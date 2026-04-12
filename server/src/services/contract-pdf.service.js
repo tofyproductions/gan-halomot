@@ -112,38 +112,11 @@ function generateContractHTML(data) {
 }
 
 /**
- * Generate PDF buffer from registration data
- * Uses @sparticuz/chromium for Vercel compatibility (no full puppeteer)
+ * Generate contract as HTML buffer (printed from browser - no puppeteer needed)
  */
 async function generateContractPDF(data) {
   const html = generateContractHTML(data);
-
-  try {
-    // Try Vercel-compatible chromium first
-    const chromium = require('@sparticuz/chromium');
-    const puppeteer = require('puppeteer-core');
-
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
-
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      printBackground: true,
-      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-    });
-    await browser.close();
-    return pdfBuffer;
-  } catch (err) {
-    console.warn('PDF generation not available:', err.message);
-    // Fallback: return HTML as buffer (can be printed from browser)
-    return Buffer.from(html, 'utf-8');
-  }
+  return Buffer.from(html, 'utf-8');
 }
 
 module.exports = { generateContractHTML, generateContractPDF };

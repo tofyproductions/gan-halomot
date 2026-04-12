@@ -16,10 +16,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/dashboard')
-      .then((res) => setData(res.data))
-      .catch(() => toast.error('שגיאה בטעינת לוח הבקרה'))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    api.get('/dashboard/stats')
+      .then((res) => { if (!cancelled) setData(res.data); })
+      .catch((err) => { if (!cancelled) console.error('Dashboard load error:', err); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   if (loading) return <LoadingSpinner />;
