@@ -51,6 +51,6 @@ services:
 
 databases:
   - name: gan-halomot-db
-    plan: starter
+    plan: free
     region: frankfurt
     postgresMajorVersion: 16
