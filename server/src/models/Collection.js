@@ -16,7 +16,7 @@ const collectionMonthSchema = new mongoose.Schema({
 }, { _id: true });
 
 const collectionSchema = new mongoose.Schema({
-  registration_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Registration', required: true },
+  registration_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Registration', default: null },
   child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
   academic_year: { type: String, required: true },
   exit_month: { type: Number, default: null },
@@ -25,6 +25,6 @@ const collectionSchema = new mongoose.Schema({
   last_updated: { type: Date, default: Date.now },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
-collectionSchema.index({ registration_id: 1, academic_year: 1 }, { unique: true });
+collectionSchema.index({ registration_id: 1, academic_year: 1 });
 
 module.exports = mongoose.model('Collection', collectionSchema);
