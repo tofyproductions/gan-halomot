@@ -1,113 +1,131 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Box, Typography, Grid, Card, CardContent, Stack, Button, Chip,
-} from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
+import { Box, Typography, Button, Card, CardContent } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import ClassroomCard from './ClassroomCard';
-import LoadingSpinner from '../shared/LoadingSpinner';
-import { formatCurrency } from '../../utils/hebrewYear';
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     api.get('/dashboard/stats')
       .then((res) => { if (!cancelled) setData(res.data); })
-      .catch((err) => { if (!cancelled) console.error('Dashboard load error:', err); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  if (loading) return <LoadingSpinner />;
+  if (loading) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 10 }}>
+        <Typography variant="h6" sx={{ color: '#f59e0b' }}>טוען נתונים... ⏳</Typography>
+      </Box>
+    );
+  }
 
-  const stats = data?.stats || {};
+  if (error) {
+    return (
+      <Box sx={{ textAlign: 'center', py: 10 }}>
+        <Typography color="error">שגיאה: {error}</Typography>
+        <Button onClick={() => window.location.reload()} sx={{ mt: 2 }}>נסה שוב</Button>
+      </Box>
+    );
+  }
+
   const classrooms = data?.classrooms || {};
+  const pendingLeads = data?.pendingLeads || [];
+  const totalKids = Object.values(classrooms).reduce((sum, kids) => sum + (Array.isArray(kids) ? kids.length : 0), 0);
+  const signedCount = pendingLeads.filter(l => l.agreementSigned).length;
+  const pendingCount = pendingLeads.length - signedCount;
 
   return (
-    <Box dir="rtl">
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>
-          לוח בקרה
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => navigate('/new-registration')}
-        >
-          רישום חדש
-        </Button>
-      </Stack>
+    <Box dir="rtl" sx={{ p: 2 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>לוח בקרה</Typography>
+        <Button variant="contained" onClick={() => navigate('/new-registration')}>➕ רישום חדש</Button>
+      </Box>
 
-      {/* KPI Summary Cards */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">סה״כ ילדים</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, color: 'primary.dark' }}>
-                {stats.totalKids ?? 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">חוזים חתומים</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, color: 'success.main' }}>
-                {stats.signed ?? 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">ממתינים לחתימה</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, color: 'warning.main' }}>
-                {stats.pending ?? 0}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Card>
-            <CardContent sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">גבייה חודשית</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800 }}>
-                {formatCurrency(stats.monthlyRevenue ?? 0)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* KPI Cards */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2, mb: 4 }}>
+        <Card>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">סה״כ ילדים</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: '#f59e0b' }}>{totalKids}</Typography>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">חוזים חתומים</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: '#10b981' }}>{signedCount}</Typography>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">ממתינים לחתימה</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: '#f97316' }}>{pendingCount}</Typography>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">סה״כ רישומים</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: '#3b82f6' }}>{pendingLeads.length}</Typography>
+          </CardContent>
+        </Card>
+      </Box>
 
-      {/* Classroom Cards */}
-      <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
-        כיתות
-      </Typography>
-      <Grid container spacing={2}>
+      {/* Classrooms */}
+      <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>כיתות</Typography>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2, mb: 4 }}>
         {Object.entries(classrooms).map(([name, kids]) => (
-          <Grid item xs={12} sm={6} md={3} key={name}>
-            <ClassroomCard name={name} kids={kids} />
-          </Grid>
+          <Card key={name} sx={{ borderTop: '5px solid #f59e0b' }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, pb: 1, borderBottom: '1px solid #f1f5f9' }}>
+                <Typography sx={{ fontWeight: 700 }}>{name}</Typography>
+                <Typography sx={{ fontWeight: 800, color: '#f59e0b' }}>{Array.isArray(kids) ? kids.length : 0}</Typography>
+              </Box>
+              {Array.isArray(kids) && kids.map((k, i) => (
+                <Box key={i} sx={{ p: 1, mb: 0.5, bgcolor: '#f8fafc', borderRadius: 2, fontSize: '0.9rem' }}>
+                  {k.child_name || k.childName || k.name || '—'}
+                </Box>
+              ))}
+            </CardContent>
+          </Card>
         ))}
         {Object.keys(classrooms).length === 0 && (
-          <Grid item xs={12}>
-            <Box sx={{ textAlign: 'center', py: 6 }}>
-              <Typography color="text.secondary">
-                אין ילדים רשומים עדיין. התחל ברישום חדש.
-              </Typography>
-            </Box>
-          </Grid>
+          <Box sx={{ textAlign: 'center', py: 6, gridColumn: '1 / -1' }}>
+            <Typography color="text.secondary">אין ילדים רשומים עדיין. התחל ברישום חדש.</Typography>
+          </Box>
         )}
-      </Grid>
+      </Box>
+
+      {/* Pending Leads Table */}
+      {pendingLeads.length > 0 && (
+        <>
+          <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>רישומים</Typography>
+          {pendingLeads.map((lead, i) => (
+            <Card key={i} sx={{ mb: 1, p: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box>
+                  <Typography sx={{ fontWeight: 700 }}>{lead.childName || lead.child_name}</Typography>
+                  <Typography variant="body2" color="text.secondary">{lead.parentName || lead.parent_name}</Typography>
+                </Box>
+                <Typography variant="body2" sx={{
+                  px: 1.5, py: 0.5, borderRadius: 2, fontWeight: 700,
+                  bgcolor: lead.agreementSigned ? '#dcfce7' : '#fee2e2',
+                  color: lead.agreementSigned ? '#166534' : '#991b1b',
+                }}>
+                  {lead.agreementSigned ? '✅ הושלם' : '⏳ בתהליך'}
+                </Typography>
+              </Box>
+            </Card>
+          ))}
+        </>
+      )}
     </Box>
   );
 }
