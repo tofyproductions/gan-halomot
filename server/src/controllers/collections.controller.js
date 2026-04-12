@@ -8,7 +8,16 @@ async function getAll(req, res, next) {
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
-    const registrations = await Registration.find({ status: 'completed' })
+    // Include all registrations that have active children (not just status=completed)
+    const activeChildren = await Child.find({ is_active: true }).select('registration_id').lean();
+    const activeRegIds = activeChildren.map(c => c.registration_id);
+
+    const registrations = await Registration.find({
+      $or: [
+        { status: 'completed' },
+        { _id: { $in: activeRegIds } },
+      ],
+    })
       .populate('classroom_id', 'name')
       .sort({ child_name: 1 })
       .lean();

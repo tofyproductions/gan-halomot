@@ -3,6 +3,7 @@ import {
   Box, Card, CardContent, Typography, TextField, Button, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, LinearProgress, MenuItem, InputAdornment, Chip,
+  Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import PrintIcon from '@mui/icons-material/Print';
@@ -30,6 +31,7 @@ export default function CollectionsTable() {
   const [rawData, setRawData] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [receiptDialog, setReceiptDialog] = useState({ open: false, regId: null, monthNum: null, receipt: '', expected: 0 });
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -49,14 +51,11 @@ export default function CollectionsTable() {
       const filtered = q
         ? rows.filter(r => r.child_name?.toLowerCase().includes(q))
         : rows;
-      if (filtered.length > 0) {
-        result.push([classroom, filtered]);
-      }
+      if (filtered.length > 0) result.push([classroom, filtered]);
     }
     return result;
   }, [rawData, search]);
 
-  // All rows flattened for totals
   const allRows = useMemo(() => grouped.flatMap(([, rows]) => rows), [grouped]);
 
   // KPI calculations
@@ -73,14 +72,21 @@ export default function CollectionsTable() {
     return { expected, collected, pct };
   }, [allRows]);
 
-  // Save a receipt number for a month
-  const handleReceiptChange = async (regId, monthNum, value) => {
-    const receipt_number = value.trim() || null;
+  // Open receipt dialog when clicking a cell
+  const handleCellClick = (regId, monthNum, receipt, expected) => {
+    setReceiptDialog({ open: true, regId, monthNum, receipt: receipt || '', expected });
+  };
+
+  // Save receipt
+  const handleSaveReceipt = async () => {
+    const { regId, monthNum, receipt } = receiptDialog;
+    const receipt_number = receipt.trim() || null;
     try {
       await api.put(`/collections/${regId}/month/${monthNum}`, {
         receipt_number,
         payment_status: receipt_number ? 'paid' : 'expected',
       });
+      setReceiptDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0 });
       fetchData();
     } catch {
       toast.error('שגיאה בשמירת קבלה');
@@ -209,7 +215,7 @@ export default function CollectionsTable() {
                 key={classroom}
                 classroom={classroom}
                 rows={rows}
-                onReceiptChange={handleReceiptChange}
+                onCellClick={handleCellClick}
                 onExitMonth={handleExitMonth}
                 getCellSx={getCellSx}
               />
@@ -230,11 +236,45 @@ export default function CollectionsTable() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Receipt Dialog */}
+      <Dialog
+        open={receiptDialog.open}
+        onClose={() => setReceiptDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0 })}
+        dir="rtl"
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          מספר קבלה
+          <Typography variant="body2" color="text.secondary">
+            סכום צפוי: {formatCurrency(receiptDialog.expected)}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="מספר קבלה"
+            value={receiptDialog.receipt}
+            onChange={(e) => setReceiptDialog(prev => ({ ...prev, receipt: e.target.value }))}
+            placeholder="הכנס מספר קבלה..."
+            sx={{ mt: 1 }}
+            inputProps={{ dir: 'ltr' }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReceiptDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0 })}>
+            ביטול
+          </Button>
+          <Button variant="contained" onClick={handleSaveReceipt}>
+            שמור
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
 
-function GroupRows({ classroom, rows, onReceiptChange, onExitMonth, getCellSx }) {
+function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
   const subtotals = {};
   ACADEMIC_MONTHS.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -268,25 +308,27 @@ function GroupRows({ classroom, rows, onReceiptChange, onExitMonth, getCellSx })
               const expected = m.expected_amount || 0;
               const isBeforeStart = m.is_before_start || false;
               const receipt = m.receipt_number || '';
+              const isPaid = m.payment_status === 'paid';
               const cellSx = getCellSx(paid, expected, isBeforeStart);
 
               return (
-                <TableCell key={mi} align="center" sx={{ p: 0.5, position: 'relative', ...cellSx }}>
-                  <TextField
-                    size="small"
-                    defaultValue={receipt}
-                    placeholder={!isBeforeStart && expected > 0 ? '' : ''}
-                    disabled={isBeforeStart}
-                    onBlur={(e) => {
-                      const val = e.target.value.trim();
-                      if (val !== receipt) {
-                        onReceiptChange(regId, monthNum, e.target.value);
-                      }
-                    }}
-                    inputProps={{ style: { textAlign: 'center', width: 60, padding: '4px 4px', fontSize: '0.85rem' } }}
-                    variant="standard"
-                    sx={{ '& .MuiInput-underline:before': { borderBottom: 'none' } }}
-                  />
+                <TableCell
+                  key={mi}
+                  align="center"
+                  sx={{
+                    p: 0.5,
+                    cursor: !isBeforeStart && expected > 0 ? 'pointer' : 'default',
+                    ...cellSx,
+                    fontSize: '0.85rem',
+                    fontWeight: expected > 0 ? 500 : 400,
+                  }}
+                  onClick={() => {
+                    if (!isBeforeStart && expected > 0) {
+                      onCellClick(regId, monthNum, receipt, expected);
+                    }
+                  }}
+                >
+                  {expected > 0 ? formatCurrency(expected) : ''}
                 </TableCell>
               );
             })}
