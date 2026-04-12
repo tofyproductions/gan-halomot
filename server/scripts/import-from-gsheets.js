@@ -278,12 +278,12 @@ async function run() {
       const val = (row[colIdx] || '').trim();
       if (!val) continue;
 
-      const numVal = parseFloat(val);
+      // Values in the sheet are receipt numbers, not payment amounts
       months.push({
         month_number: parseInt(monthNum),
-        receipt_number: isNaN(numVal) ? val : null,
-        paid_amount: isNaN(numVal) ? 0 : Math.abs(numVal),
-        payment_status: val ? 'paid' : 'pending',
+        receipt_number: val,
+        paid_amount: 0, // Will be calculated from expected on display
+        payment_status: 'paid',
       });
     }
 

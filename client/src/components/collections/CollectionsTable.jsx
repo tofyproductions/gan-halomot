@@ -73,14 +73,17 @@ export default function CollectionsTable() {
     return { expected, collected, pct };
   }, [allRows]);
 
-  // Save a single month payment
-  const handlePaymentChange = async (regId, monthNum, value) => {
-    const paid_amount = parseFloat(value) || 0;
+  // Save a receipt number for a month
+  const handleReceiptChange = async (regId, monthNum, value) => {
+    const receipt_number = value.trim() || null;
     try {
-      await api.put(`/collections/${regId}/month/${monthNum}`, { paid_amount });
+      await api.put(`/collections/${regId}/month/${monthNum}`, {
+        receipt_number,
+        payment_status: receipt_number ? 'paid' : 'expected',
+      });
       fetchData();
     } catch {
-      toast.error('שגיאה בשמירת תשלום');
+      toast.error('שגיאה בשמירת קבלה');
     }
   };
 
@@ -206,7 +209,7 @@ export default function CollectionsTable() {
                 key={classroom}
                 classroom={classroom}
                 rows={rows}
-                onPaymentChange={handlePaymentChange}
+                onReceiptChange={handleReceiptChange}
                 onExitMonth={handleExitMonth}
                 getCellSx={getCellSx}
               />
@@ -231,7 +234,7 @@ export default function CollectionsTable() {
   );
 }
 
-function GroupRows({ classroom, rows, onPaymentChange, onExitMonth, getCellSx }) {
+function GroupRows({ classroom, rows, onReceiptChange, onExitMonth, getCellSx }) {
   const subtotals = {};
   ACADEMIC_MONTHS.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -264,21 +267,20 @@ function GroupRows({ classroom, rows, onPaymentChange, onExitMonth, getCellSx })
               const paid = m.paid_amount || 0;
               const expected = m.expected_amount || 0;
               const isBeforeStart = m.is_before_start || false;
-              const isApplicable = !isBeforeStart && expected > 0;
+              const receipt = m.receipt_number || '';
               const cellSx = getCellSx(paid, expected, isBeforeStart);
 
               return (
                 <TableCell key={mi} align="center" sx={{ p: 0.5, position: 'relative', ...cellSx }}>
                   <TextField
                     size="small"
-                    type="number"
-                    defaultValue={paid || ''}
-                    placeholder={isApplicable ? String(expected) : ''}
+                    defaultValue={receipt}
+                    placeholder={!isBeforeStart && expected > 0 ? '' : ''}
                     disabled={isBeforeStart}
                     onBlur={(e) => {
-                      const val = parseFloat(e.target.value) || 0;
-                      if (val !== paid) {
-                        onPaymentChange(regId, monthNum, e.target.value);
+                      const val = e.target.value.trim();
+                      if (val !== receipt) {
+                        onReceiptChange(regId, monthNum, e.target.value);
                       }
                     }}
                     inputProps={{ style: { textAlign: 'center', width: 60, padding: '4px 4px', fontSize: '0.85rem' } }}

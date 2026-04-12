@@ -75,12 +75,16 @@ async function getAll(req, res, next) {
 
       const monthData = ACADEMIC_MONTHS.map(m => {
         const existing = monthsMap[m] || {};
+        const expected = expectedFees[m] || 0;
+        const status = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
+        // If status is 'paid' (has receipt), paid_amount = expected (fully paid)
+        const paid = status === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0);
         return {
           month: m,
-          expected_amount: expectedFees[m] || 0,
-          paid_amount: parseFloat(existing.paid_amount) || 0,
+          expected_amount: expected,
+          paid_amount: paid,
           receipt_number: existing.receipt_number || null,
-          payment_status: existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected'),
+          payment_status: status,
           payment_date: existing.payment_date || null,
           is_prorated: existing.is_prorated || false,
           is_before_start: isBeforeStart[m] || false,
