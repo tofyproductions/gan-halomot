@@ -5,23 +5,11 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Attach JWT token to every request
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Handle 401 globally
+// Simple error logging (no auth redirect - open access like original GAS app)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      window.location.href = '/login';
-    }
+    console.error('API Error:', error.response?.status, error.response?.data?.error || error.message);
     return Promise.reject(error);
   }
 );
