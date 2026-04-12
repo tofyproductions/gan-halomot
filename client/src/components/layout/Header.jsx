@@ -1,6 +1,5 @@
 import { AppBar, Toolbar, Typography, Button, Box, Stack } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
 
 const NAV_ITEMS = [
   { label: 'לוח בקרה', path: '/', icon: '🏠' },
@@ -13,7 +12,6 @@ const NAV_ITEMS = [
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
 
   return (
     <AppBar position="sticky" sx={{
@@ -49,9 +47,6 @@ export default function Header() {
               {item.icon} {item.label}
             </Button>
           ))}
-          <Button size="small" onClick={logout} sx={{ color: 'error.main', fontWeight: 600 }}>
-            יציאה
-          </Button>
         </Stack>
       </Toolbar>
     </AppBar>
