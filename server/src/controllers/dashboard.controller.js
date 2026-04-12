@@ -1,39 +1,24 @@
-const db = require('../config/database');
+const { Child, Registration, Classroom } = require('../models');
 const { getAcademicYears, normalizeYear, ACADEMIC_MONTHS } = require('../services/academic-year.service');
 
-/**
- * GET /api/dashboard?year=2025
- * Return dashboard stats: classrooms with kids, pending leads, forecast
- */
 async function getStats(req, res, next) {
   try {
     const { year } = req.query;
     const academicYears = getAcademicYears();
-    const targetYear = year
-      ? normalizeYear(year)
-      : academicYears.current.range;
+    const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
-    // --- Classrooms with children ---
-    const children = await db('children')
-      .select(
-        'children.*',
-        'classrooms.name as classroom_name',
-        'classrooms.capacity as classroom_capacity'
-      )
-      .leftJoin('classrooms', 'children.classroom_id', 'classrooms.id')
-      .where('children.academic_year', targetYear)
-      .andWhere('children.is_active', true)
-      .orderBy('classrooms.name')
-      .orderBy('children.child_name');
+    // Classrooms with children
+    const children = await Child.find({ academic_year: targetYear, is_active: true })
+      .populate('classroom_id', 'name capacity')
+      .sort({ child_name: 1 })
+      .lean();
 
     const classrooms = {};
     for (const child of children) {
-      const groupName = child.classroom_name || 'ללא קבוצה';
-      if (!classrooms[groupName]) {
-        classrooms[groupName] = [];
-      }
+      const groupName = child.classroom_id?.name || 'ללא קבוצה';
+      if (!classrooms[groupName]) classrooms[groupName] = [];
       classrooms[groupName].push({
-        id: child.id,
+        id: child._id,
         child_name: child.child_name,
         birth_date: child.birth_date,
         parent_name: child.parent_name,
@@ -42,30 +27,32 @@ async function getStats(req, res, next) {
       });
     }
 
-    // --- Pending leads (registrations not yet completed) ---
-    const pendingLeads = await db('registrations')
-      .select(
-        'registrations.*',
-        'classrooms.name as classroom_name'
-      )
-      .leftJoin('classrooms', 'registrations.classroom_id', 'classrooms.id')
-      .whereIn('registrations.status', ['link_generated', 'contract_signed', 'docs_uploaded'])
-      .orderBy('registrations.created_at', 'desc');
+    // Pending leads
+    const pendingLeads = await Registration.find({
+      status: { $in: ['link_generated', 'contract_signed', 'docs_uploaded'] },
+    })
+      .populate('classroom_id', 'name')
+      .sort({ created_at: -1 })
+      .lean();
 
-    // --- Forecast from registrations ---
-    const allRegistrations = await db('registrations')
-      .select(
-        'registrations.*',
-        'classrooms.name as classroom_name'
-      )
-      .leftJoin('classrooms', 'registrations.classroom_id', 'classrooms.id')
-      .orderBy('registrations.created_at', 'desc');
+    const formattedLeads = pendingLeads.map(l => ({
+      ...l,
+      id: l._id,
+      classroom_name: l.classroom_id?.name || null,
+      classroom_id: l.classroom_id?._id || l.classroom_id,
+    }));
+
+    // Forecast
+    const allRegistrations = await Registration.find()
+      .populate('classroom_id', 'name')
+      .sort({ created_at: -1 })
+      .lean();
 
     const forecast = buildForecast(allRegistrations, targetYear);
 
     res.json({
       classrooms,
-      pendingLeads,
+      pendingLeads: formattedLeads,
       forecast,
       academicYear: targetYear,
     });
@@ -74,9 +61,6 @@ async function getStats(req, res, next) {
   }
 }
 
-/**
- * Build forecast data from registrations (ported from GAS calculateForecast)
- */
 function buildForecast(registrations, academicYear) {
   const [y1, y2] = academicYear.split('-').map(Number);
   if (!y1 || !y2) return [];
@@ -94,7 +78,6 @@ function buildForecast(registrations, academicYear) {
 
   for (const reg of registrations) {
     if (!reg.start_date || !reg.monthly_fee) continue;
-
     const startDate = new Date(reg.start_date);
     const endDate = reg.end_date ? new Date(reg.end_date) : new Date(y2, 7, 31);
     const fee = parseFloat(reg.monthly_fee) || 0;
@@ -102,7 +85,6 @@ function buildForecast(registrations, academicYear) {
     for (const entry of monthlyData) {
       const monthStart = new Date(entry.year, entry.month - 1, 1);
       const monthEnd = new Date(entry.year, entry.month, 0);
-
       if (startDate <= monthEnd && endDate >= monthStart) {
         entry.expectedChildren++;
         entry.expectedRevenue += fee;
@@ -113,43 +95,29 @@ function buildForecast(registrations, academicYear) {
   return monthlyData;
 }
 
-/**
- * GET /api/dashboard/classrooms?year=2026
- * Return classrooms grouped data (alias for dashboard view)
- */
 async function getClassrooms(req, res, next) {
   try {
     const { year } = req.query;
     const academicYears = getAcademicYears();
-    const targetYear = year
-      ? normalizeYear(year)
-      : academicYears.current.range;
+    const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
-    const children = await db('children')
-      .select(
-        'children.*',
-        'classrooms.name as classroom_name',
-        'classrooms.capacity as classroom_capacity',
-        'classrooms.id as classroom_id_ref'
-      )
-      .leftJoin('classrooms', 'children.classroom_id', 'classrooms.id')
-      .where('children.academic_year', targetYear)
-      .andWhere('children.is_active', true)
-      .orderBy('classrooms.name')
-      .orderBy('children.child_name');
+    const children = await Child.find({ academic_year: targetYear, is_active: true })
+      .populate('classroom_id', 'name capacity')
+      .sort({ child_name: 1 })
+      .lean();
 
     const classrooms = {};
     for (const child of children) {
-      const groupName = child.classroom_name || 'ללא קבוצה';
+      const groupName = child.classroom_id?.name || 'ללא קבוצה';
       if (!classrooms[groupName]) {
         classrooms[groupName] = {
-          classroom_id: child.classroom_id_ref,
-          capacity: child.classroom_capacity,
+          classroom_id: child.classroom_id?._id,
+          capacity: child.classroom_id?.capacity,
           children: [],
         };
       }
       classrooms[groupName].children.push({
-        id: child.id,
+        id: child._id,
         child_name: child.child_name,
         birth_date: child.birth_date,
         parent_name: child.parent_name,

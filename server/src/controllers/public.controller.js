@@ -1,52 +1,35 @@
-const db = require('../config/database');
+const { Registration, Child, Document } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
 const fileStorage = require('../services/file-storage.service');
 const { sendAgreementEmail } = require('../services/email.service');
 const { getAcademicYearStr, getAcademicYears } = require('../services/academic-year.service');
 
-/**
- * GET /api/public/register/:token
- * Find registration by access_token. Return registration data + contract HTML.
- * No JWT auth required - uses access_token for authorization.
- */
 async function getRegistrationForm(req, res, next) {
   try {
     const { token } = req.params;
 
-    const registration = await db('registrations')
-      .select('registrations.*', 'classrooms.name as classroom')
-      .leftJoin('classrooms', 'registrations.classroom_id', 'classrooms.id')
-      .where('registrations.access_token', token)
-      .first();
+    const registration = await Registration.findOne({ access_token: token })
+      .populate('classroom_id', 'name').lean();
 
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
     }
 
-    // Check token expiry
     if (registration.token_expires_at && new Date(registration.token_expires_at) < new Date()) {
       return res.status(410).json({ error: 'Registration link has expired' });
     }
 
-    // Generate contract HTML for preview
+    registration.classroom = registration.classroom_id?.name || null;
     const contractHTML = generateContractHTML(registration);
 
-    // Parse configuration
-    let configuration = {};
-    if (typeof registration.configuration === 'string') {
-      try { configuration = JSON.parse(registration.configuration); } catch { /* empty */ }
-    } else {
-      configuration = registration.configuration || {};
-    }
+    const configuration = registration.configuration || {};
 
-    // Get already uploaded documents
-    const documents = await db('documents')
-      .select('id', 'doc_type', 'file_name', 'uploaded_at')
-      .where({ registration_id: registration.id });
+    const documents = await Document.find({ registration_id: registration._id })
+      .select('doc_type file_name uploaded_at').lean();
 
     res.json({
       registration: {
-        id: registration.id,
+        id: registration._id,
         unique_id: registration.unique_id,
         child_name: registration.child_name,
         child_birth_date: registration.child_birth_date,
@@ -71,10 +54,6 @@ async function getRegistrationForm(req, res, next) {
   }
 }
 
-/**
- * POST /api/public/register/:token/sign
- * Submit contract signature. Update registration. Generate PDF. Send email.
- */
 async function submitSignature(req, res, next) {
   try {
     const { token } = req.params;
@@ -84,55 +63,36 @@ async function submitSignature(req, res, next) {
       return res.status(400).json({ error: 'Signature is required' });
     }
 
-    const registration = await db('registrations')
-      .select('registrations.*', 'classrooms.name as classroom')
-      .leftJoin('classrooms', 'registrations.classroom_id', 'classrooms.id')
-      .where('registrations.access_token', token)
-      .first();
+    const registration = await Registration.findOne({ access_token: token })
+      .populate('classroom_id', 'name');
 
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
     }
 
-    // Update registration with signature and contact info
-    const updateData = {
-      signature_data: signature,
-      agreement_signed: true,
-      status: 'contract_signed',
-      updated_at: new Date(),
-    };
+    registration.signature_data = signature;
+    registration.agreement_signed = true;
+    registration.status = 'contract_signed';
 
-    if (parentEmail) updateData.parent_email = parentEmail;
-    if (phone) updateData.parent_phone = phone;
+    if (parentEmail) registration.parent_email = parentEmail;
+    if (phone) registration.parent_phone = phone;
 
-    // Store additional data in configuration
-    let config = {};
-    if (typeof registration.configuration === 'string') {
-      try { config = JSON.parse(registration.configuration); } catch { /* empty */ }
-    } else {
-      config = registration.configuration || {};
-    }
-
+    const config = registration.configuration || {};
     if (medical) config.medical_alerts = medical;
     if (registrationCard) config.registration_card = registrationCard;
-    updateData.configuration = JSON.stringify(config);
+    registration.configuration = config;
 
-    await db('registrations').where({ id: registration.id }).update(updateData);
+    await registration.save();
 
-    // Generate contract PDF with signature
-    const pdfData = { ...registration, signature_data: signature };
+    const pdfData = { ...registration.toObject(), classroom: registration.classroom_id?.name || null, signature_data: signature };
     const pdfBuffer = await generateContractPDF(pdfData);
 
-    // Upload PDF to R2
     const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
     await fileStorage.upload(pdfBuffer, key, 'application/pdf');
 
-    // Update contract path
-    await db('registrations').where({ id: registration.id }).update({
-      contract_pdf_path: key,
-    });
+    registration.contract_pdf_path = key;
+    await registration.save();
 
-    // Send email with signed contract
     try {
       await sendAgreementEmail({
         childName: registration.child_name,
@@ -142,24 +102,14 @@ async function submitSignature(req, res, next) {
       });
     } catch (emailErr) {
       console.error('Failed to send agreement email:', emailErr.message);
-      // Do not fail the request if email fails
     }
 
-    res.json({
-      message: 'Contract signed successfully',
-      status: 'contract_signed',
-    });
+    res.json({ message: 'Contract signed successfully', status: 'contract_signed' });
   } catch (error) {
     next(error);
   }
 }
 
-/**
- * POST /api/public/register/:token/upload
- * Handle file uploads from parent. Save to R2. Insert into documents.
- * If both docs uploaded, set card_completed=true.
- * If fully complete (signed + card), set status=completed and create child record.
- */
 async function uploadDocument(req, res, next) {
   try {
     const { token } = req.params;
@@ -169,81 +119,53 @@ async function uploadDocument(req, res, next) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const registration = await db('registrations')
-      .where({ access_token: token })
-      .first();
-
+    const registration = await Registration.findOne({ access_token: token });
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
     }
 
     const docType = req.body.doc_type || 'general';
-
-    // Upload to R2
     const key = `documents/${registration.unique_id}/${docType}_${Date.now()}_${file.originalname}`;
     await fileStorage.upload(file.buffer, key, file.mimetype);
 
-    // Insert document record
-    const [document] = await db('documents')
-      .insert({
-        registration_id: registration.id,
-        doc_type: docType,
-        file_name: file.originalname,
-        file_path: key,
-        mime_type: file.mimetype,
-        file_size_bytes: file.size,
-      })
-      .returning('*');
+    const document = await Document.create({
+      registration_id: registration._id,
+      doc_type: docType,
+      file_name: file.originalname,
+      file_path: key,
+      mime_type: file.mimetype,
+      file_size_bytes: file.size,
+    });
 
-    // Check if both required docs are now uploaded (id_copy + payment_proof)
-    const uploadedDocs = await db('documents')
-      .where({ registration_id: registration.id })
-      .select('doc_type');
-
+    const uploadedDocs = await Document.find({ registration_id: registration._id }).select('doc_type');
     const docTypes = uploadedDocs.map(d => d.doc_type);
     const hasIdCopy = docTypes.includes('id_copy');
     const hasPaymentProof = docTypes.includes('payment_proof');
     const bothDocsUploaded = hasIdCopy && hasPaymentProof;
 
-    const updateData = { updated_at: new Date() };
-
     if (bothDocsUploaded) {
-      updateData.card_completed = true;
-
+      registration.card_completed = true;
       if (registration.status === 'contract_signed' || registration.status === 'docs_uploaded') {
-        updateData.status = 'docs_uploaded';
+        registration.status = 'docs_uploaded';
       }
     }
 
-    // Check if fully complete: signed + both docs
     const isFullyComplete = registration.agreement_signed && bothDocsUploaded;
-
     if (isFullyComplete) {
-      updateData.status = 'completed';
+      registration.status = 'completed';
     }
 
-    await db('registrations').where({ id: registration.id }).update(updateData);
+    await registration.save();
 
-    // If fully complete, create child record
     if (isFullyComplete) {
       const academicYear = getAcademicYearStr(registration.start_date)
         || getAcademicYears().current.range;
 
-      const existingChild = await db('children')
-        .where({ registration_id: registration.id })
-        .first();
-
+      const existingChild = await Child.findOne({ registration_id: registration._id });
       if (!existingChild) {
-        // Parse config for medical alerts
-        let config = {};
-        if (typeof registration.configuration === 'string') {
-          try { config = JSON.parse(registration.configuration); } catch { /* empty */ }
-        } else {
-          config = registration.configuration || {};
-        }
-
-        await db('children').insert({
-          registration_id: registration.id,
+        const config = registration.configuration || {};
+        await Child.create({
+          registration_id: registration._id,
           child_name: registration.child_name,
           birth_date: registration.child_birth_date,
           classroom_id: registration.classroom_id,
@@ -258,7 +180,7 @@ async function uploadDocument(req, res, next) {
     }
 
     res.status(201).json({
-      document,
+      document: { ...document.toObject(), id: document._id },
       card_completed: bothDocsUploaded,
       registration_complete: isFullyComplete,
     });

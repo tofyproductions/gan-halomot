@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 const env = require('./config/env');
+const { connectDB } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -22,7 +23,7 @@ if (env.NODE_ENV !== 'test') {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', hasDB: !!env.DATABASE_URL });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', db: 'mongodb' });
 });
 
 // API routes
@@ -40,8 +41,11 @@ if (env.NODE_ENV === 'production') {
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-app.listen(env.PORT, () => {
-  console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
+// Connect to MongoDB then start server
+connectDB().then(() => {
+  app.listen(env.PORT, () => {
+    console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
+  });
 });
 
 module.exports = app;

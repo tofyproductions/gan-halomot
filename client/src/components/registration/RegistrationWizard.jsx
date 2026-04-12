@@ -13,24 +13,22 @@ import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { isValidIsraeliID, formatCurrency } from '../../utils/hebrewYear';
 
-const CLASSROOMS = ['תינוקייה א', 'תינוקייה ב', 'צעירים', 'בוגרים'];
-
 const DEFAULT_FORM = {
-  childName: '',
-  childBirthDate: '',
-  parentName: '',
-  parentId: '',
-  parentPhone: '',
-  classroom: '',
-  monthlyFee: 3200,
-  siblingDiscount: false,
-  regFee: 500,
-  startDate: '',
-  endDate: '',
-  startTime: '07:30',
-  endTime: '16:00',
-  friTime: '12:30',
-  manualImport: false,
+  child_name: '',
+  child_birth_date: '',
+  parent_name: '',
+  parent_id_number: '',
+  parent_phone: '',
+  classroom_id: '',
+  monthly_fee: 3200,
+  sibling_discount: false,
+  registration_fee: 500,
+  start_date: '',
+  end_date: '',
+  start_time: '07:30',
+  end_time: '16:00',
+  fri_time: '12:30',
+  manual_import: false,
 };
 
 export default function RegistrationWizard() {
@@ -39,33 +37,42 @@ export default function RegistrationWizard() {
   const isEdit = !!id;
 
   const [form, setForm] = useState(DEFAULT_FORM);
+  const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState(null); // { link, token }
+  const [result, setResult] = useState(null);
   const [errors, setErrors] = useState({});
+
+  // Load classrooms
+  useEffect(() => {
+    api.get('/classrooms')
+      .then((res) => setClassrooms(res.data.classrooms || []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (isEdit) {
       setLoading(true);
       api.get(`/registrations/${id}`)
         .then((res) => {
-          const d = res.data;
+          const d = res.data.registration || res.data;
+          const config = d.configuration || {};
           setForm({
-            childName: d.childName || '',
-            childBirthDate: d.childBirthDate ? d.childBirthDate.slice(0, 10) : '',
-            parentName: d.parentName || '',
-            parentId: d.parentId || '',
-            parentPhone: d.parentPhone || '',
-            classroom: d.classroom || '',
-            monthlyFee: d.monthlyFee ?? 3200,
-            siblingDiscount: d.siblingDiscount || false,
-            regFee: d.regFee ?? 500,
-            startDate: d.startDate ? d.startDate.slice(0, 10) : '',
-            endDate: d.endDate ? d.endDate.slice(0, 10) : '',
-            startTime: d.startTime || '07:30',
-            endTime: d.endTime || '16:00',
-            friTime: d.friTime || '12:30',
-            manualImport: d.manualImport || false,
+            child_name: d.child_name || '',
+            child_birth_date: d.child_birth_date ? new Date(d.child_birth_date).toISOString().slice(0, 10) : '',
+            parent_name: d.parent_name || '',
+            parent_id_number: d.parent_id_number || '',
+            parent_phone: d.parent_phone || '',
+            classroom_id: d.classroom_id || '',
+            monthly_fee: d.monthly_fee ?? 3200,
+            sibling_discount: config.sibling_discount || false,
+            registration_fee: d.registration_fee ?? 500,
+            start_date: d.start_date ? new Date(d.start_date).toISOString().slice(0, 10) : '',
+            end_date: d.end_date ? new Date(d.end_date).toISOString().slice(0, 10) : '',
+            start_time: config.start_time || '07:30',
+            end_time: config.end_time || '16:00',
+            fri_time: config.fri_time || '12:30',
+            manual_import: config.manual_import || false,
           });
         })
         .catch(() => toast.error('שגיאה בטעינת הרישום'))
@@ -73,9 +80,9 @@ export default function RegistrationWizard() {
     }
   }, [id, isEdit]);
 
-  const effectiveFee = form.siblingDiscount
-    ? Math.round(form.monthlyFee * 0.9)
-    : form.monthlyFee;
+  const effectiveFee = form.sibling_discount
+    ? Math.round(form.monthly_fee * 0.9)
+    : form.monthly_fee;
 
   const handleChange = (field) => (e) => {
     const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
@@ -85,12 +92,12 @@ export default function RegistrationWizard() {
 
   const validate = () => {
     const errs = {};
-    if (!form.childName.trim()) errs.childName = 'שדה חובה';
-    if (!form.parentName.trim()) errs.parentName = 'שדה חובה';
-    if (!form.parentPhone.trim()) errs.parentPhone = 'שדה חובה';
-    if (form.parentId && !isValidIsraeliID(form.parentId)) errs.parentId = 'תעודת זהות לא תקינה';
-    if (!form.classroom) errs.classroom = 'יש לבחור כיתה';
-    if (!form.startDate) errs.startDate = 'שדה חובה';
+    if (!form.child_name.trim()) errs.child_name = 'שדה חובה';
+    if (!form.parent_name.trim()) errs.parent_name = 'שדה חובה';
+    if (!form.parent_phone.trim()) errs.parent_phone = 'שדה חובה';
+    if (form.parent_id_number && !isValidIsraeliID(form.parent_id_number)) errs.parent_id_number = 'תעודת זהות לא תקינה';
+    if (!form.classroom_id) errs.classroom_id = 'יש לבחור כיתה';
+    if (!form.start_date) errs.start_date = 'שדה חובה';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -101,7 +108,26 @@ export default function RegistrationWizard() {
 
     setSaving(true);
     try {
-      const payload = { ...form, monthlyFee: effectiveFee };
+      const payload = {
+        child_name: form.child_name,
+        child_birth_date: form.child_birth_date || null,
+        parent_name: form.parent_name,
+        parent_id_number: form.parent_id_number || null,
+        parent_phone: form.parent_phone,
+        classroom_id: form.classroom_id || null,
+        monthly_fee: effectiveFee,
+        registration_fee: form.registration_fee,
+        start_date: form.start_date,
+        end_date: form.end_date || form.start_date,
+        configuration: {
+          sibling_discount: form.sibling_discount,
+          start_time: form.start_time,
+          end_time: form.end_time,
+          fri_time: form.fri_time,
+          manual_import: form.manual_import,
+        },
+      };
+
       let res;
       if (isEdit) {
         res = await api.put(`/registrations/${id}`, payload);
@@ -110,15 +136,16 @@ export default function RegistrationWizard() {
         res = await api.post('/registrations', payload);
         toast.success('הרישום נוצר בהצלחה');
       }
-      const data = res.data;
-      if (data.token) {
-        const link = `${window.location.origin}/register/${data.token}`;
-        setResult({ link, token: data.token, id: data._id || data.id });
+
+      const data = res.data.registration || res.data;
+      if (data.access_token) {
+        const link = `${window.location.origin}/register/${data.access_token}`;
+        setResult({ link, token: data.access_token, id: data._id || data.id });
       } else {
         navigate('/');
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || 'שגיאה בשמירת הרישום');
+      toast.error(err.response?.data?.error || 'שגיאה בשמירת הרישום');
     } finally {
       setSaving(false);
     }
@@ -133,9 +160,9 @@ export default function RegistrationWizard() {
 
   const sendWhatsApp = () => {
     if (!result?.link) return;
-    const phone = form.parentPhone.replace(/^0/, '972');
+    const phone = form.parent_phone.replace(/^0/, '972');
     const text = encodeURIComponent(
-      `שלום ${form.parentName},\nקישור לרישום ${form.childName} לגן החלומות:\n${result.link}`
+      `שלום ${form.parent_name},\nקישור לרישום ${form.child_name} לגן החלומות:\n${result.link}`
     );
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };
@@ -186,33 +213,33 @@ export default function RegistrationWizard() {
             <Stack spacing={2} sx={{ mb: 3 }}>
               <TextField
                 label="שם הילד/ה"
-                value={form.childName}
-                onChange={handleChange('childName')}
-                error={!!errors.childName}
-                helperText={errors.childName}
+                value={form.child_name}
+                onChange={handleChange('child_name')}
+                error={!!errors.child_name}
+                helperText={errors.child_name}
                 fullWidth
                 required
               />
               <TextField
                 label="תאריך לידה"
                 type="date"
-                value={form.childBirthDate}
-                onChange={handleChange('childBirthDate')}
+                value={form.child_birth_date}
+                onChange={handleChange('child_birth_date')}
                 InputLabelProps={{ shrink: true }}
                 fullWidth
               />
               <TextField
                 label="כיתה"
                 select
-                value={form.classroom}
-                onChange={handleChange('classroom')}
-                error={!!errors.classroom}
-                helperText={errors.classroom}
+                value={form.classroom_id}
+                onChange={handleChange('classroom_id')}
+                error={!!errors.classroom_id}
+                helperText={errors.classroom_id}
                 fullWidth
                 required
               >
-                {CLASSROOMS.map((c) => (
-                  <MenuItem key={c} value={c}>{c}</MenuItem>
+                {classrooms.map((c) => (
+                  <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
                 ))}
               </TextField>
             </Stack>
@@ -226,28 +253,28 @@ export default function RegistrationWizard() {
             <Stack spacing={2} sx={{ mb: 3 }}>
               <TextField
                 label="שם ההורה"
-                value={form.parentName}
-                onChange={handleChange('parentName')}
-                error={!!errors.parentName}
-                helperText={errors.parentName}
+                value={form.parent_name}
+                onChange={handleChange('parent_name')}
+                error={!!errors.parent_name}
+                helperText={errors.parent_name}
                 fullWidth
                 required
               />
               <TextField
                 label="תעודת זהות"
-                value={form.parentId}
-                onChange={handleChange('parentId')}
-                error={!!errors.parentId}
-                helperText={errors.parentId}
+                value={form.parent_id_number}
+                onChange={handleChange('parent_id_number')}
+                error={!!errors.parent_id_number}
+                helperText={errors.parent_id_number}
                 fullWidth
                 inputProps={{ maxLength: 9, dir: 'ltr' }}
               />
               <TextField
                 label="טלפון"
-                value={form.parentPhone}
-                onChange={handleChange('parentPhone')}
-                error={!!errors.parentPhone}
-                helperText={errors.parentPhone}
+                value={form.parent_phone}
+                onChange={handleChange('parent_phone')}
+                error={!!errors.parent_phone}
+                helperText={errors.parent_phone}
                 fullWidth
                 required
                 inputProps={{ dir: 'ltr' }}
@@ -265,8 +292,8 @@ export default function RegistrationWizard() {
               <TextField
                 label="שכר לימוד חודשי"
                 type="number"
-                value={form.monthlyFee}
-                onChange={handleChange('monthlyFee')}
+                value={form.monthly_fee}
+                onChange={handleChange('monthly_fee')}
                 fullWidth
                 InputProps={{
                   startAdornment: <InputAdornment position="start">₪</InputAdornment>,
@@ -275,13 +302,13 @@ export default function RegistrationWizard() {
               <FormControlLabel
                 control={
                   <Checkbox
-                    checked={form.siblingDiscount}
-                    onChange={handleChange('siblingDiscount')}
+                    checked={form.sibling_discount}
+                    onChange={handleChange('sibling_discount')}
                   />
                 }
                 label="הנחת אח/ות (10%-)"
               />
-              {form.siblingDiscount && (
+              {form.sibling_discount && (
                 <Alert severity="info" sx={{ borderRadius: 2 }}>
                   שכ״ל לאחר הנחה: {formatCurrency(effectiveFee)}
                 </Alert>
@@ -289,8 +316,8 @@ export default function RegistrationWizard() {
               <TextField
                 label="דמי רישום"
                 type="number"
-                value={form.regFee}
-                onChange={handleChange('regFee')}
+                value={form.registration_fee}
+                onChange={handleChange('registration_fee')}
                 fullWidth
                 InputProps={{
                   startAdornment: <InputAdornment position="start">₪</InputAdornment>,
@@ -309,10 +336,10 @@ export default function RegistrationWizard() {
                 <TextField
                   label="תאריך התחלה"
                   type="date"
-                  value={form.startDate}
-                  onChange={handleChange('startDate')}
-                  error={!!errors.startDate}
-                  helperText={errors.startDate}
+                  value={form.start_date}
+                  onChange={handleChange('start_date')}
+                  error={!!errors.start_date}
+                  helperText={errors.start_date}
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                   required
@@ -320,8 +347,8 @@ export default function RegistrationWizard() {
                 <TextField
                   label="תאריך סיום"
                   type="date"
-                  value={form.endDate}
-                  onChange={handleChange('endDate')}
+                  value={form.end_date}
+                  onChange={handleChange('end_date')}
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                 />
@@ -330,8 +357,8 @@ export default function RegistrationWizard() {
                 <TextField
                   label="שעת כניסה"
                   type="time"
-                  value={form.startTime}
-                  onChange={handleChange('startTime')}
+                  value={form.start_time}
+                  onChange={handleChange('start_time')}
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                   inputProps={{ dir: 'ltr' }}
@@ -339,8 +366,8 @@ export default function RegistrationWizard() {
                 <TextField
                   label="שעת יציאה"
                   type="time"
-                  value={form.endTime}
-                  onChange={handleChange('endTime')}
+                  value={form.end_time}
+                  onChange={handleChange('end_time')}
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                   inputProps={{ dir: 'ltr' }}
@@ -348,8 +375,8 @@ export default function RegistrationWizard() {
                 <TextField
                   label="יציאה שישי"
                   type="time"
-                  value={form.friTime}
-                  onChange={handleChange('friTime')}
+                  value={form.fri_time}
+                  onChange={handleChange('fri_time')}
                   InputLabelProps={{ shrink: true }}
                   fullWidth
                   inputProps={{ dir: 'ltr' }}
@@ -362,8 +389,8 @@ export default function RegistrationWizard() {
             <FormControlLabel
               control={
                 <Checkbox
-                  checked={form.manualImport}
-                  onChange={handleChange('manualImport')}
+                  checked={form.manual_import}
+                  onChange={handleChange('manual_import')}
                 />
               }
               label="ייבוא ידני (ללא חתימת הורה)"

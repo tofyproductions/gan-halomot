@@ -22,7 +22,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', py: 10 }}>
-        <Typography variant="h6" sx={{ color: '#f59e0b' }}>טוען נתונים... ⏳</Typography>
+        <Typography variant="h6" sx={{ color: '#f59e0b' }}>טוען נתונים...</Typography>
       </Box>
     );
   }
@@ -39,7 +39,7 @@ export default function Dashboard() {
   const classrooms = data?.classrooms || {};
   const pendingLeads = data?.pendingLeads || [];
   const totalKids = Object.values(classrooms).reduce((sum, kids) => sum + (Array.isArray(kids) ? kids.length : 0), 0);
-  const signedCount = pendingLeads.filter(l => l.agreementSigned).length;
+  const signedCount = pendingLeads.filter(l => l.agreement_signed).length;
   const pendingCount = pendingLeads.length - signedCount;
 
   return (
@@ -47,7 +47,7 @@ export default function Dashboard() {
       {/* Header */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>לוח בקרה</Typography>
-        <Button variant="contained" onClick={() => navigate('/new-registration')}>➕ רישום חדש</Button>
+        <Button variant="contained" onClick={() => navigate('/new-registration')}>+ רישום חדש</Button>
       </Box>
 
       {/* KPI Cards */}
@@ -90,7 +90,7 @@ export default function Dashboard() {
               </Box>
               {Array.isArray(kids) && kids.map((k, i) => (
                 <Box key={i} sx={{ p: 1, mb: 0.5, bgcolor: '#f8fafc', borderRadius: 2, fontSize: '0.9rem' }}>
-                  {k.child_name || k.childName || k.name || '—'}
+                  {k.child_name || '—'}
                 </Box>
               ))}
             </CardContent>
@@ -111,15 +111,15 @@ export default function Dashboard() {
             <Card key={i} sx={{ mb: 1, p: 2 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                  <Typography sx={{ fontWeight: 700 }}>{lead.childName || lead.child_name}</Typography>
-                  <Typography variant="body2" color="text.secondary">{lead.parentName || lead.parent_name}</Typography>
+                  <Typography sx={{ fontWeight: 700 }}>{lead.child_name}</Typography>
+                  <Typography variant="body2" color="text.secondary">{lead.parent_name}</Typography>
                 </Box>
                 <Typography variant="body2" sx={{
                   px: 1.5, py: 0.5, borderRadius: 2, fontWeight: 700,
-                  bgcolor: lead.agreementSigned ? '#dcfce7' : '#fee2e2',
-                  color: lead.agreementSigned ? '#166534' : '#991b1b',
+                  bgcolor: lead.agreement_signed ? '#dcfce7' : '#fee2e2',
+                  color: lead.agreement_signed ? '#166534' : '#991b1b',
                 }}>
-                  {lead.agreementSigned ? '✅ הושלם' : '⏳ בתהליך'}
+                  {lead.agreement_signed ? 'הושלם' : 'בתהליך'}
                 </Typography>
               </Box>
             </Card>

@@ -1,32 +1,18 @@
-const db = require('../config/database');
+const { Child } = require('../models');
 
-/**
- * GET /api/contacts/pdf?classroom=1
- * Generate a contact list PDF grouped by classroom
- */
 async function generatePDF(req, res, next) {
   try {
     const { classroom } = req.query;
 
-    let query = db('children')
-      .select(
-        'children.child_name',
-        'children.parent_name',
-        'children.phone',
-        'children.email',
-        'children.medical_alerts',
-        'classrooms.name as classroom_name'
-      )
-      .leftJoin('classrooms', 'children.classroom_id', 'classrooms.id')
-      .where('children.is_active', true)
-      .orderBy('classrooms.name')
-      .orderBy('children.child_name');
-
+    const filter = { is_active: true };
     if (classroom) {
-      query = query.where('children.classroom_id', classroom);
+      filter.classroom_id = classroom;
     }
 
-    const children = await query;
+    const children = await Child.find(filter)
+      .populate('classroom_id', 'name')
+      .sort({ child_name: 1 })
+      .lean();
 
     if (children.length === 0) {
       return res.status(404).json({ error: 'No children found for contact list' });
@@ -35,14 +21,17 @@ async function generatePDF(req, res, next) {
     // Group by classroom
     const grouped = {};
     for (const child of children) {
-      const groupName = child.classroom_name || 'ללא קבוצה';
-      if (!grouped[groupName]) {
-        grouped[groupName] = [];
-      }
-      grouped[groupName].push(child);
+      const groupName = child.classroom_id?.name || 'ללא קבוצה';
+      if (!grouped[groupName]) grouped[groupName] = [];
+      grouped[groupName].push({
+        child_name: child.child_name,
+        parent_name: child.parent_name,
+        phone: child.phone,
+        email: child.email,
+        medical_alerts: child.medical_alerts,
+      });
     }
 
-    // Generate HTML
     const today = new Date().toLocaleDateString('he-IL');
     let html = `
       <!DOCTYPE html>
@@ -95,18 +84,11 @@ async function generatePDF(req, res, next) {
         `;
       });
 
-      html += `
-          </tbody>
-        </table>
-      `;
+      html += `</tbody></table>`;
     }
 
-    html += `
-      </body>
-      </html>
-    `;
+    html += `</body></html>`;
 
-    // Return HTML (can be printed from browser, no puppeteer needed on Vercel)
     res.set({ 'Content-Type': 'text/html; charset=utf-8' });
     res.send(html);
   } catch (error) {
