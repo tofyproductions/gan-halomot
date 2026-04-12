@@ -1,5 +1,4 @@
 const db = require('../config/database');
-const puppeteer = require('puppeteer');
 
 /**
  * GET /api/contacts/pdf?classroom=1
@@ -107,30 +106,9 @@ async function generatePDF(req, res, next) {
       </html>
     `;
 
-    // Convert to PDF using Puppeteer
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '15mm', bottom: '15mm', left: '10mm', right: '10mm' },
-      });
-
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="contacts_${Date.now()}.pdf"`,
-        'Content-Length': pdfBuffer.length,
-      });
-      res.end(pdfBuffer);
-    } finally {
-      await browser.close();
-    }
+    // Return HTML (can be printed from browser, no puppeteer needed on Vercel)
+    res.set({ 'Content-Type': 'text/html; charset=utf-8' });
+    res.send(html);
   } catch (error) {
     next(error);
   }

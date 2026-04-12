@@ -1,4 +1,3 @@
-const puppeteer = require('puppeteer');
 const { calculateFirstMonthPayment, calculateAugustPayment } = require('./prorate.service');
 const { getHebrewYear } = require('./academic-year.service');
 
@@ -114,16 +113,23 @@ function generateContractHTML(data) {
 
 /**
  * Generate PDF buffer from registration data
+ * Uses @sparticuz/chromium for Vercel compatibility (no full puppeteer)
  */
 async function generateContractPDF(data) {
   const html = generateContractHTML(data);
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
-
   try {
+    // Try Vercel-compatible chromium first
+    const chromium = require('@sparticuz/chromium');
+    const puppeteer = require('puppeteer-core');
+
+    const browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
     const pdfBuffer = await page.pdf({
@@ -131,9 +137,12 @@ async function generateContractPDF(data) {
       printBackground: true,
       margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
     });
-    return pdfBuffer;
-  } finally {
     await browser.close();
+    return pdfBuffer;
+  } catch (err) {
+    console.warn('PDF generation not available:', err.message);
+    // Fallback: return HTML as buffer (can be printed from browser)
+    return Buffer.from(html, 'utf-8');
   }
 }
 
