@@ -287,12 +287,8 @@ async function run() {
       });
     }
 
-    // Exit month column (15 or 16)
-    let exitMonth = null;
-    const exitVal = (row[15] || row[16] || '').trim();
-    if (exitVal && exitVal !== 'פעיל' && !isNaN(parseInt(exitVal))) {
-      exitMonth = parseInt(exitVal);
-    }
+    // No exit_month column in the Google Sheet - always null
+    const exitMonth = null;
 
     // Get child
     let childId = null;
