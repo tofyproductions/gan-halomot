@@ -1,9 +1,18 @@
 const router = require('express').Router();
+const { optionalAuth } = require('../middleware/auth');
 
-// All routes open (no auth required - matching original GAS app behavior)
-router.use('/branches', require('./branch.routes'));
+// Public routes (no auth required)
 router.use('/auth', require('./auth.routes'));
 router.use('/public', require('./public.routes'));
+router.use('/utils', require('./utils.routes'));
+
+// Protected routes that require auth for employees/salary
+router.use('/employees', require('./employee.routes'));
+router.use('/salary-requests', require('./salary.routes'));
+
+// All other routes use optional auth (backward compatible - works without login too)
+router.use(optionalAuth);
+router.use('/branches', require('./branch.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
 router.use('/registrations', require('./registration.routes'));
@@ -16,6 +25,5 @@ router.use('/documents', require('./documents.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));
-router.use('/utils', require('./utils.routes'));
 
 module.exports = router;

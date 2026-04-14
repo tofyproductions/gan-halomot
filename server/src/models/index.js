@@ -8,6 +8,7 @@ const Archive = require('./Archive');
 const Document = require('./Document');
 const CollectionHistory = require('./CollectionHistory');
 const PriceAdjustment = require('./PriceAdjustment');
+const SalaryRequest = require('./SalaryRequest');
 const Supplier = require('./Supplier');
 const Product = require('./Product');
 const Order = require('./Order');
@@ -23,6 +24,7 @@ module.exports = {
   Document,
   CollectionHistory,
   PriceAdjustment,
+  SalaryRequest,
   Supplier,
   Product,
   Order,

@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
+import LoginPage from './components/layout/LoginPage';
+import ProtectedRoute from './components/layout/ProtectedRoute';
 import Dashboard from './components/dashboard/Dashboard';
 import RegistrationWizard from './components/registration/RegistrationWizard';
 import ParentOnboarding from './components/registration/ParentOnboarding';
@@ -11,16 +13,23 @@ import OrderList from './components/orders/OrderList';
 import OrderForm from './components/orders/OrderForm';
 import OrderView from './components/orders/OrderView';
 import SupplierManager from './components/orders/SupplierManager';
+import EmployeeManager from './components/employees/EmployeeManager';
+import SalaryRequests from './components/employees/SalaryRequests';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public parent-facing routes */}
+      {/* Public routes */}
+      <Route path="/login" element={<LoginPage />} />
       <Route path="/register/:token" element={<ParentOnboarding />} />
 
-      {/* Admin routes (open access, like original GAS app) */}
-      <Route path="/" element={<Layout />}>
+      {/* Protected admin routes */}
+      <Route path="/" element={
+        <ProtectedRoute>
+          <Layout />
+        </ProtectedRoute>
+      }>
         <Route index element={<Dashboard />} />
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
@@ -32,6 +41,12 @@ function AppRoutes() {
         <Route path="orders/new" element={<OrderForm />} />
         <Route path="orders/:id" element={<OrderView />} />
         <Route path="suppliers" element={<SupplierManager />} />
+        <Route path="employees" element={<EmployeeManager />} />
+        <Route path="salary-requests" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+            <SalaryRequests />
+          </ProtectedRoute>
+        } />
       </Route>
 
       <Route path="*" element={<Navigate to="/" />} />

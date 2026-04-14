@@ -11,7 +11,7 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/auth/me')
-        .then(res => setUser(res.data))
+        .then(res => setUser(res.data.user))
         .catch(() => { localStorage.removeItem('token'); setUser(null); })
         .finally(() => setLoading(false));
     } else {
@@ -23,16 +23,24 @@ export function AuthProvider({ children }) {
     const res = await api.post('/auth/login', { email, password });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
+    if (res.data.user.branch_id) {
+      localStorage.setItem('selectedBranch', res.data.user.branch_id);
+    }
     return res.data;
   };
 
   const logout = () => {
     localStorage.removeItem('token');
     setUser(null);
+    window.location.href = '/login';
   };
 
+  const isAuthenticated = !!user;
+  const isAdmin = user?.role === 'system_admin';
+  const isManager = user?.role === 'branch_manager' || isAdmin;
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated, isAdmin, isManager }}>
       {children}
     </AuthContext.Provider>
   );

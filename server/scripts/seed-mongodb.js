@@ -10,18 +10,26 @@ async function seed() {
     const { User, Branch, Classroom, Registration, Child } = require('../src/models');
 
     // Create admin user
-    const existingUser = await User.findOne({ email: 'admin@ganhalomot.co.il' });
-    if (!existingUser) {
+    let adminUser = await User.findOne({ email: 'admin@ganhalomot.co.il' });
+    if (!adminUser) {
       const hash = await bcrypt.hash('admin123', 10);
-      await User.create({
+      adminUser = await User.create({
         email: 'admin@ganhalomot.co.il',
         password_hash: hash,
         full_name: 'מנהל המערכת',
-        role: 'admin',
+        role: 'system_admin',
+        position: 'מנהל מערכת',
       });
       console.log('Admin user created: admin@ganhalomot.co.il / admin123');
     } else {
-      console.log('Admin user already exists');
+      // Update role if old
+      if (adminUser.role === 'admin') {
+        adminUser.role = 'system_admin';
+        await adminUser.save();
+        console.log('Admin role updated to system_admin');
+      } else {
+        console.log('Admin user already exists');
+      }
     }
 
     // Create branches

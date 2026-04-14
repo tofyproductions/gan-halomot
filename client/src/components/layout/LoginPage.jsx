@@ -26,7 +26,7 @@ export default function LoginPage() {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.message || 'שגיאה בהתחברות');
+      setError(err.response?.data?.error || 'שגיאה בהתחברות');
     } finally {
       setLoading(false);
     }
