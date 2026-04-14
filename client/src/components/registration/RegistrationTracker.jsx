@@ -65,7 +65,7 @@ export default function RegistrationTracker() {
     if (!phone) return toast.error('אין מספר טלפון');
     const link = reg.access_token ? `${window.location.origin}/register/${reg.access_token}` : '';
     const text = encodeURIComponent(
-      `שלום ${reg.parent_name},\nקישור לרישום ${reg.child_name} לגן החלומות:\n${link}`
+      `שלום ${reg.parent_name}, שמחים שהצטרפתם לגן החלומות!\nלהשלמת הרישום אנא היכנסו לקישור וחתמו על החוזה:\n${link}`
     );
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };

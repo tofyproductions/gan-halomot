@@ -162,7 +162,7 @@ export default function RegistrationWizard() {
     if (!result?.link) return;
     const phone = form.parent_phone.replace(/^0/, '972');
     const text = encodeURIComponent(
-      `שלום ${form.parent_name},\nקישור לרישום ${form.child_name} לגן החלומות:\n${result.link}`
+      `שלום ${form.parent_name}, שמחים שהצטרפתם לגן החלומות!\nלהשלמת הרישום אנא היכנסו לקישור וחתמו על החוזה:\n${result.link}`
     );
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };
