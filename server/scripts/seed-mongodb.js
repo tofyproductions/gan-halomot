@@ -80,6 +80,25 @@ async function seed() {
       console.log(`Classrooms created for ${bName}`);
     }
 
+    // Create default supplier
+    const { Supplier } = require('../src/models');
+    const existingSupplier = await Supplier.findOne({ name: 'שבי - שיווק מזון' });
+    if (!existingSupplier) {
+      await Supplier.create({
+        name: 'שבי - שיווק מזון',
+        contact_name: 'מאיר',
+        contact_phone: '052-5075834',
+        contact_email: '',
+        customer_name: 'גן החלומות',
+        customer_id: '580757805',
+        min_order_amount: 1200,
+        vat_rate: 1.18,
+      });
+      console.log('Supplier created: שבי - שיווק מזון');
+    } else {
+      console.log('Supplier already exists: שבי - שיווק מזון');
+    }
+
     console.log('\nSeed completed!');
     process.exit(0);
   } catch (error) {

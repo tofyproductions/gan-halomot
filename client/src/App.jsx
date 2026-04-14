@@ -7,6 +7,10 @@ import CollectionsTable from './components/collections/CollectionsTable';
 import ArchiveList from './components/archive/ArchiveList';
 import ContactListPDF from './components/contacts/ContactListPDF';
 import BranchManager from './components/branches/BranchManager';
+import OrderList from './components/orders/OrderList';
+import OrderForm from './components/orders/OrderForm';
+import OrderView from './components/orders/OrderView';
+import SupplierManager from './components/orders/SupplierManager';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -24,6 +28,10 @@ function AppRoutes() {
         <Route path="archive" element={<ArchiveList />} />
         <Route path="contacts" element={<ContactListPDF />} />
         <Route path="branches" element={<BranchManager />} />
+        <Route path="orders" element={<OrderList />} />
+        <Route path="orders/new" element={<OrderForm />} />
+        <Route path="orders/:id" element={<OrderView />} />
+        <Route path="suppliers" element={<SupplierManager />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" />} />

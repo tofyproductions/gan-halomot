@@ -8,6 +8,9 @@ const Archive = require('./Archive');
 const Document = require('./Document');
 const CollectionHistory = require('./CollectionHistory');
 const PriceAdjustment = require('./PriceAdjustment');
+const Supplier = require('./Supplier');
+const Product = require('./Product');
+const Order = require('./Order');
 
 module.exports = {
   User,
@@ -20,4 +23,7 @@ module.exports = {
   Document,
   CollectionHistory,
   PriceAdjustment,
+  Supplier,
+  Product,
+  Order,
 };

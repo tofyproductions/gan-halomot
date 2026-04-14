@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { label: 'מעקב גבייה', path: '/collections', icon: '💰' },
   { label: 'ארכיון', path: '/archive', icon: '📜' },
   { label: 'דף קשר', path: '/contacts', icon: '📇' },
+  { label: 'הזמנות', path: '/orders', icon: '🛒' },
 ];
 
 export default function Header() {
