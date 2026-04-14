@@ -68,14 +68,17 @@ export default function CollectionsTable() {
   const kpi = useMemo(() => {
     let expected = 0;
     let collected = 0;
+    let potential = 0; // full fee × 12 (no prorate)
     allRows.forEach(r => {
+      const fee = r.monthly_fee || 0;
+      potential += fee * 12;
       (r.months || []).forEach(m => {
         expected += m.expected_amount || 0;
         collected += m.paid_amount || 0;
       });
     });
     const pct = expected > 0 ? Math.round((collected / expected) * 100) : 0;
-    return { expected, collected, pct };
+    return { expected, collected, pct, potential };
   }, [allRows]);
 
   // Open receipt dialog
@@ -203,8 +206,16 @@ export default function CollectionsTable() {
       <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
         <Card sx={{ flex: 1 }}>
           <CardContent sx={{ textAlign: 'center', py: 2 }}>
-            <Typography variant="body2" color="text.secondary">צפי שנתי</Typography>
+            <Typography variant="body2" color="text.secondary">פוטנציאל שנתי</Typography>
+            <Typography variant="h6" sx={{ fontWeight: 800 }}>{formatCurrency(kpi.potential)}</Typography>
+            <Typography variant="caption" color="text.secondary">לפי חוזים חתומים</Typography>
+          </CardContent>
+        </Card>
+        <Card sx={{ flex: 1 }}>
+          <CardContent sx={{ textAlign: 'center', py: 2 }}>
+            <Typography variant="body2" color="text.secondary">צפי ריאלי</Typography>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>{formatCurrency(kpi.expected)}</Typography>
+            <Typography variant="caption" color="text.secondary">כולל חישוב יחסי</Typography>
           </CardContent>
         </Card>
         <Card sx={{ flex: 1 }}>
