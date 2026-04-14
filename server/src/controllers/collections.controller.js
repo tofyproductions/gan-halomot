@@ -116,6 +116,7 @@ async function getAll(req, res, next) {
         end_date: reg.end_date,
         collection_id: collection?._id || null,
         exit_month: collection?.exit_month || null,
+        registration_fee: reg.registration_fee || 0,
         registration_fee_receipt: collection?.registration_fee_receipt || null,
         months: monthData,
       });

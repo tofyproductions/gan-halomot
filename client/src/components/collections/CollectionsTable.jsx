@@ -68,15 +68,19 @@ export default function CollectionsTable() {
   const kpi = useMemo(() => {
     let expected = 0;
     let collected = 0;
-    let potential = 0; // full fee × 12 (no prorate)
+    let potential = 0;
+    let totalRegFees = 0;
     allRows.forEach(r => {
       const fee = r.monthly_fee || 0;
       potential += fee * 12;
+      totalRegFees += r.registration_fee || 0;
       (r.months || []).forEach(m => {
         expected += m.expected_amount || 0;
         collected += m.paid_amount || 0;
       });
     });
+    potential += totalRegFees;
+    expected += totalRegFees;
     const pct = expected > 0 ? Math.round((collected / expected) * 100) : 0;
     return { expected, collected, pct, potential };
   }, [allRows]);
@@ -271,6 +275,7 @@ export default function CollectionsTable() {
               <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, zIndex: 3, bgcolor: 'background.paper', minWidth: 140 }}>
                 שם הילד/ה
               </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, minWidth: 75, bgcolor: '#fef9c3' }}>דמי רישום</TableCell>
               {MONTH_LABELS.map((m) => (
                 <TableCell key={m} align="center" sx={{ fontWeight: 700, minWidth: 90 }}>{m}</TableCell>
               ))}
@@ -294,6 +299,7 @@ export default function CollectionsTable() {
               <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#f0fdf4', zIndex: 2, fontSize: '0.8rem' }}>
                 נגבה בפועל
               </TableCell>
+              <TableCell />
               {ACADEMIC_MONTHS.map((m, i) => (
                 <TableCell key={i} align="center" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'success.main' }}>
                   {formatCurrency(monthlySummary[m].collected)}
@@ -305,6 +311,7 @@ export default function CollectionsTable() {
               <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#eff6ff', zIndex: 2, fontSize: '0.8rem' }}>
                 צפוי
               </TableCell>
+              <TableCell />
               {ACADEMIC_MONTHS.map((m, i) => (
                 <TableCell key={i} align="center" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
                   {formatCurrency(monthlySummary[m].expected)}
@@ -316,6 +323,7 @@ export default function CollectionsTable() {
               <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#fefce8', zIndex: 2, fontSize: '0.85rem' }}>
                 אחוז גבייה
               </TableCell>
+              <TableCell />
               {ACADEMIC_MONTHS.map((m, i) => {
                 const pct = monthlySummary[m].pct;
                 return (
@@ -418,7 +426,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
     <>
       {/* Classroom header */}
       <TableRow>
-        <TableCell colSpan={14} sx={{ bgcolor: '#eef2ff', fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0 }}>
+        <TableCell colSpan={15} sx={{ bgcolor: '#eef2ff', fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0 }}>
           <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700 }} />
         </TableCell>
       </TableRow>
@@ -432,6 +440,12 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
           <TableRow key={regId} hover>
             <TableCell sx={{ fontWeight: 600, position: 'sticky', right: 0, bgcolor: 'background.paper', zIndex: 1 }}>
               {row.child_name}
+            </TableCell>
+            <TableCell align="center" sx={{
+              bgcolor: row.registration_fee_receipt ? '#d1fae5' : (row.registration_fee > 0 ? '#fee2e2' : '#f8fafc'),
+              fontWeight: 600, fontSize: '0.8rem',
+            }}>
+              {row.registration_fee_receipt || (row.registration_fee > 0 ? formatCurrency(row.registration_fee) : '')}
             </TableCell>
             {ACADEMIC_MONTHS.map((monthNum, mi) => {
               const m = monthsMap[monthNum] || {};
@@ -501,6 +515,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
         <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', position: 'sticky', right: 0, bgcolor: '#f8fafc', zIndex: 1 }}>
           סה״כ {classroom}
         </TableCell>
+        <TableCell />
         {ACADEMIC_MONTHS.map((m, i) => (
           <TableCell key={i} align="center" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
             {(subtotals[m] || 0) > 0 ? formatCurrency(subtotals[m]) : ''}

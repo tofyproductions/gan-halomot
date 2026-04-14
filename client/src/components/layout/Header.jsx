@@ -7,7 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 
 const ALL_NAV = [
   { label: 'לוח בקרה', path: '/', icon: '🏠', roles: null },
-  { label: 'רישום חדש', path: '/new-registration', icon: '+', roles: ['system_admin', 'branch_manager'] },
+  { label: 'רישום', path: '/registrations', icon: '📝', roles: ['system_admin', 'branch_manager'] },
   { label: 'מעקב גבייה', path: '/collections', icon: '💰', roles: ['system_admin', 'branch_manager'] },
   { label: 'ארכיון', path: '/archive', icon: '📜', roles: ['system_admin', 'branch_manager'] },
   { label: 'דף קשר', path: '/contacts', icon: '📇', roles: null },
