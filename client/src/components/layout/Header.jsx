@@ -1,9 +1,11 @@
-import { AppBar, Toolbar, Typography, Button, Box, Stack } from '@mui/material';
+import { AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Select, IconButton, Tooltip } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import SettingsIcon from '@mui/icons-material/Settings';
+import { useBranch } from '../../hooks/useBranch';
 
 const NAV_ITEMS = [
   { label: 'לוח בקרה', path: '/', icon: '🏠' },
-  { label: 'רישום חדש', path: '/new-registration', icon: '➕' },
+  { label: 'רישום חדש', path: '/new-registration', icon: '+' },
   { label: 'מעקב גבייה', path: '/collections', icon: '💰' },
   { label: 'ארכיון', path: '/archive', icon: '📜' },
   { label: 'דף קשר', path: '/contacts', icon: '📇' },
@@ -12,6 +14,7 @@ const NAV_ITEMS = [
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { branches, selectedBranch, changeBranch } = useBranch();
 
   return (
     <AppBar position="sticky" sx={{
@@ -22,10 +25,46 @@ export default function Header() {
       boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
     }}>
       <Toolbar sx={{ justifyContent: 'space-between' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }} onClick={() => navigate('/')}>
-          <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontFamily: 'Varela Round' }}>
-            ✨ גן החלומות
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
+            <Typography variant="h6" sx={{ fontWeight: 800, color: 'text.primary', fontFamily: 'Varela Round' }}>
+              גן החלומות
+            </Typography>
+          </Box>
+
+          {/* Branch Selector */}
+          {branches.length > 0 && (
+            <Select
+              value={selectedBranch}
+              onChange={(e) => {
+                changeBranch(e.target.value);
+                // Reload current page data
+                window.location.reload();
+              }}
+              size="small"
+              variant="outlined"
+              sx={{
+                minWidth: 160,
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                bgcolor: '#f8fafc',
+                borderRadius: 2,
+                '& .MuiSelect-select': { py: 0.5 },
+              }}
+            >
+              {branches.map((b) => (
+                <MenuItem key={b._id || b.id} value={b._id || b.id}>
+                  {b.name}
+                </MenuItem>
+              ))}
+            </Select>
+          )}
+
+          <Tooltip title="ניהול סניפים">
+            <IconButton size="small" onClick={() => navigate('/branches')} sx={{ color: 'text.secondary' }}>
+              <SettingsIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
 
         <Stack direction="row" spacing={1}>

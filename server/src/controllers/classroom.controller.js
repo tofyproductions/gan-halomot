@@ -1,5 +1,6 @@
 const { Classroom, Child } = require('../models');
 const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
+const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
   try {
@@ -7,7 +8,8 @@ async function getAll(req, res, next) {
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
-    const classrooms = await Classroom.find({ is_active: true }).sort({ name: 1 }).lean();
+    const branchFilter = getBranchFilter(req);
+    const classrooms = await Classroom.find({ is_active: true, ...branchFilter }).sort({ name: 1 }).lean();
 
     // Get child counts
     const childCounts = await Child.aggregate([

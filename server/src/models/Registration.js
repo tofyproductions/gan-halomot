@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const registrationSchema = new mongoose.Schema({
   unique_id: { type: String, required: true, unique: true },
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   child_name: { type: String, required: true },
   child_birth_date: { type: Date, default: null },
   classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null },

@@ -5,7 +5,16 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Simple error logging (no auth redirect - open access like original GAS app)
+// Automatically include branch parameter in all GET requests
+api.interceptors.request.use((config) => {
+  const branch = localStorage.getItem('selectedBranch');
+  if (branch && config.method === 'get') {
+    config.params = { ...config.params, branch };
+  }
+  return config;
+});
+
+// Simple error logging
 api.interceptors.response.use(
   (response) => response,
   (error) => {

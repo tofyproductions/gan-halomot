@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Typography, Button, Card, CardContent } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import OccupancyChart from './OccupancyChart';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -38,6 +39,8 @@ export default function Dashboard() {
 
   const classrooms = data?.classrooms || {};
   const pendingLeads = data?.pendingLeads || [];
+  const forecast = data?.forecast || [];
+  const classroomCapacity = data?.classroomCapacity || [];
   const totalKids = Object.values(classrooms).reduce((sum, kids) => sum + (Array.isArray(kids) ? kids.length : 0), 0);
   const signedCount = pendingLeads.filter(l => l.agreement_signed).length;
   const pendingCount = pendingLeads.length - signedCount;
@@ -78,6 +81,16 @@ export default function Dashboard() {
         </Card>
       </Box>
 
+      {/* Occupancy Chart */}
+      {forecast.length > 0 && (
+        <Card sx={{ mb: 4 }}>
+          <CardContent>
+            <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>תפוסה לאורך השנה</Typography>
+            <OccupancyChart forecast={forecast} classroomCapacity={classroomCapacity} />
+          </CardContent>
+        </Card>
+      )}
+
       {/* Classrooms */}
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>כיתות</Typography>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2, mb: 4 }}>
@@ -103,7 +116,7 @@ export default function Dashboard() {
         )}
       </Box>
 
-      {/* Pending Leads Table */}
+      {/* Pending Leads */}
       {pendingLeads.length > 0 && (
         <>
           <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>רישומים</Typography>

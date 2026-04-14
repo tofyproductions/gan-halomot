@@ -1,14 +1,25 @@
 const { Child, Registration, Classroom } = require('../models');
 const { getAcademicYears, normalizeYear, ACADEMIC_MONTHS } = require('../services/academic-year.service');
+const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getStats(req, res, next) {
   try {
     const { year } = req.query;
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
+    const branchFilter = getBranchFilter(req);
 
-    // Classrooms with children
-    const children = await Child.find({ academic_year: targetYear, is_active: true })
+    // Get classrooms for this branch
+    const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
+    const branchClassroomIds = branchClassrooms.map(c => c._id);
+
+    // Classrooms with children (filter by branch classrooms)
+    const childFilter = { academic_year: targetYear, is_active: true };
+    if (branchClassroomIds.length > 0 && Object.keys(branchFilter).length > 0) {
+      childFilter.classroom_id = { $in: branchClassroomIds };
+    }
+
+    const children = await Child.find(childFilter)
       .populate('classroom_id', 'name capacity')
       .sort({ child_name: 1 })
       .lean();
@@ -28,9 +39,11 @@ async function getStats(req, res, next) {
     }
 
     // Pending leads
-    const pendingLeads = await Registration.find({
+    const leadFilter = {
       status: { $in: ['link_generated', 'contract_signed', 'docs_uploaded'] },
-    })
+      ...branchFilter,
+    };
+    const pendingLeads = await Registration.find(leadFilter)
       .populate('classroom_id', 'name')
       .sort({ created_at: -1 })
       .lean();
@@ -43,17 +56,26 @@ async function getStats(req, res, next) {
     }));
 
     // Forecast
-    const allRegistrations = await Registration.find()
+    const regFilter = Object.keys(branchFilter).length > 0 ? branchFilter : {};
+    const allRegistrations = await Registration.find(regFilter)
       .populate('classroom_id', 'name')
       .sort({ created_at: -1 })
       .lean();
 
     const forecast = buildForecast(allRegistrations, targetYear);
 
+    // Classroom capacity info for occupancy chart
+    const classroomCapacity = await Classroom.find({
+      is_active: true,
+      academic_year: targetYear,
+      ...branchFilter,
+    }).select('name capacity').lean();
+
     res.json({
       classrooms,
       pendingLeads: formattedLeads,
       forecast,
+      classroomCapacity: classroomCapacity.map(c => ({ name: c.name, capacity: c.capacity || 0 })),
       academicYear: targetYear,
     });
   } catch (error) {
@@ -100,8 +122,17 @@ async function getClassrooms(req, res, next) {
     const { year } = req.query;
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
+    const branchFilter = getBranchFilter(req);
 
-    const children = await Child.find({ academic_year: targetYear, is_active: true })
+    const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
+    const branchClassroomIds = branchClassrooms.map(c => c._id);
+
+    const childFilter = { academic_year: targetYear, is_active: true };
+    if (branchClassroomIds.length > 0 && Object.keys(branchFilter).length > 0) {
+      childFilter.classroom_id = { $in: branchClassroomIds };
+    }
+
+    const children = await Child.find(childFilter)
       .populate('classroom_id', 'name capacity')
       .sort({ child_name: 1 })
       .lean();

@@ -409,7 +409,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
                     }
                   }}
                 >
-                  {receipt || ''}
+                  {receipt || (expected > 0 ? formatCurrency(expected) : '')}
                   {isDupOverride && (
                     <Box
                       component="span"

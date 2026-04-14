@@ -6,6 +6,8 @@ import ParentOnboarding from './components/registration/ParentOnboarding';
 import CollectionsTable from './components/collections/CollectionsTable';
 import ArchiveList from './components/archive/ArchiveList';
 import ContactListPDF from './components/contacts/ContactListPDF';
+import BranchManager from './components/branches/BranchManager';
+import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
   return (
@@ -21,6 +23,7 @@ function AppRoutes() {
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="archive" element={<ArchiveList />} />
         <Route path="contacts" element={<ContactListPDF />} />
+        <Route path="branches" element={<BranchManager />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" />} />
@@ -29,5 +32,9 @@ function AppRoutes() {
 }
 
 export default function App() {
-  return <AppRoutes />;
+  return (
+    <BranchProvider>
+      <AppRoutes />
+    </BranchProvider>
+  );
 }

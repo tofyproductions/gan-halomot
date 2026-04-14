@@ -1,6 +1,7 @@
 const router = require('express').Router();
 
 // All routes open (no auth required - matching original GAS app behavior)
+router.use('/branches', require('./branch.routes'));
 router.use('/auth', require('./auth.routes'));
 router.use('/public', require('./public.routes'));
 router.use('/dashboard', require('./dashboard.routes'));

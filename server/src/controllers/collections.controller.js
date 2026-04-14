@@ -1,6 +1,7 @@
 const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment } = require('../models');
 const { normalizeYear, getAcademicYears, getAcademicYearStr, ACADEMIC_MONTHS } = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
+const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
   try {
@@ -8,11 +9,14 @@ async function getAll(req, res, next) {
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
+    const branchFilter = getBranchFilter(req);
+
     // Include all registrations that have active children (not just status=completed)
     const activeChildren = await Child.find({ is_active: true }).select('registration_id').lean();
     const activeRegIds = activeChildren.map(c => c.registration_id);
 
     const registrations = await Registration.find({
+      ...branchFilter,
       $or: [
         { status: 'completed' },
         { _id: { $in: activeRegIds } },

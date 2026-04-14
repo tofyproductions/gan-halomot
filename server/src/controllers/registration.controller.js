@@ -1,13 +1,14 @@
 const { Registration, Classroom, Child, Archive, Collection } = require('../models');
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
 const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
+const { getBranchFilter } = require('../utils/branch-filter');
 const env = require('../config/env');
 
 async function getAll(req, res, next) {
   try {
     const { status, year } = req.query;
 
-    let filter = {};
+    let filter = { ...getBranchFilter(req) };
     if (status) filter.status = status;
 
     if (year) {
@@ -70,7 +71,7 @@ async function getById(req, res, next) {
 async function create(req, res, next) {
   try {
     const {
-      child_name, child_birth_date, classroom_id,
+      child_name, child_birth_date, classroom_id, branch_id,
       parent_name, parent_id_number, parent_phone, parent_email,
       monthly_fee, registration_fee, start_date, end_date,
       configuration,
@@ -87,6 +88,7 @@ async function create(req, res, next) {
 
     const registration = await Registration.create({
       unique_id,
+      branch_id: branch_id || null,
       child_name,
       child_birth_date: child_birth_date || null,
       classroom_id: classroom_id || null,

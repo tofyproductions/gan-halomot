@@ -1,4 +1,5 @@
 const User = require('./User');
+const Branch = require('./Branch');
 const Classroom = require('./Classroom');
 const Registration = require('./Registration');
 const Child = require('./Child');
@@ -10,6 +11,7 @@ const PriceAdjustment = require('./PriceAdjustment');
 
 module.exports = {
   User,
+  Branch,
   Classroom,
   Registration,
   Child,
