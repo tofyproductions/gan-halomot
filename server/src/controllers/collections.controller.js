@@ -111,9 +111,29 @@ async function getAll(req, res, next) {
 
       const child = childByReg[String(reg._id)];
 
+      // Detect registration fee receipts: receipts in months before child started (expected=0)
+      let detectedRegFeeReceipt = collection?.registration_fee_receipt || null;
+      for (const m of ACADEMIC_MONTHS) {
+        const existing = monthsMap[m] || {};
+        if (existing.receipt_number && (expectedFees[m] || 0) === 0 && isBeforeStart[m]) {
+          // This receipt is for registration fee, not monthly payment
+          if (!detectedRegFeeReceipt) detectedRegFeeReceipt = existing.receipt_number;
+        }
+      }
+
       const monthData = ACADEMIC_MONTHS.map(m => {
         const existing = monthsMap[m] || {};
         let expected = expectedFees[m] || 0;
+
+        // If receipt is in a month with 0 expected and before start, skip it (it's a reg fee receipt)
+        const isRegFeeReceipt = existing.receipt_number && expected === 0 && isBeforeStart[m];
+        if (isRegFeeReceipt) {
+          return {
+            month: m, expected_amount: 0, paid_amount: 0, discount_amount: 0,
+            receipt_number: null, payment_status: 'pending',
+            payment_date: null, is_prorated: false, is_before_start: true, notes: null,
+          };
+        }
 
         // Apply discounts
         const discount = expected > 0 ? calcDiscount(reg._id, classroomObjId, m, expected) : 0;
@@ -147,7 +167,7 @@ async function getAll(req, res, next) {
         collection_id: collection?._id || null,
         exit_month: collection?.exit_month || null,
         registration_fee: reg.registration_fee || 0,
-        registration_fee_receipt: collection?.registration_fee_receipt || null,
+        registration_fee_receipt: detectedRegFeeReceipt || null,
         months: monthData,
       });
     }
