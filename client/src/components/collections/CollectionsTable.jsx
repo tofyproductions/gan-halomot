@@ -8,6 +8,8 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import PrintIcon from '@mui/icons-material/Print';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import DiscountIcon from '@mui/icons-material/LocalOffer';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
@@ -40,6 +42,14 @@ export default function CollectionsTable() {
     duplicates: null, saving: false,
   });
 
+  // Discount dialog
+  const [discountDialog, setDiscountDialog] = useState({ open: false });
+  const [discounts, setDiscounts] = useState([]);
+  const [newDiscount, setNewDiscount] = useState({
+    scope: 'child', registration_id: '', classroom_id: '',
+    discount_type: 'percentage', value: '', month: '', reason: '',
+  });
+
   const fetchData = useCallback(() => {
     setLoading(true);
     api.get(`/collections?year=${selectedYear}`)
@@ -49,6 +59,38 @@ export default function CollectionsTable() {
   }, [selectedYear]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const fetchDiscounts = () => {
+    api.get('/discounts').then(res => setDiscounts(res.data.discounts || [])).catch(() => {});
+  };
+
+  const handleAddDiscount = async () => {
+    try {
+      await api.post('/discounts', {
+        ...newDiscount,
+        branch_id: localStorage.getItem('selectedBranch'),
+        month: newDiscount.month ? parseInt(newDiscount.month) : null,
+        value: parseFloat(newDiscount.value),
+        registration_id: newDiscount.registration_id || null,
+        classroom_id: newDiscount.classroom_id || null,
+      });
+      toast.success('הנחה נוספה');
+      setNewDiscount({ scope: 'child', registration_id: '', classroom_id: '', discount_type: 'percentage', value: '', month: '', reason: '' });
+      fetchDiscounts();
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const handleDeleteDiscount = async (id) => {
+    try {
+      await api.delete(`/discounts/${id}`);
+      toast.success('הנחה הוסרה');
+      fetchDiscounts();
+      fetchData();
+    } catch { toast.error('שגיאה'); }
+  };
 
   const grouped = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -200,6 +242,11 @@ export default function CollectionsTable() {
         <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב גבייה</Typography>
         <Stack direction="row" spacing={2} alignItems="center">
           <YearSelector value={selectedYear} onChange={setSelectedYear} />
+          <Button variant="outlined" color="secondary" startIcon={<DiscountIcon />}
+            onClick={() => { setDiscountDialog({ open: true }); fetchDiscounts(); }} size="small"
+          >
+            הנחות
+          </Button>
           <Button variant="outlined" startIcon={<PrintIcon />} onClick={handlePrint} size="small">
             הדפסה
           </Button>
@@ -340,6 +387,100 @@ export default function CollectionsTable() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* Discount Dialog */}
+      <Dialog open={discountDialog.open} onClose={() => setDiscountDialog({ open: false })} dir="rtl" maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>ניהול הנחות</DialogTitle>
+        <DialogContent>
+          {/* Existing discounts */}
+          {discounts.length > 0 && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>הנחות פעילות:</Typography>
+              {discounts.map(d => (
+                <Chip key={d._id || d.id} sx={{ m: 0.5 }} onDelete={() => handleDeleteDiscount(d._id || d.id)}
+                  label={`${d.scope === 'child' ? d.child_name : d.scope === 'classroom' ? d.classroom_name : 'כל הגן'}: ${d.discount_type === 'percentage' ? d.value + '%' : '₪' + d.value}${d.month ? ' (חודש ' + d.month + ')' : ' (כל השנה)'}${d.reason ? ' - ' + d.reason : ''}`}
+                />
+              ))}
+            </Box>
+          )}
+
+          {/* Add new */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>הוסף הנחה:</Typography>
+          <Stack spacing={2}>
+            <Stack direction="row" spacing={2}>
+              <TextField select size="small" label="סוג" value={newDiscount.scope}
+                onChange={e => setNewDiscount(p => ({ ...p, scope: e.target.value, registration_id: '', classroom_id: '' }))}
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="child">ילד ספציפי</MenuItem>
+                <MenuItem value="classroom">כיתה</MenuItem>
+                <MenuItem value="branch">כל הגן</MenuItem>
+              </TextField>
+
+              {newDiscount.scope === 'child' && (
+                <TextField select size="small" label="בחר ילד" value={newDiscount.registration_id}
+                  onChange={e => setNewDiscount(p => ({ ...p, registration_id: e.target.value }))}
+                  sx={{ minWidth: 200 }}
+                >
+                  {allRows.map(r => (
+                    <MenuItem key={r.registration_id} value={r.registration_id}>{r.child_name}</MenuItem>
+                  ))}
+                </TextField>
+              )}
+
+              {newDiscount.scope === 'classroom' && (
+                <TextField select size="small" label="בחר כיתה" value={newDiscount.classroom_id}
+                  onChange={e => setNewDiscount(p => ({ ...p, classroom_id: e.target.value }))}
+                  sx={{ minWidth: 200 }}
+                >
+                  {grouped.map(([cls]) => (
+                    <MenuItem key={cls} value={cls}>{cls}</MenuItem>
+                  ))}
+                </TextField>
+              )}
+            </Stack>
+
+            <Stack direction="row" spacing={2}>
+              <TextField select size="small" label="סוג הנחה" value={newDiscount.discount_type}
+                onChange={e => setNewDiscount(p => ({ ...p, discount_type: e.target.value }))}
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="percentage">אחוזים (%)</MenuItem>
+                <MenuItem value="fixed">סכום קבוע (₪)</MenuItem>
+              </TextField>
+
+              <TextField size="small" label={newDiscount.discount_type === 'percentage' ? 'אחוז הנחה' : 'סכום הנחה'}
+                type="number" value={newDiscount.value}
+                onChange={e => setNewDiscount(p => ({ ...p, value: e.target.value }))}
+                InputProps={{ endAdornment: <InputAdornment position="end">{newDiscount.discount_type === 'percentage' ? '%' : '₪'}</InputAdornment> }}
+                sx={{ width: 150 }}
+              />
+
+              <TextField select size="small" label="חודש" value={newDiscount.month}
+                onChange={e => setNewDiscount(p => ({ ...p, month: e.target.value }))}
+                sx={{ minWidth: 130 }}
+              >
+                <MenuItem value="">כל השנה</MenuItem>
+                {MONTH_LABELS.map((m, i) => (
+                  <MenuItem key={i} value={ACADEMIC_MONTHS[i]}>{m}</MenuItem>
+                ))}
+              </TextField>
+
+              <TextField size="small" label="סיבה" value={newDiscount.reason}
+                onChange={e => setNewDiscount(p => ({ ...p, reason: e.target.value }))}
+                sx={{ flex: 1 }}
+              />
+            </Stack>
+
+            <Button variant="contained" onClick={handleAddDiscount} disabled={!newDiscount.value}>
+              הוסף הנחה
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDiscountDialog({ open: false })}>סגור</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Receipt Dialog */}
       <Dialog open={dialog.open} onClose={closeDialog} dir="rtl" maxWidth="sm" fullWidth>

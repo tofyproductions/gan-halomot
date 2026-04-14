@@ -1,4 +1,4 @@
-const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment } = require('../models');
+const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount } = require('../models');
 const { normalizeYear, getAcademicYears, getAcademicYearStr, ACADEMIC_MONTHS } = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
 const { getBranchFilter } = require('../utils/branch-filter');
@@ -54,6 +54,31 @@ async function getAll(req, res, next) {
       collectionByReg[String(c.registration_id)] = c;
     }
 
+    // Load discounts for this branch
+    const branchFilter = getBranchFilter(req);
+    const allDiscounts = await Discount.find({ is_active: true, ...branchFilter }).lean();
+
+    // Helper: calculate discount for a registration+month
+    function calcDiscount(regId, classroomId, monthNum, baseFee) {
+      let totalDiscount = 0;
+      for (const d of allDiscounts) {
+        // Check month match
+        if (d.month && d.month !== monthNum) continue;
+
+        // Check scope match
+        if (d.scope === 'child' && String(d.registration_id) !== String(regId)) continue;
+        if (d.scope === 'classroom' && String(d.classroom_id) !== String(classroomId)) continue;
+        // scope === 'branch' matches all
+
+        if (d.discount_type === 'percentage') {
+          totalDiscount += baseFee * (d.value / 100);
+        } else {
+          totalDiscount += d.value;
+        }
+      }
+      return Math.round(totalDiscount);
+    }
+
     // Build grouped result
     const grouped = {};
     for (const reg of filteredRegs) {
@@ -69,6 +94,7 @@ async function getAll(req, res, next) {
       }
 
       const fee = parseFloat(reg.monthly_fee) || 0;
+      const classroomObjId = reg.classroom_id?._id || reg.classroom_id;
       const endDate = collection?.exit_month
         ? (() => {
             const exitM = collection.exit_month;
@@ -88,14 +114,19 @@ async function getAll(req, res, next) {
 
       const monthData = ACADEMIC_MONTHS.map(m => {
         const existing = monthsMap[m] || {};
-        const expected = expectedFees[m] || 0;
+        let expected = expectedFees[m] || 0;
+
+        // Apply discounts
+        const discount = expected > 0 ? calcDiscount(reg._id, classroomObjId, m, expected) : 0;
+        expected = Math.max(0, expected - discount);
+
         const status = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
-        // If status is 'paid' (has receipt), paid_amount = expected (fully paid)
         const paid = status === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0);
         return {
           month: m,
           expected_amount: expected,
           paid_amount: paid,
+          discount_amount: discount,
           receipt_number: existing.receipt_number || null,
           payment_status: status,
           payment_date: existing.payment_date || null,

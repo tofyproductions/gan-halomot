@@ -28,6 +28,7 @@ router.use('/gantt', require('./gantt.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));
+router.use('/discounts', require('./discount.routes'));
 
 // Sync endpoint
 const syncController = require('../controllers/sync.controller');
