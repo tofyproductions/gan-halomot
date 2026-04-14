@@ -144,7 +144,7 @@ async function getByRegistration(req, res, next) {
 async function updateMonth(req, res, next) {
   try {
     const { registrationId, monthIndex } = req.params;
-    const { receipt_number, paid_amount, payment_status, notes } = req.body;
+    const { receipt_number, paid_amount, payment_status, notes, force } = req.body;
     const monthNum = parseInt(monthIndex);
 
     if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
@@ -156,20 +156,66 @@ async function updateMonth(req, res, next) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
-    // Check for duplicate receipt numbers
+    // Smart duplicate receipt number validation
+    let isDuplicateOverride = false;
     if (receipt_number) {
-      const duplicate = await Collection.findOne({
+      // Find ALL collections that already use this receipt number
+      const duplicateCollections = await Collection.find({
         'months.receipt_number': receipt_number,
-        $or: [
-          { registration_id: { $ne: registrationId } },
-          { 'months': { $elemMatch: { receipt_number, month_number: { $ne: monthNum } } } },
-        ],
-      });
-      if (duplicate) {
+      }).populate('registration_id', 'child_name parent_name parent_id_number parent_phone').lean();
+
+      const duplicates = [];
+      const MONTH_NAMES = { 9: 'ספט׳', 10: 'אוק׳', 11: 'נוב׳', 12: 'דצמ׳', 1: 'ינו׳', 2: 'פבר׳', 3: 'מרץ', 4: 'אפר׳', 5: 'מאי', 6: 'יוני', 7: 'יולי', 8: 'אוג׳' };
+
+      for (const dc of duplicateCollections) {
+        // Skip if it's the same registration + same month (editing own receipt)
+        if (String(dc.registration_id?._id) === String(registrationId)) {
+          const ownMonth = dc.months.find(m => m.receipt_number === receipt_number && m.month_number === monthNum);
+          if (ownMonth) continue; // Editing own existing receipt for this month
+        }
+
+        const dupReg = dc.registration_id;
+        if (!dupReg) continue;
+
+        // Find which months have this receipt
+        const dupMonths = dc.months.filter(m => m.receipt_number === receipt_number);
+
+        for (const dm of dupMonths) {
+          // Check if same parent
+          const sameParent = (
+            (registration.parent_id_number && dupReg.parent_id_number &&
+              registration.parent_id_number === dupReg.parent_id_number) ||
+            (registration.parent_name && dupReg.parent_name &&
+              registration.parent_name === dupReg.parent_name) ||
+            (registration.parent_phone && dupReg.parent_phone &&
+              registration.parent_phone === dupReg.parent_phone)
+          );
+
+          // Same parent + same month = silently allow (one receipt for multiple kids)
+          if (sameParent && dm.month_number === monthNum) {
+            continue;
+          }
+
+          duplicates.push({
+            child_name: dupReg.child_name,
+            parent_name: dupReg.parent_name,
+            month: dm.month_number,
+            month_name: MONTH_NAMES[dm.month_number] || String(dm.month_number),
+            same_parent: sameParent,
+          });
+        }
+      }
+
+      if (duplicates.length > 0 && !force) {
         return res.status(409).json({
-          error: 'Duplicate receipt number',
-          message: `Receipt number ${receipt_number} already exists in another record`,
+          error: 'duplicate_receipt',
+          duplicates,
+          message: `מספר קבלה ${receipt_number} כבר קיים`,
         });
+      }
+
+      if (duplicates.length > 0 && force) {
+        isDuplicateOverride = true;
       }
     }
 
@@ -192,9 +238,12 @@ async function updateMonth(req, res, next) {
       });
     }
 
-    // Find existing month in array
     const existingIdx = collection.months.findIndex(m => m.month_number === monthNum);
     const existing = existingIdx >= 0 ? collection.months[existingIdx] : null;
+
+    const effectiveNotes = isDuplicateOverride
+      ? 'duplicate_override'
+      : (notes !== undefined ? notes : (existing?.notes || null));
 
     const monthData = {
       month_number: monthNum,
@@ -202,7 +251,7 @@ async function updateMonth(req, res, next) {
       receipt_number: receipt_number !== undefined ? receipt_number : (existing?.receipt_number || null),
       payment_status: payment_status || (receipt_number ? 'paid' : (existing?.payment_status || 'expected')),
       payment_date: receipt_number ? new Date() : (existing?.payment_date || null),
-      notes: notes !== undefined ? notes : (existing?.notes || null),
+      notes: effectiveNotes,
     };
 
     if (existingIdx >= 0) {
