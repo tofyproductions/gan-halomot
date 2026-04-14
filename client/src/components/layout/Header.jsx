@@ -11,6 +11,8 @@ const ALL_NAV = [
   { label: 'מעקב גבייה', path: '/collections', icon: '💰', roles: ['system_admin', 'branch_manager'] },
   { label: 'ארכיון', path: '/archive', icon: '📜', roles: ['system_admin', 'branch_manager'] },
   { label: 'דף קשר', path: '/contacts', icon: '📇', roles: null },
+  { label: 'גאנט', path: '/gantt', icon: '📋', roles: ['system_admin', 'branch_manager', 'employee'] },
+  { label: 'חופשות', path: '/holidays', icon: '📅', roles: ['system_admin', 'branch_manager'] },
   { label: 'הזמנות', path: '/orders', icon: '🛒', roles: null },
   { label: 'ספקים', path: '/suppliers', icon: '📦', roles: ['system_admin'] },
   { label: 'עובדים', path: '/employees', icon: '👥', roles: ['system_admin', 'branch_manager'] },

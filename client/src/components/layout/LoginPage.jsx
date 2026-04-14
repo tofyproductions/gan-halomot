@@ -9,21 +9,21 @@ import { useAuth } from '../../hooks/useAuth';
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
+  const [fullName, setFullName] = useState('');
   const [idNumber, setIdNumber] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!idNumber || !password) {
+    if (!fullName || !idNumber) {
       setError('יש למלא את כל השדות');
       return;
     }
     setLoading(true);
     try {
-      await login(idNumber, password);
+      await login(fullName, idNumber);
       navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'שגיאה בהתחברות');
@@ -64,22 +64,21 @@ export default function LoginPage() {
           <Box component="form" onSubmit={handleSubmit}>
             <Stack spacing={2.5}>
               <TextField
+                label="שם מלא"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                fullWidth
+                required
+                autoFocus
+              />
+              <TextField
                 label="תעודת זהות"
+                type="password"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
                 fullWidth
                 required
-                autoFocus
                 inputProps={{ dir: 'ltr', inputMode: 'numeric' }}
-              />
-              <TextField
-                label="סיסמה"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                fullWidth
-                required
-                inputProps={{ dir: 'ltr' }}
               />
               <Button
                 type="submit"

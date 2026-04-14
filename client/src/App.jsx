@@ -15,6 +15,9 @@ import OrderView from './components/orders/OrderView';
 import SupplierManager from './components/orders/SupplierManager';
 import EmployeeManager from './components/employees/EmployeeManager';
 import SalaryRequests from './components/employees/SalaryRequests';
+import HolidayManager from './components/holidays/HolidayManager';
+import GanttCalendar from './components/gantt/GanttCalendar';
+import GanttEditor from './components/gantt/GanttEditor';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -42,6 +45,9 @@ function AppRoutes() {
         <Route path="orders/:id" element={<OrderView />} />
         <Route path="suppliers" element={<SupplierManager />} />
         <Route path="employees" element={<EmployeeManager />} />
+        <Route path="holidays" element={<HolidayManager />} />
+        <Route path="gantt" element={<GanttCalendar />} />
+        <Route path="gantt/edit" element={<GanttEditor />} />
         <Route path="salary-requests" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager']}>
             <SalaryRequests />
