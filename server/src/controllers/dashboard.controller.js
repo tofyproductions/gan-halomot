@@ -64,6 +64,14 @@ async function getStats(req, res, next) {
 
     const forecast = buildForecast(allRegistrations, targetYear);
 
+    // Next year forecast
+    const academicYearsInfo = getAcademicYears();
+    const nextYear = academicYearsInfo.next.range;
+    const nextYearRegs = await Registration.find(regFilter)
+      .populate('classroom_id', 'name')
+      .lean();
+    const forecastNextYear = buildForecast(nextYearRegs, nextYear);
+
     // Classroom capacity info for occupancy chart
     const classroomCapacity = await Classroom.find({
       is_active: true,
@@ -71,12 +79,18 @@ async function getStats(req, res, next) {
       ...branchFilter,
     }).select('name capacity').lean();
 
+    // Total branch capacity (sum of all classroom capacities)
+    const totalCapacity = classroomCapacity.reduce((sum, c) => sum + (c.capacity || 0), 0);
+
     res.json({
       classrooms,
       pendingLeads: formattedLeads,
       forecast,
+      forecastNextYear,
       classroomCapacity: classroomCapacity.map(c => ({ name: c.name, capacity: c.capacity || 0 })),
+      totalCapacity,
       academicYear: targetYear,
+      nextAcademicYear: nextYear,
     });
   } catch (error) {
     next(error);
@@ -87,15 +101,27 @@ function buildForecast(registrations, academicYear) {
   const [y1, y2] = academicYear.split('-').map(Number);
   if (!y1 || !y2) return [];
 
+  // Collect all classroom names
+  const classroomSet = new Set();
+  registrations.forEach(r => {
+    const cls = r.classroom_id?.name || 'ללא קבוצה';
+    classroomSet.add(cls);
+  });
+
   const monthlyData = ACADEMIC_MONTHS.map(m => {
     const calendarYear = m >= 9 ? y1 : y2;
-    return {
+    const entry = {
       month: m,
       year: calendarYear,
       label: new Date(calendarYear, m - 1, 1).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' }),
       expectedChildren: 0,
       expectedRevenue: 0,
+      byClassroom: {},
     };
+    for (const cls of classroomSet) {
+      entry.byClassroom[cls] = 0;
+    }
+    return entry;
   });
 
   for (const reg of registrations) {
@@ -103,6 +129,7 @@ function buildForecast(registrations, academicYear) {
     const startDate = new Date(reg.start_date);
     const endDate = reg.end_date ? new Date(reg.end_date) : new Date(y2, 7, 31);
     const fee = parseFloat(reg.monthly_fee) || 0;
+    const cls = reg.classroom_id?.name || 'ללא קבוצה';
 
     for (const entry of monthlyData) {
       const monthStart = new Date(entry.year, entry.month - 1, 1);
@@ -110,6 +137,7 @@ function buildForecast(registrations, academicYear) {
       if (startDate <= monthEnd && endDate >= monthStart) {
         entry.expectedChildren++;
         entry.expectedRevenue += fee;
+        entry.byClassroom[cls] = (entry.byClassroom[cls] || 0) + 1;
       }
     }
   }

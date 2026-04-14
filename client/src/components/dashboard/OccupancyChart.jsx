@@ -2,25 +2,39 @@ import { useMemo } from 'react';
 import Chart from 'react-apexcharts';
 
 const MONTH_LABELS = [
-  'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳', 'ינו׳', 'פבר׳',
-  'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳',
+  'ספט', 'אוק', 'נוב', 'דצמ', 'ינו', 'פבר',
+  'מרץ', 'אפר', 'מאי', 'יוני', 'יול', 'אוג',
 ];
 
-export default function OccupancyChart({ forecast, classroomCapacity }) {
+const CLASSROOM_COLORS = {
+  'תינוקייה א': '#60a5fa', // blue
+  'תינוקייה ב': '#a78bfa', // purple
+  'צעירים': '#f472b6',     // pink
+  'בוגרים': '#34d399',     // green
+};
+
+const DEFAULT_COLORS = ['#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fbbf24', '#fb923c'];
+
+export default function OccupancyChart({ forecast, totalCapacity }) {
   const { options, series } = useMemo(() => {
-    // Total capacity across all classrooms
-    const totalCapacity = classroomCapacity.reduce((sum, c) => sum + (c.capacity || 0), 0);
+    if (!forecast || forecast.length === 0) return { options: {}, series: [] };
 
-    // Children per month from forecast
-    const childrenPerMonth = forecast.map(f => f.expectedChildren);
+    // Extract unique classrooms from forecast data
+    const classrooms = new Set();
+    forecast.forEach(f => {
+      if (f.byClassroom) {
+        Object.keys(f.byClassroom).forEach(c => classrooms.add(c));
+      }
+    });
 
-    const series = [
-      {
-        name: 'ילדים רשומים',
-        type: 'bar',
-        data: childrenPerMonth,
-      },
-    ];
+    const classroomList = Array.from(classrooms);
+
+    // Build stacked bar series - one per classroom
+    const series = classroomList.map((cls, idx) => ({
+      name: cls,
+      type: 'bar',
+      data: forecast.map(f => f.byClassroom?.[cls] || 0),
+    }));
 
     // Add capacity line if available
     if (totalCapacity > 0) {
@@ -31,63 +45,82 @@ export default function OccupancyChart({ forecast, classroomCapacity }) {
       });
     }
 
+    // Colors
+    const colors = classroomList.map((cls, i) =>
+      CLASSROOM_COLORS[cls] || DEFAULT_COLORS[i % DEFAULT_COLORS.length]
+    );
+    if (totalCapacity > 0) colors.push('#ef4444'); // red for capacity line
+
+    const strokeWidths = classroomList.map(() => 0);
+    const dashArrays = classroomList.map(() => 0);
+    if (totalCapacity > 0) {
+      strokeWidths.push(3);
+      dashArrays.push(5);
+    }
+
     const options = {
       chart: {
-        type: 'line',
-        height: 320,
+        type: 'bar',
+        stacked: true,
+        height: 380,
         fontFamily: 'Assistant, Heebo, sans-serif',
         toolbar: { show: false },
-        dir: 'rtl',
       },
       plotOptions: {
         bar: {
-          borderRadius: 6,
-          columnWidth: '50%',
+          borderRadius: 4,
+          columnWidth: '55%',
         },
       },
-      colors: ['#f59e0b', '#ef4444'],
+      colors,
       stroke: {
-        width: [0, 3],
-        dashArray: [0, 5],
-      },
-      fill: {
-        opacity: [0.9, 1],
+        width: strokeWidths,
+        dashArray: dashArrays,
       },
       xaxis: {
         categories: MONTH_LABELS,
         labels: {
-          style: { fontWeight: 600, fontSize: '12px' },
+          style: { fontWeight: 600, fontSize: '13px' },
         },
       },
       yaxis: {
-        title: { text: 'מספר ילדים', style: { fontWeight: 700 } },
+        title: { text: 'ילדים רשומים', style: { fontWeight: 700, fontSize: '13px' } },
         min: 0,
+        max: totalCapacity > 0 ? Math.max(totalCapacity + 5, Math.max(...forecast.map(f => f.expectedChildren)) + 5) : undefined,
       },
       legend: {
-        position: 'top',
-        horizontalAlign: 'right',
+        position: 'bottom',
+        horizontalAlign: 'center',
         fontWeight: 600,
+        fontSize: '13px',
+        markers: { radius: 4 },
       },
       dataLabels: {
-        enabled: true,
-        enabledOnSeries: [0],
-        style: { fontSize: '11px', fontWeight: 700 },
+        enabled: false,
       },
       tooltip: {
         shared: true,
         intersect: false,
+        y: {
+          formatter: (val) => val > 0 ? `${val} ילדים` : '',
+        },
+      },
+      grid: {
+        borderColor: '#f1f5f9',
       },
     };
 
     return { options, series };
-  }, [forecast, classroomCapacity]);
+  }, [forecast, totalCapacity]);
+
+  if (!forecast || forecast.length === 0) return null;
 
   return (
     <Chart
       options={options}
       series={series}
       type="line"
-      height={320}
+      height={380}
     />
   );
 }
