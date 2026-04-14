@@ -23,6 +23,7 @@ router.use('/contacts', require('./contacts.routes'));
 router.use('/classrooms', require('./classroom.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/holidays', require('./holiday.routes'));
+router.use('/activities', require('./activity.routes'));
 router.use('/gantt', require('./gantt.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));

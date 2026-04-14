@@ -10,6 +10,7 @@ const CollectionHistory = require('./CollectionHistory');
 const PriceAdjustment = require('./PriceAdjustment');
 const SalaryRequest = require('./SalaryRequest');
 const Holiday = require('./Holiday');
+const Activity = require('./Activity');
 const GanttMonth = require('./GanttMonth');
 const Supplier = require('./Supplier');
 const Product = require('./Product');
@@ -28,6 +29,7 @@ module.exports = {
   PriceAdjustment,
   SalaryRequest,
   Holiday,
+  Activity,
   GanttMonth,
   Supplier,
   Product,
