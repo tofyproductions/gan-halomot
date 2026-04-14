@@ -23,10 +23,14 @@ async function generatePDF(req, res, next) {
     for (const child of children) {
       const groupName = child.classroom_id?.name || 'ללא קבוצה';
       if (!grouped[groupName]) grouped[groupName] = [];
+      // Ensure phone starts with 0
+      let phone = child.phone || '';
+      if (phone && !phone.startsWith('0') && /^\d/.test(phone)) phone = '0' + phone;
+
       grouped[groupName].push({
         child_name: child.child_name,
         parent_name: child.parent_name,
-        phone: child.phone,
+        phone,
         email: child.email,
         medical_alerts: child.medical_alerts,
       });
