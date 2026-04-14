@@ -5,6 +5,7 @@ const ganttCellSchema = new mongoose.Schema({
   day_index: { type: Number, required: true, min: 0, max: 5 },
   content: { type: String, default: '' },
   color: { type: String, default: '' },
+  merge_span: { type: Number, default: 0 },
 }, { _id: false });
 
 const ganttWeekSchema = new mongoose.Schema({
