@@ -213,6 +213,7 @@ export default function BranchManager() {
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ fontWeight: 700 }}>שם הכיתה</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>מובילת כיתה</TableCell>
                           <TableCell sx={{ fontWeight: 700 }} align="center">תפוסה מקסימלית</TableCell>
                           <TableCell sx={{ fontWeight: 700 }} align="center">ילדים רשומים</TableCell>
                           <TableCell sx={{ fontWeight: 700 }} align="center">פעולות</TableCell>
@@ -229,6 +230,37 @@ export default function BranchManager() {
                                   value={cls.name}
                                   onSave={(val) => handleUpdateClassName(cid, val)}
                                 />
+                              </TableCell>
+                              <TableCell>
+                                <Typography variant="body2" sx={{
+                                  cursor: 'pointer', color: cls.lead_teacher_name ? 'text.primary' : 'text.disabled',
+                                  '&:hover': { color: 'primary.main' },
+                                }}
+                                  onClick={async () => {
+                                    const name = prompt('שם מובילת הכיתה (מתוך עובדי הגן):', cls.lead_teacher_name || '');
+                                    if (name === null) return;
+                                    if (!name.trim()) {
+                                      await api.put(`/classrooms/${cid}`, { lead_teacher_id: null });
+                                      toast.success('מובילת כיתה הוסרה');
+                                      fetchClassrooms();
+                                      return;
+                                    }
+                                    // Find employee by name
+                                    try {
+                                      const empRes = await api.get('/employees');
+                                      const emp = (empRes.data.employees || []).find(e => e.full_name.includes(name.trim()));
+                                      if (emp) {
+                                        await api.put(`/classrooms/${cid}`, { lead_teacher_id: emp._id || emp.id });
+                                        toast.success(`${emp.full_name} הוגדרה כמובילת כיתה`);
+                                      } else {
+                                        toast.error('עובד לא נמצא');
+                                      }
+                                      fetchClassrooms();
+                                    } catch { toast.error('שגיאה'); }
+                                  }}
+                                >
+                                  {cls.lead_teacher_name || 'לחץ להגדרה'}
+                                </Typography>
                               </TableCell>
                               <TableCell align="center">
                                 {isEditing ? (

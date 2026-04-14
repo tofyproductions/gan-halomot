@@ -9,7 +9,9 @@ async function getAll(req, res, next) {
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
     const branchFilter = getBranchFilter(req);
-    const classrooms = await Classroom.find({ is_active: true, ...branchFilter }).sort({ name: 1 }).lean();
+    const classrooms = await Classroom.find({ is_active: true, ...branchFilter })
+      .populate('lead_teacher_id', 'full_name')
+      .sort({ name: 1 }).lean();
 
     // Get child counts
     const childCounts = await Child.aggregate([
@@ -26,6 +28,8 @@ async function getAll(req, res, next) {
       ...c,
       id: c._id,
       child_count: countMap[String(c._id)] || 0,
+      lead_teacher_name: c.lead_teacher_id?.full_name || null,
+      lead_teacher_id: c.lead_teacher_id?._id || c.lead_teacher_id,
     }));
 
     res.json({ classrooms: result });

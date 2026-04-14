@@ -101,7 +101,6 @@ function buildForecast(registrations, academicYear) {
   const [y1, y2] = academicYear.split('-').map(Number);
   if (!y1 || !y2) return [];
 
-  // Collect all classroom names
   const classroomSet = new Set();
   registrations.forEach(r => {
     const cls = r.classroom_id?.name || 'ללא קבוצה';
@@ -117,19 +116,22 @@ function buildForecast(registrations, academicYear) {
       expectedChildren: 0,
       expectedRevenue: 0,
       byClassroom: {},
+      pendingByClassroom: {},
     };
     for (const cls of classroomSet) {
       entry.byClassroom[cls] = 0;
+      entry.pendingByClassroom[cls] = 0;
     }
     return entry;
   });
 
   for (const reg of registrations) {
-    if (!reg.start_date || !reg.monthly_fee) continue;
+    if (!reg.start_date) continue;
     const startDate = new Date(reg.start_date);
     const endDate = reg.end_date ? new Date(reg.end_date) : new Date(y2, 7, 31);
     const fee = parseFloat(reg.monthly_fee) || 0;
     const cls = reg.classroom_id?.name || 'ללא קבוצה';
+    const isPending = reg.status !== 'completed';
 
     for (const entry of monthlyData) {
       const monthStart = new Date(entry.year, entry.month - 1, 1);
@@ -137,7 +139,11 @@ function buildForecast(registrations, academicYear) {
       if (startDate <= monthEnd && endDate >= monthStart) {
         entry.expectedChildren++;
         entry.expectedRevenue += fee;
-        entry.byClassroom[cls] = (entry.byClassroom[cls] || 0) + 1;
+        if (isPending) {
+          entry.pendingByClassroom[cls] = (entry.pendingByClassroom[cls] || 0) + 1;
+        } else {
+          entry.byClassroom[cls] = (entry.byClassroom[cls] || 0) + 1;
+        }
       }
     }
   }

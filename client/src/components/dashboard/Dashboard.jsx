@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip } from '@mui/material';
+import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip, Stack } from '@mui/material';
+import SyncIcon from '@mui/icons-material/Sync';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import OccupancyChart from './OccupancyChart';
@@ -12,7 +13,21 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [yearTab, setYearTab] = useState(0); // 0 = current, 1 = next
+  const [yearTab, setYearTab] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await api.post('/sync');
+      toast.success(res.data.summary);
+      window.location.reload();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בסנכרון');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +80,16 @@ export default function Dashboard() {
             <Typography variant="body2" color="text.secondary">{selectedBranchName}</Typography>
           )}
         </Box>
-        <Button variant="contained" onClick={() => navigate('/new-registration')}>+ רישום חדש</Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined" size="small" startIcon={<SyncIcon />}
+            onClick={handleSync} disabled={syncing}
+            sx={{ borderColor: '#10b981', color: '#10b981' }}
+          >
+            {syncing ? 'מסנכרן...' : 'סנכרון'}
+          </Button>
+          <Button variant="contained" onClick={() => navigate('/new-registration')}>+ רישום חדש</Button>
+        </Stack>
       </Box>
 
       {/* KPI Cards */}

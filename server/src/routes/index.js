@@ -28,4 +28,8 @@ router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));
 
+// Sync endpoint
+const syncController = require('../controllers/sync.controller');
+router.post('/sync', syncController.syncFromSheets);
+
 module.exports = router;

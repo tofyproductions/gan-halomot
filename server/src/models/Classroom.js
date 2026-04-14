@@ -5,6 +5,7 @@ const classroomSchema = new mongoose.Schema({
   academic_year: { type: String, required: true },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   capacity: { type: Number, default: null },
+  lead_teacher_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
