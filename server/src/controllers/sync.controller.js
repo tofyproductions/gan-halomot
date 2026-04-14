@@ -86,7 +86,12 @@ async function syncFromSheets(req, res, next) {
       const acadYear = getAcademicYear(startDate);
       let classroom = await Classroom.findOne({ name: cls, branch_id: kaplan._id, is_active: true });
       if (!classroom) {
-        classroom = await Classroom.create({ name: cls, academic_year: acadYear || '2025-2026', branch_id: kaplan._id, capacity: 35 });
+        try {
+          classroom = await Classroom.create({ name: cls, academic_year: acadYear || '2025-2026', branch_id: kaplan._id, capacity: 35 });
+        } catch (e) {
+          // Duplicate key - find existing
+          classroom = await Classroom.findOne({ name: cls, branch_id: kaplan._id });
+        }
       }
 
       const existing = await Registration.findOne({ unique_id: uniqueId });
