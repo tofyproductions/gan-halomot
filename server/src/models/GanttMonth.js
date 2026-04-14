@@ -2,8 +2,9 @@ const mongoose = require('mongoose');
 
 const ganttCellSchema = new mongoose.Schema({
   row_key: { type: String, required: true },
-  day_index: { type: Number, required: true, min: 0, max: 5 }, // 0=Sun..5=Fri
+  day_index: { type: Number, required: true, min: 0, max: 5 },
   content: { type: String, default: '' },
+  color: { type: String, default: '' },
 }, { _id: false });
 
 const ganttWeekSchema = new mongoose.Schema({
