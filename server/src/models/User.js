@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
   },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   phone: { type: String, default: '' },
-  id_number: { type: String, default: '' },
+  id_number: { type: String, default: '', index: true },
   address: { type: String, default: '' },
   position: { type: String, default: '' },
   salary: { type: Number, default: 0 },

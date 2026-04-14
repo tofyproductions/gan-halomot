@@ -5,20 +5,22 @@ const env = require('../config/env');
 
 async function login(req, res, next) {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    const { id_number, password } = req.body;
+    if (!id_number || !password) {
+      return res.status(400).json({ error: 'תעודת זהות וסיסמה נדרשים' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase().trim(), is_active: true })
+    const cleaned = id_number.replace(/\D/g, '').trim();
+    const user = await User.findOne({ id_number: cleaned, is_active: true })
       .populate('branch_id', 'name');
+
     if (!user) {
-      return res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      return res.status(401).json({ error: 'תעודת זהות או סיסמה שגויים' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
-      return res.status(401).json({ error: 'אימייל או סיסמה שגויים' });
+      return res.status(401).json({ error: 'תעודת זהות או סיסמה שגויים' });
     }
 
     const payload = {

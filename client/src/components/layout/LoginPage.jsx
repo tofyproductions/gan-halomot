@@ -9,7 +9,7 @@ import { useAuth } from '../../hooks/useAuth';
 export default function LoginPage() {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const [idNumber, setIdNumber] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,13 +17,13 @@ export default function LoginPage() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!email || !password) {
+    if (!idNumber || !password) {
       setError('יש למלא את כל השדות');
       return;
     }
     setLoading(true);
     try {
-      await login(email, password);
+      await login(idNumber, password);
       navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'שגיאה בהתחברות');
@@ -64,14 +64,13 @@ export default function LoginPage() {
           <Box component="form" onSubmit={handleSubmit}>
             <Stack spacing={2.5}>
               <TextField
-                label="דוא״ל"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                label="תעודת זהות"
+                value={idNumber}
+                onChange={(e) => setIdNumber(e.target.value)}
                 fullWidth
                 required
                 autoFocus
-                inputProps={{ dir: 'ltr' }}
+                inputProps={{ dir: 'ltr', inputMode: 'numeric' }}
               />
               <TextField
                 label="סיסמה"

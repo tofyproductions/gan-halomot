@@ -10,26 +10,44 @@ async function seed() {
     const { User, Branch, Classroom, Registration, Child } = require('../src/models');
 
     // Create admin user
-    let adminUser = await User.findOne({ email: 'admin@ganhalomot.co.il' });
-    if (!adminUser) {
-      const hash = await bcrypt.hash('admin123', 10);
-      adminUser = await User.create({
-        email: 'admin@ganhalomot.co.il',
-        password_hash: hash,
-        full_name: 'מנהל המערכת',
-        role: 'system_admin',
-        position: 'מנהל מערכת',
-      });
-      console.log('Admin user created: admin@ganhalomot.co.il / admin123');
-    } else {
-      // Update role if old
-      if (adminUser.role === 'admin') {
-        adminUser.role = 'system_admin';
-        await adminUser.save();
-        console.log('Admin role updated to system_admin');
+    // Create system admin users (login with ID number + password)
+    const admins = [
+      { full_name: 'בן כהן', id_number: '203626296', email: 'ben@ganhalomot.co.il', position: 'מנהל ראשי' },
+      { full_name: 'עמית קוחטה', id_number: '324235241', email: 'amit@ganhalomot.co.il', position: 'מנהל ראשי' },
+      { full_name: 'אורלי מור', id_number: '024073124', email: 'orly@ganhalomot.co.il', position: 'מנהלת חשבונות' },
+    ];
+
+    const hash = await bcrypt.hash('admin123', 10);
+
+    for (const admin of admins) {
+      const existing = await User.findOne({ id_number: admin.id_number });
+      if (!existing) {
+        await User.create({
+          ...admin,
+          password_hash: hash,
+          role: 'system_admin',
+        });
+        console.log(`Admin created: ${admin.full_name} (ת.ז ${admin.id_number}) / סיסמה: admin123`);
       } else {
-        console.log('Admin user already exists');
+        // Update role if needed
+        if (existing.role !== 'system_admin') {
+          existing.role = 'system_admin';
+          existing.full_name = admin.full_name;
+          existing.position = admin.position;
+          await existing.save();
+          console.log(`Admin updated: ${admin.full_name}`);
+        } else {
+          console.log(`Admin exists: ${admin.full_name}`);
+        }
       }
+    }
+
+    // Deactivate old email-based admin if exists
+    const oldAdmin = await User.findOne({ email: 'admin@ganhalomot.co.il', id_number: '' });
+    if (oldAdmin) {
+      oldAdmin.is_active = false;
+      await oldAdmin.save();
+      console.log('Deactivated old admin (email-based)');
     }
 
     // Create branches
