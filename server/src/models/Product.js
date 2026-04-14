@@ -7,6 +7,7 @@ const productSchema = new mongoose.Schema({
   name: { type: String, required: true },
   price_before_vat: { type: Number, default: 0 },
   price_with_vat: { type: Number, default: 0 },
+  image_url: { type: String, default: '' },
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

@@ -170,13 +170,24 @@ export default function OrderForm() {
                           <Box
                             key={p._id || p.id}
                             sx={{
-                              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                              display: 'flex', alignItems: 'center', gap: 1.5,
                               p: 1, mb: 0.5, borderRadius: 2, bgcolor: inCart ? '#dcfce7' : '#f8fafc',
                               cursor: 'pointer', '&:hover': { bgcolor: inCart ? '#bbf7d0' : '#f1f5f9' },
                             }}
                             onClick={() => addToCart(p)}
                           >
-                            <Box>
+                            {p.image_url ? (
+                              <Box
+                                component="img"
+                                src={p.image_url}
+                                sx={{ width: 44, height: 44, borderRadius: 1.5, objectFit: 'cover', flexShrink: 0 }}
+                              />
+                            ) : (
+                              <Box sx={{ width: 44, height: 44, borderRadius: 1.5, bgcolor: '#e2e8f0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
+                                📦
+                              </Box>
+                            )}
+                            <Box sx={{ flex: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
                               <Typography variant="caption" color="text.secondary">{p.sku}</Typography>
                             </Box>

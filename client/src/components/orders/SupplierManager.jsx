@@ -189,6 +189,7 @@ export default function SupplierManager() {
                   <Table size="small">
                     <TableHead>
                       <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }} width="50">תמונה</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>מק״ט</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>קטגוריה</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
@@ -199,6 +200,23 @@ export default function SupplierManager() {
                     <TableBody>
                       {prods.slice(0, 20).map(p => (
                         <TableRow key={p._id || p.id} hover>
+                          <TableCell>
+                            {p.image_url ? (
+                              <Box component="img" src={p.image_url} sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'cover' }} />
+                            ) : (
+                              <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', cursor: 'pointer' }}
+                                onClick={() => {
+                                  const url = prompt('הכנס URL לתמונה:');
+                                  if (url) {
+                                    api.put(`/products/${p._id || p.id}`, { image_url: url })
+                                      .then(() => { toast.success('תמונה עודכנה'); fetchProducts(sid); })
+                                      .catch(() => toast.error('שגיאה'));
+                                  }
+                                }}
+                                title="לחץ להוספת תמונה"
+                              >📷</Box>
+                            )}
+                          </TableCell>
                           <TableCell>{p.sku}</TableCell>
                           <TableCell>{p.category}</TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>

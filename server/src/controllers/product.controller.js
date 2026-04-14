@@ -33,7 +33,7 @@ async function update(req, res, next) {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
-    const fields = ['sku', 'category', 'name', 'price_before_vat'];
+    const fields = ['sku', 'category', 'name', 'price_before_vat', 'image_url'];
     fields.forEach(f => { if (req.body[f] !== undefined) product[f] = req.body[f]; });
 
     if (req.body.price_before_vat !== undefined) {
