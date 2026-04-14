@@ -55,8 +55,7 @@ async function getAll(req, res, next) {
     }
 
     // Load discounts for this branch
-    const branchFilter = getBranchFilter(req);
-    const allDiscounts = await Discount.find({ is_active: true, ...branchFilter }).lean();
+    const allDiscounts = await Discount.find({ is_active: true, ...getBranchFilter(req) }).lean();
 
     // Helper: calculate discount for a registration+month
     function calcDiscount(regId, classroomId, monthNum, baseFee) {
