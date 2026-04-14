@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { label: 'ארכיון', path: '/archive', icon: '📜' },
   { label: 'דף קשר', path: '/contacts', icon: '📇' },
   { label: 'הזמנות', path: '/orders', icon: '🛒' },
+  { label: 'ספקים', path: '/suppliers', icon: '📦' },
 ];
 
 export default function Header() {
