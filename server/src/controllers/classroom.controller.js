@@ -41,16 +41,18 @@ async function create(req, res, next) {
       return res.status(400).json({ error: 'name and academic_year are required' });
     }
 
+    const { branch_id } = req.body;
     const normalizedYear = normalizeYear(academic_year);
-    const existing = await Classroom.findOne({ name, academic_year: normalizedYear });
+    const existing = await Classroom.findOne({ name, academic_year: normalizedYear, branch_id: branch_id || null });
     if (existing) {
-      return res.status(409).json({ error: 'A classroom with this name already exists for this academic year' });
+      return res.status(409).json({ error: 'כיתה עם שם זה כבר קיימת בסניף לשנה זו' });
     }
 
     const classroom = await Classroom.create({
       name,
       academic_year: normalizedYear,
       capacity: capacity || null,
+      branch_id: branch_id || null,
     });
 
     res.status(201).json({ classroom: { ...classroom.toObject(), id: classroom._id } });
@@ -86,4 +88,26 @@ async function update(req, res, next) {
   }
 }
 
-module.exports = { getAll, create, update };
+async function remove(req, res, next) {
+  try {
+    const { id } = req.params;
+    const classroom = await Classroom.findById(id);
+    if (!classroom) {
+      return res.status(404).json({ error: 'Classroom not found' });
+    }
+
+    // Check if classroom has active children
+    const activeChildren = await Child.countDocuments({ classroom_id: id, is_active: true });
+    if (activeChildren > 0) {
+      return res.status(400).json({ error: `לא ניתן למחוק כיתה עם ${activeChildren} ילדים פעילים` });
+    }
+
+    classroom.is_active = false;
+    await classroom.save();
+    res.json({ message: 'כיתה הוסרה', id });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { getAll, create, update, remove };
