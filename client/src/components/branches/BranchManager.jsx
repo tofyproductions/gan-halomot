@@ -37,7 +37,7 @@ export default function BranchManager() {
     for (const b of branches) {
       const bid = b._id || b.id;
       try {
-        const res = await api.get(`/classrooms?branch=${bid}`);
+        const res = await api.get('/classrooms', { params: { branch: bid } });
         result[bid] = res.data.classrooms || [];
       } catch {
         result[bid] = [];

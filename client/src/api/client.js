@@ -5,10 +5,10 @@ const api = axios.create({
   timeout: 30000,
 });
 
-// Automatically include branch parameter in all GET requests
+// Automatically include branch parameter in GET requests (unless already set)
 api.interceptors.request.use((config) => {
   const branch = localStorage.getItem('selectedBranch');
-  if (branch && config.method === 'get') {
+  if (branch && config.method === 'get' && !config.params?.branch) {
     config.params = { ...config.params, branch };
   }
   return config;
