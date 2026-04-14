@@ -158,17 +158,29 @@ export default function CollectionsTable() {
     return {};
   };
 
-  // Monthly totals
-  const monthlyTotals = useMemo(() => {
-    const totals = {};
-    ACADEMIC_MONTHS.forEach(m => { totals[m] = 0; });
+  // Monthly totals (collected + expected + percentage)
+  const monthlySummary = useMemo(() => {
+    const summary = {};
+    ACADEMIC_MONTHS.forEach(m => { summary[m] = { collected: 0, expected: 0 }; });
     allRows.forEach(r => {
       (r.months || []).forEach(m => {
-        totals[m.month] = (totals[m.month] || 0) + (m.paid_amount || 0);
+        summary[m.month].collected += (m.paid_amount || 0);
+        summary[m.month].expected += (m.expected_amount || 0);
       });
     });
-    return totals;
+    ACADEMIC_MONTHS.forEach(m => {
+      summary[m].pct = summary[m].expected > 0
+        ? Math.round((summary[m].collected / summary[m].expected) * 100)
+        : 0;
+    });
+    return summary;
   }, [allRows]);
+
+  const monthlyTotals = useMemo(() => {
+    const totals = {};
+    ACADEMIC_MONTHS.forEach(m => { totals[m] = monthlySummary[m].collected; });
+    return totals;
+  }, [monthlySummary]);
 
   const handlePrint = () => window.print();
 
@@ -266,16 +278,44 @@ export default function CollectionsTable() {
               />
             ))}
 
-            {/* Footer Totals */}
-            <TableRow sx={{ bgcolor: '#f8fafc' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#f8fafc', zIndex: 2 }}>
-                סה״כ
+            {/* Monthly Summary */}
+            <TableRow sx={{ bgcolor: '#f0fdf4' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#f0fdf4', zIndex: 2, fontSize: '0.8rem' }}>
+                נגבה בפועל
               </TableCell>
               {ACADEMIC_MONTHS.map((m, i) => (
-                <TableCell key={i} align="center" sx={{ fontWeight: 700 }}>
-                  {formatCurrency(monthlyTotals[m] || 0)}
+                <TableCell key={i} align="center" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'success.main' }}>
+                  {formatCurrency(monthlySummary[m].collected)}
                 </TableCell>
               ))}
+              <TableCell />
+            </TableRow>
+            <TableRow sx={{ bgcolor: '#eff6ff' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#eff6ff', zIndex: 2, fontSize: '0.8rem' }}>
+                צפוי
+              </TableCell>
+              {ACADEMIC_MONTHS.map((m, i) => (
+                <TableCell key={i} align="center" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
+                  {formatCurrency(monthlySummary[m].expected)}
+                </TableCell>
+              ))}
+              <TableCell />
+            </TableRow>
+            <TableRow sx={{ bgcolor: '#fefce8' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#fefce8', zIndex: 2, fontSize: '0.85rem' }}>
+                אחוז גבייה
+              </TableCell>
+              {ACADEMIC_MONTHS.map((m, i) => {
+                const pct = monthlySummary[m].pct;
+                return (
+                  <TableCell key={i} align="center" sx={{
+                    fontWeight: 800, fontSize: '0.85rem',
+                    color: pct >= 100 ? '#16a34a' : pct >= 80 ? '#ca8a04' : pct > 0 ? '#dc2626' : '#94a3b8',
+                  }}>
+                    {monthlySummary[m].expected > 0 ? `${pct}%` : ''}
+                  </TableCell>
+                );
+              })}
               <TableCell />
             </TableRow>
           </TableBody>

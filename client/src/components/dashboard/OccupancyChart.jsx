@@ -115,19 +115,26 @@ export default function OccupancyChart({ forecast, totalCapacity }) {
         fontSize: '12px',
       },
       dataLabels: {
-        enabled: true,
-        enabledOnSeries: undefined,
-        formatter: (val, { seriesIndex, dataPointIndex, w }) => {
-          // Only show total on the TOP of each stacked bar
-          const totalSeries = w.config.series.filter(s => s.type === 'bar');
-          const isLastBarSeries = seriesIndex === totalSeries.length - 1;
-          if (isLastBarSeries && val > 0) {
-            return totals[dataPointIndex];
-          }
-          return '';
-        },
-        style: { fontSize: '12px', fontWeight: 800, colors: ['#333'] },
-        offsetY: -5,
+        enabled: false,
+      },
+      annotations: {
+        points: totals.map((total, idx) => ({
+          x: MONTH_LABELS[idx],
+          y: total,
+          marker: { size: 0 },
+          label: {
+            text: String(total),
+            borderWidth: 0,
+            style: {
+              background: 'transparent',
+              color: '#333',
+              fontSize: '13px',
+              fontWeight: 800,
+              padding: { left: 4, right: 4, top: 2, bottom: 2 },
+            },
+            offsetY: -10,
+          },
+        })),
       },
       tooltip: {
         shared: true,

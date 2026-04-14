@@ -45,6 +45,24 @@ app.use(errorHandler);
 connectDB().then(() => {
   app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
+
+    // Auto-sync from Google Sheets every hour
+    const { syncFromSheets } = require('./controllers/sync.controller');
+    const runSync = () => {
+      console.log('🔄 Auto-sync started...');
+      const fakeReq = { query: {}, user: null };
+      const fakeRes = {
+        json: (data) => console.log('🔄 Auto-sync:', data.summary || 'done'),
+        status: () => fakeRes,
+      };
+      syncFromSheets(fakeReq, fakeRes, (err) => {
+        if (err) console.error('🔄 Auto-sync error:', err.message);
+      });
+    };
+
+    // First sync after 30 seconds, then every hour
+    setTimeout(runSync, 30000);
+    setInterval(runSync, 60 * 60 * 1000);
   });
 });
 
