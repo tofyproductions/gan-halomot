@@ -60,21 +60,41 @@ function flattenPrimaryAmuta(emp) {
 
 /**
  * Merge the edited primary-amuta fields back into the distribution array.
- * If there is no existing distribution we synthesize a single entry (requires
- * the caller to supply an amuta_id, otherwise it is left null and the server
- * will reject it — which is the desired behavior for now).
+ *
+ * If there is no existing distribution AND the user entered a rate, we can't
+ * create an entry from the UI because we don't know which Amuta to attach it
+ * to (the "select amuta" step is a future feature). In that case we return
+ * undefined so the caller can drop the field from the payload entirely and
+ * avoid clobbering the server-side state. We also set a flag so the caller
+ * can warn the user.
  */
 function mergePrimaryAmuta(existing, form) {
+  const hasRateInput = form.hourly_rate !== '' || form.global_salary !== '' ||
+                       form.global_ot_rate !== '' || form.required_hours !== '';
   const dist = Array.isArray(existing?.amuta_distribution) ? [...existing.amuta_distribution] : [];
+
   if (dist.length === 0) {
-    return dist; // can't create without amuta_id — UI will hint via notes
+    if (!hasRateInput) return []; // no distribution, no input → OK to send empty
+    return { __warn: true };       // user entered a rate but no amuta to attach it to
   }
+
   const first = { ...dist[0] };
+  // Strip the populated amuta object (from populate('amuta_distribution.amuta_id'))
+  // back to just the ObjectId so the server accepts it on PUT.
+  if (first.amuta_id && typeof first.amuta_id === 'object') {
+    first.amuta_id = first.amuta_id._id || first.amuta_id.id;
+  }
   first.hourly_rate = form.hourly_rate === '' ? null : Number(form.hourly_rate);
   first.global_salary = form.global_salary === '' ? null : Number(form.global_salary);
   first.global_ot_rate = form.global_ot_rate === '' ? null : Number(form.global_ot_rate);
   first.required_hours = form.required_hours === '' ? null : Number(form.required_hours);
   dist[0] = first;
+  // Also strip populated amuta_id from the rest of the distribution.
+  for (let i = 1; i < dist.length; i++) {
+    if (dist[i].amuta_id && typeof dist[i].amuta_id === 'object') {
+      dist[i] = { ...dist[i], amuta_id: dist[i].amuta_id._id || dist[i].amuta_id.id };
+    }
+  }
   return dist;
 }
 
@@ -144,6 +164,9 @@ export default function EmployeeManager() {
     if (!data.branch_id) return toast.error('סניף חובה');
 
     const distribution = mergePrimaryAmuta(original, data);
+    if (distribution && distribution.__warn) {
+      toast.warning('לא ניתן לקבוע שכר לעובד ללא שיוך עמותה — העובד יישמר בלי תעריף. יש לשייך עמותה דרך ה-API או לחכות למסך חלוקת העמותות.');
+    }
 
     const payload = {
       full_name: data.full_name.trim(),
@@ -155,7 +178,6 @@ export default function EmployeeManager() {
       start_date: data.start_date || null,
       salary_type: data.salary_type,
       salary_is_net: data.salary_is_net,
-      amuta_distribution: distribution,
       travel_allowance: Number(data.travel_allowance) || 0,
       meal_vouchers: Number(data.meal_vouchers) || 0,
       recreation_annual: Number(data.recreation_annual) || 0,
@@ -163,6 +185,11 @@ export default function EmployeeManager() {
       bituach_leumi_exempt: data.bituach_leumi_exempt,
       notes: data.notes || '',
     };
+    // Only include amuta_distribution in the payload if we can actually
+    // modify it safely (existing distribution, or genuinely empty).
+    if (Array.isArray(distribution)) {
+      payload.amuta_distribution = distribution;
+    }
 
     try {
       if (mode === 'add') {
