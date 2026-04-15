@@ -1,0 +1,26 @@
+[Unit]
+Description=TIMEDOX replacement agent (gan-halomot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/timedox-agent
+EnvironmentFile=/home/admin/timedox-agent/.env
+ExecStart=/usr/bin/node /home/admin/timedox-agent/agent.js
+Restart=always
+RestartSec=10
+# Keep the service log lean; journald already timestamps every line.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=timedox-agent
+# Protect the Pi from accidental OOM from a runaway node process.
+MemoryMax=256M
+# Don't run as root even if installed incorrectly.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

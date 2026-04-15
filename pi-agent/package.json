@@ -1,0 +1,18 @@
+{
+  "name": "timedox-agent",
+  "version": "1.0.0",
+  "description": "Pi-side agent that bridges a TIMEDOX TANDEM4 PRO clock to the gan-halomot server.",
+  "main": "agent.js",
+  "scripts": {
+    "start": "node agent.js",
+    "once": "node agent.js --once",
+    "lint": "node --check agent.js lib/clock.js lib/server.js lib/state.js lib/logger.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-zklib": "^1.1.11"
+  }
+}

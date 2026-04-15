@@ -16,6 +16,11 @@ const GanttMonth = require('./GanttMonth');
 const Supplier = require('./Supplier');
 const Product = require('./Product');
 const Order = require('./Order');
+// Attendance / payroll (TIMEDOX replacement)
+const Amuta = require('./Amuta');
+const Employee = require('./Employee');
+const Punch = require('./Punch');
+const AgentCommand = require('./AgentCommand');
 
 module.exports = {
   User,
@@ -36,4 +41,8 @@ module.exports = {
   Supplier,
   Product,
   Order,
+  Amuta,
+  Employee,
+  Punch,
+  AgentCommand,
 };

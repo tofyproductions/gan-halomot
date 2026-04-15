@@ -6,6 +6,10 @@ router.use('/auth', require('./auth.routes'));
 router.use('/public', require('./public.routes'));
 router.use('/utils', require('./utils.routes'));
 
+// Pi agent routes — authenticated with per-branch X-Agent-Secret header,
+// NOT with the normal JWT flow used by the web client.
+router.use('/agent', require('./agent.routes'));
+
 // Protected routes that require auth for employees/salary
 router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
