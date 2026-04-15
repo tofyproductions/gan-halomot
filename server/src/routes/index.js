@@ -13,6 +13,8 @@ router.use('/agent', require('./agent.routes'));
 // Protected routes that require auth for employees/salary
 router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
+// Payroll (TIMEDOX replacement) — CRUD for Employee model + attendance
+router.use('/payroll', require('./payroll.routes'));
 
 // All other routes use optional auth (backward compatible - works without login too)
 router.use(optionalAuth);

@@ -16,6 +16,7 @@ import OrderView from './components/orders/OrderView';
 import SupplierManager from './components/orders/SupplierManager';
 import EmployeeManager from './components/employees/EmployeeManager';
 import SalaryRequests from './components/employees/SalaryRequests';
+import AttendanceMonitor from './components/attendance/AttendanceMonitor';
 import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
@@ -47,6 +48,7 @@ function AppRoutes() {
         <Route path="orders/:id" element={<OrderView />} />
         <Route path="suppliers" element={<SupplierManager />} />
         <Route path="employees" element={<EmployeeManager />} />
+        <Route path="attendance" element={<AttendanceMonitor />} />
         <Route path="holidays" element={<HolidayManager />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
