@@ -157,7 +157,9 @@ async function syncFromSheets(req, res, next) {
     }
 
     // Sync collections (receipt numbers)
-    const monthColMap = { 9: 2, 10: 3, 11: 4, 12: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11, 7: 12, 8: 13 };
+    // Sheet headers are misleading: col 2 = reg fee receipt, col 3 = Sept, ..., col 13 = Jul
+    const monthColMap = { 9: 3, 10: 4, 11: 5, 12: 6, 1: 7, 2: 8, 3: 9, 4: 10, 5: 11, 6: 12, 7: 13 };
+    const regFeeColIdx = 2;
 
     for (let i = 1; i < collections.length; i++) {
       const row = collections[i];
@@ -169,6 +171,7 @@ async function syncFromSheets(req, res, next) {
 
       let coll = await Collection.findOne({ registration_id: reg._id });
 
+      const regFeeReceipt = (row[regFeeColIdx] || '').trim() || null;
       const months = [];
       for (const [monthNum, colIdx] of Object.entries(monthColMap)) {
         const val = (row[colIdx] || '').trim();
@@ -186,10 +189,15 @@ async function syncFromSheets(req, res, next) {
           registration_id: reg._id,
           child_id: child?._id || null,
           academic_year: (row[1] || '').trim() || '2025-2026',
+          registration_fee_receipt: regFeeReceipt,
           months,
         });
         results.collections++;
       } else if (coll) {
+        // Update reg fee receipt
+        if (regFeeReceipt && coll.registration_fee_receipt !== regFeeReceipt) {
+          coll.registration_fee_receipt = regFeeReceipt;
+        }
         // Update existing months
         for (const m of months) {
           const existingIdx = coll.months.findIndex(cm => cm.month_number === m.month_number);

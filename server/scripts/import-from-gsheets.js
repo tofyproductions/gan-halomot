@@ -270,19 +270,26 @@ async function run() {
       if (existing) continue;
     }
 
-    // Month columns: Sept=2, Oct=3, ..., Aug=13
-    const monthColMap = { 9: 2, 10: 3, 11: 4, 12: 5, 1: 6, 2: 7, 3: 8, 4: 9, 5: 10, 6: 11, 7: 12, 8: 13 };
+    // NOTE: Sheet headers are MISLEADING - actual column mapping:
+    // col 2 (labeled "Sept") = registration fee receipt
+    // col 3 (labeled "Oct") = September receipt
+    // col 4 (labeled "Nov") = October receipt
+    // ... shifted by 1
+    const monthColMap = { 9: 3, 10: 4, 11: 5, 12: 6, 1: 7, 2: 8, 3: 9, 4: 10, 5: 11, 6: 12, 7: 13 };
+    const regFeeColIdx = 2;
+
+    // Registration fee receipt
+    const regFeeReceipt = (row[regFeeColIdx] || '').trim();
 
     const months = [];
     for (const [monthNum, colIdx] of Object.entries(monthColMap)) {
       const val = (row[colIdx] || '').trim();
       if (!val) continue;
 
-      // Values in the sheet are receipt numbers, not payment amounts
       months.push({
         month_number: parseInt(monthNum),
         receipt_number: val,
-        paid_amount: 0, // Will be calculated from expected on display
+        paid_amount: 0,
         payment_status: 'paid',
       });
     }
@@ -302,6 +309,7 @@ async function run() {
       child_id: childId,
       academic_year: acadYear,
       exit_month: exitMonth,
+      registration_fee_receipt: regFeeReceipt || null,
       months,
     });
     collCount++;
