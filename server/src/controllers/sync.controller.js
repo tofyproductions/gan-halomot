@@ -161,6 +161,13 @@ async function syncFromSheets(req, res, next) {
     const monthColMap = { 9: 3, 10: 4, 11: 5, 12: 6, 1: 7, 2: 8, 3: 9, 4: 10, 5: 11, 6: 12, 7: 13 };
     const regFeeColIdx = 2;
 
+    // Normalize multi-receipt cells: "2584) 2515" → "2584 / 2515"
+    function normalizeReceipt(val) {
+      if (!val) return '';
+      const parts = String(val).split(/[\s,/)]+/).map(s => s.trim()).filter(Boolean);
+      return parts.join(' / ');
+    }
+
     for (let i = 1; i < collections.length; i++) {
       const row = collections[i];
       const leadId = (row[0] || '').trim();
@@ -171,10 +178,10 @@ async function syncFromSheets(req, res, next) {
 
       let coll = await Collection.findOne({ registration_id: reg._id });
 
-      const regFeeReceipt = (row[regFeeColIdx] || '').trim() || null;
+      const regFeeReceipt = normalizeReceipt(row[regFeeColIdx]) || null;
       const months = [];
       for (const [monthNum, colIdx] of Object.entries(monthColMap)) {
-        const val = (row[colIdx] || '').trim();
+        const val = normalizeReceipt(row[colIdx]);
         if (!val) continue;
         months.push({
           month_number: parseInt(monthNum),

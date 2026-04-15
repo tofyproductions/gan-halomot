@@ -498,6 +498,7 @@ export default function CollectionsTable() {
             autoFocus
             fullWidth
             label="מספר קבלה"
+            helperText="ניתן להזין מספר קבלות (מופרד ברווח, פסיק או /). למשל: 2584 / 2515"
             value={dialog.receipt}
             onChange={(e) => setDialog(prev => ({ ...prev, receipt: e.target.value, duplicates: null }))}
             placeholder="הכנס מספר קבלה..."

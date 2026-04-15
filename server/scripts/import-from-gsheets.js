@@ -273,17 +273,22 @@ async function run() {
     // NOTE: Sheet headers are MISLEADING - actual column mapping:
     // col 2 (labeled "Sept") = registration fee receipt
     // col 3 (labeled "Oct") = September receipt
-    // col 4 (labeled "Nov") = October receipt
     // ... shifted by 1
     const monthColMap = { 9: 3, 10: 4, 11: 5, 12: 6, 1: 7, 2: 8, 3: 9, 4: 10, 5: 11, 6: 12, 7: 13 };
     const regFeeColIdx = 2;
 
-    // Registration fee receipt
-    const regFeeReceipt = (row[regFeeColIdx] || '').trim();
+    // Normalize multi-receipt cells: "2584) 2515" or "2584 2515" → "2584 / 2515"
+    function normalizeReceipt(val) {
+      if (!val) return '';
+      const parts = String(val).split(/[\s,/)]+/).map(s => s.trim()).filter(Boolean);
+      return parts.join(' / ');
+    }
+
+    const regFeeReceipt = normalizeReceipt(row[regFeeColIdx]);
 
     const months = [];
     for (const [monthNum, colIdx] of Object.entries(monthColMap)) {
-      const val = (row[colIdx] || '').trim();
+      const val = normalizeReceipt(row[colIdx]);
       if (!val) continue;
 
       months.push({

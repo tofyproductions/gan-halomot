@@ -245,13 +245,29 @@ async function updateMonth(req, res, next) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
+    // Parse receipt number(s) - support multiple receipts separated by space/comma/slash/paren
+    function splitReceipts(str) {
+      if (!str) return [];
+      return String(str).split(/[\s,/)]+/).map(s => s.trim()).filter(Boolean);
+    }
+    function receiptsMatch(cellValue, searchValue) {
+      const cellNums = splitReceipts(cellValue);
+      const searchNums = splitReceipts(searchValue);
+      return searchNums.some(s => cellNums.some(c => c === s || c === '-' + s || '-' + c === s));
+    }
+
     // Smart duplicate receipt number validation
     let isDuplicateOverride = false;
     if (receipt_number) {
-      // Find ALL collections that already use this receipt number
-      const duplicateCollections = await Collection.find({
-        'months.receipt_number': receipt_number,
-      }).populate('registration_id', 'child_name parent_name parent_id_number parent_phone').lean();
+      // Find ALL collections - we need to check each manually for multi-receipt cells
+      const allCollections = await Collection.find({})
+        .populate('registration_id', 'child_name parent_name parent_id_number parent_phone')
+        .lean();
+
+      const searchNums = splitReceipts(receipt_number);
+      const duplicateCollections = allCollections.filter(c =>
+        (c.months || []).some(m => m.receipt_number && receiptsMatch(m.receipt_number, receipt_number))
+      );
 
       const duplicates = [];
       const MONTH_NAMES = { 9: 'ספט׳', 10: 'אוק׳', 11: 'נוב׳', 12: 'דצמ׳', 1: 'ינו׳', 2: 'פבר׳', 3: 'מרץ', 4: 'אפר׳', 5: 'מאי', 6: 'יוני', 7: 'יולי', 8: 'אוג׳' };
@@ -259,15 +275,15 @@ async function updateMonth(req, res, next) {
       for (const dc of duplicateCollections) {
         // Skip if it's the same registration + same month (editing own receipt)
         if (String(dc.registration_id?._id) === String(registrationId)) {
-          const ownMonth = dc.months.find(m => m.receipt_number === receipt_number && m.month_number === monthNum);
-          if (ownMonth) continue; // Editing own existing receipt for this month
+          const ownMonth = dc.months.find(m => m.month_number === monthNum && receiptsMatch(m.receipt_number, receipt_number));
+          if (ownMonth) continue;
         }
 
         const dupReg = dc.registration_id;
         if (!dupReg) continue;
 
-        // Find which months have this receipt
-        const dupMonths = dc.months.filter(m => m.receipt_number === receipt_number);
+        // Find which months have matching receipt
+        const dupMonths = dc.months.filter(m => m.receipt_number && receiptsMatch(m.receipt_number, receipt_number));
 
         for (const dm of dupMonths) {
           // Check if same parent
