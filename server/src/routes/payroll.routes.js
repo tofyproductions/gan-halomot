@@ -25,4 +25,8 @@ router.post('/clock-users/assign',             requireRole('system_admin', 'bran
 router.get('/employees/:id/salary',            c.salaryForEmployee);
 router.get('/salary-summary',                  c.salarySummary);
 
+// Manual punch entry / deletion (for corrections)
+router.post('/manual-punches',                 requireRole('system_admin', 'branch_manager'), c.createManualPunches);
+router.delete('/punches/:id',                  requireRole('system_admin', 'branch_manager'), c.deletePunch);
+
 module.exports = router;

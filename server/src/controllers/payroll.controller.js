@@ -63,9 +63,12 @@ function summarizeDay(dayPunches) {
     sessions.push({
       in: inP.timestamp,
       out: outP.timestamp,
+      in_id: String(inP._id),
+      out_id: String(outP._id),
       in_hhmm: israelTimeHHMM(new Date(inP.timestamp)),
       out_hhmm: israelTimeHHMM(new Date(outP.timestamp)),
       minutes: mins,
+      is_manual: inP.timestamp_source === 'manual' || outP.timestamp_source === 'manual',
     });
     totalMinutes += mins;
   }
@@ -73,7 +76,12 @@ function summarizeDay(dayPunches) {
   let trailingPunch = null;
   if (incomplete) {
     const last = sorted[sorted.length - 1];
-    trailingPunch = { timestamp: last.timestamp, hhmm: israelTimeHHMM(new Date(last.timestamp)) };
+    trailingPunch = {
+      id: String(last._id),
+      timestamp: last.timestamp,
+      hhmm: israelTimeHHMM(new Date(last.timestamp)),
+      is_manual: last.timestamp_source === 'manual',
+    };
   }
   return {
     punch_count: sorted.length,
@@ -452,6 +460,99 @@ async function assignIsraeliIds(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- Manual punch editing (for forgotten punches / corrections) ----------
+
+/**
+ * POST /api/payroll/manual-punches
+ * Body: { employee_id, date: "YYYY-MM-DD", in_time: "HH:mm", out_time: "HH:mm", note }
+ *
+ * Creates a pair of Punch records (in + out) for the given Israel-local day.
+ * Each manual punch gets a synthetic device_user_sn in the negative range
+ * (`-Date.now() - n`) so it never collides with real clock records. These
+ * are tagged `timestamp_source: 'manual'` and carry the user who created
+ * them for audit.
+ */
+async function createManualPunches(req, res, next) {
+  try {
+    const { employee_id, date, in_time, out_time, note = '' } = req.body || {};
+    if (!employee_id || !date) {
+      return res.status(400).json({ error: 'employee_id and date are required' });
+    }
+    if (!in_time && !out_time) {
+      return res.status(400).json({ error: 'at least one of in_time / out_time is required' });
+    }
+
+    const emp = await Employee.findById(employee_id).lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    // Build Date objects in Israel time. We piggy-back on toLocaleString
+    // with en-CA to get a YYYY-MM-DD HH:mm:ss output and then reparse as
+    // local-naive, then compensate for the TZ offset.
+    function ilDateTime(dateStr, hhmm) {
+      // dateStr: "2026-04-10", hhmm: "08:30"
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const [hh, mm] = hhmm.split(':').map(Number);
+      // Asia/Jerusalem is UTC+2 in winter and UTC+3 in summer. Node's Date
+      // constructor with Z/UTC is the safest, but we need to know the
+      // correct offset for THAT date. We compute the offset by formatting
+      // a probe Date in both IL and UTC and diffing.
+      const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+      const ilHour = parseInt(
+        new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).format(probe),
+        10
+      );
+      const offsetHours = ilHour - 12; // 2 or 3
+      // Now build the UTC Date for the intended IL local time
+      return new Date(Date.UTC(y, m - 1, d, hh - offsetHours, mm, 0));
+    }
+
+    const created = [];
+    const baseSn = -Date.now();
+
+    const pairs = [];
+    if (in_time)  pairs.push({ time: in_time,  state: 0, label: 'in'  });
+    if (out_time) pairs.push({ time: out_time, state: 1, label: 'out' });
+
+    for (let i = 0; i < pairs.length; i++) {
+      const { time, state } = pairs[i];
+      const ts = ilDateTime(date, time);
+      const sn = baseSn - i; // unique per record
+      const punch = await Punch.create({
+        branch_id: emp.branch_id,
+        employee_id: emp._id,
+        israeli_id: emp.israeli_id || '',
+        device_user_sn: sn,
+        device_user_id: null,
+        timestamp: ts,
+        timestamp_source: 'manual',
+        state,
+        verify_mode: 0,
+        received_at: new Date(),
+        agent_version: 'manual-entry',
+        manual_note: note || '',
+        created_by: req.user?.id || null,
+      });
+      created.push(punch);
+    }
+
+    res.json({ ok: true, created: created.length, punches: created });
+  } catch (err) { next(err); }
+}
+
+/**
+ * DELETE /api/payroll/punches/:id
+ * Allows admins to delete any punch (manual or clock) — useful for fixing
+ * accidental double-punches or removing test punches.
+ */
+async function deletePunch(req, res, next) {
+  try {
+    const p = await Punch.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'punch not found' });
+    await p.deleteOne();
+    res.json({ ok: true, id: req.params.id });
+  } catch (err) { next(err); }
+}
+
 // --- Salary calculation --------------------------------------------------
 
 /**
@@ -567,4 +668,6 @@ module.exports = {
   assignIsraeliIds,
   salaryForEmployee,
   salarySummary,
+  createManualPunches,
+  deletePunch,
 };

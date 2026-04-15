@@ -25,9 +25,12 @@ const punchSchema = new mongoose.Schema({
   timestamp: { type: Date, required: true, index: true },
   timestamp_source: {
     type: String,
-    enum: ['device', 'agent_received_at'],
+    enum: ['device', 'agent_received_at', 'manual'],
     default: 'agent_received_at',
   },
+  // For manual punches: who created it + optional free-text reason.
+  manual_note: { type: String, default: '' },
+  created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
   // Raw device state code (0=checkin, 1=checkout, 4/5=overtime in/out, etc.)
   // We do not trust this for pairing — pairing is computed from chronological order.

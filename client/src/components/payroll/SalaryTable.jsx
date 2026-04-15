@@ -11,6 +11,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { formatCurrency } from '../../utils/hebrewYear';
+import EmployeeDetailDialog from './EmployeeDetailDialog';
 
 /**
  * Monthly salary dashboard — for each employee in the selected branch,
@@ -28,6 +29,7 @@ export default function SalaryTable() {
   const [month, setMonth] = useState(currentYearMonth());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState({ open: false, employeeId: null });
 
   const fetchData = useCallback(() => {
     if (!selectedBranch) return;
@@ -155,7 +157,12 @@ export default function SalaryTable() {
           <TableBody>
             {loading && <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4 }}>טוען…</TableCell></TableRow>}
             {!loading && data && data.rows.map(r => (
-              <TableRow key={r.employee_id} hover>
+              <TableRow
+                key={r.employee_id}
+                hover
+                onClick={() => setDetail({ open: true, employeeId: r.employee_id })}
+                sx={{ cursor: 'pointer' }}
+              >
                 <TableCell sx={{ fontWeight: 600 }}>
                   {r.full_name}
                   {!r.israeli_id && <Chip label="ללא ת״ז" size="small" color="warning" sx={{ ml: 1 }} />}
@@ -214,6 +221,14 @@ export default function SalaryTable() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      <EmployeeDetailDialog
+        open={detail.open}
+        employeeId={detail.employeeId}
+        initialMonth={month}
+        onClose={() => setDetail({ open: false, employeeId: null })}
+        onChanged={fetchData}
+      />
     </Box>
   );
 }
