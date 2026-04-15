@@ -57,6 +57,46 @@ async function getAll(req, res, next) {
     // Load discounts for this branch
     const allDiscounts = await Discount.find({ is_active: true, ...getBranchFilter(req) }).lean();
 
+    // Build sibling map: parent_id_number -> [reg_id, reg_id, ...]
+    const siblingMap = {};
+    for (const reg of filteredRegs) {
+      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      if (!key) continue;
+      if (!siblingMap[key]) siblingMap[key] = [];
+      siblingMap[key].push(reg);
+    }
+
+    // Helper: find sibling's reg fee receipt if current child doesn't have one
+    function findSiblingRegFee(reg) {
+      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      if (!key) return null;
+      const siblings = siblingMap[key] || [];
+      for (const sib of siblings) {
+        if (String(sib._id) === String(reg._id)) continue;
+        const sibColl = collectionByReg[String(sib._id)];
+        if (sibColl?.registration_fee_receipt) {
+          return '-' + sibColl.registration_fee_receipt;
+        }
+      }
+      return null;
+    }
+
+    // Helper: find sibling's monthly receipt for shared payments
+    function findSiblingMonthReceipt(reg, monthNum) {
+      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      if (!key) return null;
+      const siblings = siblingMap[key] || [];
+      for (const sib of siblings) {
+        if (String(sib._id) === String(reg._id)) continue;
+        const sibColl = collectionByReg[String(sib._id)];
+        const sibMonth = sibColl?.months?.find(m => m.month_number === monthNum);
+        if (sibMonth?.receipt_number && !String(sibMonth.receipt_number).startsWith('-')) {
+          return '-' + sibMonth.receipt_number;
+        }
+      }
+      return null;
+    }
+
     // Helper: calculate discount for a registration+month
     function calcDiscount(regId, classroomId, monthNum, baseFee) {
       let totalDiscount = 0;
@@ -111,43 +151,37 @@ async function getAll(req, res, next) {
 
       const child = childByReg[String(reg._id)];
 
-      // Detect registration fee receipts: receipts in months before child started (expected=0)
+      // Detect registration fee receipts: use stored value or check sibling
       let detectedRegFeeReceipt = collection?.registration_fee_receipt || null;
-      for (const m of ACADEMIC_MONTHS) {
-        const existing = monthsMap[m] || {};
-        if (existing.receipt_number && (expectedFees[m] || 0) === 0 && isBeforeStart[m]) {
-          // This receipt is for registration fee, not monthly payment
-          if (!detectedRegFeeReceipt) detectedRegFeeReceipt = existing.receipt_number;
-        }
+      if (!detectedRegFeeReceipt) {
+        detectedRegFeeReceipt = findSiblingRegFee(reg);
       }
 
       const monthData = ACADEMIC_MONTHS.map(m => {
         const existing = monthsMap[m] || {};
         let expected = expectedFees[m] || 0;
 
-        // If receipt is in a month with 0 expected and before start, skip it (it's a reg fee receipt)
-        const isRegFeeReceipt = existing.receipt_number && expected === 0 && isBeforeStart[m];
-        if (isRegFeeReceipt) {
-          return {
-            month: m, expected_amount: 0, paid_amount: 0, discount_amount: 0,
-            receipt_number: null, payment_status: 'pending',
-            payment_date: null, is_prorated: false, is_before_start: true, notes: null,
-          };
-        }
-
         // Apply discounts
         const discount = expected > 0 ? calcDiscount(reg._id, classroomObjId, m, expected) : 0;
         expected = Math.max(0, expected - discount);
 
-        const status = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
-        const paid = status === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0);
+        // Get receipt - use existing, or check if it's a negative sibling receipt
+        let receiptNumber = existing.receipt_number || null;
+        let paymentStatus = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
+
+        // If has receipt (even negative = sibling shared), mark as paid
+        if (receiptNumber) {
+          paymentStatus = 'paid';
+        }
+
+        const paid = paymentStatus === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0);
         return {
           month: m,
           expected_amount: expected,
           paid_amount: paid,
           discount_amount: discount,
-          receipt_number: existing.receipt_number || null,
-          payment_status: status,
+          receipt_number: receiptNumber,
+          payment_status: paymentStatus,
           payment_date: existing.payment_date || null,
           is_prorated: existing.is_prorated || false,
           is_before_start: isBeforeStart[m] || false,
