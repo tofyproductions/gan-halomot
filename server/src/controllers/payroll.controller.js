@@ -357,6 +357,100 @@ async function hoursReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- Clock users (for matching UI) ----------------------------------------
+
+/**
+ * GET /api/payroll/clock-users?branch=X
+ *
+ * Returns the cached list of users stored on the branch's TIMEDOX clock,
+ * each enriched with `linked_employee` — the Employee (if any) whose
+ * israeli_id already matches this clock user. The admin UI uses this to
+ * show a checklist of "which clock users are already assigned, which are
+ * still orphans".
+ */
+async function listClockUsers(req, res, next) {
+  try {
+    const { branch } = req.query;
+    if (!branch) return res.status(400).json({ error: 'branch is required' });
+
+    const branchDoc = await Branch.findById(branch).select('clock_users clock_users_updated_at name').lean();
+    if (!branchDoc) return res.status(404).json({ error: 'branch not found' });
+
+    const clockUsers = Array.isArray(branchDoc.clock_users) ? branchDoc.clock_users : [];
+    const userIds = [...new Set(clockUsers.map(u => String(u.user_id || '')).filter(Boolean))];
+
+    // Look up existing employees in this branch that already carry one of
+    // these Israeli IDs, so we can tag each clock user with `linked_employee`.
+    const existing = userIds.length
+      ? await Employee.find({
+          branch_id: branch,
+          israeli_id: { $in: userIds },
+        }).select('_id full_name israeli_id').lean()
+      : [];
+    const byId = new Map(existing.map(e => [e.israeli_id, e]));
+
+    res.json({
+      branch_id: String(branch),
+      branch_name: branchDoc.name,
+      updated_at: branchDoc.clock_users_updated_at,
+      clock_users: clockUsers.map(u => ({
+        uid: u.uid,
+        user_id: u.user_id,
+        linked_employee: byId.get(String(u.user_id)) || null,
+      })).sort((a, b) => (a.uid || 0) - (b.uid || 0)),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll/clock-users/assign
+ *
+ * Body: { assignments: [{ employee_id, israeli_id }, ...] }
+ *
+ * Applies each assignment by saving the Employee with the new israeli_id.
+ * Because Employee uses doc.save() this triggers the post-save hook that
+ * back-fills any orphan Punch records. Assignments are applied in sequence
+ * so partial success is possible — the response lists each result.
+ */
+async function assignIsraeliIds(req, res, next) {
+  try {
+    const { assignments } = req.body || {};
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      return res.status(400).json({ error: 'assignments must be a non-empty array' });
+    }
+    const results = [];
+    for (const { employee_id, israeli_id } of assignments) {
+      try {
+        if (!employee_id || !israeli_id) {
+          results.push({ employee_id, israeli_id, ok: false, error: 'missing fields' });
+          continue;
+        }
+        const emp = await Employee.findById(employee_id);
+        if (!emp) {
+          results.push({ employee_id, israeli_id, ok: false, error: 'employee not found' });
+          continue;
+        }
+        emp.israeli_id = israeli_id; // pre-save hook normalizes
+        await emp.save();             // post-save hook relinks orphan punches
+        results.push({
+          employee_id,
+          israeli_id: emp.israeli_id,
+          full_name: emp.full_name,
+          ok: true,
+        });
+      } catch (e) {
+        results.push({ employee_id, israeli_id, ok: false, error: e.message });
+      }
+    }
+    res.json({
+      ok: true,
+      applied: results.filter(r => r.ok).length,
+      failed: results.filter(r => !r.ok).length,
+      results,
+    });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listEmployees,
   getEmployee,
@@ -365,4 +459,6 @@ module.exports = {
   removeEmployee,
   attendanceByMonth,
   hoursReport,
+  listClockUsers,
+  assignIsraeliIds,
 };

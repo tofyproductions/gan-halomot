@@ -98,6 +98,29 @@ employeeSchema.index({ branch_id: 1, is_active: 1 });
 employeeSchema.index({ israeli_id: 1, is_active: 1 });
 
 /**
+ * Pre-save normalization: Israeli IDs are exactly 9 digits. Users (and the
+ * TIMEDOX clock!) sometimes strip the leading zero, leaving 8 digits. We
+ * normalize on every save so comparisons against clock-reported punches
+ * always line up regardless of zero-padding.
+ *
+ * Rules:
+ * - Keep only digit characters (drop spaces, hyphens, etc.)
+ * - Left-pad with zeros to 9 digits if the result is 7–8 digits long
+ * - Leave alone if empty or >9 digits (let the user see their invalid input)
+ */
+employeeSchema.pre('save', function normalizeIsraeliId(next) {
+  if (this.israeli_id != null) {
+    const digits = String(this.israeli_id).replace(/\D/g, '');
+    if (digits.length >= 7 && digits.length <= 9) {
+      this.israeli_id = digits.padStart(9, '0');
+    } else {
+      this.israeli_id = digits; // pass through (may be empty or invalid)
+    }
+  }
+  next();
+});
+
+/**
  * Post-save hook: if an Employee gets an `israeli_id` (either at creation or
  * via an update that sets it for the first time), link any orphaned Punches
  * that were stored with `employee_id: null` but the same `israeli_id` in the

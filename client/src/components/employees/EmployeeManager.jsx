@@ -8,6 +8,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import LinkIcon from '@mui/icons-material/Link';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -15,6 +16,7 @@ import { useBranch } from '../../hooks/useBranch';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { formatCurrency } from '../../utils/hebrewYear';
 import HoursReportDialog from './HoursReportDialog';
+import ClockMatchDialog from './ClockMatchDialog';
 
 const POSITIONS = ['גננת', 'מובילת כיתה', 'מטפלת', 'סייעת', 'מבשלת', 'מנהלת', 'אחר'];
 
@@ -100,12 +102,13 @@ function mergePrimaryAmuta(existing, form) {
 
 export default function EmployeeManager() {
   const { isAdmin, isManager } = useAuth();
-  const { branches, selectedBranch } = useBranch();
+  const { branches, selectedBranch, selectedBranchName } = useBranch();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
+  const [clockMatchOpen, setClockMatchOpen] = useState(false);
 
   const fetchEmployees = useCallback(() => {
     if (!selectedBranch) { setEmployees([]); setLoading(false); return; }
@@ -238,9 +241,14 @@ export default function EmployeeManager() {
           </Typography>
         </Box>
         {isManager && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
-            הוסף עובד
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
+              שיוך לשעון
+            </Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
+              הוסף עובד
+            </Button>
+          </Stack>
         )}
       </Stack>
 
@@ -429,6 +437,14 @@ export default function EmployeeManager() {
         open={hoursDialog.open}
         employee={hoursDialog.employee}
         onClose={() => setHoursDialog({ open: false, employee: null })}
+      />
+
+      <ClockMatchDialog
+        open={clockMatchOpen}
+        branchId={selectedBranch}
+        branchName={selectedBranchName}
+        onClose={() => setClockMatchOpen(false)}
+        onSaved={fetchEmployees}
       />
     </Box>
   );

@@ -37,6 +37,18 @@ async function uploadPunches(req, res, next) {
     if (agent_version) branch.agent_version = agent_version;
     await branch.save();
 
+    // Normalize the incoming punches' Israeli IDs to 9 digits so matching
+    // against Employee.israeli_id is consistent (the clock sometimes drops
+    // leading zeros, returning e.g. "24073124" for "024073124").
+    const normalizeIsraeliId = (v) => {
+      const digits = String(v || '').replace(/\D/g, '');
+      if (digits.length >= 7 && digits.length <= 9) return digits.padStart(9, '0');
+      return digits;
+    };
+    for (const p of punches) {
+      if (p && p.israeli_id != null) p.israeli_id = normalizeIsraeliId(p.israeli_id);
+    }
+
     // Preload employees for any Israeli IDs referenced — one round trip.
     const israeliIds = [...new Set(
       punches.map(p => p && p.israeli_id).filter(Boolean).map(String)
