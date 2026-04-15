@@ -7,6 +7,7 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const { Employee, Punch, Branch, Amuta } = require('../models');
+const { calculateMonthlySalary } = require('../services/payrollCalc');
 
 // --- helpers --------------------------------------------------------------
 
@@ -451,6 +452,109 @@ async function assignIsraeliIds(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- Salary calculation --------------------------------------------------
+
+/**
+ * GET /api/payroll/employees/:id/salary?month=YYYY-MM
+ *
+ * Computes the expected monthly salary for a single employee: pairs punches
+ * into sessions, splits into regular/OT, applies rates + loans + bonuses,
+ * returns a full breakdown.
+ */
+async function salaryForEmployee(req, res, next) {
+  try {
+    const { month } = req.query;
+    if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
+    const emp = await Employee.findById(req.params.id).lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const [y, m] = month.split('-').map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
+    const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
+
+    const punches = await Punch.find({
+      employee_id: emp._id,
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    const breakdown = calculateMonthlySalary(emp, punches, month);
+    res.json({ ok: true, breakdown });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/salary-summary?branch=X&month=YYYY-MM
+ *
+ * Returns a compact per-employee salary estimate for the whole branch, used
+ * by the monthly salary dashboard. Each entry has the key numbers the UI
+ * needs to render a row without refetching the full breakdown.
+ */
+async function salarySummary(req, res, next) {
+  try {
+    const { branch, month } = req.query;
+    if (!branch || !month) return res.status(400).json({ error: 'branch and month are required' });
+
+    const employees = await Employee.find({ branch_id: branch, is_active: true })
+      .sort({ full_name: 1 })
+      .lean();
+
+    const [y, m] = month.split('-').map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
+    const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
+
+    const allPunches = await Punch.find({
+      branch_id: branch,
+      employee_id: { $in: employees.map(e => e._id) },
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    const byEmpId = new Map();
+    for (const p of allPunches) {
+      const k = String(p.employee_id);
+      if (!byEmpId.has(k)) byEmpId.set(k, []);
+      byEmpId.get(k).push(p);
+    }
+
+    const rows = employees.map(emp => {
+      const empPunches = byEmpId.get(String(emp._id)) || [];
+      const b = calculateMonthlySalary(emp, empPunches, month);
+      return {
+        employee_id: String(emp._id),
+        full_name: emp.full_name,
+        israeli_id: emp.israeli_id || '',
+        salary_type: emp.salary_type,
+        hours_total: b.hours.total,
+        days_worked: b.hours.days_worked,
+        incomplete_days: b.hours.incomplete_days,
+        base_salary: b.components.base_salary,
+        extras: b.components.travel + b.components.meal_vouchers + b.components.recreation_monthly + b.components.bonuses,
+        deductions: b.deductions.loans,
+        estimated_total: b.estimated_total,
+        warnings: b.warnings,
+      };
+    });
+
+    // Totals across the branch
+    const totals = rows.reduce((acc, r) => ({
+      employees: acc.employees + 1,
+      hours: acc.hours + r.hours_total,
+      base: acc.base + r.base_salary,
+      extras: acc.extras + r.extras,
+      deductions: acc.deductions + r.deductions,
+      total: acc.total + r.estimated_total,
+    }), { employees: 0, hours: 0, base: 0, extras: 0, deductions: 0, total: 0 });
+
+    // Round totals for presentation
+    for (const k of ['hours', 'base', 'extras', 'deductions', 'total']) {
+      totals[k] = Math.round(totals[k] * 100) / 100;
+    }
+
+    res.json({ month, branch_id: branch, rows, totals });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listEmployees,
   getEmployee,
@@ -461,4 +565,6 @@ module.exports = {
   hoursReport,
   listClockUsers,
   assignIsraeliIds,
+  salaryForEmployee,
+  salarySummary,
 };

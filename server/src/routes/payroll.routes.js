@@ -21,4 +21,8 @@ router.get('/employees/:id/hours-report',      c.hoursReport);
 router.get('/clock-users',                     c.listClockUsers);
 router.post('/clock-users/assign',             requireRole('system_admin', 'branch_manager'), c.assignIsraeliIds);
 
+// Salary calculation
+router.get('/employees/:id/salary',            c.salaryForEmployee);
+router.get('/salary-summary',                  c.salarySummary);
+
 module.exports = router;

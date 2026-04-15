@@ -17,6 +17,7 @@ const ALL_NAV = [
   { label: 'ספקים', path: '/suppliers', icon: '📦', roles: ['system_admin'] },
   { label: 'עובדים', path: '/employees', icon: '👥', roles: ['system_admin', 'branch_manager'] },
   { label: 'החתמות', path: '/attendance', icon: '⏱️', roles: ['system_admin', 'branch_manager'] },
+  { label: 'שכר', path: '/salary-table', icon: '💵', roles: ['system_admin', 'branch_manager'] },
 ];
 
 export default function Header() {
