@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Select, IconButton, Tooltip, Chip, Divider } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -17,7 +18,9 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 
-const NAV_GROUPS = [
+const STORAGE_KEY = 'ganhalomot_nav_order';
+
+const DEFAULT_NAV_GROUPS = [
   {
     label: 'ניהול',
     items: [
@@ -47,11 +50,55 @@ const NAV_GROUPS = [
   },
 ];
 
+function loadNavOrder() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw); // array of group labels in order
+  } catch { return null; }
+}
+
+function saveNavOrder(order) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(order));
+}
+
+function getOrderedGroups() {
+  const saved = loadNavOrder();
+  if (!saved) return DEFAULT_NAV_GROUPS;
+  // Reorder default groups by saved label order
+  const ordered = [];
+  for (const label of saved) {
+    const group = DEFAULT_NAV_GROUPS.find(g => g.label === label);
+    if (group) ordered.push(group);
+  }
+  // Add any new groups not in saved
+  for (const g of DEFAULT_NAV_GROUPS) {
+    if (!ordered.find(o => o.label === g.label)) ordered.push(g);
+  }
+  return ordered;
+}
+
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin } = useAuth();
+  const [navGroups, setNavGroups] = useState(getOrderedGroups());
+  const [dragGroup, setDragGroup] = useState(null);
+
+  const handleDragStart = (groupLabel) => setDragGroup(groupLabel);
+  const handleDragOver = (e) => e.preventDefault();
+  const handleDrop = (targetLabel) => {
+    if (!dragGroup || dragGroup === targetLabel) return;
+    const order = navGroups.map(g => g.label);
+    const fromIdx = order.indexOf(dragGroup);
+    const toIdx = order.indexOf(targetLabel);
+    order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, dragGroup);
+    saveNavOrder(order);
+    setNavGroups(getOrderedGroups());
+    setDragGroup(null);
+  };
 
   return (
     <AppBar position="sticky" sx={{
@@ -115,13 +162,28 @@ export default function Header() {
 
         {/* Center/Left: Nav Groups */}
         <Stack direction="row" alignItems="center" spacing={0}>
-          {NAV_GROUPS.map((group, gi) => {
+          {navGroups.map((group, gi) => {
             const visibleItems = group.items.filter(item =>
               !item.roles || item.roles.includes(user?.role)
             );
             if (visibleItems.length === 0) return null;
             return (
-              <Stack key={group.label} direction="row" alignItems="center" spacing={0}>
+              <Stack
+                key={group.label}
+                direction="row"
+                alignItems="center"
+                spacing={0}
+                draggable
+                onDragStart={() => handleDragStart(group.label)}
+                onDragOver={handleDragOver}
+                onDrop={() => handleDrop(group.label)}
+                sx={{
+                  cursor: 'grab',
+                  opacity: dragGroup === group.label ? 0.5 : 1,
+                  transition: 'opacity 0.15s',
+                  '&:active': { cursor: 'grabbing' },
+                }}
+              >
                 {gi > 0 && (
                   <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: '#e2e8f0' }} />
                 )}

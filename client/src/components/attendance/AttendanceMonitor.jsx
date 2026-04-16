@@ -70,39 +70,61 @@ export default function AttendanceMonitor() {
         position: 'sticky', right: 0, bgcolor: 'background.paper', zIndex: 1,
         borderLeft: '1px solid', borderColor: 'divider',
         minWidth: 180,
-      }}>
-        {block.full_name}
-        {block.israeli_id && !block.unlinked && (
-          <Typography variant="caption" display="block" dir="ltr" sx={{ color: 'text.secondary', fontFamily: 'monospace' }}>
-            {block.israeli_id}
-          </Typography>
-        )}
+        cursor: block.employee_id && !block.unlinked ? 'pointer' : 'default',
+        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: '#f1f5f9' } : {},
+      }}
+      onClick={() => {
+        if (block.employee_id && !block.unlinked) {
+          setHoursDialog({
+            open: true,
+            employee: { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id },
+          });
+        }
+      }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box>
+            {block.full_name}
+            {block.israeli_id && !block.unlinked && (
+              <Typography variant="caption" display="block" dir="ltr" sx={{ color: 'text.secondary', fontFamily: 'monospace', fontSize: '0.65rem' }}>
+                {block.israeli_id}
+              </Typography>
+            )}
+          </Box>
+          {block.employee_id && !block.unlinked && (
+            <ScheduleIcon sx={{ fontSize: 14, color: 'text.disabled', ml: 'auto' }} />
+          )}
+        </Box>
       </TableCell>
       {days.map(d => {
         const day = block.days[d];
-        if (!day) return <TableCell key={d} align="center" sx={{ p: 0.5 }}>
-          <Box sx={{ width: 36, height: 36, mx: 'auto', borderRadius: 1, bgcolor: '#f8fafc' }} />
+        if (!day) return <TableCell key={d} align="center" sx={{ p: 0.3 }}>
+          <Box sx={{ width: 52, height: 42, mx: 'auto' }} />
         </TableCell>;
-        const bgColor = day.incomplete ? '#fef3c7' : day.total_hours >= 8 ? '#d1fae5' : '#e0f2fe';
-        const textColor = day.incomplete ? '#92400e' : day.total_hours >= 8 ? '#065f46' : '#1e40af';
+        // Green = complete (has pairs, no trailing). Amber = incomplete.
+        const isComplete = !day.incomplete;
+        const bgColor = isComplete ? '#d1fae5' : '#fef3c7';
+        const textColor = isComplete ? '#065f46' : '#92400e';
+        const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
           <Tooltip key={d} title={
             <Box dir="ltr" sx={{ textAlign: 'center', fontSize: '0.8rem' }}>
-              <div><strong>{day.first_in || '?'} — {day.last_out || '?'}</strong></div>
-              <div>{day.punch_count} החתמות • {day.sessions.length} סשנים</div>
-              {day.incomplete && <div style={{color:'#fbbf24'}}>חסרה החתמה</div>}
+              {day.sessions.map((s, i) => (
+                <div key={i}>{s.in_hhmm} → {s.out_hhmm} ({Math.round(s.minutes/60*100)/100}h)</div>
+              ))}
+              {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
+              <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות</div>
             </Box>
           }>
-            <TableCell align="center" sx={{ p: 0.5, cursor: 'pointer' }}>
+            <TableCell align="center" sx={{ p: 0.3, cursor: 'pointer' }}>
               <Box sx={{
-                width: 40, mx: 'auto', py: 0.4, borderRadius: 1.5,
+                width: 54, mx: 'auto', py: 0.3, px: 0.3, borderRadius: 1.5,
                 bgcolor: bgColor, color: textColor,
-                fontWeight: 800, fontSize: '0.72rem', lineHeight: 1.3,
-                textAlign: 'center',
+                textAlign: 'center', lineHeight: 1.2,
               }}>
-                {day.total_hours}
-                <Box sx={{ fontSize: '0.58rem', fontWeight: 600, opacity: 0.8, direction: 'ltr' }}>
-                  {day.first_in || '?'}
+                <Box sx={{ fontWeight: 800, fontSize: '0.75rem' }}>{day.total_hours}h</Box>
+                <Box dir="ltr" sx={{ fontSize: '0.55rem', fontWeight: 600, opacity: 0.75, letterSpacing: '-0.02em' }}>
+                  {timeRange}
                 </Box>
               </Box>
             </TableCell>

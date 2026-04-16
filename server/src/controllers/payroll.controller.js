@@ -128,6 +128,10 @@ async function listEmployees(req, res, next) {
           if (e.salary_type === 'global') return first.global_salary;
           return first.hourly_rate;
         })(),
+        _display_required_hours: (() => {
+          const first = (e.amuta_distribution || []).find(d => d.required_hours);
+          return first?.required_hours || null;
+        })(),
       })),
     });
   } catch (err) { next(err); }

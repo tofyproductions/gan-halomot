@@ -109,6 +109,8 @@ export default function EmployeeManager() {
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
+  // Inline editing: { empId, field, value }
+  const [inlineEdit, setInlineEdit] = useState(null);
 
   const fetchEmployees = useCallback(() => {
     if (!selectedBranch) { setEmployees([]); setLoading(false); return; }
@@ -225,6 +227,58 @@ export default function EmployeeManager() {
     setDialog(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
   };
 
+  // Inline editing: save on Enter/blur, cancel on Escape
+  const startInlineEdit = (empId, field, currentValue) => {
+    setInlineEdit({ empId, field, value: String(currentValue ?? '') });
+  };
+  const saveInlineEdit = async () => {
+    if (!inlineEdit) return;
+    const { empId, field, value } = inlineEdit;
+    setInlineEdit(null);
+    try {
+      await api.put(`/payroll/employees/${empId}`, { [field]: value });
+      fetchEmployees();
+    } catch (err) {
+      toast.error('שגיאה בעדכון');
+    }
+  };
+  const cancelInlineEdit = () => setInlineEdit(null);
+
+  /**
+   * Render an inline-editable cell. Shows text normally; on double-click shows
+   * a small TextField. Enter saves, Escape cancels.
+   */
+  const EditableCell = ({ empId, field, value, displayValue, align, dir, sx }) => {
+    const isEditing = inlineEdit?.empId === empId && inlineEdit?.field === field;
+    if (isEditing) {
+      return (
+        <TableCell align={align} dir={dir} sx={sx}>
+          <TextField
+            size="small"
+            autoFocus
+            variant="standard"
+            value={inlineEdit.value}
+            onChange={e => setInlineEdit({ ...inlineEdit, value: e.target.value })}
+            onKeyDown={e => { if (e.key === 'Enter') saveInlineEdit(); if (e.key === 'Escape') cancelInlineEdit(); }}
+            onBlur={saveInlineEdit}
+            inputProps={{ dir: dir || 'rtl', style: { fontSize: '0.85rem', padding: '2px 4px', textAlign: align || 'right' } }}
+            sx={{ width: '100%', minWidth: 60 }}
+          />
+        </TableCell>
+      );
+    }
+    return (
+      <TableCell
+        align={align}
+        dir={dir}
+        sx={{ ...sx, cursor: 'pointer', '&:hover': { bgcolor: '#fef3c7' } }}
+        onDoubleClick={() => startInlineEdit(empId, field, value)}
+      >
+        {displayValue || value || '—'}
+      </TableCell>
+    );
+  };
+
   const { totalCount, missingIdCount } = useMemo(() => ({
     totalCount: employees.length,
     missingIdCount: employees.filter(e => !e.israeli_id).length,
@@ -268,24 +322,26 @@ export default function EmployeeManager() {
               <TableCell sx={{ fontWeight: 700 }}>טלפון</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>סוג שכר</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">שכר / תעריף</TableCell>
+              <TableCell sx={{ fontWeight: 700 }} align="center">שעות חובה</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">נסיעות</TableCell>
               {isManager && <TableCell align="center">פעולות</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {employees.map(emp => {
+              const empId = emp._id || emp.id;
               const rate = emp._display_rate;
               const rateLabel = emp.salary_type === 'global'
                 ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
                 : (rate ? `₪${rate}/שעה` : '—');
               return (
-                <TableRow key={emp._id || emp.id} hover>
+                <TableRow key={empId} hover>
                   <TableCell sx={{ fontWeight: 600 }}>{emp.full_name}</TableCell>
-                  <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main' }}>
+                  <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
                     {emp.israeli_id || '—'}
                   </TableCell>
                   <TableCell>{emp.position || '—'}</TableCell>
-                  <TableCell dir="ltr">{emp.phone || '—'}</TableCell>
+                  <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
                   <TableCell>
                     <Chip
                       label={emp.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
@@ -296,7 +352,10 @@ export default function EmployeeManager() {
                     {emp.salary_is_net && <Chip label="נטו" size="small" sx={{ ml: 0.5 }} />}
                   </TableCell>
                   <TableCell align="center" sx={{ fontWeight: 700 }}>{rateLabel}</TableCell>
-                  <TableCell align="center">{emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'}</TableCell>
+                  <TableCell align="center" sx={{ color: emp.salary_type === 'global' && emp._display_required_hours ? 'text.primary' : 'text.disabled', fontSize: '0.85rem' }}>
+                    {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
+                  </TableCell>
+                  <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
                   {isManager && (
                     <TableCell align="center">
                       <Stack direction="row" spacing={0.5} justifyContent="center">
@@ -322,10 +381,10 @@ export default function EmployeeManager() {
               );
             })}
             {!loading && employees.length === 0 && (
-              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4 }}>אין עובדים</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>אין עובדים</TableCell></TableRow>
             )}
             {loading && (
-              <TableRow><TableCell colSpan={8} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
