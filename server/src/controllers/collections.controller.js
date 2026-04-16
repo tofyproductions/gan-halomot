@@ -142,11 +142,24 @@ async function getAll(req, res, next) {
           })()
         : null;
 
+      // Parse fee_effective_from (YYYY-MM) into academic month number
+      let priceChangeMonth = null;
+      let oldFee = null;
+      if (reg.fee_effective_from && reg.previous_monthly_fee != null) {
+        const [, effMonth] = reg.fee_effective_from.split('-').map(Number);
+        if (effMonth >= 1 && effMonth <= 12) {
+          priceChangeMonth = effMonth;
+          oldFee = reg.previous_monthly_fee;
+        }
+      }
+
       const { expectedFees, isBeforeStart } = calculatePaymentStatus(
-        fee,
+        oldFee != null ? oldFee : fee,
         reg.start_date,
         targetYear,
-        endDate ? endDate.toISOString().split('T')[0] : reg.end_date
+        endDate ? endDate.toISOString().split('T')[0] : reg.end_date,
+        priceChangeMonth,
+        priceChangeMonth ? fee : undefined
       );
 
       const child = childByReg[String(reg._id)];

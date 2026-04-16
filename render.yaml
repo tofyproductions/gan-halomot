@@ -4,15 +4,15 @@ services:
     runtime: node
     region: frankfurt
     plan: free
-    buildCommand: cd server && npm install && npx knex migrate:latest && cd ../client && npm install && npm run build
+    buildCommand: cd server && npm install && cd ../client && npm install && npm run build
     startCommand: cd server && node src/index.js
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        value: postgresql://neondb_owner:npg_D8ngoX5EsIOR@ep-square-meadow-aljoq7xa.c-3.eu-central-1.aws.neon.tech/neondb?sslmode=require
       - key: JWT_SECRET
-        value: gan-halomot-dream-secret-2026
+        sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: FRONTEND_URL
         sync: false
     healthCheckPath: /api/health
