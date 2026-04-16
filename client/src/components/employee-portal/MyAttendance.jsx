@@ -45,6 +45,7 @@ export default function MyAttendance() {
                 <TableCell sx={{ fontWeight: 700 }}>כניסה</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>יציאה</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>שעות</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>סטטוס</TableCell>
               </TableRow>
             </TableHead>
@@ -55,6 +56,9 @@ export default function MyAttendance() {
                   <TableCell sx={{ fontWeight: 600 }}>{p.in_time || '-'}</TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>{p.out_time || '-'}</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>{p.hours || '-'}</TableCell>
+                  <TableCell>
+                    {p.branch && <Chip label={p.branch} size="small" variant="outlined" />}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={p.out_time ? 'שלם' : 'חסר יציאה'}

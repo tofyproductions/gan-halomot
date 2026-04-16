@@ -6,8 +6,9 @@
  * model (login accounts). A future cleanup could merge the two by linking
  * Employee.user_id, but for now they live in parallel.
  */
-const { Employee, Punch, Branch, Amuta } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const bcrypt = require('bcryptjs');
 
 // --- helpers --------------------------------------------------------------
 
@@ -165,7 +166,61 @@ async function createEmployee(req, res, next) {
       return res.status(400).json({ error: 'שם מלא וסניף הם שדות חובה' });
     }
     const emp = await Employee.create(payload);
-    res.status(201).json({ employee: { ...emp.toObject(), id: emp._id } });
+
+    // Auto-create User account if employee has israeli_id
+    let createdUser = null;
+    const normalizedId = (emp.israeli_id || '').replace(/\D/g, '').padStart(9, '0');
+    if (normalizedId.length === 9 && normalizedId !== '000000000') {
+      const existingUser = await User.findOne({ id_number: normalizedId });
+      if (!existingUser) {
+        try {
+          const hash = await bcrypt.hash(normalizedId, 10);
+          createdUser = await User.create({
+            email: `${normalizedId}@gan-halomot.local`,
+            password_hash: hash,
+            full_name: emp.full_name,
+            id_number: normalizedId,
+            role: 'teacher',
+            branch_id: emp.branch_id,
+            position: emp.position || '',
+            is_active: true,
+          });
+          emp.user_id = createdUser._id;
+          await emp.save();
+        } catch (userErr) {
+          console.error(`Auto-create user failed for ${emp.full_name}:`, userErr.message);
+        }
+      } else {
+        // Link existing user
+        emp.user_id = existingUser._id;
+        await emp.save();
+      }
+
+      // Auto-queue add_user command to ALL branches with clocks
+      try {
+        const clockBranches = await Branch.find({ clock_ip: { $ne: null, $ne: '' } }).select('_id').lean();
+        for (const branch of clockBranches) {
+          await AgentCommand.create({
+            branch_id: branch._id,
+            type: 'add_user',
+            payload: {
+              israeli_id: normalizedId,
+              name: emp.full_name,
+              privilege: 0,
+            },
+            status: 'pending',
+          });
+        }
+        console.log(`Queued add_user for ${emp.full_name} on ${clockBranches.length} branch(es)`);
+      } catch (cmdErr) {
+        console.error(`Auto-queue clock command failed:`, cmdErr.message);
+      }
+    }
+
+    res.status(201).json({
+      employee: { ...emp.toObject(), id: emp._id },
+      user_created: !!createdUser,
+    });
   } catch (err) { next(err); }
 }
 
@@ -686,6 +741,7 @@ async function mySalaryPreview(req, res, next) {
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
     const to = new Date(Date.UTC(y, m, 2, 0, 0, 0));
 
+    // Fetch punches from ALL branches (cross-branch support)
     const punches = await Punch.find({
       employee_id: emp._id,
       timestamp: { $gte: from, $lt: to },
@@ -693,6 +749,19 @@ async function mySalaryPreview(req, res, next) {
     }).sort({ timestamp: 1 }).lean();
 
     const b = calculateMonthlySalary(emp, punches, month);
+
+    // Build per-branch breakdown
+    const branchIds = [...new Set(punches.map(p => String(p.branch_id)))];
+    const branches = await Branch.find({ _id: { $in: branchIds } }).select('name').lean();
+    const branchMap = {};
+    for (const br of branches) branchMap[String(br._id)] = br.name;
+
+    const byBranch = {};
+    for (const p of punches) {
+      const bId = String(p.branch_id);
+      if (!byBranch[bId]) byBranch[bId] = { name: branchMap[bId] || 'לא ידוע', count: 0 };
+      byBranch[bId].count++;
+    }
 
     res.json({
       base_salary: Math.round(b.components.base_salary),
@@ -705,6 +774,7 @@ async function mySalaryPreview(req, res, next) {
       hours_total: Math.round(b.hours.total * 100) / 100,
       days_worked: b.hours.days_worked,
       month,
+      branches_breakdown: Object.values(byBranch),
     });
   } catch (err) { next(err); }
 }
@@ -729,32 +799,41 @@ async function myPunches(req, res, next) {
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
     const to = new Date(Date.UTC(y, m, 2, 0, 0, 0));
 
+    // Fetch punches from ALL branches (cross-branch)
     const rawPunches = await Punch.find({
       employee_id: emp._id,
       timestamp: { $gte: from, $lt: to },
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
 
-    // Group into pairs (in/out)
+    // Load branch names
+    const branchIds = [...new Set(rawPunches.map(p => String(p.branch_id)))];
+    const branches = await Branch.find({ _id: { $in: branchIds } }).select('name').lean();
+    const branchMap = {};
+    for (const br of branches) branchMap[String(br._id)] = br.name;
+
+    // Group into days with branch info
     const dayMap = {};
     for (const p of rawPunches) {
       const d = new Date(p.timestamp);
       const dateStr = d.toLocaleDateString('he-IL', { timeZone: IL_TZ });
-      if (!dayMap[dateStr]) dayMap[dateStr] = [];
-      dayMap[dateStr].push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
+      if (!dayMap[dateStr]) dayMap[dateStr] = { times: [], branch: branchMap[String(p.branch_id)] || '' };
+      dayMap[dateStr].times.push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
+      // Use last punch's branch as the day's branch
+      dayMap[dateStr].branch = branchMap[String(p.branch_id)] || '';
     }
 
-    const punches = Object.entries(dayMap).map(([date, times]) => {
-      const inTime = times[0] || null;
-      const outTime = times.length >= 2 ? times[times.length - 1] : null;
+    const punches = Object.entries(dayMap).map(([date, data]) => {
+      const inTime = data.times[0] || null;
+      const outTime = data.times.length >= 2 ? data.times[data.times.length - 1] : null;
       let hours = null;
-      if (inTime && outTime && times.length >= 2) {
+      if (inTime && outTime && data.times.length >= 2) {
         const [h1, m1] = inTime.split(':').map(Number);
         const [h2, m2] = outTime.split(':').map(Number);
         hours = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
         hours = Math.round(hours * 100) / 100;
       }
-      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null };
+      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null, branch: data.branch };
     });
 
     res.json({ punches, month, employee_name: emp.full_name });
