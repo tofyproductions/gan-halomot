@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Select, IconButton, Tooltip, Chip, Divider } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -15,21 +15,25 @@ import EventIcon from '@mui/icons-material/Event';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
+import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
+import DescriptionIcon from '@mui/icons-material/Description';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import NotificationsIcon from '@mui/icons-material/Notifications';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
 
-const STORAGE_KEY = 'ganhalomot_nav_order';
+const EMPLOYEE_ROLES = ['teacher', 'assistant', 'class_leader', 'cook'];
 
-const DEFAULT_NAV_GROUPS = [
+const NAV_GROUPS = [
   {
     label: 'ניהול',
     items: [
       { label: 'לוח בקרה', path: '/', icon: DashboardIcon, roles: null },
       { label: 'רישום', path: '/registrations', icon: PersonAddIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'גבייה', path: '/collections', icon: ReceiptLongIcon, roles: ['system_admin', 'branch_manager'] },
+      { label: 'גבייה', path: '/collections', icon: ReceiptLongIcon, roles: ['system_admin', 'accountant'] },
       { label: 'ארכיון', path: '/archive', icon: ArchiveIcon, roles: ['system_admin', 'branch_manager'] },
     ],
   },
@@ -38,55 +42,36 @@ const DEFAULT_NAV_GROUPS = [
     items: [
       { label: 'עובדים', path: '/employees', icon: PeopleIcon, roles: ['system_admin', 'branch_manager'] },
       { label: 'החתמות', path: '/attendance', icon: FingerprintIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'שכר', path: '/salary-table', icon: PaymentsIcon, roles: ['system_admin', 'branch_manager'] },
+      { label: 'שכר', path: '/salary-table', icon: PaymentsIcon, roles: ['system_admin', 'accountant'] },
+      { label: 'חופשות', path: '/holidays', icon: EventIcon, roles: ['system_admin', 'branch_manager'] },
     ],
   },
   {
     label: 'תפעול',
     items: [
-      { label: 'הזמנות', path: '/orders', icon: ShoppingCartIcon, roles: null },
-      { label: 'ספקים', path: '/suppliers', icon: LocalShippingIcon, roles: ['system_admin'] },
-      { label: 'חופשות', path: '/holidays', icon: EventIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'גאנט', path: '/gantt', icon: CalendarMonthIcon, roles: ['system_admin', 'branch_manager', 'employee'] },
+      { label: 'הזמנות', path: '/orders', icon: ShoppingCartIcon, roles: ['system_admin', 'branch_manager', 'class_leader'] },
+      { label: 'ספקים', path: '/suppliers', icon: LocalShippingIcon, roles: ['system_admin', 'accountant'] },
+      { label: 'גאנט', path: '/gantt', icon: CalendarMonthIcon, roles: ['system_admin', 'branch_manager', 'class_leader'] },
       { label: 'דף קשר', path: '/contacts', icon: ContactsIcon, roles: null },
     ],
   },
+  {
+    label: 'האזור שלי',
+    items: [
+      { label: 'צפי השכר שלי', path: '/my-salary', icon: AccountBalanceIcon, roles: EMPLOYEE_ROLES },
+      { label: 'התלושים שלי', path: '/my-payslips', icon: DescriptionIcon, roles: EMPLOYEE_ROLES },
+      { label: 'המסמכים שלי', path: '/my-documents', icon: DescriptionIcon, roles: EMPLOYEE_ROLES },
+      { label: 'ההחתמות שלי', path: '/my-attendance', icon: AccessTimeIcon, roles: EMPLOYEE_ROLES },
+      { label: 'עדכונים', path: '/my-updates', icon: NotificationsIcon, roles: EMPLOYEE_ROLES },
+    ],
+  },
 ];
-
-function loadNavOrder() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw); // array of group labels in order
-  } catch { return null; }
-}
-
-function saveNavOrder(order) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(order));
-}
-
-function getOrderedGroups() {
-  const saved = loadNavOrder();
-  if (!saved) return DEFAULT_NAV_GROUPS;
-  // Reorder default groups by saved label order
-  const ordered = [];
-  for (const label of saved) {
-    const group = DEFAULT_NAV_GROUPS.find(g => g.label === label);
-    if (group) ordered.push(group);
-  }
-  // Add any new groups not in saved
-  for (const g of DEFAULT_NAV_GROUPS) {
-    if (!ordered.find(o => o.label === g.label)) ordered.push(g);
-  }
-  return ordered;
-}
 
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin } = useAuth();
-  const [navGroups, setNavGroups] = useState(getOrderedGroups());
 
   const handleSetupBiometric = useCallback(async () => {
     try {
@@ -96,25 +81,10 @@ export default function Header() {
       localStorage.setItem('gan_biometric_user_id', user.id);
       toast.success('כניסה ביומטרית הוגדרה בהצלחה!');
     } catch (err) {
-      if (err.name === 'NotAllowedError') return; // user cancelled
+      if (err.name === 'NotAllowedError') return;
       toast.error(err.response?.data?.error || 'שגיאה בהגדרת ביומטרי');
     }
   }, [user]);
-  const [dragGroup, setDragGroup] = useState(null);
-
-  const handleDragStart = (groupLabel) => setDragGroup(groupLabel);
-  const handleDragOver = (e) => e.preventDefault();
-  const handleDrop = (targetLabel) => {
-    if (!dragGroup || dragGroup === targetLabel) return;
-    const order = navGroups.map(g => g.label);
-    const fromIdx = order.indexOf(dragGroup);
-    const toIdx = order.indexOf(targetLabel);
-    order.splice(fromIdx, 1);
-    order.splice(toIdx, 0, dragGroup);
-    saveNavOrder(order);
-    setNavGroups(getOrderedGroups());
-    setDragGroup(null);
-  };
 
   return (
     <AppBar position="sticky" sx={{
@@ -178,28 +148,13 @@ export default function Header() {
 
         {/* Center/Left: Nav Groups */}
         <Stack direction="row" alignItems="center" spacing={0}>
-          {navGroups.map((group, gi) => {
+          {NAV_GROUPS.map((group, gi) => {
             const visibleItems = group.items.filter(item =>
               !item.roles || item.roles.includes(user?.role)
             );
             if (visibleItems.length === 0) return null;
             return (
-              <Stack
-                key={group.label}
-                direction="row"
-                alignItems="center"
-                spacing={0}
-                draggable
-                onDragStart={() => handleDragStart(group.label)}
-                onDragOver={handleDragOver}
-                onDrop={() => handleDrop(group.label)}
-                sx={{
-                  cursor: 'grab',
-                  opacity: dragGroup === group.label ? 0.5 : 1,
-                  transition: 'opacity 0.15s',
-                  '&:active': { cursor: 'grabbing' },
-                }}
-              >
+              <Stack key={group.label} direction="row" alignItems="center" spacing={0}>
                 {gi > 0 && (
                   <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: '#e2e8f0' }} />
                 )}

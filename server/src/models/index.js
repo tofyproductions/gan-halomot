@@ -21,6 +21,7 @@ const Amuta = require('./Amuta');
 const Employee = require('./Employee');
 const Punch = require('./Punch');
 const AgentCommand = require('./AgentCommand');
+const Contract = require('./Contract');
 
 module.exports = {
   User,
@@ -45,4 +46,5 @@ module.exports = {
   Employee,
   Punch,
   AgentCommand,
+  Contract,
 };

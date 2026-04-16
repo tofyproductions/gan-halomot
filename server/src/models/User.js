@@ -6,8 +6,8 @@ const userSchema = new mongoose.Schema({
   full_name: { type: String, default: '' },
   role: {
     type: String,
-    enum: ['system_admin', 'branch_manager', 'employee'],
-    default: 'employee',
+    enum: ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'],
+    default: 'teacher',
   },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   phone: { type: String, default: '' },

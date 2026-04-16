@@ -21,6 +21,11 @@ import SalaryTable from './components/payroll/SalaryTable';
 import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
+import MySalaryPreview from './components/employee-portal/MySalaryPreview';
+import MyPayslips from './components/employee-portal/MyPayslips';
+import MyDocuments from './components/employee-portal/MyDocuments';
+import MyAttendance from './components/employee-portal/MyAttendance';
+import Updates from './components/employee-portal/Updates';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -54,6 +59,13 @@ function AppRoutes() {
         <Route path="holidays" element={<HolidayManager />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
+        {/* Employee portal */}
+        <Route path="my-salary" element={<MySalaryPreview />} />
+        <Route path="my-payslips" element={<MyPayslips />} />
+        <Route path="my-documents" element={<MyDocuments />} />
+        <Route path="my-attendance" element={<MyAttendance />} />
+        <Route path="my-updates" element={<Updates />} />
+
         <Route path="salary-requests" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager']}>
             <SalaryRequests />
