@@ -31,7 +31,7 @@ function formatDate(yyyyMmDd) {
   return `${d}/${m}/${y}`;
 }
 function emptyLoan() {
-  return { total_amount: '', installment_amount: '', installments_total: '', installments_paid: '', notes: '' };
+  return { total_amount: '', installment_amount: '', installments_total: '', installments_paid: '', started_at: '', notes: '' };
 }
 function emptyBonus() {
   return { type: 'fixed', amount: '', reason: '', active: true };
@@ -43,6 +43,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
   const [employee, setEmployee] = useState(null);
   const [breakdown, setBreakdown] = useState(null);
   const [hoursReport, setHoursReport] = useState(null);
+  const [forceFullGlobal, setForceFullGlobal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   // Local edit state for loans/bonuses
@@ -56,7 +57,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
     setLoading(true);
     Promise.all([
       api.get(`/payroll/employees/${employeeId}`),
-      api.get(`/payroll/employees/${employeeId}/salary`, { params: { month } }),
+      api.get(`/payroll/employees/${employeeId}/salary`, { params: { month, force_full_global: forceFullGlobal } }),
       api.get(`/payroll/employees/${employeeId}/hours-report`, { params: { month } }),
     ])
       .then(([empRes, salaryRes, hoursRes]) => {
@@ -71,7 +72,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         toast.error('שגיאה בטעינת נתוני העובד');
       })
       .finally(() => setLoading(false));
-  }, [employeeId, month]);
+  }, [employeeId, month, forceFullGlobal]);
 
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
 
@@ -254,6 +255,29 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
               </Alert>
             )}
 
+            {/* "Force full global" toggle — only for global employees with required_hours */}
+            {breakdown.salary_type === 'global' && breakdown.rates.required_hours > 0 && (
+              <Alert
+                severity={forceFullGlobal ? 'success' : 'warning'}
+                sx={{ borderRadius: 2 }}
+                action={
+                  <Button
+                    size="small"
+                    variant="contained"
+                    color={forceFullGlobal ? 'warning' : 'success'}
+                    onClick={() => setForceFullGlobal(!forceFullGlobal)}
+                  >
+                    {forceFullGlobal ? 'חזור לחישוב יחסי' : 'השלם לשכר גלובלי מלא'}
+                  </Button>
+                }
+              >
+                {forceFullGlobal
+                  ? `שכר גלובלי מלא: ₪${breakdown.rates.global_salary} (מנהל השלים ידנית)`
+                  : `שכר יחסי: עבד/ה ${breakdown.hours.total}h מתוך ${breakdown.rates.required_hours}h נדרשות`
+                }
+              </Alert>
+            )}
+
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 1 }}>פירוט רכיבים</Typography>
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
               <Table size="small">
@@ -409,12 +433,12 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                     }}
                     InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
                   />
-                  <TextField label="מתוך" type="number" size="small" sx={{ width: 100 }}
+                  <TextField label="תשלומים (סה״כ)" type="number" size="small" sx={{ width: 130 }}
                     value={loan.installments_total} onChange={e => {
                       const arr = [...loans]; arr[i].installments_total = e.target.value; setLoans(arr);
                     }}
                   />
-                  <TextField label="שולם" type="number" size="small" sx={{ width: 100 }}
+                  <TextField label="שולמו" type="number" size="small" sx={{ width: 100 }}
                     value={loan.installments_paid} onChange={e => {
                       const arr = [...loans]; arr[i].installments_paid = e.target.value; setLoans(arr);
                     }}
@@ -423,11 +447,30 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                     <DeleteIcon />
                   </IconButton>
                 </Stack>
-                <TextField label="הערות" size="small" fullWidth sx={{ mt: 1 }}
-                  value={loan.notes || ''} onChange={e => {
-                    const arr = [...loans]; arr[i].notes = e.target.value; setLoans(arr);
-                  }}
-                />
+                <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+                  <TextField
+                    label="תאריך התחלת תשלום"
+                    type="date"
+                    size="small"
+                    sx={{ width: 200 }}
+                    value={loan.started_at ? new Date(loan.started_at).toISOString().slice(0, 10) : ''}
+                    onChange={e => {
+                      const arr = [...loans]; arr[i].started_at = e.target.value; setLoans(arr);
+                    }}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                  <TextField label="הערות (סיבה, תנאים מיוחדים)" size="small" fullWidth
+                    value={loan.notes || ''} onChange={e => {
+                      const arr = [...loans]; arr[i].notes = e.target.value; setLoans(arr);
+                    }}
+                  />
+                </Stack>
+                {Number(loan.installments_total) > 0 && Number(loan.installments_paid) >= 0 && (
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                    נותרו {Math.max(0, Number(loan.installments_total) - Number(loan.installments_paid))} תשלומים •
+                    {' '}סה״כ שולם ₪{(Number(loan.installment_amount) * Number(loan.installments_paid)).toLocaleString()} מתוך ₪{Number(loan.total_amount).toLocaleString()}
+                  </Typography>
+                )}
               </Paper>
             ))}
             <Button variant="contained" onClick={saveLoansBonuses} disabled={saving}>

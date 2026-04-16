@@ -80,15 +80,16 @@ export default function AttendanceMonitor() {
       </TableCell>
       {days.map(d => {
         const day = block.days[d];
-        if (!day) return <TableCell key={d} align="center" sx={{ color: 'text.disabled', fontSize: '0.75rem' }}>—</TableCell>;
+        if (!day) return <TableCell key={d} align="center" sx={{ color: 'text.disabled', fontSize: '0.7rem' }}>—</TableCell>;
         return (
-          <TableCell key={d} align="center" sx={{ fontSize: '0.8rem', position: 'relative' }}>
-            <Tooltip title={`${day.first_in || '?'} — ${day.last_out || '?'} (${day.punch_count} החתמות)`}>
-              <Box sx={{ fontWeight: 700, color: day.incomplete ? 'warning.main' : 'success.dark' }}>
-                {day.total_hours || '?'}
-                {day.incomplete && <WarningIcon sx={{ fontSize: 12, ml: 0.3 }} />}
-              </Box>
-            </Tooltip>
+          <TableCell key={d} align="center" sx={{ fontSize: '0.72rem', lineHeight: 1.2, py: 0.5, position: 'relative' }}>
+            <Box sx={{ fontWeight: 700, color: day.incomplete ? 'warning.main' : 'success.dark' }}>
+              {day.total_hours || '?'}h
+              {day.incomplete && <WarningIcon sx={{ fontSize: 10, ml: 0.2 }} />}
+            </Box>
+            <Box sx={{ fontSize: '0.6rem', color: 'text.secondary', direction: 'ltr' }}>
+              {day.first_in || '?'}–{day.last_out || (day.incomplete ? '?' : day.first_in)}
+            </Box>
           </TableCell>
         );
       })}

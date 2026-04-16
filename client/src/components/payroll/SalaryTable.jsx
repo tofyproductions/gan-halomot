@@ -146,6 +146,8 @@ export default function SalaryTable() {
               <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>סוג</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>שעות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, color: 'text.secondary', fontSize: '0.75rem' }}>125%</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, color: 'text.secondary', fontSize: '0.75rem' }}>150%</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>ימים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>שכר בסיס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>תוספות</TableCell>
@@ -176,6 +178,12 @@ export default function SalaryTable() {
                   />
                 </TableCell>
                 <TableCell align="center">{r.hours_total}h</TableCell>
+                <TableCell align="center" sx={{ fontSize: '0.8rem', color: r.hours_ot125 > 0 ? 'warning.dark' : 'text.disabled' }}>
+                  {r.hours_ot125 > 0 ? `${r.hours_ot125}h` : '—'}
+                </TableCell>
+                <TableCell align="center" sx={{ fontSize: '0.8rem', color: r.hours_ot150 > 0 ? 'error.main' : 'text.disabled' }}>
+                  {r.hours_ot150 > 0 ? `${r.hours_ot150}h` : '—'}
+                </TableCell>
                 <TableCell align="center">{r.days_worked}</TableCell>
                 <TableCell align="center">{formatCurrency(r.base_salary)}</TableCell>
                 <TableCell align="center" sx={{ color: r.extras > 0 ? 'success.main' : 'text.disabled' }}>
@@ -203,13 +211,15 @@ export default function SalaryTable() {
               </TableRow>
             ))}
             {!loading && data && data.rows.length === 0 && (
-              <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4 }}>אין עובדים בסניף</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4 }}>אין עובדים בסניף</TableCell></TableRow>
             )}
             {data && (
               <TableRow sx={{ bgcolor: 'grey.100', '& td': { fontWeight: 800, fontSize: '0.95rem' } }}>
                 <TableCell>סה״כ</TableCell>
                 <TableCell>{totals.employees} עובדים</TableCell>
                 <TableCell align="center">{totals.hours}h</TableCell>
+                <TableCell align="center" />
+                <TableCell align="center" />
                 <TableCell align="center">—</TableCell>
                 <TableCell align="center">{formatCurrency(totals.base)}</TableCell>
                 <TableCell align="center" sx={{ color: 'success.main' }}>+{formatCurrency(totals.extras)}</TableCell>

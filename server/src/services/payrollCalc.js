@@ -101,9 +101,15 @@ function primaryRates(employee) {
  * @param {Object} employee  — a plain Employee object (or Mongoose lean)
  * @param {Array}  punches   — Punch records for this employee in the month
  * @param {String} monthYM   — "YYYY-MM"
+ * @param {Object} opts      — optional overrides
+ * @param {Boolean} opts.force_full_global — if true, global employees get full
+ *   salary even if they didn't complete required hours. If false (default),
+ *   the salary is pro-rated: (hours_worked / required_hours) × global_salary.
+ *   The admin can toggle this per employee from the UI.
  * @returns breakdown object
  */
-function calculateMonthlySalary(employee, punches, monthYM) {
+function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
+  const forceFullGlobal = opts.force_full_global || false;
   // Bucket by Israel-local day
   const byDay = new Map();
   for (const p of punches) {
@@ -143,14 +149,28 @@ function calculateMonthlySalary(employee, punches, monthYM) {
                + ot150Hours * rates.hourly_rate * 1.5;
     if (rates.hourly_rate === 0) warnings.push('אין תעריף שעתי מוגדר');
   } else { // global
-    baseSalary = rates.global_salary;
-    // Overtime for global: any minutes above required hours are at global_ot_rate
-    if (rates.required_hours > 0 && hoursWorked > rates.required_hours) {
+    let globalProrateRatio = 1; // default: full salary
+    if (rates.required_hours > 0 && hoursWorked >= rates.required_hours) {
+      // Met or exceeded requirements → full salary + overtime
+      baseSalary = rates.global_salary;
       const overtimeHours = hoursWorked - rates.required_hours;
-      baseSalary += overtimeHours * rates.global_ot_rate;
-    }
-    if (rates.required_hours > 0 && hoursWorked < rates.required_hours) {
-      warnings.push(`חסרות שעות: עבדה ${hoursWorked}h מתוך ${rates.required_hours}h נדרשות`);
+      if (overtimeHours > 0 && rates.global_ot_rate > 0) {
+        baseSalary += overtimeHours * rates.global_ot_rate;
+      }
+    } else if (rates.required_hours > 0 && hoursWorked < rates.required_hours) {
+      // Did NOT meet requirements
+      if (forceFullGlobal) {
+        // Admin chose to pay full salary anyway
+        baseSalary = rates.global_salary;
+      } else {
+        // Pro-rate: (hours_worked / required_hours) × global_salary
+        globalProrateRatio = hoursWorked / rates.required_hours;
+        baseSalary = rates.global_salary * globalProrateRatio;
+        warnings.push(`חסרות שעות: ${hoursWorked}h מתוך ${rates.required_hours}h — שכר יחסי (${Math.round(globalProrateRatio * 100)}%)`);
+      }
+    } else {
+      // No required_hours set → full salary
+      baseSalary = rates.global_salary;
     }
     if (rates.global_salary === 0) warnings.push('אין שכר גלובלי מוגדר');
   }
@@ -205,6 +225,7 @@ function calculateMonthlySalary(employee, punches, monthYM) {
     employee_name: employee.full_name,
     salary_type: employee.salary_type,
     salary_is_net: !!employee.salary_is_net,
+    force_full_global: forceFullGlobal,
     hours: {
       total: hoursWorked,
       regular: regHours,

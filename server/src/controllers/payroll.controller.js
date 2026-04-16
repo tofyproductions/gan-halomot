@@ -579,7 +579,8 @@ async function salaryForEmployee(req, res, next) {
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
 
-    const breakdown = calculateMonthlySalary(emp, punches, month);
+    const forceFullGlobal = req.query.force_full_global === 'true';
+    const breakdown = calculateMonthlySalary(emp, punches, month, { force_full_global: forceFullGlobal });
     res.json({ ok: true, breakdown });
   } catch (err) { next(err); }
 }
@@ -627,8 +628,12 @@ async function salarySummary(req, res, next) {
         israeli_id: emp.israeli_id || '',
         salary_type: emp.salary_type,
         hours_total: b.hours.total,
+        hours_regular: b.hours.regular,
+        hours_ot125: b.hours.ot_125,
+        hours_ot150: b.hours.ot_150,
         days_worked: b.hours.days_worked,
         incomplete_days: b.hours.incomplete_days,
+        required_hours: b.rates.required_hours,
         base_salary: b.components.base_salary,
         extras: b.components.travel + b.components.meal_vouchers + b.components.recreation_monthly + b.components.bonuses,
         deductions: b.deductions.loans,
