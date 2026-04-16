@@ -1,5 +1,5 @@
 /**
- * Thin wrapper around `node-zklib` for the TIMEDOX TANDEM4 PRO.
+ * Thin wrapper around `zkteco-js` for the TIMEDOX TANDEM4 PRO.
  *
  * Known issues from the POC that we compensate for here:
  *   1. `getRealTimeLogs()` doesn't fire callbacks on this firmware → we poll.
@@ -18,7 +18,7 @@
  * when it wants to poll, does its work, and disconnects. Keeping the socket
  * open across minutes tends to make the device hang on this firmware.
  */
-const ZKLib = require('node-zklib');
+const ZKLib = require('zkteco-js');
 const log = require('./logger');
 
 class Clock {
@@ -41,7 +41,6 @@ class Clock {
 
   async getInfo() {
     return this._withConnection(async (zk) => {
-      // Counts, capacities. Safe/cheap call.
       const counts = await zk.getInfo().catch(() => null);
       return counts || null;
     });
@@ -50,13 +49,10 @@ class Clock {
   /**
    * Return the raw attendance array. Each record is roughly:
    *   { userSn: Number, deviceUserId: String, recordTime: Date, ip: String }
-   * Counts are inflated/inconsistent on this firmware — caller must dedup
-   * by `userSn`.
    */
   async getAttendances() {
     return this._withConnection(async (zk) => {
       const result = await zk.getAttendances();
-      // The library sometimes returns { data: [...] }, sometimes a raw array.
       if (Array.isArray(result)) return result;
       if (result && Array.isArray(result.data)) return result.data;
       return [];
@@ -64,8 +60,7 @@ class Clock {
   }
 
   /**
-   * Return the user list from the device. Unreliable for names on this
-   * firmware (Hebrew is mangled), but `userId` (Israeli ID) is accurate.
+   * Return the user list from the device.
    */
   async getUsers() {
     return this._withConnection(async (zk) => {
@@ -73,6 +68,37 @@ class Clock {
       if (Array.isArray(result)) return result;
       if (result && Array.isArray(result.data)) return result.data;
       return [];
+    });
+  }
+
+  /**
+   * Register a new user on the device.
+   * @param {number} uid - Internal device UID (auto-assign if 0)
+   * @param {string} userId - Israeli ID (9 digits)
+   * @param {string} name - Display name
+   * @param {string} password - Password (optional)
+   * @param {number} role - 0=user, 14=admin
+   * @param {number} cardno - Card number (optional)
+   */
+  async setUser(uid, userId, name, password = '', role = 0, cardno = 0) {
+    return this._withConnection(async (zk) => {
+      log.info(`setUser uid=${uid} userId=${userId} name=${name}`);
+      const result = await zk.setUser(uid, userId, name, password, role, cardno);
+      log.info(`setUser result: ${JSON.stringify(result)}`);
+      return result;
+    });
+  }
+
+  /**
+   * Delete a user from the device by UID.
+   * @param {number} uid - Internal device UID
+   */
+  async deleteUser(uid) {
+    return this._withConnection(async (zk) => {
+      log.info(`deleteUser uid=${uid}`);
+      const result = await zk.deleteUser(uid);
+      log.info(`deleteUser result: ${JSON.stringify(result)}`);
+      return result;
     });
   }
 }

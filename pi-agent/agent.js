@@ -209,15 +209,48 @@ async function pollCommands() {
     }
     for (const cmd of commands) {
       log.info('received command', { id: cmd.id, type: cmd.type });
-      // Phase 1: write-to-clock is not yet supported by node-zklib for this
-      // firmware. For now we only respond to `ping`; all other types are
-      // reported back as failed so the server stops re-sending them.
-      if (cmd.type === 'ping') {
-        await server.commandResult(cmd.id, 'confirmed', { result: { pong: true, at: new Date().toISOString() } });
-      } else {
-        await server.commandResult(cmd.id, 'failed', {
-          error: `command type '${cmd.type}' not supported by agent ${require('./package.json').version}`,
-        });
+      try {
+        if (cmd.type === 'ping') {
+          await server.commandResult(cmd.id, 'confirmed', { result: { pong: true, at: new Date().toISOString() } });
+
+        } else if (cmd.type === 'add_user') {
+          const { israeli_id, name, privilege = 0, password = '', cardno = 0 } = cmd.payload || {};
+          if (!israeli_id) {
+            await server.commandResult(cmd.id, 'failed', { error: 'missing israeli_id in payload' });
+            continue;
+          }
+          // Find next available UID by checking existing users
+          const users = await clock.getUsers();
+          const usedUids = users.map(u => u.uid || 0);
+          let uid = 1;
+          while (usedUids.includes(uid)) uid++;
+          // Use israeli_id as the device userId
+          await clock.setUser(uid, israeli_id, name || '', password || '', privilege, cardno);
+          log.info(`add_user OK: uid=${uid} userId=${israeli_id} name=${name}`);
+          await server.commandResult(cmd.id, 'confirmed', { result: { uid, israeli_id, name } });
+
+        } else if (cmd.type === 'delete_user') {
+          const { uid } = cmd.payload || {};
+          if (!uid) {
+            await server.commandResult(cmd.id, 'failed', { error: 'missing uid in payload' });
+            continue;
+          }
+          await clock.deleteUser(uid);
+          log.info(`delete_user OK: uid=${uid}`);
+          await server.commandResult(cmd.id, 'confirmed', { result: { uid } });
+
+        } else if (cmd.type === 'sync_time') {
+          // Future: await clock.setTime(new Date());
+          await server.commandResult(cmd.id, 'failed', { error: 'sync_time not yet implemented' });
+
+        } else {
+          await server.commandResult(cmd.id, 'failed', {
+            error: `command type '${cmd.type}' not supported by agent ${require('./package.json').version}`,
+          });
+        }
+      } catch (cmdErr) {
+        log.error(`command ${cmd.id} (${cmd.type}) failed`, { err: cmdErr.message });
+        await server.commandResult(cmd.id, 'failed', { error: cmdErr.message }).catch(() => {});
       }
     }
   } catch (err) {
