@@ -6,6 +6,8 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import OccupancyChart from './OccupancyChart';
 import { useBranch } from '../../hooks/useBranch';
+import { getClassroomColor } from '../../utils/classroomColors';
+import ChildDetailDialog from '../shared/ChildDetailDialog';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -15,6 +17,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [yearTab, setYearTab] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [selectedChild, setSelectedChild] = useState(null);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -152,20 +155,31 @@ export default function Dashboard() {
         {Object.entries(classrooms).map(([name, kids]) => {
           const capacity = data?.classroomCapacity?.find(c => c.name === name)?.capacity || 0;
           const count = Array.isArray(kids) ? kids.length : 0;
+          const cc = getClassroomColor(name);
           return (
-            <Card key={name} sx={{ borderTop: '5px solid #f59e0b' }}>
+            <Card key={name} sx={{ borderTop: `5px solid ${cc.primary}` }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, pb: 1, borderBottom: '1px solid #f1f5f9' }}>
-                  <Typography sx={{ fontWeight: 700 }}>{name}</Typography>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, pb: 1, borderBottom: `1px solid ${cc.border}` }}>
+                  <Typography sx={{ fontWeight: 700, color: cc.primary }}>{name}</Typography>
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <Typography sx={{ fontWeight: 800, color: '#f59e0b' }}>{count}</Typography>
+                    <Typography sx={{ fontWeight: 800, color: cc.primary }}>{count}</Typography>
                     {capacity > 0 && (
                       <Typography variant="caption" color="text.secondary">/ {capacity}</Typography>
                     )}
                   </Box>
                 </Box>
                 {Array.isArray(kids) && kids.map((k, i) => (
-                  <Box key={i} sx={{ p: 1, mb: 0.5, bgcolor: '#f8fafc', borderRadius: 2, fontSize: '0.9rem' }}>
+                  <Box
+                    key={i}
+                    onClick={() => k._id && setSelectedChild(k._id)}
+                    sx={{
+                      p: 1, mb: 0.5, bgcolor: cc.bg, borderRadius: 2, fontSize: '0.9rem',
+                      cursor: k._id ? 'pointer' : 'default',
+                      borderRight: `3px solid ${cc.border}`,
+                      '&:hover': k._id ? { bgcolor: cc.border, transform: 'translateX(-2px)' } : {},
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
                     {k.child_name || '—'}
                   </Box>
                 ))}
@@ -202,6 +216,12 @@ export default function Dashboard() {
           ))}
         </>
       )}
+      <ChildDetailDialog
+        open={!!selectedChild}
+        childId={selectedChild}
+        onClose={() => setSelectedChild(null)}
+        onChanged={() => {}}
+      />
     </Box>
   );
 }
