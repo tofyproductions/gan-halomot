@@ -10,6 +10,9 @@ import EmailIcon from '@mui/icons-material/Email';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import MedicalServicesIcon from '@mui/icons-material/MedicalServices';
 import EditIcon from '@mui/icons-material/Edit';
+import DescriptionIcon from '@mui/icons-material/Description';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
@@ -236,20 +239,23 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
               </CardContent>
             </Card>
 
-            {/* Registration status */}
+            {/* Registration status + contracts */}
             {registration && (
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Chip
-                  label={registration.agreement_signed ? 'חוזה חתום' : 'ממתין לחתימה'}
-                  size="small"
-                  color={registration.agreement_signed ? 'success' : 'warning'}
-                  variant="outlined"
-                />
-                <Chip
-                  label={`סטטוס: ${registration.status}`}
-                  size="small"
-                  variant="outlined"
-                />
+              <Stack spacing={1.5}>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Chip
+                    label={registration.agreement_signed ? 'חוזה חתום' : 'ממתין לחתימה'}
+                    size="small"
+                    color={registration.agreement_signed ? 'success' : 'warning'}
+                    variant="outlined"
+                  />
+                  <Chip
+                    label={`סטטוס: ${registration.status}`}
+                    size="small"
+                    variant="outlined"
+                  />
+                </Stack>
+                <ContractSection registrationId={registration._id} />
               </Stack>
             )}
           </Stack>
@@ -271,5 +277,81 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
         )}
       </DialogActions>
     </Dialog>
+  );
+}
+
+function ContractSection({ registrationId }) {
+  const [contracts, setContracts] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (!registrationId) return;
+    api.get(`/contracts?registration_id=${registrationId}`)
+      .then(res => setContracts(res.data.contracts || []))
+      .catch(() => {});
+  }, [registrationId]);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result.split(',')[1];
+        await api.post('/contracts/upload', {
+          registration_id: registrationId,
+          type: 'enrollment',
+          doc_type: 'enrollment_contract',
+          file_name: file.name,
+          file_data: base64,
+          file_mimetype: file.type || 'application/pdf',
+        });
+        toast.success('חוזה הועלה בהצלחה');
+        const res = await api.get(`/contracts?registration_id=${registrationId}`);
+        setContracts(res.data.contracts || []);
+        setUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch {
+      toast.error('שגיאה בהעלאת חוזה');
+      setUploading(false);
+    }
+  };
+
+  return (
+    <Box>
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+        <DescriptionIcon fontSize="small" color="action" />
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>חוזים ומסמכים</Typography>
+        <Button component="label" size="small" startIcon={<UploadFileIcon />} disabled={uploading}
+          sx={{ fontSize: '0.75rem' }}>
+          {uploading ? 'מעלה...' : 'העלה חוזה'}
+          <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleUpload} />
+        </Button>
+      </Stack>
+      {contracts.length > 0 ? (
+        <Stack spacing={0.5}>
+          {contracts.map(c => (
+            <Stack key={c._id} direction="row" alignItems="center" spacing={1}
+              sx={{ pl: 1, py: 0.3, borderRadius: 1, '&:hover': { bgcolor: '#f8fafc' } }}>
+              <DescriptionIcon fontSize="small" sx={{ color: '#7c3aed' }} />
+              <Typography variant="body2" sx={{ flex: 1 }}>{c.file_name}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(c.created_at).toLocaleDateString('he-IL')}
+              </Typography>
+              <Button size="small" href={c.file_url} target="_blank" startIcon={<VisibilityIcon />}
+                sx={{ fontSize: '0.7rem', minWidth: 'auto' }}>
+                צפה
+              </Button>
+            </Stack>
+          ))}
+        </Stack>
+      ) : (
+        <Typography variant="caption" color="text.secondary" sx={{ pl: 1 }}>
+          אין חוזים. לחץ "העלה חוזה" כדי להוסיף.
+        </Typography>
+      )}
+    </Box>
   );
 }

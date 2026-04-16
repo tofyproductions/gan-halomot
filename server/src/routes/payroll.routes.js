@@ -29,4 +29,9 @@ router.get('/salary-summary',                  c.salarySummary);
 router.post('/manual-punches',                 requireRole('system_admin', 'branch_manager'), c.createManualPunches);
 router.delete('/punches/:id',                  requireRole('system_admin', 'branch_manager'), c.deletePunch);
 
+// Employee self-service (any authenticated user)
+router.get('/my-salary-preview',               c.mySalaryPreview);
+router.get('/my-punches',                      c.myPunches);
+router.get('/my-payslips',                     c.myPayslips);
+
 module.exports = router;

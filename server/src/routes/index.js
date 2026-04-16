@@ -15,6 +15,8 @@ router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
 // Payroll (TIMEDOX replacement) — CRUD for Employee model + attendance
 router.use('/payroll', require('./payroll.routes'));
+// Employee requests (vacation, sick leave)
+router.use('/employee-requests', require('./employeeRequests.routes'));
 
 // All other routes use optional auth (backward compatible - works without login too)
 router.use(optionalAuth);

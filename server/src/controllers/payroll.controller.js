@@ -665,6 +665,113 @@ async function salarySummary(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- Employee self-service endpoints ---
+
+/**
+ * GET /api/payroll/my-salary-preview
+ * Returns salary preview for the logged-in employee (current month)
+ */
+async function mySalaryPreview(req, res, next) {
+  try {
+    const emp = await Employee.findOne({ israeli_id: req.user.id_number || '', is_active: true }).lean()
+      || await Employee.findOne({ full_name: { $regex: new RegExp(`^${(req.user.full_name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, is_active: true }).lean();
+
+    if (!emp) {
+      return res.json({ base_salary: 0, overtime: 0, travel: 0, total: 0, loans: 0, message: 'לא נמצא עובד מקושר' });
+    }
+
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const [y, m] = month.split('-').map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
+    const to = new Date(Date.UTC(y, m, 2, 0, 0, 0));
+
+    const punches = await Punch.find({
+      employee_id: emp._id,
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    const b = calculateMonthlySalary(emp, punches, month);
+
+    res.json({
+      base_salary: Math.round(b.components.base_salary),
+      overtime: Math.round((b.components.ot_125 || 0) + (b.components.ot_150 || 0)),
+      travel: Math.round(b.components.travel || 0),
+      meals: Math.round(b.components.meal_vouchers || 0),
+      bonuses: Math.round(b.components.bonuses || 0),
+      loans: Math.round(b.deductions.loans || 0),
+      total: Math.round(b.estimated_total),
+      hours_total: Math.round(b.hours.total * 100) / 100,
+      days_worked: b.hours.days_worked,
+      month,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/my-punches?month=YYYY-MM
+ * Returns punches for the logged-in employee
+ */
+async function myPunches(req, res, next) {
+  try {
+    const month = req.query.month;
+    if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
+
+    const emp = await Employee.findOne({ israeli_id: req.user.id_number || '', is_active: true }).lean()
+      || await Employee.findOne({ full_name: { $regex: new RegExp(`^${(req.user.full_name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, is_active: true }).lean();
+
+    if (!emp) {
+      return res.json({ punches: [] });
+    }
+
+    const [y, m] = month.split('-').map(Number);
+    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
+    const to = new Date(Date.UTC(y, m, 2, 0, 0, 0));
+
+    const rawPunches = await Punch.find({
+      employee_id: emp._id,
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    // Group into pairs (in/out)
+    const dayMap = {};
+    for (const p of rawPunches) {
+      const d = new Date(p.timestamp);
+      const dateStr = d.toLocaleDateString('he-IL', { timeZone: IL_TZ });
+      if (!dayMap[dateStr]) dayMap[dateStr] = [];
+      dayMap[dateStr].push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
+    }
+
+    const punches = Object.entries(dayMap).map(([date, times]) => {
+      const inTime = times[0] || null;
+      const outTime = times.length >= 2 ? times[times.length - 1] : null;
+      let hours = null;
+      if (inTime && outTime && times.length >= 2) {
+        const [h1, m1] = inTime.split(':').map(Number);
+        const [h2, m2] = outTime.split(':').map(Number);
+        hours = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
+        hours = Math.round(hours * 100) / 100;
+      }
+      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null };
+    });
+
+    res.json({ punches, month, employee_name: emp.full_name });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/my-payslips
+ * Returns payslip history for the logged-in employee (placeholder — returns empty for now)
+ */
+async function myPayslips(req, res, next) {
+  try {
+    // Payslips will be populated when the payroll finalization feature is built
+    res.json({ payslips: [] });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listEmployees,
   getEmployee,
@@ -679,4 +786,7 @@ module.exports = {
   salarySummary,
   createManualPunches,
   deletePunch,
+  mySalaryPreview,
+  myPunches,
+  myPayslips,
 };
