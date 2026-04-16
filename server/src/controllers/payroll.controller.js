@@ -253,6 +253,34 @@ async function removeEmployee(req, res, next) {
     // Soft delete so historical punches/attendance still reference something.
     emp.is_active = false;
     await emp.save();
+
+    // Deactivate User account
+    if (emp.user_id) {
+      await User.findByIdAndUpdate(emp.user_id, { is_active: false });
+    }
+
+    // Queue delete_user on all clocks
+    const normalizedId = (emp.israeli_id || '').replace(/\D/g, '').padStart(9, '0');
+    if (normalizedId.length === 9 && normalizedId !== '000000000') {
+      try {
+        const clockBranches = await Branch.find({ clock_ip: { $ne: null, $ne: '' } }).select('_id clock_users').lean();
+        for (const branch of clockBranches) {
+          // Find the UID on this branch's clock
+          const clockUser = (branch.clock_users || []).find(u => u.user_id === normalizedId);
+          if (clockUser) {
+            await AgentCommand.create({
+              branch_id: branch._id,
+              type: 'delete_user',
+              payload: { uid: clockUser.uid, israeli_id: normalizedId, name: emp.full_name },
+              status: 'pending',
+            });
+          }
+        }
+      } catch (cmdErr) {
+        console.error('Auto-queue delete_user failed:', cmdErr.message);
+      }
+    }
+
     res.json({ ok: true, id: req.params.id });
   } catch (err) { next(err); }
 }
