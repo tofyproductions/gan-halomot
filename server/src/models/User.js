@@ -20,6 +20,14 @@ const userSchema = new mongoose.Schema({
   bank_number: { type: String, default: '' },
   start_date: { type: Date, default: null },
   is_active: { type: Boolean, default: true },
+  webauthn_credentials: [{
+    credential_id: { type: String, required: true },
+    public_key: { type: String, required: true },
+    counter: { type: Number, default: 0 },
+    device_name: { type: String, default: 'מכשיר' },
+    created_at: { type: Date, default: Date.now },
+  }],
+  webauthn_challenge: { type: String, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ branch_id: 1, role: 1 });

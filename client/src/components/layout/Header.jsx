@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Select, IconButton, Tooltip, Chip, Divider } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import DashboardIcon from '@mui/icons-material/Dashboard';
@@ -17,6 +17,9 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
+import { toast } from 'react-toastify';
+import { startRegistration } from '@simplewebauthn/browser';
+import api from '../../api/client';
 
 const STORAGE_KEY = 'ganhalomot_nav_order';
 
@@ -84,6 +87,19 @@ export default function Header() {
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin } = useAuth();
   const [navGroups, setNavGroups] = useState(getOrderedGroups());
+
+  const handleSetupBiometric = useCallback(async () => {
+    try {
+      const optionsRes = await api.post('/auth/webauthn/register/options');
+      const credential = await startRegistration({ optionsJSON: optionsRes.data });
+      await api.post('/auth/webauthn/register/verify', { credential });
+      localStorage.setItem('gan_biometric_user_id', user.id);
+      toast.success('כניסה ביומטרית הוגדרה בהצלחה!');
+    } catch (err) {
+      if (err.name === 'NotAllowedError') return; // user cancelled
+      toast.error(err.response?.data?.error || 'שגיאה בהגדרת ביומטרי');
+    }
+  }, [user]);
   const [dragGroup, setDragGroup] = useState(null);
 
   const handleDragStart = (groupLabel) => setDragGroup(groupLabel);
@@ -231,6 +247,11 @@ export default function Header() {
                   border: '1px solid #e2e8f0',
                 }}
               />
+              <Tooltip title="הגדר כניסה ביומטרית">
+                <IconButton size="small" onClick={handleSetupBiometric} sx={{ color: '#7c3aed' }}>
+                  <FingerprintIcon sx={{ fontSize: '1rem' }} />
+                </IconButton>
+              </Tooltip>
               <Tooltip title="התנתק">
                 <IconButton size="small" onClick={logout} sx={{ color: 'text.secondary' }}>
                   <LogoutIcon sx={{ fontSize: '1rem' }} />

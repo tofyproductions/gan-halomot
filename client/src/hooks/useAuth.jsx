@@ -19,8 +19,8 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = async (full_name, id_number) => {
-    const res = await api.post('/auth/login', { full_name, id_number });
+  const login = async (full_name, id_number, rememberMe = false) => {
+    const res = await api.post('/auth/login', { full_name, id_number, rememberMe });
     localStorage.setItem('token', res.data.token);
     setUser(res.data.user);
     if (res.data.user.branch_id) {
