@@ -10,6 +10,9 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import DownloadIcon from '@mui/icons-material/Download';
+import DescriptionIcon from '@mui/icons-material/Description';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatCurrency } from '../../utils/hebrewYear';
@@ -528,6 +531,13 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         )}
       </DialogContent>
 
+      {/* Contracts section */}
+      {emp && (
+        <Box sx={{ px: 3, pb: 2 }}>
+          <EmployeeContracts employeeId={employeeId} />
+        </Box>
+      )}
+
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
@@ -561,5 +571,74 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         </DialogActions>
       </Dialog>
     </Dialog>
+  );
+}
+
+function EmployeeContracts({ employeeId }) {
+  const [contracts, setContracts] = useState([]);
+  const [uploading, setUploading] = useState(false);
+
+  const fetchContracts = useCallback(() => {
+    if (!employeeId) return;
+    api.get(`/contracts?employee_id=${employeeId}`)
+      .then(res => setContracts(res.data.contracts || []))
+      .catch(() => {});
+  }, [employeeId]);
+
+  useEffect(() => { fetchContracts(); }, [fetchContracts]);
+
+  const handleUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        await api.post('/contracts/upload', {
+          employee_id: employeeId,
+          type: 'employment',
+          doc_type: 'employment_contract',
+          file_name: file.name,
+          file_data: reader.result.split(',')[1],
+          file_mimetype: file.type || 'application/pdf',
+        });
+        fetchContracts();
+      } catch { /* ignore */ }
+      setUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <Box>
+      <Divider sx={{ mb: 1.5 }} />
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+        <DescriptionIcon fontSize="small" />
+        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>חוזים ומסמכים</Typography>
+        <Button component="label" size="small" startIcon={<UploadFileIcon />} disabled={uploading}
+          sx={{ fontSize: '0.75rem' }}>
+          {uploading ? 'מעלה...' : 'העלה מסמך'}
+          <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleUpload} />
+        </Button>
+      </Stack>
+      {contracts.length > 0 ? (
+        <Stack spacing={0.5}>
+          {contracts.map(c => (
+            <Stack key={c._id} direction="row" alignItems="center" spacing={1}
+              sx={{ py: 0.3, '&:hover': { bgcolor: '#f8fafc' }, borderRadius: 1 }}>
+              <DescriptionIcon fontSize="small" sx={{ color: '#7c3aed' }} />
+              <Typography variant="body2" sx={{ flex: 1 }}>{c.file_name}</Typography>
+              <Typography variant="caption" color="text.secondary">
+                {new Date(c.created_at).toLocaleDateString('he-IL')}
+              </Typography>
+              <Button size="small" href={c.file_url} target="_blank" startIcon={<VisibilityIcon />}
+                sx={{ fontSize: '0.7rem' }}>צפה</Button>
+            </Stack>
+          ))}
+        </Stack>
+      ) : (
+        <Typography variant="caption" color="text.secondary">אין מסמכים. לחץ "העלה מסמך" כדי להוסיף.</Typography>
+      )}
+    </Box>
   );
 }

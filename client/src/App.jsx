@@ -26,6 +26,7 @@ import MyPayslips from './components/employee-portal/MyPayslips';
 import MyDocuments from './components/employee-portal/MyDocuments';
 import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
+import RequestsManager from './components/employees/RequestsManager';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Route path="my-attendance" element={<MyAttendance />} />
         <Route path="my-updates" element={<Updates />} />
 
+        <Route path="employee-requests" element={<RequestsManager />} />
         <Route path="salary-requests" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager']}>
             <SalaryRequests />

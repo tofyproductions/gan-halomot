@@ -19,6 +19,7 @@ import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import DescriptionIcon from '@mui/icons-material/Description';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import NotificationsIcon from '@mui/icons-material/Notifications';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'react-toastify';
@@ -44,6 +45,7 @@ const NAV_GROUPS = [
       { label: 'החתמות', path: '/attendance', icon: FingerprintIcon, roles: ['system_admin', 'branch_manager'] },
       { label: 'שכר', path: '/salary-table', icon: PaymentsIcon, roles: ['system_admin', 'accountant'] },
       { label: 'חופשות', path: '/holidays', icon: EventIcon, roles: ['system_admin', 'branch_manager'] },
+      { label: 'בקשות', path: '/employee-requests', icon: AssignmentIcon, roles: ['system_admin', 'branch_manager'] },
     ],
   },
   {

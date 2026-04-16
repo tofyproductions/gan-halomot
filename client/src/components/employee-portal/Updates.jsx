@@ -23,6 +23,7 @@ export default function Updates() {
   const [vacationDialog, setVacationDialog] = useState(false);
   const [sickDialog, setSickDialog] = useState(false);
   const [form, setForm] = useState({ from_date: '', to_date: '', reason: '' });
+  const [medicalFile, setMedicalFile] = useState(null);
 
   const fetchRequests = () => {
     api.get('/employee-requests/my')
@@ -50,17 +51,33 @@ export default function Updates() {
 
   const handleSubmitSick = async () => {
     try {
-      await api.post('/employee-requests', {
+      const payload = {
         type: 'sick',
         from_date: form.from_date,
         to_date: form.to_date,
         reason: form.reason,
-      });
+      };
+      if (medicalFile) {
+        payload.medical_file_data = medicalFile.data;
+        payload.medical_file_name = medicalFile.name;
+      }
+      await api.post('/employee-requests', payload);
       toast.success('דיווח מחלה נשלח');
       setSickDialog(false);
       setForm({ from_date: '', to_date: '', reason: '' });
+      setMedicalFile(null);
       fetchRequests();
     } catch { toast.error('שגיאה בשליחה'); }
+  };
+
+  const handleMedicalFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setMedicalFile({ name: file.name, data: reader.result.split(',')[1] });
+    };
+    reader.readAsDataURL(file);
   };
 
   const vacationRequests = requests.filter(r => r.type === 'vacation');
@@ -177,8 +194,12 @@ export default function Updates() {
               value={form.from_date} onChange={e => setForm(p => ({ ...p, from_date: e.target.value }))} />
             <TextField label="עד תאריך" type="date" InputLabelProps={{ shrink: true }}
               value={form.to_date} onChange={e => setForm(p => ({ ...p, to_date: e.target.value }))} />
-            <TextField label="הערות" multiline minRows={2} placeholder="אופציונלי - ניתן לצרף אישור רפואי בהמשך"
+            <TextField label="הערות" multiline minRows={2} placeholder="אופציונלי"
               value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
+            <Button component="label" variant="outlined" size="small">
+              {medicalFile ? `צורף: ${medicalFile.name}` : 'צרף אישור רפואי (PDF / תמונה)'}
+              <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleMedicalFile} />
+            </Button>
           </Stack>
         </DialogContent>
         <DialogActions>
