@@ -80,17 +80,33 @@ export default function AttendanceMonitor() {
       </TableCell>
       {days.map(d => {
         const day = block.days[d];
-        if (!day) return <TableCell key={d} align="center" sx={{ color: 'text.disabled', fontSize: '0.7rem' }}>—</TableCell>;
+        if (!day) return <TableCell key={d} align="center" sx={{ p: 0.5 }}>
+          <Box sx={{ width: 36, height: 36, mx: 'auto', borderRadius: 1, bgcolor: '#f8fafc' }} />
+        </TableCell>;
+        const bgColor = day.incomplete ? '#fef3c7' : day.total_hours >= 8 ? '#d1fae5' : '#e0f2fe';
+        const textColor = day.incomplete ? '#92400e' : day.total_hours >= 8 ? '#065f46' : '#1e40af';
         return (
-          <TableCell key={d} align="center" sx={{ fontSize: '0.72rem', lineHeight: 1.2, py: 0.5, position: 'relative' }}>
-            <Box sx={{ fontWeight: 700, color: day.incomplete ? 'warning.main' : 'success.dark' }}>
-              {day.total_hours || '?'}h
-              {day.incomplete && <WarningIcon sx={{ fontSize: 10, ml: 0.2 }} />}
+          <Tooltip key={d} title={
+            <Box dir="ltr" sx={{ textAlign: 'center', fontSize: '0.8rem' }}>
+              <div><strong>{day.first_in || '?'} — {day.last_out || '?'}</strong></div>
+              <div>{day.punch_count} החתמות • {day.sessions.length} סשנים</div>
+              {day.incomplete && <div style={{color:'#fbbf24'}}>חסרה החתמה</div>}
             </Box>
-            <Box sx={{ fontSize: '0.6rem', color: 'text.secondary', direction: 'ltr' }}>
-              {day.first_in || '?'}–{day.last_out || (day.incomplete ? '?' : day.first_in)}
-            </Box>
-          </TableCell>
+          }>
+            <TableCell align="center" sx={{ p: 0.5, cursor: 'pointer' }}>
+              <Box sx={{
+                width: 40, mx: 'auto', py: 0.4, borderRadius: 1.5,
+                bgcolor: bgColor, color: textColor,
+                fontWeight: 800, fontSize: '0.72rem', lineHeight: 1.3,
+                textAlign: 'center',
+              }}>
+                {day.total_hours}
+                <Box sx={{ fontSize: '0.58rem', fontWeight: 600, opacity: 0.8, direction: 'ltr' }}>
+                  {day.first_in || '?'}
+                </Box>
+              </Box>
+            </TableCell>
+          </Tooltip>
         );
       })}
       <TableCell align="center" sx={{

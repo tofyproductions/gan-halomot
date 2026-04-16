@@ -134,9 +134,8 @@ export default function SalaryTable() {
         </Grid>
       )}
 
-      <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
-        <strong>חישוב אוטומטי — גרסה ראשונה.</strong> לא כולל ניכויי מס הכנסה, ביטוח לאומי, או פנסיה.
-        שעות רגילות: 0–8/יום. שע״נ 125%: 8–10/יום. שע״נ 150%: מעל 10/יום. עובדים גלובליים מקבלים שכר מלא ללא קשר לשעות בפועל.
+      <Alert severity="info" icon={false} sx={{ mb: 2, py: 0.5, bgcolor: 'info.light', color: 'info.dark', fontSize: '0.78rem' }}>
+        שעות רגילות: 0–8/יום • שע״נ 125%: 8–10 • 150%: מעל 10 • גלובליים: שכר יחסי אם לא הגיעו לשעות חובה • לחץ על שורה לפרטים
       </Alert>
 
       <TableContainer component={Paper} sx={{ borderRadius: 3 }}>
