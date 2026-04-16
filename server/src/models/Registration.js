@@ -11,6 +11,8 @@ const registrationSchema = new mongoose.Schema({
   parent_phone: { type: String, default: null },
   parent_email: { type: String, default: null },
   monthly_fee: { type: Number, required: true },
+  fee_effective_from: { type: String, default: null },    // YYYY-MM: new fee applies from this month
+  previous_monthly_fee: { type: Number, default: null },  // the old fee before the change
   registration_fee: { type: Number, default: 0 },
   start_date: { type: Date, required: true },
   end_date: { type: Date, required: true },

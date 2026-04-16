@@ -36,7 +36,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
   const [registration, setRegistration] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ monthly_fee: '', phone: '', email: '', medical_alerts: '' });
+  const [editForm, setEditForm] = useState({ monthly_fee: '', phone: '', email: '', medical_alerts: '', fee_effective_from: '' });
 
   useEffect(() => {
     if (!open || !childId) return;
@@ -49,11 +49,15 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
         const reg = res.data.registration;
         setChild(c);
         setRegistration(reg);
+        // Default effective month = current month
+        const now = new Date();
+        const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         setEditForm({
           monthly_fee: String(reg?.monthly_fee || ''),
           phone: c.phone || reg?.parent_phone || '',
           email: c.email || reg?.parent_email || '',
           medical_alerts: c.medical_alerts || '',
+          fee_effective_from: curMonth,
         });
       })
       .catch(err => {
@@ -75,6 +79,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
       if (registration && String(registration.monthly_fee) !== editForm.monthly_fee) {
         await api.put(`/registrations/${registration._id || registration.id}`, {
           monthly_fee: Number(editForm.monthly_fee) || 0,
+          fee_effective_from: editForm.fee_effective_from || null,
         });
       }
       toast.success('פרטים עודכנו');
@@ -192,13 +197,24 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                   תשלום
                 </Typography>
                 {editing ? (
-                  <TextField
-                    label="תשלום חודשי" type="number" size="small" fullWidth
-                    value={editForm.monthly_fee}
-                    onChange={e => setEditForm({ ...editForm, monthly_fee: e.target.value })}
-                    InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-                    helperText="השינוי יחול על כל החודשים מהרגע הזה ואילך"
-                  />
+                  <Stack spacing={1.5}>
+                    <TextField
+                      label="תשלום חודשי חדש" type="number" size="small" fullWidth
+                      value={editForm.monthly_fee}
+                      onChange={e => setEditForm({ ...editForm, monthly_fee: e.target.value })}
+                      InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                    />
+                    <TextField
+                      label="החל מחודש"
+                      type="month"
+                      size="small"
+                      fullWidth
+                      value={editForm.fee_effective_from}
+                      onChange={e => setEditForm({ ...editForm, fee_effective_from: e.target.value })}
+                      InputLabelProps={{ shrink: true }}
+                      helperText="השינוי יחול מהחודש שנבחר והלאה, לא רטרואקטיבית"
+                    />
+                  </Stack>
                 ) : (
                   <Grid container spacing={1}>
                     <Grid size={{ xs: 4 }}>

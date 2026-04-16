@@ -12,7 +12,7 @@
 
 const CLASS_COLORS = [
   { match: /בוגרים/,   label: 'בוגרים',   primary: '#1e40af', bg: '#dbeafe', border: '#93c5fd' },
-  { match: /צעירים/,   label: 'צעירים',   primary: '#3b82f6', bg: '#e0f2fe', border: '#7dd3fc' },
+  { match: /צעירים/,   label: 'צעירים',   primary: '#60a5fa', bg: '#eff6ff', border: '#bfdbfe' },
   { match: /תינוק/,    label: 'תינוקייה', primary: '#06b6d4', bg: '#ecfeff', border: '#67e8f9' },
 ];
 const DEFAULT_COLOR = { primary: '#64748b', bg: '#f1f5f9', border: '#cbd5e1' };

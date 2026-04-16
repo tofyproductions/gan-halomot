@@ -16,6 +16,8 @@ import { useAcademicYear } from '../../hooks/useAcademicYear';
 import YearSelector from '../shared/YearSelector';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
+import { getClassroomColor } from '../../utils/classroomColors';
+import ChildDetailDialog from '../shared/ChildDetailDialog';
 
 const MONTH_LABELS = [
   'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳', 'ינו׳', 'פבר׳',
@@ -38,12 +40,15 @@ export default function CollectionsTable() {
   // Receipt dialog state
   const [dialog, setDialog] = useState({
     open: false, regId: null, monthNum: null,
-    receipt: '', expected: 0, childName: '',
+    receipt: '', notes: '', expected: 0, childName: '',
     duplicates: null, saving: false,
   });
 
   // Discount dialog
   const [discountDialog, setDiscountDialog] = useState({ open: false });
+
+  // Child detail dialog
+  const [selectedChild, setSelectedChild] = useState(null);
   const [discounts, setDiscounts] = useState([]);
   const [newDiscount, setNewDiscount] = useState({
     scope: 'child', registration_id: '', classroom_id: '',
@@ -131,37 +136,39 @@ export default function CollectionsTable() {
   const handleCellClick = (regId, monthNum, receipt, expected, childName, notes) => {
     setDialog({
       open: true, regId, monthNum,
-      receipt: receipt || '', expected, childName,
-      duplicates: null, saving: false, notes: notes || null,
+      receipt: receipt || '', notes: notes || '',
+      expected, childName,
+      duplicates: null, saving: false,
     });
   };
 
   // Save receipt (with duplicate handling)
   const handleSaveReceipt = async (force = false) => {
-    const { regId, monthNum, receipt } = dialog;
+    const { regId, monthNum, receipt, notes } = dialog;
     const receipt_number = receipt.trim() || null;
+    const notesVal = (notes || '').trim() || null;
 
     setDialog(prev => ({ ...prev, saving: true }));
 
     try {
       await api.put(`/collections/${regId}/month/${monthNum}`, {
         receipt_number,
-        payment_status: receipt_number ? 'paid' : 'expected',
+        notes: notesVal,
+        payment_status: (receipt_number || notesVal) ? 'paid' : 'expected',
         force,
       });
-      setDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0, childName: '', duplicates: null, saving: false });
+      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
       fetchData();
-      if (receipt_number) toast.success('מספר קבלה נשמר');
+      if (receipt_number || notesVal) toast.success('נשמר בהצלחה');
     } catch (err) {
       if (err.response?.status === 409 && err.response?.data?.error === 'duplicate_receipt') {
-        // Show duplicate warning
         setDialog(prev => ({
           ...prev,
           saving: false,
           duplicates: err.response.data.duplicates,
         }));
       } else {
-        toast.error('שגיאה בשמירת קבלה');
+        toast.error('שגיאה בשמירה');
         setDialog(prev => ({ ...prev, saving: false }));
       }
     }
@@ -173,9 +180,10 @@ export default function CollectionsTable() {
     try {
       await api.put(`/collections/${regId}/month/${monthNum}`, {
         receipt_number: null,
+        notes: null,
         payment_status: 'expected',
       });
-      setDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0, childName: '', duplicates: null, saving: false });
+      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
       fetchData();
     } catch {
       toast.error('שגיאה במחיקת קבלה');
@@ -184,7 +192,7 @@ export default function CollectionsTable() {
 
   // Close dialog
   const closeDialog = () => {
-    setDialog({ open: false, regId: null, monthNum: null, receipt: '', expected: 0, childName: '', duplicates: null, saving: false });
+    setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
   };
 
   // Save exit month
@@ -507,6 +515,19 @@ export default function CollectionsTable() {
             disabled={dialog.saving}
           />
 
+          <TextField
+            fullWidth
+            label="הערות"
+            helperText="למשל: חסר שיק, חלקי, חסרה וכו׳"
+            value={dialog.notes}
+            onChange={(e) => setDialog(prev => ({ ...prev, notes: e.target.value }))}
+            placeholder="הוסף הערה..."
+            sx={{ mt: 2 }}
+            multiline
+            minRows={2}
+            disabled={dialog.saving}
+          />
+
           {/* Duplicate warning */}
           {dialog.duplicates && dialog.duplicates.length > 0 && (
             <Alert
@@ -537,9 +558,9 @@ export default function CollectionsTable() {
           )}
         </DialogContent>
         <DialogActions>
-          {dialog.receipt && !dialog.duplicates && (
+          {(dialog.receipt || dialog.notes) && !dialog.duplicates && (
             <Button color="error" onClick={handleRemoveReceipt} sx={{ ml: 'auto' }}>
-              הסר קבלה
+              נקה תא
             </Button>
           )}
           <Button onClick={closeDialog}>ביטול</Button>
@@ -567,20 +588,30 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
   return (
     <>
       {/* Classroom header */}
+      {(() => { const cc = getClassroomColor(classroom); return (
       <TableRow>
-        <TableCell colSpan={15} sx={{ bgcolor: '#eef2ff', fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0 }}>
-          <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700 }} />
+        <TableCell colSpan={15} sx={{ bgcolor: cc.bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0, borderRight: `4px solid ${cc.primary}` }}>
+          <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: cc.primary, color: '#fff' }} />
         </TableCell>
       </TableRow>
+      ); })()}
 
       {rows.map((row) => {
         const regId = row.registration_id;
+        const cc = getClassroomColor(classroom);
         const monthsMap = {};
         (row.months || []).forEach(m => { monthsMap[m.month] = m; });
 
         return (
-          <TableRow key={regId} hover>
-            <TableCell sx={{ fontWeight: 600, position: 'sticky', right: 0, bgcolor: 'background.paper', zIndex: 1 }}>
+          <TableRow key={regId} hover sx={{ '& td:first-of-type': { borderRight: `3px solid ${cc.border}` } }}>
+            <TableCell
+              sx={{
+                fontWeight: 600, position: 'sticky', right: 0, zIndex: 1,
+                bgcolor: cc.bg, cursor: 'pointer',
+                '&:hover': { bgcolor: cc.border },
+              }}
+              onClick={() => row.child_id && setSelectedChild(row.child_id)}
+            >
               {row.child_name}
             </TableCell>
             <TableCell align="center" sx={{
@@ -595,8 +626,10 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
               const expected = m.expected_amount || 0;
               const isBeforeStart = m.is_before_start || false;
               const receipt = m.receipt_number || '';
-              const isDupOverride = m.notes === 'duplicate_override';
+              const notes = m.notes || '';
+              const isDupOverride = m.is_duplicate_override === true;
               const cellSx = getCellSx(paid, expected, isBeforeStart);
+              const hasContent = !!(receipt || notes);
 
               return (
                 <TableCell
@@ -607,16 +640,23 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
                     cursor: !isBeforeStart && expected > 0 ? 'pointer' : 'default',
                     ...cellSx,
                     fontSize: '0.85rem',
-                    fontWeight: receipt ? 600 : 400,
+                    fontWeight: hasContent ? 600 : 400,
                     position: 'relative',
                   }}
                   onClick={() => {
                     if (!isBeforeStart && expected > 0) {
-                      onCellClick(regId, monthNum, receipt, expected, row.child_name, m.notes);
+                      onCellClick(regId, monthNum, receipt, expected, row.child_name, notes);
                     }
                   }}
                 >
-                  {receipt || (expected > 0 ? formatCurrency(expected) : '')}
+                  {hasContent ? (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
+                      {receipt && <span>{receipt}</span>}
+                      {notes && (
+                        <span style={{ fontSize: '0.7rem', fontWeight: 500, opacity: 0.85 }}>{notes}</span>
+                      )}
+                    </Box>
+                  ) : (expected > 0 ? formatCurrency(expected) : '')}
                   {isDupOverride && (
                     <Box
                       component="span"
@@ -665,6 +705,12 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
         ))}
         <TableCell />
       </TableRow>
+      <ChildDetailDialog
+        open={!!selectedChild}
+        childId={selectedChild}
+        onClose={() => setSelectedChild(null)}
+        onChanged={fetchData}
+      />
     </>
   );
 }
