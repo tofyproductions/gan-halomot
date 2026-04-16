@@ -13,6 +13,8 @@ const collectionMonthSchema = new mongoose.Schema({
   payment_date: { type: Date, default: null },
   is_prorated: { type: Boolean, default: false },
   notes: { type: String, default: null },
+  fee_override: { type: Number, default: null },
+  fee_override_reason: { type: String, default: null },
 }, { _id: true });
 
 const collectionSchema = new mongoose.Schema({

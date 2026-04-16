@@ -10,6 +10,8 @@ import PrintIcon from '@mui/icons-material/Print';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import DiscountIcon from '@mui/icons-material/LocalOffer';
 import DeleteIcon from '@mui/icons-material/Delete';
+import Tooltip from '@mui/material/Tooltip';
+import EditIcon from '@mui/icons-material/Edit';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
@@ -42,6 +44,8 @@ export default function CollectionsTable() {
     open: false, regId: null, monthNum: null,
     receipt: '', notes: '', expected: 0, childName: '',
     duplicates: null, saving: false,
+    feeOverride: '', feeOverrideReason: '',
+    hasFeeOverride: false, originalExpected: null,
   });
 
   // Discount dialog
@@ -133,20 +137,25 @@ export default function CollectionsTable() {
   }, [allRows]);
 
   // Open receipt dialog
-  const handleCellClick = (regId, monthNum, receipt, expected, childName, notes) => {
+  const handleCellClick = (regId, monthNum, receipt, expected, childName, notes, monthData) => {
     setDialog({
       open: true, regId, monthNum,
       receipt: receipt || '', notes: notes || '',
       expected, childName,
       duplicates: null, saving: false,
+      feeOverride: monthData?.has_fee_override ? String(monthData.expected_amount) : '',
+      feeOverrideReason: monthData?.fee_override_reason || '',
+      hasFeeOverride: monthData?.has_fee_override || false,
+      originalExpected: monthData?.original_expected || null,
     });
   };
 
   // Save receipt (with duplicate handling)
   const handleSaveReceipt = async (force = false) => {
-    const { regId, monthNum, receipt, notes } = dialog;
+    const { regId, monthNum, receipt, notes, feeOverride, feeOverrideReason } = dialog;
     const receipt_number = receipt.trim() || null;
     const notesVal = (notes || '').trim() || null;
+    const overrideVal = feeOverride !== '' ? parseFloat(feeOverride) : null;
 
     setDialog(prev => ({ ...prev, saving: true }));
 
@@ -156,8 +165,10 @@ export default function CollectionsTable() {
         notes: notesVal,
         payment_status: (receipt_number || notesVal) ? 'paid' : 'expected',
         force,
+        fee_override: overrideVal,
+        fee_override_reason: overrideVal != null ? (feeOverrideReason || null) : null,
       });
-      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
+      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false, feeOverride: '', feeOverrideReason: '', hasFeeOverride: false, originalExpected: null });
       fetchData();
       if (receipt_number || notesVal) toast.success('נשמר בהצלחה');
     } catch (err) {
@@ -183,7 +194,7 @@ export default function CollectionsTable() {
         notes: null,
         payment_status: 'expected',
       });
-      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
+      setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false, feeOverride: '', feeOverrideReason: '', hasFeeOverride: false, originalExpected: null });
       fetchData();
     } catch {
       toast.error('שגיאה במחיקת קבלה');
@@ -192,7 +203,7 @@ export default function CollectionsTable() {
 
   // Close dialog
   const closeDialog = () => {
-    setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false });
+    setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false, feeOverride: '', feeOverrideReason: '', hasFeeOverride: false, originalExpected: null });
   };
 
   // Save exit month
@@ -529,6 +540,50 @@ export default function CollectionsTable() {
             disabled={dialog.saving}
           />
 
+          {/* Fee Override Section */}
+          <Box sx={{ mt: 3, pt: 2, borderTop: '1px solid #e2e8f0' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <EditIcon fontSize="small" />
+              דריסת סכום צפוי
+            </Typography>
+            {dialog.hasFeeOverride && dialog.originalExpected != null && (
+              <Typography variant="caption" color="text.secondary" sx={{ mb: 1, display: 'block' }}>
+                סכום מקורי (לפני דריסה): {formatCurrency(dialog.originalExpected)}
+              </Typography>
+            )}
+            <Stack direction="row" spacing={1.5}>
+              <TextField
+                type="number"
+                label="סכום חדש"
+                value={dialog.feeOverride}
+                onChange={(e) => setDialog(prev => ({ ...prev, feeOverride: e.target.value }))}
+                placeholder={String(dialog.expected)}
+                size="small"
+                sx={{ width: 140 }}
+                inputProps={{ dir: 'ltr', min: 0 }}
+                disabled={dialog.saving}
+              />
+              <TextField
+                label="סיבה"
+                value={dialog.feeOverrideReason}
+                onChange={(e) => setDialog(prev => ({ ...prev, feeOverrideReason: e.target.value }))}
+                placeholder="הנחה אישית..."
+                size="small"
+                sx={{ flex: 1 }}
+                disabled={dialog.saving}
+              />
+              {dialog.feeOverride !== '' && (
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => setDialog(prev => ({ ...prev, feeOverride: '', feeOverrideReason: '', hasFeeOverride: false }))}
+                >
+                  הסר דריסה
+                </Button>
+              )}
+            </Stack>
+          </Box>
+
           {/* Duplicate warning */}
           {dialog.duplicates && dialog.duplicates.length > 0 && (
             <Alert
@@ -650,7 +705,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChi
                   }}
                   onClick={() => {
                     if (!isBeforeStart && expected > 0) {
-                      onCellClick(regId, monthNum, receipt, expected, row.child_name, notes);
+                      onCellClick(regId, monthNum, receipt, expected, row.child_name, notes, m);
                     }
                   }}
                 >
@@ -675,6 +730,22 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChi
                         bgcolor: '#f59e0b',
                       }}
                     />
+                  )}
+                  {m.has_fee_override && (
+                    <Tooltip title={`דריסה: ${m.fee_override_reason || 'ללא סיבה'}${m.original_expected != null ? ` (מקורי: ${m.original_expected}₪)` : ''}`} arrow>
+                      <Box
+                        component="span"
+                        sx={{
+                          position: 'absolute',
+                          top: 2,
+                          right: 4,
+                          width: 6,
+                          height: 6,
+                          borderRadius: '50%',
+                          bgcolor: '#8b5cf6',
+                        }}
+                      />
+                    </Tooltip>
                   )}
                 </TableCell>
               );

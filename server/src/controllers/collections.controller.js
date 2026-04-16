@@ -165,6 +165,13 @@ async function getAll(req, res, next) {
         const discount = expected > 0 ? calcDiscount(reg._id, classroomObjId, m, expected) : 0;
         expected = Math.max(0, expected - discount);
 
+        // Apply per-child-per-month fee override
+        const hasFeeOverride = existing.fee_override != null;
+        const originalExpected = hasFeeOverride ? expected : null;
+        if (hasFeeOverride) {
+          expected = existing.fee_override;
+        }
+
         // Get receipt - use existing, or check if it's a negative sibling receipt
         let receiptNumber = existing.receipt_number || null;
         let paymentStatus = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
@@ -186,6 +193,9 @@ async function getAll(req, res, next) {
           is_prorated: existing.is_prorated || false,
           is_before_start: isBeforeStart[m] || false,
           notes: existing.notes || null,
+          has_fee_override: hasFeeOverride,
+          fee_override_reason: existing.fee_override_reason || null,
+          original_expected: originalExpected,
         };
       });
 
@@ -233,7 +243,7 @@ async function getByRegistration(req, res, next) {
 async function updateMonth(req, res, next) {
   try {
     const { registrationId, monthIndex } = req.params;
-    const { receipt_number, paid_amount, payment_status, notes, force } = req.body;
+    const { receipt_number, paid_amount, payment_status, notes, force, fee_override, fee_override_reason } = req.body;
     const monthNum = parseInt(monthIndex);
 
     if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
@@ -357,6 +367,8 @@ async function updateMonth(req, res, next) {
       payment_status: payment_status || (receipt_number ? 'paid' : (existing?.payment_status || 'expected')),
       payment_date: receipt_number ? new Date() : (existing?.payment_date || null),
       notes: effectiveNotes,
+      fee_override: fee_override !== undefined ? fee_override : (existing?.fee_override || null),
+      fee_override_reason: fee_override_reason !== undefined ? fee_override_reason : (existing?.fee_override_reason || null),
     };
 
     if (existingIdx >= 0) {
