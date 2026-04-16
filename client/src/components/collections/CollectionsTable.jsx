@@ -346,6 +346,7 @@ export default function CollectionsTable() {
                 onCellClick={handleCellClick}
                 onExitMonth={handleExitMonth}
                 getCellSx={getCellSx}
+                onChildClick={(childId) => setSelectedChild(childId)}
               />
             ))}
 
@@ -571,12 +572,18 @@ export default function CollectionsTable() {
           )}
         </DialogActions>
       </Dialog>
+      <ChildDetailDialog
+        open={!!selectedChild}
+        childId={selectedChild}
+        onClose={() => setSelectedChild(null)}
+        onChanged={fetchData}
+      />
     </Box>
   );
 }
 
 /* Grouped rows for a classroom */
-function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
+function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChildClick }) {
   const subtotals = {};
   ACADEMIC_MONTHS.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -588,13 +595,11 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
   return (
     <>
       {/* Classroom header */}
-      {(() => { const cc = getClassroomColor(classroom); return (
       <TableRow>
-        <TableCell colSpan={15} sx={{ bgcolor: cc.bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0, borderRight: `4px solid ${cc.primary}` }}>
-          <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: cc.primary, color: '#fff' }} />
+        <TableCell colSpan={15} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
+          <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: getClassroomColor(classroom).primary, color: '#fff' }} />
         </TableCell>
       </TableRow>
-      ); })()}
 
       {rows.map((row) => {
         const regId = row.registration_id;
@@ -610,7 +615,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
                 bgcolor: cc.bg, cursor: 'pointer',
                 '&:hover': { bgcolor: cc.border },
               }}
-              onClick={() => row.child_id && setSelectedChild(row.child_id)}
+              onClick={() => row.child_id && onChildClick?.(row.child_id)}
             >
               {row.child_name}
             </TableCell>
@@ -705,12 +710,6 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx }) {
         ))}
         <TableCell />
       </TableRow>
-      <ChildDetailDialog
-        open={!!selectedChild}
-        childId={selectedChild}
-        onClose={() => setSelectedChild(null)}
-        onChanged={fetchData}
-      />
     </>
   );
 }
