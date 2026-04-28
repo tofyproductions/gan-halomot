@@ -9,6 +9,57 @@ async function getAll(req, res, next) {
   try {
     const { status, year } = req.query;
 
+    // Lazy migration: any reg signed AND with a submitted registration card
+    // but stuck on docs_uploaded/contract_signed gets advanced to completed,
+    // and its Child is created/reactivated. Lets old data heal automatically
+    // without needing a manual button click.
+    try {
+      const stuck = await Registration.find({
+        agreement_signed: true,
+        status: { $in: ['docs_uploaded', 'contract_signed'] },
+        'configuration.registration_card': { $exists: true, $ne: null },
+      });
+      for (const r of stuck) {
+        r.status = 'completed';
+        r.card_completed = true;
+        await r.save();
+        const academicYear = getAcademicYearStr(r.start_date)
+          || getAcademicYears().current.range;
+        const card = (r.configuration && r.configuration.registration_card) || {};
+        const existingChild = await Child.findOne({ registration_id: r._id });
+        const childPayload = {
+          child_name: r.child_name,
+          child_id_number: card.childIdNumber || null,
+          birth_date: r.child_birth_date,
+          classroom_id: r.classroom_id,
+          parent_name: r.parent_name,
+          parent_id_number: r.parent_id_number || card.parent1Id || null,
+          phone: r.parent_phone,
+          email: r.parent_email,
+          parent2_name: card.parent2Name || null,
+          parent2_id_number: card.parent2Id || null,
+          parent2_phone: card.parent2Phone || null,
+          parent2_email: card.parent2Email || null,
+          address: card.address || null,
+          medical_alerts: card.medicalInfo || (r.configuration && r.configuration.medical_alerts) || null,
+          allergies: card.allergies || null,
+          emergency_contact: card.emergencyContact || null,
+          emergency_phone: card.emergencyPhone || null,
+          notes: card.notes || null,
+          academic_year: academicYear,
+          is_active: true,
+        };
+        if (existingChild) {
+          Object.assign(existingChild, childPayload);
+          await existingChild.save();
+        } else {
+          await Child.create({ registration_id: r._id, ...childPayload });
+        }
+      }
+    } catch (migErr) {
+      console.error('Lazy completion migration failed:', migErr.message);
+    }
+
     let filter = { ...getBranchFilter(req) };
     if (status) filter.status = status;
 

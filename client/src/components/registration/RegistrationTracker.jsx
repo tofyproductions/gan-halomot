@@ -89,8 +89,8 @@ export default function RegistrationTracker() {
         { headers: { 'Content-Type': 'multipart/form-data' } }
       );
       toast.success('רישום סומן כהושלם');
-      refreshDocs();
-      setDocsDialog(prev => prev.reg ? { ...prev, reg: { ...prev.reg, status: 'completed', agreement_signed: true } } : prev);
+      setDocsDialog(prev => prev.reg ? { ...prev, reg: { ...prev.reg, status: 'completed', agreement_signed: true, card_completed: true } } : prev);
+      await refreshDocs();
     } catch {
       toast.error('שגיאה בסיום ידני');
     }
@@ -386,33 +386,39 @@ export default function RegistrationTracker() {
               הורדת חוזה
             </Button>
           </Stack>
-          <Button
-            component="label"
-            size="small"
-            variant="outlined"
-            startIcon={<UploadFileIcon />}
-            sx={{ mb: 2 }}
-          >
-            העלה חוזה ידני וסמן כהושלם
-            <input
-              type="file"
-              accept="application/pdf,image/*"
-              hidden
-              onChange={(e) => {
-                if (e.target.files?.[0]) handleFinalizeManual(e.target.files[0]);
-                e.target.value = '';
-              }}
-            />
-          </Button>
-          {docsDialog.reg?.status !== 'completed' && (
-            <Button
-              size="small"
-              variant="text"
-              sx={{ display: 'block', mb: 2 }}
-              onClick={() => handleFinalizeManual(null)}
-            >
-              סמן כהושלם ללא קובץ
-            </Button>
+          {docsDialog.reg?.status === 'completed' ? (
+            <Typography variant="caption" color="success.main" sx={{ display: 'block', mb: 2, fontWeight: 600 }}>
+              ✓ הרישום הושלם
+            </Typography>
+          ) : (
+            <>
+              <Button
+                component="label"
+                size="small"
+                variant="outlined"
+                startIcon={<UploadFileIcon />}
+                sx={{ mb: 1 }}
+              >
+                העלה חוזה ידני וסמן כהושלם
+                <input
+                  type="file"
+                  accept="application/pdf,image/*"
+                  hidden
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFinalizeManual(e.target.files[0]);
+                    e.target.value = '';
+                  }}
+                />
+              </Button>
+              <Button
+                size="small"
+                variant="text"
+                sx={{ display: 'block', mb: 2 }}
+                onClick={() => handleFinalizeManual(null)}
+              >
+                סמן כהושלם ללא קובץ
+              </Button>
+            </>
           )}
 
           <Divider sx={{ my: 2 }} />
