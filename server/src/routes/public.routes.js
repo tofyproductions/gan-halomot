@@ -12,6 +12,14 @@ router.get('/register/:token', publicController.getRegistrationForm);
 router.post('/register/:token/sign', publicController.submitSignature);
 
 // POST /api/public/register/:token/upload
-router.post('/register/:token/upload', upload.single('file'), publicController.uploadDocument);
+router.post(
+  '/register/:token/upload',
+  upload.fields([
+    { name: 'parentIdFile', maxCount: 1 },
+    { name: 'paymentProof', maxCount: 1 },
+    { name: 'file', maxCount: 1 },
+  ]),
+  publicController.uploadDocument
+);
 
 module.exports = router;

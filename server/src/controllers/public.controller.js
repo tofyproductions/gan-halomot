@@ -127,29 +127,64 @@ async function submitSignature(req, res, next) {
 async function uploadDocument(req, res, next) {
   try {
     const { token } = req.params;
-    const file = req.file;
-
-    if (!file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
 
     const registration = await Registration.findOne({ access_token: token });
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found or link expired' });
     }
 
-    const docType = req.body.doc_type || 'general';
-    const key = `documents/${registration.unique_id}/${docType}_${Date.now()}_${file.originalname}`;
-    await fileStorage.upload(file.buffer, key, file.mimetype);
+    // Persist registration-card form fields onto registration.configuration.
+    // The wizard sends them as multipart form fields alongside the files.
+    const CARD_FIELDS = [
+      'childFullName', 'childBirthDate', 'childIdNumber',
+      'parent1Name', 'parent1Id', 'parent1Phone', 'parent1Email',
+      'parent2Name', 'parent2Id', 'parent2Phone', 'parent2Email',
+      'address', 'medicalInfo', 'allergies',
+      'emergencyContact', 'emergencyPhone', 'notes',
+    ];
+    const card = {};
+    for (const f of CARD_FIELDS) {
+      if (req.body[f] !== undefined) card[f] = req.body[f];
+    }
+    const config = registration.configuration || {};
+    if (Object.keys(card).length > 0) {
+      config.registration_card = { ...(config.registration_card || {}), ...card };
+    }
+    if (card.medicalInfo) config.medical_alerts = card.medicalInfo;
+    registration.configuration = config;
 
-    const document = await Document.create({
-      registration_id: registration._id,
-      doc_type: docType,
-      file_name: file.originalname,
-      file_path: key,
-      mime_type: file.mimetype,
-      file_size_bytes: file.size,
-    });
+    // Collect uploaded files. multer.fields() returns req.files[fieldName] = [files].
+    const filesByField = req.files || {};
+    const filesToSave = [];
+    if (filesByField.parentIdFile?.[0]) {
+      filesToSave.push({ file: filesByField.parentIdFile[0], doc_type: 'id_copy' });
+    }
+    if (filesByField.paymentProof?.[0]) {
+      filesToSave.push({ file: filesByField.paymentProof[0], doc_type: 'payment_proof' });
+    }
+    if (filesByField.file?.[0]) {
+      const docType = req.body.doc_type || 'general';
+      filesToSave.push({ file: filesByField.file[0], doc_type: docType });
+    }
+
+    const savedDocs = [];
+    for (const { file, doc_type } of filesToSave) {
+      const key = `documents/${registration.unique_id}/${doc_type}_${Date.now()}_${file.originalname}`;
+      try {
+        await fileStorage.upload(file.buffer, key, file.mimetype);
+        const doc = await Document.create({
+          registration_id: registration._id,
+          doc_type,
+          file_name: file.originalname,
+          file_path: key,
+          mime_type: file.mimetype,
+          file_size_bytes: file.size,
+        });
+        savedDocs.push({ ...doc.toObject(), id: doc._id });
+      } catch (uploadErr) {
+        console.error(`Failed to upload ${doc_type}:`, uploadErr.message);
+      }
+    }
 
     const uploadedDocs = await Document.find({ registration_id: registration._id }).select('doc_type');
     const docTypes = uploadedDocs.map(d => d.doc_type);
@@ -160,6 +195,11 @@ async function uploadDocument(req, res, next) {
     if (bothDocsUploaded) {
       registration.card_completed = true;
       if (registration.status === 'contract_signed' || registration.status === 'docs_uploaded') {
+        registration.status = 'docs_uploaded';
+      }
+    } else if (Object.keys(card).length > 0) {
+      // Even without files, accepting card data advances status if signed.
+      if (registration.agreement_signed && registration.status === 'contract_signed') {
         registration.status = 'docs_uploaded';
       }
     }
@@ -177,7 +217,6 @@ async function uploadDocument(req, res, next) {
 
       const existingChild = await Child.findOne({ registration_id: registration._id });
       if (!existingChild) {
-        const config = registration.configuration || {};
         await Child.create({
           registration_id: registration._id,
           child_name: registration.child_name,
@@ -194,7 +233,7 @@ async function uploadDocument(req, res, next) {
     }
 
     res.status(201).json({
-      document: { ...document.toObject(), id: document._id },
+      documents: savedDocs,
       card_completed: bothDocsUploaded,
       registration_complete: isFullyComplete,
     });
