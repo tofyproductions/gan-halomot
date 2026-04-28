@@ -532,7 +532,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
       </DialogContent>
 
       {/* Contracts section */}
-      {emp && (
+      {employee && (
         <Box sx={{ px: 3, pb: 2 }}>
           <EmployeeContracts employeeId={employeeId} />
         </Box>
