@@ -27,12 +27,18 @@ async function getAll(req, res, next) {
       .lean();
 
     const [y1, y2] = targetYear.split('-').map(Number);
+    const acadStart = new Date(y1, 8, 1);   // Sep 1 of y1
+    const acadEnd = new Date(y2, 7, 31);    // Aug 31 of y2
 
     const filteredRegs = registrations.filter(r => {
       if (!r.start_date) return false;
       const startDate = new Date(r.start_date);
-      const acadEnd = new Date(y2, 7, 31);
-      return startDate <= acadEnd;
+      if (startDate > acadEnd) return false;
+      if (r.end_date) {
+        const endDate = new Date(r.end_date);
+        if (endDate < acadStart) return false;
+      }
+      return true;
     });
 
     // Get children for these registrations
