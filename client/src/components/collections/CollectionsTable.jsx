@@ -663,7 +663,7 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChi
         (row.months || []).forEach(m => { monthsMap[m.month] = m; });
 
         return (
-          <TableRow key={regId} hover sx={{ '& td:first-of-type': { borderRight: `3px solid ${cc.border}` }, '&:nth-of-type(odd) td': { bgcolor: `${cc.bg}44` } }}>
+          <TableRow key={regId} hover sx={{ '& td:first-of-type': { borderRight: `3px solid ${cc.border}` } }}>
             <TableCell
               sx={{
                 fontWeight: 600, position: 'sticky', right: 0, zIndex: 1,
