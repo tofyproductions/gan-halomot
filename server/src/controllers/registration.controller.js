@@ -9,15 +9,21 @@ async function getAll(req, res, next) {
   try {
     const { status, year } = req.query;
 
-    // Lazy migration: any reg signed AND with a submitted registration card
-    // but stuck on docs_uploaded/contract_signed gets advanced to completed,
-    // and its Child is created/reactivated. Lets old data heal automatically
-    // without needing a manual button click.
+    // Lazy migration: any signed reg that already advanced past contract
+    // signing (status=docs_uploaded) heals to completed; signed regs still
+    // on contract_signed advance only when card data is present. The signed
+    // signature on its own is treated as sufficient when the reg is on
+    // docs_uploaded — that status was reached only after the card flow ran.
     try {
       const stuck = await Registration.find({
         agreement_signed: true,
-        status: { $in: ['docs_uploaded', 'contract_signed'] },
-        'configuration.registration_card': { $exists: true, $ne: null },
+        $or: [
+          { status: 'docs_uploaded' },
+          {
+            status: 'contract_signed',
+            'configuration.registration_card': { $exists: true, $ne: null },
+          },
+        ],
       });
       for (const r of stuck) {
         r.status = 'completed';
