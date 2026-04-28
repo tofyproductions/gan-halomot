@@ -16,6 +16,34 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
+import html2pdf from 'html2pdf.js';
+
+async function renderHtmlToPdf(html, filename) {
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.right = '-10000px';
+  container.style.top = '0';
+  container.style.width = '900px';
+  container.dir = 'rtl';
+  container.innerHTML = html;
+  document.body.appendChild(container);
+  try {
+    await new Promise(r => setTimeout(r, 250));
+    await html2pdf()
+      .set({
+        margin: [10, 10, 10, 10],
+        filename: filename || 'contract.pdf',
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      })
+      .from(container)
+      .save();
+  } finally {
+    document.body.removeChild(container);
+  }
+}
 
 /**
  * ChildDetailDialog — view and edit details of a single child.
@@ -341,11 +369,13 @@ function ContractSection({ registrationId }) {
   const downloadVersion = async (versionId) => {
     try {
       const res = await api.get(`/registrations/contract-versions/${versionId}/download`);
-      if (res.data?.url) {
-        window.open(res.data.url, '_blank');
-      } else if (res.data?.html) {
-        const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' });
-        window.open(URL.createObjectURL(blob), '_blank');
+      if (res.data?.html) {
+        await renderHtmlToPdf(res.data.html, `חוזה_גרסה_${versionId}.pdf`);
+      } else if (res.data?.url) {
+        const a = document.createElement('a');
+        a.href = res.data.url;
+        a.download = `חוזה_גרסה_${versionId}.pdf`;
+        a.click();
       } else {
         toast.error('אין חוזה זמין');
       }
@@ -357,11 +387,13 @@ function ContractSection({ registrationId }) {
   const downloadActive = async () => {
     try {
       const res = await api.get(`/registrations/${registrationId}/contract-download`);
-      if (res.data?.url) {
-        window.open(res.data.url, '_blank');
-      } else if (res.data?.html) {
-        const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' });
-        window.open(URL.createObjectURL(blob), '_blank');
+      if (res.data?.html) {
+        await renderHtmlToPdf(res.data.html, 'חוזה.pdf');
+      } else if (res.data?.url) {
+        const a = document.createElement('a');
+        a.href = res.data.url;
+        a.download = 'חוזה.pdf';
+        a.click();
       } else {
         toast.error('אין חוזה זמין');
       }
