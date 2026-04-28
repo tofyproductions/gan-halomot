@@ -32,6 +32,12 @@ router.post('/:id/finalize-manual', upload.single('contract_file'), registration
 // GET /api/registration/:id/contract-download
 router.get('/:id/contract-download', registrationController.downloadContract);
 
+// GET /api/registration/:id/contract-versions
+router.get('/:id/contract-versions', registrationController.listContractVersions);
+
+// GET /api/registration/contract-versions/:versionId/download
+router.get('/contract-versions/:versionId/download', registrationController.downloadContractVersion);
+
 // DELETE /api/registration/:id
 router.delete('/:id', registrationController.remove);
 

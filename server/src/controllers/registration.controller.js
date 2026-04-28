@@ -1,4 +1,4 @@
-const { Registration, Classroom, Child, Archive, Collection } = require('../models');
+const { Registration, Classroom, Child, Archive, Collection, ContractVersion } = require('../models');
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
 const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
@@ -147,21 +147,55 @@ async function update(req, res, next) {
       updates.previous_monthly_fee = null;
     }
 
-    // Forward-dated fee changes don't invalidate the signed contract — only
-    // structural fields do.
-    const signatureFields = ['start_date', 'end_date', 'child_name', 'classroom_id'];
-    const retroFeeChange = monthlyFeeProvided && !updates.fee_effective_from;
-    const signatureChanged =
-      retroFeeChange ||
-      signatureFields.some(
-        field => updates[field] !== undefined && String(updates[field]) !== String(existing[field])
-      );
+    // Detect material contract-affecting field changes for archiving the
+    // current signed contract as a historical version. We DO NOT delete the
+    // signature on the active registration — the existing contract stays
+    // valid until the manager explicitly re-issues one.
+    const contractFields = ['start_date', 'end_date', 'child_name', 'classroom_id', 'monthly_fee', 'registration_fee'];
+    const contractFieldChanged = contractFields.some(
+      field => updates[field] !== undefined && String(updates[field]) !== String(existing[field])
+    );
+    const shouldArchive = contractFieldChanged && existing.agreement_signed;
 
-    if (signatureChanged && existing.agreement_signed) {
-      updates.agreement_signed = false;
-      updates.signature_data = null;
-      updates.contract_pdf_path = null;
-      updates.status = 'link_generated';
+    if (shouldArchive) {
+      try {
+        const classroom = existing.classroom_id
+          ? await Classroom.findById(existing.classroom_id).select('name').lean()
+          : null;
+        const lastVersion = await ContractVersion.findOne({ registration_id: existing._id })
+          .sort({ version: -1 }).select('version').lean();
+        const nextVersion = (lastVersion?.version || 0) + 1;
+
+        await ContractVersion.create({
+          registration_id: existing._id,
+          version: nextVersion,
+          contract_pdf_path: existing.contract_pdf_path,
+          signature_data: existing.signature_data,
+          agreement_signed: existing.agreement_signed,
+          snapshot: {
+            child_name: existing.child_name,
+            parent_name: existing.parent_name,
+            parent_id_number: existing.parent_id_number,
+            classroom_name: classroom?.name || null,
+            monthly_fee: existing.monthly_fee,
+            registration_fee: existing.registration_fee,
+            start_date: existing.start_date,
+            end_date: existing.end_date,
+            configuration: existing.configuration,
+          },
+          reason: contractFields.filter(f => updates[f] !== undefined && String(updates[f]) !== String(existing[f])).join(', '),
+        });
+
+        // Trim history: keep only the most recent 4 versions per registration.
+        const all = await ContractVersion.find({ registration_id: existing._id })
+          .sort({ archived_at: -1 }).select('_id').lean();
+        if (all.length > 4) {
+          const idsToRemove = all.slice(4).map(v => v._id);
+          await ContractVersion.deleteMany({ _id: { $in: idsToRemove } });
+        }
+      } catch (archiveErr) {
+        console.error('Failed to archive contract version:', archiveErr.message);
+      }
     }
 
     const updated = await Registration.findByIdAndUpdate(id, updates, { new: true })
@@ -172,7 +206,7 @@ async function update(req, res, next) {
     updated.classroom_name = updated.classroom_id?.name || null;
     updated.classroom_id = updated.classroom_id?._id || updated.classroom_id;
 
-    res.json({ registration: updated, signatureReset: signatureChanged });
+    res.json({ registration: updated, contractArchived: shouldArchive });
   } catch (error) {
     next(error);
   }
@@ -333,6 +367,57 @@ async function finalizeManual(req, res, next) {
   }
 }
 
+async function listContractVersions(req, res, next) {
+  try {
+    const { id } = req.params;
+    const versions = await ContractVersion.find({ registration_id: id })
+      .sort({ archived_at: -1 })
+      .lean();
+    res.json({
+      versions: versions.map(v => ({
+        id: v._id,
+        version: v.version,
+        archived_at: v.archived_at,
+        reason: v.reason,
+        agreement_signed: v.agreement_signed,
+        has_pdf: !!v.contract_pdf_path,
+        snapshot: v.snapshot,
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function downloadContractVersion(req, res, next) {
+  try {
+    const { versionId } = req.params;
+    const version = await ContractVersion.findById(versionId).lean();
+    if (!version) {
+      return res.status(404).json({ error: 'Contract version not found' });
+    }
+    if (version.contract_pdf_path) {
+      try {
+        const url = await fileStorage.getPresignedUrl(version.contract_pdf_path, 600);
+        return res.json({ url });
+      } catch (err) {
+        console.error('Presigned URL failed for version, falling back:', err.message);
+      }
+    }
+    // Live render from snapshot.
+    const { generateContractHTML } = require('../services/contract-pdf.service');
+    const data = {
+      ...(version.snapshot || {}),
+      classroom: version.snapshot?.classroom_name || null,
+      signature_data: version.signature_data,
+    };
+    const html = generateContractHTML(data);
+    res.json({ html, filename: `contract_v${version.version}.html` });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function downloadContract(req, res, next) {
   try {
     const { id } = req.params;
@@ -381,5 +466,6 @@ async function fixOrphanBranch(req, res, next) {
 
 module.exports = {
   getAll, getById, create, update, generateLink, activate, remove,
-  finalizeManual, downloadContract, fixOrphanBranch,
+  finalizeManual, downloadContract, listContractVersions, downloadContractVersion,
+  fixOrphanBranch,
 };

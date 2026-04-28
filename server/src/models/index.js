@@ -22,6 +22,7 @@ const Employee = require('./Employee');
 const Punch = require('./Punch');
 const AgentCommand = require('./AgentCommand');
 const Contract = require('./Contract');
+const ContractVersion = require('./ContractVersion');
 const EmployeeRequest = require('./EmployeeRequest');
 
 module.exports = {
@@ -48,5 +49,6 @@ module.exports = {
   Punch,
   AgentCommand,
   Contract,
+  ContractVersion,
   EmployeeRequest,
 };

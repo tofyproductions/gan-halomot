@@ -325,6 +325,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
 
 function ContractSection({ registrationId }) {
   const [contracts, setContracts] = useState([]);
+  const [versions, setVersions] = useState([]);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
@@ -332,7 +333,42 @@ function ContractSection({ registrationId }) {
     api.get(`/contracts?registration_id=${registrationId}`)
       .then(res => setContracts(res.data.contracts || []))
       .catch(() => {});
+    api.get(`/registrations/${registrationId}/contract-versions`)
+      .then(res => setVersions(res.data.versions || []))
+      .catch(() => {});
   }, [registrationId]);
+
+  const downloadVersion = async (versionId) => {
+    try {
+      const res = await api.get(`/registrations/contract-versions/${versionId}/download`);
+      if (res.data?.url) {
+        window.open(res.data.url, '_blank');
+      } else if (res.data?.html) {
+        const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else {
+        toast.error('אין חוזה זמין');
+      }
+    } catch {
+      toast.error('אין חוזה זמין');
+    }
+  };
+
+  const downloadActive = async () => {
+    try {
+      const res = await api.get(`/registrations/${registrationId}/contract-download`);
+      if (res.data?.url) {
+        window.open(res.data.url, '_blank');
+      } else if (res.data?.html) {
+        const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' });
+        window.open(URL.createObjectURL(blob), '_blank');
+      } else {
+        toast.error('אין חוזה זמין');
+      }
+    } catch {
+      toast.error('אין חוזה זמין');
+    }
+  };
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -367,12 +403,45 @@ function ContractSection({ registrationId }) {
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
         <DescriptionIcon fontSize="small" color="action" />
         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>חוזים ומסמכים</Typography>
+        <Button size="small" onClick={downloadActive} startIcon={<VisibilityIcon />}
+          sx={{ fontSize: '0.75rem' }}>
+          חוזה פעיל
+        </Button>
         <Button component="label" size="small" startIcon={<UploadFileIcon />} disabled={uploading}
           sx={{ fontSize: '0.75rem' }}>
           {uploading ? 'מעלה...' : 'העלה חוזה'}
           <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleUpload} />
         </Button>
       </Stack>
+
+      {versions.length > 0 && (
+        <Box sx={{ mb: 1, mt: 0.5 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b' }}>
+            גרסאות קודמות ({versions.length}/4):
+          </Typography>
+          <Stack spacing={0.3} sx={{ mt: 0.3 }}>
+            {versions.map(v => (
+              <Stack key={v.id} direction="row" alignItems="center" spacing={1}
+                sx={{ pl: 1, py: 0.3, borderRadius: 1, bgcolor: '#fef9c3', '&:hover': { bgcolor: '#fde68a' } }}>
+                <DescriptionIcon fontSize="small" sx={{ color: '#92400e' }} />
+                <Typography variant="caption" sx={{ flex: 1, fontWeight: 600 }}>
+                  גרסה {v.version}
+                  {v.snapshot?.monthly_fee != null && ` · ₪${v.snapshot.monthly_fee.toLocaleString()}`}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                  {new Date(v.archived_at).toLocaleDateString('he-IL')}
+                  {v.reason && ` · שינוי: ${v.reason}`}
+                </Typography>
+                <Button size="small" onClick={() => downloadVersion(v.id)} startIcon={<VisibilityIcon />}
+                  sx={{ fontSize: '0.7rem', minWidth: 'auto' }}>
+                  צפה
+                </Button>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
       {contracts.length > 0 ? (
         <Stack spacing={0.5}>
           {contracts.map(c => (
@@ -390,11 +459,11 @@ function ContractSection({ registrationId }) {
             </Stack>
           ))}
         </Stack>
-      ) : (
+      ) : versions.length === 0 ? (
         <Typography variant="caption" color="text.secondary" sx={{ pl: 1 }}>
           אין חוזים. לחץ "העלה חוזה" כדי להוסיף.
         </Typography>
-      )}
+      ) : null}
     </Box>
   );
 }
