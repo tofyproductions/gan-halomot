@@ -1,5 +1,19 @@
+const fs = require('fs');
+const path = require('path');
 const { calculateFirstMonthPayment, calculateAugustPayment } = require('./prorate.service');
 const { getHebrewYear } = require('./academic-year.service');
+
+// Load logo once and cache as data URL.
+let LOGO_DATA_URL = null;
+try {
+  const logoPath = path.join(__dirname, '..', 'assets', 'logo.png');
+  if (fs.existsSync(logoPath)) {
+    const buf = fs.readFileSync(logoPath);
+    LOGO_DATA_URL = `data:image/png;base64,${buf.toString('base64')}`;
+  }
+} catch (err) {
+  console.error('Failed to load contract logo:', err.message);
+}
 
 /**
  * Generate contract HTML string from registration data
@@ -51,28 +65,139 @@ function generateContractHTML(data) {
     <html dir="rtl" lang="he">
     <head>
       <meta charset="UTF-8">
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&family=Heebo:wght@400;600;700;800&display=swap" rel="stylesheet">
       <style>
-        body { font-family: 'Assistant', 'Heebo', 'Arial', sans-serif; max-width: 860px; margin: 0 auto; line-height: 1.7; color: #0f172a; padding: 50px 60px; }
-        h1 { text-align: center; color: #1e3a8a; font-size: 1.6rem; margin-bottom: 8px; }
-        h4 { color: #1e3a8a; text-decoration: underline; margin-top: 28px; margin-bottom: 8px; font-size: 1.1rem; }
-        ol { padding-right: 22px; margin-top: 6px; }
-        li { margin-bottom: 6px; text-align: justify; }
-        .summary { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; margin: 18px 0 8px; display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; font-size: 0.95rem; }
+        @page { size: A4; margin: 18mm 14mm; }
+        * { box-sizing: border-box; }
+        body {
+          font-family: 'Assistant', 'Heebo', 'Arial', sans-serif;
+          margin: 0;
+          padding: 0;
+          color: #1e293b;
+          background: #fff8f0;
+          line-height: 1.7;
+        }
+        .page {
+          max-width: 860px;
+          margin: 0 auto;
+          padding: 36px 48px 56px;
+          background: #fff;
+          border: 1px solid #fde2c5;
+          box-shadow: 0 6px 24px rgba(245, 158, 11, 0.08);
+        }
+        .header {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 18px;
+          padding-bottom: 18px;
+          margin-bottom: 18px;
+          border-bottom: 3px double #f59e0b;
+        }
+        .header img {
+          height: 90px;
+          object-fit: contain;
+        }
+        .header-text {
+          text-align: center;
+        }
+        h1 {
+          margin: 0;
+          color: #1e3a8a;
+          font-size: 1.55rem;
+          font-weight: 800;
+          letter-spacing: 0.3px;
+        }
+        .subtitle {
+          color: #64748b;
+          font-size: 0.95rem;
+          font-weight: 600;
+          margin-top: 4px;
+        }
+        .summary {
+          background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+          border: 1.5px solid #fbbf24;
+          border-radius: 14px;
+          padding: 14px 22px;
+          margin: 0 0 22px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px 22px;
+          font-size: 0.95rem;
+        }
         .summary div { white-space: nowrap; }
-        .sig-box { margin-top: 36px; border: 2px solid #3b82f6; padding: 18px 22px; border-radius: 12px; display: inline-block; }
-        .sig-box img { max-width: 280px; max-height: 120px; display: block; margin-top: 6px; }
-        .sig-meta { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+        .summary b { color: #92400e; font-weight: 700; }
+        h4 {
+          color: #1e3a8a;
+          margin-top: 24px;
+          margin-bottom: 10px;
+          font-size: 1.1rem;
+          font-weight: 800;
+          padding: 6px 12px;
+          background: #eff6ff;
+          border-right: 5px solid #1e3a8a;
+          border-radius: 4px;
+        }
+        ol { padding-right: 22px; margin: 6px 0; }
+        li { margin-bottom: 7px; text-align: justify; line-height: 1.65; }
+        li::marker { color: #f59e0b; font-weight: 700; }
+        .sig-block {
+          margin-top: 36px;
+          padding-top: 18px;
+          border-top: 2px dashed #cbd5e1;
+          display: flex;
+          justify-content: flex-end;
+        }
+        .sig-box {
+          border: 2px solid #1e3a8a;
+          padding: 14px 22px;
+          border-radius: 12px;
+          background: #f8fafc;
+          min-width: 280px;
+        }
+        .sig-box .sig-label {
+          font-weight: 700;
+          color: #1e3a8a;
+          margin: 0 0 6px;
+          font-size: 0.95rem;
+        }
+        .sig-box img { max-width: 240px; max-height: 100px; display: block; }
+        .sig-meta { font-size: 0.8rem; color: #64748b; margin-top: 6px; }
+        .footer {
+          margin-top: 30px;
+          padding-top: 14px;
+          border-top: 1px solid #e2e8f0;
+          text-align: center;
+          font-size: 0.8rem;
+          color: #94a3b8;
+        }
         b { font-weight: 700; }
+        @media print {
+          body { background: #fff; }
+          .page { box-shadow: none; border: none; padding: 0; }
+        }
       </style>
     </head>
     <body>
-      <h1>הסכם התקשרות ורישום - שנה"ל ${schoolYear}</h1>
-      <div class="summary">
-        <div><b>ילד/ה:</b> ${childName}</div>
-        <div><b>הורה:</b> ${parentName}${parentId ? ` (ת.ז. ${parentId})` : ''}</div>
-        <div><b>קבוצה:</b> ${classroom}</div>
-        <div><b>תאריך חתימה:</b> ${today}</div>
-      </div>
+      <div class="page">
+        <div class="header">
+          ${LOGO_DATA_URL ? `<img src="${LOGO_DATA_URL}" alt="גן החלומות">` : ''}
+          <div class="header-text">
+            <h1>הסכם התקשרות ורישום</h1>
+            <div class="subtitle">שנה"ל ${schoolYear}</div>
+          </div>
+        </div>
+
+        <div class="summary">
+          <div><b>שם הילד/ה:</b> ${childName}</div>
+          <div><b>קבוצה:</b> ${classroom || '—'}</div>
+          <div><b>שם ההורה:</b> ${parentName}</div>
+          <div><b>ת.ז. הורה:</b> ${parentId || '—'}</div>
+          <div><b>תאריך חתימה:</b> ${today}</div>
+          <div><b>תקופת ההתקשרות:</b> ${formatDate(startDate)} – ${formatDate(endDate)}</div>
+        </div>
 
       <h4>ההתקשרות:</h4>
       <ol>
@@ -112,13 +237,21 @@ function generateContractHTML(data) {
         <li>באם יודיע ההורה על הפסקת ההתקשרות – הרי שישולם על ידו שכר הלימוד עבור אותו חודש בו נתנה ההודעה וכן עבור חודש נוסף שלאחר מכן כפיצוי קבוע ומוסכם מראש.</li>
       </ol>
 
-      ${signature ? `
-        <div class="sig-box">
-          <p style="margin:0;"><b>חתימת ההורה:</b></p>
-          <img src="${signature}" alt="חתימה">
-          <p class="sig-meta">${parentName}${parentId ? ` · ת.ז. ${parentId}` : ''} · תאריך: ${today}</p>
+        ${signature ? `
+          <div class="sig-block">
+            <div class="sig-box">
+              <p class="sig-label">חתימת ההורה</p>
+              <img src="${signature}" alt="חתימה">
+              <p class="sig-meta">${parentName}${parentId ? ` · ת.ז. ${parentId}` : ''}</p>
+              <p class="sig-meta">תאריך: ${today}</p>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="footer">
+          גן החלומות · "כל ילד חולם להיות בו"
         </div>
-      ` : ''}
+      </div>
     </body>
     </html>
   `;
