@@ -56,18 +56,19 @@ export default function ParentOnboarding() {
       .then((res) => {
         setRegData(res.data);
         // Pre-fill card from registration
-        const d = res.data;
+        const d = res.data?.registration || {};
         setCard((prev) => ({
           ...prev,
-          childFullName: d.childName || '',
-          childBirthDate: d.childBirthDate ? d.childBirthDate.slice(0, 10) : '',
-          parent1Name: d.parentName || '',
-          parent1Id: d.parentId || '',
-          parent1Phone: d.parentPhone || '',
+          childFullName: d.child_name || '',
+          childBirthDate: d.child_birth_date ? String(d.child_birth_date).slice(0, 10) : '',
+          parent1Name: d.parent_name || '',
+          parent1Id: d.parent_id_number || '',
+          parent1Phone: d.parent_phone || '',
+          parent1Email: d.parent_email || '',
         }));
       })
       .catch((err) => {
-        setError(err.response?.data?.message || 'קישור לא תקין או שפג תוקפו');
+        setError(err.response?.data?.message || err.response?.data?.error || 'קישור לא תקין או שפג תוקפו');
       })
       .finally(() => setLoading(false));
   }, [token]);
@@ -96,7 +97,8 @@ export default function ParentOnboarding() {
       toast.success('החוזה נחתם בהצלחה');
       setStep(2);
     } catch (err) {
-      toast.error(err.response?.data?.message || 'שגיאה בחתימה');
+      const msg = err.response?.data?.message || err.response?.data?.error || err.message || 'שגיאה בחתימה';
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
@@ -178,16 +180,16 @@ export default function ParentOnboarding() {
         <Card sx={{ textAlign: 'center', py: 4 }}>
           <CardContent>
             <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
-              שלום {regData?.parentName}!
+              שלום {regData?.registration?.parent_name}!
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
               ברוכים הבאים לתהליך הרישום של
             </Typography>
             <Typography variant="h6" sx={{ fontWeight: 800, color: 'primary.dark', mb: 3 }}>
-              {regData?.childName}
+              {regData?.registration?.child_name}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-              כיתה: {regData?.classroom}
+              כיתה: {regData?.registration?.classroom}
             </Typography>
             <Button variant="contained" size="large" onClick={() => setStep(1)}>
               בואו נתחיל
@@ -204,7 +206,7 @@ export default function ParentOnboarding() {
               חוזה התקשרות
             </Typography>
 
-            {regData?.contractHtml ? (
+            {(regData?.contractHTML || regData?.contractHtml) ? (
               <Box
                 sx={{
                   border: '1px solid #e2e8f0',
@@ -217,7 +219,7 @@ export default function ParentOnboarding() {
                   fontSize: '0.9rem',
                   lineHeight: 1.8,
                 }}
-                dangerouslySetInnerHTML={{ __html: regData.contractHtml }}
+                dangerouslySetInnerHTML={{ __html: regData.contractHTML || regData.contractHtml }}
               />
             ) : (
               <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>

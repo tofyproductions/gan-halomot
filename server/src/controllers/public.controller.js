@@ -34,6 +34,7 @@ async function getRegistrationForm(req, res, next) {
         child_name: registration.child_name,
         child_birth_date: registration.child_birth_date,
         parent_name: registration.parent_name,
+        parent_id_number: registration.parent_id_number,
         parent_phone: registration.parent_phone,
         parent_email: registration.parent_email,
         classroom: registration.classroom,
@@ -47,6 +48,7 @@ async function getRegistrationForm(req, res, next) {
         configuration,
       },
       contractHTML,
+      contractHtml: contractHTML,
       documents,
     });
   } catch (error) {
@@ -84,24 +86,36 @@ async function submitSignature(req, res, next) {
 
     await registration.save();
 
-    const pdfData = { ...registration.toObject(), classroom: registration.classroom_id?.name || null, signature_data: signature };
-    const pdfBuffer = await generateContractPDF(pdfData);
-
-    const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
-    await fileStorage.upload(pdfBuffer, key, 'application/pdf');
-
-    registration.contract_pdf_path = key;
-    await registration.save();
-
+    // Best-effort: generate PDF, upload to R2, email parent. Do not fail the
+    // signature request if any of these throw (e.g. R2 not configured).
+    let pdfBuffer = null;
     try {
-      await sendAgreementEmail({
-        childName: registration.child_name,
-        parentName: registration.parent_name,
-        parentEmail: parentEmail || registration.parent_email,
-        contractPdfBuffer: pdfBuffer,
-      });
-    } catch (emailErr) {
-      console.error('Failed to send agreement email:', emailErr.message);
+      const pdfData = { ...registration.toObject(), classroom: registration.classroom_id?.name || null, signature_data: signature };
+      pdfBuffer = await generateContractPDF(pdfData);
+    } catch (pdfErr) {
+      console.error('Failed to generate contract PDF:', pdfErr.message);
+    }
+
+    if (pdfBuffer) {
+      try {
+        const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
+        await fileStorage.upload(pdfBuffer, key, 'application/pdf');
+        registration.contract_pdf_path = key;
+        await registration.save();
+      } catch (uploadErr) {
+        console.error('Failed to upload signed contract:', uploadErr.message);
+      }
+
+      try {
+        await sendAgreementEmail({
+          childName: registration.child_name,
+          parentName: registration.parent_name,
+          parentEmail: parentEmail || registration.parent_email,
+          contractPdfBuffer: pdfBuffer,
+        });
+      } catch (emailErr) {
+        console.error('Failed to send agreement email:', emailErr.message);
+      }
     }
 
     res.json({ message: 'Contract signed successfully', status: 'contract_signed' });

@@ -14,4 +14,7 @@ router.put('/:id', classroomController.update);
 // DELETE /api/classroom/:id
 router.delete('/:id', classroomController.remove);
 
+// POST /api/classrooms/cleanup-garbled — deactivate classrooms with corrupted names
+router.post('/cleanup-garbled', classroomController.cleanupGarbled);
+
 module.exports = router;

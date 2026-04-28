@@ -84,6 +84,23 @@ export default function RegistrationWizard() {
     ? Math.round(form.monthly_fee * 0.9)
     : form.monthly_fee;
 
+  const isGarbled = (n) => /[�?]{2,}/.test(String(n || ''));
+  const cleanClassrooms = classrooms.filter(c => !isGarbled(c.name));
+  const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים'];
+  const otherCats = cleanClassrooms.filter(c => !CATEGORIES.includes(c.category));
+  const orderedClassrooms = [
+    ...CATEGORIES.flatMap(cat => cleanClassrooms.filter(c => c.category === cat)),
+    ...otherCats,
+  ];
+
+  const selectedClassroom = cleanClassrooms.find(c => String(c._id || c.id) === String(form.classroom_id));
+  const capacity = selectedClassroom?.capacity || 0;
+  const childCount = selectedClassroom?.child_count || 0;
+  const isFull = capacity > 0 && childCount >= capacity;
+  const sameCategoryCount = selectedClassroom?.category
+    ? cleanClassrooms.filter(c => c.category === selectedClassroom.category).length
+    : 0;
+
   const handleChange = (field) => (e) => {
     const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
     setForm((prev) => ({ ...prev, [field]: val }));
@@ -234,14 +251,28 @@ export default function RegistrationWizard() {
                 value={form.classroom_id}
                 onChange={handleChange('classroom_id')}
                 error={!!errors.classroom_id}
-                helperText={errors.classroom_id}
+                helperText={errors.classroom_id || (selectedClassroom?.category ? `קבוצה: ${selectedClassroom.category}` : '')}
                 fullWidth
                 required
               >
-                {classrooms.map((c) => (
-                  <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
-                ))}
+                {orderedClassrooms.map((c) => {
+                  const cap = c.capacity || 0;
+                  const cnt = c.child_count || 0;
+                  const full = cap > 0 && cnt >= cap;
+                  const label = `${c.name}${c.category ? ` · ${c.category}` : ''}${cap ? ` (${cnt}/${cap})` : ''}${full ? ' — מלאה' : ''}`;
+                  return (
+                    <MenuItem key={c._id || c.id} value={c._id || c.id}>{label}</MenuItem>
+                  );
+                })}
               </TextField>
+              {isFull && (
+                <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                  כיתה זו מלאה ({childCount}/{capacity}).
+                  {sameCategoryCount > 1
+                    ? ' ניתן לבחור כיתה אחרת מאותה קבוצה, או להמשיך בשיקול דעת.'
+                    : ' אין כיתה נוספת באותה קבוצה — שיבוץ בשיקול דעת המנהל/ת.'}
+                </Alert>
+              )}
             </Stack>
 
             <Divider sx={{ my: 3 }} />

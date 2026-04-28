@@ -40,9 +40,13 @@ async function getAll(req, res, next) {
 
 async function create(req, res, next) {
   try {
-    const { name, academic_year, capacity } = req.body;
+    const { name, academic_year, capacity, category } = req.body;
     if (!name || !academic_year) {
       return res.status(400).json({ error: 'name and academic_year are required' });
+    }
+
+    if (category && !Classroom.CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: 'invalid category' });
     }
 
     const { branch_id } = req.body;
@@ -54,6 +58,7 @@ async function create(req, res, next) {
 
     const classroom = await Classroom.create({
       name,
+      category: category || null,
       academic_year: normalizedYear,
       capacity: capacity || null,
       branch_id: branch_id || null,
@@ -83,10 +88,36 @@ async function update(req, res, next) {
       updates.academic_year = normalizeYear(updates.academic_year);
     }
 
+    if (updates.category !== undefined && updates.category !== null && !Classroom.CATEGORIES.includes(updates.category)) {
+      return res.status(400).json({ error: 'invalid category' });
+    }
+
     const updated = await Classroom.findByIdAndUpdate(id, updates, { new: true }).lean();
     updated.id = updated._id;
 
     res.json({ classroom: updated });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function cleanupGarbled(req, res, next) {
+  try {
+    // Match U+FFFD replacement char or invalid sequence markers in classroom name.
+    // These appear as "��" / "?" boxes in the UI.
+    const garbled = await Classroom.find({ name: { $regex: /[�?]{2,}/ } });
+    const ids = garbled.map(c => c._id);
+
+    if (ids.length === 0) {
+      return res.json({ deactivated: 0, items: [] });
+    }
+
+    await Classroom.updateMany({ _id: { $in: ids } }, { $set: { is_active: false } });
+
+    res.json({
+      deactivated: ids.length,
+      items: garbled.map(c => ({ id: c._id, name: c.name })),
+    });
   } catch (error) {
     next(error);
   }
@@ -114,4 +145,4 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { getAll, create, update, remove };
+module.exports = { getAll, create, update, remove, cleanupGarbled };

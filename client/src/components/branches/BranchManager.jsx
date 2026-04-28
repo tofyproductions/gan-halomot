@@ -3,7 +3,9 @@ import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   IconButton, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions,
   Divider, Chip, Table, TableBody, TableCell, TableHead, TableRow,
+  MenuItem, Select,
 } from '@mui/material';
+import CleaningServicesIcon from '@mui/icons-material/CleaningServices';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
@@ -23,7 +25,8 @@ export default function BranchManager() {
   // Branch dialog
   const [branchDialog, setBranchDialog] = useState({ open: false, mode: 'add', id: null, name: '', address: '' });
   // Classroom dialog
-  const [classDialog, setClassDialog] = useState({ open: false, branchId: null, id: null, name: '', capacity: 35 });
+  const [classDialog, setClassDialog] = useState({ open: false, branchId: null, id: null, name: '', capacity: 35, category: '' });
+  const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים'];
   // Confirm delete
   const [confirm, setConfirm] = useState({ open: false, type: null, id: null, message: '' });
   // Classrooms per branch
@@ -74,16 +77,17 @@ export default function BranchManager() {
   };
 
   // --- Classroom CRUD ---
-  const openAddClass = (branchId) => setClassDialog({ open: true, branchId, id: null, name: '', capacity: 35 });
-  const closeClassDialog = () => setClassDialog({ open: false, branchId: null, id: null, name: '', capacity: 35 });
+  const openAddClass = (branchId) => setClassDialog({ open: true, branchId, id: null, name: '', capacity: 35, category: '' });
+  const closeClassDialog = () => setClassDialog({ open: false, branchId: null, id: null, name: '', capacity: 35, category: '' });
 
   const handleSaveClass = async () => {
-    const { branchId, name, capacity } = classDialog;
+    const { branchId, name, capacity, category } = classDialog;
     if (!name.trim()) return toast.error('שם הכיתה חובה');
     try {
       await api.post('/classrooms', {
         name: name.trim(),
         capacity: parseInt(capacity) || 35,
+        category: category || null,
         academic_year: years.current.range,
         branch_id: branchId,
       });
@@ -92,6 +96,28 @@ export default function BranchManager() {
       fetchClassrooms();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const handleUpdateCategory = async (classroomId, newCategory) => {
+    try {
+      await api.put(`/classrooms/${classroomId}`, { category: newCategory || null });
+      toast.success('קבוצה עודכנה');
+      fetchClassrooms();
+    } catch {
+      toast.error('שגיאה בעדכון');
+    }
+  };
+
+  const handleCleanupGarbled = async () => {
+    try {
+      const res = await api.post('/classrooms/cleanup-garbled');
+      const n = res.data?.deactivated || 0;
+      if (n === 0) toast.info('לא נמצאו שמות פגומים');
+      else toast.success(`הוסרו ${n} כיתות עם שמות פגומים`);
+      fetchClassrooms();
+    } catch {
+      toast.error('שגיאה בניקוי');
     }
   };
 
@@ -140,9 +166,16 @@ export default function BranchManager() {
     <Box dir="rtl" sx={{ maxWidth: 900, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>ניהול סניפים וכיתות</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={openAddBranch}>
-          הוסף סניף
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Tooltip title="הסר כיתות עם שמות פגומים (��)">
+            <Button variant="outlined" color="warning" startIcon={<CleaningServicesIcon />} onClick={handleCleanupGarbled}>
+              נקה שמות פגומים
+            </Button>
+          </Tooltip>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={openAddBranch}>
+            הוסף סניף
+          </Button>
+        </Stack>
       </Stack>
 
       {branches.length === 0 ? (
@@ -213,6 +246,7 @@ export default function BranchManager() {
                       <TableHead>
                         <TableRow>
                           <TableCell sx={{ fontWeight: 700 }}>שם הכיתה</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>קבוצה</TableCell>
                           <TableCell sx={{ fontWeight: 700 }}>מובילת כיתה</TableCell>
                           <TableCell sx={{ fontWeight: 700 }} align="center">תפוסה מקסימלית</TableCell>
                           <TableCell sx={{ fontWeight: 700 }} align="center">ילדים רשומים</TableCell>
@@ -230,6 +264,20 @@ export default function BranchManager() {
                                   value={cls.name}
                                   onSave={(val) => handleUpdateClassName(cid, val)}
                                 />
+                              </TableCell>
+                              <TableCell>
+                                <Select
+                                  size="small"
+                                  value={cls.category || ''}
+                                  onChange={(e) => handleUpdateCategory(cid, e.target.value)}
+                                  displayEmpty
+                                  sx={{ minWidth: 110, '.MuiSelect-select': { py: 0.5 } }}
+                                >
+                                  <MenuItem value=""><em>—</em></MenuItem>
+                                  {CATEGORIES.map(cat => (
+                                    <MenuItem key={cat} value={cat}>{cat}</MenuItem>
+                                  ))}
+                                </Select>
                               </TableCell>
                               <TableCell>
                                 <Typography variant="body2" sx={{
@@ -359,6 +407,19 @@ export default function BranchManager() {
               required
               placeholder="לדוגמה: תינוקייה א"
             />
+            <TextField
+              select
+              label="קבוצה"
+              value={classDialog.category}
+              onChange={(e) => setClassDialog(prev => ({ ...prev, category: e.target.value }))}
+              fullWidth
+              helperText="תינוקייה / צעירים / בוגרים"
+            >
+              <MenuItem value=""><em>ללא</em></MenuItem>
+              {CATEGORIES.map(cat => (
+                <MenuItem key={cat} value={cat}>{cat}</MenuItem>
+              ))}
+            </TextField>
             <TextField
               label="תפוסה מקסימלית"
               type="number"
