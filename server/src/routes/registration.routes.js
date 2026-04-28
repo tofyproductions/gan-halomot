@@ -5,6 +5,9 @@ const registrationController = require('../controllers/registration.controller')
 // GET /api/registration
 router.get('/', registrationController.getAll);
 
+// POST /api/registration/fix-orphan-branch — assign null-branch regs to a branch
+router.post('/fix-orphan-branch', registrationController.fixOrphanBranch);
+
 // GET /api/registration/:id
 router.get('/:id', registrationController.getById);
 

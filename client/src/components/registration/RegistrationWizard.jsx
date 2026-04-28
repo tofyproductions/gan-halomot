@@ -132,6 +132,7 @@ export default function RegistrationWizard() {
         parent_id_number: form.parent_id_number || null,
         parent_phone: form.parent_phone,
         classroom_id: form.classroom_id || null,
+        branch_id: localStorage.getItem('selectedBranch') || null,
         monthly_fee: effectiveFee,
         registration_fee: form.registration_fee,
         start_date: form.start_date,

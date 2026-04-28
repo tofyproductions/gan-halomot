@@ -86,9 +86,14 @@ async function create(req, res, next) {
     const unique_id = generateUniqueId('REG');
     const access_token = generateAccessToken();
 
+    // Fall back to the request's selected branch (?branch=...) if the
+    // client didn't pass branch_id explicitly. Without this, new regs get
+    // saved as branch_id=null and disappear from any branch-filtered list.
+    const effectiveBranchId = branch_id || req.query.branch || null;
+
     const registration = await Registration.create({
       unique_id,
-      branch_id: branch_id || null,
+      branch_id: effectiveBranchId,
       child_name,
       child_birth_date: child_birth_date || null,
       classroom_id: classroom_id || null,
@@ -247,4 +252,20 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { getAll, getById, create, update, generateLink, activate, remove };
+async function fixOrphanBranch(req, res, next) {
+  try {
+    const targetBranchId = req.body.branch_id || req.query.branch;
+    if (!targetBranchId) {
+      return res.status(400).json({ error: 'branch_id required' });
+    }
+    const result = await Registration.updateMany(
+      { $or: [{ branch_id: null }, { branch_id: { $exists: false } }] },
+      { $set: { branch_id: targetBranchId } }
+    );
+    res.json({ updated: result.modifiedCount, branch_id: targetBranchId });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { getAll, getById, create, update, generateLink, activate, remove, fixOrphanBranch };

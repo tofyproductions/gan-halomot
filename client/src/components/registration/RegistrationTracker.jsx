@@ -102,9 +102,30 @@ export default function RegistrationTracker() {
             <Chip label={`${pendingCount} בתהליך`} color="warning" size="small" variant="outlined" />
           </Stack>
         </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/new-registration')}>
-          רישום חדש
-        </Button>
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={async () => {
+              const branch = localStorage.getItem('selectedBranch');
+              if (!branch) return toast.error('בחר/י סניף קודם');
+              try {
+                const res = await api.post('/registrations/fix-orphan-branch', { branch_id: branch });
+                const n = res.data?.updated || 0;
+                if (n === 0) toast.info('אין רישומים יתומים');
+                else toast.success(`${n} רישומים שויכו לסניף`);
+                fetchData();
+              } catch {
+                toast.error('שגיאה');
+              }
+            }}
+          >
+            תקן רישומים ללא סניף
+          </Button>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/new-registration')}>
+            רישום חדש
+          </Button>
+        </Stack>
       </Stack>
 
       {/* Filters */}
