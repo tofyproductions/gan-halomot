@@ -132,10 +132,30 @@ async function update(req, res, next) {
     delete updates.unique_id;
     delete updates.created_at;
 
-    const signatureFields = ['monthly_fee', 'start_date', 'end_date', 'child_name', 'classroom_id'];
-    const signatureChanged = signatureFields.some(
-      field => updates[field] !== undefined && String(updates[field]) !== String(existing[field])
-    );
+    // Auto-capture previous fee when a forward-dated price change is applied,
+    // so the collections view bills the old fee for months before
+    // fee_effective_from instead of applying the new fee retroactively.
+    const monthlyFeeProvided = updates.monthly_fee !== undefined
+      && Number(updates.monthly_fee) !== Number(existing.monthly_fee);
+    if (monthlyFeeProvided && updates.fee_effective_from && updates.previous_monthly_fee === undefined) {
+      updates.previous_monthly_fee = existing.monthly_fee;
+    }
+    // Clearing the price-change point: if the manager removes
+    // fee_effective_from, drop previous_monthly_fee too — the new fee then
+    // applies for the whole year.
+    if (updates.fee_effective_from === null || updates.fee_effective_from === '') {
+      updates.previous_monthly_fee = null;
+    }
+
+    // Forward-dated fee changes don't invalidate the signed contract — only
+    // structural fields do.
+    const signatureFields = ['start_date', 'end_date', 'child_name', 'classroom_id'];
+    const retroFeeChange = monthlyFeeProvided && !updates.fee_effective_from;
+    const signatureChanged =
+      retroFeeChange ||
+      signatureFields.some(
+        field => updates[field] !== undefined && String(updates[field]) !== String(existing[field])
+      );
 
     if (signatureChanged && existing.agreement_signed) {
       updates.agreement_signed = false;

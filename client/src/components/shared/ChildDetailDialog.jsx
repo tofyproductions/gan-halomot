@@ -39,7 +39,10 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
   const [registration, setRegistration] = useState(null);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ monthly_fee: '', phone: '', email: '', medical_alerts: '', fee_effective_from: '' });
+  const [editForm, setEditForm] = useState({
+    monthly_fee: '', phone: '', email: '', medical_alerts: '',
+    fee_effective_from: '', previous_monthly_fee: '',
+  });
 
   useEffect(() => {
     if (!open || !childId) return;
@@ -60,7 +63,8 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
           phone: c.phone || reg?.parent_phone || '',
           email: c.email || reg?.parent_email || '',
           medical_alerts: c.medical_alerts || '',
-          fee_effective_from: curMonth,
+          fee_effective_from: reg?.fee_effective_from || curMonth,
+          previous_monthly_fee: reg?.previous_monthly_fee != null ? String(reg.previous_monthly_fee) : '',
         });
       })
       .catch(err => {
@@ -79,11 +83,20 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
         medical_alerts: editForm.medical_alerts,
       });
       // Update registration monthly_fee if changed
-      if (registration && String(registration.monthly_fee) !== editForm.monthly_fee) {
-        await api.put(`/registrations/${registration._id || registration.id}`, {
+      const feeChanged = registration && String(registration.monthly_fee) !== editForm.monthly_fee;
+      const prevFeeChanged = registration && String(registration.previous_monthly_fee || '') !== (editForm.previous_monthly_fee || '');
+      const effectiveChanged = registration && String(registration.fee_effective_from || '') !== (editForm.fee_effective_from || '');
+      if (feeChanged || prevFeeChanged || effectiveChanged) {
+        const payload = {
           monthly_fee: Number(editForm.monthly_fee) || 0,
           fee_effective_from: editForm.fee_effective_from || null,
-        });
+        };
+        if (editForm.previous_monthly_fee !== '') {
+          payload.previous_monthly_fee = Number(editForm.previous_monthly_fee);
+        } else if (!editForm.fee_effective_from) {
+          payload.previous_monthly_fee = null;
+        }
+        await api.put(`/registrations/${registration._id || registration.id}`, payload);
       }
       toast.success('פרטים עודכנו');
       setEditing(false);
@@ -201,11 +214,41 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                 </Typography>
                 {editing ? (
                   <Stack spacing={1.5}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="warning"
+                      onClick={() => {
+                        const currentFee = Number(editForm.monthly_fee) || Number(registration?.monthly_fee) || 0;
+                        const discounted = Math.round(currentFee * 0.9);
+                        const now = new Date();
+                        const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+                        const nextMonth = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`;
+                        setEditForm({
+                          ...editForm,
+                          previous_monthly_fee: String(currentFee),
+                          monthly_fee: String(discounted),
+                          fee_effective_from: nextMonth,
+                        });
+                      }}
+                    >
+                      🎁 הוסף הנחת אח/ות 10% מהחודש הבא
+                    </Button>
                     <TextField
                       label="תשלום חודשי חדש" type="number" size="small" fullWidth
                       value={editForm.monthly_fee}
                       onChange={e => setEditForm({ ...editForm, monthly_fee: e.target.value })}
                       InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                    />
+                    <TextField
+                      label="תשלום חודשי קודם (לפני שינוי)"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      value={editForm.previous_monthly_fee}
+                      onChange={e => setEditForm({ ...editForm, previous_monthly_fee: e.target.value })}
+                      InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                      helperText="ישולם עבור החודשים שלפני 'החל מחודש'. ריק = חל רטרואקטיבית."
                     />
                     <TextField
                       label="החל מחודש"
@@ -215,7 +258,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                       value={editForm.fee_effective_from}
                       onChange={e => setEditForm({ ...editForm, fee_effective_from: e.target.value })}
                       InputLabelProps={{ shrink: true }}
-                      helperText="השינוי יחול מהחודש שנבחר והלאה, לא רטרואקטיבית"
+                      helperText="השינוי יחול מהחודש שנבחר והלאה. השאר ריק לשינוי רטרואקטיבי לכל השנה."
                     />
                   </Stack>
                 ) : (
