@@ -14,16 +14,34 @@ const HEBREW_YEAR_MAP = {
 };
 
 /**
- * Convert a Gregorian date to the approximate Hebrew year string.
- * Hebrew year starts around September, so dates Sept+ map to the next Hebrew year.
+ * Convert a Gregorian date to the Hebrew academic year string.
+ * Cutoff is Aug 10 (matches kindergarten contract end-of-year).
+ * Dates on/after Aug 10 belong to the next academic year.
  */
 export function getHebrewYear(date) {
   const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return 'לא ידוע';
   const gYear = d.getFullYear();
-  const month = d.getMonth(); // 0-based
-  // After Rosh Hashana (~September) we're in the next Hebrew year
-  const hebrewYearNum = gYear + 3761 + (month >= 8 ? 1 : 0);
+  const month = d.getMonth() + 1; // 1-12
+  const day = d.getDate();
+  const isAfterCutoff = month > 8 || (month === 8 && day >= 10);
+  const hebrewYearNum = gYear + (isAfterCutoff ? 3761 : 3760);
   return HEBREW_YEAR_MAP[hebrewYearNum] || `תש״${hebrewYearNum % 100}`;
+}
+
+/**
+ * Academic year range string (e.g. "2026-2027") from a Gregorian date.
+ * Matches the server's normalizeYear / getAcademicYearStr.
+ */
+export function getAcademicYearRange(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (isNaN(d.getTime())) return null;
+  const gYear = d.getFullYear();
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  const isAfterCutoff = month > 8 || (month === 8 && day >= 10);
+  const startYear = isAfterCutoff ? gYear : gYear - 1;
+  return `${startYear}-${startYear + 1}`;
 }
 
 /**

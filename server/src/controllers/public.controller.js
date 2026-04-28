@@ -202,21 +202,19 @@ async function uploadDocument(req, res, next) {
     const hasPaymentProof = docTypes.includes('payment_proof');
     const bothDocsUploaded = hasIdCopy && hasPaymentProof;
 
-    if (bothDocsUploaded) {
+    const cardSubmitted = Object.keys(card).length > 0;
+    if (bothDocsUploaded || cardSubmitted) {
       registration.card_completed = true;
-      if (registration.status === 'contract_signed' || registration.status === 'docs_uploaded') {
-        registration.status = 'docs_uploaded';
-      }
-    } else if (Object.keys(card).length > 0) {
-      // Even without files, accepting card data advances status if signed.
-      if (registration.agreement_signed && registration.status === 'contract_signed') {
-        registration.status = 'docs_uploaded';
-      }
     }
 
-    const isFullyComplete = registration.agreement_signed && bothDocsUploaded;
+    // Completion rule: parent signed digitally + submitted the registration
+    // card. Document uploads (id_copy / payment_proof) are optional — the
+    // manager can collect them later from the documents dialog.
+    const isFullyComplete = registration.agreement_signed && (bothDocsUploaded || cardSubmitted);
     if (isFullyComplete) {
       registration.status = 'completed';
+    } else if (bothDocsUploaded || cardSubmitted) {
+      registration.status = 'docs_uploaded';
     }
 
     await registration.save();

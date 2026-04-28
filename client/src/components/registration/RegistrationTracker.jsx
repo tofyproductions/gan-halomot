@@ -19,6 +19,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
+import { getHebrewYear } from '../../utils/hebrewYear';
 
 const STATUS_CONFIG = {
   link_generated: { label: 'בתהליך', color: '#fef3c7', textColor: '#92400e', border: '#f59e0b' },
@@ -33,6 +34,7 @@ export default function RegistrationTracker() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
@@ -133,10 +135,15 @@ export default function RegistrationTracker() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const yearOptions = Array.from(
+    new Set(registrations.map(r => r.start_date ? getHebrewYear(r.start_date) : null).filter(Boolean))
+  ).sort();
+
   const filtered = registrations.filter(r => {
     const q = search.trim().toLowerCase();
     if (q && !r.child_name?.toLowerCase().includes(q) && !r.parent_name?.toLowerCase().includes(q)) return false;
     if (statusFilter && r.status !== statusFilter) return false;
+    if (yearFilter && (!r.start_date || getHebrewYear(r.start_date) !== yearFilter)) return false;
     return true;
   });
 
@@ -238,6 +245,14 @@ export default function RegistrationTracker() {
             <MenuItem key={k} value={k}>{v.label}</MenuItem>
           ))}
         </TextField>
+        <TextField select size="small" value={yearFilter} onChange={e => setYearFilter(e.target.value)}
+          sx={{ minWidth: 140 }} label="שנה"
+        >
+          <MenuItem value="">כל השנים</MenuItem>
+          {yearOptions.map(y => (
+            <MenuItem key={y} value={y}>{y}</MenuItem>
+          ))}
+        </TextField>
       </Stack>
 
       {/* Registration Cards */}
@@ -269,6 +284,12 @@ export default function RegistrationTracker() {
                   <Box sx={{ minWidth: 100 }}>
                     <Typography variant="body2" color="text.secondary">שובץ לקבוצה</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{reg.classroom_name || '—'}</Typography>
+                  </Box>
+                  <Box sx={{ minWidth: 90 }}>
+                    <Typography variant="body2" color="text.secondary">שנת לימוד</Typography>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {reg.start_date ? getHebrewYear(reg.start_date) : '—'}
+                    </Typography>
                   </Box>
                   <Box>
                     <Typography variant="body2" color="text.secondary">חוזה וכרטיסיה</Typography>
