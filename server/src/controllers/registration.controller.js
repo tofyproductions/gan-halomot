@@ -316,16 +316,28 @@ async function finalizeManual(req, res, next) {
 async function downloadContract(req, res, next) {
   try {
     const { id } = req.params;
-    const registration = await Registration.findById(id);
+    const registration = await Registration.findById(id).populate('classroom_id', 'name');
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found' });
     }
-    if (!registration.contract_pdf_path) {
-      return res.status(404).json({ error: 'No contract on file' });
+    // If we have a stored PDF/HTML in R2, return its presigned URL.
+    if (registration.contract_pdf_path) {
+      try {
+        const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
+        return res.json({ url });
+      } catch (storageErr) {
+        console.error('Presigned URL failed, falling back to live render:', storageErr.message);
+      }
     }
-    const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
-    // Return URL as JSON; frontend opens it. Avoids axios-following-redirect quirks.
-    res.json({ url });
+    // Live fallback: render HTML now using current registration data + saved
+    // signature. Works even if R2 isn't configured.
+    const { generateContractHTML } = require('../services/contract-pdf.service');
+    const data = {
+      ...registration.toObject(),
+      classroom: registration.classroom_id?.name || null,
+    };
+    const html = generateContractHTML(data);
+    res.json({ html, filename: `contract_${registration.unique_id}.html` });
   } catch (error) {
     next(error);
   }

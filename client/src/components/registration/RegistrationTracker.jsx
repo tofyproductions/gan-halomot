@@ -97,10 +97,17 @@ export default function RegistrationTracker() {
   const downloadContract = async (regId) => {
     try {
       const res = await api.get(`/registrations/${regId}/contract-download`);
-      if (res.data?.url) window.open(res.data.url, '_blank');
-      else toast.error('אין חוזה שמור');
-    } catch {
-      toast.error('אין חוזה שמור');
+      if (res.data?.url) {
+        window.open(res.data.url, '_blank');
+      } else if (res.data?.html) {
+        const blob = new Blob([res.data.html], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } else {
+        toast.error('אין חוזה זמין');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'אין חוזה זמין');
     }
   };
 
@@ -352,10 +359,10 @@ export default function RegistrationTracker() {
             <Button
               size="small"
               startIcon={<DownloadIcon />}
-              disabled={!docsDialog.reg?.contract_pdf_path}
+              disabled={!docsDialog.reg?.agreement_signed && !docsDialog.reg?.contract_pdf_path}
               onClick={() => downloadContract(docsDialog.reg._id || docsDialog.reg.id)}
             >
-              הורדת חוזה שמור
+              הורדת חוזה
             </Button>
           </Stack>
           <Button
@@ -388,6 +395,47 @@ export default function RegistrationTracker() {
           )}
 
           <Divider sx={{ my: 2 }} />
+
+          {/* Registration card details */}
+          {docsDialog.reg?.configuration?.registration_card && (
+            <>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: 'primary.dark' }}>
+                כרטיס רישום שמולא ע"י ההורה
+              </Typography>
+              <Box sx={{ border: '1px solid #e2e8f0', borderRadius: 1, p: 1.5, mb: 2, fontSize: '0.85rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
+                {(() => {
+                  const c = docsDialog.reg.configuration.registration_card;
+                  const rows = [
+                    ['שם הילד/ה', c.childFullName],
+                    ['ת.ז ילד/ה', c.childIdNumber],
+                    ['תאריך לידה', c.childBirthDate],
+                    ['הורה 1', c.parent1Name],
+                    ['ת.ז הורה 1', c.parent1Id],
+                    ['טלפון הורה 1', c.parent1Phone],
+                    ['דוא"ל הורה 1', c.parent1Email],
+                    ['הורה 2', c.parent2Name],
+                    ['ת.ז הורה 2', c.parent2Id],
+                    ['טלפון הורה 2', c.parent2Phone],
+                    ['דוא"ל הורה 2', c.parent2Email],
+                    ['כתובת', c.address],
+                    ['רפואי', c.medicalInfo],
+                    ['אלרגיות', c.allergies],
+                    ['חירום - שם', c.emergencyContact],
+                    ['חירום - טלפון', c.emergencyPhone],
+                    ['הערות', c.notes],
+                  ].filter(([, v]) => v);
+                  return rows.map(([label, val]) => (
+                    <Box key={label} sx={{ display: 'flex', gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ minWidth: 100 }}>
+                        {label}:
+                      </Typography>
+                      <Typography variant="caption" sx={{ fontWeight: 600 }}>{val}</Typography>
+                    </Box>
+                  ));
+                })()}
+              </Box>
+            </>
+          )}
 
           {/* Documents section */}
           <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: 'primary.dark' }}>

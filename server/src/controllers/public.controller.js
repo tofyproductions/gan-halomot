@@ -153,6 +153,16 @@ async function uploadDocument(req, res, next) {
     if (card.medicalInfo) config.medical_alerts = card.medicalInfo;
     registration.configuration = config;
 
+    // Sync card data into the Registration's primary fields so the manager
+    // sees the parent's submitted info on the customer card, not just the
+    // original wizard data.
+    if (card.childFullName?.trim()) registration.child_name = card.childFullName.trim();
+    if (card.childBirthDate) registration.child_birth_date = card.childBirthDate;
+    if (card.parent1Name?.trim()) registration.parent_name = card.parent1Name.trim();
+    if (card.parent1Id?.trim()) registration.parent_id_number = card.parent1Id.trim();
+    if (card.parent1Phone?.trim()) registration.parent_phone = card.parent1Phone.trim();
+    if (card.parent1Email?.trim()) registration.parent_email = card.parent1Email.trim();
+
     // Collect uploaded files. multer.fields() returns req.files[fieldName] = [files].
     const filesByField = req.files || {};
     const filesToSave = [];
@@ -215,20 +225,35 @@ async function uploadDocument(req, res, next) {
       const academicYear = getAcademicYearStr(registration.start_date)
         || getAcademicYears().current.range;
 
+      const childPayload = {
+        child_name: registration.child_name,
+        child_id_number: card.childIdNumber || null,
+        birth_date: registration.child_birth_date,
+        classroom_id: registration.classroom_id,
+        parent_name: registration.parent_name,
+        parent_id_number: registration.parent_id_number || card.parent1Id || null,
+        phone: registration.parent_phone,
+        email: registration.parent_email,
+        parent2_name: card.parent2Name || null,
+        parent2_id_number: card.parent2Id || null,
+        parent2_phone: card.parent2Phone || null,
+        parent2_email: card.parent2Email || null,
+        address: card.address || null,
+        medical_alerts: card.medicalInfo || config.medical_alerts || null,
+        allergies: card.allergies || null,
+        emergency_contact: card.emergencyContact || null,
+        emergency_phone: card.emergencyPhone || null,
+        notes: card.notes || null,
+        academic_year: academicYear,
+        is_active: true,
+      };
+
       const existingChild = await Child.findOne({ registration_id: registration._id });
       if (!existingChild) {
-        await Child.create({
-          registration_id: registration._id,
-          child_name: registration.child_name,
-          birth_date: registration.child_birth_date,
-          classroom_id: registration.classroom_id,
-          parent_name: registration.parent_name,
-          phone: registration.parent_phone,
-          email: registration.parent_email,
-          medical_alerts: config.medical_alerts || null,
-          academic_year: academicYear,
-          is_active: true,
-        });
+        await Child.create({ registration_id: registration._id, ...childPayload });
+      } else {
+        Object.assign(existingChild, childPayload);
+        await existingChild.save();
       }
     }
 
