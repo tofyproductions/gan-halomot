@@ -20,6 +20,9 @@ router.post('/:registrationId/recalculate', collectionsController.recalculate);
 // PUT /api/collections/:registrationId/exit-month
 router.put('/:registrationId/exit-month', collectionsController.updateExitMonth);
 
+// PUT /api/collections/:registrationId/registration-fee
+router.put('/:registrationId/registration-fee', collectionsController.updateRegistrationFee);
+
 // POST /api/collections/backup
 router.post('/backup', collectionsController.backup);
 

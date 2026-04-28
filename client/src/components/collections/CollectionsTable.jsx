@@ -48,6 +48,11 @@ export default function CollectionsTable() {
     hasFeeOverride: false, originalExpected: null,
   });
 
+  // Registration fee dialog
+  const [regFeeDialog, setRegFeeDialog] = useState({
+    open: false, regId: null, receipt: '', childName: '', regFee: 0, saving: false,
+  });
+
   // Discount dialog
   const [discountDialog, setDiscountDialog] = useState({ open: false });
 
@@ -206,6 +211,34 @@ export default function CollectionsTable() {
     setDialog({ open: false, regId: null, monthNum: null, receipt: '', notes: '', expected: 0, childName: '', duplicates: null, saving: false, feeOverride: '', feeOverrideReason: '', hasFeeOverride: false, originalExpected: null });
   };
 
+  // Open reg-fee dialog
+  const handleRegFeeClick = (regId, currentReceipt, childName, regFee) => {
+    if (!regFee) return;
+    const editable = currentReceipt && !String(currentReceipt).startsWith('-') ? currentReceipt : '';
+    setRegFeeDialog({ open: true, regId, receipt: editable, childName, regFee, saving: false });
+  };
+
+  const closeRegFeeDialog = () => {
+    setRegFeeDialog({ open: false, regId: null, receipt: '', childName: '', regFee: 0, saving: false });
+  };
+
+  const handleSaveRegFee = async () => {
+    const { regId, receipt } = regFeeDialog;
+    setRegFeeDialog(prev => ({ ...prev, saving: true }));
+    try {
+      await api.put(`/collections/${regId}/registration-fee`, {
+        receipt_number: receipt.trim() || null,
+        year: selectedYear,
+      });
+      closeRegFeeDialog();
+      fetchData();
+      toast.success('נשמר בהצלחה');
+    } catch {
+      toast.error('שגיאה בשמירה');
+      setRegFeeDialog(prev => ({ ...prev, saving: false }));
+    }
+  };
+
   // Save exit month
   const handleExitMonth = async (regId, value) => {
     const exit_month = value === '' ? null : parseInt(value, 10);
@@ -355,6 +388,7 @@ export default function CollectionsTable() {
                 classroom={classroom}
                 rows={rows}
                 onCellClick={handleCellClick}
+                onRegFeeClick={handleRegFeeClick}
                 onExitMonth={handleExitMonth}
                 getCellSx={getCellSx}
                 onChildClick={(childId) => setSelectedChild(childId)}
@@ -627,6 +661,49 @@ export default function CollectionsTable() {
           )}
         </DialogActions>
       </Dialog>
+
+      {/* Registration Fee Dialog */}
+      <Dialog open={regFeeDialog.open} onClose={closeRegFeeDialog} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {regFeeDialog.childName && (
+            <Typography variant="body2" color="text.secondary">{regFeeDialog.childName}</Typography>
+          )}
+          דמי רישום — מספר קבלה
+          <Typography variant="body2" color="text.secondary">
+            סכום: {formatCurrency(regFeeDialog.regFee)}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            label="מספר קבלה"
+            value={regFeeDialog.receipt}
+            onChange={(e) => setRegFeeDialog(prev => ({ ...prev, receipt: e.target.value }))}
+            placeholder="הכנס מספר קבלה..."
+            sx={{ mt: 1 }}
+            inputProps={{ dir: 'ltr' }}
+            disabled={regFeeDialog.saving}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSaveRegFee(); }}
+          />
+        </DialogContent>
+        <DialogActions>
+          {regFeeDialog.receipt && (
+            <Button
+              color="error"
+              onClick={() => setRegFeeDialog(prev => ({ ...prev, receipt: '' }))}
+              sx={{ ml: 'auto' }}
+            >
+              נקה
+            </Button>
+          )}
+          <Button onClick={closeRegFeeDialog}>ביטול</Button>
+          <Button variant="contained" onClick={handleSaveRegFee} disabled={regFeeDialog.saving}>
+            שמור
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <ChildDetailDialog
         open={!!selectedChild}
         childId={selectedChild}
@@ -638,7 +715,7 @@ export default function CollectionsTable() {
 }
 
 /* Grouped rows for a classroom */
-function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChildClick }) {
+function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, getCellSx, onChildClick }) {
   const subtotals = {};
   ACADEMIC_MONTHS.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -677,7 +754,11 @@ function GroupRows({ classroom, rows, onCellClick, onExitMonth, getCellSx, onChi
             <TableCell align="center" sx={{
               bgcolor: row.registration_fee_receipt ? '#d1fae5' : (row.registration_fee > 0 ? '#fee2e2' : '#f8fafc'),
               fontWeight: 600, fontSize: '0.8rem',
-            }}>
+              cursor: row.registration_fee > 0 ? 'pointer' : 'default',
+              '&:hover': row.registration_fee > 0 ? { filter: 'brightness(0.95)' } : undefined,
+            }}
+            onClick={() => row.registration_fee > 0 && onRegFeeClick(regId, row.registration_fee_receipt, row.child_name, row.registration_fee)}
+            >
               {row.registration_fee_receipt || (row.registration_fee > 0 ? formatCurrency(row.registration_fee) : '')}
             </TableCell>
             {ACADEMIC_MONTHS.map((monthNum, mi) => {

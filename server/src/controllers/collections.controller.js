@@ -419,6 +419,50 @@ async function updateExitMonth(req, res, next) {
   }
 }
 
+async function updateRegistrationFee(req, res, next) {
+  try {
+    const { registrationId } = req.params;
+    const { receipt_number, year } = req.body;
+
+    const registration = await Registration.findById(registrationId);
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    const academicYear = year
+      || getAcademicYearStr(registration.start_date)
+      || getAcademicYears().current.range;
+
+    const child = await Child.findOne({ registration_id: registrationId, is_active: true });
+
+    let collection = await Collection.findOne({
+      registration_id: registrationId,
+      academic_year: academicYear,
+    });
+
+    if (!collection) {
+      collection = await Collection.create({
+        registration_id: registrationId,
+        child_id: child?._id || null,
+        academic_year: academicYear,
+        months: [],
+      });
+    }
+
+    const trimmed = (receipt_number || '').toString().trim();
+    collection.registration_fee_receipt = trimmed || null;
+    collection.last_updated = new Date();
+    await collection.save();
+
+    res.json({
+      message: 'Registration fee receipt updated',
+      registration_fee_receipt: collection.registration_fee_receipt,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function recalculate(req, res, next) {
   try {
     const { registrationId } = req.params;
@@ -530,5 +574,5 @@ async function backup(req, res, next) {
 
 module.exports = {
   getAll, getByRegistration, updateMonth, updateExitMonth,
-  recalculate, getHistory, backup,
+  updateRegistrationFee, recalculate, getHistory, backup,
 };
