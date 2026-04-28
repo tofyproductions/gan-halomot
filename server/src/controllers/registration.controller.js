@@ -2,6 +2,7 @@ const { Registration, Classroom, Child, Archive, Collection } = require('../mode
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
 const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
+const fileStorage = require('../services/file-storage.service');
 const env = require('../config/env');
 
 async function getAll(req, res, next) {
@@ -252,6 +253,84 @@ async function remove(req, res, next) {
   }
 }
 
+async function finalizeManual(req, res, next) {
+  try {
+    const { id } = req.params;
+    const registration = await Registration.findById(id);
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    // Optional signed contract file (PDF/image). Best-effort upload to R2.
+    if (req.file) {
+      try {
+        const key = `contracts/${registration.unique_id}_manual_${Date.now()}_${req.file.originalname}`;
+        await fileStorage.upload(req.file.buffer, key, req.file.mimetype);
+        registration.contract_pdf_path = key;
+      } catch (uploadErr) {
+        console.error('Manual contract upload failed:', uploadErr.message);
+      }
+    }
+
+    registration.agreement_signed = true;
+    registration.card_completed = true;
+    registration.status = 'completed';
+
+    const config = registration.configuration || {};
+    config.manual_import = true;
+    registration.configuration = config;
+
+    await registration.save();
+
+    // Create Child if missing
+    const academicYear = getAcademicYearStr(registration.start_date)
+      || getAcademicYears().current.range;
+    const existingChild = await Child.findOne({ registration_id: registration._id });
+    if (!existingChild) {
+      await Child.create({
+        registration_id: registration._id,
+        child_name: registration.child_name,
+        birth_date: registration.child_birth_date,
+        classroom_id: registration.classroom_id,
+        parent_name: registration.parent_name,
+        phone: registration.parent_phone,
+        email: registration.parent_email,
+        academic_year: academicYear,
+        is_active: true,
+      });
+    } else if (!existingChild.is_active) {
+      existingChild.is_active = true;
+      await existingChild.save();
+    }
+
+    res.json({
+      message: 'Registration finalized manually',
+      registration_id: registration._id,
+      contract_pdf_path: registration.contract_pdf_path,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function downloadContract(req, res, next) {
+  try {
+    const { id } = req.params;
+    const registration = await Registration.findById(id);
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+    if (!registration.contract_pdf_path) {
+      return res.status(404).json({ error: 'No contract on file' });
+    }
+    const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
+    // Return URL as JSON; frontend opens it. Avoids axios-following-redirect quirks.
+    res.json({ url });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function fixOrphanBranch(req, res, next) {
   try {
     const targetBranchId = req.body.branch_id || req.query.branch;
@@ -268,4 +347,7 @@ async function fixOrphanBranch(req, res, next) {
   }
 }
 
-module.exports = { getAll, getById, create, update, generateLink, activate, remove, fixOrphanBranch };
+module.exports = {
+  getAll, getById, create, update, generateLink, activate, remove,
+  finalizeManual, downloadContract, fixOrphanBranch,
+};

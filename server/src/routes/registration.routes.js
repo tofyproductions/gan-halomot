@@ -1,6 +1,9 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const registrationController = require('../controllers/registration.controller');
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 // GET /api/registration
 router.get('/', registrationController.getAll);
@@ -22,6 +25,12 @@ router.post('/:id/generate-link', registrationController.generateLink);
 
 // POST /api/registration/:id/activate
 router.post('/:id/activate', registrationController.activate);
+
+// POST /api/registration/:id/finalize-manual
+router.post('/:id/finalize-manual', upload.single('contract_file'), registrationController.finalizeManual);
+
+// GET /api/registration/:id/contract-download
+router.get('/:id/contract-download', registrationController.downloadContract);
 
 // DELETE /api/registration/:id
 router.delete('/:id', registrationController.remove);

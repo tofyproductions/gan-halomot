@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
   TextField, InputAdornment, Button, MenuItem,
+  Dialog, DialogTitle, DialogContent, DialogActions, Divider,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
@@ -12,6 +13,9 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import AddIcon from '@mui/icons-material/Add';
+import FolderIcon from '@mui/icons-material/Folder';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DownloadIcon from '@mui/icons-material/Download';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
@@ -30,6 +34,87 @@ export default function RegistrationTracker() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [confirm, setConfirm] = useState({ open: false, id: null });
+  const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
+  const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
+
+  const apiBase = '';
+
+  const openDocsDialog = async (reg) => {
+    setDocsDialog({ open: true, reg, documents: [], loading: true });
+    try {
+      const res = await api.get(`/documents/${reg._id || reg.id}`);
+      setDocsDialog(prev => ({ ...prev, documents: res.data.documents || [], loading: false }));
+    } catch {
+      setDocsDialog(prev => ({ ...prev, loading: false }));
+      toast.error('שגיאה בטעינת מסמכים');
+    }
+  };
+
+  const closeDocsDialog = () => setDocsDialog({ open: false, reg: null, documents: [], loading: false });
+
+  const refreshDocs = async () => {
+    if (!docsDialog.reg) return;
+    try {
+      const res = await api.get(`/documents/${docsDialog.reg._id || docsDialog.reg.id}`);
+      setDocsDialog(prev => ({ ...prev, documents: res.data.documents || [] }));
+    } catch { /* ignore */ }
+    fetchData();
+  };
+
+  const handleUploadDocument = async (file, docType) => {
+    if (!file || !docsDialog.reg) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('doc_type', docType);
+    fd.append('registration_id', docsDialog.reg._id || docsDialog.reg.id);
+    try {
+      await api.post('/documents/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success('מסמך הועלה');
+      refreshDocs();
+    } catch {
+      toast.error('שגיאה בהעלאה');
+    }
+  };
+
+  const handleFinalizeManual = async (file) => {
+    if (!docsDialog.reg) return;
+    const fd = new FormData();
+    if (file) fd.append('contract_file', file);
+    try {
+      await api.post(
+        `/registrations/${docsDialog.reg._id || docsDialog.reg.id}/finalize-manual`,
+        fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      );
+      toast.success('רישום סומן כהושלם');
+      refreshDocs();
+      setDocsDialog(prev => prev.reg ? { ...prev, reg: { ...prev.reg, status: 'completed', agreement_signed: true } } : prev);
+    } catch {
+      toast.error('שגיאה בסיום ידני');
+    }
+  };
+
+  const downloadContract = async (regId) => {
+    try {
+      const res = await api.get(`/registrations/${regId}/contract-download`);
+      if (res.data?.url) window.open(res.data.url, '_blank');
+      else toast.error('אין חוזה שמור');
+    } catch {
+      toast.error('אין חוזה שמור');
+    }
+  };
+
+  const downloadDoc = (docId) => {
+    window.open(`/api/documents/${docId}/download`, '_blank');
+  };
+
+  const DOC_TYPE_LABELS = {
+    id_copy: 'תעודת זהות',
+    payment_proof: 'אישור תשלום',
+    signed_contract: 'חוזה חתום',
+    medical: 'אישור רפואי',
+    general: 'מסמך כללי',
+  };
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -195,6 +280,11 @@ export default function RegistrationTracker() {
 
                 {/* Actions */}
                 <Stack direction="row" spacing={0.5}>
+                  <Tooltip title="מסמכים וחוזה">
+                    <IconButton size="small" onClick={() => openDocsDialog(reg)}>
+                      <FolderIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="הפק/חדש קישור">
                     <IconButton size="small" onClick={() => handleGenerateLink(id)}>
                       <LinkIcon fontSize="small" />
@@ -239,6 +329,138 @@ export default function RegistrationTracker() {
         title="מחיקת רישום"
         message="למחוק את הרישום ולהעביר לארכיון?"
       />
+
+      {/* Documents + manual finalize dialog */}
+      <Dialog open={docsDialog.open} onClose={closeDocsDialog} dir="rtl" maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          מסמכים — {docsDialog.reg?.child_name}
+          <Typography variant="body2" color="text.secondary">
+            {docsDialog.reg?.parent_name}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          {/* Contract section */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: 'primary.dark' }}>
+            חוזה
+          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+            <Chip
+              size="small"
+              label={docsDialog.reg?.agreement_signed ? 'חתום' : 'לא חתום'}
+              color={docsDialog.reg?.agreement_signed ? 'success' : 'warning'}
+            />
+            <Button
+              size="small"
+              startIcon={<DownloadIcon />}
+              disabled={!docsDialog.reg?.contract_pdf_path}
+              onClick={() => downloadContract(docsDialog.reg._id || docsDialog.reg.id)}
+            >
+              הורדת חוזה שמור
+            </Button>
+          </Stack>
+          <Button
+            component="label"
+            size="small"
+            variant="outlined"
+            startIcon={<UploadFileIcon />}
+            sx={{ mb: 2 }}
+          >
+            העלה חוזה ידני וסמן כהושלם
+            <input
+              type="file"
+              accept="application/pdf,image/*"
+              hidden
+              onChange={(e) => {
+                if (e.target.files?.[0]) handleFinalizeManual(e.target.files[0]);
+                e.target.value = '';
+              }}
+            />
+          </Button>
+          {docsDialog.reg?.status !== 'completed' && (
+            <Button
+              size="small"
+              variant="text"
+              sx={{ display: 'block', mb: 2 }}
+              onClick={() => handleFinalizeManual(null)}
+            >
+              סמן כהושלם ללא קובץ
+            </Button>
+          )}
+
+          <Divider sx={{ my: 2 }} />
+
+          {/* Documents section */}
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1, color: 'primary.dark' }}>
+            מסמכים
+          </Typography>
+          {docsDialog.loading ? (
+            <Typography variant="body2" color="text.secondary">טוען...</Typography>
+          ) : docsDialog.documents.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              אין מסמכים
+            </Typography>
+          ) : (
+            <Stack spacing={0.5} sx={{ mb: 2 }}>
+              {docsDialog.documents.map(d => (
+                <Stack
+                  key={d._id || d.id}
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ border: '1px solid #e2e8f0', borderRadius: 1, px: 1, py: 0.5 }}
+                >
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {DOC_TYPE_LABELS[d.doc_type] || d.doc_type}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {d.file_name}
+                    </Typography>
+                  </Box>
+                  <IconButton size="small" onClick={() => downloadDoc(d._id || d.id)}>
+                    <DownloadIcon fontSize="small" />
+                  </IconButton>
+                </Stack>
+              ))}
+            </Stack>
+          )}
+
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField
+              select
+              size="small"
+              label="סוג מסמך"
+              value={docTypeForUpload}
+              onChange={(e) => setDocTypeForUpload(e.target.value)}
+              sx={{ width: 160 }}
+            >
+              {Object.entries(DOC_TYPE_LABELS).map(([k, v]) => (
+                <MenuItem key={k} value={k}>{v}</MenuItem>
+              ))}
+            </TextField>
+            <Button
+              component="label"
+              size="small"
+              variant="contained"
+              startIcon={<UploadFileIcon />}
+            >
+              העלאה
+              <input
+                type="file"
+                accept="application/pdf,image/*"
+                hidden
+                onChange={(e) => {
+                  if (e.target.files?.[0]) handleUploadDocument(e.target.files[0], docTypeForUpload);
+                  e.target.value = '';
+                }}
+              />
+            </Button>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeDocsDialog}>סגור</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
