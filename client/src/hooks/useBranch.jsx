@@ -21,8 +21,9 @@ export function BranchProvider({ children }) {
           setSelectedBranch(first);
           localStorage.setItem('selectedBranch', first);
         }
-        // If selected branch no longer exists, reset
-        if (selectedBranch && list.length > 0) {
+        // If selected branch no longer exists, reset.
+        // 'all' is a valid pseudo-value (cross-branch view) — leave it.
+        if (selectedBranch && list.length > 0 && selectedBranch !== 'all') {
           const exists = list.some(b => (b._id || b.id) === selectedBranch);
           if (!exists) {
             const first = list[0]._id || list[0].id;
