@@ -75,6 +75,11 @@ function normalizeIsraeliId(v) {
   let linked = 0, unlinked = 0, errors = 0;
   const stats = { byMonth: {}, byEmployee: {}, unlinkedIds: new Set() };
 
+  // Build the bulk write ops up-front, computing stats along the way. This
+  // avoids the previous version's per-record round trip (which on Atlas free
+  // tier could take 50-200ms each, turning an 11k-row import into ~20 minutes
+  // and putting Render under enough load to OOM-kill it).
+  const ops = [];
   for (const rec of raw) {
     const ts = Date.parse(rec.recordTime);
     if (isNaN(ts) || ts < Date.parse('2010-01-01')) { errors++; continue; }
@@ -93,10 +98,10 @@ function normalizeIsraeliId(v) {
 
     if (DRY_RUN) continue;
 
-    try {
-      const result = await Punch.updateOne(
-        { branch_id: branch._id, device_user_sn: rec.userSn },
-        {
+    ops.push({
+      updateOne: {
+        filter: { branch_id: branch._id, device_user_sn: rec.userSn },
+        update: {
           $setOnInsert: {
             branch_id: branch._id,
             device_user_sn: rec.userSn,
@@ -104,20 +109,43 @@ function normalizeIsraeliId(v) {
             israeli_id: israeliId,
             employee_id: emp ? emp._id : null,
             timestamp: new Date(ts),
-            timestamp_source: 'device', // these come straight from the clock
+            timestamp_source: 'device', // straight from the clock
             state: Number(rec.state || 0),
             verify_mode: Number(rec.verifyMode || 0),
             received_at: new Date(),
             agent_version: 'historical-import',
           },
         },
-        { upsert: true }
-      );
-      if (result.upsertedCount === 1) created++;
-      else existed++;
-    } catch (e) {
-      errors++;
-      if (errors < 5) console.error('insert error:', e.message);
+        upsert: true,
+      },
+    });
+  }
+
+  if (!DRY_RUN && ops.length > 0) {
+    const BATCH = 1000;
+    const t0 = Date.now();
+    for (let i = 0; i < ops.length; i += BATCH) {
+      const slice = ops.slice(i, i + BATCH);
+      try {
+        // ordered: false → keep going past per-doc errors instead of aborting the batch
+        const r = await Punch.bulkWrite(slice, { ordered: false });
+        created += r.upsertedCount || 0;
+        // matched-but-not-modified == already existed (we use $setOnInsert so no modification on hit)
+        existed += (r.matchedCount || 0);
+      } catch (e) {
+        // Partial failure: bulkWrite throws but the BulkWriteResult is on e.result
+        const r = e.result || {};
+        created += r.nUpserted || r.upsertedCount || 0;
+        existed += r.nMatched || r.matchedCount || 0;
+        const writeErrors = e.writeErrors || (r.getWriteErrors && r.getWriteErrors()) || [];
+        errors += writeErrors.length;
+        if (writeErrors.length && errors < 10) {
+          console.error(`bulkWrite (batch ${i}-${i+slice.length}) had ${writeErrors.length} errors; first:`, writeErrors[0].errmsg);
+        }
+      }
+      const done = Math.min(i + BATCH, ops.length);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      console.log(`  bulk progress: ${done} / ${ops.length}  (${elapsed}s)`);
     }
   }
 
