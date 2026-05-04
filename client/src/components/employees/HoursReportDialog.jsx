@@ -127,8 +127,17 @@ export default function HoursReportDialog({ open, employee, onClose }) {
                   <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3 }}>אין נתוני החתמה לחודש זה</TableCell></TableRow>
                 )}
                 {!loading && report && report.days.map(d => (
-                  <TableRow key={d.date} hover>
-                    <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
+                  <TableRow key={d.date} hover sx={d.cross_branch_names?.length > 0 ? { bgcolor: '#faf5ff' } : undefined}>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      {formatDate(d.date)}
+                      {d.cross_branch_names?.length > 0 && (
+                        <Chip
+                          label={`עבד/ה ב${d.cross_branch_names.join(' + ')}`}
+                          size="small"
+                          sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#a855f7', color: 'white', fontWeight: 700 }}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell align="center" dir="ltr">{d.first_in || '—'}</TableCell>
                     <TableCell align="center" dir="ltr">{d.last_out || (d.incomplete ? '⚠︎' : '—')}</TableCell>
                     <TableCell align="center" sx={{ fontWeight: 700 }}>{d.total_hours}h</TableCell>

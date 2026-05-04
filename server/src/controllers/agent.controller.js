@@ -50,17 +50,36 @@ async function uploadPunches(req, res, next) {
     }
 
     // Preload employees for any Israeli IDs referenced — one round trip.
+    // Cross-branch handling: a punch is matched first against employees of
+    // THIS branch (typical case). Any IDs that don't match are then looked
+    // up across ALL branches — that catches employees who occasionally show
+    // up to help at another branch. The Punch's branch_id stays at the
+    // visiting branch (where it physically happened); employee_id points to
+    // the worker, so salary aggregation by employee_id works across branches.
     const israeliIds = [...new Set(
       punches.map(p => p && p.israeli_id).filter(Boolean).map(String)
     )];
-    const employees = israeliIds.length
+    const sameBranchEmployees = israeliIds.length
       ? await Employee.find({
           branch_id: branch._id,
           israeli_id: { $in: israeliIds },
           is_active: true,
         }).select('_id israeli_id').lean()
       : [];
-    const idMap = new Map(employees.map(e => [e.israeli_id, e._id]));
+    const idMap = new Map(sameBranchEmployees.map(e => [e.israeli_id, e._id]));
+
+    const stillMissing = israeliIds.filter(id => !idMap.has(id));
+    if (stillMissing.length) {
+      const guests = await Employee.find({
+        israeli_id: { $in: stillMissing },
+        is_active: true,
+      }).select('_id israeli_id branch_id').lean();
+      // If multiple branches happen to have the same israeli_id (data quirk),
+      // keep the first one and ignore the rest — better than silently dropping.
+      for (const e of guests) {
+        if (!idMap.has(e.israeli_id)) idMap.set(e.israeli_id, e._id);
+      }
+    }
 
     let accepted = 0;
     let duplicates = 0;

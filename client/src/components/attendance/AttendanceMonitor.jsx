@@ -76,15 +76,22 @@ export default function AttendanceMonitor() {
 
   const hasAnyActivity = (block) => block.month_total_hours > 0 || Object.keys(block.days).length > 0;
 
-  const renderEmployeeRow = (block, key) => (
-    <TableRow key={key} hover sx={block.unlinked ? { bgcolor: 'warning.50' } : undefined}>
+  const renderEmployeeRow = (block, key) => {
+    // Visual treatment per row state:
+    //  - unlinked  → warning.50 (existing)
+    //  - guest     → soft purple — clearly NOT a home employee
+    //  - has away  → no special bg, but a chip in the name cell
+    const rowBg = block.unlinked ? 'warning.50' : (block.is_guest ? '#f3e8ff' : undefined);
+    return (
+    <TableRow key={key} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
       <TableCell sx={{
         fontWeight: 600,
-        position: 'sticky', right: 0, bgcolor: 'background.paper', zIndex: 1,
+        position: 'sticky', right: 0,
+        bgcolor: rowBg || 'background.paper', zIndex: 1,
         borderLeft: '1px solid', borderColor: 'divider',
-        minWidth: 180,
+        minWidth: 200,
         cursor: block.employee_id && !block.unlinked ? 'pointer' : 'default',
-        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: '#f1f5f9' } : {},
+        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: rowBg || '#f1f5f9' } : {},
       }}
       onClick={() => {
         if (block.employee_id && !block.unlinked) {
@@ -96,8 +103,22 @@ export default function AttendanceMonitor() {
       }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-          <Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
             {block.full_name}
+            {block.is_guest && block.home_branch_name && (
+              <Chip
+                label={`אורח/ת מסניף ${block.home_branch_name}`}
+                size="small"
+                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#a855f7', color: 'white', fontWeight: 700 }}
+              />
+            )}
+            {block.away_total_hours > 0 && (
+              <Chip
+                label={`עבד/ה גם בסניף אחר: ${block.away_total_hours}h`}
+                size="small"
+                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700 }}
+              />
+            )}
             {block.israeli_id && !block.unlinked && (
               <Typography variant="caption" display="block" dir="ltr" sx={{ color: 'text.secondary', fontFamily: 'monospace', fontSize: '0.65rem' }}>
                 {block.israeli_id}
@@ -161,10 +182,12 @@ export default function AttendanceMonitor() {
         )}
       </TableCell>
     </TableRow>
-  );
+    );
+  };
 
   const activeEmployees = (data?.employees || []).filter(hasAnyActivity);
   const inactiveCount = (data?.employees || []).length - activeEmployees.length;
+  const guestEmployees = (data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
 
   // Aggregate totals across branches in all-branches mode
   const allTotals = perBranch ? perBranch.reduce((acc, grp) => {
@@ -239,6 +262,16 @@ export default function AttendanceMonitor() {
 
             {/* Single-branch mode */}
             {!loading && data && activeEmployees.map(block => renderEmployeeRow(block, block.employee_id))}
+            {!loading && data && guestEmployees.length > 0 && (
+              <>
+                <TableRow>
+                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#ede9fe', fontWeight: 700, py: 1, color: '#6d28d9' }}>
+                    🟣 אורחים מסניפים אחרים — החתימו פה אך משויכים לסניף אחר (השעות נספרות בשכר של סניף הבית שלהם)
+                  </TableCell>
+                </TableRow>
+                {guestEmployees.map(block => renderEmployeeRow(block, `guest-${block.employee_id}`))}
+              </>
+            )}
             {!loading && data && data.unlinked && data.unlinked.length > 0 && (
               <>
                 <TableRow>
@@ -258,6 +291,7 @@ export default function AttendanceMonitor() {
               const branchKey = grp.branch._id || grp.branch.id;
               const out = [];
               const grpActive = (grp.data?.employees || []).filter(hasAnyActivity);
+              const grpGuests = (grp.data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
               const grpUnlinked = grp.data?.unlinked || [];
               out.push(
                 <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'grey.200' }}>
@@ -271,10 +305,20 @@ export default function AttendanceMonitor() {
                 </TableRow>
               );
               if (grp.data) {
-                if (grpActive.length === 0 && grpUnlinked.length === 0) {
+                if (grpActive.length === 0 && grpGuests.length === 0 && grpUnlinked.length === 0) {
                   out.push(<TableRow key={`empty-${branchKey}`}><TableCell colSpan={days.length + 3} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין החתמות בסניף זה החודש</TableCell></TableRow>);
                 } else {
                   for (const b of grpActive) out.push(renderEmployeeRow(b, `${branchKey}-${b.employee_id}`));
+                  if (grpGuests.length > 0) {
+                    out.push(
+                      <TableRow key={`gst-hdr-${branchKey}`}>
+                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#ede9fe', fontWeight: 700, py: 0.5, fontSize: '0.8rem', color: '#6d28d9' }}>
+                          🟣 אורחים מסניפים אחרים ({grp.branch.name})
+                        </TableCell>
+                      </TableRow>
+                    );
+                    for (const b of grpGuests) out.push(renderEmployeeRow(b, `${branchKey}-guest-${b.employee_id}`));
+                  }
                   if (grpUnlinked.length > 0) {
                     out.push(
                       <TableRow key={`unl-hdr-${branchKey}`}>

@@ -136,6 +136,23 @@ export default function SalaryTable() {
       <TableCell sx={{ fontWeight: 600 }}>
         {r.full_name}
         {!r.israeli_id && <Chip label="ללא ת״ז" size="small" color="warning" sx={{ ml: 1 }} />}
+        {r.cross_branch && r.cross_branch.elsewhere?.length > 0 && (
+          <Tooltip title={
+            <Box sx={{ fontSize: '0.8rem' }}>
+              <div>בסניף הבית: {r.cross_branch.home_punches} החתמות</div>
+              {r.cross_branch.elsewhere.map(x => (
+                <div key={x.branch_id}>בסניף {x.branch_name}: {x.punch_count} החתמות</div>
+              ))}
+              <div style={{ marginTop: 4, opacity: 0.8 }}>השעות נכללות בשכר זה (במחיר של הסניף שלהם).</div>
+            </Box>
+          }>
+            <Chip
+              label={`+ ${r.cross_branch.elsewhere.map(x => x.branch_name).join('+')}`}
+              size="small"
+              sx={{ ml: 0.5, height: 20, fontSize: '0.7rem', bgcolor: '#f3e8ff', color: '#6d28d9', fontWeight: 700 }}
+            />
+          </Tooltip>
+        )}
       </TableCell>
       <TableCell>
         <Chip

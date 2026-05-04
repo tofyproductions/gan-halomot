@@ -301,52 +301,102 @@ async function attendanceByMonth(req, res, next) {
     const range = monthRange(month);
     if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
 
-    const [employees, punches] = await Promise.all([
+    // First batch — employees + branch list (don't depend on each other).
+    const [homeEmployees, allEmployees, branches] = await Promise.all([
       Employee.find({ branch_id: branch, is_active: true })
         .select('_id full_name israeli_id position')
         .sort({ full_name: 1 })
         .lean(),
+      Employee.find({ is_active: true })
+        .select('_id full_name israeli_id branch_id position')
+        .lean(),
+      Branch.find({}).select('_id name').lean(),
+    ]);
+    const homeIdsArr = homeEmployees.map(e => e._id);
+
+    // Second batch — punches. Run in parallel now that we have the home IDs.
+    //  1) atThisBranchPunches: physically happened here (includes guests).
+    //  2) awayPunches: home employees who punched at OTHER branches.
+    const [atThisBranchPunches, awayPunches] = await Promise.all([
       Punch.find({
         branch_id: branch,
         timestamp: { $gte: range.from, $lt: range.to },
         ignored: { $ne: true },
-      })
-        .sort({ timestamp: 1 })
-        .lean(),
+      }).sort({ timestamp: 1 }).lean(),
+      Punch.find({
+        branch_id: { $ne: branch },
+        employee_id: { $in: homeIdsArr },
+        timestamp: { $gte: range.from, $lt: range.to },
+        ignored: { $ne: true },
+      }).sort({ timestamp: 1 }).lean(),
     ]);
 
-    // Filter punches to the exact Israel-local month (drop overflow from
-    // the 2-day buffer we added in monthRange()).
     const ymPrefix = `${range.year}-${String(range.month).padStart(2, '0')}`;
-    const monthPunches = punches.filter(p => israelDateKey(new Date(p.timestamp)).startsWith(ymPrefix));
+    const monthPunches = atThisBranchPunches.filter(p =>
+      israelDateKey(new Date(p.timestamp)).startsWith(ymPrefix));
+    const monthAwayPunches = awayPunches.filter(p =>
+      israelDateKey(new Date(p.timestamp)).startsWith(ymPrefix));
 
-    // Bucket by employee (use employee_id if matched, else group under the
-    // raw israeli_id for the `unlinked` block).
+    const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+    const empById = new Map(allEmployees.map(e => [String(e._id), e]));
+    const homeIdSet = new Set(homeEmployees.map(e => String(e._id)));
+
+    // Three buckets:
+    //  - byEmployee: home-branch employees (their punches at this branch)
+    //  - guestByEmployee: employees from OTHER branches who punched here
+    //  - unlinkedByIsraeliId: punches with no employee_id (truly unmatched)
     const byEmployee = new Map();
+    const guestByEmployee = new Map();
     const unlinkedByIsraeliId = new Map();
 
-    for (const emp of employees) {
+    for (const emp of homeEmployees) {
       byEmployee.set(String(emp._id), {
         employee_id: String(emp._id),
         full_name: emp.full_name,
         israeli_id: emp.israeli_id || '',
         position: emp.position || '',
         days: {},
+        away_days: {},          // days where this person worked at another branch
         month_total_hours: 0,
+        away_total_hours: 0,
         incomplete_days: 0,
       });
     }
 
     for (const p of monthPunches) {
       const dayKey = israelDateKey(new Date(p.timestamp));
-      let bucket;
-      if (p.employee_id) {
-        bucket = byEmployee.get(String(p.employee_id));
-      }
-      if (!bucket) {
-        // Unlinked → key by israeli_id
+      const empIdStr = p.employee_id ? String(p.employee_id) : null;
+
+      if (empIdStr && homeIdSet.has(empIdStr)) {
+        // Home employee, punched at home — normal case.
+        const bucket = byEmployee.get(empIdStr);
+        if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
+        bucket.days[dayKey].push(p);
+      } else if (empIdStr && empById.has(empIdStr)) {
+        // Guest: known employee from another branch.
+        let bucket = guestByEmployee.get(empIdStr);
+        if (!bucket) {
+          const emp = empById.get(empIdStr);
+          bucket = {
+            employee_id: empIdStr,
+            full_name: emp.full_name,
+            israeli_id: emp.israeli_id || '',
+            position: emp.position || '',
+            home_branch_id: emp.branch_id ? String(emp.branch_id) : null,
+            home_branch_name: emp.branch_id ? (branchById.get(String(emp.branch_id)) || '') : '',
+            is_guest: true,
+            days: {},
+            month_total_hours: 0,
+            incomplete_days: 0,
+          };
+          guestByEmployee.set(empIdStr, bucket);
+        }
+        if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
+        bucket.days[dayKey].push(p);
+      } else {
+        // Truly unlinked: no employee in any branch with this israeli_id.
         const k = String(p.israeli_id || 'unknown');
-        bucket = unlinkedByIsraeliId.get(k);
+        let bucket = unlinkedByIsraeliId.get(k);
         if (!bucket) {
           bucket = {
             employee_id: null,
@@ -360,12 +410,25 @@ async function attendanceByMonth(req, res, next) {
           };
           unlinkedByIsraeliId.set(k, bucket);
         }
+        if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
+        bucket.days[dayKey].push(p);
       }
-      if (!bucket.days[dayKey]) bucket.days[dayKey] = [];
-      bucket.days[dayKey].push(p);
     }
 
-    // Summarize each day for each bucket.
+    // Hour bucket for home employees who worked at another branch this month.
+    // We track per-day where they were so the UI can label "worked at <other>".
+    for (const p of monthAwayPunches) {
+      const dayKey = israelDateKey(new Date(p.timestamp));
+      const empIdStr = String(p.employee_id);
+      const bucket = byEmployee.get(empIdStr);
+      if (!bucket) continue;
+      if (!bucket.away_days[dayKey]) {
+        bucket.away_days[dayKey] = { punches: [], at_branches: new Set() };
+      }
+      bucket.away_days[dayKey].punches.push(p);
+      bucket.away_days[dayKey].at_branches.add(branchById.get(String(p.branch_id)) || 'אחר');
+    }
+
     const finalize = (bucket) => {
       const summarized = {};
       for (const [dayKey, dayPunches] of Object.entries(bucket.days)) {
@@ -376,19 +439,35 @@ async function attendanceByMonth(req, res, next) {
       }
       bucket.days = summarized;
       bucket.month_total_hours = Math.round(bucket.month_total_hours * 100) / 100;
+
+      // For home employees: also summarize away_days (same shape, plus branch list)
+      if (bucket.away_days) {
+        const awaySummarized = {};
+        for (const [dayKey, info] of Object.entries(bucket.away_days)) {
+          const s = summarizeDay(info.punches);
+          s.at_branches = [...info.at_branches];
+          awaySummarized[dayKey] = s;
+          bucket.away_total_hours += s.total_hours;
+        }
+        bucket.away_days = awaySummarized;
+        bucket.away_total_hours = Math.round(bucket.away_total_hours * 100) / 100;
+      }
       return bucket;
     };
 
     const employeeBlocks = [...byEmployee.values()].map(finalize);
+    const guestBlocks = [...guestByEmployee.values()].map(finalize);
     const unlinkedBlocks = [...unlinkedByIsraeliId.values()].map(finalize);
 
     res.json({
       month: ymPrefix,
       branch_id: branch,
       employees: employeeBlocks,
+      guests: guestBlocks,           // NEW — workers from other branches who punched here
       unlinked: unlinkedBlocks,
       totals: {
         employees: employeeBlocks.length,
+        guests: guestBlocks.length,
         unlinked: unlinkedBlocks.length,
         total_punches: monthPunches.length,
         matched_punches: monthPunches.filter(p => p.employee_id).length,
@@ -411,12 +490,17 @@ async function hoursReport(req, res, next) {
     const range = monthRange(month);
     if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
 
+    // Cross-branch: pull punches by employee_id only (any branch). Salary
+    // is computed at home-branch rate but every hour worked counts.
     const punches = await Punch.find({
-      branch_id: emp.branch_id?._id || emp.branch_id,
       timestamp: { $gte: range.from, $lt: range.to },
       employee_id: emp._id,
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
+
+    const branches = await Branch.find({}).select('_id name').lean();
+    const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+    const homeBranchId = String(emp.branch_id?._id || emp.branch_id);
 
     const ymPrefix = `${range.year}-${String(range.month).padStart(2, '0')}`;
     const filtered = punches.filter(p => israelDateKey(new Date(p.timestamp)).startsWith(ymPrefix));
@@ -426,10 +510,21 @@ async function hoursReport(req, res, next) {
       const k = israelDateKey(new Date(p.timestamp));
       (days[k] ||= []).push(p);
     }
-    const dayRows = Object.keys(days).sort().map(k => ({
-      date: k,
-      ...summarizeDay(days[k]),
-    }));
+    const dayRows = Object.keys(days).sort().map(k => {
+      const summary = summarizeDay(days[k]);
+      // Tag each session with the branch where its first punch happened, and
+      // mark the day with the set of non-home branches the employee visited.
+      const branchesVisited = new Set();
+      for (const p of days[k]) {
+        const bid = String(p.branch_id);
+        if (bid !== homeBranchId) branchesVisited.add(branchById.get(bid) || 'אחר');
+      }
+      return {
+        date: k,
+        ...summary,
+        cross_branch_names: [...branchesVisited],   // empty array if all at home
+      };
+    });
 
     const monthMinutes = dayRows.reduce((s, d) => s + d.total_minutes, 0);
     res.json({
@@ -692,12 +787,18 @@ async function salarySummary(req, res, next) {
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
     const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
 
+    // Cross-branch: pull all punches by these employees regardless of where
+    // they physically clocked in. Salary = work × home-branch rate, even if
+    // the work happened at a sister branch. Branch info is preserved on the
+    // punch so we can break it down per-row for the UI.
     const allPunches = await Punch.find({
-      branch_id: branch,
       employee_id: { $in: employees.map(e => e._id) },
       timestamp: { $gte: from, $lt: to },
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
+
+    const branches = await Branch.find({}).select('_id name').lean();
+    const branchById = new Map(branches.map(b => [String(b._id), b.name]));
 
     const byEmpId = new Map();
     for (const p of allPunches) {
@@ -709,6 +810,27 @@ async function salarySummary(req, res, next) {
     const rows = employees.map(emp => {
       const empPunches = byEmpId.get(String(emp._id)) || [];
       const b = calculateMonthlySalary(emp, empPunches, month);
+
+      // Build a small breakdown of where the punches happened. The home
+      // branch's count includes any punches at branch=home; the other entries
+      // are guest visits. Only included when there's actually cross-branch
+      // activity, so the typical row stays clean.
+      const branchCounts = {};
+      for (const p of empPunches) {
+        const bid = String(p.branch_id);
+        branchCounts[bid] = (branchCounts[bid] || 0) + 1;
+      }
+      const homeBid = String(emp.branch_id);
+      const otherBranches = Object.keys(branchCounts).filter(bid => bid !== homeBid);
+      const cross_branch = otherBranches.length === 0 ? null : {
+        home_punches:  branchCounts[homeBid] || 0,
+        elsewhere: otherBranches.map(bid => ({
+          branch_id:   bid,
+          branch_name: branchById.get(bid) || '?',
+          punch_count: branchCounts[bid],
+        })),
+      };
+
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,
@@ -726,6 +848,7 @@ async function salarySummary(req, res, next) {
         deductions: b.deductions.loans,
         estimated_total: b.estimated_total,
         warnings: b.warnings,
+        cross_branch,
       };
     });
 

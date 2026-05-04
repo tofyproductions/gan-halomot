@@ -133,8 +133,13 @@ employeeSchema.post('save', async function relinkOrphanPunches(doc) {
     if (!doc || !doc.israeli_id) return;
     // Lazy-require to avoid a circular import loop with models/index.js
     const Punch = mongoose.model('Punch');
+    // Drop the branch_id filter so we also catch cross-branch orphans:
+    // an employee from branch A who occasionally punches at branch B leaves
+    // orphan punches in branch B's records. After saving the employee we
+    // link those too. Salary calc aggregates by employee_id (not branch_id),
+    // so every hour ends up under the correct home branch.
     const result = await Punch.updateMany(
-      { branch_id: doc.branch_id, israeli_id: doc.israeli_id, employee_id: null },
+      { israeli_id: doc.israeli_id, employee_id: null },
       { $set: { employee_id: doc._id } }
     );
     if (result.modifiedCount > 0) {
