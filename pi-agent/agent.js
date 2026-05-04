@@ -116,10 +116,55 @@ function shapePunch(rec) {
   };
 }
 
+// --- Self-healing: scan local subnet for the clock if it goes missing ---
+// Triggered after POLL_FAILURE_THRESHOLD consecutive pollPunches failures.
+// Clocks at our branches use DHCP so their LAN IP can change after a power
+// cycle; without this the agent would just spam errors forever.
+let pollFailureCount = 0;
+const POLL_FAILURE_THRESHOLD = 5; // ~75s of consecutive failures @ 15s loop
+
+async function discoverClockIp() {
+  const os = require('os');
+  const net = require('net');
+  const ifaces = os.networkInterfaces();
+  let myIp = null;
+  for (const list of Object.values(ifaces || {})) {
+    for (const a of list || []) {
+      if (a.family === 'IPv4' && !a.internal) { myIp = a.address; break; }
+    }
+    if (myIp) break;
+  }
+  if (!myIp) { log.warn('discoverClockIp: no local IP'); return null; }
+  const subnet = myIp.split('.').slice(0, 3).join('.');
+  log.warn('discoverClockIp: scanning subnet', { subnet, port: cfg.clockPort, currentIp: clock.ip });
+
+  const probe = (ip) => new Promise(resolve => {
+    const sock = net.createConnection({ host: ip, port: cfg.clockPort, timeout: 800 });
+    sock.once('connect', () => { sock.destroy(); resolve(ip); });
+    sock.once('error',   () => { try { sock.destroy(); } catch(e){} resolve(null); });
+    sock.once('timeout', () => { try { sock.destroy(); } catch(e){} resolve(null); });
+  });
+
+  const found = [];
+  for (let start = 1; start <= 254; start += 32) {
+    const batch = [];
+    for (let i = start; i < start + 32 && i <= 254; i++) {
+      const ip = `${subnet}.${i}`;
+      if (ip !== myIp) batch.push(ip);
+    }
+    const results = await Promise.all(batch.map(probe));
+    for (const r of results) if (r) found.push(r);
+  }
+  log.warn('discoverClockIp: scan complete', { found, currentIp: clock.ip });
+  // Prefer something different from the IP we currently have (since that one isn't responding)
+  return found.find(ip => ip !== clock.ip) || found[0] || null;
+}
+
 async function pollPunches() {
   try {
     const raws = await clock.getAttendances();
     if (!raws || raws.length === 0) {
+      pollFailureCount = 0;
       log.debug('no attendances returned from device');
       return;
     }
@@ -128,6 +173,8 @@ async function pollPunches() {
     const fresh = raws
       .filter(r => typeof r.userSn === 'number' && r.userSn > lastSeen && r.deviceUserId)
       .sort((a, b) => a.userSn - b.userSn);
+
+    pollFailureCount = 0; // success — reset
 
     if (fresh.length === 0) {
       log.debug('no new punches', { lastSeen, total: raws.length });
@@ -166,6 +213,26 @@ async function pollPunches() {
     saveState(cfg.stateFile, state);
   } catch (err) {
     log.error('pollPunches failed', { err: err.message });
+    pollFailureCount++;
+    if (pollFailureCount >= POLL_FAILURE_THRESHOLD) {
+      pollFailureCount = 0;  // reset so we don't loop on every failure
+      try {
+        const newIp = await discoverClockIp();
+        if (newIp && newIp !== clock.ip) {
+          log.warn('clock IP appears to have changed, switching in-memory', {
+            from: clock.ip, to: newIp,
+          });
+          clock.ip = newIp;
+          // Note: this is a runtime override only — to make it permanent,
+          // update CLOCK_IP in .env and restart. The agent will keep using
+          // the new IP until it dies/restarts.
+        } else if (!newIp) {
+          log.error('discoverClockIp: no clock found on local subnet');
+        }
+      } catch (e) {
+        log.error('discoverClockIp threw', { err: e.message });
+      }
+    }
   }
 }
 
