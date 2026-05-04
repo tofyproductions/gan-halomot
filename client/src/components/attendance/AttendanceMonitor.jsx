@@ -33,23 +33,36 @@ function formatHours(h) {
 }
 
 export default function AttendanceMonitor() {
-  const { selectedBranch, selectedBranchName } = useBranch();
+  const { selectedBranch, selectedBranchName, isAllBranches, branches } = useBranch();
   const [month, setMonth] = useState(currentYearMonth());
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(null);            // single-branch payload
+  const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
 
   const fetchAttendance = useCallback(() => {
     if (!selectedBranch) return;
     setLoading(true);
+    if (isAllBranches) {
+      Promise.all(branches.map(b => {
+        const id = b._id || b.id;
+        return api.get('/payroll/attendance', { params: { branch: id, month } })
+          .then(res => ({ branch: b, data: res.data }))
+          .catch(err => ({ branch: b, error: err.message || 'שגיאה' }));
+      }))
+        .then(results => { setPerBranch(results); setData(null); })
+        .catch(err => { console.error(err); toast.error('שגיאה בטעינת מעקב החתמות'); })
+        .finally(() => setLoading(false));
+      return;
+    }
     api.get('/payroll/attendance', { params: { branch: selectedBranch, month } })
-      .then(res => setData(res.data))
+      .then(res => { setData(res.data); setPerBranch(null); })
       .catch(err => {
         console.error(err);
         toast.error('שגיאה בטעינת מעקב החתמות');
       })
       .finally(() => setLoading(false));
-  }, [selectedBranch, month]);
+  }, [selectedBranch, isAllBranches, branches, month]);
 
   useEffect(() => { fetchAttendance(); }, [fetchAttendance]);
 
@@ -153,6 +166,14 @@ export default function AttendanceMonitor() {
   const activeEmployees = (data?.employees || []).filter(hasAnyActivity);
   const inactiveCount = (data?.employees || []).length - activeEmployees.length;
 
+  // Aggregate totals across branches in all-branches mode
+  const allTotals = perBranch ? perBranch.reduce((acc, grp) => {
+    if (!grp.data?.totals) return acc;
+    acc.total_punches   += grp.data.totals.total_punches   || 0;
+    acc.matched_punches += grp.data.totals.matched_punches || 0;
+    return acc;
+  }, { total_punches: 0, matched_punches: 0 }) : null;
+
   return (
     <Box dir="rtl" sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
@@ -161,6 +182,7 @@ export default function AttendanceMonitor() {
           <Typography variant="caption" color="text.secondary">
             {selectedBranchName}
             {data && ` • ${data.totals.total_punches} החתמות בחודש • ${data.totals.matched_punches} משויכות`}
+            {allTotals && ` • ${allTotals.total_punches} החתמות סה״כ • ${allTotals.matched_punches} משויכות`}
           </Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
@@ -214,6 +236,8 @@ export default function AttendanceMonitor() {
             {loading && (
               <TableRow><TableCell colSpan={days.length + 3} align="center" sx={{ py: 4 }}>טוען…</TableCell></TableRow>
             )}
+
+            {/* Single-branch mode */}
             {!loading && data && activeEmployees.map(block => renderEmployeeRow(block, block.employee_id))}
             {!loading && data && data.unlinked && data.unlinked.length > 0 && (
               <>
@@ -228,6 +252,43 @@ export default function AttendanceMonitor() {
             {!loading && data && activeEmployees.length === 0 && (!data.unlinked || data.unlinked.length === 0) && (
               <TableRow><TableCell colSpan={days.length + 3} align="center" sx={{ py: 4 }}>אין החתמות בחודש הזה</TableCell></TableRow>
             )}
+
+            {/* All-branches mode: per-branch sections */}
+            {!loading && perBranch && perBranch.flatMap((grp) => {
+              const branchKey = grp.branch._id || grp.branch.id;
+              const out = [];
+              const grpActive = (grp.data?.employees || []).filter(hasAnyActivity);
+              const grpUnlinked = grp.data?.unlinked || [];
+              out.push(
+                <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'grey.200' }}>
+                  <TableCell colSpan={days.length + 3} sx={{ fontWeight: 900, fontSize: '0.95rem', py: 1, position: 'sticky', right: 0, bgcolor: 'grey.200', zIndex: 2 }}>
+                    🏠 {grp.branch.name}
+                    {grp.error
+                      ? <Chip size="small" color="error" label={'שגיאה: ' + grp.error} sx={{ ml: 1 }} />
+                      : grp.data && <Chip size="small" variant="outlined" label={`${grp.data.totals.total_punches} החתמות, ${grp.data.totals.matched_punches} משויכות`} sx={{ ml: 1 }} />
+                    }
+                  </TableCell>
+                </TableRow>
+              );
+              if (grp.data) {
+                if (grpActive.length === 0 && grpUnlinked.length === 0) {
+                  out.push(<TableRow key={`empty-${branchKey}`}><TableCell colSpan={days.length + 3} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין החתמות בסניף זה החודש</TableCell></TableRow>);
+                } else {
+                  for (const b of grpActive) out.push(renderEmployeeRow(b, `${branchKey}-${b.employee_id}`));
+                  if (grpUnlinked.length > 0) {
+                    out.push(
+                      <TableRow key={`unl-hdr-${branchKey}`}>
+                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: 'warning.50', fontWeight: 700, py: 0.5, fontSize: '0.85rem' }}>
+                          החתמות לא מזוהות ({grp.branch.name})
+                        </TableCell>
+                      </TableRow>
+                    );
+                    for (const b of grpUnlinked) out.push(renderEmployeeRow(b, `${branchKey}-unl-${b.israeli_id}`));
+                  }
+                }
+              }
+              return out;
+            })}
           </TableBody>
         </Table>
       </TableContainer>

@@ -42,13 +42,19 @@ export function BranchProvider({ children }) {
     localStorage.setItem('selectedBranch', id);
   };
 
-  const selectedBranchName = branches.find(b => (b._id || b.id) === selectedBranch)?.name || '';
+  // 'all' is a special pseudo-branch — components that support cross-branch
+  // views (SalaryTable, AttendanceMonitor) detect it and fan out per branch.
+  const isAllBranches = selectedBranch === 'all';
+  const selectedBranchName = isAllBranches
+    ? 'כל הסניפים'
+    : (branches.find(b => (b._id || b.id) === selectedBranch)?.name || '');
 
   return (
     <BranchContext.Provider value={{
       branches,
       selectedBranch,
       selectedBranchName,
+      isAllBranches,
       changeBranch,
       fetchBranches,
       loading,

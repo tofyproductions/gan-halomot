@@ -136,6 +136,14 @@ export default function Header() {
               {branches.map((b) => (
                 <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
               ))}
+              {isAdmin && branches.length > 1 && [
+                <MenuItem key="__all-divider" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset', py: 0.3 }}>
+                  ──────────
+                </MenuItem>,
+                <MenuItem key="__all" value="all" sx={{ fontWeight: 800, color: 'primary.main' }}>
+                  כל הסניפים
+                </MenuItem>,
+              ]}
             </Select>
           )}
 
