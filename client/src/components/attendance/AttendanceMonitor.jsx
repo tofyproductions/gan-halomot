@@ -276,20 +276,25 @@ export default function AttendanceMonitor() {
           bodyRows += data.unlinked.map(b => buildRow(b, 'unlinked')).join('');
         }
       }
+      const today = new Date();
+      const todayStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
       const html = `
         <div dir="rtl">
-          <div class="head">
-            <div>
+          <div class="doc-head">
+            <div class="title-row">
               <div class="title">דוח החתמות חודשי</div>
-              <div class="sub">${headerLabel} · ${monthLabel}</div>
+              <div>תאריך הפקה: ${todayStr}</div>
             </div>
-            <div class="stats">${headerStats}</div>
+            <div class="row"><div class="lbl">שם החברה:</div><div>גן החלומות</div></div>
+            <div class="row"><div class="lbl">חודש:</div><div>${monthLabel}</div></div>
+            <div class="row"><div class="lbl">סניף:</div><div>${headerLabel}</div></div>
+            <div class="row"><div class="lbl">סטטיסטיקה:</div><div>${headerStats}</div></div>
           </div>
           <table>
             <colgroup>
-              <col style="width:110px">
+              <col style="width:120px">
               ${days.map(() => '<col>').join('')}
-              <col style="width:38px">
+              <col style="width:42px">
             </colgroup>
             <thead>
               <tr>
@@ -300,6 +305,12 @@ export default function AttendanceMonitor() {
             </thead>
             <tbody>${bodyRows}</tbody>
           </table>
+          <div class="legend">
+            <span><span class="swatch" style="background:#fff"></span>יום תקין</span>
+            <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
+            <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
+            <span><span class="swatch" style="background:#fff7ed"></span>לא מזוהה</span>
+          </div>
         </div>`;
       // Open a new window with the report HTML and trigger the browser's
       // native print dialog. The user picks "Save as PDF" (or Ctrl+P) and gets
@@ -312,42 +323,46 @@ export default function AttendanceMonitor() {
     <meta charset="utf-8">
     <title>${`attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}`}</title>
     <style>
-      @page { size: A4 landscape; margin: 6mm; }
+      @page { size: A4 landscape; margin: 8mm; }
       * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
       html, body { background: #fff; }
-      body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 8px; }
-      .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid #fbbf24; }
-      .head .title { font-size: 16pt; font-weight: 800; }
-      .head .sub { font-size: 9pt; color: #555; margin-top: 2px; }
-      .head .stats { font-size: 8pt; color: #555; text-align: left; }
+      body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; }
+      .doc-head { border: 1.5px solid #111; padding: 6px 10px; margin-bottom: 6px;
+        display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; font-size: 9pt; }
+      .doc-head .row { display: flex; gap: 6px; }
+      .doc-head .row .lbl { font-weight: 700; }
+      .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
+        border-bottom: 1px solid #ccc; padding-bottom: 3px; margin-bottom: 2px; }
+      .doc-head .title-row .title { font-size: 13pt; font-weight: 800; }
       table { width: 100%; border-collapse: collapse; font-size: 6.5pt; table-layout: fixed; }
-      thead { display: table-header-group; }   /* repeat header on each page */
-      thead th { background: #f3f4f6 !important; padding: 3px 4px; border: 1px solid #d1d5db; text-align: center; font-weight: 800; }
-      thead th.name-col { text-align: right; width: 110px; }
-      thead th.day-col { font-size: 6pt; }
-      thead th.total-col { background: #dbeafe !important; width: 38px; }
-      tbody tr { page-break-inside: avoid; }   /* don't split a row across pages */
-      td { padding: 0; vertical-align: middle; border: 1px solid #e5e7eb; }
-      td.name { text-align: right; font-weight: 700; padding: 3px 5px; background: #fff !important; }
-      td.total { font-weight: 800; background: #dbeafe !important; text-align: center; padding: 3px; font-size: 7.5pt; }
-      .day-cell { padding: 1px; line-height: 1.1; text-align: center; height: 28px; display: flex; flex-direction: column; justify-content: center; }
-      .day-cell .h { font-weight: 800; font-size: 6.5pt; }
-      .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; }
-      .ok { background: #d1fae5 !important; color: #065f46; }
-      .warn { background: #fef3c7 !important; color: #92400e; }
-      .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #a855f7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
+      thead { display: table-header-group; }
+      thead th { background: #f3f4f6 !important; padding: 3px 4px; border: 1px solid #777; text-align: center; font-weight: 800; }
+      thead th.name-col { text-align: right; width: 120px; }
+      thead th.day-col { font-size: 6.5pt; }
+      thead th.total-col { background: #e5e7eb !important; width: 42px; }
+      tbody tr { page-break-inside: avoid; }
+      td { padding: 0; vertical-align: middle; border: 1px solid #ccc; }
+      td.name { text-align: right; font-weight: 700; padding: 3px 5px; background: #fff !important; font-size: 7pt; }
+      td.total { font-weight: 800; background: #f9fafb !important; text-align: center; padding: 3px; font-size: 7.5pt; font-variant-numeric: tabular-nums; }
+      .day-cell { padding: 1px; line-height: 1.1; text-align: center; height: 26px; display: flex; flex-direction: column; justify-content: center; }
+      .day-cell .h { font-weight: 800; font-size: 7pt; font-variant-numeric: tabular-nums; }
+      .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; color: #444; }
+      .day-cell.ok { background: #ffffff !important; color: #111; }
+      .day-cell.warn { background: #fffbeb !important; color: #92400e; border: 0.5px dashed #d97706; border-radius: 2px; }
+      .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #6d28d9 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
-      .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; }
-      .section-row td { padding: 4px 6px; text-align: right; font-size: 8.5pt; font-weight: 800; border-top: 2px solid #999; }
+      .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
+      .section-row td { padding: 4px 6px; text-align: right; font-size: 9pt; font-weight: 800; border-top: 2px solid #111; border-bottom: 1px solid #777; }
       .section-banner td { background: #e5e7eb !important; }
       .section-guests td { background: #ede9fe !important; color: #6d28d9; }
       .section-unlinked td { background: #fef3c7 !important; color: #92400e; }
       tr.guest td.name { background: #f3e8ff !important; }
-      tr.unlinked td.name { background: #fff7ed !important; }
-      .empty-row td { text-align: center; padding: 8px; color: #888; }
+      tr.guest td.name::before { content: "אורח/ת · "; color: #6d28d9; font-weight: 700; font-size: 6pt; }
+      tr.unlinked td.name { background: #fff7ed !important; color: #92400e; }
+      .legend { display: flex; gap: 12px; font-size: 7pt; color: #555; margin-top: 6px; padding: 0 4px; }
+      .legend .swatch { display: inline-block; width: 10px; height: 8px; vertical-align: middle; border: 1px solid #999; margin-left: 3px; }
       @media print { body { padding: 0; } .no-print { display: none !important; } }
       .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); border: none; font-size: 14px; z-index: 9999; }
-      .tip { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #fef3c7; color: #92400e; padding: 6px 10px; font-size: 11px; border-radius: 4px; }
     </style>
   </head>
   <body>
