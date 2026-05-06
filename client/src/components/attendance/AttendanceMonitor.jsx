@@ -294,45 +294,68 @@ export default function AttendanceMonitor() {
             <tbody>${bodyRows}</tbody>
           </table>
         </div>`;
-      // Render off-screen but in normal document flow. Using `position:absolute;
-      // left:-10000px` (rather than `position:fixed; right:-10000px`) makes
-      // html2canvas + html2pdf much happier — the previous approach silently
-      // produced an empty PDF on at least one machine.
-      const container = document.createElement('div');
-      container.style.position = 'absolute';
-      container.style.left = '-10000px';
-      container.style.top = '0';
-      container.style.width = '1100px';
-      container.style.background = '#fff';
-      container.style.padding = '16px';
-      container.dir = 'rtl';
-      container.innerHTML = html;
-      document.body.appendChild(container);
-      try {
-        // Wait a tick so the browser can lay out the table before capture.
-        await new Promise(r => setTimeout(r, 250));
-        await html2pdf()
-          .set({
-            margin: [6, 6, 6, 6],
-            filename: `attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}.pdf`,
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: {
-              scale: 1.5,           // 2 was too aggressive on Pi-Zero-class machines
-              useCORS: true,
-              backgroundColor: '#ffffff',
-              logging: false,
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-            pagebreak: { mode: ['css'] },
-          })
-          .from(container)
-          .save();
-      } finally {
-        document.body.removeChild(container);
+      // Open a new window with the report HTML and trigger the browser's
+      // native print dialog. The user picks "Save as PDF" (or Ctrl+P) and gets
+      // a clean A4-landscape PDF rendered by the browser itself — Hebrew/RTL
+      // and table layout Just Work, no html2canvas quirks. The earlier
+      // html2pdf.js approach produced an empty PDF on macOS Safari/Chrome.
+      const printable = `<!doctype html>
+<html dir="rtl" lang="he">
+  <head>
+    <meta charset="utf-8">
+    <title>${`attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}`}</title>
+    <style>
+      @page { size: A4 landscape; margin: 8mm; }
+      * { box-sizing: border-box; }
+      body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 12px; background: #fff; }
+      .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; }
+      .head .title { font-size: 18pt; font-weight: 800; }
+      .head .sub { font-size: 10pt; color: #555; }
+      .head .stats { font-size: 9pt; color: #555; text-align: left; }
+      table { width: 100%; border-collapse: collapse; font-size: 7pt; table-layout: fixed; }
+      thead th { background: #f3f4f6; padding: 4px 6px; border-bottom: 1px solid #999; text-align: center; }
+      thead th:first-child { text-align: right; }
+      thead th.total-col { background: #dbeafe; }
+      td { padding: 1px; vertical-align: middle; }
+      td.name { text-align: right; font-weight: 700; padding: 4px 6px; border-left: 1px solid #ddd; }
+      td.total { font-weight: 800; background: #dbeafe; text-align: center; padding: 4px; font-size: 8pt; }
+      .day-cell { padding: 2px 1px; border-radius: 3px; line-height: 1.1; text-align: center; }
+      .day-cell .h { font-weight: 800; font-size: 7pt; }
+      .day-cell .r { font-size: 5pt; opacity: 0.8; direction: ltr; }
+      .ok { background: #d1fae5; color: #065f46; }
+      .warn { background: #fef3c7; color: #92400e; }
+      .badge-guest { font-size: 6pt; color: #6d28d9; font-weight: 700; }
+      .badge-away { font-size: 6pt; color: #92400e; }
+      .iid { direction: ltr; font-size: 6pt; color: #666; font-family: monospace; }
+      .section-row td { padding: 5px 6px; text-align: right; font-size: 9pt; font-weight: 800; }
+      .section-banner td { background: #e5e7eb; }
+      .section-guests td { background: #ede9fe; color: #6d28d9; }
+      .section-unlinked td { background: #fef3c7; color: #92400e; }
+      tr.guest td.name { background: #f3e8ff; }
+      tr.unlinked td.name { background: #fff7ed; }
+      .empty-row td { text-align: center; padding: 8px; color: #888; }
+      @media print { body { padding: 0; } .no-print { display: none !important; } }
+      .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 6px 12px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+    </style>
+  </head>
+  <body>
+    <button class="toolbar no-print" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
+    ${html}
+  </body>
+</html>`;
+      const win = window.open('', '_blank', 'width=1200,height=850');
+      if (!win) {
+        toast.error('הדפדפן חסם את חלון ההדפסה — אפשר חלונות קופצים ונסה שוב');
+        return;
       }
+      win.document.open();
+      win.document.write(printable);
+      win.document.close();
+      // Give the browser a moment to lay out, then auto-trigger the print dialog.
+      setTimeout(() => { try { win.focus(); win.print(); } catch(e) { /* user can click the toolbar button */ } }, 400);
     } catch (e) {
       console.error('PDF export failed:', e);
-      toast.error('שגיאה בייצוא PDF: ' + (e?.message || 'לא ידוע'));
+      toast.error('שגיאה בייצוא: ' + (e?.message || 'לא ידוע'));
     } finally {
       setExporting(false);
     }
