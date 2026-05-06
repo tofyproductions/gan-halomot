@@ -208,28 +208,30 @@ export default function AttendanceMonitor() {
         const [y, m] = month.split('-');
         return `${m}/${y}`;
       })();
-      const dayHeaders = days.map(d => `<th style="padding:2px;font-size:7pt">${d.slice(-2)}</th>`).join('');
+      const dayHeaders = days.map(d => `<th class="day-col">${d.slice(-2)}</th>`).join('');
       const buildRow = (block, kind) => {
         const cells = days.map(d => {
           const day = block.days[d];
           if (!day) return '<td></td>';
-          const bg = day.incomplete ? '#fef3c7' : '#d1fae5';
-          const fg = day.incomplete ? '#92400e' : '#065f46';
+          const cls = day.incomplete ? 'warn' : 'ok';
           const range = `${day.first_in || '?'}–${day.last_out || '?'}`;
-          return `<td style="padding:1px"><div style="background:${bg};color:${fg};padding:2px 1px;border-radius:3px;line-height:1.1"><div style="font-weight:800;font-size:7pt">${day.total_hours}h</div><div dir="ltr" style="font-size:5pt;opacity:0.8">${range}</div></div></td>`;
+          return `<td><div class="day-cell ${cls}"><div class="h">${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
         }).join('');
-        const nameBg = kind === 'unlinked' ? '#fff7ed' : (kind === 'guest' ? '#f3e8ff' : '#fff');
         const guestBadge = kind === 'guest' && block.home_branch_name
-          ? `<div style="font-size:6pt;color:#6d28d9;font-weight:700">אורח/ת מסניף ${block.home_branch_name}</div>` : '';
+          ? `<span class="badge-guest">אורח/ת מ-${block.home_branch_name}</span>` : '';
         const awayBadge = block.away_total_hours > 0
-          ? `<div style="font-size:6pt;color:#92400e">+${block.away_total_hours}h בסניף אחר</div>` : '';
-        const nameCell = `<td style="text-align:right;font-weight:700;padding:4px 6px;background:${nameBg};border-left:1px solid #ddd">${block.full_name}${guestBadge}${awayBadge}${block.israeli_id ? `<div dir="ltr" style="font-size:6pt;color:#666;font-family:monospace">${block.israeli_id}</div>` : ''}</td>`;
-        const totalCell = `<td style="font-weight:800;background:#dbeafe;text-align:center;padding:4px;font-size:8pt">${block.month_total_hours}h</td>`;
-        return `<tr>${nameCell}${cells}${totalCell}</tr>`;
+          ? `<span class="badge-away">+${block.away_total_hours}h בסניף אחר</span>` : '';
+        const iidLine = block.israeli_id ? `<div class="iid">${block.israeli_id}</div>` : '';
+        const trClass = kind === 'guest' ? 'guest' : (kind === 'unlinked' ? 'unlinked' : '');
+        const nameCell = `<td class="name">${guestBadge}${awayBadge}${block.full_name}${iidLine}</td>`;
+        const totalCell = `<td class="total">${block.month_total_hours}h</td>`;
+        return `<tr class="${trClass}">${nameCell}${cells}${totalCell}</tr>`;
       };
       const colspan = days.length + 2;
-      const sectionHeader = (label, bg, color) =>
-        `<tr><td colspan="${colspan}" style="background:${bg};color:${color || '#111'};font-weight:800;padding:5px 6px;text-align:right;font-size:9pt">${label}</td></tr>`;
+      const sectionHeader = (label, kind) => {
+        const cls = kind === 'guests' ? 'section-guests' : (kind === 'unlinked' ? 'section-unlinked' : 'section-banner');
+        return `<tr class="section-row ${cls}"><td colspan="${colspan}">${label}</td></tr>`;
+      };
       const buildBranchSection = (branchName, branchData) => {
         const grpActive = (branchData.employees || []).filter(hasAnyActivity);
         const grpGuests = (branchData.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
@@ -240,15 +242,15 @@ export default function AttendanceMonitor() {
         } else {
           rows += grpActive.map(b => buildRow(b, 'home')).join('');
           if (grpGuests.length > 0) {
-            rows += sectionHeader(`🟣 אורחים מסניפים אחרים (${branchName})`, '#ede9fe', '#6d28d9');
+            rows += sectionHeader(`🟣 אורחים מסניפים אחרים (${branchName})`, 'guests');
             rows += grpGuests.map(b => buildRow(b, 'guest')).join('');
           }
           if (grpUnlinked.length > 0) {
-            rows += sectionHeader(`החתמות לא מזוהות (${branchName})`, '#fef3c7', '#92400e');
+            rows += sectionHeader(`החתמות לא מזוהות (${branchName})`, 'unlinked');
             rows += grpUnlinked.map(b => buildRow(b, 'unlinked')).join('');
           }
         }
-        const banner = sectionHeader(`🏠 ${branchName} · ${branchData.totals?.total_punches || 0} החתמות · ${branchData.totals?.matched_punches || 0} משויכות`, '#e5e7eb');
+        const banner = sectionHeader(`🏠 ${branchName} · ${branchData.totals?.total_punches || 0} החתמות · ${branchData.totals?.matched_punches || 0} משויכות`, 'banner');
         return banner + rows;
       };
       let bodyRows = '';
@@ -266,29 +268,34 @@ export default function AttendanceMonitor() {
         headerStats = `${data.totals.total_punches} החתמות · ${data.totals.matched_punches} משויכות · ${activeEmployees.length} עובדים`;
         bodyRows += activeEmployees.map(b => buildRow(b, 'home')).join('');
         if (guestEmployees.length > 0) {
-          bodyRows += sectionHeader('🟣 אורחים מסניפים אחרים', '#ede9fe', '#6d28d9');
+          bodyRows += sectionHeader('🟣 אורחים מסניפים אחרים', 'guests');
           bodyRows += guestEmployees.map(b => buildRow(b, 'guest')).join('');
         }
         if ((data.unlinked || []).length > 0) {
-          bodyRows += sectionHeader('החתמות לא מזוהות', '#fef3c7', '#92400e');
+          bodyRows += sectionHeader('החתמות לא מזוהות', 'unlinked');
           bodyRows += data.unlinked.map(b => buildRow(b, 'unlinked')).join('');
         }
       }
       const html = `
-        <div dir="rtl" style="font-family:Arial,sans-serif;color:#111">
-          <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px">
+        <div dir="rtl">
+          <div class="head">
             <div>
-              <div style="font-size:18pt;font-weight:800">דוח החתמות חודשי</div>
-              <div style="font-size:10pt;color:#555">${headerLabel} · ${monthLabel}</div>
+              <div class="title">דוח החתמות חודשי</div>
+              <div class="sub">${headerLabel} · ${monthLabel}</div>
             </div>
-            <div style="font-size:9pt;color:#555">${headerStats}</div>
+            <div class="stats">${headerStats}</div>
           </div>
-          <table style="width:100%;border-collapse:collapse;font-size:7pt;table-layout:fixed">
+          <table>
+            <colgroup>
+              <col style="width:110px">
+              ${days.map(() => '<col>').join('')}
+              <col style="width:38px">
+            </colgroup>
             <thead>
-              <tr style="background:#f3f4f6">
-                <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #999">עובד</th>
+              <tr>
+                <th class="name-col">עובד</th>
                 ${dayHeaders}
-                <th style="background:#dbeafe;padding:4px;border-bottom:1px solid #999">סה״כ</th>
+                <th class="total-col">סה״כ</th>
               </tr>
             </thead>
             <tbody>${bodyRows}</tbody>
@@ -305,37 +312,42 @@ export default function AttendanceMonitor() {
     <meta charset="utf-8">
     <title>${`attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}`}</title>
     <style>
-      @page { size: A4 landscape; margin: 8mm; }
-      * { box-sizing: border-box; }
-      body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 12px; background: #fff; }
-      .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px; }
-      .head .title { font-size: 18pt; font-weight: 800; }
-      .head .sub { font-size: 10pt; color: #555; }
-      .head .stats { font-size: 9pt; color: #555; text-align: left; }
-      table { width: 100%; border-collapse: collapse; font-size: 7pt; table-layout: fixed; }
-      thead th { background: #f3f4f6; padding: 4px 6px; border-bottom: 1px solid #999; text-align: center; }
-      thead th:first-child { text-align: right; }
-      thead th.total-col { background: #dbeafe; }
-      td { padding: 1px; vertical-align: middle; }
-      td.name { text-align: right; font-weight: 700; padding: 4px 6px; border-left: 1px solid #ddd; }
-      td.total { font-weight: 800; background: #dbeafe; text-align: center; padding: 4px; font-size: 8pt; }
-      .day-cell { padding: 2px 1px; border-radius: 3px; line-height: 1.1; text-align: center; }
-      .day-cell .h { font-weight: 800; font-size: 7pt; }
-      .day-cell .r { font-size: 5pt; opacity: 0.8; direction: ltr; }
-      .ok { background: #d1fae5; color: #065f46; }
-      .warn { background: #fef3c7; color: #92400e; }
-      .badge-guest { font-size: 6pt; color: #6d28d9; font-weight: 700; }
-      .badge-away { font-size: 6pt; color: #92400e; }
-      .iid { direction: ltr; font-size: 6pt; color: #666; font-family: monospace; }
-      .section-row td { padding: 5px 6px; text-align: right; font-size: 9pt; font-weight: 800; }
-      .section-banner td { background: #e5e7eb; }
-      .section-guests td { background: #ede9fe; color: #6d28d9; }
-      .section-unlinked td { background: #fef3c7; color: #92400e; }
-      tr.guest td.name { background: #f3e8ff; }
-      tr.unlinked td.name { background: #fff7ed; }
+      @page { size: A4 landscape; margin: 6mm; }
+      * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+      html, body { background: #fff; }
+      body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 8px; }
+      .head { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 2px solid #fbbf24; }
+      .head .title { font-size: 16pt; font-weight: 800; }
+      .head .sub { font-size: 9pt; color: #555; margin-top: 2px; }
+      .head .stats { font-size: 8pt; color: #555; text-align: left; }
+      table { width: 100%; border-collapse: collapse; font-size: 6.5pt; table-layout: fixed; }
+      thead { display: table-header-group; }   /* repeat header on each page */
+      thead th { background: #f3f4f6 !important; padding: 3px 4px; border: 1px solid #d1d5db; text-align: center; font-weight: 800; }
+      thead th.name-col { text-align: right; width: 110px; }
+      thead th.day-col { font-size: 6pt; }
+      thead th.total-col { background: #dbeafe !important; width: 38px; }
+      tbody tr { page-break-inside: avoid; }   /* don't split a row across pages */
+      td { padding: 0; vertical-align: middle; border: 1px solid #e5e7eb; }
+      td.name { text-align: right; font-weight: 700; padding: 3px 5px; background: #fff !important; }
+      td.total { font-weight: 800; background: #dbeafe !important; text-align: center; padding: 3px; font-size: 7.5pt; }
+      .day-cell { padding: 1px; line-height: 1.1; text-align: center; height: 28px; display: flex; flex-direction: column; justify-content: center; }
+      .day-cell .h { font-weight: 800; font-size: 6.5pt; }
+      .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; }
+      .ok { background: #d1fae5 !important; color: #065f46; }
+      .warn { background: #fef3c7 !important; color: #92400e; }
+      .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #a855f7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
+      .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
+      .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; }
+      .section-row td { padding: 4px 6px; text-align: right; font-size: 8.5pt; font-weight: 800; border-top: 2px solid #999; }
+      .section-banner td { background: #e5e7eb !important; }
+      .section-guests td { background: #ede9fe !important; color: #6d28d9; }
+      .section-unlinked td { background: #fef3c7 !important; color: #92400e; }
+      tr.guest td.name { background: #f3e8ff !important; }
+      tr.unlinked td.name { background: #fff7ed !important; }
       .empty-row td { text-align: center; padding: 8px; color: #888; }
       @media print { body { padding: 0; } .no-print { display: none !important; } }
-      .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 6px 12px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+      .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); border: none; font-size: 14px; z-index: 9999; }
+      .tip { position: fixed; bottom: 8px; left: 8px; right: 8px; background: #fef3c7; color: #92400e; padding: 6px 10px; font-size: 11px; border-radius: 4px; }
     </style>
   </head>
   <body>
