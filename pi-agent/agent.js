@@ -57,7 +57,11 @@ const cfg = {
   httpRetryMax:   envInt('HTTP_RETRY_MAX', 5),
   httpRetryBase:  envInt('HTTP_RETRY_BASE_MS', 2000),
   stateFile:      process.env.STATE_FILE || path.join(__dirname, 'state.json'),
-  trustDeviceTs:  String(process.env.TRUST_DEVICE_TIMESTAMPS || 'false').toLowerCase() === 'true',
+  // Default to true: device timestamps are reliable when not zeroed-out (we
+  // detect that case below). The old default "false" caused recovery-after-
+  // outage punches to be silently misdated to "now". Set env=false on a Pi
+  // only if its specific firmware can't be trusted.
+  trustDeviceTs:  String(process.env.TRUST_DEVICE_TIMESTAMPS || 'true').toLowerCase() !== 'false',
 };
 
 // --- init ---
@@ -95,6 +99,9 @@ function shapePunch(rec) {
 
   // Detect the "broken historical timestamp" bug — if the time is before
   // 2010 we know the library's decoder gave us garbage. Fall back to "now".
+  // Otherwise trust the device. Using agent-received-now as the default
+  // silently turned a 2-day catch-up at Herzliya (2026-05-06) into 21
+  // misdated punches; cfg.trustDeviceTs now defaults to true.
   let ts, tsSource;
   const broken = !(recordTime instanceof Date) || isNaN(recordTime.getTime()) || recordTime.getTime() < Date.parse('2010-01-01');
   if (cfg.trustDeviceTs && !broken) {

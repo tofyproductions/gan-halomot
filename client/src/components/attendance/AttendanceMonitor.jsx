@@ -294,24 +294,36 @@ export default function AttendanceMonitor() {
             <tbody>${bodyRows}</tbody>
           </table>
         </div>`;
+      // Render off-screen but in normal document flow. Using `position:absolute;
+      // left:-10000px` (rather than `position:fixed; right:-10000px`) makes
+      // html2canvas + html2pdf much happier — the previous approach silently
+      // produced an empty PDF on at least one machine.
       const container = document.createElement('div');
-      container.style.position = 'fixed';
-      container.style.right = '-10000px';
+      container.style.position = 'absolute';
+      container.style.left = '-10000px';
       container.style.top = '0';
-      container.style.width = '1180px';
+      container.style.width = '1100px';
+      container.style.background = '#fff';
+      container.style.padding = '16px';
       container.dir = 'rtl';
       container.innerHTML = html;
       document.body.appendChild(container);
       try {
-        await new Promise(r => setTimeout(r, 200));
+        // Wait a tick so the browser can lay out the table before capture.
+        await new Promise(r => setTimeout(r, 250));
         await html2pdf()
           .set({
-            margin: [8, 8, 8, 8],
+            margin: [6, 6, 6, 6],
             filename: `attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}.pdf`,
             image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: { scale: 2, useCORS: true },
+            html2canvas: {
+              scale: 1.5,           // 2 was too aggressive on Pi-Zero-class machines
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              logging: false,
+            },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-            pagebreak: { mode: ['css', 'legacy'] },
+            pagebreak: { mode: ['css'] },
           })
           .from(container)
           .save();
@@ -319,8 +331,8 @@ export default function AttendanceMonitor() {
         document.body.removeChild(container);
       }
     } catch (e) {
-      console.error(e);
-      toast.error('שגיאה בייצוא PDF');
+      console.error('PDF export failed:', e);
+      toast.error('שגיאה בייצוא PDF: ' + (e?.message || 'לא ידוע'));
     } finally {
       setExporting(false);
     }
