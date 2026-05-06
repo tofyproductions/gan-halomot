@@ -6,6 +6,8 @@ import {
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import WarningIcon from '@mui/icons-material/Warning';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -39,6 +41,7 @@ export default function AttendanceMonitor() {
   const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
+  const [exporting, setExporting] = useState(false);
 
   const fetchAttendance = useCallback(() => {
     if (!selectedBranch) return;
@@ -197,6 +200,132 @@ export default function AttendanceMonitor() {
     return acc;
   }, { total_punches: 0, matched_punches: 0 }) : null;
 
+  const exportPDF = async () => {
+    if (!data && !perBranch) return;
+    setExporting(true);
+    try {
+      const monthLabel = (() => {
+        const [y, m] = month.split('-');
+        return `${m}/${y}`;
+      })();
+      const dayHeaders = days.map(d => `<th style="padding:2px;font-size:7pt">${d.slice(-2)}</th>`).join('');
+      const buildRow = (block, kind) => {
+        const cells = days.map(d => {
+          const day = block.days[d];
+          if (!day) return '<td></td>';
+          const bg = day.incomplete ? '#fef3c7' : '#d1fae5';
+          const fg = day.incomplete ? '#92400e' : '#065f46';
+          const range = `${day.first_in || '?'}–${day.last_out || '?'}`;
+          return `<td style="padding:1px"><div style="background:${bg};color:${fg};padding:2px 1px;border-radius:3px;line-height:1.1"><div style="font-weight:800;font-size:7pt">${day.total_hours}h</div><div dir="ltr" style="font-size:5pt;opacity:0.8">${range}</div></div></td>`;
+        }).join('');
+        const nameBg = kind === 'unlinked' ? '#fff7ed' : (kind === 'guest' ? '#f3e8ff' : '#fff');
+        const guestBadge = kind === 'guest' && block.home_branch_name
+          ? `<div style="font-size:6pt;color:#6d28d9;font-weight:700">אורח/ת מסניף ${block.home_branch_name}</div>` : '';
+        const awayBadge = block.away_total_hours > 0
+          ? `<div style="font-size:6pt;color:#92400e">+${block.away_total_hours}h בסניף אחר</div>` : '';
+        const nameCell = `<td style="text-align:right;font-weight:700;padding:4px 6px;background:${nameBg};border-left:1px solid #ddd">${block.full_name}${guestBadge}${awayBadge}${block.israeli_id ? `<div dir="ltr" style="font-size:6pt;color:#666;font-family:monospace">${block.israeli_id}</div>` : ''}</td>`;
+        const totalCell = `<td style="font-weight:800;background:#dbeafe;text-align:center;padding:4px;font-size:8pt">${block.month_total_hours}h</td>`;
+        return `<tr>${nameCell}${cells}${totalCell}</tr>`;
+      };
+      const colspan = days.length + 2;
+      const sectionHeader = (label, bg, color) =>
+        `<tr><td colspan="${colspan}" style="background:${bg};color:${color || '#111'};font-weight:800;padding:5px 6px;text-align:right;font-size:9pt">${label}</td></tr>`;
+      const buildBranchSection = (branchName, branchData) => {
+        const grpActive = (branchData.employees || []).filter(hasAnyActivity);
+        const grpGuests = (branchData.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
+        const grpUnlinked = branchData.unlinked || [];
+        let rows = '';
+        if (grpActive.length === 0 && grpGuests.length === 0 && grpUnlinked.length === 0) {
+          rows = `<tr><td colspan="${colspan}" style="text-align:center;padding:8px;color:#888">אין החתמות בסניף זה החודש</td></tr>`;
+        } else {
+          rows += grpActive.map(b => buildRow(b, 'home')).join('');
+          if (grpGuests.length > 0) {
+            rows += sectionHeader(`🟣 אורחים מסניפים אחרים (${branchName})`, '#ede9fe', '#6d28d9');
+            rows += grpGuests.map(b => buildRow(b, 'guest')).join('');
+          }
+          if (grpUnlinked.length > 0) {
+            rows += sectionHeader(`החתמות לא מזוהות (${branchName})`, '#fef3c7', '#92400e');
+            rows += grpUnlinked.map(b => buildRow(b, 'unlinked')).join('');
+          }
+        }
+        const banner = sectionHeader(`🏠 ${branchName} · ${branchData.totals?.total_punches || 0} החתמות · ${branchData.totals?.matched_punches || 0} משויכות`, '#e5e7eb');
+        return banner + rows;
+      };
+      let bodyRows = '';
+      let headerLabel = '';
+      let headerStats = '';
+      if (perBranch) {
+        headerLabel = 'כל הסניפים';
+        headerStats = `${allTotals?.total_punches || 0} החתמות · ${allTotals?.matched_punches || 0} משויכות · ${perBranch.length} סניפים`;
+        bodyRows = perBranch
+          .filter(grp => grp.data)
+          .map(grp => buildBranchSection(grp.branch.name, grp.data))
+          .join('');
+      } else if (data) {
+        headerLabel = selectedBranchName || '';
+        headerStats = `${data.totals.total_punches} החתמות · ${data.totals.matched_punches} משויכות · ${activeEmployees.length} עובדים`;
+        bodyRows += activeEmployees.map(b => buildRow(b, 'home')).join('');
+        if (guestEmployees.length > 0) {
+          bodyRows += sectionHeader('🟣 אורחים מסניפים אחרים', '#ede9fe', '#6d28d9');
+          bodyRows += guestEmployees.map(b => buildRow(b, 'guest')).join('');
+        }
+        if ((data.unlinked || []).length > 0) {
+          bodyRows += sectionHeader('החתמות לא מזוהות', '#fef3c7', '#92400e');
+          bodyRows += data.unlinked.map(b => buildRow(b, 'unlinked')).join('');
+        }
+      }
+      const html = `
+        <div dir="rtl" style="font-family:Arial,sans-serif;color:#111">
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px">
+            <div>
+              <div style="font-size:18pt;font-weight:800">דוח החתמות חודשי</div>
+              <div style="font-size:10pt;color:#555">${headerLabel} · ${monthLabel}</div>
+            </div>
+            <div style="font-size:9pt;color:#555">${headerStats}</div>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:7pt;table-layout:fixed">
+            <thead>
+              <tr style="background:#f3f4f6">
+                <th style="text-align:right;padding:4px 6px;border-bottom:1px solid #999">עובד</th>
+                ${dayHeaders}
+                <th style="background:#dbeafe;padding:4px;border-bottom:1px solid #999">סה״כ</th>
+              </tr>
+            </thead>
+            <tbody>${bodyRows}</tbody>
+          </table>
+        </div>`;
+      const container = document.createElement('div');
+      container.style.position = 'fixed';
+      container.style.right = '-10000px';
+      container.style.top = '0';
+      container.style.width = '1180px';
+      container.dir = 'rtl';
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      try {
+        await new Promise(r => setTimeout(r, 200));
+        await html2pdf()
+          .set({
+            margin: [8, 8, 8, 8],
+            filename: `attendance-${perBranch ? 'all' : (selectedBranchName || 'branch')}-${month}.pdf`,
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+            pagebreak: { mode: ['css', 'legacy'] },
+          })
+          .from(container)
+          .save();
+      } finally {
+        document.body.removeChild(container);
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error('שגיאה בייצוא PDF');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Box dir="rtl" sx={{ maxWidth: 1400, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
@@ -223,6 +352,15 @@ export default function AttendanceMonitor() {
               <RefreshIcon />
             </IconButton>
           </Tooltip>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<PictureAsPdfIcon />}
+            onClick={exportPDF}
+            disabled={(!data && !perBranch) || loading || exporting}
+          >
+            {exporting ? 'מייצא…' : 'ייצא PDF'}
+          </Button>
         </Stack>
       </Stack>
 
