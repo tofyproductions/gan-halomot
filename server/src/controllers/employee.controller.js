@@ -6,10 +6,11 @@ async function getAll(req, res, next) {
     const { branch } = req.query;
     const filter = { is_active: true };
 
-    // Non-admins can only see their own branch
+    // Non-admins can only see their own branch.
+    // For admin: 'all' (cross-branch view) is a UI sentinel — skip the filter.
     if (req.user.role !== 'system_admin') {
       filter.branch_id = req.user.branch_id;
-    } else if (branch) {
+    } else if (branch && branch !== 'all') {
       filter.branch_id = branch;
     }
 

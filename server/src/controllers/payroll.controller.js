@@ -104,7 +104,9 @@ async function listEmployees(req, res, next) {
   try {
     const { branch, active } = req.query;
     const filter = {};
-    if (branch) filter.branch_id = branch;
+    // 'all' (cross-branch admin view) is a UI sentinel, not a real branch_id —
+    // skip the filter so every active employee is returned.
+    if (branch && branch !== 'all') filter.branch_id = branch;
     if (active === 'true') filter.is_active = true;
     if (active === 'false') filter.is_active = false;
 

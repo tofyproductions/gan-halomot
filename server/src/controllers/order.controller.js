@@ -97,9 +97,26 @@ async function create(req, res, next) {
     const order = await Order.create({
       order_number, branch_id, supplier_id,
       items: processedItems, total_amount,
-      notes: notes || '', created_by: created_by || '',
+      notes: notes || '', created_by: created_by || req.user?.full_name || '',
       status: 'pending',
     });
+
+    // Send the order to the supplier and CC the creator. Wrapped in a
+    // try/catch so a flaky SMTP server can't break the create itself —
+    // the order is in the DB regardless.
+    try {
+      const branch = await Branch.findById(branch_id).select('name address').lean();
+      const creatorEmail = req.user?.email && !String(req.user.email).endsWith('@gan-halomot.local') ? req.user.email : null;
+      await sendOrderEmail({
+        order: order.toObject(),
+        supplier: supplier.toObject(),
+        branch,
+        creatorEmail,
+        creatorName: req.user?.full_name || created_by || '',
+      });
+    } catch (mailErr) {
+      console.error('Order email failed:', mailErr.message);
+    }
 
     res.status(201).json({ order: { ...order.toObject(), id: order._id } });
   } catch (error) { next(error); }

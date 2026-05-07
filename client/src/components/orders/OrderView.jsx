@@ -9,6 +9,7 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CancelIcon from '@mui/icons-material/Cancel';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import InventoryIcon from '@mui/icons-material/Inventory';
+import PrintIcon from '@mui/icons-material/Print';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
@@ -53,6 +54,87 @@ export default function OrderView() {
     }
   };
 
+  const handlePrint = () => {
+    if (!order) return;
+    const fmt = (n) => `₪${Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const today = new Date(order.created_at || Date.now()).toLocaleDateString('he-IL');
+    const supplierObj = order.supplier_id || {};
+    const branchObj = order.branch_id || {};
+
+    const itemsHTML = (order.items || []).map(it => `
+      <tr>
+        <td>${it.sku || ''}</td>
+        <td style="font-weight:600">${it.name || ''}</td>
+        <td style="text-align:center;font-weight:700">${it.qty || 0}</td>
+        <td style="text-align:center">${fmt(it.unit_price)}</td>
+        <td style="text-align:center;font-weight:700">${fmt(it.total)}</td>
+      </tr>
+    `).join('');
+
+    const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
+      <title>הזמנה ${order.order_number}</title>
+      <style>
+        @media print { @page { size: A4; margin: 14mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        body { font-family: Assistant, Arial, sans-serif; color:#1e293b; padding:20px; max-width:800px; margin:0 auto; }
+        .head { border-bottom:3px solid #f59e0b; padding-bottom:12px; margin-bottom:20px; }
+        .head h1 { margin:0; color:#d97706; font-size:26px; }
+        .meta { width:100%; border-collapse:collapse; margin-bottom:16px; }
+        .meta td { vertical-align:top; padding:12px; border-radius:8px; width:50%; }
+        .meta .l { background:#f8fafc; }
+        .meta .r { background:#fffbeb; }
+        .lbl { color:#64748b; font-size:13px; }
+        .val { font-weight:700; font-size:16px; }
+        table.items { width:100%; border-collapse:collapse; font-size:14px; }
+        table.items th, table.items td { padding:10px; border:1px solid #e2e8f0; }
+        table.items th { background:#f8fafc; text-align:right; }
+        table.items tfoot td { background:#fef3c7; font-weight:800; font-size:16px; }
+        .notes { padding:12px; background:#dbeafe; border-radius:8px; margin-bottom:16px; }
+        .footer { margin-top:32px; padding-top:16px; border-top:1px solid #e2e8f0; color:#94a3b8; font-size:12px; text-align:center; }
+        .print-btn { position:fixed; bottom:20px; left:20px; z-index:9999; padding:12px 24px; background:#f59e0b; color:#fff; border:none; border-radius:30px; font-weight:700; font-size:16px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+        @media print { .print-btn { display:none; } }
+      </style></head>
+      <body>
+        <button class="print-btn" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
+        <div class="head">
+          <h1>הזמנה ${order.order_number}</h1>
+          <div style="color:#64748b;margin-top:6px">${today}</div>
+        </div>
+        <table class="meta"><tr>
+          <td class="l">
+            <div class="lbl">ספק</div>
+            <div class="val">${supplierObj.name || ''}</div>
+            ${supplierObj.contact_name ? `<div>${supplierObj.contact_name}${supplierObj.contact_phone ? ' · ' + supplierObj.contact_phone : ''}</div>` : ''}
+            ${supplierObj.contact_email ? `<div>${supplierObj.contact_email}</div>` : ''}
+          </td>
+          <td class="r">
+            <div class="lbl">סניף מזמין</div>
+            <div class="val">${branchObj.name || ''}</div>
+            ${branchObj.address ? `<div>${branchObj.address}</div>` : ''}
+          </td>
+        </tr></table>
+        ${order.notes ? `<div class="notes"><b>הערות:</b> ${order.notes}</div>` : ''}
+        <table class="items">
+          <thead><tr>
+            <th>מק"ט</th><th>מוצר</th>
+            <th style="text-align:center">כמות</th>
+            <th style="text-align:center">מחיר ליח'</th>
+            <th style="text-align:center">סה"כ</th>
+          </tr></thead>
+          <tbody>${itemsHTML}</tbody>
+          <tfoot><tr>
+            <td colspan="4" style="text-align:left">סה"כ להזמנה</td>
+            <td style="text-align:center">${fmt(order.total_amount)}</td>
+          </tr></tfoot>
+        </table>
+        <div class="footer">גן החלומות · נוצר ב-${new Date().toLocaleString('he-IL')}</div>
+        <script>setTimeout(() => window.print(), 400);</script>
+      </body></html>`;
+
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('הדפדפן חסם פתיחת חלון. אפשר חלונות פופ-אפ ונסה שוב.'); return; }
+    w.document.open(); w.document.write(html); w.document.close();
+  };
+
   const handleMarkArrived = async () => {
     try {
       const res = await api.post(`/orders/${id}/mark-arrived`);
@@ -88,7 +170,10 @@ export default function OrderView() {
           <Typography variant="h5" sx={{ fontWeight: 800 }}>הזמנה {order.order_number}</Typography>
           <Chip label={status.label} color={status.color} size="small" sx={{ mt: 0.5 }} />
         </Box>
-        <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>חזרה</Button>
+        <Stack direction="row" spacing={1}>
+          <Button startIcon={<PrintIcon />} variant="outlined" onClick={handlePrint}>הדפס / PDF</Button>
+          <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>חזרה</Button>
+        </Stack>
       </Stack>
 
       {/* Details */}

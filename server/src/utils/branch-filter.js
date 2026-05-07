@@ -5,7 +5,8 @@
  */
 function getBranchFilter(req, field = 'branch_id') {
   const branchId = req.query.branch;
-  if (!branchId) return {};
+  // 'all' is the cross-branch admin view sentinel — treat it like no filter.
+  if (!branchId || branchId === 'all') return {};
   return { [field]: branchId };
 }
 
