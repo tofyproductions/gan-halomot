@@ -15,6 +15,9 @@ const STATUS_MAP = {
   pending: { label: 'ממתין לאישור', color: 'warning' },
   approved: { label: 'מאושר', color: 'success' },
   sent: { label: 'נשלח', color: 'info' },
+  pending_receive: { label: 'בדרך', color: 'warning' },
+  received: { label: 'התקבל', color: 'success' },
+  received_partial: { label: 'התקבל חלקית', color: 'warning' },
   cancelled: { label: 'בוטל', color: 'error' },
 };
 

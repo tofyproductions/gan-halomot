@@ -1,7 +1,33 @@
-const { Order, Supplier, Branch } = require('../models');
+const { Order, Supplier, Branch, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 const { sendOrderEmail } = require('../services/email.service');
 const env = require('../config/env');
+
+async function findOrCreateStockItem({ branch_id, product_id, name, supplier_id }) {
+  if (product_id) {
+    const existing = await StockItem.findOne({ branch_id, product_id, is_active: true });
+    if (existing) return existing;
+  }
+  // Pick a category — prefer "מלאי מזון", else first active.
+  let category = await StockCategory.findOne({ branch_id, name: 'מלאי מזון', is_active: true });
+  if (!category) category = await StockCategory.findOne({ branch_id, is_active: true }).sort({ sort_order: 1 });
+  if (!category) {
+    category = await StockCategory.create({ branch_id, name: 'מלאי מזון', sort_order: 10 });
+  }
+  let resolvedSupplierId = supplier_id;
+  if (product_id && !resolvedSupplierId) {
+    const product = await Product.findById(product_id);
+    if (product) resolvedSupplierId = product.supplier_id;
+  }
+  return StockItem.create({
+    branch_id,
+    category_id: category._id,
+    product_id: product_id || null,
+    supplier_id: resolvedSupplierId || null,
+    name,
+    qty: 0,
+  });
+}
 
 async function getAll(req, res, next) {
   try {
@@ -135,6 +161,100 @@ async function approve(req, res, next) {
   } catch (error) { next(error); }
 }
 
+async function markArrived(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (!['approved', 'sent'].includes(order.status)) {
+      return res.status(400).json({ error: 'ניתן לסמן הגעה רק להזמנה מאושרת או שנשלחה' });
+    }
+    order.status = 'pending_receive';
+    order.pending_receive_at = new Date();
+    await order.save();
+    res.json({ order: { ...order.toObject(), id: order._id } });
+  } catch (err) { next(err); }
+}
+
+async function receive(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (!['pending_receive', 'sent', 'approved'].includes(order.status)) {
+      return res.status(400).json({ error: 'הזמנה לא במצב שמאפשר אישור קבלה' });
+    }
+
+    // Body: { items: [{ index, qty_received, expiry_date, shelf_number, notes }] }
+    const incoming = req.body.items || [];
+    const incomingByIndex = new Map();
+    incoming.forEach(r => incomingByIndex.set(r.index, r));
+
+    let anyShortage = false;
+    const userId = req.user?.id || null;
+    const userName = req.user?.full_name || req.user?.email || '';
+
+    for (let i = 0; i < order.items.length; i++) {
+      const orderItem = order.items[i];
+      const recv = incomingByIndex.get(i);
+      const qtyReceived = recv ? Number(recv.qty_received) : orderItem.qty;
+      if (isNaN(qtyReceived) || qtyReceived < 0) continue;
+
+      // Find or create the stock item for this branch
+      const stockItem = await findOrCreateStockItem({
+        branch_id: order.branch_id,
+        product_id: orderItem.product_id,
+        name: orderItem.name,
+      });
+
+      let batch = null;
+      if (qtyReceived > 0) {
+        batch = await StockBatch.create({
+          branch_id: order.branch_id,
+          item_id: stockItem._id,
+          qty: qtyReceived,
+          expiry_date: recv?.expiry_date ? new Date(recv.expiry_date) : null,
+          shelf_number: recv?.shelf_number || '',
+          source_order_id: order._id,
+          received_at: new Date(),
+        });
+
+        const before = stockItem.qty;
+        const after = before + qtyReceived;
+        stockItem.qty = after;
+        await stockItem.save();
+
+        await StockMovement.create({
+          branch_id: order.branch_id,
+          item_id: stockItem._id,
+          delta: qtyReceived,
+          reason: 'delivery',
+          qty_before: before,
+          qty_after: after,
+          source_order_id: order._id,
+          batch_id: batch._id,
+          by_user_id: userId,
+          by_user_name: userName,
+          notes: recv?.notes || `קבלת הזמנה ${order.order_number}`,
+        });
+      }
+
+      orderItem.qty_received = qtyReceived;
+      orderItem.expiry_date = recv?.expiry_date ? new Date(recv.expiry_date) : null;
+      orderItem.shelf_number = recv?.shelf_number || '';
+      orderItem.stock_item_id = stockItem._id;
+      orderItem.batch_id = batch?._id || null;
+      if (qtyReceived < orderItem.qty) anyShortage = true;
+    }
+
+    order.status = anyShortage ? 'received_partial' : 'received';
+    order.received_at = new Date();
+    order.received_by_id = userId;
+    order.received_by_name = userName;
+    await order.save();
+
+    res.json({ order: { ...order.toObject(), id: order._id } });
+  } catch (err) { next(err); }
+}
+
 async function remove(req, res, next) {
   try {
     const order = await Order.findById(req.params.id);
@@ -149,4 +269,4 @@ async function remove(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getById, create, update, approve, remove };
+module.exports = { getAll, getById, create, update, approve, markArrived, receive, remove };
