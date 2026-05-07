@@ -186,16 +186,34 @@ async function resendEmail(req, res, next) {
     if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
 
     const creatorEmail = req.user?.email && !String(req.user.email).endsWith('@gan-halomot.local') ? req.user.email : null;
-    const result = await sendOrderEmail({
-      order: order.toObject(),
-      supplier: order.supplier_id?.toObject ? order.supplier_id.toObject() : order.supplier_id,
-      branch: order.branch_id?.toObject ? order.branch_id.toObject() : order.branch_id,
-      creatorEmail,
-      creatorName: req.user?.full_name || order.created_by || '',
-    });
+
+    let result;
+    try {
+      result = await sendOrderEmail({
+        order: order.toObject(),
+        supplier: order.supplier_id?.toObject ? order.supplier_id.toObject() : order.supplier_id,
+        branch: order.branch_id?.toObject ? order.branch_id.toObject() : order.branch_id,
+        creatorEmail,
+        creatorName: req.user?.full_name || order.created_by || '',
+      });
+    } catch (smtpErr) {
+      console.error('Order email SMTP error:', smtpErr);
+      // Surface the real SMTP error code + message so the user can fix the
+      // env vars / app password without needing access to the server logs.
+      const detail = smtpErr.code || smtpErr.responseCode || '';
+      const msg = smtpErr.message || 'שגיאה לא ידועה';
+      return res.status(500).json({
+        error: `שגיאת SMTP${detail ? ` (${detail})` : ''}: ${msg}`,
+        smtp_host: process.env.SMTP_HOST || '(ברירת מחדל smtp.gmail.com)',
+        smtp_user: process.env.SMTP_USER || '(לא מוגדר)',
+        has_pass: !!process.env.SMTP_PASS,
+      });
+    }
 
     if (result?.skipped) {
-      return res.status(400).json({ error: result.reason === 'no-recipients' ? 'אין נמענים — לספק לא הוגדר אימייל' : 'מערכת המייל לא מוגדרת' });
+      return res.status(400).json({
+        error: result.reason === 'no-recipients' ? 'אין נמענים — לספק לא הוגדר אימייל' : 'מערכת המייל לא מוגדרת (SMTP_USER חסר)',
+      });
     }
 
     res.json({ ok: true, recipients: result.recipients });
