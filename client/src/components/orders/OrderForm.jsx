@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   MenuItem, Table, TableBody, TableCell, TableHead, TableRow,
@@ -17,9 +17,12 @@ import { formatCurrency } from '../../utils/hebrewYear';
 export default function OrderForm() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { id: editId } = useParams();
+  const isEdit = !!editId;
   const { selectedBranch } = useBranch();
   const prefill = location.state?.prefill;
   const prefillApplied = useRef(false);
+  const editLoaded = useRef(false);
 
   const [suppliers, setSuppliers] = useState([]);
   const [selectedSupplier, setSelectedSupplier] = useState(prefill?.supplier_id || '');
@@ -28,11 +31,32 @@ export default function OrderForm() {
   const [search, setSearch] = useState('');
   const [notes, setNotes] = useState(prefill?.source === 'stock-shortages' ? 'הזמנה אוטומטית מחוסרי מלאי' : '');
   const [saving, setSaving] = useState(false);
+  const [editSourceItems, setEditSourceItems] = useState(null);
 
   // Load suppliers
   useEffect(() => {
     api.get('/suppliers').then(res => setSuppliers(res.data.suppliers || [])).catch(() => {});
   }, []);
+
+  // Edit mode: load the existing order, set its supplier, stash the items so
+  // the products-loaded effect below can hydrate the cart.
+  useEffect(() => {
+    if (!isEdit || editLoaded.current) return;
+    api.get(`/orders/${editId}`)
+      .then(res => {
+        const order = res.data.order;
+        if (order.status !== 'pending' && order.status !== 'draft') {
+          toast.error('ניתן לערוך רק הזמנות ממתינות');
+          navigate(`/orders/${editId}`);
+          return;
+        }
+        setSelectedSupplier(order.supplier_id?._id || order.supplier_id);
+        setNotes(order.notes || '');
+        setEditSourceItems(order.items || []);
+        editLoaded.current = true;
+      })
+      .catch(() => toast.error('שגיאה בטעינת הזמנה'));
+  }, [isEdit, editId, navigate]);
 
   // Load products when supplier changes
   useEffect(() => {
@@ -58,6 +82,34 @@ export default function OrderForm() {
     }
     prefillApplied.current = true;
   }, [products, prefill, selectedSupplier]);
+
+  // Edit mode: hydrate the cart from the source order items once the supplier's
+  // products have loaded.
+  useEffect(() => {
+    if (!editSourceItems || !products.length) return;
+    const newCart = [];
+    for (const it of editSourceItems) {
+      const pid = it.product_id?._id || it.product_id;
+      const product = products.find(p => (p._id || p.id) === pid);
+      if (product) {
+        newCart.push({ product, qty: it.qty });
+      } else {
+        // Product no longer in catalog — fall back to a synthetic product so
+        // the row still appears and the user can decide to remove it.
+        newCart.push({
+          product: {
+            _id: pid || `legacy-${it.sku}`,
+            name: it.name,
+            sku: it.sku || '',
+            price_with_vat: it.unit_price || 0,
+          },
+          qty: it.qty,
+        });
+      }
+    }
+    setCart(newCart);
+    setEditSourceItems(null);
+  }, [products, editSourceItems]);
 
   const supplier = suppliers.find(s => (s._id || s.id) === selectedSupplier);
   const minOrder = supplier?.min_order_amount || 0;
@@ -128,17 +180,22 @@ export default function OrderForm() {
         unit_price: c.product.price_with_vat,
       }));
 
-      await api.post('/orders', {
-        branch_id: selectedBranch,
-        supplier_id: selectedSupplier,
-        items,
-        notes,
-      });
-
-      toast.success('ההזמנה נשלחה לאישור');
-      navigate('/orders');
+      if (isEdit) {
+        await api.put(`/orders/${editId}`, { items, notes });
+        toast.success('ההזמנה עודכנה');
+        navigate(`/orders/${editId}`);
+      } else {
+        await api.post('/orders', {
+          branch_id: selectedBranch,
+          supplier_id: selectedSupplier,
+          items,
+          notes,
+        });
+        toast.success('ההזמנה נשלחה לאישור');
+        navigate('/orders');
+      }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה ביצירת הזמנה');
+      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
     } finally {
       setSaving(false);
     }
@@ -146,13 +203,15 @@ export default function OrderForm() {
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 1000, mx: 'auto' }}>
-      <Typography variant="h5" sx={{ fontWeight: 800, mb: 3 }}>הזמנה חדשה</Typography>
+      <Typography variant="h5" sx={{ fontWeight: 800, mb: 3 }}>{isEdit ? 'עריכת הזמנה' : 'הזמנה חדשה'}</Typography>
 
       {/* Supplier Selection */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <TextField
             select fullWidth label="בחר ספק" value={selectedSupplier}
+            disabled={isEdit}
+            helperText={isEdit ? 'לא ניתן לשנות ספק בעריכה — בטל וצור הזמנה חדשה אם נדרש' : ''}
             onChange={e => { setSelectedSupplier(e.target.value); setCart([]); }}
           >
             {suppliers.map(s => (

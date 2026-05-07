@@ -54,6 +54,7 @@ function AppRoutes() {
         <Route path="branches" element={<BranchManager />} />
         <Route path="orders" element={<OrderList />} />
         <Route path="orders/new" element={<OrderForm />} />
+        <Route path="orders/:id/edit" element={<OrderForm />} />
         <Route path="orders/:id" element={<OrderView />} />
         <Route path="stock" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'class_leader', 'cook']}>

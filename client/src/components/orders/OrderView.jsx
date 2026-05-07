@@ -11,6 +11,7 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import PrintIcon from '@mui/icons-material/Print';
 import EmailIcon from '@mui/icons-material/Email';
+import EditIcon from '@mui/icons-material/Edit';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
@@ -281,13 +282,20 @@ export default function OrderView() {
 
       {/* Actions */}
       {order.status === 'pending' && (
-        <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2} flexWrap="wrap" gap={1}>
           <Button
             variant="contained" color="success" size="large"
             startIcon={<CheckCircleIcon />}
             onClick={() => setConfirm({ open: true, action: 'approve' })}
           >
             אשר הזמנה
+          </Button>
+          <Button
+            variant="contained" color="primary" size="large"
+            startIcon={<EditIcon />}
+            onClick={() => navigate(`/orders/${id}/edit`)}
+          >
+            ערוך הזמנה
           </Button>
           <Button
             variant="outlined" color="error" size="large"
