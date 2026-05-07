@@ -38,6 +38,7 @@ router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));
 router.use('/discounts', require('./discount.routes'));
 router.use('/admin', require('./admin.routes'));
+router.use('/stock', require('./stock.routes'));
 
 // Sync endpoint
 const syncController = require('../controllers/sync.controller');

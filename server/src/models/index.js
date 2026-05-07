@@ -24,6 +24,10 @@ const AgentCommand = require('./AgentCommand');
 const Contract = require('./Contract');
 const ContractVersion = require('./ContractVersion');
 const EmployeeRequest = require('./EmployeeRequest');
+const StockCategory = require('./StockCategory');
+const StockItem = require('./StockItem');
+const StockMovement = require('./StockMovement');
+const StockBatch = require('./StockBatch');
 
 module.exports = {
   User,
@@ -51,4 +55,8 @@ module.exports = {
   Contract,
   ContractVersion,
   EmployeeRequest,
+  StockCategory,
+  StockItem,
+  StockMovement,
+  StockBatch,
 };

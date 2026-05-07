@@ -28,6 +28,7 @@ import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import PermissionsManager from './components/admin/PermissionsManager';
+import StockPage from './components/stock/StockPage';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -54,6 +55,11 @@ function AppRoutes() {
         <Route path="orders" element={<OrderList />} />
         <Route path="orders/new" element={<OrderForm />} />
         <Route path="orders/:id" element={<OrderView />} />
+        <Route path="stock" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'class_leader', 'cook']}>
+            <StockPage />
+          </ProtectedRoute>
+        } />
         <Route path="suppliers" element={<SupplierManager />} />
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
