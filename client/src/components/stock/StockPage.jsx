@@ -19,6 +19,8 @@ import StockItemDialog from './StockItemDialog';
 import StockHistoryDrawer from './StockHistoryDrawer';
 import StockCountDialog from './StockCountDialog';
 import StockCategoryManager from './StockCategoryManager';
+import ShortageOrderDialog from './ShortageOrderDialog';
+import ShoppingBasketIcon from '@mui/icons-material/ShoppingBasket';
 
 function colorForStatus(item) {
   const { qty = 0, min_qty = 0, warn_qty = 0 } = item;
@@ -131,6 +133,9 @@ export default function StockPage() {
   const [historyItem, setHistoryItem] = useState(null);
   const [countItem, setCountItem] = useState(null);
   const [catManagerOpen, setCatManagerOpen] = useState(false);
+  const [shortageOpen, setShortageOpen] = useState(false);
+
+  const redCount = useMemo(() => items.filter(i => i.qty < i.min_qty).length, [items]);
 
   useEffect(() => {
     if (selectedBranch && !isAll) {
@@ -259,6 +264,12 @@ export default function StockPage() {
           {suppliers.map(s => <MenuItem key={s._id} value={s._id}>{s.name}</MenuItem>)}
         </TextField>
         <Button
+          variant="outlined" color="warning" startIcon={<ShoppingBasketIcon />}
+          onClick={() => setShortageOpen(true)}
+        >
+          הזמנה מחוסרים{redCount > 0 ? ` (${redCount})` : ''}
+        </Button>
+        <Button
           variant="contained" startIcon={<AddIcon />}
           onClick={() => setItemDialog({ open: true, item: null })}
           disabled={!activeCat}
@@ -367,6 +378,11 @@ export default function StockPage() {
         categories={categories}
         branchId={selectedBranch}
         onChanged={loadCategories}
+      />
+      <ShortageOrderDialog
+        open={shortageOpen}
+        onClose={() => setShortageOpen(false)}
+        branchId={selectedBranch}
       />
     </Box>
   );

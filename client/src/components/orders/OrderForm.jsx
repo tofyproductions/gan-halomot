@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   MenuItem, Table, TableBody, TableCell, TableHead, TableRow,
@@ -16,14 +16,17 @@ import { formatCurrency } from '../../utils/hebrewYear';
 
 export default function OrderForm() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { selectedBranch } = useBranch();
+  const prefill = location.state?.prefill;
+  const prefillApplied = useRef(false);
 
   const [suppliers, setSuppliers] = useState([]);
-  const [selectedSupplier, setSelectedSupplier] = useState('');
+  const [selectedSupplier, setSelectedSupplier] = useState(prefill?.supplier_id || '');
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]); // [{ product, qty }]
   const [search, setSearch] = useState('');
-  const [notes, setNotes] = useState('');
+  const [notes, setNotes] = useState(prefill?.source === 'stock-shortages' ? 'הזמנה אוטומטית מחוסרי מלאי' : '');
   const [saving, setSaving] = useState(false);
 
   // Load suppliers
@@ -38,6 +41,23 @@ export default function OrderForm() {
       .then(res => setProducts(res.data.products || []))
       .catch(() => toast.error('שגיאה בטעינת מוצרים'));
   }, [selectedSupplier]);
+
+  // Apply prefill once products for the prefilled supplier load.
+  useEffect(() => {
+    if (!prefill || prefillApplied.current) return;
+    if (!products.length) return;
+    if (prefill.supplier_id !== selectedSupplier) return;
+    const newCart = [];
+    for (const it of (prefill.items || [])) {
+      const product = products.find(p => (p._id || p.id) === it.product_id);
+      if (product) newCart.push({ product, qty: it.qty });
+    }
+    if (newCart.length) {
+      setCart(newCart);
+      toast.info(`נטענו ${newCart.length} פריטים מחוסרי מלאי`);
+    }
+    prefillApplied.current = true;
+  }, [products, prefill, selectedSupplier]);
 
   const supplier = suppliers.find(s => (s._id || s.id) === selectedSupplier);
   const minOrder = supplier?.min_order_amount || 0;

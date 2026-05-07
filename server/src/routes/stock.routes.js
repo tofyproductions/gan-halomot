@@ -27,5 +27,7 @@ router.get('/movements', ctrl.listMovements);
 // Helpers
 router.get('/search-products', ctrl.searchProducts);
 router.get('/consumption', ctrl.consumptionStats);
+router.get('/shortages', ctrl.listShortages);
+router.get('/shortages-by-branch', ctrl.shortagesByBranch);
 
 module.exports = router;

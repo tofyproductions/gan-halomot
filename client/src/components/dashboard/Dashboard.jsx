@@ -8,6 +8,7 @@ import OccupancyChart from './OccupancyChart';
 import { useBranch } from '../../hooks/useBranch';
 import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
+import StockShortageTile from './StockShortageTile';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -122,6 +123,7 @@ export default function Dashboard() {
             <Typography variant="h4" sx={{ fontWeight: 800, color: '#3b82f6' }}>{totalCapacity || '—'}</Typography>
           </CardContent>
         </Card>
+        <StockShortageTile />
       </Box>
 
       {/* Occupancy Chart */}

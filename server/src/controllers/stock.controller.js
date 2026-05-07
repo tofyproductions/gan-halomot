@@ -293,9 +293,65 @@ async function consumptionStats(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Items below threshold, grouped by supplier — drives the
+// "create order from shortages" workflow and the dashboard tile.
+async function listShortages(req, res, next) {
+  try {
+    const { branch_id, level } = req.query;
+    if (!branch_id) return res.status(400).json({ error: 'branch_id נדרש' });
+    const items = await StockItem.find({ branch_id, is_active: true })
+      .populate('product_id', 'name price_with_vat sku')
+      .populate('supplier_id', 'name min_order_amount')
+      .populate('category_id', 'name');
+
+    const lvl = level || 'red';
+    const filtered = items.filter(i => {
+      const w = i.warn_qty > 0 ? i.warn_qty : i.min_qty;
+      if (lvl === 'warn') return i.qty < w;
+      return i.qty < i.min_qty;
+    });
+
+    const groups = {};
+    for (const it of filtered) {
+      const sid = it.supplier_id?._id?.toString() || 'none';
+      if (!groups[sid]) {
+        groups[sid] = {
+          supplier: it.supplier_id || null,
+          items: [],
+        };
+      }
+      groups[sid].items.push(it);
+    }
+    res.json({ groups: Object.values(groups), total: filtered.length });
+  } catch (err) { next(err); }
+}
+
+// Per-branch counts for the dashboard widget. system_admin sees every branch;
+// other roles see only their own.
+async function shortagesByBranch(req, res, next) {
+  try {
+    const { Branch } = require('../models');
+    const isAdmin = req.user?.role === 'system_admin';
+    const filter = isAdmin ? { is_active: true } : { _id: req.user?.branch_id };
+    const branches = await Branch.find(filter).select('name').lean();
+
+    const out = [];
+    for (const b of branches) {
+      const items = await StockItem.find({ branch_id: b._id, is_active: true }).select('qty min_qty warn_qty').lean();
+      let red = 0, warn = 0;
+      for (const i of items) {
+        if (i.qty < i.min_qty) red++;
+        else if (i.warn_qty > 0 && i.qty < i.warn_qty) warn++;
+      }
+      out.push({ branch_id: b._id, branch_name: b.name, total: items.length, red, warn });
+    }
+    res.json({ branches: out });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   listCategories, createCategory, updateCategory, deleteCategory,
   listItems, createItem, updateItem, deleteItem,
   adjustItem, countItem, undoMovement, listMovements,
-  searchProducts, consumptionStats,
+  searchProducts, consumptionStats, listShortages, shortagesByBranch,
 };
