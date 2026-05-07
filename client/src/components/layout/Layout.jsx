@@ -66,7 +66,7 @@ export default function Layout() {
 
       <Box sx={{ position: 'relative', zIndex: 1 }}>
         <Header />
-        <Box sx={{ maxWidth: 1200, mx: 'auto', px: 2, py: 3 }}>
+        <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 1, sm: 2 }, py: { xs: 1.5, sm: 3 } }}>
           <Outlet />
         </Box>
       </Box>

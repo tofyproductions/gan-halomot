@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, Box, Typography,
   Checkbox, TextField, Divider, Alert, Chip, IconButton, CircularProgress,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import RemoveIcon from '@mui/icons-material/Remove';
 import AddIcon from '@mui/icons-material/Add';
@@ -21,6 +22,8 @@ export default function ShortageOrderDialog({ open, onClose, branchId }) {
   const [activeSupplier, setActiveSupplier] = useState(null);
   const [selections, setSelections] = useState({}); // { itemId: { checked, qty } }
   const navigate = useNavigate();
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
   useEffect(() => {
     if (open) load();
@@ -102,7 +105,7 @@ export default function ShortageOrderDialog({ open, onClose, branchId }) {
   const selectedCount = activeGroup ? activeGroup.items.filter(it => selections[it._id]?.checked && it.product_id).length : 0;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth fullScreen={fullScreen}>
       <DialogTitle sx={{ fontWeight: 800 }}>צור הזמנה ממה שחסר</DialogTitle>
       <DialogContent dividers>
         {loading ? (

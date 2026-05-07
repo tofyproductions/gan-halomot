@@ -44,6 +44,7 @@ const theme = createTheme({
           fontWeight: 700,
           padding: '8px 20px',
           fontSize: '0.875rem',
+          minHeight: 40,
         },
         containedPrimary: {
           background: 'linear-gradient(135deg, #fbbf24, #f59e0b)',
@@ -57,7 +58,14 @@ const theme = createTheme({
           borderWidth: '1.5px',
           '&:hover': { borderWidth: '1.5px' },
         },
-        sizeSmall: { padding: '5px 14px', fontSize: '0.8rem' },
+        sizeSmall: { padding: '5px 14px', fontSize: '0.8rem', minHeight: 32 },
+      },
+    },
+    MuiIconButton: {
+      styleOverrides: {
+        root: {
+          '@media (max-width: 600px)': { padding: 10 },
+        },
       },
     },
     MuiCard: {

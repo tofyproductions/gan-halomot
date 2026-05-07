@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, TextField,
   MenuItem, Autocomplete, Box, Typography, InputAdornment, Switch, FormControlLabel,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
@@ -10,6 +11,8 @@ const UNITS = ['יח\'', 'ק"ג', 'ל\'', 'אריזה', 'חבילה'];
 
 export default function StockItemDialog({ open, onClose, branchId, categoryId, item, onSaved }) {
   const isEdit = !!item;
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
 
   const [linkToProduct, setLinkToProduct] = useState(false);
   const [productOptions, setProductOptions] = useState([]);
@@ -106,7 +109,7 @@ export default function StockItemDialog({ open, onClose, branchId, categoryId, i
   }
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth fullScreen={fullScreen}>
       <DialogTitle sx={{ fontWeight: 800 }}>{isEdit ? 'עריכת פריט' : 'פריט חדש'}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2} sx={{ pt: 1 }}>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, TextField,
-  Box, Typography, Divider, Alert, IconButton,
+  Box, Typography, Divider, Alert, IconButton, useMediaQuery, useTheme,
 } from '@mui/material';
 import RemoveIcon from '@mui/icons-material/Remove';
 import AddIcon from '@mui/icons-material/Add';
@@ -14,6 +14,8 @@ function todayPlusDays(d) {
 }
 
 export default function ReceiveOrderDialog({ open, onClose, order, onReceived }) {
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -63,7 +65,7 @@ export default function ReceiveOrderDialog({ open, onClose, order, onReceived })
   const anyOver = rows.some(r => Number(r.qty_received) > Number(r.qty_ordered));
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth fullScreen={fullScreen}>
       <DialogTitle sx={{ fontWeight: 800 }}>אישור קבלה — {order.order_number}</DialogTitle>
       <DialogContent dividers>
         <Alert severity="info" sx={{ mb: 2 }}>
