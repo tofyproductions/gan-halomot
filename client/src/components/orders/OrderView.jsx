@@ -10,6 +10,7 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import PrintIcon from '@mui/icons-material/Print';
+import EmailIcon from '@mui/icons-material/Email';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
@@ -35,6 +36,7 @@ export default function OrderView() {
   const [loading, setLoading] = useState(true);
   const [confirm, setConfirm] = useState({ open: false, action: '' });
   const [receiveOpen, setReceiveOpen] = useState(false);
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     api.get(`/orders/${id}`)
@@ -51,6 +53,19 @@ export default function OrderView() {
       setConfirm({ open: false, action: '' });
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const handleResendEmail = async () => {
+    setSendingEmail(true);
+    try {
+      const res = await api.post(`/orders/${id}/resend-email`);
+      const recipients = res.data.recipients || [];
+      toast.success(`המייל נשלח ל-${recipients.length} נמענים`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשליחת מייל');
+    } finally {
+      setSendingEmail(false);
     }
   };
 
@@ -171,6 +186,12 @@ export default function OrderView() {
           <Chip label={status.label} color={status.color} size="small" sx={{ mt: 0.5 }} />
         </Box>
         <Stack direction="row" spacing={1}>
+          <Button
+            startIcon={<EmailIcon />} variant="outlined" color="info"
+            onClick={handleResendEmail} disabled={sendingEmail}
+          >
+            {sendingEmail ? 'שולח...' : 'שלח מייל'}
+          </Button>
           <Button startIcon={<PrintIcon />} variant="outlined" onClick={handlePrint}>הדפס / PDF</Button>
           <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>חזרה</Button>
         </Stack>

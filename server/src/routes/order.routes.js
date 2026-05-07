@@ -10,6 +10,7 @@ router.get('/:id', c.getById);
 router.post('/', c.create);
 router.put('/:id', c.update);
 router.post('/:id/approve', c.approve);
+router.post('/:id/resend-email', authMiddleware, c.resendEmail);
 router.post('/:id/mark-arrived', authMiddleware, requireRole(...RECEIVE_ROLES), c.markArrived);
 router.post('/:id/receive', authMiddleware, requireRole(...RECEIVE_ROLES), c.receive);
 router.delete('/:id', c.remove);

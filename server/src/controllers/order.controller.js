@@ -178,6 +178,32 @@ async function approve(req, res, next) {
   } catch (error) { next(error); }
 }
 
+async function resendEmail(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('branch_id', 'name address')
+      .populate('supplier_id');
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+
+    const creatorEmail = req.user?.email && !String(req.user.email).endsWith('@gan-halomot.local') ? req.user.email : null;
+    const result = await sendOrderEmail({
+      order: order.toObject(),
+      supplier: order.supplier_id?.toObject ? order.supplier_id.toObject() : order.supplier_id,
+      branch: order.branch_id?.toObject ? order.branch_id.toObject() : order.branch_id,
+      creatorEmail,
+      creatorName: req.user?.full_name || order.created_by || '',
+    });
+
+    if (result?.skipped) {
+      return res.status(400).json({ error: result.reason === 'no-recipients' ? 'אין נמענים — לספק לא הוגדר אימייל' : 'מערכת המייל לא מוגדרת' });
+    }
+
+    res.json({ ok: true, recipients: result.recipients });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function markArrived(req, res, next) {
   try {
     const order = await Order.findById(req.params.id);
@@ -286,4 +312,4 @@ async function remove(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getById, create, update, approve, markArrived, receive, remove };
+module.exports = { getAll, getById, create, update, approve, markArrived, receive, resendEmail, remove };
