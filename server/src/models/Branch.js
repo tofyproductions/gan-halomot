@@ -5,6 +5,10 @@ const branchSchema = new mongoose.Schema({
   address: { type: String, default: '' },
   is_active: { type: Boolean, default: true },
 
+  // Delivery contact shown on the PDF order forms (איש קשר למשלוח).
+  delivery_contact_name: { type: String, default: '' },
+  delivery_contact_phone: { type: String, default: '' },
+
   // Attendance / TIMEDOX replacement — per-branch clock integration
   clock_ip: { type: String, default: '' },           // e.g. "10.0.0.3"
   clock_port: { type: Number, default: 4370 },

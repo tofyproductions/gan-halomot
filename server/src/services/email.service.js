@@ -63,7 +63,7 @@ async function sendViaResend({ to, cc, subject, html, text, from }) {
  * limits apply (100/day free, 1500/day Workspace). The script is expected
  * to accept a JSON POST: { secret, to, cc, subject, html, text }.
  */
-async function sendViaGAS({ to, cc, subject, html, text }) {
+async function sendViaGAS({ to, cc, subject, html, text, attachments }) {
   if (!env.GAS_EMAIL_URL) throw new Error('GAS_EMAIL_URL not configured');
   const body = {
     secret: env.GAS_EMAIL_SECRET || '',
@@ -72,6 +72,7 @@ async function sendViaGAS({ to, cc, subject, html, text }) {
     subject,
     html,
     text: text || '',
+    attachments: attachments || [], // [{ name, html }] — Apps Script converts each HTML to PDF
   };
   const res = await fetch(env.GAS_EMAIL_URL, {
     method: 'POST',
@@ -97,9 +98,9 @@ async function sendViaGAS({ to, cc, subject, html, text }) {
  * sends via user's Gmail) > Resend (HTTPS, needs verified domain to send to
  * arbitrary addresses) > SMTP (blocked on Render).
  */
-async function dispatchEmail({ to, cc, subject, html, text, from }) {
+async function dispatchEmail({ to, cc, subject, html, text, from, attachments }) {
   if (env.GAS_EMAIL_URL) {
-    return sendViaGAS({ to, cc, subject, html, text });
+    return sendViaGAS({ to, cc, subject, html, text, attachments });
   }
   if (env.RESEND_API_KEY) {
     return sendViaResend({ to, cc, subject, html, text, from });
@@ -270,14 +271,35 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
     return { skipped: true, reason: 'no-recipients' };
   }
 
-  const html = buildOrderHTML({ order, supplier, branch, creatorName });
+  const { buildSupplierHTML, buildInternalHTML, buildFilename } = require('./order-pdf.service');
+
+  // Email body — short summary; the detailed copies are in the attached PDFs.
+  const html = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
+      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה סופית ומאושרת</h2>
+      <p><b>סניף:</b> ${branch?.name || ''}</p>
+      <p style="color:#475569;">מצורפים 2 קבצים (למשרד ולספק).</p>
+      <h3>פירוט ההזמנה:</h3>
+      ${buildOrderHTML({ order, supplier, branch, creatorName })}
+    </div>
+  `;
+
   const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
+
+  const supplierHTML = buildSupplierHTML({ order, supplier, branch });
+  const internalHTML = buildInternalHTML({ order, supplier, branch });
+  const supplierFile = buildFilename({ variant: 'supplier', branch, order });
+  const internalFile = buildFilename({ variant: 'internal', branch, order });
 
   const info = await dispatchEmail({
     to: supplierEmail || creatorEmail || officeEmail,
     cc,
-    subject: `הזמנה ${order.order_number} · ${branch?.name || ''} · ${supplier?.name || ''}`,
+    subject: `הזמנה מאושרת: ${branch?.name || ''} (הזמנה #${order.order_number})`,
     html,
+    attachments: [
+      { name: supplierFile, html: supplierHTML },
+      { name: internalFile, html: internalHTML },
+    ],
   });
 
   return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
