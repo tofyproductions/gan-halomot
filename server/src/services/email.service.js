@@ -57,14 +57,54 @@ async function sendViaResend({ to, cc, subject, html, text, from }) {
 }
 
 /**
- * Provider-agnostic send. Picks Resend if RESEND_API_KEY is set, otherwise
- * falls back to nodemailer. Same call signature as nodemailer's sendMail.
+ * Send via a Google Apps Script web-app endpoint. The Apps Script runs as
+ * the user's Gmail account and uses GmailApp.sendEmail, so no SMTP port
+ * is involved and no domain has to be verified — Gmail's normal sending
+ * limits apply (100/day free, 1500/day Workspace). The script is expected
+ * to accept a JSON POST: { secret, to, cc, subject, html, text }.
+ */
+async function sendViaGAS({ to, cc, subject, html, text }) {
+  if (!env.GAS_EMAIL_URL) throw new Error('GAS_EMAIL_URL not configured');
+  const body = {
+    secret: env.GAS_EMAIL_SECRET || '',
+    to: Array.isArray(to) ? to : [to].filter(Boolean),
+    cc: Array.isArray(cc) ? cc : (cc ? [cc] : []),
+    subject,
+    html,
+    text: text || '',
+  };
+  const res = await fetch(env.GAS_EMAIL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    redirect: 'follow',
+  });
+  const responseText = await res.text();
+  let parsed = null;
+  try { parsed = JSON.parse(responseText); } catch { parsed = { raw: responseText }; }
+  if (!res.ok || parsed?.ok === false) {
+    const err = new Error(parsed?.error || `GAS ${res.status}`);
+    err.code = parsed?.code || `HTTP_${res.status}`;
+    err.responseCode = res.status;
+    err.detail = parsed;
+    throw err;
+  }
+  return { messageId: parsed?.messageId || `gas-${Date.now()}`, provider: 'gas' };
+}
+
+/**
+ * Provider-agnostic send. Priority: Google Apps Script (no domain needed,
+ * sends via user's Gmail) > Resend (HTTPS, needs verified domain to send to
+ * arbitrary addresses) > SMTP (blocked on Render).
  */
 async function dispatchEmail({ to, cc, subject, html, text, from }) {
+  if (env.GAS_EMAIL_URL) {
+    return sendViaGAS({ to, cc, subject, html, text });
+  }
   if (env.RESEND_API_KEY) {
     return sendViaResend({ to, cc, subject, html, text, from });
   }
-  if (!env.SMTP_USER) throw new Error('No email provider configured (set RESEND_API_KEY or SMTP_*)');
+  if (!env.SMTP_USER) throw new Error('No email provider configured (set GAS_EMAIL_URL, RESEND_API_KEY, or SMTP_*)');
   const info = await getTransporter().sendMail({
     from: from || `"גן החלומות" <${env.SMTP_USER}>`,
     to: Array.isArray(to) ? to.join(',') : to,
@@ -218,7 +258,7 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
  * their inbox.
  */
 async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorName }) {
-  if (!env.RESEND_API_KEY && !env.SMTP_USER) {
+  if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
     console.warn('No email provider configured — skipping order email');
     return { skipped: true, reason: 'provider-not-configured' };
   }

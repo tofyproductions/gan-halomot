@@ -17,6 +17,10 @@ const env = {
   // forces "onboarding@resend.dev"; once you verify a domain set this to
   // 'גן החלומות <orders@yourdomain.com>'.
   RESEND_FROM: process.env.RESEND_FROM,
+  // Google Apps Script web-app URL — relays mail through the user's Gmail
+  // account so we don't need a verified domain. Optional shared secret.
+  GAS_EMAIL_URL: process.env.GAS_EMAIL_URL,
+  GAS_EMAIL_SECRET: process.env.GAS_EMAIL_SECRET,
 
   // Cloudflare R2
   R2_ENDPOINT: process.env.R2_ENDPOINT,

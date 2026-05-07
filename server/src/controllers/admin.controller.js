@@ -39,7 +39,9 @@ async function updateUserTabs(req, res, next) {
 async function emailDiagnostic(req, res, next) {
   const env = require('../config/env');
   const info = {
-    active_provider: env.RESEND_API_KEY ? 'resend' : (env.SMTP_USER ? 'smtp' : 'none'),
+    active_provider: env.GAS_EMAIL_URL ? 'gas' : (env.RESEND_API_KEY ? 'resend' : (env.SMTP_USER ? 'smtp' : 'none')),
+    gas_url_set: !!env.GAS_EMAIL_URL,
+    gas_secret_set: !!env.GAS_EMAIL_SECRET,
     resend_key_set: !!env.RESEND_API_KEY,
     resend_key_length: env.RESEND_API_KEY ? env.RESEND_API_KEY.length : 0,
     resend_from: env.RESEND_FROM || '(default: onboarding@resend.dev)',
@@ -58,10 +60,10 @@ async function emailTest(req, res, next) {
   try {
     const env = require('../config/env');
     const { dispatchEmail } = require('../services/email.service');
-    if (!env.RESEND_API_KEY && !env.SMTP_USER) {
+    if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
       return res.status(400).json({
         ok: false,
-        error: 'אין ספק מייל מוגדר — הגדר RESEND_API_KEY (מומלץ) או SMTP_USER+SMTP_PASS',
+        error: 'אין ספק מייל מוגדר — הגדר GAS_EMAIL_URL (מומלץ) או RESEND_API_KEY או SMTP_USER+SMTP_PASS',
       });
     }
     const to = req.body?.to || req.user?.email || env.SMTP_USER || 'dreamgan10@gmail.com';
