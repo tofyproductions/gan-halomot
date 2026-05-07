@@ -28,6 +28,11 @@ const userSchema = new mongoose.Schema({
     created_at: { type: Date, default: Date.now },
   }],
   webauthn_challenge: { type: String, default: null },
+  // Tab access overrides on top of role defaults.
+  // tab_overrides_add: tab IDs the user gets even though their role wouldn't.
+  // tab_overrides_remove: tab IDs the user is denied even though their role would.
+  tab_overrides_add: { type: [String], default: [] },
+  tab_overrides_remove: { type: [String], default: [] },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ branch_id: 1, role: 1 });

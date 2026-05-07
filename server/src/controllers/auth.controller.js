@@ -23,6 +23,8 @@ function makeToken(user, rememberMe) {
     branch_id: user.branch_id?._id || user.branch_id,
     branch_name: user.branch_id?.name || null,
     position: user.position,
+    tab_overrides_add: user.tab_overrides_add || [],
+    tab_overrides_remove: user.tab_overrides_remove || [],
   };
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
   return { token, user: payload };

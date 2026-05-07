@@ -27,6 +27,7 @@ import MyDocuments from './components/employee-portal/MyDocuments';
 import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
+import PermissionsManager from './components/admin/PermissionsManager';
 import { BranchProvider } from './hooks/useBranch';
 
 function AppRoutes() {
@@ -71,6 +72,11 @@ function AppRoutes() {
         <Route path="salary-requests" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager']}>
             <SalaryRequests />
+          </ProtectedRoute>
+        } />
+        <Route path="admin/permissions" element={
+          <ProtectedRoute roles={['system_admin']}>
+            <PermissionsManager />
           </ProtectedRoute>
         } />
       </Route>

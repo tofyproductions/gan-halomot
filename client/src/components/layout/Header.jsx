@@ -20,54 +20,39 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import AssignmentIcon from '@mui/icons-material/Assignment';
+import Inventory2Icon from '@mui/icons-material/Inventory2';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
+import { TAB_GROUPS, hasTabAccess } from '../../config/tabs';
 
-const EMPLOYEE_ROLES = ['teacher', 'assistant', 'class_leader', 'cook'];
+const ICON_BY_TAB = {
+  dashboard: DashboardIcon,
+  registrations: PersonAddIcon,
+  collections: ReceiptLongIcon,
+  archive: ArchiveIcon,
+  employees: PeopleIcon,
+  attendance: FingerprintIcon,
+  salary_table: PaymentsIcon,
+  holidays: EventIcon,
+  employee_requests: AssignmentIcon,
+  orders: ShoppingCartIcon,
+  stock: Inventory2Icon,
+  suppliers: LocalShippingIcon,
+  gantt: CalendarMonthIcon,
+  contacts: ContactsIcon,
+  my_salary: AccountBalanceIcon,
+  my_payslips: DescriptionIcon,
+  my_documents: DescriptionIcon,
+  my_attendance: AccessTimeIcon,
+  my_updates: NotificationsIcon,
+};
 
-const NAV_GROUPS = [
-  {
-    label: 'ניהול',
-    items: [
-      { label: 'לוח בקרה', path: '/', icon: DashboardIcon, roles: null },
-      { label: 'רישום', path: '/registrations', icon: PersonAddIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'גבייה', path: '/collections', icon: ReceiptLongIcon, roles: ['system_admin', 'accountant'] },
-      { label: 'ארכיון', path: '/archive', icon: ArchiveIcon, roles: ['system_admin', 'branch_manager'] },
-    ],
-  },
-  {
-    label: 'כוח אדם',
-    items: [
-      { label: 'עובדים', path: '/employees', icon: PeopleIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'החתמות', path: '/attendance', icon: FingerprintIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'שכר', path: '/salary-table', icon: PaymentsIcon, roles: ['system_admin', 'accountant'] },
-      { label: 'חופשות', path: '/holidays', icon: EventIcon, roles: ['system_admin', 'branch_manager'] },
-      { label: 'בקשות', path: '/employee-requests', icon: AssignmentIcon, roles: ['system_admin', 'branch_manager'] },
-    ],
-  },
-  {
-    label: 'תפעול',
-    items: [
-      { label: 'הזמנות', path: '/orders', icon: ShoppingCartIcon, roles: ['system_admin', 'branch_manager', 'class_leader'] },
-      { label: 'ספקים', path: '/suppliers', icon: LocalShippingIcon, roles: ['system_admin', 'accountant'] },
-      { label: 'גאנט', path: '/gantt', icon: CalendarMonthIcon, roles: ['system_admin', 'branch_manager', 'class_leader'] },
-      { label: 'דף קשר', path: '/contacts', icon: ContactsIcon, roles: null },
-    ],
-  },
-  {
-    label: 'האזור שלי',
-    items: [
-      { label: 'צפי השכר שלי', path: '/my-salary', icon: AccountBalanceIcon, roles: EMPLOYEE_ROLES },
-      { label: 'התלושים שלי', path: '/my-payslips', icon: DescriptionIcon, roles: EMPLOYEE_ROLES },
-      { label: 'המסמכים שלי', path: '/my-documents', icon: DescriptionIcon, roles: EMPLOYEE_ROLES },
-      { label: 'ההחתמות שלי', path: '/my-attendance', icon: AccessTimeIcon, roles: EMPLOYEE_ROLES },
-      { label: 'עדכונים', path: '/my-updates', icon: NotificationsIcon, roles: EMPLOYEE_ROLES },
-    ],
-  },
-];
+// Nav structure now lives in client/src/config/tabs.js (TAB_GROUPS).
+// Icons are kept here in ICON_BY_TAB so the config file stays free of MUI imports.
 
 export default function Header() {
   const navigate = useNavigate();
@@ -158,10 +143,8 @@ export default function Header() {
 
         {/* Center/Left: Nav Groups */}
         <Stack direction="row" alignItems="center" spacing={0}>
-          {NAV_GROUPS.map((group, gi) => {
-            const visibleItems = group.items.filter(item =>
-              !item.roles || item.roles.includes(user?.role)
-            );
+          {TAB_GROUPS.map((group, gi) => {
+            const visibleItems = group.items.filter(item => hasTabAccess(user, item.id));
             if (visibleItems.length === 0) return null;
             return (
               <Stack key={group.label} direction="row" alignItems="center" spacing={0}>
@@ -169,7 +152,7 @@ export default function Header() {
                   <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: '#e2e8f0' }} />
                 )}
                 {visibleItems.map(item => {
-                  const Icon = item.icon;
+                  const Icon = ICON_BY_TAB[item.id] || DashboardIcon;
                   const isActive = location.pathname === item.path;
                   return (
                     <Tooltip key={item.path} title={item.label}>
@@ -212,6 +195,13 @@ export default function Header() {
                   border: '1px solid #e2e8f0',
                 }}
               />
+              {isAdmin && (
+                <Tooltip title="ניהול הרשאות">
+                  <IconButton size="small" onClick={() => navigate('/admin/permissions')} sx={{ color: '#0ea5e9' }}>
+                    <AdminPanelSettingsIcon sx={{ fontSize: '1rem' }} />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="הגדר כניסה ביומטרית">
                 <IconButton size="small" onClick={handleSetupBiometric} sx={{ color: '#7c3aed' }}>
                   <FingerprintIcon sx={{ fontSize: '1rem' }} />
