@@ -31,6 +31,9 @@ function fmtTime(d) {
 }
 
 // Shared header + side boxes for both PDFs. Variant: 'supplier' | 'internal'.
+// Layout uses tables instead of CSS grid/flex because Google Docs (used by
+// the Apps Script HTML→PDF pipeline) ignores most modern CSS — tables and
+// inline styles are what survives the conversion.
 function topBlock({ order, supplier, branch, variant }) {
   const date = fmtDate(order.created_at);
   const time = fmtTime(order.created_at);
@@ -48,62 +51,62 @@ function topBlock({ order, supplier, branch, variant }) {
   const customerName = supplier?.customer_name || 'גן החלומות';
   const customerId = supplier?.customer_id || '';
 
-  return `
-    <header class="doc-head">
-      <div class="head-meta">
-        <div><b>תאריך:</b> ${date}</div>
-        <div><b>שעה:</b> ${time}</div>
-        <div><b>מספר הזמנה:</b> ${order.order_number || ''}</div>
-      </div>
-      <div class="head-title">
-        <h1>גן החלומות</h1>
-        <h2>עבור: ${branchName}</h2>
-        <div class="subtitle">${variantLabel}</div>
-      </div>
-      ${LOGO_DATA_URL ? `<img class="head-logo" src="${LOGO_DATA_URL}" alt="">` : ''}
-    </header>
+  const supplierRows = [
+    `<div><b>שם:</b> ${supplierName}</div>`,
+    supplierContact ? `<div><b>איש קשר:</b> ${supplierContact}</div>` : '',
+    supplierPhone ? `<div><b>טלפון:</b> ${supplierPhone}</div>` : '',
+  ].filter(Boolean).join('');
 
-    <section class="info-grid">
-      <div class="info-card">
-        <h3>פרטי ספק</h3>
-        <div><b>שם:</b> ${supplierName}</div>
-        ${supplierContact ? `<div><b>איש קשר:</b> ${supplierContact}</div>` : ''}
-        ${supplierPhone ? `<div><b>טלפון:</b> ${supplierPhone}</div>` : ''}
-      </div>
-      <div class="info-card">
-        <h3>כתובת למשלוח</h3>
-        <div><b>סניף:</b> ${branchName}</div>
-        ${branchAddr ? `<div><b>כתובת:</b> ${branchAddr}</div>` : ''}
-        ${deliveryContact ? `<div><b>איש קשר:</b> ${deliveryContact}</div>` : ''}
-        <hr>
-        <div><b>לקוח משלם:</b> ${customerName}</div>
-        ${customerId ? `<div><b>ח.פ:</b> ${customerId}</div>` : ''}
-      </div>
-    </section>
+  const deliveryRows = [
+    `<div><b>סניף:</b> ${branchName}</div>`,
+    branchAddr ? `<div><b>כתובת:</b> ${branchAddr}</div>` : '',
+    deliveryContact ? `<div><b>איש קשר:</b> ${deliveryContact}</div>` : '',
+    `<div style="margin-top:4px;padding-top:4px;border-top:1px dashed #cbd5e1;"><b>לקוח משלם:</b> ${customerName}${customerId ? ` · <b>ח.פ:</b> ${customerId}` : ''}</div>`,
+  ].filter(Boolean).join('');
+
+  return `
+    <table style="width:100%;border-collapse:collapse;margin-bottom:10px;">
+      <tr>
+        <td style="width:33%;font-size:10px;line-height:1.4;vertical-align:top;">
+          <div><b>תאריך:</b> ${date}</div>
+          <div><b>שעה:</b> ${time}</div>
+          <div><b>מספר הזמנה:</b> ${order.order_number || ''}</div>
+        </td>
+        <td style="width:34%;text-align:center;vertical-align:top;">
+          <div style="color:#d97706;font-size:18px;font-weight:900;line-height:1.1;">גן החלומות</div>
+          <div style="font-size:13px;font-weight:800;text-decoration:underline;margin-top:2px;">עבור: ${branchName}</div>
+          <div style="color:#475569;font-size:10px;font-weight:700;margin-top:2px;">${variantLabel}</div>
+        </td>
+        <td style="width:33%;text-align:left;vertical-align:top;">
+          ${LOGO_DATA_URL ? `<img src="${LOGO_DATA_URL}" alt="" style="width:60px;height:auto;">` : ''}
+        </td>
+      </tr>
+    </table>
+
+    <table style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-bottom:8px;">
+      <tr>
+        <td style="width:50%;border:1px solid #cbd5e1;padding:8px 10px;vertical-align:top;font-size:10px;line-height:1.5;">
+          <div style="font-weight:800;font-size:11px;border-bottom:1px solid #e2e8f0;padding-bottom:3px;margin-bottom:4px;">פרטי ספק</div>
+          ${supplierRows}
+        </td>
+        <td style="width:50%;border:1px solid #cbd5e1;padding:8px 10px;vertical-align:top;font-size:10px;line-height:1.5;">
+          <div style="font-weight:800;font-size:11px;border-bottom:1px solid #e2e8f0;padding-bottom:3px;margin-bottom:4px;">כתובת למשלוח</div>
+          ${deliveryRows}
+        </td>
+      </tr>
+    </table>
   `;
 }
 
 const SHARED_CSS = `
-  @page { size: A4; margin: 14mm; }
-  * { box-sizing: border-box; }
-  body { font-family: 'Assistant', 'Heebo', Arial, sans-serif; color: #1e293b; direction: rtl; margin: 0; padding: 16px; }
-  .doc-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 16px; border-bottom: 3px solid #10b981; margin-bottom: 20px; }
-  .head-meta { font-size: 12px; line-height: 1.6; min-width: 160px; }
-  .head-title { text-align: center; flex: 1; }
-  .head-title h1 { margin: 0; color: #d97706; font-size: 28px; font-weight: 900; }
-  .head-title h2 { margin: 4px 0; color: #1e293b; font-size: 18px; font-weight: 800; text-decoration: underline; }
-  .head-title .subtitle { color: #475569; font-weight: 700; font-size: 14px; }
-  .head-logo { width: 90px; height: auto; }
-  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-  .info-card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 14px 16px; font-size: 13px; line-height: 1.7; }
-  .info-card h3 { margin: 0 0 8px 0; font-size: 14px; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
-  .info-card hr { border: none; border-top: 1px dashed #e2e8f0; margin: 8px 0; }
-  table.items { width: 100%; border-collapse: collapse; font-size: 13px; }
-  table.items th, table.items td { padding: 8px 6px; border: 1px solid #cbd5e1; text-align: center; }
-  table.items th { background: #f8fafc; font-weight: 800; color: #475569; }
+  @page { size: A4; margin: 10mm; }
+  body { font-family: Arial, sans-serif; color: #1e293b; direction: rtl; margin: 0; padding: 0; font-size: 10px; }
+  table.items { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 6px; }
+  table.items th, table.items td { padding: 4px 6px; border: 1px solid #cbd5e1; text-align: center; }
+  table.items th { background: #f1f5f9; font-weight: 800; color: #1e293b; }
   table.items td.product { text-align: right; font-weight: 600; }
-  .total-box { margin-top: 18px; padding: 14px 18px; border: 2px solid #10b981; border-radius: 12px; display: inline-block; font-size: 18px; font-weight: 800; color: #065f46; background: #f0fdf4; }
-  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 11px; text-align: center; }
+  .total-box { margin-top: 10px; padding: 8px 14px; border: 2px solid #10b981; display: inline-block; font-size: 13px; font-weight: 800; color: #065f46; background: #f0fdf4; }
+  .footer { margin-top: 14px; padding-top: 6px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 9px; text-align: center; }
 `;
 
 function buildSupplierHTML({ order, supplier, branch }) {
