@@ -16,6 +16,65 @@ function getTransporter() {
 }
 
 /**
+ * Send a mail via Resend's HTTPS API. Render's free/starter tiers block
+ * outbound port 587, so SMTP fails with ETIMEDOUT — Resend's HTTPS API
+ * sidesteps that. Returns the same shape as nodemailer (info.messageId).
+ *
+ * Without a verified Resend domain, the From address must be the literal
+ * "onboarding@resend.dev". Once a domain is verified set RESEND_FROM to
+ * something like 'גן החלומות <orders@yourdomain.com>'.
+ */
+async function sendViaResend({ to, cc, subject, html, text, from }) {
+  if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
+
+  const fromAddr = from || env.RESEND_FROM || 'גן החלומות <onboarding@resend.dev>';
+  const body = {
+    from: fromAddr,
+    to: Array.isArray(to) ? to : [to].filter(Boolean),
+    subject,
+    html,
+  };
+  if (cc) body.cc = Array.isArray(cc) ? cc : [cc].filter(Boolean);
+  if (text) body.text = text;
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(json.message || `Resend ${res.status}`);
+    err.code = json.name || `HTTP_${res.status}`;
+    err.responseCode = res.status;
+    err.detail = json;
+    throw err;
+  }
+  return { messageId: json.id, provider: 'resend' };
+}
+
+/**
+ * Provider-agnostic send. Picks Resend if RESEND_API_KEY is set, otherwise
+ * falls back to nodemailer. Same call signature as nodemailer's sendMail.
+ */
+async function dispatchEmail({ to, cc, subject, html, text, from }) {
+  if (env.RESEND_API_KEY) {
+    return sendViaResend({ to, cc, subject, html, text, from });
+  }
+  if (!env.SMTP_USER) throw new Error('No email provider configured (set RESEND_API_KEY or SMTP_*)');
+  const info = await getTransporter().sendMail({
+    from: from || `"גן החלומות" <${env.SMTP_USER}>`,
+    to: Array.isArray(to) ? to.join(',') : to,
+    cc: Array.isArray(cc) ? cc.join(',') : cc,
+    subject, html, text,
+  });
+  return { messageId: info.messageId, provider: 'smtp' };
+}
+
+/**
  * Send registration completion email with contract PDF and uploaded docs
  */
 async function sendAgreementEmail({ childName, parentName, parentEmail, contractPdfBuffer, attachments = [] }) {
@@ -159,29 +218,29 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
  * their inbox.
  */
 async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorName }) {
-  if (!env.SMTP_USER) {
-    console.warn('SMTP not configured — skipping order email');
-    return { skipped: true, reason: 'smtp-not-configured' };
+  if (!env.RESEND_API_KEY && !env.SMTP_USER) {
+    console.warn('No email provider configured — skipping order email');
+    return { skipped: true, reason: 'provider-not-configured' };
   }
 
   const supplierEmail = supplier?.contact_email;
-  const officeEmail = 'tofy10.office@gmail.com';
+  const officeEmail = 'dreamgan10@gmail.com';
   const recipients = [supplierEmail, creatorEmail, officeEmail].filter(Boolean);
   if (recipients.length === 0) {
     return { skipped: true, reason: 'no-recipients' };
   }
 
   const html = buildOrderHTML({ order, supplier, branch, creatorName });
+  const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
 
-  const info = await getTransporter().sendMail({
-    from: `"גן החלומות" <${env.SMTP_USER}>`,
-    to: supplierEmail || creatorEmail,
-    cc: [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail).join(','),
+  const info = await dispatchEmail({
+    to: supplierEmail || creatorEmail || officeEmail,
+    cc,
     subject: `הזמנה ${order.order_number} · ${branch?.name || ''} · ${supplier?.name || ''}`,
     html,
   });
 
-  return { sent: true, messageId: info.messageId, recipients };
+  return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
 }
 
-module.exports = { sendAgreementEmail, sendRegistrationLink, sendOrderEmail, buildOrderHTML };
+module.exports = { sendAgreementEmail, sendRegistrationLink, sendOrderEmail, buildOrderHTML, dispatchEmail };

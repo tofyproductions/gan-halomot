@@ -39,6 +39,10 @@ async function updateUserTabs(req, res, next) {
 async function emailDiagnostic(req, res, next) {
   const env = require('../config/env');
   const info = {
+    active_provider: env.RESEND_API_KEY ? 'resend' : (env.SMTP_USER ? 'smtp' : 'none'),
+    resend_key_set: !!env.RESEND_API_KEY,
+    resend_key_length: env.RESEND_API_KEY ? env.RESEND_API_KEY.length : 0,
+    resend_from: env.RESEND_FROM || '(default: onboarding@resend.dev)',
     smtp_host: env.SMTP_HOST || null,
     smtp_port: env.SMTP_PORT || null,
     smtp_user_set: !!env.SMTP_USER,
@@ -53,34 +57,21 @@ async function emailDiagnostic(req, res, next) {
 async function emailTest(req, res, next) {
   try {
     const env = require('../config/env');
-    if (!env.SMTP_USER || !env.SMTP_PASS) {
+    const { dispatchEmail } = require('../services/email.service');
+    if (!env.RESEND_API_KEY && !env.SMTP_USER) {
       return res.status(400).json({
         ok: false,
-        error: 'SMTP_USER או SMTP_PASS חסרים ב-environment',
-        config: {
-          smtp_host: env.SMTP_HOST,
-          smtp_user_set: !!env.SMTP_USER,
-          smtp_pass_set: !!env.SMTP_PASS,
-        },
+        error: 'אין ספק מייל מוגדר — הגדר RESEND_API_KEY (מומלץ) או SMTP_USER+SMTP_PASS',
       });
     }
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: env.SMTP_HOST, port: env.SMTP_PORT, secure: false,
-      auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-    });
-    // verify() pings the server with the credentials but doesn't send anything.
-    await transporter.verify();
-    // Send a tiny test mail to the requesting admin's address (or the SMTP_USER itself).
-    const to = req.body?.to || req.user?.email || env.SMTP_USER;
-    const info = await transporter.sendMail({
-      from: `"גן החלומות בדיקת SMTP" <${env.SMTP_USER}>`,
+    const to = req.body?.to || req.user?.email || env.SMTP_USER || 'dreamgan10@gmail.com';
+    const info = await dispatchEmail({
       to,
-      subject: 'בדיקת SMTP — גן החלומות',
-      text: 'אם הגיע — SMTP מוגדר נכון.',
-      html: '<div dir="rtl"><h2>SMTP פעיל</h2><p>אם המייל הזה הגיע, ההגדרות תקינות.</p></div>',
+      subject: 'בדיקת מייל — גן החלומות',
+      text: 'אם הגיע — המערכת מוגדרת נכון.',
+      html: '<div dir="rtl" style="font-family:Arial"><h2>המייל פעיל</h2><p>אם הגיע — ההגדרות תקינות.</p></div>',
     });
-    res.json({ ok: true, messageId: info.messageId, sent_to: to });
+    res.json({ ok: true, messageId: info.messageId, provider: info.provider, sent_to: to });
   } catch (err) {
     console.error('emailTest failed:', err);
     res.status(500).json({
@@ -89,6 +80,7 @@ async function emailTest(req, res, next) {
       responseCode: err.responseCode,
       command: err.command,
       message: err.message,
+      detail: err.detail,
     });
   }
 }

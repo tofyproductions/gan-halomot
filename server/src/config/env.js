@@ -12,6 +12,11 @@ const env = {
   SMTP_PORT: parseInt(process.env.SMTP_PORT, 10) || 587,
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
+  RESEND_API_KEY: process.env.RESEND_API_KEY,
+  // Optional override of the From address. Without a verified domain Resend
+  // forces "onboarding@resend.dev"; once you verify a domain set this to
+  // 'גן החלומות <orders@yourdomain.com>'.
+  RESEND_FROM: process.env.RESEND_FROM,
 
   // Cloudflare R2
   R2_ENDPOINT: process.env.R2_ENDPOINT,
