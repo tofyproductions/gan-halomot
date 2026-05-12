@@ -145,8 +145,10 @@ export default function AttendanceMonitor() {
         </Box>
       </TableCell>
       {days.map(d => {
-        // Build "YYYY-MM-DD" for the cell so the editor knows which day to load.
-        const fullDate = `${month}-${String(d).padStart(2, '0')}`;
+        // `d` is already a full "YYYY-MM-DD" string from the days memo above —
+        // don't re-prefix the month or the dialog will request a malformed date
+        // like "2026-05-2026-05-04" and never find any punches.
+        const fullDate = d;
         const openCell = () => setDayDialog({
           open: true,
           employee: block.unlinked ? null : { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id },
