@@ -225,8 +225,47 @@ export default function PermissionsManager() {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
   }
 
+  // Per-role default tabs reference: derived from tabs.js
+  const roleDefaults = useMemo(() => {
+    const out = {};
+    for (const role of Object.keys(ROLE_LABELS)) {
+      out[role] = ALL_TABS.filter(t => !t.defaultRoles || t.defaultRoles.includes(role));
+    }
+    return out;
+  }, []);
+
   return (
     <Box sx={{ p: { xs: 1, md: 3 } }}>
+      {/* Role defaults reference */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 3, bgcolor: '#fafbff' }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>תבניות תפקידים</Typography>
+          <Chip label="ברירות מחדל" size="small" color="primary" variant="outlined" />
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+          כל תפקיד מקבל את הטאבים הבאים כברירת מחדל. ניתן לשנות פר משתמש בטבלה למטה (סימון V/X = override סגול).
+        </Typography>
+        <Stack spacing={1}>
+          {Object.entries(ROLE_LABELS).map(([role, label]) => (
+            <Stack key={role} direction="row" spacing={1} alignItems="flex-start" useFlexGap flexWrap="wrap">
+              <Chip
+                size="small"
+                label={label}
+                color={role === 'system_admin' ? 'error' : role === 'branch_manager' ? 'primary' : 'default'}
+                sx={{ minWidth: 110, fontWeight: 700 }}
+              />
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
+                {roleDefaults[role].length === 0 ? (
+                  <Typography variant="caption" color="text.disabled">— אין טאבים —</Typography>
+                ) : roleDefaults[role].map(t => (
+                  <Chip key={t.id} size="small" variant="outlined" label={t.label} sx={{ height: 22, fontSize: '0.7rem' }} />
+                ))}
+              </Stack>
+            </Stack>
+          ))}
+        </Stack>
+      </Paper>
+
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2, flexWrap: 'wrap' }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>ניהול הרשאות לפי טאב</Typography>
         <Box sx={{ flex: 1 }} />
