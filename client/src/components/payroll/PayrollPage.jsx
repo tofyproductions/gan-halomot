@@ -6,11 +6,13 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import RequestPageIcon from '@mui/icons-material/RequestPage';
 import SettingsIcon from '@mui/icons-material/Settings';
 import LegendToggleIcon from '@mui/icons-material/LegendToggle';
+import EventNoteIcon from '@mui/icons-material/EventNote';
 import PayrollMonthTable from './PayrollMonthTable';
 import PayslipAudit from './PayslipAudit';
 import SalaryTable from './SalaryTable';
 import SalaryRequests from '../employees/SalaryRequests';
 import PayrollSettings from './PayrollSettings';
+import CommitmentsManager from './CommitmentsManager';
 
 /**
  * Parent "שכר" page — internal tabs combine the monthly payroll table,
@@ -19,11 +21,12 @@ import PayrollSettings from './PayrollSettings';
  */
 
 const TABS = [
-  { id: 'monthly', label: 'טבלה חודשית', icon: <TableChartIcon fontSize="small" />, component: PayrollMonthTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'summary', label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'audit',   label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'branch_manager'] },
-  { id: 'raises',  label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },
-  { id: 'settings',label: 'הגדרות',     icon: <SettingsIcon fontSize="small" />, component: PayrollSettings, roles: ['system_admin'] },
+  { id: 'monthly',     label: 'טבלה חודשית', icon: <TableChartIcon fontSize="small" />, component: PayrollMonthTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
+  { id: 'commitments', label: 'התחייבויות',  icon: <EventNoteIcon fontSize="small" />, component: CommitmentsManager, roles: ['system_admin', 'accountant', 'branch_manager'] },
+  { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
+  { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'branch_manager'] },
+  { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },
+  { id: 'settings',    label: 'הגדרות',      icon: <SettingsIcon fontSize="small" />, component: PayrollSettings, roles: ['system_admin'] },
 ];
 
 export default function PayrollPage() {

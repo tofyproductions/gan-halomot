@@ -347,13 +347,18 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // Travel: prefer the new per_day/monthly_flat fields. Legacy employees
   // (created before the travel_mode field existed) default to 16 ₪/day if
   // they have no travel_allowance configured.
+  //
+  // Cap: in per_day mode the result never exceeds the monthly free-pass
+  // price (315₪). monthly_flat is treated as an explicit override and
+  // skips the cap.
+  const TRAVEL_PER_DAY_CAP = 315;
   let travel = 0;
   const mode = employee.travel_mode || 'per_day';
   if (mode === 'per_day') {
     const perDay = (employee.travel_per_day != null && employee.travel_per_day !== '')
       ? Number(employee.travel_per_day)
       : 16;
-    travel = perDay * daysWorked;
+    travel = Math.min(perDay * daysWorked, TRAVEL_PER_DAY_CAP);
   } else if (mode === 'monthly_flat') {
     travel = Number(employee.travel_monthly_flat) || Number(employee.travel_allowance) || 0;
   } else {

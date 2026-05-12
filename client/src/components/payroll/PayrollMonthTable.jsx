@@ -44,14 +44,16 @@ function fmtCurrency(n) {
 }
 
 function computeTravel(row) {
+  // Manual override takes precedence and skips the monthly free-pass cap —
+  // admin entered a specific value on purpose.
   if (row.manual.travel_override != null) return row.manual.travel_override;
   const days = row.breakdown?.hours?.days_worked || 0;
   if (row.travel_mode === 'per_day') {
-    const perDay = row.travel_per_day || 16; // default 16₪/day if unset
-    return perDay * days;
+    const perDay = row.travel_per_day || 16;
+    return Math.min(perDay * days, 315);
   }
   if (row.travel_mode === 'monthly_flat') return row.travel_monthly_flat || 0;
-  return 16 * days;
+  return Math.min(16 * days, 315);
 }
 
 /* ─── Inline editors ────────────────────────────────────────────────── */
@@ -732,7 +734,30 @@ export default function PayrollMonthTable() {
 
                       <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
                       <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
-                      <TableCell align="center"><NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} /></TableCell>
+                      <TableCell align="center" sx={{ position: 'relative' }}>
+                        <NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} />
+                        {/* Show the auto-detected absences from commitment vs punches
+                            as a small chip when the admin hasn't entered a manual value. */}
+                        {(!r.manual.absence_days || r.manual.absence_days === 0) && r.commitment?.net_absent > 0 && (
+                          <Tooltip title={
+                            <Box sx={{ fontSize: '0.8rem' }}>
+                              <Box sx={{ fontWeight: 700 }}>{r.commitment.net_absent} ימי היעדרות אוטומטיים</Box>
+                              <Box>חסרה ב: {r.commitment.absent_days.join(', ') || '—'}</Box>
+                              {r.commitment.off_day_workdays.length > 0 && (
+                                <Box>עבדה בחופש: {r.commitment.off_day_workdays.join(', ')} (קוזז)</Box>
+                              )}
+                              <Box sx={{ mt: 0.5, opacity: 0.7, fontSize: '0.7rem' }}>לחץ לעריכה ידנית</Box>
+                            </Box>
+                          }>
+                            <Chip
+                              size="small" color="warning" variant="outlined"
+                              label={`auto: ${r.commitment.net_absent}`}
+                              onClick={() => patchManual(r.employee_id, { absence_days: r.commitment.net_absent })}
+                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
                       <TableCell align="center"><NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} /></TableCell>
                       <TableCell align="center"><NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} /></TableCell>
                       <TableCell>

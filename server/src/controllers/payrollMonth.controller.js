@@ -5,9 +5,10 @@
  */
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
-  Employee, Branch, Amuta, Punch,
+  Employee, Branch, Amuta, Punch, EmployeeCommitment,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const { analyzeCommitment } = require('../services/commitmentAnalysis');
 
 function parseMonthRange(monthYM) {
   const [y, m] = monthYM.split('-').map(Number);
@@ -117,6 +118,12 @@ async function getMonth(req, res, next) {
       month,
       status: { $ne: 'rejected' },
     }).populate('created_by', 'full_name').sort({ created_at: -1 }).lean();
+
+    // Commitments (contracted weekly schedules) — for absence detection
+    const commitments = await EmployeeCommitment.find({
+      employee_id: { $in: employees.map(e => e._id) },
+    }).lean();
+    const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
     const adjByEmp = new Map();
     for (const adj of adjustments) {
       const k = String(adj.employee_id);
@@ -143,6 +150,14 @@ async function getMonth(req, res, next) {
       const breakdown = calculateMonthlySalary(emp, empPunches, month, { branchAmutaMap });
       const row = existingByEmp.get(String(emp._id));
       const manual = row?.manual || {};
+      // Commitment analysis: count auto-absences (committed days she didn't punch,
+      // minus off-day workdays that offset). Only counts countable (approved/auto)
+      // punches — same filter calculateMonthlySalary uses.
+      const countablePunches = empPunches.filter(p => {
+        const s = p.approval_status || 'auto';
+        return s === 'auto' || s === 'approved';
+      });
+      const commitmentInfo = analyzeCommitment(commitmentByEmp.get(String(emp._id)), countablePunches, month);
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
       const adjTotals = empAdjustments.reduce((acc, a) => {
@@ -192,6 +207,13 @@ async function getMonth(req, res, next) {
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
+        commitment: commitmentInfo.has_commitment ? {
+          committed_days: commitmentInfo.committed_dates.length,
+          off_days: commitmentInfo.off_dates.length,
+          absent_days: commitmentInfo.absent_dates,         // ymd[] for tooltip
+          off_day_workdays: commitmentInfo.off_day_workdays, // ymd[] of compensation
+          net_absent: commitmentInfo.net_absent,
+        } : null,
         status: row?.status || 'draft',
       };
     });

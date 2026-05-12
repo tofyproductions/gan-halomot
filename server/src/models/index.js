@@ -33,6 +33,7 @@ const PayrollMonth = require('./PayrollMonth');
 const PayrollPresetOption = require('./PayrollPresetOption');
 const PayrollCustomColumn = require('./PayrollCustomColumn');
 const SalaryAdjustment = require('./SalaryAdjustment');
+const EmployeeCommitment = require('./EmployeeCommitment');
 
 module.exports = {
   User,
@@ -69,4 +70,5 @@ module.exports = {
   PayrollPresetOption,
   PayrollCustomColumn,
   SalaryAdjustment,
+  EmployeeCommitment,
 };

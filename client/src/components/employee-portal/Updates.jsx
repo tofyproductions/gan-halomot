@@ -50,17 +50,23 @@ export default function Updates() {
   };
 
   const handleSubmitSick = async () => {
+    if (!medicalFile) {
+      toast.error('חובה לצרף אישור רפואי לפני שליחת דיווח מחלה');
+      return;
+    }
+    if (!form.from_date || !form.to_date) {
+      toast.error('יש למלא תאריכים');
+      return;
+    }
     try {
       const payload = {
         type: 'sick',
         from_date: form.from_date,
         to_date: form.to_date,
         reason: form.reason,
+        medical_file_data: medicalFile.data,
+        medical_file_name: medicalFile.name,
       };
-      if (medicalFile) {
-        payload.medical_file_data = medicalFile.data;
-        payload.medical_file_name = medicalFile.name;
-      }
       await api.post('/employee-requests', payload);
       toast.success('דיווח מחלה נשלח');
       setSickDialog(false);
@@ -196,15 +202,29 @@ export default function Updates() {
               value={form.to_date} onChange={e => setForm(p => ({ ...p, to_date: e.target.value }))} />
             <TextField label="הערות" multiline minRows={2} placeholder="אופציונלי"
               value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
-            <Button component="label" variant="outlined" size="small">
-              {medicalFile ? `צורף: ${medicalFile.name}` : 'צרף אישור רפואי (PDF / תמונה)'}
+            <Button
+              component="label"
+              variant={medicalFile ? 'outlined' : 'contained'}
+              color={medicalFile ? 'success' : 'warning'}
+              size="small"
+            >
+              {medicalFile ? `✓ צורף: ${medicalFile.name}` : 'צרף אישור רפואי (PDF / תמונה) — חובה'}
               <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleMedicalFile} />
             </Button>
+            {!medicalFile && (
+              <Typography variant="caption" color="error" sx={{ pl: 1 }}>
+                דיווח מחלה לא יישלח ללא אישור רפואי
+              </Typography>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setSickDialog(false)}>ביטול</Button>
-          <Button variant="contained" color="error" onClick={handleSubmitSick} disabled={!form.from_date}>שלח דיווח</Button>
+          <Button
+            variant="contained" color="error"
+            onClick={handleSubmitSick}
+            disabled={!form.from_date || !form.to_date || !medicalFile}
+          >שלח דיווח</Button>
         </DialogActions>
       </Dialog>
     </Box>

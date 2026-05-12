@@ -18,6 +18,10 @@ async function createRequest(req, res, next) {
     if (!type || !from_date) {
       return res.status(400).json({ error: 'סוג בקשה ותאריך התחלה נדרשים' });
     }
+    // Sick reports must include a medical attachment
+    if (type === 'sick' && !medical_file_data) {
+      return res.status(400).json({ error: 'חובה לצרף אישור רפואי לדיווח מחלה' });
+    }
 
     const request = await EmployeeRequest.create({
       user_id: req.user.id,
