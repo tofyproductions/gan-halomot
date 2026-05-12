@@ -517,28 +517,17 @@ export default function PayrollMonthTable() {
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
           <TextField type="month" size="small" label="חודש" value={month} onChange={e => setMonth(e.target.value)} sx={{ width: 160 }} InputLabelProps={{ shrink: true }} />
-          <ToggleButtonGroup size="small" exclusive value={viewMode} onChange={(_, v) => v && setViewMode(v)}>
-            <ToggleButton value="branch">לפי סניף</ToggleButton>
-            <ToggleButton value="amuta">לפי עמותה</ToggleButton>
-          </ToggleButtonGroup>
-          {viewMode === 'amuta' && data && (
-            <Select size="small" value={selectedAmuta} onChange={e => setSelectedAmuta(e.target.value)} displayEmpty sx={{ minWidth: 220 }}>
-              <MenuItem value=""><em>בחר עמותה…</em></MenuItem>
-              {data.amutot.map(a => <MenuItem key={a.id} value={a.id}>{a.name}</MenuItem>)}
-            </Select>
-          )}
-          {/* Visual indicator of the current scope. When the global branch
-              picker is on 'כל הסניפים', we show a chip so it's obvious that
-              this table is aggregating every branch. */}
-          {viewMode === 'branch' && (
-            <Chip
-              size="small"
-              color={isAllBranches ? 'primary' : 'default'}
-              variant={isAllBranches ? 'filled' : 'outlined'}
-              label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
-              sx={{ fontWeight: 600 }}
-            />
-          )}
+          {/* Scope is the global branch picker — show as a read-only chip so
+              the current view is obvious. Removed the amuta/branch toggle:
+              rows are always grouped by branch via section headers, so the
+              extra dimension was just confusing. */}
+          <Chip
+            size="small"
+            color={isAllBranches ? 'primary' : 'default'}
+            variant={isAllBranches ? 'filled' : 'outlined'}
+            label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
+            sx={{ fontWeight: 600 }}
+          />
           <Box sx={{ flex: 1 }} />
           <Typography variant="caption" color="text.secondary">
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
