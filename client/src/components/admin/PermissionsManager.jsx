@@ -287,10 +287,24 @@ export default function PermissionsManager() {
                   <TableCell sx={{ position: 'sticky', right: 0, zIndex: 1, bgcolor: dirty ? '#fef3c7' : '#fff' }}>
                     <Stack spacing={0.3}>
                       <Box sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{user.full_name || user.email}</Box>
-                      <Stack direction="row" spacing={0.5}>
-                        <Chip size="small" label={ROLE_LABELS[user.role] || user.role} sx={{ fontSize: '0.65rem', height: 18 }} />
+                      <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                        <Tooltip title="לחץ לעריכת תפקיד וסניפים מנוהלים">
+                          <Chip
+                            size="small"
+                            label={ROLE_LABELS[user.role] || user.role}
+                            onClick={() => setRoleDialog({ open: true, user })}
+                            icon={<AdminPanelSettingsIcon sx={{ fontSize: 14 }} />}
+                            color={user.role === 'branch_manager' ? 'primary' : user.role === 'system_admin' ? 'error' : 'default'}
+                            sx={{ fontSize: '0.65rem', height: 20, cursor: 'pointer', '&:hover': { boxShadow: 1 } }}
+                          />
+                        </Tooltip>
                         {user.branch_id?.name && (
                           <Chip size="small" variant="outlined" label={user.branch_id.name} sx={{ fontSize: '0.65rem', height: 18 }} />
+                        )}
+                        {(user.managed_branch_ids || []).length > 1 && (
+                          <Chip size="small" color="primary" variant="outlined"
+                            label={`+${user.managed_branch_ids.length - 1} סניפים`}
+                            sx={{ fontSize: '0.65rem', height: 18 }} />
                         )}
                       </Stack>
                     </Stack>
