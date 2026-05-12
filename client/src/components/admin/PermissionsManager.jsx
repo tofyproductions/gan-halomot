@@ -221,10 +221,6 @@ export default function PermissionsManager() {
     });
   }, [users, search, roleFilter]);
 
-  if (loading) {
-    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
-  }
-
   // Per-role default tabs reference: derived from tabs.js
   const roleDefaults = useMemo(() => {
     const out = {};
@@ -233,6 +229,10 @@ export default function PermissionsManager() {
     }
     return out;
   }, []);
+
+  if (loading) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
+  }
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 } }}>
