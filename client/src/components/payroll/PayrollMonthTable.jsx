@@ -484,17 +484,29 @@ export default function PayrollMonthTable() {
 
   // Approx column widths so borders sit right
   const W = {
-    branch: 110,
-    name: 150,
-    amutaCell: 64,        // each of 7 cols per amuta
-    travel: 70,
-    days: 56,
-    advance: 170,
-    money: 78,
-    notes: 50,
+    name: 180,            // sticky right column
+    amutaCell: 68,        // each of 7 cols per amuta/branch
+    travel: 78,
+    days: 60,
+    advance: 180,
+    money: 82,
+    notes: 56,
     custom: 110,
     adjust: 110,
   };
+
+  // Group rows by branch_id so we can insert section headers instead of
+  // repeating the branch name on every row.
+  const rowsByBranch = useMemo(() => {
+    if (!data?.rows) return [];
+    const groups = new Map();
+    for (const r of data.rows) {
+      const key = r.branch_id || 'no-branch';
+      if (!groups.has(key)) groups.set(key, { branch_id: key, branch_name: r.branch_name, rows: [] });
+      groups.get(key).rows.push(r);
+    }
+    return [...groups.values()];
+  }, [data]);
 
   return (
     <Box dir="rtl">
@@ -536,16 +548,18 @@ export default function PayrollMonthTable() {
         </Stack>
       </Paper>
 
-      <TableContainer component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto' }}>
+      <TableContainer component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
         <Table size="small" stickyHeader sx={{
           tableLayout: 'fixed',
-          minWidth: 1200,
-          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box' },
+          minWidth: 1100,
+          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px' },
           '& td.auto': { bgcolor: 'grey.50', color: 'text.secondary' },
           '& .ag-divider': { borderLeft: '2px solid', borderColor: 'divider' },
+          '& tbody tr:nth-of-type(even) td': { bgcolor: 'rgba(0,0,0,0.015)' },
+          '& tbody tr:nth-of-type(even) td.auto': { bgcolor: 'rgba(0,0,0,0.035)' },
+          '& tbody tr:hover td': { bgcolor: 'rgba(99,102,241,0.06) !important' },
         }}>
           <colgroup>
-            <col style={{ width: W.branch }} />
             <col style={{ width: W.name }} />
             {visibleBranches.flatMap(b => [
               <col key={`cg-${b.id}-days`} style={{ width: W.days }} />,
@@ -568,8 +582,11 @@ export default function PayrollMonthTable() {
 
           <TableHead>
             <TableRow>
-              <TableCell rowSpan={2} sx={{ fontWeight: 800, bgcolor: 'background.paper' }}>סניף</TableCell>
-              <TableCell rowSpan={2} sx={{ fontWeight: 800, bgcolor: 'background.paper' }} className="ag-divider">שם העובד</TableCell>
+              <TableCell rowSpan={2} sx={{
+                fontWeight: 800, bgcolor: 'background.paper',
+                position: 'sticky', right: 0, zIndex: 4,
+                borderLeft: '2px solid', borderColor: 'divider',
+              }} className="ag-divider">שם העובד</TableCell>
               {visibleBranches.map((b) => {
                 const c = branchColor(b.color_index || 0);
                 return (
@@ -626,70 +643,110 @@ export default function PayrollMonthTable() {
           </TableHead>
 
           <TableBody>
-            {loading && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 4 }}>
-                <CircularProgress size={28} />
-              </TableCell></TableRow>
-            )}
-            {!loading && data && data.rows.length === 0 && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
-                אין עובדים פעילים בתחום הנבחר. נסה לבחור "כל הסניפים" בראש הדף או חודש אחר.
-              </TableCell></TableRow>
-            )}
-            {!loading && !data && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
-                לא ניתן לטעון את הנתונים. נסה לרענן.
-              </TableCell></TableRow>
-            )}
-            {!loading && data?.rows.map(r => {
-              const locked = r.status === 'finalized';
-              return (
-                <TableRow key={r.employee_id} hover>
-                  <TableCell sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>{r.branch_name}</TableCell>
-                  <TableCell sx={{ fontWeight: 600 }} className="ag-divider">
-                    {r.full_name}
-                    {locked && <Chip size="small" label="נעול" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }} />}
-                  </TableCell>
-
-                  {visibleBranches.map((b) => {
-                    const bk = r.breakdown.per_branch?.[b.id];
-                    const c = branchColor(b.color_index || 0);
-                    return <BranchGroupCells key={b.id} bk={bk} salaryType={r.salary_type} color={c} />;
-                  })}
-
-                  <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 600 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
-                  <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
-                  <TableCell align="center"><NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} /></TableCell>
-                  <TableCell align="center"><NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} /></TableCell>
-                  <TableCell align="center"><NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} /></TableCell>
-                  <TableCell>
-                    <AdvanceDeductionCell
-                      row={r} presets={presets} disabled={locked}
-                      onSavePresetId={(id) => patchManual(r.employee_id, { advance_deduction_preset_id: id, advance_deduction_text: id ? '' : r.manual.advance_deduction_text })}
-                      onSaveText={(text) => patchManual(r.employee_id, { advance_deduction_text: text, advance_deduction_preset_id: null })}
-                      onCreatePreset={createPresetAndUse}
-                    />
-                  </TableCell>
-                  <TableCell align="center"><NumberOrTextCell value={r.manual.gift_card}  disabled={locked} onSave={v => patchManual(r.employee_id, { gift_card: v })} /></TableCell>
-                  <TableCell align="center"><NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} /></TableCell>
-                  <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
-                  <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
-                  {customColumns.map(c => (
-                    <TableCell key={c.id} align="center">
-                      <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
+            {(() => {
+              const totalCols = 1 + visibleBranches.length * 7 + 12 + customColumns.length;
+              if (loading) {
+                return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
+              }
+              if (data && data.rows.length === 0) {
+                return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+                  אין עובדים פעילים בתחום הנבחר. נסה לבחור "כל הסניפים" בראש הדף או חודש אחר.
+                </TableCell></TableRow>);
+              }
+              if (!data) {
+                return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+                  לא ניתן לטעון את הנתונים. נסה לרענן.
+                </TableCell></TableRow>);
+              }
+              const elements = [];
+              for (const group of rowsByBranch) {
+                // Branch section header — wider strip than any data row so it's obvious where the group begins.
+                const branchInfo = data.branches_in_view?.find(b => b.id === group.branch_id);
+                const color = branchInfo ? branchColor(branchInfo.color_index || 0) : null;
+                elements.push(
+                  <TableRow key={`grp-${group.branch_id}`} sx={{
+                    '& td': {
+                      bgcolor: color?.header || 'grey.200',
+                      color: color?.accent || 'text.primary',
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      py: 0.8,
+                      borderTop: '2px solid',
+                      borderColor: color?.border || 'divider',
+                    },
+                  }}>
+                    <TableCell colSpan={totalCols}>
+                      <Box sx={{ position: 'sticky', right: 12, display: 'inline-block' }}>
+                        🏠 {group.branch_name}
+                        <Box component="span" sx={{ mr: 1, opacity: 0.75, fontWeight: 600, fontSize: '0.7rem' }}>• {group.rows.length} עובדים</Box>
+                      </Box>
                     </TableCell>
-                  ))}
-                  <TableCell align="center" sx={{ minWidth: 100 }}>
-                    <AdjustmentSummary row={r} onOpen={() => setAdjustments({ open: true, row: r })} disabled={locked} />
-                  </TableCell>
-                  <TableCell align="center">
-                    <IconButton size="small" onClick={() => setNotes({ open: true, row: r })} color={r.manual.notes ? 'primary' : 'default'}>
-                      <NoteAltIcon fontSize="small" />
-                    </IconButton>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                  </TableRow>
+                );
+                for (const r of group.rows) {
+                  const locked = r.status === 'finalized';
+                  elements.push(
+                    <TableRow key={r.employee_id}>
+                      <TableCell sx={{
+                        fontWeight: 700, position: 'sticky', right: 0, zIndex: 1,
+                        bgcolor: 'background.paper',
+                        borderLeft: '2px solid', borderColor: 'divider',
+                      }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ flex: 1, lineHeight: 1.2 }}>
+                            {r.full_name}
+                            {r.israeli_id && (
+                              <Typography variant="caption" sx={{ display: 'block', color: 'text.disabled', fontSize: '0.65rem' }}>
+                                {r.israeli_id}
+                              </Typography>
+                            )}
+                          </Box>
+                          {locked && <Chip size="small" label="נעול" sx={{ height: 18, fontSize: '0.62rem' }} />}
+                        </Box>
+                      </TableCell>
+
+                      {visibleBranches.map((b) => {
+                        const bk = r.breakdown.per_branch?.[b.id];
+                        const c = branchColor(b.color_index || 0);
+                        return <BranchGroupCells key={b.id} bk={bk} salaryType={r.salary_type} color={c} />;
+                      })}
+
+                      <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
+                      <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
+                      <TableCell align="center"><NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} /></TableCell>
+                      <TableCell align="center"><NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} /></TableCell>
+                      <TableCell align="center"><NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} /></TableCell>
+                      <TableCell>
+                        <AdvanceDeductionCell
+                          row={r} presets={presets} disabled={locked}
+                          onSavePresetId={(id) => patchManual(r.employee_id, { advance_deduction_preset_id: id, advance_deduction_text: id ? '' : r.manual.advance_deduction_text })}
+                          onSaveText={(text) => patchManual(r.employee_id, { advance_deduction_text: text, advance_deduction_preset_id: null })}
+                          onCreatePreset={createPresetAndUse}
+                        />
+                      </TableCell>
+                      <TableCell align="center"><NumberOrTextCell value={r.manual.gift_card}  disabled={locked} onSave={v => patchManual(r.employee_id, { gift_card: v })} /></TableCell>
+                      <TableCell align="center"><NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} /></TableCell>
+                      <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
+                      <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
+                      {customColumns.map(c => (
+                        <TableCell key={c.id} align="center">
+                          <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
+                        </TableCell>
+                      ))}
+                      <TableCell align="center" sx={{ minWidth: 100 }}>
+                        <AdjustmentSummary row={r} onOpen={() => setAdjustments({ open: true, row: r })} disabled={locked} />
+                      </TableCell>
+                      <TableCell align="center">
+                        <IconButton size="small" onClick={() => setNotes({ open: true, row: r })} color={r.manual.notes ? 'primary' : 'default'}>
+                          <NoteAltIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                }
+              }
+              return elements;
+            })()}
           </TableBody>
         </Table>
       </TableContainer>
