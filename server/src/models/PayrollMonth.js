@@ -46,6 +46,13 @@ const payrollMonthSchema = new mongoose.Schema({
     travel_override: { type: Number, default: null },
 
     notes: { type: String, default: '' },
+
+    // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
+    // Value shape matches numberOrTextSchema regardless of column kind:
+    //   - kind='text'   → only `text` is meaningful
+    //   - kind='number' → only `amount`
+    //   - kind='number_or_text' → either field, distinguished by `kind`
+    custom_values: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
 
   // --- Auto snapshot ---

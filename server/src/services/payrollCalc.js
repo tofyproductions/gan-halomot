@@ -88,13 +88,18 @@ function bonusAmountThisMonth(bonus, { hoursWorked, daysWorked, refDate }) {
 
 function primaryRates(employee) {
   const dist = Array.isArray(employee.amuta_distribution) ? employee.amuta_distribution : [];
-  const first = dist.find(d => d.hourly_rate || d.global_salary) || {};
+  const first = dist.find(d => d.hourly_rate || d.global_salary) || dist[0] || {};
+  // amuta_id may be either a raw ObjectId or a populated document — normalize to a string id.
+  const rawAmutaId = first.amuta_id;
+  const amutaIdStr = rawAmutaId
+    ? String(rawAmutaId._id || rawAmutaId)
+    : null;
   return {
     hourly_rate:    Number(first.hourly_rate) || 0,
     global_salary:  Number(first.global_salary) || 0,
     global_ot_rate: Number(first.global_ot_rate) || 0,
     required_hours: Number(first.required_hours) || 0,
-    primary_amuta_id: first.amuta_id ? String(first.amuta_id) : null,
+    primary_amuta_id: amutaIdStr,
   };
 }
 
@@ -275,12 +280,18 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   }
 
   // --- Extras ---
-  // Travel: prefer the new per_day/monthly_flat fields; fall back to legacy travel_allowance.
+  // Travel: prefer the new per_day/monthly_flat fields. Legacy employees
+  // (created before the travel_mode field existed) default to 16 ₪/day if
+  // they have no travel_allowance configured.
   let travel = 0;
-  if (employee.travel_mode === 'per_day') {
-    travel = (Number(employee.travel_per_day) || 0) * daysWorked;
-  } else if (employee.travel_mode === 'monthly_flat') {
-    travel = Number(employee.travel_monthly_flat) || 0;
+  const mode = employee.travel_mode || 'per_day';
+  if (mode === 'per_day') {
+    const perDay = (employee.travel_per_day != null && employee.travel_per_day !== '')
+      ? Number(employee.travel_per_day)
+      : 16;
+    travel = perDay * daysWorked;
+  } else if (mode === 'monthly_flat') {
+    travel = Number(employee.travel_monthly_flat) || Number(employee.travel_allowance) || 0;
   } else {
     travel = Number(employee.travel_allowance) || 0;
   }

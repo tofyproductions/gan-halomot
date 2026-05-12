@@ -22,4 +22,10 @@ router.get('/amutot',                         c.listAmutot);
 router.put('/amutot/:id',                     requireRole('system_admin'), c.upsertAmuta);
 router.put('/branches/:branchId/amuta',       requireRole('system_admin'), c.setBranchAmuta);
 
+// Custom columns — admin-added per-month columns (text / number / number_or_text)
+router.get('/custom-columns',                 c.listCustomColumns);
+router.post('/custom-columns',                requireRole('system_admin', 'accountant', 'branch_manager'), c.createCustomColumn);
+router.patch('/custom-columns/:id',           requireRole('system_admin', 'accountant'), c.updateCustomColumn);
+router.delete('/custom-columns/:id',          requireRole('system_admin', 'accountant'), c.deleteCustomColumn);
+
 module.exports = router;

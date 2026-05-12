@@ -4,7 +4,7 @@
  * `PayrollMonth` collection plus on-the-fly recomputation via payrollCalc.
  */
 const {
-  PayrollMonth, PayrollPresetOption, Employee, Branch, Amuta, Punch,
+  PayrollMonth, PayrollPresetOption, PayrollCustomColumn, Employee, Branch, Amuta, Punch,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 
@@ -52,6 +52,12 @@ async function getMonth(req, res, next) {
 
     // Pull amutot to render column groups
     const amutot = await Amuta.find({ is_active: true }).sort({ name: 1 }).lean();
+
+    // Pull custom columns: both month-specific and "*" (all months)
+    const customColumns = await PayrollCustomColumn.find({
+      is_active: true,
+      $or: [{ month }, { month: '*' }],
+    }).sort({ position: 1, created_at: 1 }).lean();
 
     // Build branch→amuta map for payrollCalc
     const allBranches = await Branch.find({}).select('_id amuta_id').lean();
@@ -125,6 +131,7 @@ async function getMonth(req, res, next) {
           miluim:      manual.miluim      || { kind: 'empty', amount: null, text: '' },
           travel_override: manual.travel_override ?? null,
           notes: manual.notes || '',
+          custom_values: manual.custom_values || {},
         },
         status: row?.status || 'draft',
       };
@@ -143,6 +150,13 @@ async function getMonth(req, res, next) {
       rows,
       amutot: amutot.map(a => ({ id: String(a._id), name: a.name, short_name: a.short_name })),
       branches: branches.map(b => ({ id: String(b._id), name: b.name, amuta_id: b.amuta_id ? String(b.amuta_id) : null })),
+      custom_columns: customColumns.map(c => ({
+        id: String(c._id),
+        month: c.month,
+        label: c.label,
+        kind: c.kind,
+        position: c.position,
+      })),
       totals,
     });
   } catch (err) { next(err); }
@@ -170,7 +184,7 @@ async function upsertEntry(req, res, next) {
       'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
-      'travel_override', 'notes',
+      'travel_override', 'notes', 'custom_values',
     ];
     for (const k of allowed) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
@@ -361,6 +375,60 @@ async function upsertAmuta(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ── Custom columns CRUD ─────────────────────────────────────────────
+
+async function listCustomColumns(req, res, next) {
+  try {
+    const { month } = req.query;
+    const filter = { is_active: true };
+    if (month) filter.$or = [{ month }, { month: '*' }];
+    const cols = await PayrollCustomColumn.find(filter).sort({ position: 1, created_at: 1 }).lean();
+    res.json({ columns: cols.map(c => ({ ...c, id: String(c._id) })) });
+  } catch (err) { next(err); }
+}
+
+async function createCustomColumn(req, res, next) {
+  try {
+    const { month, label, kind, position, persistent } = req.body;
+    if (!month || !label) return res.status(400).json({ error: 'month and label are required' });
+    if (!['text', 'number', 'number_or_text'].includes(kind)) {
+      return res.status(400).json({ error: 'invalid kind' });
+    }
+    const col = await PayrollCustomColumn.create({
+      month: persistent ? '*' : month,
+      label: label.trim(),
+      kind,
+      position: position || 0,
+      created_by: req.user.id,
+    });
+    res.json({ column: { ...col.toObject(), id: String(col._id) } });
+  } catch (err) { next(err); }
+}
+
+async function updateCustomColumn(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { label, kind, position, is_active, month } = req.body;
+    const setObj = {};
+    if (label != null) setObj.label = String(label).trim();
+    if (kind && ['text', 'number', 'number_or_text'].includes(kind)) setObj.kind = kind;
+    if (position != null) setObj.position = Number(position);
+    if (is_active != null) setObj.is_active = !!is_active;
+    if (month) setObj.month = month;
+    const col = await PayrollCustomColumn.findByIdAndUpdate(id, { $set: setObj }, { new: true });
+    if (!col) return res.status(404).json({ error: 'column not found' });
+    res.json({ column: { ...col.toObject(), id: String(col._id) } });
+  } catch (err) { next(err); }
+}
+
+async function deleteCustomColumn(req, res, next) {
+  try {
+    const { id } = req.params;
+    await PayrollCustomColumn.findByIdAndUpdate(id, { $set: { is_active: false } });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 async function setBranchAmuta(req, res, next) {
   try {
     const { branchId } = req.params;
@@ -387,4 +455,8 @@ module.exports = {
   listAmutot,
   upsertAmuta,
   setBranchAmuta,
+  listCustomColumns,
+  createCustomColumn,
+  updateCustomColumn,
+  deleteCustomColumn,
 };
