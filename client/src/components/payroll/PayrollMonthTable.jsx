@@ -302,9 +302,19 @@ function AddColumnDialog({ open, month, onClose, onCreated }) {
   );
 }
 
-/* ─── Main component ────────────────────────────────────────────────── */
+/* ─── Branch colour palette ─────────────────────────────────────────── */
 
-const BALANCE_AMUTA = { id: '__balance__', name: 'מאזן כללי', virtual: true };
+const BRANCH_PALETTE = [
+  { name: 'blue',   header: '#dbeafe', sub: '#eff6ff', cell: '#f8fafc', accent: '#1e40af', border: '#93c5fd' },
+  { name: 'green',  header: '#d1fae5', sub: '#ecfdf5', cell: '#f7fef9', accent: '#065f46', border: '#86efac' },
+  { name: 'purple', header: '#ede9fe', sub: '#f5f3ff', cell: '#fbfaff', accent: '#5b21b6', border: '#c4b5fd' },
+  { name: 'orange', header: '#ffedd5', sub: '#fff7ed', cell: '#fffbf6', accent: '#9a3412', border: '#fdba74' },
+  { name: 'rose',   header: '#ffe4e6', sub: '#fff1f2', cell: '#fffafa', accent: '#9f1239', border: '#fda4af' },
+  { name: 'teal',   header: '#ccfbf1', sub: '#f0fdfa', cell: '#f6fefc', accent: '#115e59', border: '#5eead4' },
+];
+function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; }
+
+/* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
@@ -395,17 +405,16 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  // Amuta columns shown — real amutot + a virtual "מאזן כללי" if any row has unmapped data
-  const visibleAmutot = useMemo(() => {
+  // Branch column groups — coloured per branch. In amuta view we filter to
+  // branches under the selected amuta; otherwise show all branches that have
+  // data (or are in the current scope filter).
+  const visibleBranches = useMemo(() => {
     if (!data) return [];
-    const base = viewMode === 'amuta' && selectedAmuta
-      ? data.amutot.filter(a => a.id === selectedAmuta)
-      : data.amutot;
-    const anyBalance = data.rows.some(r => r.breakdown.per_amuta?.unmapped);
-    if (anyBalance && viewMode !== 'amuta') {
-      return [...base, { id: 'unmapped', name: 'מאזן כללי', virtual: true }];
+    const list = data.branches_in_view || [];
+    if (viewMode === 'amuta' && selectedAmuta) {
+      return list.filter(b => b.amuta_id === selectedAmuta);
     }
-    return base;
+    return list;
   }, [data, viewMode, selectedAmuta]);
 
   const customColumns = data?.custom_columns || [];
@@ -417,14 +426,14 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע"נ גלובלי'];
 
     const headerTop = ['סניף', 'שם העובד'];
-    for (const a of visibleAmutot) headerTop.push(a.name, ...Array(6).fill(''));
+    for (const b of visibleBranches) headerTop.push(b.name, ...Array(6).fill(''));
     headerTop.push(...['נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים']);
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('הערות');
     rowsAcc.push(headerTop);
 
     const subHdr = ['', ''];
-    for (const _a of visibleAmutot) subHdr.push(...cols);
+    for (const _b of visibleBranches) subHdr.push(...cols);
     subHdr.push(...Array(10).fill(''));
     for (const _c of customColumns) subHdr.push('');
     subHdr.push('');
@@ -432,8 +441,8 @@ export default function PayrollMonthTable() {
 
     for (const r of data.rows) {
       const cells = [r.branch_name, r.full_name];
-      for (const a of visibleAmutot) {
-        const bk = r.breakdown.per_amuta?.[a.id];
+      for (const b of visibleBranches) {
+        const bk = r.breakdown.per_branch?.[b.id];
         if (bk) {
           cells.push(bk.days_worked, bk.regular_hours, bk.ot_125_hours, bk.ot_150_hours, bk.hourly_rate || '', bk.global_salary || '', bk.global_ot_rate || '');
         } else { cells.push('', '', '', '', '', '', ''); }
@@ -522,9 +531,9 @@ export default function PayrollMonthTable() {
           <colgroup>
             <col style={{ width: W.branch }} />
             <col style={{ width: W.name }} />
-            {visibleAmutot.flatMap(a => [
-              <col key={`cg-${a.id}-days`} style={{ width: W.days }} />,
-              ...Array.from({ length: 6 }, (_, i) => <col key={`cg-${a.id}-${i}`} style={{ width: W.amutaCell }} />),
+            {visibleBranches.flatMap(b => [
+              <col key={`cg-${b.id}-days`} style={{ width: W.days }} />,
+              ...Array.from({ length: 6 }, (_, i) => <col key={`cg-${b.id}-${i}`} style={{ width: W.amutaCell }} />),
             ])}
             <col style={{ width: W.travel }} />
             <col style={{ width: W.days }} />
@@ -544,21 +553,30 @@ export default function PayrollMonthTable() {
             <TableRow>
               <TableCell rowSpan={2} sx={{ fontWeight: 800, bgcolor: 'background.paper' }}>סניף</TableCell>
               <TableCell rowSpan={2} sx={{ fontWeight: 800, bgcolor: 'background.paper' }} className="ag-divider">שם העובד</TableCell>
-              {visibleAmutot.map((a, idx) => (
-                <TableCell
-                  key={a.id} colSpan={7} align="center"
-                  className="ag-divider"
-                  sx={{ fontWeight: 800, bgcolor: a.virtual ? 'grey.100' : 'primary.50' }}
-                >
-                  {a.name}
-                </TableCell>
-              ))}
+              {visibleBranches.map((b) => {
+                const c = branchColor(b.color_index || 0);
+                return (
+                  <TableCell
+                    key={b.id} colSpan={7} align="center"
+                    sx={{
+                      fontWeight: 800, bgcolor: c.header, color: c.accent,
+                      borderLeft: '3px solid', borderColor: c.border,
+                      letterSpacing: 0.2,
+                    }}
+                  >
+                    {b.name}
+                  </TableCell>
+                );
+              })}
               <TableCell colSpan={10 + customColumns.length + 1} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
             <TableRow>
-              {visibleAmutot.map((a, idx) => <SubHeaderGroup key={a.id} accent={idx === 0 && !a.virtual} />)}
+              {visibleBranches.map((b) => {
+                const c = branchColor(b.color_index || 0);
+                return <SubHeaderGroup key={b.id} color={c} />;
+              })}
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
@@ -604,9 +622,10 @@ export default function PayrollMonthTable() {
                     {locked && <Chip size="small" label="נעול" sx={{ ml: 0.5, height: 18, fontSize: '0.65rem' }} />}
                   </TableCell>
 
-                  {visibleAmutot.map((a, idx) => {
-                    const bk = r.breakdown.per_amuta?.[a.id];
-                    return <AmutaGroupCells key={a.id} bk={bk} salaryType={r.salary_type} primaryAmutaId={r.breakdown.rates?.primary_amuta_id} amutaId={a.id} primary={r.breakdown.rates} />;
+                  {visibleBranches.map((b) => {
+                    const bk = r.breakdown.per_branch?.[b.id];
+                    const c = branchColor(b.color_index || 0);
+                    return <BranchGroupCells key={b.id} bk={bk} salaryType={r.salary_type} color={c} />;
                   })}
 
                   <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 600 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
@@ -662,15 +681,19 @@ function CustomCell({ column, value, onSave, disabled }) {
   return <NumberOrTextCell value={value} disabled={disabled} onSave={onSave} />;
 }
 
-function SubHeaderGroup({ accent }) {
-  const bg = accent ? 'primary.50' : 'grey.100';
+function SubHeaderGroup({ color }) {
   const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע״נ גלובלי'];
   return (
     <>
       {cells.map((label, i) => (
         <TableCell
-          key={i} align="center" className={`auto ${i === 6 ? 'ag-divider' : ''}`}
-          sx={{ fontWeight: 700, fontSize: '0.7rem', bgcolor: bg, lineHeight: 1.1 }}
+          key={i} align="center"
+          sx={{
+            fontWeight: 700, fontSize: '0.7rem', lineHeight: 1.1,
+            bgcolor: color.sub, color: color.accent,
+            borderLeft: i === 6 ? '3px solid' : undefined,
+            borderColor: i === 6 ? color.border : undefined,
+          }}
         >
           {label}
         </TableCell>
@@ -679,17 +702,23 @@ function SubHeaderGroup({ accent }) {
   );
 }
 
-function AmutaGroupCells({ bk, salaryType, primaryAmutaId, amutaId, primary }) {
-  const isPrimary = String(primaryAmutaId) === String(amutaId);
+function BranchGroupCells({ bk, salaryType, color }) {
   const days  = bk?.days_worked || 0;
   const reg   = bk?.regular_hours || 0;
   const ot125 = bk?.ot_125_hours || 0;
   const ot150 = bk?.ot_150_hours || 0;
-  const hourly = isPrimary && salaryType === 'hourly'  ? primary.hourly_rate    : 0;
-  const global = isPrimary && salaryType === 'global'  ? primary.global_salary  : 0;
-  const globalOt = isPrimary && salaryType === 'global' ? primary.global_ot_rate : 0;
+  const hourly = salaryType === 'hourly' ? (bk?.hourly_rate || 0) : 0;
+  const global = salaryType === 'global' ? (bk?.global_salary || 0) : 0;
+  const globalOt = salaryType === 'global' ? (bk?.global_ot_rate || 0) : 0;
   const cell = (v, opts = {}) => (
-    <TableCell align="center" className={`auto ${opts.last ? 'ag-divider' : ''}`}>
+    <TableCell
+      align="center"
+      sx={{
+        bgcolor: color.cell, color: 'text.secondary',
+        borderLeft: opts.last ? '3px solid' : undefined,
+        borderColor: opts.last ? color.border : undefined,
+      }}
+    >
       {v ? fmtNum(v) : <span style={{ opacity: 0.3 }}>—</span>}
     </TableCell>
   );

@@ -128,6 +128,26 @@ function emptyAmutaBucket() {
  *
  * Employees with no amuta mapping for a branch fall back to their primary amuta.
  */
+/**
+ * Same as splitDayIntoAmutas but bucketed by branch_id of the in-punch.
+ * Used for the per-branch column groups in the monthly payroll UI.
+ */
+function splitDayIntoBranches(dayPunches) {
+  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const perBranchMinutes = new Map();
+  for (let i = 0; i + 1 < sorted.length; i += 2) {
+    const inP = sorted[i];
+    const outP = sorted[i + 1];
+    const inT = new Date(inP.timestamp).getTime();
+    const outT = new Date(outP.timestamp).getTime();
+    const minutes = Math.max(0, Math.round((outT - inT) / 60000));
+    if (minutes <= 0) continue;
+    const branchId = String(inP.branch_id);
+    perBranchMinutes.set(branchId, (perBranchMinutes.get(branchId) || 0) + minutes);
+  }
+  return perBranchMinutes;
+}
+
 function splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId) {
   const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   // Build sessions of (in,out) pairs and attribute the minutes to the in-punch's amuta
@@ -169,7 +189,8 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   }
 
   // Per-amuta buckets — populated alongside total counters below
-  const amutaBuckets = new Map(); // amutaIdStr → bucket
+  const amutaBuckets = new Map();   // amutaIdStr → bucket
+  const branchBuckets = new Map();  // branchIdStr → bucket
 
   const rates = primaryRates(employee);
   const fallbackAmutaId = rates.primary_amuta_id;
@@ -188,22 +209,34 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     if (pair.incomplete) incompleteDays++;
     days.push({ date, minutes: pair.minutes, incomplete: pair.incomplete, ...split });
 
-    // Per-amuta attribution: split the day's regular/OT minutes proportionally
-    // across the amutot the employee worked in that day.
+    // Per-amuta + per-branch attribution: each in-punch contributes minutes
+    // to its own branch's bucket and to that branch's amuta bucket.
     const dayAmutaMinutes = splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId);
     const dayTotal = pair.minutes;
-    if (dayTotal > 0 && dayAmutaMinutes.size > 0) {
+
+    // Compute per-branch minute share within this day too.
+    const dayBranchMinutes = splitDayIntoBranches(dayPunches);
+
+    if (dayTotal > 0) {
       for (const [amutaId, minutes] of dayAmutaMinutes) {
         const share = minutes / dayTotal;
         if (!amutaBuckets.has(amutaId)) amutaBuckets.set(amutaId, emptyAmutaBucket());
         const bk = amutaBuckets.get(amutaId);
-        // A "work day" credits to the amuta that holds the majority of minutes
-        // — accumulated below after all days are processed.
         bk._minutes_total = (bk._minutes_total || 0) + minutes;
         bk._minutes_regular = (bk._minutes_regular || 0) + split.reg * share;
         bk._minutes_ot125 = (bk._minutes_ot125 || 0) + split.ot125 * share;
         bk._minutes_ot150 = (bk._minutes_ot150 || 0) + split.ot150 * share;
-        // Track which amuta dominated this day so we count work_days correctly
+        bk._day_minute_map = bk._day_minute_map || new Map();
+        bk._day_minute_map.set(date, (bk._day_minute_map.get(date) || 0) + minutes);
+      }
+      for (const [branchId, minutes] of dayBranchMinutes) {
+        const share = minutes / dayTotal;
+        if (!branchBuckets.has(branchId)) branchBuckets.set(branchId, emptyAmutaBucket());
+        const bk = branchBuckets.get(branchId);
+        bk._minutes_total = (bk._minutes_total || 0) + minutes;
+        bk._minutes_regular = (bk._minutes_regular || 0) + split.reg * share;
+        bk._minutes_ot125 = (bk._minutes_ot125 || 0) + split.ot125 * share;
+        bk._minutes_ot150 = (bk._minutes_ot150 || 0) + split.ot150 * share;
         bk._day_minute_map = bk._day_minute_map || new Map();
         bk._day_minute_map.set(date, (bk._day_minute_map.get(date) || 0) + minutes);
       }
@@ -215,33 +248,55 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const ot150Hours   = Math.round((ot150Minutes / 60) * 100) / 100;
   const daysWorked   = days.length;
 
-  // Finalize per-amuta buckets: convert minutes → hours, count work_days as
-  // the number of dates where this amuta got the most minutes.
-  const dayWinner = new Map(); // date → winning amutaId
-  for (const [amutaId, bk] of amutaBuckets) {
-    if (!bk._day_minute_map) continue;
-    for (const [date, minutes] of bk._day_minute_map) {
-      const cur = dayWinner.get(date);
-      if (!cur || minutes > cur.minutes) dayWinner.set(date, { amutaId, minutes });
+  const finalizeBuckets = (buckets, applyRatesTo = null) => {
+    const dayWinner = new Map(); // date → winning key
+    for (const [key, bk] of buckets) {
+      if (!bk._day_minute_map) continue;
+      for (const [date, minutes] of bk._day_minute_map) {
+        const cur = dayWinner.get(date);
+        if (!cur || minutes > cur.minutes) dayWinner.set(date, { key, minutes });
+      }
     }
+    for (const [key, bk] of buckets) {
+      bk.regular_hours = Math.round((bk._minutes_regular || 0) / 60 * 100) / 100;
+      bk.ot_125_hours  = Math.round((bk._minutes_ot125 || 0) / 60 * 100) / 100;
+      bk.ot_150_hours  = Math.round((bk._minutes_ot150 || 0) / 60 * 100) / 100;
+      bk.days_worked   = [...dayWinner.entries()].filter(([, v]) => v.key === key).length;
+      if (applyRatesTo === key) {
+        bk.hourly_rate = rates.hourly_rate;
+        bk.global_salary = rates.global_salary;
+        bk.global_ot_rate = rates.global_ot_rate;
+      }
+      delete bk._minutes_total;
+      delete bk._minutes_regular;
+      delete bk._minutes_ot125;
+      delete bk._minutes_ot150;
+      delete bk._day_minute_map;
+    }
+  };
+
+  finalizeBuckets(amutaBuckets, fallbackAmutaId);
+  // Each branch the employee worked at gets the employee's standard rates —
+  // hours at any branch are paid at the same hourly_rate / global_salary.
+  const primaryBranchId = employee.branch_id ? String(employee.branch_id._id || employee.branch_id) : null;
+  finalizeBuckets(branchBuckets, primaryBranchId);
+  // Fall back: even if employee has no punches anywhere else, make sure their
+  // home branch has rate columns populated so the UI shows the rate values.
+  if (primaryBranchId && !branchBuckets.has(primaryBranchId)) {
+    const bk = emptyAmutaBucket();
+    bk.hourly_rate = rates.hourly_rate;
+    bk.global_salary = rates.global_salary;
+    bk.global_ot_rate = rates.global_ot_rate;
+    branchBuckets.set(primaryBranchId, bk);
   }
-  for (const [amutaId, bk] of amutaBuckets) {
-    bk.regular_hours = Math.round((bk._minutes_regular || 0) / 60 * 100) / 100;
-    bk.ot_125_hours  = Math.round((bk._minutes_ot125 || 0) / 60 * 100) / 100;
-    bk.ot_150_hours  = Math.round((bk._minutes_ot150 || 0) / 60 * 100) / 100;
-    bk.days_worked   = [...dayWinner.entries()].filter(([, v]) => v.amutaId === amutaId).length;
-    // Use the employee's primary rates for the amuta that matches primary_amuta_id.
-    // For other amutot we leave rates at 0 (admin can edit in employee record later).
-    if (amutaId === fallbackAmutaId) {
+  // Also populate rates for every branch where the employee did work (so the
+  // table shows the same hourly/global figure under each branch they punched at).
+  for (const [bId, bk] of branchBuckets) {
+    if (bk.hourly_rate === 0 && bk.global_salary === 0) {
       bk.hourly_rate = rates.hourly_rate;
       bk.global_salary = rates.global_salary;
       bk.global_ot_rate = rates.global_ot_rate;
     }
-    delete bk._minutes_total;
-    delete bk._minutes_regular;
-    delete bk._minutes_ot125;
-    delete bk._minutes_ot150;
-    delete bk._day_minute_map;
   }
 
   // --- Base pay ---
@@ -368,9 +423,11 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     estimated_total: estimatedTotal,
     warnings,
     days,
-    // Per-amuta breakdown (keyed by amuta_id string). Consumers join against
-    // the Amuta collection to render column groups in the monthly payroll table.
+    // Per-amuta breakdown (keyed by amuta_id string).
     per_amuta: Object.fromEntries([...amutaBuckets.entries()]),
+    // Per-branch breakdown (keyed by branch_id string). Drives the per-branch
+    // column groups in the monthly payroll table (each branch gets its own colour).
+    per_branch: Object.fromEntries([...branchBuckets.entries()]),
   };
 }
 

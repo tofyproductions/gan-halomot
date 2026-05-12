@@ -89,8 +89,10 @@ async function getMonth(req, res, next) {
     }).populate('manual.advance_deduction_preset_id').lean();
     const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
 
-    // Branch name lookup
-    const branchNameById = new Map(branches.map(b => [String(b._id), b.name]));
+    // Need ALL branches (not just in-scope) so cross-branch hours can still
+    // be shown in the table — an employee from branch A may have punched at B.
+    const allBranchesData = await Branch.find({}).select('_id name amuta_id').sort({ name: 1 }).lean();
+    const branchNameById = new Map(allBranchesData.map(b => [String(b._id), b.name]));
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
@@ -145,11 +147,32 @@ async function getMonth(req, res, next) {
       return acc;
     }, { employees: 0, hours: 0, base: 0 });
 
+    // Branches referenced by anyone's per_branch breakdown — these are the
+    // column groups the UI should render (filter view scope + cross-branch hours).
+    const referencedBranchIds = new Set();
+    for (const r of rows) {
+      Object.keys(r.breakdown.per_branch || {}).forEach(id => referencedBranchIds.add(id));
+    }
+    // Always include the in-scope branches even if no employee has any punches yet
+    branches.forEach(b => referencedBranchIds.add(String(b._id)));
+
+    const branchesInView = allBranchesData
+      .filter(b => referencedBranchIds.has(String(b._id)))
+      .map((b, idx) => ({
+        id: String(b._id),
+        name: b.name,
+        amuta_id: b.amuta_id ? String(b.amuta_id) : null,
+        // Stable color index — derived from the alphabetical position so it
+        // stays the same across page reloads / month changes.
+        color_index: idx,
+      }));
+
     res.json({
       month,
       rows,
       amutot: amutot.map(a => ({ id: String(a._id), name: a.name, short_name: a.short_name })),
       branches: branches.map(b => ({ id: String(b._id), name: b.name, amuta_id: b.amuta_id ? String(b.amuta_id) : null })),
+      branches_in_view: branchesInView,
       custom_columns: customColumns.map(c => ({
         id: String(c._id),
         month: c.month,
