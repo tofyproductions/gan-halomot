@@ -759,6 +759,38 @@ async function createManualPunches(req, res, next) {
 }
 
 /**
+ * GET /api/payroll/punches/day?employee_id=&branch=&date=YYYY-MM-DD
+ *
+ * Returns raw punch records for a single day. Used by the inline punch
+ * editor in AttendanceMonitor. Either employee_id (matched punches) or
+ * branch (unlinked punches) must be provided.
+ */
+async function listPunchesForDay(req, res, next) {
+  try {
+    const { employee_id, branch, israeli_id, date } = req.query;
+    if (!date) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
+    const [y, m, d] = date.split('-').map(Number);
+    // Israel-day window in UTC
+    const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+    const ilHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).format(probe), 10);
+    const offsetHours = ilHour - 12;
+    const from = new Date(Date.UTC(y, m - 1, d, 0 - offsetHours, 0, 0));
+    const to   = new Date(Date.UTC(y, m - 1, d + 1, 0 - offsetHours, 0, 0));
+    const filter = { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } };
+    if (employee_id) filter.employee_id = employee_id;
+    else if (israeli_id) filter.israeli_id = israeli_id;
+    if (branch) filter.branch_id = branch;
+    const punches = await Punch.find(filter)
+      .populate('branch_id', 'name')
+      .populate('approval_decided_by', 'full_name')
+      .populate('created_by', 'full_name')
+      .sort({ timestamp: 1 })
+      .lean();
+    res.json({ punches });
+  } catch (err) { next(err); }
+}
+
+/**
  * DELETE /api/payroll/punches/:id
  * Allows admins to delete any punch (manual or clock) — useful for fixing
  * accidental double-punches or removing test punches.
@@ -1177,6 +1209,7 @@ module.exports = {
   createManualPunches,
   createPunchRequest,
   listPendingPunches,
+  listPunchesForDay,
   approvePunch,
   rejectPunch,
   editPunch,

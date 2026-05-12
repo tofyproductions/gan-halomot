@@ -13,6 +13,7 @@ import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import HoursReportDialog from '../employees/HoursReportDialog';
 import PendingPunchApprovals from './PendingPunchApprovals';
+import DayPunchesDialog from './DayPunchesDialog';
 
 /**
  * Monthly attendance monitor. Columns: employee, day-by-day hours, monthly total.
@@ -42,6 +43,7 @@ export default function AttendanceMonitor() {
   const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
+  const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
 
   const fetchAttendance = useCallback(() => {
@@ -135,10 +137,30 @@ export default function AttendanceMonitor() {
         </Box>
       </TableCell>
       {days.map(d => {
+        // Build "YYYY-MM-DD" for the cell so the editor knows which day to load.
+        const fullDate = `${month}-${String(d).padStart(2, '0')}`;
+        const openCell = () => setDayDialog({
+          open: true,
+          employee: block.unlinked ? null : { _id: block.employee_id, full_name: block.full_name, israeli_id: block.israeli_id },
+          date: fullDate,
+          branchId: selectedBranch && !isAllBranches ? selectedBranch : null,
+          isUnlinked: !!block.unlinked,
+          israeliId: block.israeli_id || null,
+        });
+
         const day = block.days[d];
-        if (!day) return <TableCell key={d} align="center" sx={{ p: 0.3 }}>
-          <Box sx={{ width: 52, height: 42, mx: 'auto' }} />
-        </TableCell>;
+        if (!day) return (
+          <TableCell key={d} align="center" sx={{ p: 0.3, cursor: 'pointer' }}
+            onClick={openCell}
+            title="לחץ כדי להוסיף החתמה"
+          >
+            <Box sx={{
+              width: 52, height: 42, mx: 'auto', borderRadius: 1.5,
+              border: '1px dashed', borderColor: 'transparent',
+              '&:hover': { borderColor: 'primary.light', bgcolor: 'primary.50' },
+            }} />
+          </TableCell>
+        );
         // Green = complete (has pairs, no trailing). Amber = incomplete.
         const isComplete = !day.incomplete;
         const bgColor = isComplete ? '#d1fae5' : '#fef3c7';
@@ -151,14 +173,16 @@ export default function AttendanceMonitor() {
                 <div key={i}>{s.in_hhmm} → {s.out_hhmm} ({Math.round(s.minutes/60*100)/100}h)</div>
               ))}
               {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
-              <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות</div>
+              <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>
-            <TableCell align="center" sx={{ p: 0.3, cursor: 'pointer' }}>
+            <TableCell align="center" sx={{ p: 0.3, cursor: 'pointer' }} onClick={openCell}>
               <Box sx={{
                 width: 54, mx: 'auto', py: 0.3, px: 0.3, borderRadius: 1.5,
                 bgcolor: bgColor, color: textColor,
                 textAlign: 'center', lineHeight: 1.2,
+                transition: 'transform 0.1s',
+                '&:hover': { transform: 'scale(1.06)' },
               }}>
                 <Box sx={{ fontWeight: 800, fontSize: '0.75rem' }}>{day.total_hours}h</Box>
                 <Box dir="ltr" sx={{ fontSize: '0.55rem', fontWeight: 600, opacity: 0.75, letterSpacing: '-0.02em' }}>
@@ -549,6 +573,17 @@ export default function AttendanceMonitor() {
         open={hoursDialog.open}
         employee={hoursDialog.employee}
         onClose={() => setHoursDialog({ open: false, employee: null })}
+      />
+
+      <DayPunchesDialog
+        open={dayDialog.open}
+        employee={dayDialog.employee}
+        date={dayDialog.date}
+        branchId={dayDialog.branchId}
+        isUnlinked={dayDialog.isUnlinked}
+        israeliId={dayDialog.israeliId}
+        onClose={() => setDayDialog({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null })}
+        onChanged={fetchAttendance}
       />
     </Box>
   );
