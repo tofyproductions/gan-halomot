@@ -507,6 +507,18 @@ export default function PayrollMonthTable() {
               {data.amutot.map(a => <MenuItem key={a.id} value={a.id}>{a.name}</MenuItem>)}
             </Select>
           )}
+          {/* Visual indicator of the current scope. When the global branch
+              picker is on 'כל הסניפים', we show a chip so it's obvious that
+              this table is aggregating every branch. */}
+          {viewMode === 'branch' && (
+            <Chip
+              size="small"
+              color={isAllBranches ? 'primary' : 'default'}
+              variant={isAllBranches ? 'filled' : 'outlined'}
+              label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
+              sx={{ fontWeight: 600 }}
+            />
+          )}
           <Box sx={{ flex: 1 }} />
           <Typography variant="caption" color="text.secondary">
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
@@ -608,9 +620,20 @@ export default function PayrollMonthTable() {
           </TableHead>
 
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={20 + customColumns.length} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>}
-            {!loading && data?.rows.length === 0 && (
-              <TableRow><TableCell colSpan={20 + customColumns.length} align="center" sx={{ py: 4, color: 'text.disabled' }}>אין עובדים</TableCell></TableRow>
+            {loading && (
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 4 }}>
+                <CircularProgress size={28} />
+              </TableCell></TableRow>
+            )}
+            {!loading && data && data.rows.length === 0 && (
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+                אין עובדים פעילים בתחום הנבחר. נסה לבחור "כל הסניפים" בראש הדף או חודש אחר.
+              </TableCell></TableRow>
+            )}
+            {!loading && !data && (
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+                לא ניתן לטעון את הנתונים. נסה לרענן.
+              </TableCell></TableRow>
             )}
             {!loading && data?.rows.map(r => {
               const locked = r.status === 'finalized';

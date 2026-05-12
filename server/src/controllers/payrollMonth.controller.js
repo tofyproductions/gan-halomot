@@ -31,16 +31,20 @@ async function getMonth(req, res, next) {
     const { month, branch, amuta } = req.query;
     if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
 
-    // Determine which branches are in scope
+    // Determine which branches are in scope. Sentinel values that mean
+    // "no filter": empty string, the literal 'all', or 'undefined'.
     const branchFilter = {};
-    if (branch) {
+    const isAllBranches = !branch || branch === 'all' || branch === 'undefined';
+    if (!isAllBranches) {
       branchFilter._id = branch;
     } else if (amuta) {
       branchFilter.amuta_id = amuta;
     }
     const branches = await Branch.find(branchFilter).select('_id name amuta_id').lean();
     if (branches.length === 0) {
-      return res.json({ rows: [], amutot: [], branches: [], totals: {} });
+      return res.json({
+        rows: [], amutot: [], branches: [], branches_in_view: [], custom_columns: [], totals: {},
+      });
     }
     const branchIds = branches.map(b => b._id);
 
