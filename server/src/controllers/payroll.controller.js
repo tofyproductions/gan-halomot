@@ -781,7 +781,16 @@ async function listPunchesForDay(req, res, next) {
     const filter = { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } };
     if (employee_id) {
       // Employee may have punched at any branch — don't constrain by branch.
-      filter.employee_id = employee_id;
+      // ALSO include punches that arrived before the Employee record was
+      // created/linked: those have employee_id: null but match by israeli_id.
+      // attendanceByMonth groups them under this employee too, so the editor
+      // needs to see them as well.
+      const emp = await Employee.findById(employee_id).select('israeli_id').lean();
+      const orClauses = [{ employee_id }];
+      if (emp?.israeli_id) {
+        orClauses.push({ employee_id: null, israeli_id: emp.israeli_id });
+      }
+      filter.$or = orClauses;
     } else if (israeli_id) {
       filter.israeli_id = israeli_id;
       // Unlinked rows are scoped to a single branch (multiple unmatched IDs
