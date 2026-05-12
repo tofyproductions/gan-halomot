@@ -36,6 +36,9 @@ const EMPTY_FORM = {
   global_salary: '',
   global_ot_rate: '',
   required_hours: '',
+  travel_mode: 'per_day',
+  travel_per_day: 16,
+  travel_monthly_flat: 0,
   travel_allowance: 0,
   meal_vouchers: 0,
   recreation_annual: 0,
@@ -148,6 +151,9 @@ export default function EmployeeManager() {
         start_date: emp.start_date ? new Date(emp.start_date).toISOString().slice(0, 10) : '',
         salary_type: emp.salary_type || 'hourly',
         salary_is_net: !!emp.salary_is_net,
+        travel_mode: emp.travel_mode || 'per_day',
+        travel_per_day: emp.travel_per_day ?? 16,
+        travel_monthly_flat: emp.travel_monthly_flat || 0,
         travel_allowance: emp.travel_allowance || 0,
         meal_vouchers: emp.meal_vouchers || 0,
         recreation_annual: emp.recreation_annual || 0,
@@ -183,6 +189,9 @@ export default function EmployeeManager() {
       start_date: data.start_date || null,
       salary_type: data.salary_type,
       salary_is_net: data.salary_is_net,
+      travel_mode: data.travel_mode || 'per_day',
+      travel_per_day: Number(data.travel_per_day) || 0,
+      travel_monthly_flat: Number(data.travel_monthly_flat) || 0,
       travel_allowance: Number(data.travel_allowance) || 0,
       meal_vouchers: Number(data.meal_vouchers) || 0,
       recreation_annual: Number(data.recreation_annual) || 0,
@@ -461,10 +470,30 @@ export default function EmployeeManager() {
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>תוספות קבועות</Typography>
             <Stack direction="row" spacing={2}>
-              <TextField label="נסיעות (חודשי)" type="number" value={dialog.data.travel_allowance}
-                onChange={e => updateField('travel_allowance', e.target.value)} fullWidth
-                InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-              />
+              <TextField
+                select
+                label="מודל נסיעות"
+                value={dialog.data.travel_mode}
+                onChange={e => updateField('travel_mode', e.target.value)}
+                sx={{ minWidth: 180 }}
+                SelectProps={{ native: true }}
+              >
+                <option value="per_day">פר יום עבודה</option>
+                <option value="monthly_flat">סכום קבוע לחודש</option>
+              </TextField>
+              {dialog.data.travel_mode === 'per_day' ? (
+                <TextField label="נסיעות פר יום" type="number" value={dialog.data.travel_per_day}
+                  onChange={e => updateField('travel_per_day', e.target.value)} fullWidth
+                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                  helperText="ברירת מחדל: 16 ₪/יום"
+                />
+              ) : (
+                <TextField label="נסיעות חודשי" type="number" value={dialog.data.travel_monthly_flat}
+                  onChange={e => updateField('travel_monthly_flat', e.target.value)} fullWidth
+                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                  helperText="סכום קבוע בלי תלות בימי עבודה"
+                />
+              )}
               <TextField label="סיבוס" type="number" value={dialog.data.meal_vouchers}
                 onChange={e => updateField('meal_vouchers', e.target.value)} fullWidth
                 InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}

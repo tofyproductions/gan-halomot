@@ -23,8 +23,7 @@ export const TAB_GROUPS = [
     items: [
       { id: 'employees',          label: 'עובדים',  path: '/employees',          defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'branch_manager'] },
-      { id: 'salary_table',       label: 'שכר',         path: '/salary-table',     defaultRoles: ['system_admin', 'accountant'] },
-      { id: 'payslip_audit',      label: 'בדיקת תלושים', path: '/payslip-audit',    defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
     ],

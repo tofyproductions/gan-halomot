@@ -9,6 +9,11 @@ const branchSchema = new mongoose.Schema({
   delivery_contact_name: { type: String, default: '' },
   delivery_contact_phone: { type: String, default: '' },
 
+  // Legal entity (amuta) this branch belongs to. Drives how punched hours are
+  // bucketed in the monthly payroll table: hours at branch X go under the
+  // amuta column for X. A single branch belongs to exactly one amuta.
+  amuta_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Amuta', default: null, index: true },
+
   // Attendance / TIMEDOX replacement — per-branch clock integration
   clock_ip: { type: String, default: '' },           // e.g. "10.0.0.3"
   clock_port: { type: Number, default: 4370 },

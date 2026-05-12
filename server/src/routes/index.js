@@ -15,6 +15,8 @@ router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
 // Payroll (TIMEDOX replacement) — CRUD for Employee model + attendance
 router.use('/payroll', require('./payroll.routes'));
+// Monthly payroll table — per-amuta breakdown + manual fields (sick, vacation, etc.)
+router.use('/payroll-month', require('./payrollMonth.routes'));
 // Employee requests (vacation, sick leave)
 router.use('/employee-requests', require('./employeeRequests.routes'));
 

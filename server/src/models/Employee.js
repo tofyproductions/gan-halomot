@@ -69,8 +69,17 @@ const employeeSchema = new mongoose.Schema({
   salary_is_net: { type: Boolean, default: false },
   amuta_distribution: { type: [amutaSplitSchema], default: [] },
 
-  // Extras (monthly defaults, can be overridden per PayrollRun)
-  travel_allowance: { type: Number, default: 0 },           // נסיעות
+  // Extras (monthly defaults, can be overridden per PayrollMonth entry)
+  // Two travel modes:
+  //   - 'per_day': נסיעות = travel_per_day × ימי עבודה (most common, default 16₪/day)
+  //   - 'monthly_flat': נסיעות = travel_monthly_flat each month regardless of days
+  // The monthly admin UI can override either with a per-month manual value.
+  travel_mode: { type: String, enum: ['per_day', 'monthly_flat'], default: 'per_day' },
+  travel_per_day: { type: Number, default: 16 },            // ₪/יום ב-mode='per_day'
+  travel_monthly_flat: { type: Number, default: 0 },        // ₪/חודש ב-mode='monthly_flat'
+
+  // Kept for backward compatibility — old name. New code should use travel_monthly_flat.
+  travel_allowance: { type: Number, default: 0 },
   meal_vouchers: { type: Number, default: 0 },              // סיבוס
   recreation_annual: { type: Number, default: 0 },          // הבראה (annual)
 

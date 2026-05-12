@@ -29,6 +29,8 @@ const StockItem = require('./StockItem');
 const StockMovement = require('./StockMovement');
 const StockBatch = require('./StockBatch');
 const PayslipAuditRecord = require('./PayslipAuditRecord');
+const PayrollMonth = require('./PayrollMonth');
+const PayrollPresetOption = require('./PayrollPresetOption');
 
 module.exports = {
   User,
@@ -61,4 +63,6 @@ module.exports = {
   StockMovement,
   StockBatch,
   PayslipAuditRecord,
+  PayrollMonth,
+  PayrollPresetOption,
 };

@@ -19,6 +19,7 @@ import SalaryRequests from './components/employees/SalaryRequests';
 import AttendanceMonitor from './components/attendance/AttendanceMonitor';
 import SalaryTable from './components/payroll/SalaryTable';
 import PayslipAudit from './components/payroll/PayslipAudit';
+import PayrollPage from './components/payroll/PayrollPage';
 import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
@@ -65,12 +66,14 @@ function AppRoutes() {
         <Route path="suppliers" element={<SupplierManager />} />
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
-        <Route path="salary-table" element={<SalaryTable />} />
-        <Route path="payslip-audit" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
-            <PayslipAudit />
+        <Route path="payroll" element={
+          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+            <PayrollPage />
           </ProtectedRoute>
         } />
+        {/* Legacy routes — redirect to unified payroll page */}
+        <Route path="salary-table" element={<Navigate to="/payroll?tab=summary" replace />} />
+        <Route path="payslip-audit" element={<Navigate to="/payroll?tab=audit" replace />} />
         <Route path="holidays" element={<HolidayManager />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
@@ -82,11 +85,7 @@ function AppRoutes() {
         <Route path="my-updates" element={<Updates />} />
 
         <Route path="employee-requests" element={<RequestsManager />} />
-        <Route path="salary-requests" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
-            <SalaryRequests />
-          </ProtectedRoute>
-        } />
+        <Route path="salary-requests" element={<Navigate to="/payroll?tab=raises" replace />} />
         <Route path="admin/permissions" element={
           <ProtectedRoute roles={['system_admin']}>
             <PermissionsManager />

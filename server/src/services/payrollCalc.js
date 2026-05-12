@@ -94,7 +94,51 @@ function primaryRates(employee) {
     global_salary:  Number(first.global_salary) || 0,
     global_ot_rate: Number(first.global_ot_rate) || 0,
     required_hours: Number(first.required_hours) || 0,
+    primary_amuta_id: first.amuta_id ? String(first.amuta_id) : null,
   };
+}
+
+/**
+ * Returns an empty per-amuta breakdown bucket.
+ */
+function emptyAmutaBucket() {
+  return {
+    days_worked: 0,
+    regular_hours: 0,
+    ot_125_hours: 0,
+    ot_150_hours: 0,
+    hourly_rate: 0,
+    global_salary: 0,
+    global_ot_rate: 0,
+  };
+}
+
+/**
+ * Split per-day hours into per-amuta buckets.
+ *
+ * Branches→amuta mapping comes from `branchAmutaMap`: a Map<branch_id_string, amuta_id_string>.
+ * For each day, each punch's branch is resolved to an amuta; if all punches that
+ * day are in the same amuta, the entire day's regular/OT hours go to that amuta.
+ * If punches mix amutot (rare), we fall back to splitting by minute-share.
+ *
+ * Employees with no amuta mapping for a branch fall back to their primary amuta.
+ */
+function splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId) {
+  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  // Build sessions of (in,out) pairs and attribute the minutes to the in-punch's amuta
+  const perAmutaMinutes = new Map(); // amutaIdStr → minutes
+  for (let i = 0; i + 1 < sorted.length; i += 2) {
+    const inP = sorted[i];
+    const outP = sorted[i + 1];
+    const inT = new Date(inP.timestamp).getTime();
+    const outT = new Date(outP.timestamp).getTime();
+    const minutes = Math.max(0, Math.round((outT - inT) / 60000));
+    if (minutes <= 0) continue;
+    const branchId = String(inP.branch_id);
+    const amutaId = branchAmutaMap.get(branchId) || fallbackAmutaId || 'unmapped';
+    perAmutaMinutes.set(amutaId, (perAmutaMinutes.get(amutaId) || 0) + minutes);
+  }
+  return perAmutaMinutes;
 }
 
 /**
@@ -110,6 +154,7 @@ function primaryRates(employee) {
  */
 function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const forceFullGlobal = opts.force_full_global || false;
+  const branchAmutaMap = opts.branchAmutaMap || new Map();
   // Bucket by Israel-local day
   const byDay = new Map();
   for (const p of punches) {
@@ -117,6 +162,12 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(p);
   }
+
+  // Per-amuta buckets — populated alongside total counters below
+  const amutaBuckets = new Map(); // amutaIdStr → bucket
+
+  const rates = primaryRates(employee);
+  const fallbackAmutaId = rates.primary_amuta_id;
 
   const days = [];
   let totalMinutes = 0;
@@ -131,6 +182,27 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     ot150Minutes += split.ot150;
     if (pair.incomplete) incompleteDays++;
     days.push({ date, minutes: pair.minutes, incomplete: pair.incomplete, ...split });
+
+    // Per-amuta attribution: split the day's regular/OT minutes proportionally
+    // across the amutot the employee worked in that day.
+    const dayAmutaMinutes = splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId);
+    const dayTotal = pair.minutes;
+    if (dayTotal > 0 && dayAmutaMinutes.size > 0) {
+      for (const [amutaId, minutes] of dayAmutaMinutes) {
+        const share = minutes / dayTotal;
+        if (!amutaBuckets.has(amutaId)) amutaBuckets.set(amutaId, emptyAmutaBucket());
+        const bk = amutaBuckets.get(amutaId);
+        // A "work day" credits to the amuta that holds the majority of minutes
+        // — accumulated below after all days are processed.
+        bk._minutes_total = (bk._minutes_total || 0) + minutes;
+        bk._minutes_regular = (bk._minutes_regular || 0) + split.reg * share;
+        bk._minutes_ot125 = (bk._minutes_ot125 || 0) + split.ot125 * share;
+        bk._minutes_ot150 = (bk._minutes_ot150 || 0) + split.ot150 * share;
+        // Track which amuta dominated this day so we count work_days correctly
+        bk._day_minute_map = bk._day_minute_map || new Map();
+        bk._day_minute_map.set(date, (bk._day_minute_map.get(date) || 0) + minutes);
+      }
+    }
   }
   const hoursWorked  = Math.round((totalMinutes / 60) * 100) / 100;
   const regHours     = Math.round((regMinutes / 60) * 100) / 100;
@@ -138,7 +210,34 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const ot150Hours   = Math.round((ot150Minutes / 60) * 100) / 100;
   const daysWorked   = days.length;
 
-  const rates = primaryRates(employee);
+  // Finalize per-amuta buckets: convert minutes → hours, count work_days as
+  // the number of dates where this amuta got the most minutes.
+  const dayWinner = new Map(); // date → winning amutaId
+  for (const [amutaId, bk] of amutaBuckets) {
+    if (!bk._day_minute_map) continue;
+    for (const [date, minutes] of bk._day_minute_map) {
+      const cur = dayWinner.get(date);
+      if (!cur || minutes > cur.minutes) dayWinner.set(date, { amutaId, minutes });
+    }
+  }
+  for (const [amutaId, bk] of amutaBuckets) {
+    bk.regular_hours = Math.round((bk._minutes_regular || 0) / 60 * 100) / 100;
+    bk.ot_125_hours  = Math.round((bk._minutes_ot125 || 0) / 60 * 100) / 100;
+    bk.ot_150_hours  = Math.round((bk._minutes_ot150 || 0) / 60 * 100) / 100;
+    bk.days_worked   = [...dayWinner.entries()].filter(([, v]) => v.amutaId === amutaId).length;
+    // Use the employee's primary rates for the amuta that matches primary_amuta_id.
+    // For other amutot we leave rates at 0 (admin can edit in employee record later).
+    if (amutaId === fallbackAmutaId) {
+      bk.hourly_rate = rates.hourly_rate;
+      bk.global_salary = rates.global_salary;
+      bk.global_ot_rate = rates.global_ot_rate;
+    }
+    delete bk._minutes_total;
+    delete bk._minutes_regular;
+    delete bk._minutes_ot125;
+    delete bk._minutes_ot150;
+    delete bk._day_minute_map;
+  }
 
   // --- Base pay ---
   let baseSalary = 0;
@@ -176,7 +275,15 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   }
 
   // --- Extras ---
-  const travel     = Number(employee.travel_allowance) || 0;
+  // Travel: prefer the new per_day/monthly_flat fields; fall back to legacy travel_allowance.
+  let travel = 0;
+  if (employee.travel_mode === 'per_day') {
+    travel = (Number(employee.travel_per_day) || 0) * daysWorked;
+  } else if (employee.travel_mode === 'monthly_flat') {
+    travel = Number(employee.travel_monthly_flat) || 0;
+  } else {
+    travel = Number(employee.travel_allowance) || 0;
+  }
   const meal       = Number(employee.meal_vouchers) || 0;
   const recreation = (Number(employee.recreation_annual) || 0) / 12; // pro-rate annually
 
@@ -250,6 +357,9 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     estimated_total: estimatedTotal,
     warnings,
     days,
+    // Per-amuta breakdown (keyed by amuta_id string). Consumers join against
+    // the Amuta collection to render column groups in the monthly payroll table.
+    per_amuta: Object.fromEntries([...amutaBuckets.entries()]),
   };
 }
 
