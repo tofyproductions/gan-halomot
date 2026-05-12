@@ -4,7 +4,8 @@
  * `PayrollMonth` collection plus on-the-fly recomputation via payrollCalc.
  */
 const {
-  PayrollMonth, PayrollPresetOption, PayrollCustomColumn, Employee, Branch, Amuta, Punch,
+  PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
+  Employee, Branch, Amuta, Punch,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 
@@ -93,6 +94,28 @@ async function getMonth(req, res, next) {
     }).populate('manual.advance_deduction_preset_id').lean();
     const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
 
+    // Salary adjustments — managers' ad-hoc credits/debits/hour corrections
+    const adjustments = await SalaryAdjustment.find({
+      employee_id: { $in: employees.map(e => e._id) },
+      month,
+      status: { $ne: 'rejected' },
+    }).populate('created_by', 'full_name').sort({ created_at: -1 }).lean();
+    const adjByEmp = new Map();
+    for (const adj of adjustments) {
+      const k = String(adj.employee_id);
+      if (!adjByEmp.has(k)) adjByEmp.set(k, []);
+      adjByEmp.get(k).push({
+        id: String(adj._id),
+        type: adj.type,
+        amount: adj.amount,
+        hours: adj.hours,
+        reason: adj.reason,
+        status: adj.status,
+        created_by_name: adj.created_by?.full_name || '',
+        created_at: adj.created_at,
+      });
+    }
+
     // Need ALL branches (not just in-scope) so cross-branch hours can still
     // be shown in the table — an employee from branch A may have punched at B.
     const allBranchesData = await Branch.find({}).select('_id name amuta_id').sort({ name: 1 }).lean();
@@ -103,6 +126,17 @@ async function getMonth(req, res, next) {
       const breakdown = calculateMonthlySalary(emp, empPunches, month, { branchAmutaMap });
       const row = existingByEmp.get(String(emp._id));
       const manual = row?.manual || {};
+      const empAdjustments = adjByEmp.get(String(emp._id)) || [];
+      // Aggregate adjustments
+      const adjTotals = empAdjustments.reduce((acc, a) => {
+        if (a.status !== 'approved') return acc;
+        if (a.type === 'money_add' || a.type === 'purchase_reimburse' || a.type === 'travel_add') acc.money_add += Number(a.amount) || 0;
+        else if (a.type === 'money_deduct' || a.type === 'advance_request' || a.type === 'loan_request') acc.money_deduct += Math.abs(Number(a.amount) || 0);
+        else if (a.type === 'hours_add' || a.type === 'hour_correction') acc.hours_delta += Number(a.hours) || 0;
+        else if (a.type === 'hours_deduct') acc.hours_delta -= Math.abs(Number(a.hours) || 0);
+        else if (a.type === 'other') acc.money_add += Number(a.amount) || 0;
+        return acc;
+      }, { money_add: 0, money_deduct: 0, hours_delta: 0 });
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,
@@ -139,6 +173,8 @@ async function getMonth(req, res, next) {
           notes: manual.notes || '',
           custom_values: manual.custom_values || {},
         },
+        adjustments: empAdjustments,
+        adj_totals: adjTotals,
         status: row?.status || 'draft',
       };
     });
@@ -402,6 +438,70 @@ async function upsertAmuta(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ── Salary adjustments CRUD ─────────────────────────────────────────
+
+async function listAdjustments(req, res, next) {
+  try {
+    const { month, employee_id, branch } = req.query;
+    const filter = { status: { $ne: 'rejected' } };
+    if (month) filter.month = month;
+    if (employee_id) filter.employee_id = employee_id;
+    if (branch && branch !== 'all') filter.branch_id = branch;
+    const list = await SalaryAdjustment.find(filter)
+      .populate('employee_id', 'full_name israeli_id')
+      .populate('created_by', 'full_name')
+      .sort({ created_at: -1 })
+      .lean();
+    res.json({ adjustments: list.map(a => ({ ...a, id: String(a._id) })) });
+  } catch (err) { next(err); }
+}
+
+async function createAdjustment(req, res, next) {
+  try {
+    const { employee_id, month, type, amount, hours, reason } = req.body;
+    if (!employee_id || !month || !type) {
+      return res.status(400).json({ error: 'employee_id, month, type are required' });
+    }
+    const emp = await Employee.findById(employee_id).select('branch_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const adj = await SalaryAdjustment.create({
+      employee_id,
+      branch_id: emp.branch_id,
+      month,
+      type,
+      amount: Number(amount) || 0,
+      hours: Number(hours) || 0,
+      reason: reason || '',
+      created_by: req.user.id,
+      status: 'approved', // branch managers' entries auto-approve
+      decided_by: req.user.id,
+      decided_at: new Date(),
+    });
+    res.json({ adjustment: { ...adj.toObject(), id: String(adj._id) } });
+  } catch (err) { next(err); }
+}
+
+async function updateAdjustment(req, res, next) {
+  try {
+    const { id } = req.params;
+    const setObj = {};
+    ['amount', 'hours', 'reason', 'type', 'status'].forEach(k => {
+      if (req.body[k] != null) setObj[k] = req.body[k];
+    });
+    const adj = await SalaryAdjustment.findByIdAndUpdate(id, { $set: setObj }, { new: true });
+    if (!adj) return res.status(404).json({ error: 'adjustment not found' });
+    res.json({ adjustment: { ...adj.toObject(), id: String(adj._id) } });
+  } catch (err) { next(err); }
+}
+
+async function deleteAdjustment(req, res, next) {
+  try {
+    await SalaryAdjustment.findByIdAndDelete(req.params.id);
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 // ── Custom columns CRUD ─────────────────────────────────────────────
 
 async function listCustomColumns(req, res, next) {
@@ -486,4 +586,8 @@ module.exports = {
   createCustomColumn,
   updateCustomColumn,
   deleteCustomColumn,
+  listAdjustments,
+  createAdjustment,
+  updateAdjustment,
+  deleteAdjustment,
 };

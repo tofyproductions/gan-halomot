@@ -32,6 +32,7 @@ const PayslipAuditRecord = require('./PayslipAuditRecord');
 const PayrollMonth = require('./PayrollMonth');
 const PayrollPresetOption = require('./PayrollPresetOption');
 const PayrollCustomColumn = require('./PayrollCustomColumn');
+const SalaryAdjustment = require('./SalaryAdjustment');
 
 module.exports = {
   User,
@@ -67,4 +68,5 @@ module.exports = {
   PayrollMonth,
   PayrollPresetOption,
   PayrollCustomColumn,
+  SalaryAdjustment,
 };

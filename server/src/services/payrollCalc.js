@@ -180,9 +180,18 @@ function splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId) {
 function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const forceFullGlobal = opts.force_full_global || false;
   const branchAmutaMap = opts.branchAmutaMap || new Map();
+
+  // Salary excludes any punch that is pending review or has been rejected by
+  // the branch manager. Punches with no approval_status (legacy) are treated
+  // as 'auto' (counted). Approved manual punches count.
+  const countablePunches = punches.filter(p => {
+    const s = p.approval_status || 'auto';
+    return s === 'auto' || s === 'approved';
+  });
+
   // Bucket by Israel-local day
   const byDay = new Map();
-  for (const p of punches) {
+  for (const p of countablePunches) {
     const key = israelDateKey(new Date(p.timestamp));
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(p);

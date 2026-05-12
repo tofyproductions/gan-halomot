@@ -669,6 +669,15 @@ async function createManualPunches(req, res, next) {
     const emp = await Employee.findById(employee_id).lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
+    // Managers / admins create punches in approved state. Anyone else (e.g.
+    // an employee using the self-service portal) creates pending records
+    // that wait for branch-manager review.
+    const role = req.user?.role;
+    const managerLevel = role === 'system_admin' || role === 'branch_manager' || role === 'accountant';
+    const approvalStatus = managerLevel ? 'approved' : 'pending';
+    const decidedAt = managerLevel ? new Date() : null;
+    const decidedBy = managerLevel ? req.user.id : null;
+
     // Build Date objects in Israel time. We piggy-back on toLocaleString
     // with en-CA to get a YYYY-MM-DD HH:mm:ss output and then reparse as
     // local-naive, then compensate for the TZ offset.
@@ -715,6 +724,9 @@ async function createManualPunches(req, res, next) {
         agent_version: 'manual-entry',
         manual_note: note || '',
         created_by: req.user?.id || null,
+        approval_status: approvalStatus,
+        approval_decided_by: decidedBy,
+        approval_decided_at: decidedAt,
       });
       created.push(punch);
     }
@@ -734,6 +746,116 @@ async function deletePunch(req, res, next) {
     if (!p) return res.status(404).json({ error: 'punch not found' });
     await p.deleteOne();
     res.json({ ok: true, id: req.params.id });
+  } catch (err) { next(err); }
+}
+
+// --- Self-service manual-punch request (employee → manager approval) ----
+
+/**
+ * POST /api/payroll/punch-requests
+ * Body: { date, in_time, out_time, note }
+ *
+ * Used by employees through the self-service portal to report a missing
+ * punch. Resolves employee_id from the authenticated user, sets the
+ * punch's approval_status to 'pending', and surfaces it to the branch
+ * manager via /api/payroll/punches/pending.
+ */
+async function createPunchRequest(req, res, next) {
+  try {
+    // Resolve the employee record for the logged-in user
+    const emp = await Employee.findOne({ user_id: req.user.id, is_active: true }).lean();
+    if (!emp) return res.status(404).json({ error: 'אין רשומת עובד מקושרת למשתמש' });
+    req.body.employee_id = String(emp._id);
+    // Force pending: even if the user has elevated role, when calling this
+    // endpoint they are acting as an employee submitting a report.
+    const originalRole = req.user.role;
+    req.user.role = 'teacher'; // sentinel to force 'pending' branch in createManualPunches
+    await createManualPunches(req, res, next);
+    req.user.role = originalRole;
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/punches/pending?branch=<id>
+ * Returns pending manual-punch requests awaiting approval. Branch managers
+ * see only their own branch; system admins see all branches.
+ */
+async function listPendingPunches(req, res, next) {
+  try {
+    const filter = { approval_status: 'pending' };
+    if (req.user.role !== 'system_admin') {
+      // Restrict to branches the user manages
+      const userBranchIds = req.user.branch_ids || (req.user.branch_id ? [req.user.branch_id] : []);
+      if (userBranchIds.length > 0) filter.branch_id = { $in: userBranchIds };
+    } else if (req.query.branch) {
+      filter.branch_id = req.query.branch;
+    }
+    const punches = await Punch.find(filter)
+      .populate('employee_id', 'full_name israeli_id')
+      .populate('created_by', 'full_name')
+      .sort({ timestamp: -1 })
+      .lean();
+    res.json({ punches });
+  } catch (err) { next(err); }
+}
+
+/**
+ * PATCH /api/payroll/punches/:id/approve
+ * Body: { note }
+ */
+async function approvePunch(req, res, next) {
+  try {
+    const p = await Punch.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'punch not found' });
+    p.approval_status = 'approved';
+    p.approval_decided_by = req.user.id;
+    p.approval_decided_at = new Date();
+    p.approval_decided_note = req.body?.note || '';
+    await p.save();
+    res.json({ ok: true, punch: p });
+  } catch (err) { next(err); }
+}
+
+/**
+ * PATCH /api/payroll/punches/:id/reject
+ * Body: { note }
+ */
+async function rejectPunch(req, res, next) {
+  try {
+    const p = await Punch.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'punch not found' });
+    p.approval_status = 'rejected';
+    p.approval_decided_by = req.user.id;
+    p.approval_decided_at = new Date();
+    p.approval_decided_note = req.body?.note || '';
+    await p.save();
+    res.json({ ok: true, punch: p });
+  } catch (err) { next(err); }
+}
+
+/**
+ * PATCH /api/payroll/punches/:id
+ * Body: { timestamp?, state?, manual_note? }
+ *
+ * Edit a punch's timestamp / state. Manager-level only. We mark the punch
+ * as 'approved' on edit (a manager intervening on a record is approving
+ * the corrected value). Used for fixing typo'd manual punches and rare
+ * clock-time corrections.
+ */
+async function editPunch(req, res, next) {
+  try {
+    const p = await Punch.findById(req.params.id);
+    if (!p) return res.status(404).json({ error: 'punch not found' });
+    if (req.body.timestamp) p.timestamp = new Date(req.body.timestamp);
+    if (req.body.state != null) p.state = Number(req.body.state);
+    if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
+    if (p.timestamp_source === 'manual' && p.approval_status === 'pending') {
+      p.approval_status = 'approved';
+      p.approval_decided_by = req.user.id;
+      p.approval_decided_at = new Date();
+    }
+    await p.save();
+    res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
 }
 
@@ -965,15 +1087,15 @@ async function myPunches(req, res, next) {
     const branchMap = {};
     for (const br of branches) branchMap[String(br._id)] = br.name;
 
-    // Group into days with branch info
+    // Group into days with branch info + pending-approval marker
     const dayMap = {};
     for (const p of rawPunches) {
       const d = new Date(p.timestamp);
       const dateStr = d.toLocaleDateString('he-IL', { timeZone: IL_TZ });
-      if (!dayMap[dateStr]) dayMap[dateStr] = { times: [], branch: branchMap[String(p.branch_id)] || '' };
+      if (!dayMap[dateStr]) dayMap[dateStr] = { times: [], branch: branchMap[String(p.branch_id)] || '', pending: false };
       dayMap[dateStr].times.push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
-      // Use last punch's branch as the day's branch
       dayMap[dateStr].branch = branchMap[String(p.branch_id)] || '';
+      if (p.approval_status === 'pending') dayMap[dateStr].pending = true;
     }
 
     const punches = Object.entries(dayMap).map(([date, data]) => {
@@ -986,7 +1108,7 @@ async function myPunches(req, res, next) {
         hours = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
         hours = Math.round(hours * 100) / 100;
       }
-      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null, branch: data.branch };
+      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null, branch: data.branch, pending_approval: data.pending };
     });
 
     res.json({ punches, month, employee_name: emp.full_name });
@@ -1017,6 +1139,11 @@ module.exports = {
   salaryForEmployee,
   salarySummary,
   createManualPunches,
+  createPunchRequest,
+  listPendingPunches,
+  approvePunch,
+  rejectPunch,
+  editPunch,
   deletePunch,
   mySalaryPreview,
   myPunches,

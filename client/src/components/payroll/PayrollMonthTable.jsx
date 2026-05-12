@@ -14,9 +14,11 @@ import NumbersIcon from '@mui/icons-material/Numbers';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import TuneIcon from '@mui/icons-material/Tune';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Monthly payroll table — auto-calculated per-amuta hours from punches,
@@ -326,6 +328,7 @@ export default function PayrollMonthTable() {
   const [presets, setPresets] = useState([]);
   const [notes, setNotes] = useState({ open: false, row: null });
   const [addCol, setAddCol] = useState(false);
+  const [adjustments, setAdjustments] = useState({ open: false, row: null });
 
   const isFinalized = useMemo(() => {
     if (!data?.rows?.length) return false;
@@ -490,6 +493,7 @@ export default function PayrollMonthTable() {
     money: 78,
     notes: 50,
     custom: 110,
+    adjust: 110,
   };
 
   return (
@@ -558,6 +562,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
+            <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
           </colgroup>
 
@@ -580,7 +585,7 @@ export default function PayrollMonthTable() {
                   </TableCell>
                 );
               })}
-              <TableCell colSpan={10 + customColumns.length + 1} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={10 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -615,23 +620,24 @@ export default function PayrollMonthTable() {
                   ><DeleteOutlineIcon sx={{ fontSize: 14 }} /></IconButton>
                 </TableCell>
               ))}
+              <TableCell align="center" sx={{ fontWeight: 700 }}>עדכוני שכר</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>הערות</TableCell>
             </TableRow>
           </TableHead>
 
           <TableBody>
             {loading && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 4 }}>
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 4 }}>
                 <CircularProgress size={28} />
               </TableCell></TableRow>
             )}
             {!loading && data && data.rows.length === 0 && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
                 אין עובדים פעילים בתחום הנבחר. נסה לבחור "כל הסניפים" בראש הדף או חודש אחר.
               </TableCell></TableRow>
             )}
             {!loading && !data && (
-              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 11 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
+              <TableRow><TableCell colSpan={2 + visibleBranches.length * 7 + 12 + customColumns.length} align="center" sx={{ py: 6, color: 'text.disabled' }}>
                 לא ניתן לטעון את הנתונים. נסה לרענן.
               </TableCell></TableRow>
             )}
@@ -673,6 +679,9 @@ export default function PayrollMonthTable() {
                       <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
                     </TableCell>
                   ))}
+                  <TableCell align="center" sx={{ minWidth: 100 }}>
+                    <AdjustmentSummary row={r} onOpen={() => setAdjustments({ open: true, row: r })} disabled={locked} />
+                  </TableCell>
                   <TableCell align="center">
                     <IconButton size="small" onClick={() => setNotes({ open: true, row: r })} color={r.manual.notes ? 'primary' : 'default'}>
                       <NoteAltIcon fontSize="small" />
@@ -688,7 +697,37 @@ export default function PayrollMonthTable() {
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
+      <SalaryAdjustmentDialog
+        open={adjustments.open}
+        row={adjustments.row}
+        month={month}
+        onClose={() => setAdjustments({ open: false, row: null })}
+        onChanged={fetchData}
+      />
     </Box>
+  );
+}
+
+function AdjustmentSummary({ row, onOpen, disabled }) {
+  const totals = row.adj_totals || { money_add: 0, money_deduct: 0, hours_delta: 0 };
+  const count = row.adjustments?.length || 0;
+  const hasAny = totals.money_add !== 0 || totals.money_deduct !== 0 || totals.hours_delta !== 0;
+  return (
+    <Stack direction="row" spacing={0.3} alignItems="center" justifyContent="center" flexWrap="wrap" useFlexGap>
+      {!hasAny ? (
+        <IconButton size="small" onClick={onOpen} disabled={disabled} sx={{ opacity: 0.5 }}>
+          <TuneIcon fontSize="small" />
+        </IconButton>
+      ) : (
+        <>
+          {totals.money_add > 0 && <Chip size="small" color="success" label={`+${Math.round(totals.money_add)}₪`} sx={{ height: 18, fontSize: '0.7rem' }} />}
+          {totals.money_deduct > 0 && <Chip size="small" color="error" label={`-${Math.round(totals.money_deduct)}₪`} sx={{ height: 18, fontSize: '0.7rem' }} />}
+          {totals.hours_delta !== 0 && <Chip size="small" color="warning" label={`${totals.hours_delta > 0 ? '+' : ''}${totals.hours_delta}h`} sx={{ height: 18, fontSize: '0.7rem' }} />}
+          <IconButton size="small" onClick={onOpen} disabled={disabled}><TuneIcon fontSize="small" /></IconButton>
+        </>
+      )}
+      {count > 0 && <Typography variant="caption" sx={{ fontSize: '0.65rem', color: 'text.disabled' }}>{count}</Typography>}
+    </Stack>
   );
 }
 

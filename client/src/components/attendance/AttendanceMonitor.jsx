@@ -12,6 +12,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import HoursReportDialog from '../employees/HoursReportDialog';
+import PendingPunchApprovals from './PendingPunchApprovals';
 
 /**
  * Monthly attendance monitor. Columns: employee, day-by-day hours, monthly total.
@@ -390,6 +391,7 @@ export default function AttendanceMonitor() {
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 1400, mx: 'auto' }}>
+      <PendingPunchApprovals />
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב החתמות</Typography>

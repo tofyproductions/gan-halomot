@@ -32,6 +32,22 @@ const punchSchema = new mongoose.Schema({
   manual_note: { type: String, default: '' },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
+  // Approval workflow for manual punches reported by employees themselves.
+  //   - 'auto'     — clock-originated punch or admin-entered manual punch (no review needed)
+  //   - 'pending'  — employee submitted a missing-punch report; waits for branch manager
+  //   - 'approved' — branch manager / admin approved the manual entry
+  //   - 'rejected' — branch manager / admin rejected (kept for audit; excluded from payroll)
+  // Anything not in {'auto','approved'} is excluded from salary calculation.
+  approval_status: {
+    type: String,
+    enum: ['auto', 'pending', 'approved', 'rejected'],
+    default: 'auto',
+    index: true,
+  },
+  approval_decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  approval_decided_at: { type: Date, default: null },
+  approval_decided_note: { type: String, default: '' },
+
   // Raw device state code (0=checkin, 1=checkout, 4/5=overtime in/out, etc.)
   // We do not trust this for pairing — pairing is computed from chronological order.
   state: { type: Number, default: 0 },

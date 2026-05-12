@@ -28,4 +28,10 @@ router.post('/custom-columns',                requireRole('system_admin', 'accou
 router.patch('/custom-columns/:id',           requireRole('system_admin', 'accountant'), c.updateCustomColumn);
 router.delete('/custom-columns/:id',          requireRole('system_admin', 'accountant'), c.deleteCustomColumn);
 
+// Salary adjustments — branch-manager-level credits/debits/hour corrections
+router.get('/adjustments',                    c.listAdjustments);
+router.post('/adjustments',                   requireRole('system_admin', 'accountant', 'branch_manager'), c.createAdjustment);
+router.patch('/adjustments/:id',              requireRole('system_admin', 'accountant', 'branch_manager'), c.updateAdjustment);
+router.delete('/adjustments/:id',             requireRole('system_admin', 'accountant', 'branch_manager'), c.deleteAdjustment);
+
 module.exports = router;
