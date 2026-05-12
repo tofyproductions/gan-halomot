@@ -37,10 +37,15 @@ export function AuthProvider({ children }) {
 
   const isAuthenticated = !!user;
   const isAdmin = user?.role === 'system_admin';
+  const isAccountant = user?.role === 'accountant';
   const isManager = user?.role === 'branch_manager' || isAdmin;
+  // Can use the cross-branch "כל הסניפים" view: admins always; accountants
+  // (they need cross-branch payroll consolidation); managers who oversee
+  // more than one branch (multi-branch heads like Lidor).
+  const canSeeAllBranches = isAdmin || isAccountant || (user?.managed_branch_ids?.length || 0) > 1;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated, isAdmin, isManager }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
       {children}
     </AuthContext.Provider>
   );

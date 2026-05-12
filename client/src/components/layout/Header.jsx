@@ -68,7 +68,7 @@ export default function Header() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { branches, selectedBranch, changeBranch } = useBranch();
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
 
   const goto = (path) => {
     setDrawerOpen(false);
@@ -132,7 +132,7 @@ export default function Header() {
             </Typography>
           </Box>
 
-          {branches.length > 0 && (isAdmin ? true : branches.length > 1) && (
+          {branches.length > 0 && (canSeeAllBranches || branches.length > 1) && (
             <Select
               value={selectedBranch}
               onChange={(e) => { changeBranch(e.target.value); window.location.reload(); }}
@@ -149,7 +149,7 @@ export default function Header() {
               {branches.map((b) => (
                 <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
               ))}
-              {isAdmin && branches.length > 1 && [
+              {canSeeAllBranches && branches.length > 1 && [
                 <MenuItem key="__all-divider" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset', py: 0.3 }}>
                   ──────────
                 </MenuItem>,
@@ -282,7 +282,7 @@ export default function Header() {
             </Box>
           )}
 
-          {branches.length > 0 && (isAdmin || branches.length > 1) && (
+          {branches.length > 0 && (canSeeAllBranches || branches.length > 1) && (
             <Box sx={{ mb: 2 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>סניף</Typography>
               <Select
@@ -294,7 +294,7 @@ export default function Header() {
                 {branches.map((b) => (
                   <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
                 ))}
-                {isAdmin && branches.length > 1 && [
+                {canSeeAllBranches && branches.length > 1 && [
                   <MenuItem key="__div" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset' }}>──────────</MenuItem>,
                   <MenuItem key="__all" value="all" sx={{ fontWeight: 800, color: 'primary.main' }}>כל הסניפים</MenuItem>,
                 ]}
