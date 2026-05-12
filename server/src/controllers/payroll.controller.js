@@ -769,13 +769,15 @@ async function listPunchesForDay(req, res, next) {
   try {
     const { employee_id, branch, israeli_id, date } = req.query;
     if (!date) return res.status(400).json({ error: 'date=YYYY-MM-DD is required' });
+
+    // Query a buffered ±2-day window in UTC and post-filter by the Israel
+    // calendar date. Mirrors the approach used by attendanceByMonth so the
+    // two views always agree about which punches belong to which day —
+    // regardless of DST transitions or device time being a few hours off.
     const [y, m, d] = date.split('-').map(Number);
-    // Israel-day window in UTC
-    const probe = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-    const ilHour = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false }).format(probe), 10);
-    const offsetHours = ilHour - 12;
-    const from = new Date(Date.UTC(y, m - 1, d, 0 - offsetHours, 0, 0));
-    const to   = new Date(Date.UTC(y, m - 1, d + 1, 0 - offsetHours, 0, 0));
+    const from = new Date(Date.UTC(y, m - 1, d - 1, 0, 0, 0));
+    const to   = new Date(Date.UTC(y, m - 1, d + 2, 0, 0, 0));
+
     const filter = { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } };
     if (employee_id) {
       // Employee may have punched at any branch — don't constrain by branch.
@@ -788,12 +790,15 @@ async function listPunchesForDay(req, res, next) {
     } else if (branch) {
       filter.branch_id = branch;
     }
-    const punches = await Punch.find(filter)
+    const raw = await Punch.find(filter)
       .populate('branch_id', 'name')
       .populate('approval_decided_by', 'full_name')
       .populate('created_by', 'full_name')
       .sort({ timestamp: 1 })
       .lean();
+
+    // Keep only punches whose IL-local calendar date equals the requested date
+    const punches = raw.filter(p => israelDateKey(new Date(p.timestamp)) === date);
     res.json({ punches });
   } catch (err) { next(err); }
 }
