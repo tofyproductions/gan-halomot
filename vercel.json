@@ -9,7 +9,6 @@
   ],
   "functions": {
     "api/index.js": {
-      "memory": 1024,
       "maxDuration": 30,
       "includeFiles": "server/**"
     }
