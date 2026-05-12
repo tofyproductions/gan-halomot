@@ -777,9 +777,17 @@ async function listPunchesForDay(req, res, next) {
     const from = new Date(Date.UTC(y, m - 1, d, 0 - offsetHours, 0, 0));
     const to   = new Date(Date.UTC(y, m - 1, d + 1, 0 - offsetHours, 0, 0));
     const filter = { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } };
-    if (employee_id) filter.employee_id = employee_id;
-    else if (israeli_id) filter.israeli_id = israeli_id;
-    if (branch) filter.branch_id = branch;
+    if (employee_id) {
+      // Employee may have punched at any branch — don't constrain by branch.
+      filter.employee_id = employee_id;
+    } else if (israeli_id) {
+      filter.israeli_id = israeli_id;
+      // Unlinked rows are scoped to a single branch (multiple unmatched IDs
+      // can collide across branches), so keep branch in the filter here.
+      if (branch) filter.branch_id = branch;
+    } else if (branch) {
+      filter.branch_id = branch;
+    }
     const punches = await Punch.find(filter)
       .populate('branch_id', 'name')
       .populate('approval_decided_by', 'full_name')
