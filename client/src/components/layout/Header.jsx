@@ -43,6 +43,7 @@ const ICON_BY_TAB = {
   employees: PeopleIcon,
   attendance: FingerprintIcon,
   salary_table: PaymentsIcon,
+  payslip_audit: ReceiptLongIcon,
   holidays: EventIcon,
   employee_requests: AssignmentIcon,
   orders: ShoppingCartIcon,

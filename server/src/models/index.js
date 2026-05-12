@@ -28,6 +28,7 @@ const StockCategory = require('./StockCategory');
 const StockItem = require('./StockItem');
 const StockMovement = require('./StockMovement');
 const StockBatch = require('./StockBatch');
+const PayslipAuditRecord = require('./PayslipAuditRecord');
 
 module.exports = {
   User,
@@ -59,4 +60,5 @@ module.exports = {
   StockItem,
   StockMovement,
   StockBatch,
+  PayslipAuditRecord,
 };

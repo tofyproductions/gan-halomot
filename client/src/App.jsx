@@ -18,6 +18,7 @@ import EmployeeManager from './components/employees/EmployeeManager';
 import SalaryRequests from './components/employees/SalaryRequests';
 import AttendanceMonitor from './components/attendance/AttendanceMonitor';
 import SalaryTable from './components/payroll/SalaryTable';
+import PayslipAudit from './components/payroll/PayslipAudit';
 import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
@@ -65,6 +66,11 @@ function AppRoutes() {
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
         <Route path="salary-table" element={<SalaryTable />} />
+        <Route path="payslip-audit" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+            <PayslipAudit />
+          </ProtectedRoute>
+        } />
         <Route path="holidays" element={<HolidayManager />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
