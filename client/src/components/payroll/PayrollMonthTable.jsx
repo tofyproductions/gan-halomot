@@ -422,33 +422,35 @@ export default function PayrollMonthTable() {
 
   const customColumns = data?.custom_columns || [];
 
-  /* CSV export — replicates the bookkeeper's spreadsheet layout */
+  /* CSV export — one 7-col hours block per row (branch comes from the row's
+     branch_name column), matching the simplified on-screen layout. */
   const exportCSV = () => {
     if (!data) return;
     const rowsAcc = [];
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע"נ גלובלי'];
 
-    const headerTop = ['סניף', 'שם העובד'];
-    for (const b of visibleBranches) headerTop.push(b.name, ...Array(6).fill(''));
-    headerTop.push(...['נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים']);
+    const headerTop = ['סניף', 'שם העובד', ...cols,
+      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('הערות');
     rowsAcc.push(headerTop);
 
-    const subHdr = ['', ''];
-    for (const _b of visibleBranches) subHdr.push(...cols);
-    subHdr.push(...Array(10).fill(''));
-    for (const _c of customColumns) subHdr.push('');
-    subHdr.push('');
-    rowsAcc.push(subHdr);
-
     for (const r of data.rows) {
       const cells = [r.branch_name, r.full_name];
-      for (const b of visibleBranches) {
-        const bk = r.breakdown.per_branch?.[b.id];
-        if (bk) {
-          cells.push(bk.days_worked, bk.regular_hours, bk.ot_125_hours, bk.ot_150_hours, bk.hourly_rate || '', bk.global_salary || '', bk.global_ot_rate || '');
-        } else { cells.push('', '', '', '', '', '', ''); }
+      // Use the home-branch bucket if present, else the rolled-up hours totals.
+      const bk = r.breakdown.per_branch?.[r.branch_id];
+      if (bk) {
+        cells.push(bk.days_worked, bk.regular_hours, bk.ot_125_hours, bk.ot_150_hours, bk.hourly_rate || '', bk.global_salary || '', bk.global_ot_rate || '');
+      } else {
+        cells.push(
+          r.breakdown.hours.days_worked,
+          r.breakdown.hours.regular,
+          r.breakdown.hours.ot_125,
+          r.breakdown.hours.ot_150,
+          r.breakdown.rates?.hourly_rate || '',
+          r.breakdown.rates?.global_salary || '',
+          r.breakdown.rates?.global_ot_rate || '',
+        );
       }
       cells.push(
         computeTravel(r),
@@ -561,10 +563,15 @@ export default function PayrollMonthTable() {
         }}>
           <colgroup>
             <col style={{ width: W.name }} />
-            {visibleBranches.flatMap(b => [
-              <col key={`cg-${b.id}-days`} style={{ width: W.days }} />,
-              ...Array.from({ length: 6 }, (_, i) => <col key={`cg-${b.id}-${i}`} style={{ width: W.amutaCell }} />),
-            ])}
+            {/* Single 7-col hours block — rows already grouped by branch via
+                section headers, so the per-branch column blocks were redundant. */}
+            <col style={{ width: W.days }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.travel }} />
             <col style={{ width: W.days }} />
             <col style={{ width: W.days }} />
@@ -587,30 +594,16 @@ export default function PayrollMonthTable() {
                 position: 'sticky', right: 0, zIndex: 4,
                 borderLeft: '2px solid', borderColor: 'divider',
               }} className="ag-divider">שם העובד</TableCell>
-              {visibleBranches.map((b) => {
-                const c = branchColor(b.color_index || 0);
-                return (
-                  <TableCell
-                    key={b.id} colSpan={7} align="center"
-                    sx={{
-                      fontWeight: 800, bgcolor: c.header, color: c.accent,
-                      borderLeft: '3px solid', borderColor: c.border,
-                      letterSpacing: 0.2,
-                    }}
-                  >
-                    {b.name}
-                  </TableCell>
-                );
-              })}
+              <TableCell colSpan={7} align="center" sx={{
+                fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
+                letterSpacing: 0.2,
+              }}>שעות עבודה</TableCell>
               <TableCell colSpan={10 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
             <TableRow>
-              {visibleBranches.map((b) => {
-                const c = branchColor(b.color_index || 0);
-                return <SubHeaderGroup key={b.id} color={c} />;
-              })}
+              <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
@@ -644,7 +637,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + visibleBranches.length * 7 + 12 + customColumns.length;
+              const totalCols = 1 + 7 + 12 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -700,16 +693,42 @@ export default function PayrollMonthTable() {
                                 {r.israeli_id}
                               </Typography>
                             )}
+                            {(() => {
+                              // Show a chip if this employee also has hours at a
+                              // branch other than the section's branch.
+                              const pb = r.breakdown.per_branch || {};
+                              const otherBranches = Object.entries(pb)
+                                .filter(([id, bk]) => id !== r.branch_id && (bk?.regular_hours || 0) + (bk?.ot_125_hours || 0) + (bk?.ot_150_hours || 0) > 0);
+                              if (otherBranches.length === 0) return null;
+                              const totalOther = otherBranches.reduce((a, [, bk]) => a + (bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0), 0);
+                              return (
+                                <Chip
+                                  size="small" color="secondary" variant="outlined"
+                                  label={`+${Math.round(totalOther * 10) / 10}h בסניף אחר`}
+                                  sx={{ height: 16, fontSize: '0.6rem', mt: 0.3 }}
+                                />
+                              );
+                            })()}
                           </Box>
                           {locked && <Chip size="small" label="נעול" sx={{ height: 18, fontSize: '0.62rem' }} />}
                         </Box>
                       </TableCell>
 
-                      {visibleBranches.map((b) => {
-                        const bk = r.breakdown.per_branch?.[b.id];
-                        const c = branchColor(b.color_index || 0);
-                        return <BranchGroupCells key={b.id} bk={bk} salaryType={r.salary_type} color={c} />;
-                      })}
+                      {(() => {
+                        // Hour block uses the home-branch bucket. Cross-branch
+                        // hours show in a chip in the name cell (see above).
+                        const bk = r.breakdown.per_branch?.[r.branch_id] || r.breakdown.per_branch?.[group.branch_id];
+                        const totalBk = bk || {
+                          days_worked: r.breakdown.hours.days_worked,
+                          regular_hours: r.breakdown.hours.regular,
+                          ot_125_hours: r.breakdown.hours.ot_125,
+                          ot_150_hours: r.breakdown.hours.ot_150,
+                          hourly_rate: r.breakdown.rates?.hourly_rate || 0,
+                          global_salary: r.breakdown.rates?.global_salary || 0,
+                          global_ot_rate: r.breakdown.rates?.global_ot_rate || 0,
+                        };
+                        return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
+                      })()}
 
                       <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
                       <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
