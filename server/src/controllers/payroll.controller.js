@@ -110,6 +110,18 @@ async function listEmployees(req, res, next) {
     if (active === 'true') filter.is_active = true;
     if (active === 'false') filter.is_active = false;
 
+    // Enforce per-user branch scope for non-admin/accountant viewers
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (filter.branch_id && !allowed.includes(String(filter.branch_id))) {
+        return res.json({ employees: [] });
+      }
+      if (!filter.branch_id) filter.branch_id = { $in: allowed };
+    }
+
     const employees = await Employee.find(filter)
       .populate('branch_id', 'name')
       .populate('amuta_distribution.amuta_id', 'name short_name')
@@ -302,6 +314,17 @@ async function attendanceByMonth(req, res, next) {
     if (!branch) return res.status(400).json({ error: 'branch is required' });
     const range = monthRange(month);
     if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
+
+    // Branch-scope enforcement
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (!allowed.includes(String(branch))) {
+        return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      }
+    }
 
     // First batch — employees + branch list (don't depend on each other).
     const [homeEmployees, allEmployees, branches] = await Promise.all([
@@ -783,10 +806,12 @@ async function createPunchRequest(req, res, next) {
 async function listPendingPunches(req, res, next) {
   try {
     const filter = { approval_status: 'pending' };
-    if (req.user.role !== 'system_admin') {
-      // Restrict to branches the user manages
-      const userBranchIds = req.user.branch_ids || (req.user.branch_id ? [req.user.branch_id] : []);
-      if (userBranchIds.length > 0) filter.branch_id = { $in: userBranchIds };
+    if (req.user.role !== 'system_admin' && req.user.role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (allowed.length === 0) return res.json({ punches: [] });
+      filter.branch_id = { $in: allowed };
     } else if (req.query.branch) {
       filter.branch_id = req.query.branch;
     }
@@ -902,6 +927,17 @@ async function salarySummary(req, res, next) {
   try {
     const { branch, month } = req.query;
     if (!branch || !month) return res.status(400).json({ error: 'branch and month are required' });
+
+    // Branch-scope enforcement
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (!allowed.includes(String(branch))) {
+        return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      }
+    }
 
     const employees = await Employee.find({ branch_id: branch, is_active: true })
       .sort({ full_name: 1 })

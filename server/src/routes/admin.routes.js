@@ -6,6 +6,7 @@ router.use(authMiddleware, requireRole('system_admin'));
 
 router.get('/users', ctrl.listUsers);
 router.patch('/users/:id/tabs', ctrl.updateUserTabs);
+router.patch('/users/:id/role', ctrl.updateUserRole);
 
 // SMTP diagnostics
 router.get('/email-diagnostic', ctrl.emailDiagnostic);

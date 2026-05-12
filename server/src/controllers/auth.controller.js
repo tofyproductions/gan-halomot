@@ -15,6 +15,12 @@ const ORIGIN = env.NODE_ENV === 'production'
   : 'http://localhost:5173';
 
 function makeToken(user, rememberMe) {
+  // Resolve managed_branch_ids: explicit value first, single-branch managers
+  // fall back to [branch_id] so they don't need separate configuration.
+  let managed = (user.managed_branch_ids || []).map(b => b?._id || b).filter(Boolean);
+  if (managed.length === 0 && user.role === 'branch_manager' && user.branch_id) {
+    managed = [user.branch_id?._id || user.branch_id];
+  }
   const payload = {
     id: user._id,
     email: user.email,
@@ -22,6 +28,7 @@ function makeToken(user, rememberMe) {
     role: user.role,
     branch_id: user.branch_id?._id || user.branch_id,
     branch_name: user.branch_id?.name || null,
+    managed_branch_ids: managed.map(x => String(x)),
     position: user.position,
     tab_overrides_add: user.tab_overrides_add || [],
     tab_overrides_remove: user.tab_overrides_remove || [],

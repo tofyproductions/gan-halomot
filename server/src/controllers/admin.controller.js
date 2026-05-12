@@ -3,13 +3,36 @@ const { User } = require('../models');
 async function listUsers(req, res, next) {
   try {
     const users = await User.find({ is_active: true })
-      .select('full_name email role branch_id position tab_overrides_add tab_overrides_remove')
+      .select('full_name email role branch_id managed_branch_ids position tab_overrides_add tab_overrides_remove')
       .populate('branch_id', 'name')
+      .populate('managed_branch_ids', 'name')
       .sort({ full_name: 1 });
     res.json({ users });
   } catch (err) {
     next(err);
   }
+}
+
+async function updateUserRole(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { role, managed_branch_ids } = req.body;
+    const ALLOWED_ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'];
+    const setObj = {};
+    if (role) {
+      if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ error: 'role not allowed' });
+      setObj.role = role;
+    }
+    if (Array.isArray(managed_branch_ids)) {
+      setObj.managed_branch_ids = managed_branch_ids.filter(x => x && typeof x === 'string');
+    }
+    const user = await User.findByIdAndUpdate(id, setObj, { new: true })
+      .select('full_name email role branch_id managed_branch_ids tab_overrides_add tab_overrides_remove')
+      .populate('branch_id', 'name')
+      .populate('managed_branch_ids', 'name');
+    if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });
+    res.json({ user });
+  } catch (err) { next(err); }
 }
 
 async function updateUserTabs(req, res, next) {
@@ -87,4 +110,4 @@ async function emailTest(req, res, next) {
   }
 }
 
-module.exports = { listUsers, updateUserTabs, emailDiagnostic, emailTest };
+module.exports = { listUsers, updateUserTabs, updateUserRole, emailDiagnostic, emailTest };

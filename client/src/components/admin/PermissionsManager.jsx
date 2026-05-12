@@ -3,9 +3,12 @@ import {
   Box, Paper, Typography, Stack, Chip, IconButton, Tooltip, Alert,
   Table, TableHead, TableBody, TableRow, TableCell, Checkbox,
   TextField, MenuItem, Button, CircularProgress, Divider,
+  Dialog, DialogTitle, DialogContent, DialogActions, Select,
+  InputLabel, FormControl, OutlinedInput, ListItemText,
 } from '@mui/material';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import SaveIcon from '@mui/icons-material/Save';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { TAB_GROUPS, ALL_TABS, isDefaultAllowed } from '../../config/tabs';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
@@ -46,21 +49,101 @@ function effectiveMap(user) {
   return m;
 }
 
+function RoleDialog({ open, user, branches, onClose, onSaved }) {
+  const [role, setRole] = useState('');
+  const [managed, setManaged] = useState([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open && user) {
+      setRole(user.role || 'teacher');
+      setManaged((user.managed_branch_ids || []).map(b => b._id || b.id || b));
+    }
+  }, [open, user]);
+
+  if (!user) return null;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.patch(`/admin/users/${user._id}/role`, { role, managed_branch_ids: managed });
+      onSaved(res.data.user);
+      toast.success('עודכן');
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>תפקיד וסניפים — {user.full_name || user.email}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField select label="תפקיד" value={role} onChange={e => setRole(e.target.value)} fullWidth>
+            {Object.entries(ROLE_LABELS).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
+          </TextField>
+          <FormControl fullWidth>
+            <InputLabel>סניפים מנוהלים</InputLabel>
+            <Select
+              multiple
+              value={managed}
+              onChange={e => setManaged(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+              input={<OutlinedInput label="סניפים מנוהלים" />}
+              renderValue={(selected) => (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {selected.map(id => {
+                    const b = branches.find(x => (x._id || x.id) === id);
+                    return <Chip key={id} label={b?.name || id} size="small" />;
+                  })}
+                </Stack>
+              )}
+            >
+              {branches.map(b => {
+                const id = b._id || b.id;
+                return (
+                  <MenuItem key={id} value={id}>
+                    <Checkbox checked={managed.indexOf(id) > -1} size="small" />
+                    <ListItemText primary={b.name} />
+                  </MenuItem>
+                );
+              })}
+            </Select>
+            <Typography variant="caption" sx={{ mt: 0.5, color: 'text.secondary' }}>
+              משאיר ריק = ברירת מחדל = הסניף הראשי של המשתמש
+            </Typography>
+          </FormControl>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={save} disabled={saving}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 export default function PermissionsManager() {
   const [users, setUsers] = useState([]);
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({});
   const [edits, setEdits] = useState({}); // userId -> { tabId -> bool }
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [roleDialog, setRoleDialog] = useState({ open: false, user: null });
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
     try {
-      const res = await api.get('/admin/users');
-      setUsers(res.data.users || []);
+      const [usersRes, branchesRes] = await Promise.all([
+        api.get('/admin/users'),
+        api.get('/branches'),
+      ]);
+      setUsers(usersRes.data.users || []);
+      setBranches(branchesRes.data.branches || []);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בטעינת משתמשים');
     } finally {
@@ -238,6 +321,11 @@ export default function PermissionsManager() {
                   ))}
                   <TableCell>
                     <Stack direction="row" spacing={0.5}>
+                      <Tooltip title="ערוך תפקיד וסניפים מנוהלים">
+                        <IconButton size="small" color="secondary" onClick={() => setRoleDialog({ open: true, user })}>
+                          <AdminPanelSettingsIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
                       <Tooltip title="שמור">
                         <span>
                           <IconButton
@@ -278,8 +366,16 @@ export default function PermissionsManager() {
 
       <Divider sx={{ my: 2 }} />
       <Typography variant="caption" color="text.secondary">
-        סה"כ {filteredUsers.length} משתמשים. ניתן לסנן לפי שם, אימייל ותפקיד.
+        סה"כ {filteredUsers.length} משתמשים. לחץ על אייקון "מנהל סניף" כדי לערוך תפקיד וסניפים מנוהלים.
       </Typography>
+
+      <RoleDialog
+        open={roleDialog.open}
+        user={roleDialog.user}
+        branches={branches}
+        onClose={() => setRoleDialog({ open: false, user: null })}
+        onSaved={(fresh) => setUsers(prev => prev.map(u => u._id === fresh._id ? { ...u, ...fresh } : u))}
+      />
     </Box>
   );
 }

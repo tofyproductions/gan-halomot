@@ -10,6 +10,12 @@ const userSchema = new mongoose.Schema({
     default: 'teacher',
   },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
+  // Branches the user manages. For branch_manager / accountant roles this is
+  // the source of truth for "which branches am I allowed to see". Defaults
+  // to an empty list — when empty AND role==='branch_manager', falls back to
+  // `[branch_id]` so single-branch managers don't need explicit setup.
+  // system_admin ignores this field (always sees everything).
+  managed_branch_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'Branch', default: [] },
   phone: { type: String, default: '' },
   id_number: { type: String, default: '', index: true },
   address: { type: String, default: '' },

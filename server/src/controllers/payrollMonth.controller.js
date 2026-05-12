@@ -41,6 +41,23 @@ async function getMonth(req, res, next) {
     } else if (amuta) {
       branchFilter.amuta_id = amuta;
     }
+    // Enforce per-user branch scope: non-admins are restricted to the
+    // branches they manage. system_admin / accountant see everything.
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (branchFilter._id && !allowed.includes(String(branchFilter._id))) {
+        // User asked for a branch they don't manage — return empty
+        return res.json({
+          rows: [], amutot: [], branches: [], branches_in_view: [], custom_columns: [], totals: {},
+        });
+      }
+      if (!branchFilter._id) {
+        branchFilter._id = { $in: allowed };
+      }
+    }
     const branches = await Branch.find(branchFilter).select('_id name amuta_id').lean();
     if (branches.length === 0) {
       return res.json({

@@ -2,7 +2,23 @@ const { Branch } = require('../models');
 
 async function getAll(req, res, next) {
   try {
-    const branches = await Branch.find({ is_active: true }).sort({ name: 1 }).lean();
+    const filter = { is_active: true };
+    // Non-admins see only the branches they manage. system_admin and
+    // accountant always see all branches (accountant needs cross-branch
+    // visibility for payroll consolidation).
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = req.user.managed_branch_ids || [];
+      if (managed.length > 0) {
+        filter._id = { $in: managed };
+      } else if (req.user.branch_id) {
+        filter._id = req.user.branch_id;
+      } else {
+        // Authenticated user with no branch — return empty list rather than all
+        return res.json({ branches: [] });
+      }
+    }
+    const branches = await Branch.find(filter).sort({ name: 1 }).lean();
     res.json({ branches: branches.map(b => ({ ...b, id: b._id })) });
   } catch (error) {
     next(error);
