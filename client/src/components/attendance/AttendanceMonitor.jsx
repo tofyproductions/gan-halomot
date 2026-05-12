@@ -54,9 +54,17 @@ export default function AttendanceMonitor() {
         const id = b._id || b.id;
         return api.get('/payroll/attendance', { params: { branch: id, month } })
           .then(res => ({ branch: b, data: res.data }))
-          .catch(err => ({ branch: b, error: err.message || 'שגיאה' }));
+          .catch(err => ({ branch: b, error: err.message || 'שגיאה', status: err.response?.status }));
       }))
-        .then(results => { setPerBranch(results); setData(null); })
+        .then(results => {
+          // Hide branches the user is not authorized to view — these come back
+          // as 403 from the server-side managed-branch filter. The branch
+          // dropdown should have excluded them upstream, but the JWT-based
+          // filter on /branches and the per-endpoint filter can drift while a
+          // freshly-deployed server is propagating.
+          setPerBranch(results.filter(r => r.status !== 403));
+          setData(null);
+        })
         .catch(err => { console.error(err); toast.error('שגיאה בטעינת מעקב החתמות'); })
         .finally(() => setLoading(false));
       return;

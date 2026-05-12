@@ -42,9 +42,9 @@ export default function SalaryTable() {
         const id = b._id || b.id;
         return api.get('/payroll/salary-summary', { params: { branch: id, month } })
           .then(res => ({ branch: b, data: res.data }))
-          .catch(err => ({ branch: b, error: err.message || 'שגיאה' }));
+          .catch(err => ({ branch: b, error: err.message || 'שגיאה', status: err.response?.status }));
       }))
-        .then(results => { setPerBranch(results); setData(null); })
+        .then(results => { setPerBranch(results.filter(r => r.status !== 403)); setData(null); })
         .catch(err => { console.error(err); toast.error('שגיאה בטעינת טבלת שכר'); })
         .finally(() => setLoading(false));
       return;

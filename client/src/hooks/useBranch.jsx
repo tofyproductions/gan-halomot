@@ -13,7 +13,23 @@ export function BranchProvider({ children }) {
   const fetchBranches = () => {
     api.get('/branches')
       .then((res) => {
-        const list = res.data.branches || [];
+        let list = res.data.branches || [];
+        // Belt-and-suspenders: if the JWT carries managed_branch_ids, filter
+        // the list to those IDs even if the server hasn't applied the same
+        // filter yet (e.g. during a rolling deploy). Without this the user
+        // can see branches in the dropdown that they're not authorized to
+        // fetch attendance / payroll data from — producing visible 403s.
+        try {
+          const token = localStorage.getItem('token');
+          if (token) {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            const role = payload.role;
+            const managed = payload.managed_branch_ids || [];
+            if (role && role !== 'system_admin' && role !== 'accountant' && managed.length > 0) {
+              list = list.filter(b => managed.includes(String(b._id || b.id)));
+            }
+          }
+        } catch { /* token unparseable — skip filter */ }
         setBranches(list);
         // If no branch selected and branches exist, select first
         if (!selectedBranch && list.length > 0) {
