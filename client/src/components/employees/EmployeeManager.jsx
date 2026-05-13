@@ -11,6 +11,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import LinkIcon from '@mui/icons-material/Link';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
+import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -445,11 +446,28 @@ export default function EmployeeManager() {
                               <EditIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="הסר">
-                            <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id: emp._id || emp.id })}>
-                              <DeleteIcon fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
+                          {!emp.is_active ? (
+                            <Tooltip title="החזר לפעילים">
+                              <IconButton
+                                size="small" color="success"
+                                onClick={async () => {
+                                  try {
+                                    await api.put(`/payroll/employees/${empId}`, { is_active: true });
+                                    toast.success('הוחזר לפעילים');
+                                    fetchEmployees();
+                                  } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+                                }}
+                              >
+                                <RestoreFromTrashIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="הסר">
+                              <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id: emp._id || emp.id })}>
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </TableCell>
                     )}
