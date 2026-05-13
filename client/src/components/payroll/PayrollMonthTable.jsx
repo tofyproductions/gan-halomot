@@ -486,6 +486,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן'];
 
     const headerTop = ['סניף', 'שם העובד', ...cols,
+      'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('הערות');
@@ -508,7 +509,12 @@ export default function PayrollMonthTable() {
           r.breakdown.rates?.global_ot_rate || '',
         );
       }
+      const tb = r.breakdown?.components?.teken_breakdown;
+      const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
       cells.push(
+        r.salary_type === 'global' && tb ? Math.round(tb.base_part) : '',
+        r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
+        r.salary_type === 'global' && tb ? Math.round(tb.ot_part) : '',
         computeTravel(r),
         r.manual.sick_days || '', r.manual.absence_days || '', r.manual.vacation_days || '', r.manual.holiday_pay || '',
         r.manual.advance_deduction_preset?.label || r.manual.advance_deduction_text || '',
@@ -549,7 +555,8 @@ export default function PayrollMonthTable() {
     days: 60,
     advance: 180,
     money: 82,
-    notes: 56,
+    teken: 95,            // base / completion / OT addition (תקן breakdown)
+    notes: 240,           // inline notes — readable without click
     custom: 110,
     adjust: 110,
   };
@@ -613,8 +620,7 @@ export default function PayrollMonthTable() {
         }}>
           <colgroup>
             <col style={{ width: W.name }} />
-            {/* Single 7-col hours block — rows already grouped by branch via
-                section headers, so the per-branch column blocks were redundant. */}
+            {/* 7-col hours block */}
             <col style={{ width: W.days }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
@@ -622,6 +628,10 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
+            {/* תקן breakdown — 3 new columns: base / completion / OT addition */}
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.teken }} />
             <col style={{ width: W.travel }} />
             <col style={{ width: W.days }} />
             <col style={{ width: W.days }} />
@@ -649,12 +659,15 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={11 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={14 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
             <TableRow>
               <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>שכר בסיס</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>השלמת שכר</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>תוספת שכר</TableCell>
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
@@ -689,7 +702,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 7 + 13 + customColumns.length;
+              const totalCols = 1 + 7 + 16 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -795,6 +808,19 @@ export default function PayrollMonthTable() {
                         return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
                       })()}
 
+                      {/* תקן breakdown — base / completion (with toggle) / OT addition */}
+                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
+                        <TekenBasePartCell row={r} />
+                      </TableCell>
+                      <TableCell align="center" sx={{ bgcolor: '#fefce8' }}>
+                        <TekenCompletionCell row={r} disabled={locked}
+                          onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
+                        />
+                      </TableCell>
+                      <TableCell align="center" sx={{ bgcolor: '#f0fdf4' }}>
+                        <TekenOtCell row={r} />
+                      </TableCell>
+
                       <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
                       <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
                       <TableCell align="center" sx={{ position: 'relative' }}>
@@ -850,10 +876,28 @@ export default function PayrollMonthTable() {
                       <TableCell align="center" sx={{ minWidth: 100 }}>
                         <AdjustmentSummary row={r} onOpen={() => setAdjustments({ open: true, row: r })} disabled={locked} />
                       </TableCell>
-                      <TableCell align="center">
-                        <IconButton size="small" onClick={() => setNotes({ open: true, row: r })} color={r.manual.notes ? 'primary' : 'default'}>
-                          <NoteAltIcon fontSize="small" />
-                        </IconButton>
+                      <TableCell
+                        onClick={() => setNotes({ open: true, row: r })}
+                        sx={{
+                          cursor: 'pointer',
+                          verticalAlign: 'top',
+                          padding: '6px 8px !important',
+                          fontSize: '0.72rem',
+                          lineHeight: 1.35,
+                          color: r.manual.notes ? 'text.primary' : 'text.disabled',
+                          whiteSpace: 'pre-wrap',
+                          overflow: 'hidden',
+                          maxHeight: 140,
+                          textOverflow: 'ellipsis',
+                          bgcolor: r.manual.notes ? 'rgba(254, 252, 232, 0.55)' : undefined,
+                          '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
+                        }}
+                      >
+                        {r.manual.notes
+                          ? r.manual.notes
+                          : <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
+                              <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
+                            </Box>}
                       </TableCell>
                     </TableRow>
                   );
@@ -969,6 +1013,69 @@ function VacationCell({ row }) {
           יתרה: {balance}
         </Typography>
       )}
+    </Stack>
+  );
+}
+
+function TekenBasePartCell({ row }) {
+  const tb = row.breakdown?.components?.teken_breakdown;
+  if (row.salary_type !== 'global' || !tb) {
+    return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
+  }
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>
+        {Math.round(tb.base_part).toLocaleString('he-IL')} ₪
+      </Typography>
+      <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+        ערך/שעה: {tb.hourly_value}
+      </Typography>
+    </Stack>
+  );
+}
+
+function TekenCompletionCell({ row, disabled, onToggle }) {
+  const tb = row.breakdown?.components?.teken_breakdown;
+  if (row.salary_type !== 'global' || !tb) {
+    return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
+  }
+  const enabled = row.manual.include_salary_completion !== false;
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      <Typography
+        variant="body2"
+        sx={{ fontWeight: 700, fontSize: '0.82rem', color: enabled ? 'warning.dark' : 'text.disabled', textDecoration: enabled ? 'none' : 'line-through' }}
+      >
+        {enabled ? `${Math.round(tb.completion).toLocaleString('he-IL')} ₪` : '0 ₪'}
+      </Typography>
+      <Tooltip title={enabled ? 'בטל השלמת שכר אוטומטית' : 'הפעל השלמת שכר אוטומטית'}>
+        <Chip
+          size="small"
+          color={enabled ? 'success' : 'default'}
+          variant={enabled ? 'filled' : 'outlined'}
+          label={enabled ? 'פעיל' : 'מבוטל'}
+          disabled={disabled}
+          onClick={(e) => { e.stopPropagation(); onToggle(!enabled); }}
+          sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer' }}
+        />
+      </Tooltip>
+    </Stack>
+  );
+}
+
+function TekenOtCell({ row }) {
+  const tb = row.breakdown?.components?.teken_breakdown;
+  if (row.salary_type !== 'global' || !tb || !tb.ot_part) {
+    return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
+  }
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem', color: 'success.dark' }}>
+        +{Math.round(tb.ot_part).toLocaleString('he-IL')} ₪
+      </Typography>
+      <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+        שע״נ × ערך/שעה
+      </Typography>
     </Stack>
   );
 }
