@@ -820,7 +820,7 @@ export default function PayrollMonthTable() {
                         )}
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setVacation({ open: true, row: r })}>
-                        <VacationCell row={r} onApplyAuto={(v) => patchManual(r.employee_id, { vacation_days: v })} />
+                        <VacationCell row={r} />
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setHolidayPay({ open: true, row: r })}>
                         <HolidayPayCell row={r} />
@@ -910,17 +910,24 @@ export default function PayrollMonthTable() {
   );
 }
 
-function VacationCell({ row, onApplyAuto }) {
+function VacationCell({ row }) {
   const manualVal = Number(row.manual.vacation_days) || 0;
   const auto = row.vacation_days_auto?.total_days || 0;
   const balance = row.vacation_info?.balance_from_payslip;
   const remaining = balance != null ? Math.round((balance - manualVal) * 10) / 10 : null;
+  const isGlobal = row.salary_type === 'global';
+
   if (manualVal > 0) {
     return (
       <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
         <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.85rem', color: 'primary.dark' }}>
           {manualVal}
         </Typography>
+        {isGlobal && (
+          <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled' }}>
+            ללא תשלום
+          </Typography>
+        )}
         {balance != null && (
           <Typography variant="caption" sx={{ fontSize: '0.6rem', color: remaining < 0 ? 'error.main' : 'text.disabled' }}>
             יתרה: {remaining}/{balance}
@@ -932,14 +939,18 @@ function VacationCell({ row, onApplyAuto }) {
   if (auto > 0) {
     return (
       <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-        <Tooltip title={`${auto} ימי חופשה מלוח החופשות. לחץ להחיל ולהוריד מהיתרה.`}>
+        <Tooltip title={`${auto} ימי חופשה מלוח חופשות הגן. לחץ על התא לפירוט ולאישור.`}>
           <Chip
-            size="small" color="primary" variant="filled"
-            label={`auto: ${auto}`}
-            onClick={(e) => { e.stopPropagation(); onApplyAuto(auto); }}
-            sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+            size="small" color="warning" variant="outlined"
+            label={`לוח: ${auto}`}
+            sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', pointerEvents: 'none' }}
           />
         </Tooltip>
+        {isGlobal && (
+          <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled' }}>
+            ללא תשלום
+          </Typography>
+        )}
         {balance != null && (
           <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
             יתרה: {balance}
