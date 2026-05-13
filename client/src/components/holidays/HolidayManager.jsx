@@ -3,7 +3,7 @@ import {
   Box, Typography, Card, CardContent, TextField, Button, Stack,
   Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
   Paper, IconButton, Tooltip, MenuItem, Dialog, DialogTitle,
-  DialogContent, DialogActions, Chip, Alert,
+  DialogContent, DialogActions, Chip, Alert, FormControlLabel, Checkbox,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -146,16 +146,24 @@ export default function HolidayManager() {
           </TableHead>
           <TableBody>
             {holidays.map(h => {
-              const days = Math.ceil((new Date(h.end_date) - new Date(h.start_date)) / 86400000) + 1;
+              const fullDays = Math.ceil((new Date(h.end_date) - new Date(h.start_date)) / 86400000) + 1;
+              const displayDays = h.is_half_day ? (fullDays - 0.5) : fullDays;
               return (
                 <TableRow key={h._id || h.id} hover>
                   <TableCell sx={{ fontWeight: 600 }}>
                     {h.name}
                     {h.is_custom && <Chip label="מותאם" size="small" variant="outlined" sx={{ ml: 1 }} />}
+                    {h.is_half_day && (
+                      <Chip
+                        label={`חצי יום (עד ${h.end_time || '12:00'})`}
+                        size="small" color="warning" variant="outlined"
+                        sx={{ ml: 1 }}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>{formatDate(h.start_date)}</TableCell>
                   <TableCell>{formatDate(h.end_date)}</TableCell>
-                  <TableCell align="center"><Chip label={days} size="small" /></TableCell>
+                  <TableCell align="center"><Chip label={displayDays} size="small" /></TableCell>
                   <TableCell align="center">
                     <Stack direction="row" spacing={0.5} justifyContent="center">
                       <Tooltip title="ערוך">
@@ -165,6 +173,8 @@ export default function HolidayManager() {
                             id: h._id || h.id, name: h.name,
                             start_date: new Date(h.start_date).toISOString().slice(0, 10),
                             end_date: new Date(h.end_date).toISOString().slice(0, 10),
+                            is_half_day: !!h.is_half_day,
+                            end_time: h.end_time || '12:00',
                           },
                         })}>
                           <EditIcon fontSize="small" />
@@ -203,6 +213,31 @@ export default function HolidayManager() {
               InputLabelProps={{ shrink: true }}
               onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, end_date: e.target.value } }))}
             />
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={!!dialog.data.is_half_day}
+                  onChange={e => setDialog(prev => ({
+                    ...prev,
+                    data: {
+                      ...prev.data,
+                      is_half_day: e.target.checked,
+                      end_time: e.target.checked ? (prev.data.end_time || '12:00') : '',
+                    },
+                  }))}
+                />
+              }
+              label="חצי יום (יום קצר ביום האחרון)"
+            />
+            {dialog.data.is_half_day && (
+              <TextField
+                label="עד שעה" type="time"
+                value={dialog.data.end_time || '12:00'}
+                fullWidth
+                InputLabelProps={{ shrink: true }}
+                onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, end_time: e.target.value } }))}
+              />
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>
