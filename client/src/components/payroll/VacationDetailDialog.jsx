@@ -128,14 +128,28 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                   סה״כ ימי חופשה מלוח: {row.vacation_days_auto.total_days}
                 </Typography>
-                {(!manualDays || Number(manualDays) === 0) && (
-                  <Button variant="contained" size="small" onClick={() => {
-                    setManualDays(row.vacation_days_auto.total_days);
-                    saveManualDays(row.vacation_days_auto.total_days);
-                  }}>
-                    החל לטבלת השכר
-                  </Button>
-                )}
+                <Stack direction="row" spacing={1}>
+                  {Number(manualDays) > 0 && (
+                    <Button
+                      variant="outlined" color="error" size="small"
+                      onClick={() => {
+                        if (!confirm('לאפס את ימי החופש בטבלת השכר לאפס?')) return;
+                        setManualDays(0);
+                        saveManualDays(0);
+                      }}
+                    >
+                      בטל / אפס
+                    </Button>
+                  )}
+                  {(!manualDays || Number(manualDays) === 0) && (
+                    <Button variant="contained" size="small" onClick={() => {
+                      setManualDays(row.vacation_days_auto.total_days);
+                      saveManualDays(row.vacation_days_auto.total_days);
+                    }}>
+                      החל לטבלת השכר
+                    </Button>
+                  )}
+                </Stack>
               </Stack>
             </>
           )}
