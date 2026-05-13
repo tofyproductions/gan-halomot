@@ -45,7 +45,7 @@ export default function PayrollPage() {
 
   return (
     <Box dir="rtl">
-      <Paper sx={{ borderRadius: 3, mb: 2 }} elevation={0} variant="outlined">
+      <Paper dir="rtl" sx={{ borderRadius: 3, mb: 2, overflow: 'hidden' }} elevation={0} variant="outlined">
         <Box sx={{ px: 2, pt: 1.5, pb: 0 }}>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>שכר</Typography>
         </Box>
@@ -54,7 +54,10 @@ export default function PayrollPage() {
           onChange={handleChange}
           variant="scrollable"
           scrollButtons="auto"
-          sx={{ borderBottom: 1, borderColor: 'divider' }}
+          dir="rtl"
+          sx={{
+            borderBottom: 1, borderColor: 'divider',
+          }}
         >
           {TABS.map(t => (
             <Tab

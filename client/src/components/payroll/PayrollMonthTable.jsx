@@ -26,6 +26,7 @@ import VacationDetailDialog from './VacationDetailDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
+import EmployeeDetailDialog from './EmployeeDetailDialog';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Monthly payroll table — auto-calculated per-amuta hours from punches,
@@ -342,6 +343,7 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [cibusDlg, setCibusDlg] = useState(false);
+  const [empDetail, setEmpDetail] = useState({ open: false, employeeId: null });
 
   const isFinalized = useMemo(() => {
     if (!data?.rows?.length) return false;
@@ -721,7 +723,20 @@ export default function PayrollMonthTable() {
                       }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           <Box sx={{ flex: 1, lineHeight: 1.2 }}>
-                            {r.full_name}
+                            <Box
+                              component="span"
+                              onClick={() => setEmpDetail({ open: true, employeeId: r.employee_id })}
+                              sx={{
+                                cursor: 'pointer',
+                                color: 'primary.main',
+                                textDecoration: 'underline',
+                                textDecorationStyle: 'dotted',
+                                textUnderlineOffset: 3,
+                                '&:hover': { color: 'primary.dark', textDecorationStyle: 'solid' },
+                              }}
+                            >
+                              {r.full_name}
+                            </Box>
                             {r.israeli_id && (
                               <Typography variant="caption" sx={{ display: 'block', color: 'text.disabled', fontSize: '0.65rem' }}>
                                 {r.israeli_id}
@@ -880,6 +895,13 @@ export default function PayrollMonthTable() {
         month={month}
         onClose={() => setCibusDlg(false)}
         onImported={fetchData}
+      />
+      <EmployeeDetailDialog
+        open={empDetail.open}
+        employeeId={empDetail.employeeId}
+        initialMonth={month}
+        onClose={() => setEmpDetail({ open: false, employeeId: null })}
+        onChanged={fetchData}
       />
     </Box>
   );
