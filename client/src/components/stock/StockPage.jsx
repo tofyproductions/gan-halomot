@@ -15,6 +15,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { toast } from 'react-toastify';
+import { useConfirm } from '../shared/ConfirmProvider';
 import StockItemDialog from './StockItemDialog';
 import StockHistoryDrawer from './StockHistoryDrawer';
 import StockCountDialog from './StockCountDialog';
@@ -118,6 +119,7 @@ function StockItemCard({ item, onAdjust, onCount, onEdit, onDelete, onHistory })
 
 export default function StockPage() {
   const { selectedBranch, branches } = useBranch();
+  const confirm = useConfirm();
   const isAll = selectedBranch === 'all';
 
   const [categories, setCategories] = useState([]);
@@ -186,7 +188,7 @@ export default function StockPage() {
   }
 
   async function handleDelete(item) {
-    if (!confirm(`למחוק את "${item.name}"?`)) return;
+    if (!(await confirm({ title: 'מחיקת פריט מלאי', message: `למחוק את "${item.name}"?`, danger: true, remember_key: 'delete-stock-item' }))) return;
     try {
       await api.delete(`/stock/items/${item._id}`);
       setItems(prev => prev.filter(i => i._id !== item._id));

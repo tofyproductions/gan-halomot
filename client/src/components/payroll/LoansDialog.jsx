@@ -9,6 +9,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Loans management for one employee. Lists every loan with progress
@@ -21,6 +22,7 @@ import api from '../../api/client';
  * Persisted via PATCH /employees/:id with the full loans[] array.
  */
 export default function LoansDialog({ open, row, onClose, onSaved }) {
+  const confirm = useConfirm();
   const [loans, setLoans] = useState([]);
   const [draft, setDraft] = useState({ total_amount: '', installment_amount: '', installments_total: '', notes: '' });
   const [saving, setSaving] = useState(false);
@@ -61,8 +63,8 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
     persist(next);
   };
 
-  const removeLoan = (idx) => {
-    if (!confirm('למחוק הלוואה זו?')) return;
+  const removeLoan = async (idx) => {
+    if (!(await confirm({ title: 'מחיקת הלוואה', message: 'למחוק הלוואה זו?', danger: true, remember_key: 'delete-loan' }))) return;
     const next = loans.filter((_, i) => i !== idx);
     setLoans(next);
     persist(next);

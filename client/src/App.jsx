@@ -32,6 +32,7 @@ import RequestsManager from './components/employees/RequestsManager';
 import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
 import { BranchProvider } from './hooks/useBranch';
+import { ConfirmProvider } from './components/shared/ConfirmProvider';
 
 function AppRoutes() {
   return (
@@ -100,8 +101,10 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BranchProvider>
-      <AppRoutes />
-    </BranchProvider>
+    <ConfirmProvider>
+      <BranchProvider>
+        <AppRoutes />
+      </BranchProvider>
+    </ConfirmProvider>
   );
 }

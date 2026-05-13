@@ -17,6 +17,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatCurrency } from '../../utils/hebrewYear';
 import { useBranch } from '../../hooks/useBranch';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * EmployeeDetailDialog — the "zoom into one employee" view. Tabs:
@@ -43,6 +44,7 @@ function emptyBonus() {
 
 export default function EmployeeDetailDialog({ open, employeeId, initialMonth, onClose, onChanged }) {
   const { branches } = useBranch();
+  const confirm = useConfirm();
   const [tab, setTab] = useState(0);
   const [month, setMonth] = useState(initialMonth || currentYearMonth());
   const [employee, setEmployee] = useState(null);
@@ -217,7 +219,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
 
   // --- Delete a single punch ---
   const deletePunch = async (punchId) => {
-    if (!confirm('למחוק את ההחתמה? (לא ניתן לשחזר)')) return;
+    if (!(await confirm({ title: 'מחיקת החתמה', message: 'למחוק את ההחתמה? (לא ניתן לשחזר)', danger: true, remember_key: 'delete-punch' }))) return;
     try {
       await api.delete(`/payroll/punches/${punchId}`);
       toast.success('נמחק');

@@ -6,6 +6,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import UndoIcon from '@mui/icons-material/Undo';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 const REASON_LABELS = {
   count: { label: 'ספירה', color: '#0ea5e9' },
@@ -24,6 +25,7 @@ function fmtDate(d) {
 }
 
 export default function StockHistoryDrawer({ open, onClose, item, onItemChange }) {
+  const confirm = useConfirm();
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -45,7 +47,7 @@ export default function StockHistoryDrawer({ open, onClose, item, onItemChange }
   }
 
   async function handleUndo(m) {
-    if (!confirm(`לבטל את התנועה ${m.delta > 0 ? '+' : ''}${m.delta}?`)) return;
+    if (!(await confirm({ title: 'ביטול תנועה', message: `לבטל את התנועה ${m.delta > 0 ? '+' : ''}${m.delta}?`, danger: true, remember_key: 'undo-stock-movement' }))) return;
     try {
       const res = await api.post(`/stock/movements/${m._id}/undo`);
       onItemChange?.(res.data.item);

@@ -7,6 +7,7 @@ import {
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Shows the vacation balance for an employee in a given month:
@@ -18,6 +19,7 @@ import api from '../../api/client';
  * waiting for the employee to file a request.
  */
 export default function VacationDetailDialog({ open, row, month, onClose, onSaved }) {
+  const confirm = useConfirm();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [manualDays, setManualDays] = useState(0);
@@ -132,8 +134,8 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                   {Number(manualDays) > 0 && (
                     <Button
                       variant="outlined" color="error" size="small"
-                      onClick={() => {
-                        if (!confirm('לאפס את ימי החופש בטבלת השכר לאפס?')) return;
+                      onClick={async () => {
+                        if (!(await confirm({ title: 'איפוס ימי חופש', message: 'לאפס את ימי החופש בטבלת השכר לאפס?', danger: true, remember_key: 'reset-vacation-days' }))) return;
                         setManualDays(0);
                         saveManualDays(0);
                       }}

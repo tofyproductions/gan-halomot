@@ -7,8 +7,10 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 export default function StockCategoryManager({ open, onClose, categories, branchId, onChanged }) {
+  const confirm = useConfirm();
   const [newName, setNewName] = useState('');
   const [editing, setEditing] = useState(null);
   const [editName, setEditName] = useState('');
@@ -39,7 +41,7 @@ export default function StockCategoryManager({ open, onClose, categories, branch
   }
 
   async function handleDelete(c) {
-    if (!confirm(`למחוק קטגוריה "${c.name}"?`)) return;
+    if (!(await confirm({ title: 'מחיקת קטגוריה', message: `למחוק קטגוריה "${c.name}"?`, danger: true, remember_key: 'delete-stock-category' }))) return;
     try {
       await api.delete(`/stock/categories/${c._id}`);
       onChanged?.();

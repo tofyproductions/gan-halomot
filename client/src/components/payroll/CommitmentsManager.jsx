@@ -12,6 +12,7 @@ import LinkIcon from '@mui/icons-material/Link';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Manage weekly work commitments per employee. Loads / shows / edits the
@@ -241,6 +242,7 @@ function ImportDialog({ open, onClose, onDone, employees }) {
 }
 
 export default function CommitmentsManager() {
+  const confirm = useConfirm();
   const { selectedBranch, isAllBranches } = useBranch();
   const [commitments, setCommitments] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -266,8 +268,8 @@ export default function CommitmentsManager() {
 
   useEffect(() => { load(); }, [load]);
 
-  const remove = (id) => {
-    if (!confirm('להסיר התחייבות זו?')) return;
+  const remove = async (id) => {
+    if (!(await confirm({ title: 'הסרת התחייבות', message: 'להסיר התחייבות זו?', danger: true, remember_key: 'remove-commitment' }))) return;
     api.delete(`/payroll/commitments/${id}`)
       .then(() => load())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

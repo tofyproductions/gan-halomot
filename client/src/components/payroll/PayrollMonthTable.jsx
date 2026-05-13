@@ -21,6 +21,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useConfirm } from '../shared/ConfirmProvider';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
@@ -330,6 +331,7 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 
 export default function PayrollMonthTable() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
+  const confirm = useConfirm();
   const [month, setMonth] = useState(currentYearMonth());
   const [viewMode, setViewMode] = useState('branch'); // 'branch' | 'amuta'
   const [selectedAmuta, setSelectedAmuta] = useState('');
@@ -400,15 +402,15 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   }, []);
 
-  const removeColumn = (colId) => {
-    if (!confirm('להסיר את העמודה? הנתונים שהוזנו לעובדים יישמרו בבסיס הנתונים.')) return;
+  const removeColumn = async (colId) => {
+    if (!(await confirm({ title: 'הסרת עמודה', message: 'להסיר את העמודה? הנתונים שהוזנו לעובדים יישמרו בבסיס הנתונים.', danger: true, remember_key: 'remove-payroll-column' }))) return;
     api.delete(`/payroll-month/custom-columns/${colId}`)
       .then(() => fetchData())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const applyAutoHolidays = () => {
-    if (!confirm('להחיל דמי חגים אוטומטית לכל הזכאים? לא ידרסו ערכים שכבר הוזנו ידנית.')) return;
+  const applyAutoHolidays = async () => {
+    if (!(await confirm({ title: 'החלת דמי חגים', message: 'להחיל דמי חגים אוטומטית לכל הזכאים? לא ידרסו ערכים שכבר הוזנו ידנית.', remember_key: 'apply-auto-holidays' }))) return;
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/apply-auto-holidays`, null, { params })
@@ -420,8 +422,8 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const applyKindergartenVacation = () => {
-    if (!confirm('להחיל ימי חופשה מלוח חופשות הגן לכל העובדים? לא ידרסו ערכים שכבר הוזנו ידנית.')) return;
+  const applyKindergartenVacation = async () => {
+    if (!(await confirm({ title: 'החלת ימי חופשה מלוח', message: 'להחיל ימי חופשה מלוח חופשות הגן לכל העובדים? לא ידרסו ערכים שכבר הוזנו ידנית.', remember_key: 'apply-kindergarten-vacation' }))) return;
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/apply-kindergarten-vacation`, null, { params })
@@ -433,8 +435,8 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const applyVacationRequests = () => {
-    if (!confirm('לסנכרן בקשות חופש מאושרות מהחודש הזה לטבלת השכר?')) return;
+  const applyVacationRequests = async () => {
+    if (!(await confirm({ title: 'סנכרון בקשות חופש', message: 'לסנכרן בקשות חופש מאושרות מהחודש הזה לטבלת השכר?', remember_key: 'sync-vacation-requests' }))) return;
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/apply-vacation-requests`, null, { params })
@@ -446,8 +448,8 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const finalize = () => {
-    if (!confirm('לנעול את החודש?')) return;
+  const finalize = async () => {
+    if (!(await confirm({ title: 'נעילת חודש', message: 'לנעול את החודש? לא ניתן יהיה לערוך עד ביטול הנעילה.', danger: true, remember_key: 'finalize-month' }))) return;
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/finalize`, null, { params })

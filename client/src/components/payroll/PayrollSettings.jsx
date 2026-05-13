@@ -8,6 +8,7 @@ import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Payroll settings panel — currently houses two admin tools:
@@ -25,6 +26,7 @@ const ACTION_LABELS = {
 };
 
 function PresetOptionsManager() {
+  const confirm = useConfirm();
   const FIELD = 'advance_deduction';
   const [options, setOptions] = useState([]);
   const [draft, setDraft] = useState({ label: '', action: 'custom', percent: 50 });
@@ -56,8 +58,8 @@ function PresetOptionsManager() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const remove = (id) => {
-    if (!confirm('להסיר אפשרות זו?')) return;
+  const remove = async (id) => {
+    if (!(await confirm({ title: 'הסרת אפשרות', message: 'להסיר אפשרות זו?', danger: true, remember_key: 'remove-payroll-preset' }))) return;
     api.delete(`/payroll-month/presets/${id}`)
       .then(() => load())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

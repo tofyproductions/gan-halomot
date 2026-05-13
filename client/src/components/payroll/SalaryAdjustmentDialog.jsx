@@ -8,6 +8,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Per-employee per-month salary-adjustment editor. Lists existing
@@ -40,6 +41,7 @@ function typeColor(t) {
 }
 
 export default function SalaryAdjustmentDialog({ open, onClose, row, month, onChanged }) {
+  const confirm = useConfirm();
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState({ type: 'money_add', amount: '', hours: '', reason: '' });
@@ -87,8 +89,8 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const remove = (id) => {
-    if (!confirm('להסיר עדכון זה?')) return;
+  const remove = async (id) => {
+    if (!(await confirm({ title: 'הסרת עדכון שכר', message: 'להסיר עדכון זה?', danger: true, remember_key: 'remove-salary-adj' }))) return;
     api.delete(`/payroll-month/adjustments/${id}`)
       .then(() => { load(); onChanged && onChanged(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

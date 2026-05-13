@@ -11,6 +11,7 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * Dialog for managing all punches on a specific (employee × day). Manager
@@ -48,6 +49,7 @@ function statusChip(p) {
 }
 
 export default function DayPunchesDialog({ open, onClose, employee, date, branchId, isUnlinked, israeliId, onChanged }) {
+  const confirm = useConfirm();
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState({ in_time: '', out_time: '', note: '' });
@@ -85,8 +87,8 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   };
   const cancelEdit = (id) => setEditing(prev => { const x = { ...prev }; delete x[id]; return x; });
 
-  const del = (p) => {
-    if (!confirm('להסיר את ההחתמה?')) return;
+  const del = async (p) => {
+    if (!(await confirm({ title: 'הסרת החתמה', message: 'להסיר את ההחתמה?', danger: true, remember_key: 'delete-punch' }))) return;
     api.delete(`/payroll/punches/${p._id}`)
       .then(() => { load(); onChanged?.(); toast.success('נמחק'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
