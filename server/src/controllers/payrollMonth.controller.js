@@ -297,6 +297,7 @@ async function getMonth(req, res, next) {
           ineligible: holidayPayInfo.ineligible_days,
           blocking_reason: holidayPayInfo.blocking_reason,
           is_eligible: holidayPayInfo.total_days > 0,
+          calc: holidayPayInfo.calc,
         },
         loans_info: (() => {
           const list = Array.isArray(emp.loans) ? emp.loans : [];

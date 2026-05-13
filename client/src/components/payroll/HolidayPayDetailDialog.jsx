@@ -85,6 +85,21 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
             </Stack>
           )}
 
+          {isHourly && auto.calc && auto.total_days > 0 && (
+            <Alert severity="success" icon={false} sx={{ borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>איך חושב הסכום?</Typography>
+              <Box component="pre" sx={{ fontFamily: 'inherit', m: 0, fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>
+                {`תעריף שעתי: ${auto.calc.hourly_rate} ₪/שעה
+ממוצע שעות יומי (מהחתמות החודש): ${auto.calc.avg_daily_hours}h
+תעריף יומי = ${auto.calc.hourly_rate} × ${auto.calc.avg_daily_hours} = ${auto.calc.daily_rate} ₪
+סה״כ = ${auto.calc.daily_rate} ₪ × ${auto.total_days} ימי חג זכאי = ${auto.total_pay} ₪`}
+              </Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                אם בחודש לא היו החתמות, ברירת המחדל היא 8 שעות יומיות.
+              </Typography>
+            </Alert>
+          )}
+
           {isHourly && (auto.eligible.length > 0 || auto.ineligible.length > 0) && (
             <>
               <Divider />

@@ -79,6 +79,11 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     total_days: 0,
     total_pay: 0,
     blocking_reason: null, // populated when whole employee disqualified (global / no tenure)
+    calc: {
+      hourly_rate: Number(hourlyRate) || 0,
+      avg_daily_hours: Math.round((Number(avgDailyHours) || 8) * 100) / 100,
+      daily_rate: Math.round(((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8)) * 100) / 100,
+    },
   };
 
   const monthHolidays = getHolidaysInMonth(monthYM);
