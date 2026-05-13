@@ -21,6 +21,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
@@ -331,6 +332,11 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 
 export default function PayrollMonthTable() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
+  const { isAdmin, isAccountant, user } = useAuth();
+  // Branch managers see the payroll table in READ-ONLY mode. Any edit needs
+  // to be routed via the accountant — server enforces this; client locks the
+  // inline cells visually.
+  const readOnly = !(isAdmin || isAccountant);
   const confirm = useConfirm();
   const [month, setMonth] = useState(currentYearMonth());
   const [viewMode, setViewMode] = useState('branch'); // 'branch' | 'amuta'
@@ -375,6 +381,10 @@ export default function PayrollMonthTable() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const patchManual = useCallback((employeeId, patch) => {
+    if (readOnly) {
+      toast.info('מצב צפייה — צור קשר עם הנה״ח לעדכון השינוי');
+      return;
+    }
     setData(prev => {
       if (!prev) return prev;
       return {
@@ -384,7 +394,7 @@ export default function PayrollMonthTable() {
     });
     api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
-  }, [month, fetchData]);
+  }, [month, fetchData, readOnly]);
 
   const patchCustomValue = useCallback((employeeId, colId, value) => {
     const row = data.rows.find(r => r.employee_id === employeeId);
@@ -576,6 +586,16 @@ export default function PayrollMonthTable() {
 
   return (
     <Box dir="rtl">
+      {readOnly && (
+        <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.50', border: '1px solid', borderColor: 'info.light' }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.dark' }}>
+            👁️ מצב צפייה בלבד — עריכת טבלת השכר היא באחריות הנה״ח
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            אם דרוש שינוי — צור קשר עם הנה״ח עם פירוט העובד, החודש והשדה.
+          </Typography>
+        </Box>
+      )}
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
           <TextField type="month" size="small" label="חודש" value={month} onChange={e => setMonth(e.target.value)} sx={{ width: 160 }} InputLabelProps={{ shrink: true }} />
@@ -594,16 +614,16 @@ export default function PayrollMonthTable() {
           <Typography variant="caption" color="text.secondary">
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
           </Typography>
-          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined">הוסף עמודה</Button>
-          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success">ייבוא סיבוס</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning">החל דמי חגים</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary">חופשה מלוח</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info">סנכרן בקשות</Button>
+          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={readOnly}>הוסף עמודה</Button>
+          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={readOnly}>ייבוא סיבוס</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={readOnly}>החל דמי חגים</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={readOnly}>חופשה מלוח</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={readOnly}>סנכרן בקשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
-            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small">פתח לעריכה</Button>
-            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small">נעל חודש</Button>}
+            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={readOnly}>פתח לעריכה</Button>
+            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small" disabled={readOnly}>נעל חודש</Button>}
         </Stack>
       </Paper>
 

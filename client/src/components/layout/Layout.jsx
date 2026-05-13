@@ -1,7 +1,11 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
 import Header from './Header';
 import { useBranch } from '../../hooks/useBranch';
+
+// Routes that benefit from extra horizontal space — payroll/attendance tables
+// are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
+const WIDE_ROUTES = ['/payroll', '/attendance', '/employees'];
 
 /**
  * Branch → subtle background tint. The tint is very light so text remains
@@ -66,10 +70,24 @@ export default function Layout() {
 
       <Box sx={{ position: 'relative', zIndex: 1 }}>
         <Header />
-        <Box sx={{ maxWidth: 1200, mx: 'auto', px: { xs: 1, sm: 2 }, py: { xs: 1.5, sm: 3 } }}>
-          <Outlet />
-        </Box>
+        <RouteAwareContainer />
       </Box>
     </Box>
   );
 }
+
+function RouteAwareContainer() {
+  const { pathname } = useLocation();
+  const isWide = WIDE_ROUTES.some(r => pathname === r || pathname.startsWith(r + '/'));
+  return (
+    <Box sx={{
+      maxWidth: isWide ? '100%' : 1200,
+      mx: 'auto',
+      px: { xs: 1, sm: 2 },
+      py: { xs: 1.5, sm: 3 },
+    }}>
+      <Outlet />
+    </Box>
+  );
+}
+
