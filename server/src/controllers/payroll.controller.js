@@ -596,15 +596,20 @@ async function listClockUsers(req, res, next) {
     const clockUsers = Array.isArray(branchDoc.clock_users) ? branchDoc.clock_users : [];
     const userIds = [...new Set(clockUsers.map(u => String(u.user_id || '')).filter(Boolean))];
 
-    // Look up existing employees in this branch that already carry one of
-    // these Israeli IDs, so we can tag each clock user with `linked_employee`.
+    // Look up existing employees with these Israeli IDs — anywhere in the
+    // system, not just the current branch. A clock at branch A can match an
+    // employee whose home branch is B (cross-branch worker); we still want to
+    // mark her as linked so the admin doesn't try to re-assign her.
     const existing = userIds.length
       ? await Employee.find({
-          branch_id: branch,
           israeli_id: { $in: userIds },
-        }).select('_id full_name israeli_id').lean()
+        }).populate('branch_id', 'name').select('_id full_name israeli_id branch_id is_active').lean()
       : [];
-    const byId = new Map(existing.map(e => [e.israeli_id, e]));
+    const byId = new Map(existing.map(e => [e.israeli_id, {
+      _id: e._id, full_name: e.full_name, israeli_id: e.israeli_id,
+      branch_name: e.branch_id?.name || '',
+      is_active: e.is_active,
+    }]));
 
     res.json({
       branch_id: String(branch),

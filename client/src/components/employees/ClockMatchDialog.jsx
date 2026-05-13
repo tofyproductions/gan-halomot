@@ -43,9 +43,11 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   useEffect(() => {
     if (!open || !effectiveBranch) return;
     setLoading(true);
+    // Load employees system-wide (not just this branch) so cross-branch
+    // workers show up in the assignment dropdown too.
     Promise.all([
       api.get('/payroll/clock-users', { params: { branch: effectiveBranch } }),
-      api.get('/payroll/employees', { params: { branch: effectiveBranch, active: 'true' } }),
+      api.get('/payroll/employees', { params: { active: 'true' } }),
     ])
       .then(([clockRes, empRes]) => {
         setClockUsers(clockRes.data.clock_users || []);
@@ -149,16 +151,25 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
                   כבר משויכים ({linked.length})
                 </Typography>
                 <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                  {linked.map(u => (
-                    <Chip
-                      key={u.user_id}
-                      icon={<CheckCircleIcon />}
-                      label={`${u.linked_employee.full_name} · ${u.user_id}`}
-                      size="small"
-                      color="success"
-                      variant="outlined"
-                    />
-                  ))}
+                  {linked.map(u => {
+                    const le = u.linked_employee;
+                    const isCrossBranch = le.branch_name && le.branch_name.replace(/\s+/g, ' ').trim() !== (branchName || '').replace(/\s+/g, ' ').trim();
+                    return (
+                      <Chip
+                        key={u.user_id}
+                        icon={<CheckCircleIcon />}
+                        label={
+                          <span>
+                            {le.full_name} · {u.user_id}
+                            {isCrossBranch && <span style={{ marginInlineStart: 6, opacity: 0.75, fontSize: '0.75em' }}>({le.branch_name})</span>}
+                          </span>
+                        }
+                        size="small"
+                        color={isCrossBranch ? 'secondary' : 'success'}
+                        variant="outlined"
+                      />
+                    );
+                  })}
                 </Stack>
               </Box>
             )}
