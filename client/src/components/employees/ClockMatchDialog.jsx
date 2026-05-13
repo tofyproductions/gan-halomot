@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, Typography,
   Table, TableBody, TableCell, TableHead, TableRow, TableContainer, Paper,
-  Select, MenuItem, Chip, Alert, Box,
+  Select, MenuItem, Chip, Alert, Box, FormControl, InputLabel,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useBranch } from '../../hooks/useBranch';
 
 /**
  * ClockMatchDialog — bulk-assign clock user IDs to payroll employees.
@@ -24,6 +25,13 @@ import api from '../../api/client';
  * checklist so the admin knows what's done.
  */
 export default function ClockMatchDialog({ open, branchId, branchName, onClose, onSaved }) {
+  const { branches } = useBranch();
+  // When the global picker is on 'all', let the user pick a specific branch
+  // inside the dialog (the clock-users endpoint can only handle one branch).
+  const isAll = !branchId || branchId === 'all';
+  const [pickedBranch, setPickedBranch] = useState('');
+  const effectiveBranch = isAll ? pickedBranch : branchId;
+
   const [clockUsers, setClockUsers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [updatedAt, setUpdatedAt] = useState(null);
@@ -33,11 +41,11 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   const [selections, setSelections] = useState({});
 
   useEffect(() => {
-    if (!open || !branchId) return;
+    if (!open || !effectiveBranch) return;
     setLoading(true);
     Promise.all([
-      api.get('/payroll/clock-users', { params: { branch: branchId } }),
-      api.get('/payroll/employees', { params: { branch: branchId, active: 'true' } }),
+      api.get('/payroll/clock-users', { params: { branch: effectiveBranch } }),
+      api.get('/payroll/employees', { params: { branch: effectiveBranch, active: 'true' } }),
     ])
       .then(([clockRes, empRes]) => {
         setClockUsers(clockRes.data.clock_users || []);
@@ -50,7 +58,7 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
         toast.error('שגיאה בטעינת נתוני השעון');
       })
       .finally(() => setLoading(false));
-  }, [open, branchId]);
+  }, [open, effectiveBranch]);
 
   const linked = useMemo(() => clockUsers.filter(u => u.linked_employee), [clockUsers]);
   const unlinked = useMemo(() => clockUsers.filter(u => !u.linked_employee), [clockUsers]);
@@ -101,10 +109,26 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>
-        שיוך עובדים לשעון — {branchName || ''}
+        שיוך עובדים לשעון{isAll ? '' : ` — ${branchName || ''}`}
       </DialogTitle>
       <DialogContent>
-        {loading ? (
+        {isAll && (
+          <FormControl size="small" fullWidth sx={{ mt: 1, mb: 2 }}>
+            <InputLabel>בחר סניף</InputLabel>
+            <Select
+              value={pickedBranch}
+              label="בחר סניף"
+              onChange={e => setPickedBranch(e.target.value)}
+            >
+              {(branches || []).map(b => (
+                <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+        {!effectiveBranch ? (
+          <Alert severity="info">בחר סניף ספציפי מהרשימה למעלה כדי לטעון את משתמשי השעון.</Alert>
+        ) : loading ? (
           <Typography sx={{ py: 4, textAlign: 'center' }}>טוען…</Typography>
         ) : (
           <Stack spacing={2}>
