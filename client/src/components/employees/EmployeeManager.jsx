@@ -169,6 +169,13 @@ export default function EmployeeManager() {
         bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
         notes: emp.notes || '',
         id: emp._id || emp.id,
+        branch_rates: (emp.branch_rates || []).map(br => ({
+          branch_id: String(br.branch_id?._id || br.branch_id),
+          hourly_rate: br.hourly_rate ?? '',
+          global_salary: br.global_salary ?? '',
+          global_ot_rate: br.global_ot_rate ?? '',
+          required_hours: br.required_hours ?? '',
+        })),
         ...primary,
       },
       original: emp,
@@ -212,6 +219,16 @@ export default function EmployeeManager() {
     if (Array.isArray(distribution)) {
       payload.amuta_distribution = distribution;
     }
+    // Per-branch rate overrides for cross-branch workers.
+    payload.branch_rates = (data.branch_rates || [])
+      .filter(br => br.branch_id && (br.hourly_rate || br.global_salary))
+      .map(br => ({
+        branch_id: br.branch_id,
+        hourly_rate: br.hourly_rate === '' ? null : Number(br.hourly_rate),
+        global_salary: br.global_salary === '' ? null : Number(br.global_salary),
+        global_ot_rate: br.global_ot_rate === '' ? null : Number(br.global_ot_rate),
+        required_hours: br.required_hours === '' ? null : Number(br.required_hours),
+      }));
 
     try {
       if (mode === 'add') {
@@ -579,6 +596,80 @@ export default function EmployeeManager() {
                 />
               </Stack>
             )}
+
+            <Divider />
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>תעריפים פר־סניף (עבודה רב-סניפית)</Typography>
+              <Chip size="small" label="אופציונלי" variant="outlined" />
+            </Stack>
+            <Alert severity="info" sx={{ borderRadius: 2, py: 0.5 }}>
+              עובדת בכמה סניפים? הוסף שורה לכל סניף נוסף עם התעריף שלה שם.
+              ההחתמות שתבצע באותו סניף יחושבו לפי התעריף המוגדר כאן.
+            </Alert>
+            {(dialog.data.branch_rates || []).map((br, i) => (
+              <Stack key={i} direction="row" spacing={1} alignItems="center">
+                <TextField select label="סניף" size="small" sx={{ width: 200 }}
+                  value={br.branch_id || ''}
+                  onChange={e => {
+                    const arr = [...(dialog.data.branch_rates || [])];
+                    arr[i].branch_id = e.target.value;
+                    updateField('branch_rates', arr);
+                  }}
+                >
+                  {(branches || []).map(b => (
+                    <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+                  ))}
+                </TextField>
+                {dialog.data.salary_type === 'hourly' ? (
+                  <TextField label="תעריף שעתי" type="number" size="small" sx={{ width: 140 }}
+                    value={br.hourly_rate}
+                    onChange={e => {
+                      const arr = [...(dialog.data.branch_rates || [])];
+                      arr[i].hourly_rate = e.target.value;
+                      updateField('branch_rates', arr);
+                    }}
+                    InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                  />
+                ) : (
+                  <>
+                    <TextField label="שכר תקן" type="number" size="small" sx={{ width: 130 }}
+                      value={br.global_salary}
+                      onChange={e => {
+                        const arr = [...(dialog.data.branch_rates || [])];
+                        arr[i].global_salary = e.target.value;
+                        updateField('branch_rates', arr);
+                      }}
+                    />
+                    <TextField label="שעות נדרשות" type="number" size="small" sx={{ width: 130 }}
+                      value={br.required_hours}
+                      onChange={e => {
+                        const arr = [...(dialog.data.branch_rates || [])];
+                        arr[i].required_hours = e.target.value;
+                        updateField('branch_rates', arr);
+                      }}
+                    />
+                  </>
+                )}
+                <IconButton color="error" onClick={() => {
+                  const arr = (dialog.data.branch_rates || []).filter((_, idx) => idx !== i);
+                  updateField('branch_rates', arr);
+                }}>
+                  <DeleteIcon />
+                </IconButton>
+              </Stack>
+            ))}
+            <Button
+              startIcon={<AddIcon />}
+              size="small"
+              variant="outlined"
+              sx={{ alignSelf: 'flex-start' }}
+              onClick={() => updateField('branch_rates', [
+                ...(dialog.data.branch_rates || []),
+                { branch_id: '', hourly_rate: '', global_salary: '', global_ot_rate: '', required_hours: '' },
+              ])}
+            >
+              הוסף תעריף לסניף נוסף
+            </Button>
 
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>תוספות קבועות</Typography>
