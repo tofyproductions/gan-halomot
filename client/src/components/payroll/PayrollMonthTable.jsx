@@ -483,7 +483,7 @@ export default function PayrollMonthTable() {
   const exportCSV = () => {
     if (!data) return;
     const rowsAcc = [];
-    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע"נ גלובלי'];
+    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן'];
 
     const headerTop = ['סניף', 'שם העובד', ...cols,
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות'];
@@ -1077,7 +1077,7 @@ function CustomCell({ column, value, onSave, disabled }) {
 }
 
 function SubHeaderGroup({ color }) {
-  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע״נ גלובלי'];
+  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע״נ תקן'];
   return (
     <>
       {cells.map((label, i) => (

@@ -404,7 +404,7 @@ export default function EmployeeManager() {
                     <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
                     <TableCell>
                       <Chip
-                        label={emp.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
+                        label={emp.salary_type === 'global' ? 'תקן' : 'שעתי'}
                         size="small"
                         color={emp.salary_type === 'global' ? 'primary' : 'default'}
                         variant="outlined"
@@ -517,7 +517,7 @@ export default function EmployeeManager() {
             <Stack direction="row" spacing={2}>
               <TextField label="סוג שכר" select value={dialog.data.salary_type} onChange={e => updateField('salary_type', e.target.value)} fullWidth>
                 <MenuItem value="hourly">שעתי</MenuItem>
-                <MenuItem value="global">גלובלי</MenuItem>
+                <MenuItem value="global">תקן</MenuItem>
               </TextField>
               <TextField label="נטו/ברוטו" select value={dialog.data.salary_is_net ? 'net' : 'gross'}
                 onChange={e => updateField('salary_is_net', e.target.value === 'net')} fullWidth>
@@ -532,7 +532,7 @@ export default function EmployeeManager() {
               />
             ) : (
               <Stack direction="row" spacing={2}>
-                <TextField label="שכר גלובלי חודשי" type="number" value={dialog.data.global_salary}
+                <TextField label="שכר תקן חודשי" type="number" value={dialog.data.global_salary}
                   onChange={e => updateField('global_salary', e.target.value)} fullWidth
                   InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
                 />

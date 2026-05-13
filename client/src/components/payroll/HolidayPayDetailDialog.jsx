@@ -56,7 +56,7 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
         <Stack spacing={2} sx={{ mt: 1 }}>
           {!isHourly && (
             <Alert severity="info">
-              עובד גלובלי — לא זכאי לדמי חגים בנפרד (החגים מכוסים כבר ע"י השכר הגלובלי).
+              עובד תקן — לא זכאי לדמי חגים בנפרד (החגים מכוסים כבר ע"י השכר הגלובלי).
             </Alert>
           )}
           {isHourly && auto.blocking_reason && (

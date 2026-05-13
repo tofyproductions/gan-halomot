@@ -34,7 +34,7 @@ const TABLE_FIELDS = [
   { key: 'ot_125',               label: 'שעות נוספות 125%' },
   { key: 'ot_150',               label: 'שעות נוספות 150%' },
   { key: 'hourly_rate',          label: 'תעריף שעתי' },
-  { key: 'global_salary_amount', label: 'שכר גלובלי', currency: true, suffixKey: 'global_salary_kind' },
+  { key: 'global_salary_amount', label: 'שכר תקן', currency: true, suffixKey: 'global_salary_kind' },
   { key: 'global_ot_amount',     label: 'שעות נוספות גלובלי', currency: true, suffixKey: 'global_salary_kind' },
   { key: 'transport',            label: 'נסיעות', currency: true },
   { key: 'sick_days',            label: 'מחלה (ימים)' },
@@ -822,7 +822,7 @@ const DIFF_FIELDS = [
   { key: 'ot_125',       label: 'שעות נוספות 125%',    tableKey: 'ot_125',              payslipFn: (p) => p?.item_ot_125_hours ?? null,   tolerance: 0.5, hours: true },
   { key: 'ot_150',       label: 'שעות נוספות 150%',    tableKey: 'ot_150',              payslipFn: (p) => p?.item_ot_150_hours ?? null,   tolerance: 0.5, hours: true },
   { key: 'hourly_rate',  label: 'תעריף שעתי',          tableKey: 'hourly_rate',         payslipKey: 'hourly_rate',     tolerance: 0.5, currency: true },
-  { key: 'global',       label: 'שכר גלובלי',          tableKey: 'global_salary_amount', payslipKey: 'base_salary',     tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
+  { key: 'global',       label: 'שכר תקן',          tableKey: 'global_salary_amount', payslipKey: 'base_salary',     tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'global_ot',    label: 'שעות נוספות גלובלי',  tableKey: 'global_ot_amount',    payslipKey: 'global_ot_amount', tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'transport',    label: 'נסיעות',              tableKey: 'transport',           payslipKey: 'transport_value', tolerance: 0.5, currency: true },
   { key: 'recup',        label: 'הבראה',               tableKey: 'recuperation',        payslipKey: null,              currency: true, infoOnly: true, note: 'מופיע בתלוש כ-"שווי הבראה" או "סיבוס"' },
@@ -884,12 +884,12 @@ function DiffPanel({ tableRow, payslip, cibusRow }) {
   const [showAll, setShowAll] = useState(false);
   // Hourly employee = the table has hourly_rate but no global salary. For these
   // rows the payslip's base_salary equals rate × hours, NOT a global figure —
-  // so a "שכר גלובלי" comparison is meaningless and should be hidden.
+  // so a "שכר תקן" comparison is meaningless and should be hidden.
   const isHourlyEmployee = tableRow
     && (tableRow.hourly_rate || 0) > 0
     && !tableRow.global_salary_amount
     && !tableRow.global_salary;
-  // Global-salary employee = the table carries a שכר גלובלי. For these rows
+  // Global-salary employee = the table carries a שכר תקן. For these rows
   // hours aren't paid per-unit, so שעות-related comparisons are meaningless
   // (any "shortfall" is handled by the comparator only when the notes carry
   // a "מחויבת ל-N שעות" directive).

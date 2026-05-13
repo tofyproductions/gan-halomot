@@ -86,7 +86,7 @@ export default function SalaryTable() {
         if (!grp.data) continue;
         for (const r of grp.data.rows) {
           rows.push([
-            grp.branch.name, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'גלובלי' : 'שעתי',
+            grp.branch.name, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'תקן' : 'שעתי',
             r.hours_total, r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
             (r.warnings || []).join(' / '),
           ]);
@@ -98,7 +98,7 @@ export default function SalaryTable() {
     } else if (data) {
       for (const r of data.rows) {
         rows.push([
-          selectedBranchName, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'גלובלי' : 'שעתי',
+          selectedBranchName, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'תקן' : 'שעתי',
           r.hours_total, r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
           (r.warnings || []).join(' / '),
         ]);
@@ -156,7 +156,7 @@ export default function SalaryTable() {
       </TableCell>
       <TableCell>
         <Chip
-          label={r.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
+          label={r.salary_type === 'global' ? 'תקן' : 'שעתי'}
           size="small"
           variant="outlined"
           color={r.salary_type === 'global' ? 'primary' : 'default'}

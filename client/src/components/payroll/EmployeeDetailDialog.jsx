@@ -262,7 +262,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
               <Chip label={employee.israeli_id} size="small" dir="ltr" sx={{ ml: 1, fontFamily: 'monospace' }} />
             )}
             <Chip
-              label={employee?.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
+              label={employee?.salary_type === 'global' ? 'תקן' : 'שעתי'}
               size="small"
               color={employee?.salary_type === 'global' ? 'primary' : 'default'}
               sx={{ ml: 1 }}
@@ -358,12 +358,12 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                     color={forceFullGlobal ? 'warning' : 'success'}
                     onClick={() => setForceFullGlobal(!forceFullGlobal)}
                   >
-                    {forceFullGlobal ? 'חזור לחישוב יחסי' : 'השלם לשכר גלובלי מלא'}
+                    {forceFullGlobal ? 'חזור לחישוב יחסי' : 'השלם לשכר תקן מלא'}
                   </Button>
                 }
               >
                 {forceFullGlobal
-                  ? `שכר גלובלי מלא: ₪${breakdown.rates.global_salary} (מנהל השלים ידנית)`
+                  ? `שכר תקן מלא: ₪${breakdown.rates.global_salary} (מנהל השלים ידנית)`
                   : `שכר יחסי: עבד/ה ${breakdown.hours.total}h מתוך ${breakdown.rates.required_hours}h נדרשות`
                 }
               </Alert>
@@ -663,7 +663,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                 onChange={e => setDetails({ ...details, salary_type: e.target.value })}
               >
                 <MenuItem value="hourly">שעתי</MenuItem>
-                <MenuItem value="global">גלובלי</MenuItem>
+                <MenuItem value="global">תקן</MenuItem>
               </TextField>
               {details.salary_type === 'hourly' ? (
                 <TextField label="תעריף שעתי (₪)" type="number" fullWidth
@@ -673,7 +673,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                 />
               ) : (
                 <>
-                  <TextField label="שכר גלובלי (₪)" type="number" fullWidth
+                  <TextField label="שכר תקן (₪)" type="number" fullWidth
                     value={details.global_salary || ''}
                     onChange={e => setDetails({ ...details, global_salary: e.target.value })}
                   />
@@ -681,7 +681,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                     value={details.required_hours || ''}
                     onChange={e => setDetails({ ...details, required_hours: e.target.value })}
                   />
-                  <TextField label="שע״נ גלובלי" type="number" sx={{ width: 160 }}
+                  <TextField label="שע״נ תקן" type="number" sx={{ width: 160 }}
                     value={details.global_ot_rate || ''}
                     onChange={e => setDetails({ ...details, global_ot_rate: e.target.value })}
                   />
@@ -719,7 +719,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                   />
                 ) : (
                   <>
-                    <TextField label="שכר גלובלי" type="number" size="small" sx={{ width: 140 }}
+                    <TextField label="שכר תקן" type="number" size="small" sx={{ width: 140 }}
                       value={br.global_salary} onChange={e => {
                         const arr = [...branchRates]; arr[i].global_salary = e.target.value; setBranchRates(arr);
                       }}

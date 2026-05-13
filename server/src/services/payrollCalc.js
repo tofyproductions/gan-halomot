@@ -353,31 +353,81 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
                  + ot150Hours * rates.hourly_rate * 1.5;
     }
     if (rates.hourly_rate === 0) warnings.push('אין תעריף שעתי מוגדר');
-  } else { // global
-    let globalProrateRatio = 1; // default: full salary
-    if (rates.required_hours > 0 && hoursWorked >= rates.required_hours) {
-      // Met or exceeded requirements → full salary + overtime
-      baseSalary = rates.global_salary;
-      const overtimeHours = hoursWorked - rates.required_hours;
-      if (overtimeHours > 0 && rates.global_ot_rate > 0) {
-        baseSalary += overtimeHours * rates.global_ot_rate;
+  } else { // 'global' in DB = 'תקן' (standard salary) in UI
+    // Standard-salary model:
+    //   1. hourlyValue = teken_salary / required_hours
+    //   2. base = actual regular hours × hourlyValue
+    //   3. ot_addition = ot125 × hourlyValue × 1.25 + ot150 × hourlyValue × 1.5
+    //   4. completion = max(0, teken_salary - base - ot_addition) — fills
+    //      up to the agreed standard salary when she didn't work full hours.
+    //      Default ON, can be toggled off (manual.include_salary_completion=false).
+    //   5. When she worked beyond commitment (hours > required), no completion;
+    //      she gets base (capped by commitment + OT addition) + OT addition.
+    const includeCompletion = opts.include_salary_completion !== false;
+    if (rates.required_hours > 0 && rates.global_salary > 0) {
+      const hourlyValue = rates.global_salary / rates.required_hours;
+
+      // Cap regular hours at commitment — anything above goes to OT bucket
+      // (it should have been categorized as OT already by per-day rules, but
+      // also account for cases where total exceeds commitment).
+      // For now: trust the per-day split; reg/ot already separated.
+
+      const basePart = regHours * hourlyValue;
+      const otPart = ot125Hours * hourlyValue * 1.25 + ot150Hours * hourlyValue * 1.5;
+
+      let completion = 0;
+      if (includeCompletion) {
+        completion = Math.max(0, rates.global_salary - basePart - otPart);
       }
-    } else if (rates.required_hours > 0 && hoursWorked < rates.required_hours) {
-      // Did NOT meet requirements
-      if (forceFullGlobal) {
-        // Admin chose to pay full salary anyway
-        baseSalary = rates.global_salary;
-      } else {
-        // Pro-rate: (hours_worked / required_hours) × global_salary
-        globalProrateRatio = hoursWorked / rates.required_hours;
-        baseSalary = rates.global_salary * globalProrateRatio;
-        warnings.push(`חסרות שעות: ${hoursWorked}h מתוך ${rates.required_hours}h — שכר יחסי (${Math.round(globalProrateRatio * 100)}%)`);
-      }
-    } else {
-      // No required_hours set → full salary
+      baseSalary = basePart;
+      // Stash for downstream output
+      baseSalary._tekenBreakdown = {
+        teken_salary: rates.global_salary,
+        required_hours: rates.required_hours,
+        hourly_value: Math.round(hourlyValue * 100) / 100,
+        base_part: Math.round(basePart * 100) / 100,
+        ot_part: Math.round(otPart * 100) / 100,
+        completion: Math.round(completion * 100) / 100,
+        include_completion: includeCompletion,
+        exceeded_commitment: hoursWorked > rates.required_hours,
+      };
+      // Total base output combines base + completion (so estimated_total includes
+      // the full teken salary worth). OT shown separately in components.
+      baseSalary = basePart + completion;
+      // Re-attach the breakdown on the number-like value via a wrapper.
+      // (Numbers are primitive in JS; we'll surface tekenBreakdown via the
+      // returned breakdown object below.)
+    } else if (rates.global_salary > 0) {
+      // No required_hours configured → fall back to full salary
       baseSalary = rates.global_salary;
     }
-    if (rates.global_salary === 0) warnings.push('אין שכר גלובלי מוגדר');
+    if (rates.global_salary === 0) warnings.push('אין שכר תקן מוגדר');
+    if (rates.required_hours === 0 && rates.global_salary > 0) {
+      warnings.push('חסרה התחייבות שעות לחישוב שכר תקן');
+    }
+  }
+
+  // Compute teken breakdown for output (needed below in return object).
+  let tekenBreakdown = null;
+  if (employee.salary_type === 'global' && rates.required_hours > 0 && rates.global_salary > 0) {
+    const includeCompletion = opts.include_salary_completion !== false;
+    const hourlyValue = rates.global_salary / rates.required_hours;
+    const basePart = regHours * hourlyValue;
+    const otPart = ot125Hours * hourlyValue * 1.25 + ot150Hours * hourlyValue * 1.5;
+    const completion = includeCompletion ? Math.max(0, rates.global_salary - basePart - otPart) : 0;
+    tekenBreakdown = {
+      teken_salary: rates.global_salary,
+      required_hours: rates.required_hours,
+      hourly_value: Math.round(hourlyValue * 100) / 100,
+      base_part: Math.round(basePart * 100) / 100,
+      ot_part: Math.round(otPart * 100) / 100,
+      completion: Math.round(completion * 100) / 100,
+      include_completion: includeCompletion,
+      exceeded_commitment: hoursWorked > rates.required_hours,
+    };
+    // Override baseSalary with sum that includes ot_part too, so estimated_total
+    // is correct (was previously just basePart).
+    baseSalary = basePart + completion + otPart;
   }
 
   // --- Extras ---
@@ -466,6 +516,11 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
       recreation_monthly: Math.round(recreation * 100) / 100,
       bonuses:        Math.round(bonusTotal * 100) / 100,
       bonus_details:  bonusDetails,
+      // Teken (standard-salary) breakdown — only populated for salary_type='global'.
+      // base_part: actual regular hours × hourly_value
+      // ot_part: OT premium (using hourly_value × multiplier)
+      // completion: max(0, teken_salary - base_part - ot_part), 0 when toggled off
+      teken_breakdown: tekenBreakdown,
     },
     deductions: {
       loans:        Math.round(loanDeductions * 100) / 100,

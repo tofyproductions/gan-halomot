@@ -47,6 +47,12 @@ const payrollMonthSchema = new mongoose.Schema({
 
     notes: { type: String, default: '' },
 
+    // Standard-salary (תקן) completion toggle. Defaults true — the system
+    // adds השלמת שכר to bring a teken-salary employee up to her full agreed
+    // salary even when she didn't complete required hours. Manager can set
+    // false to pay only the actual worked hours × hourly_value (no top-up).
+    include_salary_completion: { type: Boolean, default: true },
+
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
     //   - kind='text'   → only `text` is meaningful

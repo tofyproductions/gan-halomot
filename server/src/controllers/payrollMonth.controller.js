@@ -202,7 +202,11 @@ async function getMonth(req, res, next) {
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
-      const breakdown = calculateMonthlySalary(emp, empPunches, month, { branchAmutaMap });
+      const existingManual = existingByEmp.get(String(emp._id))?.manual || {};
+      const breakdown = calculateMonthlySalary(emp, empPunches, month, {
+        branchAmutaMap,
+        include_salary_completion: existingManual.include_salary_completion !== false,
+      });
       const row = existingByEmp.get(String(emp._id));
       const manual = row?.manual || {};
       // Commitment analysis: count auto-absences (committed days she didn't punch,
@@ -280,6 +284,7 @@ async function getMonth(req, res, next) {
           travel_override: manual.travel_override ?? null,
           notes: manual.notes || '',
           custom_values: manual.custom_values || {},
+          include_salary_completion: manual.include_salary_completion !== false,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
@@ -403,6 +408,7 @@ async function upsertEntry(req, res, next) {
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'notes', 'custom_values',
+      'include_salary_completion',
     ];
     for (const k of allowed) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
