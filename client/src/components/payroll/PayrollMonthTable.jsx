@@ -420,6 +420,19 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  const applyKindergartenVacation = () => {
+    if (!confirm('להחיל ימי חופשה מלוח חופשות הגן לכל העובדים? לא ידרסו ערכים שכבר הוזנו ידנית.')) return;
+    const params = {};
+    if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
+    api.post(`/payroll-month/${month}/apply-kindergarten-vacation`, null, { params })
+      .then(res => {
+        const { updated, skipped_already_set, no_kindergarten_holidays } = res.data;
+        toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • בלי חגי גן: ${no_kindergarten_holidays}`);
+        fetchData();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
   const applyVacationRequests = () => {
     if (!confirm('לסנכרן בקשות חופש מאושרות מהחודש הזה לטבלת השכר?')) return;
     const params = {};
@@ -575,7 +588,8 @@ export default function PayrollMonthTable() {
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined">הוסף עמודה</Button>
           <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success">ייבוא סיבוס</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning">החל דמי חגים</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info">סנכרן חופשות</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary">חופשה מלוח</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info">סנכרן בקשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
@@ -805,19 +819,8 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer' }} onClick={() => setVacation({ open: true, row: r })}>
-                        <NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} />
-                        {r.vacation_info?.balance_from_payslip != null && (
-                          <Tooltip title="לחץ לפירוט: יתרת חופש מתלוש + בקשות מאושרות">
-                            <Chip
-                              size="small"
-                              color="primary" variant="outlined"
-                              label={`יתרה: ${r.vacation_info.balance_from_payslip}`}
-                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
-                              onClick={(e) => { e.stopPropagation(); setVacation({ open: true, row: r }); }}
-                            />
-                          </Tooltip>
-                        )}
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setVacation({ open: true, row: r })}>
+                        <VacationCell row={r} onApplyAuto={(v) => patchManual(r.employee_id, { vacation_days: v })} />
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setHolidayPay({ open: true, row: r })}>
                         <HolidayPayCell row={r} />
@@ -904,6 +907,56 @@ export default function PayrollMonthTable() {
         onChanged={fetchData}
       />
     </Box>
+  );
+}
+
+function VacationCell({ row, onApplyAuto }) {
+  const manualVal = Number(row.manual.vacation_days) || 0;
+  const auto = row.vacation_days_auto?.total_days || 0;
+  const balance = row.vacation_info?.balance_from_payslip;
+  const remaining = balance != null ? Math.round((balance - manualVal) * 10) / 10 : null;
+  if (manualVal > 0) {
+    return (
+      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+        <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.85rem', color: 'primary.dark' }}>
+          {manualVal}
+        </Typography>
+        {balance != null && (
+          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: remaining < 0 ? 'error.main' : 'text.disabled' }}>
+            יתרה: {remaining}/{balance}
+          </Typography>
+        )}
+      </Stack>
+    );
+  }
+  if (auto > 0) {
+    return (
+      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+        <Tooltip title={`${auto} ימי חופשה מלוח החופשות. לחץ להחיל ולהוריד מהיתרה.`}>
+          <Chip
+            size="small" color="primary" variant="filled"
+            label={`auto: ${auto}`}
+            onClick={(e) => { e.stopPropagation(); onApplyAuto(auto); }}
+            sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+          />
+        </Tooltip>
+        {balance != null && (
+          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+            יתרה: {balance}
+          </Typography>
+        )}
+      </Stack>
+    );
+  }
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+      <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>
+      {balance != null && (
+        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+          יתרה: {balance}
+        </Typography>
+      )}
+    </Stack>
   );
 }
 

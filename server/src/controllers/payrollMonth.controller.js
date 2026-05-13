@@ -5,7 +5,7 @@
  */
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
-  Employee, Branch, Amuta, Punch, EmployeeCommitment,
+  Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
@@ -17,6 +17,42 @@ function parseMonthRange(monthYM) {
   const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
   const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
   return { from, to };
+}
+
+/**
+ * Compute the number of "vacation days" an employee accrues this month from
+ * kindergarten holidays (Holiday docs). Every weekday inside a holiday range
+ * counts as one vacation day, EXCEPT:
+ *   - Saturdays (never count — not a work day anyway)
+ *   - The employee's weekly off-day (per EmployeeCommitment)
+ *   - The last day of a half-day holiday counts as 0.5
+ *
+ * Returns { total, details: [{date, name, value}] } so the UI can show why.
+ */
+function computeKindergartenVacationDays(holidays, monthYM, commitment) {
+  const offWeekdays = new Set();
+  if (commitment && Array.isArray(commitment.days)) {
+    for (const d of commitment.days) if (d.is_off) offWeekdays.add(d.day);
+  }
+  const result = { total: 0, details: [] };
+  for (const h of holidays) {
+    const start = new Date(h.start_date);
+    const end = new Date(h.end_date);
+    const endYmd = end.toISOString().slice(0, 10);
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      const ymd = d.toISOString().slice(0, 10);
+      if (!ymd.startsWith(monthYM)) continue;
+      const wd = d.getUTCDay();
+      if (wd === 6) continue;
+      if (offWeekdays.has(wd)) continue;
+      const isLastDay = ymd === endYmd;
+      const value = (h.is_half_day && isLastDay) ? 0.5 : 1;
+      result.total += value;
+      result.details.push({ date: ymd, name: h.name, value });
+    }
+  }
+  result.total = Math.round(result.total * 10) / 10;
+  return result;
 }
 
 /**
@@ -126,6 +162,23 @@ async function getMonth(req, res, next) {
       employee_id: { $in: employees.map(e => e._id) },
     }).lean();
     const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
+
+    // Kindergarten holidays (Holiday model) for every in-scope branch that
+    // overlap with the requested month. Drives the auto vacation-days suggestion.
+    const [yy, mm] = month.split('-').map(Number);
+    const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
+    const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
+    const kindergartenHolidays = await Holiday.find({
+      branch_id: { $in: branchIds },
+      start_date: { $lte: monthEnd },
+      end_date: { $gte: monthStart },
+    }).lean();
+    const holidaysByBranch = new Map();
+    for (const h of kindergartenHolidays) {
+      const k = String(h.branch_id);
+      if (!holidaysByBranch.has(k)) holidaysByBranch.set(k, []);
+      holidaysByBranch.get(k).push(h);
+    }
     const adjByEmp = new Map();
     for (const adj of adjustments) {
       const k = String(adj.employee_id);
@@ -176,6 +229,11 @@ async function getMonth(req, res, next) {
         hourlyRate,
         avgDailyHours,
       });
+      // Kindergarten holidays → vacation days for this employee.
+      const kgHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
+      const vacationAutoInfo = computeKindergartenVacationDays(
+        kgHolidays, month, commitmentByEmp.get(String(emp._id)),
+      );
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
       const adjTotals = empAdjustments.reduce((acc, a) => {
@@ -260,14 +318,17 @@ async function getMonth(req, res, next) {
           };
         })(),
         vacation_info: (() => {
-          // Pulled from PayrollMonth row if already populated; else null.
-          // Detail endpoint /payroll-month/:id/vacation gives the full breakdown.
           return {
             balance_from_payslip: row?.vacation_balance_from_payslip ?? null,
             balance_recorded_at: row?.vacation_balance_recorded_at || null,
             request_ids: row?.vacation_request_ids?.map(String) || [],
           };
         })(),
+        vacation_days_auto: {
+          total_days: vacationAutoInfo.total,
+          details: vacationAutoInfo.details,
+          source: 'kindergarten_holidays',
+        },
         status: row?.status || 'draft',
       };
     });
@@ -764,6 +825,83 @@ async function applyAutoHolidays(req, res, next) {
 }
 
 /**
+ * POST /api/payroll-month/:month/apply-kindergarten-vacation?branch=<id>
+ *
+ * Sets manual.vacation_days = number-of-weekdays-in-kindergarten-holidays
+ * for every employee in scope. Same idea as apply-auto-holidays but reads
+ * the Holiday model instead of the statutory list. Skips employees that
+ * already have a manager-entered value (vacation_days > 0).
+ */
+async function applyKindergartenVacationDays(req, res, next) {
+  try {
+    const { month } = req.params;
+    const { branch } = req.query;
+
+    const branchFilter = { is_active: true };
+    if (branch && branch !== 'all') branchFilter.branch_id = branch;
+
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (branchFilter.branch_id && !allowed.includes(String(branchFilter.branch_id))) {
+        return res.json({ updated: 0, skipped_already_set: 0, no_kindergarten_holidays: 0 });
+      }
+      if (!branchFilter.branch_id) branchFilter.branch_id = { $in: allowed };
+    }
+
+    const employees = await Employee.find(branchFilter).lean();
+    const empIds = employees.map(e => e._id);
+    const branchIds = [...new Set(employees.map(e => String(e.branch_id)))];
+
+    const [yy, mm] = month.split('-').map(Number);
+    const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
+    const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
+    const holidays = await Holiday.find({
+      branch_id: { $in: branchIds },
+      start_date: { $lte: monthEnd },
+      end_date: { $gte: monthStart },
+    }).lean();
+    const holidaysByBranch = new Map();
+    for (const h of holidays) {
+      const k = String(h.branch_id);
+      if (!holidaysByBranch.has(k)) holidaysByBranch.set(k, []);
+      holidaysByBranch.get(k).push(h);
+    }
+
+    const commitments = await EmployeeCommitment.find({ employee_id: { $in: empIds } }).lean();
+    const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
+
+    const existing = await PayrollMonth.find({ employee_id: { $in: empIds }, month }).lean();
+    const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+    let noKindergartenHolidays = 0;
+
+    for (const emp of employees) {
+      const empHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
+      const info = computeKindergartenVacationDays(empHolidays, month, commitmentByEmp.get(String(emp._id)));
+      if (info.total <= 0) { noKindergartenHolidays++; continue; }
+      const cur = Number(existingByEmp.get(String(emp._id))?.manual?.vacation_days) || 0;
+      if (cur > 0) { skippedAlreadySet++; continue; }
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        {
+          $set: { 'manual.vacation_days': info.total },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+        },
+        { upsert: true },
+      );
+      updated++;
+    }
+
+    res.json({ updated, skipped_already_set: skippedAlreadySet, no_kindergarten_holidays: noKindergartenHolidays });
+  } catch (err) { next(err); }
+}
+
+/**
  * POST /api/payroll-month/:month/apply-vacation-requests?branch=<id>
  *
  * Retroactive sync: walks every approved EmployeeRequest with from_date
@@ -976,4 +1114,5 @@ module.exports = {
   importCibus,
   applyAutoHolidays,
   applyVacationRequests,
+  applyKindergartenVacationDays,
 };

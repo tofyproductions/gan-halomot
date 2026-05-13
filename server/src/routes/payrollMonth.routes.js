@@ -61,4 +61,10 @@ router.post('/:month/apply-vacation-requests',
   c.applyVacationRequests,
 );
 
+// Bulk apply: fill vacation_days from kindergarten holiday calendar.
+router.post('/:month/apply-kindergarten-vacation',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  c.applyKindergartenVacationDays,
+);
+
 module.exports = router;

@@ -93,6 +93,53 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
             <Alert severity="warning">חרגתם מהיתרה הקיימת ({Math.abs(remaining)} ימים).</Alert>
           )}
 
+          {row.vacation_days_auto?.total_days > 0 && (
+            <>
+              <Divider />
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                ימי חופשה מלוח חופשות הגן
+              </Typography>
+              <Alert severity="info" sx={{ borderRadius: 2 }}>
+                {row.salary_type === 'global'
+                  ? 'עובד גלובלי: ימי חופשה אלו יורדים מהיתרה אך אין תשלום נוסף — השכר כבר מכסה אותם.'
+                  : 'עובד שעתי: רשאי לחתום על ימים אלו כחופשה ולקבל תשלום עבורם בתלוש (מנוצל מהיתרה).'}
+              </Alert>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>תאריך</TableCell>
+                    <TableCell>חופשה/חג</TableCell>
+                    <TableCell align="center">ערך</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {row.vacation_days_auto.details.map((d, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{d.date}</TableCell>
+                      <TableCell>{d.name}</TableCell>
+                      <TableCell align="center">
+                        <Chip size="small" label={d.value === 0.5 ? '½' : d.value} color="primary" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Stack direction="row" justifyContent="space-between" alignItems="center">
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  סה״כ ימי חופשה מלוח: {row.vacation_days_auto.total_days}
+                </Typography>
+                {(!manualDays || Number(manualDays) === 0) && (
+                  <Button variant="contained" size="small" onClick={() => {
+                    setManualDays(row.vacation_days_auto.total_days);
+                    saveManualDays(row.vacation_days_auto.total_days);
+                  }}>
+                    החל לטבלת השכר
+                  </Button>
+                )}
+              </Stack>
+            </>
+          )}
+
           <Divider />
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
             בקשות חופש מאושרות החודש
