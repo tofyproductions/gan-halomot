@@ -810,7 +810,9 @@ export default function PayrollMonthTable() {
 
                       {/* תקן breakdown — base / completion (with toggle) / OT addition */}
                       <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
-                        <TekenBasePartCell row={r} />
+                        <TekenBasePartCell row={r}
+                          onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
+                        />
                       </TableCell>
                       <TableCell align="center" sx={{ bgcolor: '#fefce8' }}>
                         <TekenCompletionCell row={r} disabled={locked}
@@ -949,7 +951,8 @@ export default function PayrollMonthTable() {
         open={empDetail.open}
         employeeId={empDetail.employeeId}
         initialMonth={month}
-        onClose={() => setEmpDetail({ open: false, employeeId: null })}
+        initialTab={empDetail.initialTab || 0}
+        onClose={() => setEmpDetail({ open: false, employeeId: null, initialTab: 0 })}
         onChanged={fetchData}
       />
     </Box>
@@ -1017,19 +1020,57 @@ function VacationCell({ row }) {
   );
 }
 
-function TekenBasePartCell({ row }) {
+function TekenBasePartCell({ row, onOpenHours }) {
   const tb = row.breakdown?.components?.teken_breakdown;
-  if (row.salary_type !== 'global' || !tb) {
+  const baseSalary = row.breakdown?.components?.base_salary || 0;
+  const incomplete = row.breakdown?.hours?.incomplete_days || 0;
+  const noHours = (row.breakdown?.hours?.total || 0) === 0;
+
+  // Render value: תקן uses base_part, hourly uses computed base_salary
+  let mainValue = 0;
+  let perHourLabel = null;
+  if (row.salary_type === 'global' && tb) {
+    mainValue = tb.base_part;
+    perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
+  } else if (row.salary_type === 'hourly') {
+    mainValue = baseSalary;
+    const rate = row.breakdown?.rates?.hourly_rate;
+    if (rate) perHourLabel = `${rate} ₪/שעה`;
+  } else {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }
+
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>
-        {Math.round(tb.base_part).toLocaleString('he-IL')} ₪
-      </Typography>
-      <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-        ערך/שעה: {tb.hourly_value}
-      </Typography>
+      {mainValue > 0 ? (
+        <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>
+          {Math.round(mainValue).toLocaleString('he-IL')} ₪
+        </Typography>
+      ) : (
+        <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>
+      )}
+      {perHourLabel && (
+        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+          {perHourLabel}
+        </Typography>
+      )}
+      {incomplete > 0 && (
+        <Tooltip title={`${incomplete} ימים עם החתמה חסרה — לחץ להשלמה`}>
+          <Chip
+            size="small" color="error" variant="filled"
+            label={`${incomplete} חסר`}
+            onClick={(e) => { e.stopPropagation(); onOpenHours && onOpenHours(); }}
+            sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700, cursor: 'pointer' }}
+          />
+        </Tooltip>
+      )}
+      {!incomplete && noHours && row.salary_type === 'hourly' && (
+        <Chip
+          size="small" color="warning" variant="outlined"
+          label="אין החתמות"
+          sx={{ height: 14, fontSize: '0.58rem' }}
+        />
+      )}
     </Stack>
   );
 }

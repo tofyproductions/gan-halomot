@@ -42,10 +42,10 @@ function emptyBonus() {
   return { type: 'fixed', amount: '', reason: '', active: true };
 }
 
-export default function EmployeeDetailDialog({ open, employeeId, initialMonth, onClose, onChanged }) {
+export default function EmployeeDetailDialog({ open, employeeId, initialMonth, initialTab, onClose, onChanged }) {
   const { branches } = useBranch();
   const confirm = useConfirm();
-  const [tab, setTab] = useState(0);
+  const [tab, setTab] = useState(initialTab ?? 0);
   const [month, setMonth] = useState(initialMonth || currentYearMonth());
   const [employee, setEmployee] = useState(null);
   const [branchRates, setBranchRates] = useState([]);
@@ -114,6 +114,10 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
   }, [employeeId, month, forceFullGlobal]);
 
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
+  // When opened with an explicit initialTab, jump there (and only there) once per open cycle.
+  useEffect(() => {
+    if (open && initialTab != null) setTab(initialTab);
+  }, [open, initialTab]);
 
   // --- Loans / bonuses local editing ---
   const saveLoansBonuses = async () => {
