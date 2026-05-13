@@ -17,6 +17,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import TuneIcon from '@mui/icons-material/Tune';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import PaymentsIcon from '@mui/icons-material/Payments';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -404,6 +405,32 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  const applyAutoHolidays = () => {
+    if (!confirm('להחיל דמי חגים אוטומטית לכל הזכאים? לא ידרסו ערכים שכבר הוזנו ידנית.')) return;
+    const params = {};
+    if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
+    api.post(`/payroll-month/${month}/apply-auto-holidays`, null, { params })
+      .then(res => {
+        const { updated, skipped_already_set, skipped_not_eligible } = res.data;
+        toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • לא זכאים: ${skipped_not_eligible}`);
+        fetchData();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
+  const applyVacationRequests = () => {
+    if (!confirm('לסנכרן בקשות חופש מאושרות מהחודש הזה לטבלת השכר?')) return;
+    const params = {};
+    if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
+    api.post(`/payroll-month/${month}/apply-vacation-requests`, null, { params })
+      .then(res => {
+        const { updated, skipped_already_applied, requests_examined } = res.data;
+        toast.success(`סונכרנו ${updated} בקשות (${skipped_already_applied} כבר היו) מתוך ${requests_examined}`);
+        fetchData();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
   const finalize = () => {
     if (!confirm('לנעול את החודש?')) return;
     const params = {};
@@ -545,6 +572,8 @@ export default function PayrollMonthTable() {
           </Typography>
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined">הוסף עמודה</Button>
           <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success">ייבוא סיבוס</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning">החל דמי חגים</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info">סנכרן חופשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized

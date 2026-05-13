@@ -49,4 +49,16 @@ router.post('/import-cibus',
   c.importCibus,
 );
 
+// Bulk apply: auto-fill דמי חגים for every eligible hourly employee in scope.
+router.post('/:month/apply-auto-holidays',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  c.applyAutoHolidays,
+);
+
+// Bulk apply: re-sync approved vacation requests into manual.vacation_days.
+router.post('/:month/apply-vacation-requests',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  c.applyVacationRequests,
+);
+
 module.exports = router;

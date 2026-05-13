@@ -648,6 +648,197 @@ async function deleteCustomColumn(req, res, next) {
 }
 
 /**
+ * POST /api/payroll-month/:month/apply-auto-holidays?branch=<id>
+ *
+ * Bulk-applies the auto-computed דמי חגים value into manual.holiday_pay
+ * for every eligible hourly employee in scope. Only writes when:
+ *   - employee.salary_type === 'hourly'
+ *   - holiday_pay_auto > 0
+ *   - manual.holiday_pay is currently 0 / empty (we do NOT overwrite
+ *     manager overrides)
+ *
+ * Returns { updated, skipped_already_set, skipped_not_eligible }.
+ */
+async function applyAutoHolidays(req, res, next) {
+  try {
+    const { month } = req.params;
+    const { branch } = req.query;
+
+    const branchFilter = { is_active: true };
+    if (branch && branch !== 'all') branchFilter.branch_id = branch;
+
+    // Same scope enforcement as getMonth
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (branchFilter.branch_id && !allowed.includes(String(branchFilter.branch_id))) {
+        return res.json({ updated: 0, skipped_already_set: 0, skipped_not_eligible: 0 });
+      }
+      if (!branchFilter.branch_id) branchFilter.branch_id = { $in: allowed };
+    }
+
+    const employees = await Employee.find(branchFilter).lean();
+    const empIds = employees.map(e => e._id);
+
+    const { from, to } = parseMonthRange(month);
+    const punches = await Punch.find({
+      employee_id: { $in: empIds },
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+    const punchesByEmp = new Map();
+    for (const p of punches) {
+      const k = String(p.employee_id);
+      if (!punchesByEmp.has(k)) punchesByEmp.set(k, []);
+      punchesByEmp.get(k).push(p);
+    }
+
+    const commitments = await EmployeeCommitment.find({ employee_id: { $in: empIds } }).lean();
+    const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
+
+    const existing = await PayrollMonth.find({ employee_id: { $in: empIds }, month }).lean();
+    const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
+
+    let updated = 0;
+    let skippedAlreadySet = 0;
+    let skippedNotEligible = 0;
+
+    for (const emp of employees) {
+      if (emp.salary_type !== 'hourly') { skippedNotEligible++; continue; }
+
+      const empPunches = (punchesByEmp.get(String(emp._id)) || []).filter(p => {
+        const s = p.approval_status || 'auto';
+        return s === 'auto' || s === 'approved';
+      });
+      const hourlyRate = emp.amuta_distribution?.[0]?.hourly_rate || 0;
+      const daysWorked = new Set(empPunches.map(p => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date(p.timestamp)))).size;
+      const totalMinutes = (() => {
+        const byDay = new Map();
+        for (const p of empPunches) {
+          const k = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date(p.timestamp));
+          if (!byDay.has(k)) byDay.set(k, []);
+          byDay.get(k).push(p);
+        }
+        let total = 0;
+        for (const ps of byDay.values()) {
+          const sorted = ps.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          for (let i = 0; i + 1 < sorted.length; i += 2) {
+            total += Math.max(0, Math.round((new Date(sorted[i + 1].timestamp) - new Date(sorted[i].timestamp)) / 60000));
+          }
+        }
+        return total;
+      })();
+      const avgDailyHours = daysWorked > 0 ? (totalMinutes / 60 / daysWorked) : 8;
+
+      const info = computeHolidayPay({
+        employee: emp,
+        monthYM: month,
+        punches: empPunches,
+        commitment: commitmentByEmp.get(String(emp._id)),
+        hourlyRate,
+        avgDailyHours,
+      });
+
+      if (info.total_pay <= 0) { skippedNotEligible++; continue; }
+
+      const cur = Number(existingByEmp.get(String(emp._id))?.manual?.holiday_pay) || 0;
+      if (cur > 0) { skippedAlreadySet++; continue; }
+
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        {
+          $set: { 'manual.holiday_pay': info.total_pay },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+        },
+        { upsert: true },
+      );
+      updated++;
+    }
+
+    res.json({ updated, skipped_already_set: skippedAlreadySet, skipped_not_eligible: skippedNotEligible });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/:month/apply-vacation-requests?branch=<id>
+ *
+ * Retroactive sync: walks every approved EmployeeRequest with from_date
+ * in the target month and applies it to manual.vacation_days. Idempotent
+ * (vacation_request_ids tracks already-applied requests).
+ */
+async function applyVacationRequests(req, res, next) {
+  try {
+    const { month } = req.params;
+    const { branch } = req.query;
+    const { EmployeeRequest } = require('../models');
+
+    const branchFilter = {};
+    if (branch && branch !== 'all') branchFilter.branch_id = branch;
+
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (branchFilter.branch_id && !allowed.includes(String(branchFilter.branch_id))) {
+        return res.json({ updated: 0, skipped_already_applied: 0 });
+      }
+      if (!branchFilter.branch_id) branchFilter.branch_id = { $in: allowed };
+    }
+
+    const employees = await Employee.find({ is_active: true, ...branchFilter })
+      .select('_id user_id branch_id').lean();
+    const empByUser = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), e]));
+    const userIds = [...empByUser.keys()];
+
+    const requests = await EmployeeRequest.find({
+      user_id: { $in: userIds },
+      type: 'vacation',
+      status: 'approved',
+      from_date: { $regex: `^${month}` },
+    }).lean();
+
+    function countWorkDays(fromYmd, toYmd) {
+      const start = new Date(`${fromYmd}T12:00:00Z`);
+      const end = new Date(`${toYmd}T12:00:00Z`);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+      let count = 0;
+      for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        const wd = d.getUTCDay();
+        if (wd !== 6) count++;
+      }
+      return count;
+    }
+
+    let updated = 0;
+    let skipped = 0;
+    for (const r of requests) {
+      const emp = empByUser.get(String(r.user_id));
+      if (!emp) continue;
+      const days = countWorkDays(r.from_date, r.to_date || r.from_date);
+      if (days <= 0) continue;
+      const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
+      const alreadyApplied = (existing?.vacation_request_ids || []).map(String).includes(String(r._id));
+      if (alreadyApplied) { skipped++; continue; }
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        {
+          $inc: { 'manual.vacation_days': days },
+          $addToSet: { vacation_request_ids: r._id },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+        },
+        { upsert: true },
+      );
+      updated++;
+    }
+
+    res.json({ updated, skipped_already_applied: skipped, requests_examined: requests.length });
+  } catch (err) { next(err); }
+}
+
+/**
  * POST /api/payroll-month/import-cibus?month=YYYY-MM
  * multipart: { cibus_file: <xlsx|csv> }
  *
@@ -781,4 +972,6 @@ module.exports = {
   updateAdjustment,
   deleteAdjustment,
   importCibus,
+  applyAutoHolidays,
+  applyVacationRequests,
 };
