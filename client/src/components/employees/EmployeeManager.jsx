@@ -118,18 +118,21 @@ export default function EmployeeManager() {
   // Inline editing: { empId, field, value }
   const [inlineEdit, setInlineEdit] = useState(null);
   const [search, setSearch] = useState('');
+  const [showArchived, setShowArchived] = useState(false);
 
   const fetchEmployees = useCallback(() => {
     if (!selectedBranch) { setEmployees([]); setLoading(false); return; }
     setLoading(true);
-    api.get('/payroll/employees', { params: { branch: selectedBranch, active: 'true' } })
+    const params = { branch: selectedBranch };
+    if (!showArchived) params.active = 'true';
+    api.get('/payroll/employees', { params })
       .then(res => setEmployees(res.data.employees || []))
       .catch((err) => {
         console.error(err);
         toast.error('שגיאה בטעינת עובדים');
       })
       .finally(() => setLoading(false));
-  }, [selectedBranch]);
+  }, [selectedBranch, showArchived]);
 
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
 
@@ -352,6 +355,16 @@ export default function EmployeeManager() {
               ) : null,
             }}
           />
+          <Tooltip title={showArchived ? 'מציג עובדים פעילים + ארכיון' : 'מציג עובדים פעילים בלבד'}>
+            <Button
+              size="small"
+              variant={showArchived ? 'contained' : 'outlined'}
+              color={showArchived ? 'warning' : 'inherit'}
+              onClick={() => setShowArchived(v => !v)}
+            >
+              {showArchived ? 'כולל ארכיון' : 'הצג ארכיון'}
+            </Button>
+          </Tooltip>
           {isManager && (
             <>
               <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
@@ -395,8 +408,11 @@ export default function EmployeeManager() {
                   ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
                   : (rate ? `₪${rate}/שעה` : '—');
                 return (
-                  <TableRow key={empId} hover>
-                    <TableCell sx={{ fontWeight: 600 }}>{emp.full_name}</TableCell>
+                  <TableRow key={empId} hover sx={!emp.is_active ? { bgcolor: 'rgba(0,0,0,0.04)', opacity: 0.75 } : undefined}>
+                    <TableCell sx={{ fontWeight: 600 }}>
+                      {emp.full_name}
+                      {!emp.is_active && <Chip label="ארכיון" size="small" sx={{ ml: 1, height: 18, fontSize: '0.65rem' }} />}
+                    </TableCell>
                     <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
                       {emp.israeli_id || '—'}
                     </TableCell>
