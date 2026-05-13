@@ -78,15 +78,30 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     ineligible_days: [],
     total_days: 0,
     total_pay: 0,
+    blocking_reason: null, // populated when whole employee disqualified (global / no tenure)
   };
 
-  // Rule 1: hourly only
+  const monthHolidays = getHolidaysInMonth(monthYM);
+  if (monthHolidays.length === 0) {
+    result.blocking_reason = 'אין חגים בחודש זה';
+    return result;
+  }
+
+  // Rule 1: hourly only — global is paid for holidays via the salary itself
   if (employee.salary_type !== 'hourly') {
+    result.blocking_reason = 'עובד גלובלי — לא זכאי לדמי חגים בנפרד';
+    for (const h of monthHolidays) {
+      result.ineligible_days.push({ date: h.date, name: h.name, reasons: ['עובד גלובלי'] });
+    }
     return result;
   }
 
   // Rule 2: tenure ≥ 3 months
   if (!employee.start_date) {
+    result.blocking_reason = 'תאריך תחילת עבודה לא הוגדר בכרטיס העובד';
+    for (const h of monthHolidays) {
+      result.ineligible_days.push({ date: h.date, name: h.name, reasons: ['חסר תאריך תחילת עבודה — הוסף בכרטיס העובד'] });
+    }
     return result;
   }
   const start = new Date(employee.start_date);
@@ -95,11 +110,12 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
   const tenureMs = monthEnd - start;
   const tenureDays = tenureMs / (24 * 3600 * 1000);
   if (tenureDays < 90) {
+    result.blocking_reason = `ותק ${Math.floor(tenureDays)} ימים בלבד (נדרשים 90)`;
+    for (const h of monthHolidays) {
+      result.ineligible_days.push({ date: h.date, name: h.name, reasons: [`ותק לא מספיק (${Math.floor(tenureDays)} ימים, נדרשים 90)`] });
+    }
     return result;
   }
-
-  const monthHolidays = getHolidaysInMonth(monthYM);
-  if (monthHolidays.length === 0) return result;
 
   // Worked-day set from punches (YMD in Israel)
   const workedSet = new Set();

@@ -59,7 +59,12 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
               עובד גלובלי — לא זכאי לדמי חגים בנפרד (החגים מכוסים כבר ע"י השכר הגלובלי).
             </Alert>
           )}
-          {isHourly && auto.total_days === 0 && auto.ineligible.length === 0 && (
+          {isHourly && auto.blocking_reason && (
+            <Alert severity="warning">
+              <strong>לא זכאי לדמי חגים החודש:</strong> {auto.blocking_reason}
+            </Alert>
+          )}
+          {isHourly && !auto.blocking_reason && auto.total_days === 0 && auto.ineligible.length === 0 && (
             <Alert severity="info">אין חגים החודש.</Alert>
           )}
 

@@ -804,18 +804,8 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer' }} onClick={() => setHolidayPay({ open: true, row: r })}>
-                        <NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} />
-                        {(!r.manual.holiday_pay || r.manual.holiday_pay === 0) && r.holiday_pay_auto?.total_pay > 0 && (
-                          <Tooltip title={`חישוב אוטומטי: ${r.holiday_pay_auto.total_days} ימי חג × תעריף יומי. לחץ לפירוט.`}>
-                            <Chip
-                              size="small" color="warning" variant="outlined"
-                              label={`auto: ${r.holiday_pay_auto.total_pay}`}
-                              onClick={(e) => { e.stopPropagation(); patchManual(r.employee_id, { holiday_pay: r.holiday_pay_auto.total_pay }); }}
-                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
-                            />
-                          </Tooltip>
-                        )}
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setHolidayPay({ open: true, row: r })}>
+                        <HolidayPayCell row={r} />
                       </TableCell>
                       <TableCell>
                         <AdvanceDeductionCell
@@ -892,6 +882,47 @@ export default function PayrollMonthTable() {
         onImported={fetchData}
       />
     </Box>
+  );
+}
+
+function HolidayPayCell({ row }) {
+  const auto = row.holiday_pay_auto || { total_days: 0, total_pay: 0, is_eligible: false };
+  const manualVal = Number(row.manual.holiday_pay) || 0;
+  // If manager entered a manual amount, show it bold; otherwise show eligibility status.
+  if (manualVal > 0) {
+    return (
+      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+        <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.85rem', color: 'success.dark' }}>
+          {manualVal.toLocaleString('he-IL')} ₪
+        </Typography>
+        {auto.is_eligible && (
+          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+            {auto.total_days} ימים
+          </Typography>
+        )}
+      </Stack>
+    );
+  }
+  if (auto.is_eligible) {
+    return (
+      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+        <Chip
+          size="small" color="success" variant="filled"
+          label={`זכאי ${auto.total_days}`}
+          sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700 }}
+        />
+        <Typography variant="caption" sx={{ fontSize: '0.62rem', color: 'success.dark' }}>
+          {auto.total_pay} ₪
+        </Typography>
+      </Stack>
+    );
+  }
+  return (
+    <Chip
+      size="small" color="default" variant="outlined"
+      label="לא זכאי"
+      sx={{ height: 18, fontSize: '0.7rem' }}
+    />
   );
 }
 
