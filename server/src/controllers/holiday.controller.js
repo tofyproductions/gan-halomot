@@ -1,4 +1,4 @@
-const { Holiday } = require('../models');
+const { Holiday, Branch } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
@@ -23,14 +23,39 @@ async function create(req, res, next) {
       return res.status(400).json({ error: 'שדות חובה חסרים' });
     }
 
-    const holiday = await Holiday.create({
-      branch_id, academic_year: academic_year || '',
+    const baseDoc = {
+      academic_year: academic_year || '',
       name, start_date, end_date,
       is_custom: is_custom || false,
       is_half_day: !!is_half_day,
       end_time: is_half_day ? (end_time || '12:00') : '',
-    });
+    };
 
+    // Sentinel "all" → create the holiday for every active branch the user
+    // has access to. Frontend may also send empty string with the same intent.
+    if (branch_id === 'all' || branch_id === '*' || !branch_id) {
+      const filter = { is_active: true };
+      const role = req.user?.role;
+      if (role && role !== 'system_admin' && role !== 'accountant') {
+        const managed = (req.user.managed_branch_ids || []).map(String);
+        const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+        const allowed = managed.length > 0 ? managed : fallback;
+        filter._id = { $in: allowed };
+      }
+      const branches = await Branch.find(filter).select('_id').lean();
+      if (branches.length === 0) {
+        return res.status(400).json({ error: 'לא נמצאו סניפים פעילים' });
+      }
+      const created = await Holiday.insertMany(
+        branches.map(b => ({ ...baseDoc, branch_id: b._id })),
+      );
+      return res.status(201).json({
+        holidays: created.map(h => ({ ...h.toObject(), id: h._id })),
+        count: created.length,
+      });
+    }
+
+    const holiday = await Holiday.create({ ...baseDoc, branch_id });
     res.status(201).json({ holiday: { ...holiday.toObject(), id: holiday._id } });
   } catch (error) { next(error); }
 }
