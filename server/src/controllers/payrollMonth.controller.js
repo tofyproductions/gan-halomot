@@ -9,6 +9,8 @@ const {
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
+const { computeHolidayPay } = require('../services/israeliHolidays');
+const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
 
 function parseMonthRange(monthYM) {
   const [y, m] = monthYM.split('-').map(Number);
@@ -158,6 +160,22 @@ async function getMonth(req, res, next) {
         return s === 'auto' || s === 'approved';
       });
       const commitmentInfo = analyzeCommitment(commitmentByEmp.get(String(emp._id)), countablePunches, month);
+
+      // Holiday pay (דמי חגים) — auto-computed only for hourly employees
+      // who pass tenure + guard-day rules. Manager can still override via
+      // manual.holiday_pay; we expose both so the UI can show the breakdown.
+      const hourlyRate = emp.amuta_distribution?.[0]?.hourly_rate || 0;
+      const avgDailyHours = (breakdown.hours.days_worked > 0)
+        ? (breakdown.hours.total / breakdown.hours.days_worked)
+        : 8;
+      const holidayPayInfo = computeHolidayPay({
+        employee: emp,
+        monthYM: month,
+        punches: countablePunches,
+        commitment: commitmentByEmp.get(String(emp._id)),
+        hourlyRate,
+        avgDailyHours,
+      });
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
       const adjTotals = empAdjustments.reduce((acc, a) => {
@@ -214,6 +232,40 @@ async function getMonth(req, res, next) {
           off_day_workdays: commitmentInfo.off_day_workdays, // ymd[] of compensation
           net_absent: commitmentInfo.net_absent,
         } : null,
+        holiday_pay_auto: {
+          total_days: holidayPayInfo.total_days,
+          total_pay: holidayPayInfo.total_pay,
+          eligible: holidayPayInfo.eligible_days,
+          ineligible: holidayPayInfo.ineligible_days,
+        },
+        loans_info: (() => {
+          const list = Array.isArray(emp.loans) ? emp.loans : [];
+          const active = list.filter(l => (l.installments_paid || 0) < (l.installments_total || 0));
+          const monthDeduction = active.reduce((s, l) => s + (Number(l.installment_amount) || 0), 0);
+          return {
+            count: active.length,
+            month_deduction: Math.round(monthDeduction * 100) / 100,
+            loans: list.map(l => ({
+              id: String(l._id),
+              total_amount: l.total_amount,
+              installment_amount: l.installment_amount,
+              installments_total: l.installments_total,
+              installments_paid: l.installments_paid || 0,
+              started_at: l.started_at || null,
+              notes: l.notes || '',
+              active: (l.installments_paid || 0) < (l.installments_total || 0),
+            })),
+          };
+        })(),
+        vacation_info: (() => {
+          // Pulled from PayrollMonth row if already populated; else null.
+          // Detail endpoint /payroll-month/:id/vacation gives the full breakdown.
+          return {
+            balance_from_payslip: row?.vacation_balance_from_payslip ?? null,
+            balance_recorded_at: row?.vacation_balance_recorded_at || null,
+            request_ids: row?.vacation_request_ids?.map(String) || [],
+          };
+        })(),
         status: row?.status || 'draft',
       };
     });
@@ -595,6 +647,105 @@ async function deleteCustomColumn(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /api/payroll-month/import-cibus?month=YYYY-MM
+ * multipart: { cibus_file: <xlsx|csv> }
+ *
+ * Parses an exported Pluxee/Cibus report and writes each employee's monthly
+ * total into PayrollMonth.manual.cibus. Matches employees by israeli_id
+ * first, falls back to fuzzy name match within the system.
+ *
+ * Response: { matched, unmatched, total_amount, details: [...] }
+ */
+async function importCibus(req, res, next) {
+  try {
+    const { month } = req.query;
+    if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
+    if (!req.file) return res.status(400).json({ error: 'נדרש קובץ סיבוס' });
+
+    let report;
+    try {
+      report = parseCibusReport(req.file.buffer, req.file.originalname);
+    } catch (err) {
+      return res.status(400).json({ error: err.message || 'שגיאה בקריאת קובץ סיבוס' });
+    }
+
+    // Enforce per-user branch scope on the employee lookup
+    const role = req.user?.role;
+    const branchScope = {};
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      branchScope.branch_id = { $in: allowed };
+    }
+
+    const allEmployees = await Employee.find({ is_active: true, ...branchScope })
+      .select('_id full_name israeli_id branch_id')
+      .lean();
+    const byId = new Map(allEmployees.filter(e => e.israeli_id).map(e => [e.israeli_id, e]));
+    const normalizeName = (s) => (s || '').replace(/[()‘’“”"'.,]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    const normalized = allEmployees.map(e => ({ emp: e, tokens: normalizeName(e.full_name).split(' ').filter(Boolean) }));
+
+    const matched = [];
+    const unmatched = [];
+    let totalAmount = 0;
+
+    for (const row of report.rows || []) {
+      let emp = row.id ? byId.get(row.id) : null;
+      if (!emp && row.name) {
+        const target = normalizeName(row.name).split(' ').filter(Boolean);
+        if (target.length > 0) {
+          let best = null;
+          let bestScore = 0;
+          for (const cand of normalized) {
+            let common = 0;
+            for (const t of target) if (cand.tokens.includes(t)) common++;
+            const required = target.length === 1 ? 1 : 2;
+            if (common >= required && common > bestScore) {
+              best = cand.emp;
+              bestScore = common;
+            }
+          }
+          emp = best;
+        }
+      }
+      const amount = Number(row.amount) || 0;
+      totalAmount += amount;
+      if (!emp) {
+        unmatched.push({ name: row.name, id: row.id, amount });
+        continue;
+      }
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        {
+          $set: {
+            'manual.cibus': { kind: 'number', amount, text: '' },
+          },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+        },
+        { upsert: true },
+      );
+      matched.push({
+        employee_id: String(emp._id),
+        employee_name: emp.full_name,
+        israeli_id: emp.israeli_id,
+        amount,
+      });
+    }
+
+    res.json({
+      matched_count: matched.length,
+      unmatched_count: unmatched.length,
+      total_amount: Math.round(totalAmount * 100) / 100,
+      matched,
+      unmatched,
+      detected_columns: report.detected_columns,
+      warning: report.warning || null,
+    });
+  } catch (err) { next(err); }
+}
+
 async function setBranchAmuta(req, res, next) {
   try {
     const { branchId } = req.params;
@@ -629,4 +780,5 @@ module.exports = {
   createAdjustment,
   updateAdjustment,
   deleteAdjustment,
+  importCibus,
 };

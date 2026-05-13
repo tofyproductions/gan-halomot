@@ -59,6 +59,17 @@ const payrollMonthSchema = new mongoose.Schema({
   // Stored only when finalized; otherwise computed live on read.
   auto_snapshot: { type: mongoose.Schema.Types.Mixed, default: null },
 
+  // Snapshot of vacation balance from the latest parsed payslip for this
+  // employee. Recorded by the payslip-audit ingest step. Used by the manager
+  // UI to show "balance available" alongside any month-level vacation usage.
+  vacation_balance_from_payslip: { type: Number, default: null },
+  vacation_balance_recorded_at: { type: Date, default: null },
+  // Vacation requests (EmployeeRequest._id) approved into this month.
+  // When a manager approves a vacation request, the days are added to
+  // manual.vacation_days and the request id is recorded here so the UI
+  // can show the source of each day.
+  vacation_request_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'EmployeeRequest', default: [] },
+
   status: {
     type: String,
     enum: ['draft', 'finalized'],

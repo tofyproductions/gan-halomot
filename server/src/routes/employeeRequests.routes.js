@@ -12,5 +12,6 @@ router.post('/', c.createRequest);
 // Manager endpoints
 router.get('/', requireRole('system_admin', 'branch_manager'), c.getAllRequests);
 router.put('/:id/status', requireRole('system_admin', 'branch_manager'), c.updateRequestStatus);
+router.get('/vacation-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listVacationForMonth);
 
 module.exports = router;

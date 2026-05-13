@@ -1,7 +1,14 @@
 const express = require('express');
+const multer = require('multer');
 const router = express.Router();
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const c = require('../controllers/payrollMonth.controller');
+
+// In-memory upload for Cibus xlsx/csv imports. 10MB cap covers a typical month.
+const cibusUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+});
 
 router.use(authMiddleware);
 
@@ -33,5 +40,13 @@ router.get('/adjustments',                    c.listAdjustments);
 router.post('/adjustments',                   requireRole('system_admin', 'accountant', 'branch_manager'), c.createAdjustment);
 router.patch('/adjustments/:id',              requireRole('system_admin', 'accountant', 'branch_manager'), c.updateAdjustment);
 router.delete('/adjustments/:id',             requireRole('system_admin', 'accountant', 'branch_manager'), c.deleteAdjustment);
+
+// Cibus import — uploads a monthly Pluxee report and writes each employee's
+// total into PayrollMonth.manual.cibus.
+router.post('/import-cibus',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  cibusUpload.single('cibus_file'),
+  c.importCibus,
+);
 
 module.exports = router;

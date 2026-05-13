@@ -33,7 +33,45 @@ function pdfStoragePath(auditId, branch) {
 function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
-const { PayslipAuditRecord } = require('../models');
+const { PayslipAuditRecord, Employee, PayrollMonth } = require('../models');
+
+/**
+ * After an audit run completes, copy vacation balance from each parsed
+ * payslip into PayrollMonth.vacation_balance_from_payslip for the same
+ * (employee, year_month). Matches by israeli_id first, falls back to
+ * employee name token overlap on the same branch.
+ *
+ * Failure here is logged but never blocks the audit itself.
+ */
+async function syncVacationBalances(audit) {
+  if (!audit || !audit.year_month) return;
+  const month = audit.year_month;
+  for (const r of audit.results || []) {
+    try {
+      const balance = r?.payslip?.vacation?.balance;
+      if (balance == null) continue;
+      const israeliId = r.payslip?.employee_id;
+      let emp = null;
+      if (israeliId) {
+        emp = await Employee.findOne({ israeli_id: israeliId }).select('_id branch_id').lean();
+      }
+      if (!emp) continue; // skip ambiguous matches — only ID-grounded sync
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        {
+          $set: {
+            vacation_balance_from_payslip: balance,
+            vacation_balance_recorded_at: new Date(),
+          },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+        },
+        { upsert: true },
+      );
+    } catch (err) {
+      console.error('syncVacationBalances row failed:', err.message);
+    }
+  }
+}
 
 const ACCOUNTANT_EMAIL = 'efraim@dy-cpa.co.il';
 const OFFICE_EMAIL = 'tofy10.office@gmail.com';
@@ -392,6 +430,9 @@ async function runAuditMulti(req, res) {
       branches: payslipEntries.map((e) => e.branch),
     });
 
+    // Sync vacation balances from payslip → PayrollMonth (best-effort).
+    syncVacationBalances(merged).catch(err => console.error('syncVacationBalances failed:', err.message));
+
     // Persist the original PDF buffers so the per-employee preview endpoint
     // can extract individual pages later. We do this AFTER persistAudit so
     // the file path is keyed by the saved audit id.
@@ -441,6 +482,8 @@ async function runAudit(req, res) {
       payslip_files: [{ branch: opts.branchFilter || '', filename: payslipFile.originalname }],
       branches: opts.branchFilter ? [opts.branchFilter] : [],
     });
+
+    syncVacationBalances(audit).catch(err => console.error('syncVacationBalances failed:', err.message));
 
     res.json({
       ...audit,

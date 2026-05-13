@@ -15,10 +15,16 @@ import TextFieldsIcon from '@mui/icons-material/TextFields';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import TuneIcon from '@mui/icons-material/Tune';
+import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
+import PaymentsIcon from '@mui/icons-material/Payments';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
+import VacationDetailDialog from './VacationDetailDialog';
+import HolidayPayDetailDialog from './HolidayPayDetailDialog';
+import LoansDialog from './LoansDialog';
+import CibusImportDialog from './CibusImportDialog';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Monthly payroll table — auto-calculated per-amuta hours from punches,
@@ -331,6 +337,10 @@ export default function PayrollMonthTable() {
   const [notes, setNotes] = useState({ open: false, row: null });
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
+  const [vacation, setVacation] = useState({ open: false, row: null });
+  const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
+  const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
+  const [cibusDlg, setCibusDlg] = useState(false);
 
   const isFinalized = useMemo(() => {
     if (!data?.rows?.length) return false;
@@ -432,7 +442,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר גלובלי', 'שע"נ גלובלי'];
 
     const headerTop = ['סניף', 'שם העובד', ...cols,
-      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים'];
+      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('הערות');
     rowsAcc.push(headerTop);
@@ -462,6 +472,7 @@ export default function PayrollMonthTable() {
         r.manual.recreation?.kind === 'number' ? r.manual.recreation.amount : (r.manual.recreation?.text || ''),
         r.manual.cibus?.kind === 'number' ? r.manual.cibus.amount : (r.manual.cibus?.text || ''),
         r.manual.miluim?.kind === 'number' ? r.manual.miluim.amount : (r.manual.miluim?.text || ''),
+        r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
       );
       for (const c of customColumns) {
         const v = r.manual.custom_values?.[c.id];
@@ -533,6 +544,7 @@ export default function PayrollMonthTable() {
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
           </Typography>
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined">הוסף עמודה</Button>
+          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success">ייבוא סיבוס</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
@@ -573,6 +585,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
+            <col style={{ width: W.money }} />
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
@@ -589,7 +602,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={10 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={11 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -605,6 +618,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>הבראה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.50' }}>הלוואות</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -628,7 +642,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 7 + 12 + customColumns.length;
+              const totalCols = 1 + 7 + 13 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -747,8 +761,33 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
-                      <TableCell align="center"><NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} /></TableCell>
-                      <TableCell align="center"><NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} /></TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer' }} onClick={() => setVacation({ open: true, row: r })}>
+                        <NumberCell value={r.manual.vacation_days} disabled={locked} onSave={v => patchManual(r.employee_id, { vacation_days: v })} />
+                        {r.vacation_info?.balance_from_payslip != null && (
+                          <Tooltip title="לחץ לפירוט: יתרת חופש מתלוש + בקשות מאושרות">
+                            <Chip
+                              size="small"
+                              color="primary" variant="outlined"
+                              label={`יתרה: ${r.vacation_info.balance_from_payslip}`}
+                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
+                              onClick={(e) => { e.stopPropagation(); setVacation({ open: true, row: r }); }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer' }} onClick={() => setHolidayPay({ open: true, row: r })}>
+                        <NumberCell value={r.manual.holiday_pay} disabled={locked} onSave={v => patchManual(r.employee_id, { holiday_pay: v })} />
+                        {(!r.manual.holiday_pay || r.manual.holiday_pay === 0) && r.holiday_pay_auto?.total_pay > 0 && (
+                          <Tooltip title={`חישוב אוטומטי: ${r.holiday_pay_auto.total_days} ימי חג × תעריף יומי. לחץ לפירוט.`}>
+                            <Chip
+                              size="small" color="warning" variant="outlined"
+                              label={`auto: ${r.holiday_pay_auto.total_pay}`}
+                              onClick={(e) => { e.stopPropagation(); patchManual(r.employee_id, { holiday_pay: r.holiday_pay_auto.total_pay }); }}
+                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <AdvanceDeductionCell
                           row={r} presets={presets} disabled={locked}
@@ -761,6 +800,9 @@ export default function PayrollMonthTable() {
                       <TableCell align="center"><NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} /></TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.50' }} onClick={() => setLoansDlg({ open: true, row: r })}>
+                        <LoansSummaryCell row={r} />
+                      </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
                           <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
@@ -794,7 +836,60 @@ export default function PayrollMonthTable() {
         onClose={() => setAdjustments({ open: false, row: null })}
         onChanged={fetchData}
       />
+      <VacationDetailDialog
+        open={vacation.open}
+        row={vacation.row}
+        month={month}
+        onClose={() => setVacation({ open: false, row: null })}
+        onSaved={fetchData}
+      />
+      <HolidayPayDetailDialog
+        open={holidayPay.open}
+        row={holidayPay.row}
+        month={month}
+        onClose={() => setHolidayPay({ open: false, row: null })}
+        onSaved={fetchData}
+      />
+      <LoansDialog
+        open={loansDlg.open}
+        row={loansDlg.row}
+        onClose={() => setLoansDlg({ open: false, row: null })}
+        onSaved={fetchData}
+      />
+      <CibusImportDialog
+        open={cibusDlg}
+        month={month}
+        onClose={() => setCibusDlg(false)}
+        onImported={fetchData}
+      />
     </Box>
+  );
+}
+
+function LoansSummaryCell({ row }) {
+  const info = row.loans_info || { count: 0, month_deduction: 0, loans: [] };
+  if (info.count === 0 && info.loans.length === 0) {
+    return <Box sx={{ color: 'text.disabled', fontSize: '0.78rem' }}>—</Box>;
+  }
+  const active = info.count;
+  const monthDed = info.month_deduction;
+  return (
+    <Stack spacing={0.3} alignItems="center">
+      {monthDed > 0 ? (
+        <Typography variant="body2" sx={{ fontWeight: 700, color: 'error.dark', fontSize: '0.78rem' }}>
+          -{Math.round(monthDed).toLocaleString('he-IL')} ₪
+        </Typography>
+      ) : (
+        <Typography variant="body2" sx={{ color: 'text.disabled', fontSize: '0.78rem' }}>—</Typography>
+      )}
+      {active > 0 && (
+        <Chip
+          size="small" color="error" variant="outlined"
+          label={`${active} פעיל${active > 1 ? 'ות' : 'ה'}`}
+          sx={{ height: 14, fontSize: '0.6rem' }}
+        />
+      )}
+    </Stack>
   );
 }
 
