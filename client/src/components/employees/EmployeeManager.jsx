@@ -9,10 +9,13 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import LinkIcon from '@mui/icons-material/Link';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
+import { branchColor } from '../../utils/branchColors';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { formatCurrency } from '../../utils/hebrewYear';
 import HoursReportDialog from './HoursReportDialog';
@@ -105,7 +108,7 @@ function mergePrimaryAmuta(existing, form) {
 
 export default function EmployeeManager() {
   const { isAdmin, isManager } = useAuth();
-  const { branches, selectedBranch, selectedBranchName } = useBranch();
+  const { branches, selectedBranch, selectedBranchName, isAllBranches } = useBranch();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
@@ -114,6 +117,7 @@ export default function EmployeeManager() {
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
   // Inline editing: { empId, field, value }
   const [inlineEdit, setInlineEdit] = useState(null);
+  const [search, setSearch] = useState('');
 
   const fetchEmployees = useCallback(() => {
     if (!selectedBranch) { setEmployees([]); setLoading(false); return; }
@@ -293,6 +297,35 @@ export default function EmployeeManager() {
     missingIdCount: employees.filter(e => !e.israeli_id).length,
   }), [employees]);
 
+  const filteredEmployees = useMemo(() => {
+    if (!search.trim()) return employees;
+    const q = search.trim().toLowerCase();
+    return employees.filter(e =>
+      (e.full_name || '').toLowerCase().includes(q) ||
+      (e.israeli_id || '').includes(q) ||
+      (e.position || '').toLowerCase().includes(q) ||
+      (e.phone || '').includes(q)
+    );
+  }, [employees, search]);
+
+  // Group filtered employees by branch (only used when "all branches" view).
+  const employeesByBranch = useMemo(() => {
+    if (!isAllBranches) return null;
+    const groups = new Map();
+    for (const e of filteredEmployees) {
+      const bid = String(e.branch_id || 'no-branch');
+      if (!groups.has(bid)) groups.set(bid, []);
+      groups.get(bid).push(e);
+    }
+    return groups;
+  }, [filteredEmployees, isAllBranches]);
+
+  const branchById = useMemo(() => {
+    const m = new Map();
+    (branches || []).forEach((b, idx) => m.set(String(b._id || b.id), { branch: b, idx }));
+    return m;
+  }, [branches]);
+
   return (
     <Box dir="rtl" sx={{ maxWidth: 1200, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
@@ -303,16 +336,33 @@ export default function EmployeeManager() {
             {missingIdCount > 0 && ` • ${missingIdCount} בלי ת״ז`}
           </Typography>
         </Box>
-        {isManager && (
-          <Stack direction="row" spacing={1}>
-            <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
-              שיוך לשעון
-            </Button>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
-              הוסף עובד
-            </Button>
-          </Stack>
-        )}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <TextField
+            placeholder="חיפוש שם / ת״ז / תפקיד / טלפון"
+            size="small"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            sx={{ width: 280 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearch('')}><ClearIcon fontSize="small" /></IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          {isManager && (
+            <>
+              <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
+                שיוך לשעון
+              </Button>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
+                הוסף עובד
+              </Button>
+            </>
+          )}
+        </Stack>
       </Stack>
 
       {missingIdCount > 0 && (
@@ -337,64 +387,93 @@ export default function EmployeeManager() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {employees.map(emp => {
-              const empId = emp._id || emp.id;
-              const rate = emp._display_rate;
-              const rateLabel = emp.salary_type === 'global'
-                ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
-                : (rate ? `₪${rate}/שעה` : '—');
-              return (
-                <TableRow key={empId} hover>
-                  <TableCell sx={{ fontWeight: 600 }}>{emp.full_name}</TableCell>
-                  <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
-                    {emp.israeli_id || '—'}
-                  </TableCell>
-                  <TableCell>{emp.position || '—'}</TableCell>
-                  <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
-                  <TableCell>
-                    <Chip
-                      label={emp.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
-                      size="small"
-                      color={emp.salary_type === 'global' ? 'primary' : 'default'}
-                      variant="outlined"
-                    />
-                    {emp.salary_is_net && <Chip label="נטו" size="small" sx={{ ml: 0.5 }} />}
-                  </TableCell>
-                  <TableCell align="center" sx={{ fontWeight: 700 }}>{rateLabel}</TableCell>
-                  <TableCell align="center" sx={{ color: emp.salary_type === 'global' && emp._display_required_hours ? 'text.primary' : 'text.disabled', fontSize: '0.85rem' }}>
-                    {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
-                  </TableCell>
-                  <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
-                  {isManager && (
-                    <TableCell align="center">
-                      <Stack direction="row" spacing={0.5} justifyContent="center">
-                        <Tooltip title="דוח שעות">
-                          <IconButton size="small" onClick={() => setHoursDialog({ open: true, employee: emp })}>
-                            <ScheduleIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="ערוך">
-                          <IconButton size="small" onClick={() => openEdit(emp)}>
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        <Tooltip title="הסר">
-                          <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id: emp._id || emp.id })}>
-                            <DeleteIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </Stack>
+            {(() => {
+              const renderEmp = (emp) => {
+                const empId = emp._id || emp.id;
+                const rate = emp._display_rate;
+                const rateLabel = emp.salary_type === 'global'
+                  ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
+                  : (rate ? `₪${rate}/שעה` : '—');
+                return (
+                  <TableRow key={empId} hover>
+                    <TableCell sx={{ fontWeight: 600 }}>{emp.full_name}</TableCell>
+                    <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
+                      {emp.israeli_id || '—'}
                     </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
-            {!loading && employees.length === 0 && (
-              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>אין עובדים</TableCell></TableRow>
-            )}
-            {loading && (
-              <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>
-            )}
+                    <TableCell>{emp.position || '—'}</TableCell>
+                    <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
+                    <TableCell>
+                      <Chip
+                        label={emp.salary_type === 'global' ? 'גלובלי' : 'שעתי'}
+                        size="small"
+                        color={emp.salary_type === 'global' ? 'primary' : 'default'}
+                        variant="outlined"
+                      />
+                      {emp.salary_is_net && <Chip label="נטו" size="small" sx={{ ml: 0.5 }} />}
+                    </TableCell>
+                    <TableCell align="center" sx={{ fontWeight: 700 }}>{rateLabel}</TableCell>
+                    <TableCell align="center" sx={{ color: emp.salary_type === 'global' && emp._display_required_hours ? 'text.primary' : 'text.disabled', fontSize: '0.85rem' }}>
+                      {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
+                    </TableCell>
+                    <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
+                    {isManager && (
+                      <TableCell align="center">
+                        <Stack direction="row" spacing={0.5} justifyContent="center">
+                          <Tooltip title="דוח שעות">
+                            <IconButton size="small" onClick={() => setHoursDialog({ open: true, employee: emp })}>
+                              <ScheduleIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="ערוך">
+                            <IconButton size="small" onClick={() => openEdit(emp)}>
+                              <EditIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="הסר">
+                            <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id: emp._id || emp.id })}>
+                              <DeleteIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              };
+              if (loading) return <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
+              const out = [];
+              if (employeesByBranch) {
+                const ordered = (branches || [])
+                  .map(b => String(b._id || b.id))
+                  .filter(id => employeesByBranch.has(id));
+                if (employeesByBranch.has('no-branch')) ordered.push('no-branch');
+                for (const bid of ordered) {
+                  const info = branchById.get(bid);
+                  const color = info ? branchColor(info.branch, info.idx) : { header: '#f1f5f9', accent: '#475569', border: '#cbd5e1' };
+                  const list = employeesByBranch.get(bid) || [];
+                  out.push(
+                    <TableRow key={`hdr-${bid}`} sx={{ bgcolor: color.header }}>
+                      <TableCell colSpan={isManager ? 9 : 8} sx={{
+                        fontWeight: 900, fontSize: '0.9rem', py: 1,
+                        color: color.accent, borderTop: '3px solid', borderColor: color.border,
+                      }}>
+                        🏠 {info?.branch?.name || 'ללא סניף'} <Chip size="small" label={`${list.length} עובדים`} sx={{ ml: 1, bgcolor: 'background.paper' }} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                  for (const emp of list) out.push(renderEmp(emp));
+                }
+                if (out.length === 0) {
+                  out.push(<TableRow key="empty"><TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.disabled' }}>אין עובדים תואמים את החיפוש</TableCell></TableRow>);
+                }
+                return out;
+              }
+              // Single-branch view: simple flat list
+              if (filteredEmployees.length === 0) {
+                return <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.disabled' }}>{search ? 'אין עובדים תואמים את החיפוש' : 'אין עובדים בסניף זה'}</TableCell></TableRow>;
+              }
+              return filteredEmployees.map(renderEmp);
+            })()}
           </TableBody>
         </Table>
       </TableContainer>

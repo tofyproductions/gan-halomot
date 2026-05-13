@@ -2,15 +2,19 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Stack, TextField, Paper, Table, TableBody, TableCell,
   TableHead, TableRow, TableContainer, Chip, Alert, Button, Tooltip, IconButton,
+  InputAdornment,
 } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import WarningIcon from '@mui/icons-material/Warning';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import SearchIcon from '@mui/icons-material/Search';
+import ClearIcon from '@mui/icons-material/Clear';
 import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { branchColor } from '../../utils/branchColors';
 import HoursReportDialog from '../employees/HoursReportDialog';
 import PendingPunchApprovals from './PendingPunchApprovals';
 import DayPunchesDialog from './DayPunchesDialog';
@@ -45,6 +49,7 @@ export default function AttendanceMonitor() {
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
+  const [search, setSearch] = useState('');
 
   const fetchAttendance = useCallback(() => {
     if (!selectedBranch) return;
@@ -223,9 +228,18 @@ export default function AttendanceMonitor() {
     );
   };
 
-  const activeEmployees = (data?.employees || []).filter(hasAnyActivity);
+  const searchPredicate = useCallback((block) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return (
+      (block.full_name || '').toLowerCase().includes(q) ||
+      (block.israeli_id || '').includes(q)
+    );
+  }, [search]);
+
+  const activeEmployees = (data?.employees || []).filter(hasAnyActivity).filter(searchPredicate);
   const inactiveCount = (data?.employees || []).length - activeEmployees.length;
-  const guestEmployees = (data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
+  const guestEmployees = (data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0).filter(searchPredicate);
 
   // Aggregate totals across branches in all-branches mode
   const allTotals = perBranch ? perBranch.reduce((acc, grp) => {
@@ -437,6 +451,21 @@ export default function AttendanceMonitor() {
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <TextField
+            placeholder="חיפוש עובד / ת״ז"
+            size="small"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            sx={{ width: 240 }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearch('')}><ClearIcon fontSize="small" /></IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
+          />
+          <TextField
             label="חודש"
             type="month"
             value={month}
@@ -523,19 +552,25 @@ export default function AttendanceMonitor() {
             )}
 
             {/* All-branches mode: per-branch sections */}
-            {!loading && perBranch && perBranch.flatMap((grp) => {
+            {!loading && perBranch && perBranch.flatMap((grp, idx) => {
               const branchKey = grp.branch._id || grp.branch.id;
+              const color = branchColor(grp.branch, idx);
               const out = [];
-              const grpActive = (grp.data?.employees || []).filter(hasAnyActivity);
-              const grpGuests = (grp.data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0);
+              const grpActive = (grp.data?.employees || []).filter(hasAnyActivity).filter(searchPredicate);
+              const grpGuests = (grp.data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0).filter(searchPredicate);
               const grpUnlinked = grp.data?.unlinked || [];
               out.push(
-                <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'grey.200' }}>
-                  <TableCell colSpan={days.length + 3} sx={{ fontWeight: 900, fontSize: '0.95rem', py: 1, position: 'sticky', right: 0, bgcolor: 'grey.200', zIndex: 2 }}>
+                <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: color.header }}>
+                  <TableCell colSpan={days.length + 3} sx={{
+                    fontWeight: 900, fontSize: '0.95rem', py: 1,
+                    position: 'sticky', right: 0, zIndex: 2,
+                    bgcolor: color.header, color: color.accent,
+                    borderTop: '3px solid', borderColor: color.border,
+                  }}>
                     🏠 {grp.branch.name}
                     {grp.error
                       ? <Chip size="small" color="error" label={'שגיאה: ' + grp.error} sx={{ ml: 1 }} />
-                      : grp.data && <Chip size="small" variant="outlined" label={`${grp.data.totals.total_punches} החתמות, ${grp.data.totals.matched_punches} משויכות`} sx={{ ml: 1 }} />
+                      : grp.data && <Chip size="small" variant="outlined" label={`${grp.data.totals.total_punches} החתמות, ${grp.data.totals.matched_punches} משויכות`} sx={{ ml: 1, bgcolor: 'background.paper' }} />
                     }
                   </TableCell>
                 </TableRow>

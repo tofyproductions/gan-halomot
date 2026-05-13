@@ -17,13 +17,14 @@ import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
+import { BRANCH_PALETTE, BRANCH_COLOR_NAMES, branchColor } from '../../utils/branchColors';
 
 export default function BranchManager() {
   const { branches, fetchBranches } = useBranch();
   const { years } = useAcademicYear();
 
   // Branch dialog
-  const [branchDialog, setBranchDialog] = useState({ open: false, mode: 'add', id: null, name: '', address: '' });
+  const [branchDialog, setBranchDialog] = useState({ open: false, mode: 'add', id: null, name: '', address: '', color: '' });
   // Classroom dialog
   const [classDialog, setClassDialog] = useState({ open: false, branchId: null, id: null, name: '', capacity: 35, category: '' });
   const CATEGORIES = ['תינוקייה', 'צעירים', 'בוגרים'];
@@ -54,19 +55,19 @@ export default function BranchManager() {
   }, [branches, fetchClassrooms]);
 
   // --- Branch CRUD ---
-  const openAddBranch = () => setBranchDialog({ open: true, mode: 'add', id: null, name: '', address: '' });
-  const openEditBranch = (b) => setBranchDialog({ open: true, mode: 'edit', id: b._id || b.id, name: b.name, address: b.address || '' });
-  const closeBranchDialog = () => setBranchDialog({ open: false, mode: 'add', id: null, name: '', address: '' });
+  const openAddBranch = () => setBranchDialog({ open: true, mode: 'add', id: null, name: '', address: '', color: '' });
+  const openEditBranch = (b) => setBranchDialog({ open: true, mode: 'edit', id: b._id || b.id, name: b.name, address: b.address || '', color: b.color || '' });
+  const closeBranchDialog = () => setBranchDialog({ open: false, mode: 'add', id: null, name: '', address: '', color: '' });
 
   const handleSaveBranch = async () => {
-    const { mode, id, name, address } = branchDialog;
+    const { mode, id, name, address, color } = branchDialog;
     if (!name.trim()) return toast.error('שם הסניף חובה');
     try {
       if (mode === 'add') {
         await api.post('/branches', { name: name.trim(), address: address.trim() });
         toast.success('סניף נוסף');
       } else {
-        await api.put(`/branches/${id}`, { name: name.trim(), address: address.trim() });
+        await api.put(`/branches/${id}`, { name: name.trim(), address: address.trim(), color: color || '' });
         toast.success('סניף עודכן');
       }
       closeBranchDialog();
@@ -184,14 +185,15 @@ export default function BranchManager() {
         </Box>
       ) : (
         <Stack spacing={3}>
-          {branches.map((branch) => {
+          {branches.map((branch, idx) => {
             const bid = branch._id || branch.id;
             const classrooms = classroomsByBranch[bid] || [];
             const totalCapacity = classrooms.reduce((s, c) => s + (c.capacity || 0), 0);
             const totalChildren = classrooms.reduce((s, c) => s + (c.child_count || 0), 0);
+            const c = branchColor(branch, idx);
 
             return (
-              <Card key={bid} sx={{ borderRight: '5px solid #f59e0b' }}>
+              <Card key={bid} sx={{ borderRight: `5px solid ${c.dot}`, bgcolor: c.sub }}>
                 <CardContent>
                   {/* Branch Header */}
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
@@ -385,6 +387,39 @@ export default function BranchManager() {
               onChange={(e) => setBranchDialog(prev => ({ ...prev, address: e.target.value }))}
               fullWidth
             />
+            {branchDialog.mode === 'edit' && (
+              <Box>
+                <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>
+                  צבע הסניף (משמש בטבלת השכר, מעקב החתמות וניהול עובדים)
+                </Typography>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Box
+                    onClick={() => setBranchDialog(prev => ({ ...prev, color: '' }))}
+                    sx={{
+                      width: 36, height: 36, borderRadius: 2, cursor: 'pointer',
+                      border: branchDialog.color === '' ? '3px solid #1976d2' : '2px solid #ccc',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '0.7rem', color: '#666', bgcolor: '#fff',
+                    }}
+                    title="אוטומטי"
+                  >
+                    auto
+                  </Box>
+                  {BRANCH_COLOR_NAMES.map(name => (
+                    <Box
+                      key={name}
+                      onClick={() => setBranchDialog(prev => ({ ...prev, color: name }))}
+                      sx={{
+                        width: 36, height: 36, borderRadius: 2, cursor: 'pointer',
+                        bgcolor: BRANCH_PALETTE[name].header,
+                        border: branchDialog.color === name ? `3px solid ${BRANCH_PALETTE[name].dot}` : `2px solid ${BRANCH_PALETTE[name].border}`,
+                      }}
+                      title={name}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

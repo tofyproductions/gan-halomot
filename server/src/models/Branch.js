@@ -9,6 +9,11 @@ const branchSchema = new mongoose.Schema({
   delivery_contact_name: { type: String, default: '' },
   delivery_contact_phone: { type: String, default: '' },
 
+  // Visual color (one of the keys in client/src/utils/branchColors.js).
+  // Drives the section header tint in attendance/payroll/employee views.
+  // When empty, the UI falls back to a position-based color.
+  color: { type: String, default: '' },
+
   // Legal entity (amuta) this branch belongs to. Drives how punched hours are
   // bucketed in the monthly payroll table: hours at branch X go under the
   // amuta column for X. A single branch belongs to exactly one amuta.

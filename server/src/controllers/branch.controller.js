@@ -47,7 +47,7 @@ async function create(req, res, next) {
 async function update(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, address } = req.body;
+    const { name, address, color } = req.body;
 
     const branch = await Branch.findById(id);
     if (!branch) {
@@ -56,6 +56,7 @@ async function update(req, res, next) {
 
     if (name) branch.name = name;
     if (address !== undefined) branch.address = address;
+    if (color !== undefined) branch.color = color;
     await branch.save();
 
     res.json({ branch: { ...branch.toObject(), id: branch._id } });
