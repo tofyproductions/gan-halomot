@@ -16,6 +16,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatCurrency } from '../../utils/hebrewYear';
+import { useBranch } from '../../hooks/useBranch';
 
 /**
  * EmployeeDetailDialog — the "zoom into one employee" view. Tabs:
@@ -41,9 +42,11 @@ function emptyBonus() {
 }
 
 export default function EmployeeDetailDialog({ open, employeeId, initialMonth, onClose, onChanged }) {
+  const { branches } = useBranch();
   const [tab, setTab] = useState(0);
   const [month, setMonth] = useState(initialMonth || currentYearMonth());
   const [employee, setEmployee] = useState(null);
+  const [branchRates, setBranchRates] = useState([]);
   const [breakdown, setBreakdown] = useState(null);
   const [hoursReport, setHoursReport] = useState(null);
   const [forceFullGlobal, setForceFullGlobal] = useState(false);
@@ -71,6 +74,13 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         setEmployee(emp);
         setLoans(emp.loans || []);
         setBonuses(emp.bonuses || []);
+        setBranchRates((emp.branch_rates || []).map(br => ({
+          branch_id: String(br.branch_id?._id || br.branch_id),
+          hourly_rate: br.hourly_rate ?? '',
+          global_salary: br.global_salary ?? '',
+          global_ot_rate: br.global_ot_rate ?? '',
+          required_hours: br.required_hours ?? '',
+        })));
         const firstAmuta = emp.amuta_distribution?.[0] || {};
         setDetails({
           start_date: emp.start_date ? new Date(emp.start_date).toISOString().slice(0, 10) : '',
@@ -153,6 +163,15 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         },
         ...(employee?.amuta_distribution || []).slice(1),
       ];
+      const cleanBranchRates = branchRates
+        .filter(br => br.branch_id && (br.hourly_rate || br.global_salary))
+        .map(br => ({
+          branch_id: br.branch_id,
+          hourly_rate: br.hourly_rate === '' ? null : Number(br.hourly_rate),
+          global_salary: br.global_salary === '' ? null : Number(br.global_salary),
+          global_ot_rate: br.global_ot_rate === '' ? null : Number(br.global_ot_rate),
+          required_hours: br.required_hours === '' ? null : Number(br.required_hours),
+        }));
       await api.put(`/payroll/employees/${employeeId}`, {
         start_date: details.start_date || null,
         position: details.position,
@@ -161,6 +180,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         address: details.address,
         salary_type: details.salary_type,
         amuta_distribution: updatedAmuta,
+        branch_rates: cleanBranchRates,
         travel_mode: details.travel_mode,
         travel_per_day: Number(details.travel_per_day) || 0,
         travel_monthly_flat: Number(details.travel_monthly_flat) || 0,
@@ -666,6 +686,62 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
                 </>
               )}
             </Stack>
+
+            <Divider sx={{ my: 1 }} />
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>תעריפים פר־סניף (עבודה רב-סניפית)</Typography>
+              <Chip size="small" label="אופציונלי" variant="outlined" />
+            </Stack>
+            <Alert severity="info" sx={{ borderRadius: 2, py: 0.5 }}>
+              עובדת שעובדת בכמה סניפים — הוסף שורה לכל סניף נוסף עם התעריף שלה שם.
+              שעות שהיא תחתום שם יחושבו לפי התעריף הזה. אם לא הוגדר — השעות משולמות בתעריף הראשי.
+            </Alert>
+            {branchRates.map((br, i) => (
+              <Stack key={i} direction="row" spacing={1} alignItems="center">
+                <TextField select label="סניף" size="small" sx={{ width: 200 }}
+                  value={br.branch_id || ''}
+                  onChange={e => {
+                    const arr = [...branchRates]; arr[i].branch_id = e.target.value; setBranchRates(arr);
+                  }}
+                >
+                  {(branches || []).map(b => (
+                    <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+                  ))}
+                </TextField>
+                {details.salary_type === 'hourly' ? (
+                  <TextField label="תעריף שעתי" type="number" size="small" sx={{ width: 140 }}
+                    value={br.hourly_rate} onChange={e => {
+                      const arr = [...branchRates]; arr[i].hourly_rate = e.target.value; setBranchRates(arr);
+                    }}
+                    InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                  />
+                ) : (
+                  <>
+                    <TextField label="שכר גלובלי" type="number" size="small" sx={{ width: 140 }}
+                      value={br.global_salary} onChange={e => {
+                        const arr = [...branchRates]; arr[i].global_salary = e.target.value; setBranchRates(arr);
+                      }}
+                    />
+                    <TextField label="שעות נדרשות" type="number" size="small" sx={{ width: 130 }}
+                      value={br.required_hours} onChange={e => {
+                        const arr = [...branchRates]; arr[i].required_hours = e.target.value; setBranchRates(arr);
+                      }}
+                    />
+                  </>
+                )}
+                <IconButton color="error" onClick={() => setBranchRates(branchRates.filter((_, idx) => idx !== i))}>
+                  <DeleteIcon />
+                </IconButton>
+              </Stack>
+            ))}
+            <Button
+              startIcon={<AddIcon />}
+              size="small"
+              variant="outlined"
+              onClick={() => setBranchRates([...branchRates, { branch_id: '', hourly_rate: '', global_salary: '', global_ot_rate: '', required_hours: '' }])}
+            >
+              הוסף תעריף לסניף נוסף
+            </Button>
 
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>נסיעות ותוספות</Typography>

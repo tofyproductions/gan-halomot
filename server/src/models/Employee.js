@@ -45,6 +45,25 @@ const amutaSplitSchema = new mongoose.Schema({
   required_hours: { type: Number, default: null },          // מחוייבת ל-X שעות חודשיות
 }, { _id: false });
 
+/**
+ * Per-branch rate override — used when an employee works across multiple
+ * branches with different pay rates per branch. The `branch_id` field is the
+ * branch where the employee can also be clocked in (in addition to her home
+ * branch). When she punches at that branch, the calculator uses the rates
+ * here instead of the primary `amuta_distribution[0]` rates.
+ *
+ * If empty (default), all hours are paid at the primary rate regardless of
+ * where they happened. The home branch (`Employee.branch_id`) does NOT need
+ * to appear here — its rate comes from `amuta_distribution`.
+ */
+const branchRateSchema = new mongoose.Schema({
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+  hourly_rate: { type: Number, default: null },
+  global_salary: { type: Number, default: null },
+  global_ot_rate: { type: Number, default: null },
+  required_hours: { type: Number, default: null },
+}, { _id: false });
+
 const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
@@ -68,6 +87,8 @@ const employeeSchema = new mongoose.Schema({
   // distinction so payroll calculation can apply the correct tax treatment.
   salary_is_net: { type: Boolean, default: false },
   amuta_distribution: { type: [amutaSplitSchema], default: [] },
+  // Per-branch rate overrides for cross-branch workers. Empty by default.
+  branch_rates: { type: [branchRateSchema], default: [] },
 
   // Extras (monthly defaults, can be overridden per PayrollMonth entry)
   // Two travel modes:

@@ -131,7 +131,13 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
 
           <Divider />
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>סכום בטבלת השכר</Typography>
-          <Stack direction="row" spacing={1} alignItems="center">
+          {(auto.blocking_reason || (!isHourly)) && (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              העובד לא זכאי אוטומטית — אבל ניתן לתת לו דמי חגים ידנית בכל זאת.
+              הזן סכום בשדה למטה ולחץ "שמור".
+            </Alert>
+          )}
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
             <TextField
               size="small"
               type="number"
@@ -143,6 +149,14 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
             {isHourly && auto.total_pay > 0 && (
               <Button variant="outlined" onClick={useAuto}>
                 החל אוטומטי ({auto.total_pay} ₪)
+              </Button>
+            )}
+            {Number(manual) > 0 && (
+              <Button
+                variant="outlined" color="error"
+                onClick={() => setManual(0)}
+              >
+                אפס
               </Button>
             )}
           </Stack>

@@ -246,7 +246,8 @@ async function updateEmployee(req, res, next) {
     const fields = [
       'full_name', 'israeli_id', 'branch_id', 'phone', 'email', 'address',
       'position', 'start_date',
-      'salary_type', 'salary_is_net', 'amuta_distribution',
+      'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates',
+      'travel_mode', 'travel_per_day', 'travel_monthly_flat',
       'travel_allowance', 'meal_vouchers', 'recreation_annual',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
       'loans', 'bonuses', 'notes', 'is_active',

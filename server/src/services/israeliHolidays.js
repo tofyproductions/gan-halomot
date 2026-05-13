@@ -145,15 +145,21 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     // commitment uses 0..5 same convention.
     if (wd <= 5 && offWeekdays.has(wd)) reasons.push('יום החג ביום החופש השבועי של העובד');
 
-    // Rule 5: worked day before AND day after (skipping Saturdays/holidays).
-    // Find the nearest working calendar day before the holiday — if THAT was
-    // a Saturday, we relax the rule for that side.
+    // Rule 5: worked day before AND day after (skipping Saturdays/holidays/
+    // employee's weekly off-day). The guard-day rule is relaxed when the
+    // adjacent day was:
+    //   - Saturday (no one works)
+    //   - the employee's weekly off-day per commitment
+    // In both cases the employee couldn't have worked anyway, so absence is
+    // not a disqualifier.
     const prev = shiftYmd(h.date, -1);
     const next = shiftYmd(h.date, +1);
     const prevWd = weekdayLocal(prev);
     const nextWd = weekdayLocal(next);
-    const prevWorked = workedSet.has(prev) || prevWd === 6;
-    const nextWorked = workedSet.has(next) || nextWd === 6;
+    const prevIsRelaxed = prevWd === 6 || offWeekdays.has(prevWd);
+    const nextIsRelaxed = nextWd === 6 || offWeekdays.has(nextWd);
+    const prevWorked = workedSet.has(prev) || prevIsRelaxed;
+    const nextWorked = workedSet.has(next) || nextIsRelaxed;
     if (!prevWorked) reasons.push(`לא עבד יום לפני החג (${prev})`);
     if (!nextWorked) reasons.push(`לא עבד יום אחרי החג (${next})`);
 

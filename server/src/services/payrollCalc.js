@@ -285,36 +285,73 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   };
 
   finalizeBuckets(amutaBuckets, fallbackAmutaId);
-  // Each branch the employee worked at gets the employee's standard rates —
-  // hours at any branch are paid at the same hourly_rate / global_salary.
+  // Each branch the employee worked at gets the rate from `branch_rates`
+  // if defined for that branch, otherwise the employee's standard rates.
   const primaryBranchId = employee.branch_id ? String(employee.branch_id._id || employee.branch_id) : null;
   finalizeBuckets(branchBuckets, primaryBranchId);
+
+  // Per-branch rate override lookup
+  const branchRateMap = new Map();
+  if (Array.isArray(employee.branch_rates)) {
+    for (const br of employee.branch_rates) {
+      const bid = String(br.branch_id?._id || br.branch_id);
+      if (bid) branchRateMap.set(bid, br);
+    }
+  }
+  function rateForBranch(bId) {
+    const override = branchRateMap.get(String(bId));
+    if (override && (override.hourly_rate || override.global_salary)) {
+      return {
+        hourly_rate: Number(override.hourly_rate) || 0,
+        global_salary: Number(override.global_salary) || 0,
+        global_ot_rate: Number(override.global_ot_rate) || 0,
+      };
+    }
+    return {
+      hourly_rate: rates.hourly_rate,
+      global_salary: rates.global_salary,
+      global_ot_rate: rates.global_ot_rate,
+    };
+  }
+
   // Fall back: even if employee has no punches anywhere else, make sure their
   // home branch has rate columns populated so the UI shows the rate values.
   if (primaryBranchId && !branchBuckets.has(primaryBranchId)) {
     const bk = emptyAmutaBucket();
-    bk.hourly_rate = rates.hourly_rate;
-    bk.global_salary = rates.global_salary;
-    bk.global_ot_rate = rates.global_ot_rate;
+    const r = rateForBranch(primaryBranchId);
+    bk.hourly_rate = r.hourly_rate;
+    bk.global_salary = r.global_salary;
+    bk.global_ot_rate = r.global_ot_rate;
     branchBuckets.set(primaryBranchId, bk);
   }
-  // Also populate rates for every branch where the employee did work (so the
-  // table shows the same hourly/global figure under each branch they punched at).
+  // Populate rates for every branch where the employee worked, respecting
+  // any per-branch override.
   for (const [bId, bk] of branchBuckets) {
-    if (bk.hourly_rate === 0 && bk.global_salary === 0) {
-      bk.hourly_rate = rates.hourly_rate;
-      bk.global_salary = rates.global_salary;
-      bk.global_ot_rate = rates.global_ot_rate;
-    }
+    const r = rateForBranch(bId);
+    bk.hourly_rate = r.hourly_rate;
+    bk.global_salary = r.global_salary;
+    bk.global_ot_rate = r.global_ot_rate;
   }
 
   // --- Base pay ---
   let baseSalary = 0;
   const warnings = [];
   if (employee.salary_type === 'hourly') {
-    baseSalary = regHours * rates.hourly_rate
-               + ot125Hours * rates.hourly_rate * 1.25
-               + ot150Hours * rates.hourly_rate * 1.5;
+    // Sum per-branch hours × per-branch rate, so cross-branch employees with
+    // different rates per branch get paid correctly. Falls back to the
+    // primary rate when no override is defined.
+    if (branchBuckets.size > 0 && branchRateMap.size > 0) {
+      for (const [bId, bk] of branchBuckets) {
+        const r = rateForBranch(bId);
+        baseSalary += (bk.regular_hours || 0) * r.hourly_rate
+                    + (bk.ot_125_hours || 0) * r.hourly_rate * 1.25
+                    + (bk.ot_150_hours || 0) * r.hourly_rate * 1.5;
+      }
+    } else {
+      baseSalary = regHours * rates.hourly_rate
+                 + ot125Hours * rates.hourly_rate * 1.25
+                 + ot150Hours * rates.hourly_rate * 1.5;
+    }
     if (rates.hourly_rate === 0) warnings.push('אין תעריף שעתי מוגדר');
   } else { // global
     let globalProrateRatio = 1; // default: full salary
