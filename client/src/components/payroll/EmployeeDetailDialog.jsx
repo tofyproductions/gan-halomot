@@ -52,6 +52,9 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
   // Local edit state for loans/bonuses
   const [loans, setLoans] = useState([]);
   const [bonuses, setBonuses] = useState([]);
+  // Local edit state for personal/payroll basic details (Tab 4)
+  const [details, setDetails] = useState({});
+  const [savingDetails, setSavingDetails] = useState(false);
   // Manual punch form
   const [manualForm, setManualForm] = useState({ open: false, date: '', in_time: '08:00', out_time: '16:00', note: '' });
 
@@ -64,9 +67,30 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
       api.get(`/payroll/employees/${employeeId}/hours-report`, { params: { month } }),
     ])
       .then(([empRes, salaryRes, hoursRes]) => {
-        setEmployee(empRes.data.employee);
-        setLoans(empRes.data.employee.loans || []);
-        setBonuses(empRes.data.employee.bonuses || []);
+        const emp = empRes.data.employee;
+        setEmployee(emp);
+        setLoans(emp.loans || []);
+        setBonuses(emp.bonuses || []);
+        const firstAmuta = emp.amuta_distribution?.[0] || {};
+        setDetails({
+          start_date: emp.start_date ? new Date(emp.start_date).toISOString().slice(0, 10) : '',
+          position: emp.position || '',
+          phone: emp.phone || '',
+          email: emp.email || '',
+          address: emp.address || '',
+          salary_type: emp.salary_type || 'hourly',
+          hourly_rate: firstAmuta.hourly_rate || '',
+          global_salary: firstAmuta.global_salary || '',
+          global_ot_rate: firstAmuta.global_ot_rate || '',
+          required_hours: firstAmuta.required_hours || '',
+          travel_mode: emp.travel_mode || 'per_day',
+          travel_per_day: emp.travel_per_day ?? 16,
+          travel_monthly_flat: emp.travel_monthly_flat || 0,
+          meal_vouchers: emp.meal_vouchers || 0,
+          recreation_annual: emp.recreation_annual || 0,
+          pension_exempt: !!emp.pension_exempt,
+          bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
+        });
         setBreakdown(salaryRes.data.breakdown);
         setHoursReport(hoursRes.data);
       })
@@ -111,6 +135,47 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
       toast.error(err.response?.data?.error || 'שגיאה בשמירה');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveDetails = async () => {
+    setSavingDetails(true);
+    try {
+      const firstAmuta = employee?.amuta_distribution?.[0] || {};
+      const updatedAmuta = [
+        {
+          ...firstAmuta,
+          amuta_id: firstAmuta.amuta_id?._id || firstAmuta.amuta_id,
+          hourly_rate: Number(details.hourly_rate) || null,
+          global_salary: Number(details.global_salary) || null,
+          global_ot_rate: Number(details.global_ot_rate) || null,
+          required_hours: Number(details.required_hours) || null,
+        },
+        ...(employee?.amuta_distribution || []).slice(1),
+      ];
+      await api.put(`/payroll/employees/${employeeId}`, {
+        start_date: details.start_date || null,
+        position: details.position,
+        phone: details.phone,
+        email: details.email,
+        address: details.address,
+        salary_type: details.salary_type,
+        amuta_distribution: updatedAmuta,
+        travel_mode: details.travel_mode,
+        travel_per_day: Number(details.travel_per_day) || 0,
+        travel_monthly_flat: Number(details.travel_monthly_flat) || 0,
+        meal_vouchers: Number(details.meal_vouchers) || 0,
+        recreation_annual: Number(details.recreation_annual) || 0,
+        pension_exempt: details.pension_exempt,
+        bituach_leumi_exempt: details.bituach_leumi_exempt,
+      });
+      toast.success('פרטי העובד נשמרו');
+      refresh();
+      onChanged?.();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    } finally {
+      setSavingDetails(false);
     }
   };
 
@@ -193,11 +258,12 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
         </Stack>
       </DialogTitle>
 
-      <Tabs value={tab} onChange={(e, v) => setTab(v)} sx={{ px: 3, borderBottom: 1, borderColor: 'divider' }}>
+      <Tabs value={tab} onChange={(e, v) => setTab(v)} dir="rtl" sx={{ px: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="סיכום" />
         <Tab label={`שעות יומיות (${hoursReport?.totals.days_worked || 0})`} />
         <Tab label={`הלוואות (${loans.length})`} />
         <Tab label={`בונוסים (${bonuses.length})`} />
+        <Tab label="פרטים אישיים ושכר" />
       </Tabs>
 
       <DialogContent sx={{ minHeight: 420 }}>
@@ -527,6 +593,138 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, o
             <Button variant="contained" onClick={saveLoansBonuses} disabled={saving}>
               {saving ? 'שומר…' : 'שמור בונוסים'}
             </Button>
+          </Stack>
+        )}
+
+        {/* --- TAB 4: PERSONAL DETAILS + PAYROLL CONFIG --- */}
+        {!loading && tab === 4 && (
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              שינוי הפרטים כאן ישפיע על כל החישובים הבאים (דמי חגים תלוי בתאריך תחילת עבודה).
+            </Alert>
+
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>פרטים אישיים</Typography>
+            <Stack direction="row" spacing={2}>
+              <TextField
+                label="תאריך תחילת עבודה" type="date" fullWidth
+                value={details.start_date || ''}
+                onChange={e => setDetails({ ...details, start_date: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                helperText="קובע זכאות לדמי חגים (3 חודשים ותק מינימום)"
+              />
+              <TextField
+                label="תפקיד" fullWidth
+                value={details.position || ''}
+                onChange={e => setDetails({ ...details, position: e.target.value })}
+              />
+            </Stack>
+            <Stack direction="row" spacing={2}>
+              <TextField label="טלפון" fullWidth dir="ltr"
+                value={details.phone || ''}
+                onChange={e => setDetails({ ...details, phone: e.target.value })}
+              />
+              <TextField label="אימייל" fullWidth dir="ltr"
+                value={details.email || ''}
+                onChange={e => setDetails({ ...details, email: e.target.value })}
+              />
+            </Stack>
+            <TextField label="כתובת" fullWidth
+              value={details.address || ''}
+              onChange={e => setDetails({ ...details, address: e.target.value })}
+            />
+
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הגדרות שכר</Typography>
+            <Stack direction="row" spacing={2}>
+              <TextField label="סוג העסקה" select sx={{ width: 200 }}
+                value={details.salary_type || 'hourly'}
+                onChange={e => setDetails({ ...details, salary_type: e.target.value })}
+              >
+                <MenuItem value="hourly">שעתי</MenuItem>
+                <MenuItem value="global">גלובלי</MenuItem>
+              </TextField>
+              {details.salary_type === 'hourly' ? (
+                <TextField label="תעריף שעתי (₪)" type="number" fullWidth
+                  value={details.hourly_rate || ''}
+                  onChange={e => setDetails({ ...details, hourly_rate: e.target.value })}
+                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                />
+              ) : (
+                <>
+                  <TextField label="שכר גלובלי (₪)" type="number" fullWidth
+                    value={details.global_salary || ''}
+                    onChange={e => setDetails({ ...details, global_salary: e.target.value })}
+                  />
+                  <TextField label="שעות נדרשות" type="number" sx={{ width: 160 }}
+                    value={details.required_hours || ''}
+                    onChange={e => setDetails({ ...details, required_hours: e.target.value })}
+                  />
+                  <TextField label="שע״נ גלובלי" type="number" sx={{ width: 160 }}
+                    value={details.global_ot_rate || ''}
+                    onChange={e => setDetails({ ...details, global_ot_rate: e.target.value })}
+                  />
+                </>
+              )}
+            </Stack>
+
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>נסיעות ותוספות</Typography>
+            <Stack direction="row" spacing={2}>
+              <TextField label="מצב נסיעות" select sx={{ width: 200 }}
+                value={details.travel_mode || 'per_day'}
+                onChange={e => setDetails({ ...details, travel_mode: e.target.value })}
+              >
+                <MenuItem value="per_day">לפי יום</MenuItem>
+                <MenuItem value="monthly_flat">קבוע חודשי</MenuItem>
+              </TextField>
+              {details.travel_mode === 'per_day' ? (
+                <TextField label="נסיעות ליום (₪)" type="number" fullWidth
+                  value={details.travel_per_day ?? 16}
+                  onChange={e => setDetails({ ...details, travel_per_day: e.target.value })}
+                />
+              ) : (
+                <TextField label="נסיעות חודשי (₪)" type="number" fullWidth
+                  value={details.travel_monthly_flat || 0}
+                  onChange={e => setDetails({ ...details, travel_monthly_flat: e.target.value })}
+                />
+              )}
+              <TextField label="סיבוס חודשי קבוע (₪)" type="number" fullWidth
+                value={details.meal_vouchers || 0}
+                onChange={e => setDetails({ ...details, meal_vouchers: e.target.value })}
+              />
+              <TextField label="הבראה שנתי (₪)" type="number" fullWidth
+                value={details.recreation_annual || 0}
+                onChange={e => setDetails({ ...details, recreation_annual: e.target.value })}
+              />
+            </Stack>
+
+            <Stack direction="row" spacing={3}>
+              <Box>
+                <input
+                  type="checkbox"
+                  checked={!!details.pension_exempt}
+                  onChange={e => setDetails({ ...details, pension_exempt: e.target.checked })}
+                /> פטור מפנסיה
+              </Box>
+              <Box>
+                <input
+                  type="checkbox"
+                  checked={!!details.bituach_leumi_exempt}
+                  onChange={e => setDetails({ ...details, bituach_leumi_exempt: e.target.checked })}
+                /> פטור מביטוח לאומי
+              </Box>
+            </Stack>
+
+            <Box>
+              <Button
+                variant="contained"
+                onClick={saveDetails}
+                disabled={savingDetails}
+                size="large"
+              >
+                {savingDetails ? 'שומר…' : 'שמור פרטי עובד'}
+              </Button>
+            </Box>
           </Stack>
         )}
       </DialogContent>
