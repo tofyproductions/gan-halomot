@@ -36,6 +36,24 @@ import EmployeeDetailDialog from './EmployeeDetailDialog';
    columns specific to a month (or all months).
    ──────────────────────────────────────────────────────────────────────── */
 
+// Hebrew labels for staged change-request items (branch-manager flow).
+const FIELD_LABELS = {
+  sick_days: 'מחלה',
+  absence_days: 'היעדרות',
+  vacation_days: 'חופשה',
+  holiday_pay: 'דמי חגים',
+  gift_card: 'GIFT CARD',
+  recreation: 'הבראה',
+  cibus: 'סיבוס',
+  miluim: 'מילואים',
+  notes: 'הערות',
+  advance_deduction_text: 'קיזוז מקדמה',
+  advance_deduction_preset_id: 'קיזוז מקדמה',
+  travel_override: 'נסיעות',
+  include_salary_completion: 'השלמת שכר',
+  custom_values: 'עמודה מותאמת',
+};
+
 function currentYearMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -332,12 +350,15 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 
 export default function PayrollMonthTable() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
-  const { isAdmin, isAccountant, user } = useAuth();
-  // Branch managers see the payroll table in READ-ONLY mode. Any edit needs
-  // to be routed via the accountant — server enforces this; client locks the
-  // inline cells visually.
-  const readOnly = !(isAdmin || isAccountant);
+  const { isAdmin, isAccountant } = useAuth();
+  // Branch managers can't write PayrollMonth directly. They stage edits
+  // locally and submit them as one change request to the accountant.
+  const isReviewer = isAdmin || isAccountant;
+  const stagingMode = !isReviewer;
   const confirm = useConfirm();
+  // key `${employeeId}::${field}` → change item
+  const [staged, setStaged] = useState({});
+  const [submittingReq, setSubmittingReq] = useState(false);
   const [month, setMonth] = useState(currentYearMonth());
   const [viewMode, setViewMode] = useState('branch'); // 'branch' | 'amuta'
   const [selectedAmuta, setSelectedAmuta] = useState('');
@@ -381,8 +402,27 @@ export default function PayrollMonthTable() {
   useEffect(() => { fetchData(); }, [fetchData]);
 
   const patchManual = useCallback((employeeId, patch) => {
-    if (readOnly) {
-      toast.info('מצב צפייה — צור קשר עם הנה״ח לעדכון השינוי');
+    if (stagingMode) {
+      // Stage the edit locally + apply optimistically so the manager sees it.
+      const row = data?.rows?.find(r => r.employee_id === employeeId);
+      setStaged(prev => {
+        const next = { ...prev };
+        for (const [field, value] of Object.entries(patch)) {
+          next[`${employeeId}::${field}`] = {
+            employee_id: employeeId,
+            employee_name: row?.full_name || '',
+            field,
+            field_label: FIELD_LABELS[field] || field,
+            current_value: row?.manual?.[field] ?? null,
+            requested_value: value,
+          };
+        }
+        return next;
+      });
+      setData(prev => prev && {
+        ...prev,
+        rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, manual: { ...r.manual, ...patch } } : r),
+      });
       return;
     }
     setData(prev => {
@@ -394,7 +434,33 @@ export default function PayrollMonthTable() {
     });
     api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
-  }, [month, fetchData, readOnly]);
+  }, [month, fetchData, stagingMode, data]);
+
+  const submitChangeRequest = useCallback(async () => {
+    const changes = Object.values(staged);
+    if (changes.length === 0) return;
+    if (!(await confirm({
+      title: 'שליחת בקשת שינוי',
+      message: `לשלוח ${changes.length} שינויים לאישור הנה״ח?`,
+    }))) return;
+    setSubmittingReq(true);
+    try {
+      await api.post('/payroll-month/change-requests', { month, changes });
+      toast.success('הבקשה נשלחה להנה״ח');
+      setStaged({});
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשליחת הבקשה');
+    } finally {
+      setSubmittingReq(false);
+    }
+  }, [staged, month, confirm, fetchData]);
+
+  const discardStaged = useCallback(async () => {
+    if (!(await confirm({ title: 'ביטול שינויים', message: 'לבטל את כל השינויים שטרם נשלחו?', danger: true }))) return;
+    setStaged({});
+    fetchData();
+  }, [confirm, fetchData]);
 
   const patchCustomValue = useCallback((employeeId, colId, value) => {
     const row = data.rows.find(r => r.employee_id === employeeId);
@@ -586,14 +652,32 @@ export default function PayrollMonthTable() {
 
   return (
     <Box dir="rtl">
-      {readOnly && (
+      {stagingMode && (
         <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.50', border: '1px solid', borderColor: 'info.light' }}>
           <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.dark' }}>
-            👁️ מצב צפייה בלבד — עריכת טבלת השכר היא באחריות הנה״ח
+            ✏️ מצב עריכה לבקשת אישור — כל שינוי שתבצע יישלח להנה״ח לאישור
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            אם דרוש שינוי — צור קשר עם הנה״ח עם פירוט העובד, החודש והשדה.
+            ערוך את התאים כרגיל. בסיום לחץ "שלח לאישור הנה״ח". השינויים ייכנסו לתוקף רק אחרי אישור.
           </Typography>
+        </Box>
+      )}
+      {stagingMode && Object.keys(staged).length > 0 && (
+        <Box sx={{
+          position: 'sticky', top: 8, zIndex: 20, mb: 1.5, p: 1.5, borderRadius: 3,
+          bgcolor: 'warning.light', border: '2px solid', borderColor: 'warning.main',
+          display: 'flex', alignItems: 'center', gap: 2,
+        }}>
+          <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }}>
+            {Object.keys(staged).length} שינויים ממתינים לשליחה
+          </Typography>
+          <Button size="small" color="inherit" onClick={discardStaged}>בטל הכל</Button>
+          <Button
+            size="small" variant="contained" color="primary"
+            onClick={submitChangeRequest} disabled={submittingReq}
+          >
+            {submittingReq ? 'שולח…' : 'שלח לאישור הנה״ח'}
+          </Button>
         </Box>
       )}
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
@@ -614,16 +698,16 @@ export default function PayrollMonthTable() {
           <Typography variant="caption" color="text.secondary">
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
           </Typography>
-          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={readOnly}>הוסף עמודה</Button>
-          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={readOnly}>ייבוא סיבוס</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={readOnly}>החל דמי חגים</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={readOnly}>חופשה מלוח</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={readOnly}>סנכרן בקשות</Button>
+          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
+          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
-            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={readOnly}>פתח לעריכה</Button>
-            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small" disabled={readOnly}>נעל חודש</Button>}
+            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={stagingMode}>פתח לעריכה</Button>
+            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small" disabled={stagingMode}>נעל חודש</Button>}
         </Stack>
       </Paper>
 

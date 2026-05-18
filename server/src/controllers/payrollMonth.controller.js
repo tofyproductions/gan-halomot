@@ -6,6 +6,7 @@
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
+  PayrollChangeRequest,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
@@ -1098,9 +1099,161 @@ async function setBranchAmuta(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ── Payroll change requests (branch-manager → accountant approval) ──────
+
+const CHANGE_ALLOWED_FIELDS = [
+  'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
+  'advance_deduction_preset_id', 'advance_deduction_text',
+  'gift_card', 'recreation', 'cibus', 'miluim',
+  'travel_override', 'notes', 'custom_values', 'include_salary_completion',
+];
+
+/**
+ * POST /api/payroll-month/change-requests
+ * Body: { month, note?, changes: [{ employee_id, field, current_value,
+ *         requested_value, field_label? }] }
+ *
+ * Branch managers stage their edits in the UI and submit them here as one
+ * pending request. Accountants/admins review and apply.
+ */
+async function createChangeRequest(req, res, next) {
+  try {
+    const { month, note, changes } = req.body;
+    if (!month || !Array.isArray(changes) || changes.length === 0) {
+      return res.status(400).json({ error: 'month וגם changes (לא ריק) נדרשים' });
+    }
+    for (const c of changes) {
+      if (!c.employee_id || !c.field) {
+        return res.status(400).json({ error: 'כל שינוי חייב employee_id ו-field' });
+      }
+      if (!CHANGE_ALLOWED_FIELDS.includes(c.field)) {
+        return res.status(400).json({ error: `שדה לא מורשה: ${c.field}` });
+      }
+    }
+
+    // Enrich with employee + branch names
+    const empIds = [...new Set(changes.map(c => String(c.employee_id)))];
+    const emps = await Employee.find({ _id: { $in: empIds } })
+      .populate('branch_id', 'name').select('full_name branch_id').lean();
+    const empMap = new Map(emps.map(e => [String(e._id), e]));
+
+    // Submitter's branch (first managed branch / their branch_id)
+    const submitterBranchId = (req.user.managed_branch_ids?.[0]) || req.user.branch_id || null;
+    let submitterBranchName = '';
+    if (submitterBranchId) {
+      const b = await Branch.findById(submitterBranchId).select('name').lean();
+      submitterBranchName = b?.name || '';
+    }
+
+    const doc = await PayrollChangeRequest.create({
+      month,
+      requested_by: req.user.id,
+      requested_by_name: req.user.full_name || '',
+      branch_id: submitterBranchId,
+      branch_name: submitterBranchName,
+      note: note || '',
+      changes: changes.map(c => {
+        const emp = empMap.get(String(c.employee_id));
+        return {
+          employee_id: c.employee_id,
+          employee_name: emp?.full_name || '',
+          branch_id: emp?.branch_id?._id || emp?.branch_id || null,
+          field: c.field,
+          field_label: c.field_label || c.field,
+          current_value: c.current_value ?? null,
+          requested_value: c.requested_value ?? null,
+        };
+      }),
+      change_decisions: changes.map(() => 'pending'),
+      status: 'pending',
+    });
+    res.status(201).json({ request: doc });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll-month/change-requests?status=pending&mine=1
+ * Admin/accountant: all requests. With mine=1 (or branch_manager role):
+ * only the caller's own requests.
+ */
+async function listChangeRequests(req, res, next) {
+  try {
+    const { status, mine } = req.query;
+    const role = req.user?.role;
+    const filter = {};
+    if (status) filter.status = status;
+    const isReviewer = role === 'system_admin' || role === 'accountant';
+    if (mine === '1' || !isReviewer) {
+      filter.requested_by = req.user.id;
+    }
+    const list = await PayrollChangeRequest.find(filter)
+      .sort({ created_at: -1 })
+      .limit(200)
+      .lean();
+    const pendingCount = await PayrollChangeRequest.countDocuments({ status: 'pending' });
+    res.json({ requests: list, pending_count: pendingCount });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/change-requests/:id/decide
+ * Body: { decisions: ['approved'|'rejected'|'pending', ...] (index-aligned
+ *         with changes), decision_note? }
+ *
+ * Applies every change marked 'approved' to PayrollMonth.manual, then sets
+ * the request status (approved / rejected / partially_approved).
+ */
+async function decideChangeRequest(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { decisions, decision_note } = req.body;
+    const doc = await PayrollChangeRequest.findById(id);
+    if (!doc) return res.status(404).json({ error: 'בקשה לא נמצאה' });
+    if (doc.status !== 'pending') {
+      return res.status(400).json({ error: 'הבקשה כבר טופלה' });
+    }
+    const dec = Array.isArray(decisions) && decisions.length === doc.changes.length
+      ? decisions
+      : doc.changes.map(() => 'approved'); // default: approve all
+
+    let appliedCount = 0;
+    for (let i = 0; i < doc.changes.length; i++) {
+      if (dec[i] !== 'approved') continue;
+      const ch = doc.changes[i];
+      const emp = await Employee.findById(ch.employee_id).select('branch_id').lean();
+      if (!emp) continue;
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: ch.employee_id, month: doc.month },
+        {
+          $set: { [`manual.${ch.field}`]: ch.requested_value },
+          $setOnInsert: { branch_id: emp.branch_id, employee_id: ch.employee_id, month: doc.month },
+        },
+        { upsert: true },
+      );
+      appliedCount++;
+    }
+
+    const anyApproved = dec.some(d => d === 'approved');
+    const anyRejected = dec.some(d => d === 'rejected');
+    doc.status = anyApproved && anyRejected ? 'partially_approved'
+      : anyApproved ? 'approved' : 'rejected';
+    doc.change_decisions = dec;
+    doc.decided_by = req.user.id;
+    doc.decided_by_name = req.user.full_name || '';
+    doc.decided_at = new Date();
+    if (decision_note != null) doc.decision_note = decision_note;
+    await doc.save();
+
+    res.json({ request: doc, applied: appliedCount });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getMonth,
   upsertEntry,
+  createChangeRequest,
+  listChangeRequests,
+  decideChangeRequest,
   finalizeMonth,
   reopenMonth,
   listPresets,

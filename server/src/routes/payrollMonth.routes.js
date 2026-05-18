@@ -15,6 +15,12 @@ router.use(authMiddleware);
 // Monthly payroll table — branch_manager has READ access only.
 // Edits go through pending change-request flow (see /change-requests below).
 router.get('/',                               c.getMonth);
+
+// Change-request workflow: branch managers stage edits → accountant approves.
+router.post('/change-requests',               requireRole('system_admin', 'accountant', 'branch_manager'), c.createChangeRequest);
+router.get('/change-requests',                requireRole('system_admin', 'accountant', 'branch_manager'), c.listChangeRequests);
+router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accountant'), c.decideChangeRequest);
+
 router.patch('/:employeeId',                  requireRole('system_admin', 'accountant'), c.upsertEntry);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
 router.post('/:month/reopen',                 requireRole('system_admin', 'accountant'), c.reopenMonth);
