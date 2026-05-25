@@ -170,6 +170,46 @@ async function getEmployee(req, res, next) {
 }
 
 /**
+ * Fill in a missing amuta_id on rate-bearing distribution entries so the
+ * operator never has to pick an amuta by hand. Resolution order:
+ *   1. the employee's branch amuta_id
+ *   2. the amuta used by the most branches (org default)
+ *   3. the single active amuta, if there is exactly one
+ * If none resolves, entries are left as-is (amuta_id stays null).
+ */
+async function resolveAmutaDistribution(distribution, branchId) {
+  if (!Array.isArray(distribution) || distribution.length === 0) return distribution;
+  const hasRate = (d) => d.hourly_rate != null || d.global_salary != null ||
+                         d.global_ot_rate != null || d.required_hours != null;
+  const needsResolve = distribution.some(d => !d.amuta_id && hasRate(d));
+  if (!needsResolve) return distribution;
+
+  let fallback = null;
+  if (branchId) {
+    const branch = await Branch.findById(branchId).select('amuta_id').lean();
+    if (branch?.amuta_id) fallback = branch.amuta_id;
+  }
+  if (!fallback) {
+    // Most common branch amuta = the org's de-facto default.
+    const branches = await Branch.find({ amuta_id: { $ne: null } }).select('amuta_id').lean();
+    const counts = new Map();
+    for (const b of branches) {
+      const k = String(b.amuta_id);
+      counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    let best = null, bestN = 0;
+    for (const [k, n] of counts) if (n > bestN) { best = k; bestN = n; }
+    if (best) fallback = best;
+  }
+  if (!fallback) {
+    const active = await Amuta.find({ is_active: true }).select('_id').limit(2).lean();
+    if (active.length === 1) fallback = active[0]._id;
+  }
+  if (!fallback) return distribution;
+  return distribution.map(d => (!d.amuta_id && hasRate(d)) ? { ...d, amuta_id: fallback } : d);
+}
+
+/**
  * Accepts the full Employee payload. Notable: `amuta_distribution` can be
  * passed as an array of { amuta_id, hourly_rate, global_salary, ... }.
  */
@@ -179,6 +219,7 @@ async function createEmployee(req, res, next) {
     if (!payload.full_name || !payload.branch_id) {
       return res.status(400).json({ error: 'שם מלא וסניף הם שדות חובה' });
     }
+    payload.amuta_distribution = await resolveAmutaDistribution(payload.amuta_distribution, payload.branch_id);
     const emp = await Employee.create(payload);
 
     // Auto-create User account if employee has israeli_id
@@ -255,6 +296,9 @@ async function updateEmployee(req, res, next) {
     ];
     for (const f of fields) {
       if (req.body[f] !== undefined) emp[f] = req.body[f];
+    }
+    if (req.body.amuta_distribution !== undefined) {
+      emp.amuta_distribution = await resolveAmutaDistribution(req.body.amuta_distribution, emp.branch_id);
     }
     await emp.save(); // triggers post-save hook for orphan punch re-linking
     res.json({ employee: { ...emp.toObject(), id: emp._id } });

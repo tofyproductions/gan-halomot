@@ -70,12 +70,10 @@ function flattenPrimaryAmuta(emp) {
 /**
  * Merge the edited primary-amuta fields back into the distribution array.
  *
- * If there is no existing distribution AND the user entered a rate, we can't
- * create an entry from the UI because we don't know which Amuta to attach it
- * to (the "select amuta" step is a future feature). In that case we return
- * undefined so the caller can drop the field from the payload entirely and
- * avoid clobbering the server-side state. We also set a flag so the caller
- * can warn the user.
+ * If there is no existing distribution AND the user entered a rate, we build a
+ * new entry with a null amuta_id. The server resolves the amuta from the
+ * employee's branch (with an org-default fallback), so the operator never has
+ * to pick an amuta manually.
  */
 function mergePrimaryAmuta(existing, form) {
   const hasRateInput = form.hourly_rate !== '' || form.global_salary !== '' ||
@@ -84,7 +82,13 @@ function mergePrimaryAmuta(existing, form) {
 
   if (dist.length === 0) {
     if (!hasRateInput) return []; // no distribution, no input → OK to send empty
-    return { __warn: true };       // user entered a rate but no amuta to attach it to
+    return [{
+      amuta_id: null, // resolved server-side from the branch amuta
+      hourly_rate: form.hourly_rate === '' ? null : Number(form.hourly_rate),
+      global_salary: form.global_salary === '' ? null : Number(form.global_salary),
+      global_ot_rate: form.global_ot_rate === '' ? null : Number(form.global_ot_rate),
+      required_hours: form.required_hours === '' ? null : Number(form.required_hours),
+    }];
   }
 
   const first = { ...dist[0] };
@@ -190,9 +194,6 @@ export default function EmployeeManager() {
     if (!data.branch_id) return toast.error('סניף חובה');
 
     const distribution = mergePrimaryAmuta(original, data);
-    if (distribution && distribution.__warn) {
-      toast.warning('לא ניתן לקבוע שכר לעובד ללא שיוך עמותה — העובד יישמר בלי תעריף. יש לשייך עמותה דרך ה-API או לחכות למסך חלוקת העמותות.');
-    }
 
     const payload = {
       full_name: data.full_name.trim(),
