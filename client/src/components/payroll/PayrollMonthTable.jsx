@@ -346,6 +346,26 @@ const BRANCH_PALETTE = [
 ];
 function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; }
 
+/* ─── Per-gan marker colours ────────────────────────────────────────────
+ * Each kindergarten gets a fixed, vivid "marker" colour so its block in the
+ * payroll table is instantly recognisable. Matched by substring of the branch
+ * name so it survives prefix changes ("כפר סבא - משה דיין" → orange, etc.).
+ *   strip      = vivid section-header background
+ *   stripText  = header text colour (dark on yellow, white on the rest)
+ *   nameTint   = light wash for the sticky name column of every row in the gan
+ *   accent     = thick separator / spine colour
+ */
+const GAN_MARKERS = [
+  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fee2e2', accent: '#dc2626' }, // red
+  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef9c3', accent: '#eab308' }, // yellow
+  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#ffedd5', accent: '#ea580c' }, // orange
+  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fce7f3', accent: '#db2777' }, // pink
+];
+function ganMarker(branchName) {
+  const n = branchName || '';
+  return GAN_MARKERS.find(g => g.match.some(m => n.includes(m))) || null;
+}
+
 /* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
@@ -823,24 +843,31 @@ export default function PayrollMonthTable() {
               const elements = [];
               for (const group of rowsByBranch) {
                 // Branch section header — wider strip than any data row so it's obvious where the group begins.
+                const marker = ganMarker(group.branch_name);
                 const branchInfo = data.branches_in_view?.find(b => b.id === group.branch_id);
                 const color = branchInfo ? branchColor(branchInfo.color_index || 0) : null;
+                // Vivid marker strip when the gan is recognised; otherwise fall
+                // back to the soft positional palette.
+                const stripBg = marker?.strip || color?.header || 'grey.200';
+                const stripText = marker?.stripText || color?.accent || 'text.primary';
+                const stripBorder = marker?.accent || color?.border || 'divider';
                 elements.push(
                   <TableRow key={`grp-${group.branch_id}`} sx={{
                     '& td': {
-                      bgcolor: color?.header || 'grey.200',
-                      color: color?.accent || 'text.primary',
+                      bgcolor: stripBg,
+                      color: stripText,
                       fontWeight: 800,
-                      fontSize: '0.85rem',
-                      py: 0.8,
-                      borderTop: '2px solid',
-                      borderColor: color?.border || 'divider',
+                      fontSize: '0.9rem',
+                      py: 1,
+                      borderTop: '4px solid',
+                      borderBottom: '2px solid',
+                      borderColor: stripBorder,
                     },
                   }}>
                     <TableCell colSpan={totalCols}>
                       <Box sx={{ position: 'sticky', right: 12, display: 'inline-block' }}>
                         🏠 {group.branch_name}
-                        <Box component="span" sx={{ mr: 1, opacity: 0.75, fontWeight: 600, fontSize: '0.7rem' }}>• {group.rows.length} עובדים</Box>
+                        <Box component="span" sx={{ mr: 1, opacity: 0.85, fontWeight: 700, fontSize: '0.72rem' }}>• {group.rows.length} עובדים</Box>
                       </Box>
                     </TableCell>
                   </TableRow>
@@ -851,8 +878,9 @@ export default function PayrollMonthTable() {
                     <TableRow key={r.employee_id}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', right: 0, zIndex: 1,
-                        bgcolor: 'background.paper',
-                        borderLeft: '2px solid', borderColor: 'divider',
+                        bgcolor: marker?.nameTint || 'background.paper',
+                        borderLeft: marker ? '3px solid' : '2px solid',
+                        borderColor: marker?.accent || 'divider',
                       }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                           <Box sx={{ flex: 1, lineHeight: 1.2 }}>
