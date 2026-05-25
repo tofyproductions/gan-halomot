@@ -356,10 +356,10 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
  *   accent     = thick separator / spine colour
  */
 const GAN_MARKERS = [
-  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fee2e2', accent: '#dc2626' }, // red
-  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef9c3', accent: '#eab308' }, // yellow
-  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#ffedd5', accent: '#ea580c' }, // orange
-  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fce7f3', accent: '#db2777' }, // pink
+  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fecaca', rowTint: '#fef2f2', accent: '#dc2626' }, // red
+  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef08a', rowTint: '#fefce8', accent: '#eab308' }, // yellow
+  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#fed7aa', rowTint: '#fff7ed', accent: '#ea580c' }, // orange
+  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fbcfe8', rowTint: '#fdf2f8', accent: '#db2777' }, // pink
 ];
 function ganMarker(branchName) {
   const n = branchName || '';
@@ -380,6 +380,7 @@ export default function PayrollMonthTable() {
   const [staged, setStaged] = useState({});
   const [submittingReq, setSubmittingReq] = useState(false);
   const [month, setMonth] = useState(currentYearMonth());
+  const [ganFilter, setGanFilter] = useState([]); // [] = show all gans (only used in "all branches" view)
   const [viewMode, setViewMode] = useState('branch'); // 'branch' | 'amuta'
   const [selectedAmuta, setSelectedAmuta] = useState('');
   const [data, setData] = useState(null);
@@ -714,6 +715,40 @@ export default function PayrollMonthTable() {
             label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
             sx={{ fontWeight: 600 }}
           />
+          {isAllBranches && rowsByBranch.length > 1 && (
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <Select
+                multiple
+                displayEmpty
+                value={ganFilter}
+                onChange={(e) => setGanFilter(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                renderValue={(sel) => {
+                  if (!sel.length) return <Typography variant="body2" color="text.secondary">סינון גנים: הכל</Typography>;
+                  return (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4 }}>
+                      {sel.map(id => {
+                        const g = rowsByBranch.find(x => x.branch_id === id);
+                        const mk = ganMarker(g?.branch_name);
+                        return <Chip key={id} size="small" label={g?.branch_name || id}
+                          sx={{ height: 20, fontSize: '0.7rem', bgcolor: mk?.strip, color: mk?.stripText, fontWeight: 700 }} />;
+                      })}
+                    </Box>
+                  );
+                }}
+              >
+                {rowsByBranch.map(g => {
+                  const mk = ganMarker(g.branch_name);
+                  return (
+                    <MenuItem key={g.branch_id} value={g.branch_id} sx={{ py: 0.5 }}>
+                      <Checkbox size="small" checked={ganFilter.includes(g.branch_id)} />
+                      <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: mk?.strip || 'grey.400', mr: 1, ml: 0.5, flexShrink: 0 }} />
+                      <Typography variant="body2">{g.branch_name} <Box component="span" sx={{ color: 'text.disabled', fontSize: '0.72rem' }}>• {g.rows.length}</Box></Typography>
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
+          )}
           <Box sx={{ flex: 1 }} />
           <Typography variant="caption" color="text.secondary">
             {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
@@ -841,7 +876,15 @@ export default function PayrollMonthTable() {
                 </TableCell></TableRow>);
               }
               const elements = [];
-              for (const group of rowsByBranch) {
+              const visibleGroups = (isAllBranches && ganFilter.length)
+                ? rowsByBranch.filter(g => ganFilter.includes(g.branch_id))
+                : rowsByBranch;
+              if (visibleGroups.length === 0) {
+                return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 5, color: 'text.disabled' }}>
+                  לא נבחרו גנים להצגה. בחר גנים מהסינון למעלה.
+                </TableCell></TableRow>);
+              }
+              for (const group of visibleGroups) {
                 // Branch section header — wider strip than any data row so it's obvious where the group begins.
                 const marker = ganMarker(group.branch_name);
                 const branchInfo = data.branches_in_view?.find(b => b.id === group.branch_id);
@@ -851,31 +894,37 @@ export default function PayrollMonthTable() {
                 const stripBg = marker?.strip || color?.header || 'grey.200';
                 const stripText = marker?.stripText || color?.accent || 'text.primary';
                 const stripBorder = marker?.accent || color?.border || 'divider';
+                const stripCell = {
+                  bgcolor: stripBg,
+                  color: stripText,
+                  fontWeight: 800,
+                  fontSize: '0.9rem',
+                  py: 1,
+                  borderTop: '4px solid',
+                  borderBottom: '2px solid',
+                  borderColor: stripBorder,
+                };
                 elements.push(
-                  <TableRow key={`grp-${group.branch_id}`} sx={{
-                    '& td': {
-                      bgcolor: stripBg,
-                      color: stripText,
-                      fontWeight: 800,
-                      fontSize: '0.9rem',
-                      py: 1,
-                      borderTop: '4px solid',
-                      borderBottom: '2px solid',
-                      borderColor: stripBorder,
-                    },
-                  }}>
-                    <TableCell colSpan={totalCols}>
-                      <Box sx={{ position: 'sticky', right: 12, display: 'inline-block' }}>
-                        🏠 {group.branch_name}
-                        <Box component="span" sx={{ mr: 1, opacity: 0.85, fontWeight: 700, fontSize: '0.72rem' }}>• {group.rows.length} עובדים</Box>
-                      </Box>
+                  <TableRow key={`grp-${group.branch_id}`}>
+                    {/* Sticky name-column segment so the colour strip lines up
+                        exactly under the frozen "שם העובד" column. */}
+                    <TableCell sx={{
+                      ...stripCell,
+                      position: 'sticky', right: 0, zIndex: 3,
+                      borderLeft: '2px solid', borderLeftColor: stripBorder,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      🏠 {group.branch_name}
+                    </TableCell>
+                    <TableCell colSpan={totalCols - 1} sx={stripCell}>
+                      <Box component="span" sx={{ opacity: 0.9, fontWeight: 700, fontSize: '0.75rem' }}>{group.rows.length} עובדים</Box>
                     </TableCell>
                   </TableRow>
                 );
                 for (const r of group.rows) {
                   const locked = r.status === 'finalized';
                   elements.push(
-                    <TableRow key={r.employee_id}>
+                    <TableRow key={r.employee_id} sx={marker ? { backgroundColor: marker.rowTint } : undefined}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', right: 0, zIndex: 1,
                         bgcolor: marker?.nameTint || 'background.paper',
