@@ -34,6 +34,7 @@ import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
 import { TAB_GROUPS, hasTabAccess } from '../../config/tabs';
+import { ganMarkerByName } from '../../utils/branchColors';
 
 const ICON_BY_TAB = {
   dashboard: DashboardIcon,
@@ -69,6 +70,10 @@ export default function Header() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
+  // Selected gan marker colour — drives the branch switcher's own colour so
+  // the switcher always shows the current gan's colour (synced with payroll).
+  const selectedBranchObj = branches.find(b => (b._id || b.id) === selectedBranch);
+  const selectedMarker = selectedBranchObj ? ganMarkerByName(selectedBranchObj.name) : null;
 
   const goto = (path) => {
     setDrawerOpen(false);
@@ -139,16 +144,25 @@ export default function Header() {
               size="small"
               variant="outlined"
               sx={{
-                minWidth: { xs: 100, md: 140 }, fontWeight: 700, fontSize: '0.8rem',
-                bgcolor: '#f8fafc', borderRadius: 2,
+                minWidth: { xs: 100, md: 140 }, fontWeight: 800, fontSize: '0.8rem',
+                bgcolor: selectedMarker?.strip || '#f8fafc',
+                color: selectedMarker?.stripText || 'inherit',
+                borderRadius: 2,
                 display: { xs: 'none', md: 'flex' },
                 '& .MuiSelect-select': { py: 0.5, px: 1.5 },
-                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#e2e8f0' },
+                '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'inherit' },
+                '& .MuiOutlinedInput-notchedOutline': { borderColor: selectedMarker?.accent || '#e2e8f0' },
               }}
             >
-              {branches.map((b) => (
-                <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
-              ))}
+              {branches.map((b) => {
+                const mk = ganMarkerByName(b.name);
+                return (
+                  <MenuItem key={b._id || b.id} value={b._id || b.id} sx={{ fontWeight: 700 }}>
+                    <Box component="span" sx={{ width: 11, height: 11, borderRadius: '3px', bgcolor: mk?.strip || 'grey.400', mr: 1, ml: 0.5, display: 'inline-block', flexShrink: 0, border: '1px solid rgba(0,0,0,0.1)' }} />
+                    {b.name}
+                  </MenuItem>
+                );
+              })}
               {canSeeAllBranches && branches.length > 1 && [
                 <MenuItem key="__all-divider" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset', py: 0.3 }}>
                   ──────────
@@ -289,11 +303,22 @@ export default function Header() {
                 value={selectedBranch}
                 onChange={(e) => { changeBranch(e.target.value); window.location.reload(); }}
                 size="small" fullWidth
-                sx={{ mt: 0.5, bgcolor: '#fff' }}
+                sx={{
+                  mt: 0.5, fontWeight: 800,
+                  bgcolor: selectedMarker?.strip || '#fff',
+                  color: selectedMarker?.stripText || 'inherit',
+                  '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'inherit' },
+                }}
               >
-                {branches.map((b) => (
-                  <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
-                ))}
+                {branches.map((b) => {
+                  const mk = ganMarkerByName(b.name);
+                  return (
+                    <MenuItem key={b._id || b.id} value={b._id || b.id} sx={{ fontWeight: 700 }}>
+                      <Box component="span" sx={{ width: 11, height: 11, borderRadius: '3px', bgcolor: mk?.strip || 'grey.400', mr: 1, ml: 0.5, display: 'inline-block', flexShrink: 0, border: '1px solid rgba(0,0,0,0.1)' }} />
+                      {b.name}
+                    </MenuItem>
+                  );
+                })}
                 {canSeeAllBranches && branches.length > 1 && [
                   <MenuItem key="__div" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset' }}>──────────</MenuItem>,
                   <MenuItem key="__all" value="all" sx={{ fontWeight: 800, color: 'primary.main' }}>כל הסניפים</MenuItem>,

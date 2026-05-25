@@ -17,7 +17,7 @@ import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
-import { BRANCH_PALETTE, BRANCH_COLOR_NAMES, branchColor } from '../../utils/branchColors';
+import { BRANCH_PALETTE, BRANCH_COLOR_NAMES, branchColor, ganMarkerByName } from '../../utils/branchColors';
 
 export default function BranchManager() {
   const { branches, fetchBranches } = useBranch();
@@ -190,7 +190,10 @@ export default function BranchManager() {
             const classrooms = classroomsByBranch[bid] || [];
             const totalCapacity = classrooms.reduce((s, c) => s + (c.capacity || 0), 0);
             const totalChildren = classrooms.reduce((s, c) => s + (c.child_count || 0), 0);
-            const c = branchColor(branch, idx);
+            const mk = ganMarkerByName(branch.name);
+            const c = mk
+              ? { dot: mk.strip, sub: mk.rowTint, header: mk.strip, accent: mk.accent, border: mk.accent }
+              : branchColor(branch, idx);
 
             return (
               <Card key={bid} sx={{ borderRight: `5px solid ${c.dot}`, bgcolor: c.sub }}>

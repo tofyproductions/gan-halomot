@@ -14,7 +14,7 @@ import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
-import { branchColor } from '../../utils/branchColors';
+import { branchColor, ganMarkerByName } from '../../utils/branchColors';
 import HoursReportDialog from '../employees/HoursReportDialog';
 import PendingPunchApprovals from './PendingPunchApprovals';
 import DayPunchesDialog from './DayPunchesDialog';
@@ -554,7 +554,10 @@ export default function AttendanceMonitor() {
             {/* All-branches mode: per-branch sections */}
             {!loading && perBranch && perBranch.flatMap((grp, idx) => {
               const branchKey = grp.branch._id || grp.branch.id;
-              const color = branchColor(grp.branch, idx);
+              const mk = ganMarkerByName(grp.branch.name);
+              const color = mk
+                ? { header: mk.strip, sub: mk.rowTint, accent: mk.stripText, border: mk.accent, dot: mk.strip }
+                : branchColor(grp.branch, idx);
               const out = [];
               const grpActive = (grp.data?.employees || []).filter(hasAnyActivity).filter(searchPredicate);
               const grpGuests = (grp.data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0).filter(searchPredicate);

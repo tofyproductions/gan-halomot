@@ -34,3 +34,26 @@ export function branchColor(branch, idx = 0) {
 export function branchColorName(branch, idx = 0) {
   return (branch && branch.color) ? branch.color : PALETTE_ORDER[idx % PALETTE_ORDER.length];
 }
+
+/* ─── Per-gan marker colours (single source of truth) ───────────────────
+ * Fixed vivid "marker" colour per kindergarten, matched by substring of the
+ * branch name so it survives prefix changes ("כפר סבא - משה דיין" → orange).
+ * Used by the payroll table, the branch switcher, attendance, and any other
+ * place that renders a per-gan table so colours stay consistent system-wide.
+ *   strip      = vivid header / chip background
+ *   stripText  = text colour on the strip
+ *   nameTint   = light wash for the sticky name column
+ *   rowTint    = very light wash for the whole row body
+ *   accent     = thick separator / spine / border colour
+ */
+export const GAN_MARKERS = [
+  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fecaca', rowTint: '#fef2f2', accent: '#dc2626' }, // red
+  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef08a', rowTint: '#fefce8', accent: '#eab308' }, // yellow
+  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#fed7aa', rowTint: '#fff7ed', accent: '#ea580c' }, // orange
+  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fbcfe8', rowTint: '#fdf2f8', accent: '#db2777' }, // pink
+];
+
+export function ganMarkerByName(branchName) {
+  const n = branchName || '';
+  return GAN_MARKERS.find(g => g.match.some(m => n.includes(m))) || null;
+}

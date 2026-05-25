@@ -112,7 +112,10 @@ function mergePrimaryAmuta(existing, form) {
 }
 
 export default function EmployeeManager() {
-  const { isAdmin, isManager } = useAuth();
+  const { isAdmin, isManager, isAccountant } = useAuth();
+  // Accountant (הנה"ח) manages employees with the same add/edit rights as a
+  // manager — only the visible tab set differs (handled by tab access config).
+  const canManage = isManager || isAccountant;
   const { branches, selectedBranch, selectedBranchName, isAllBranches } = useBranch();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -384,7 +387,7 @@ export default function EmployeeManager() {
               {showArchived ? 'כולל ארכיון' : 'הצג ארכיון'}
             </Button>
           </Tooltip>
-          {isManager && (
+          {canManage && (
             <>
               <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
                 שיוך לשעון
@@ -415,7 +418,7 @@ export default function EmployeeManager() {
               <TableCell sx={{ fontWeight: 700 }} align="center">שכר / תעריף</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">שעות חובה</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">נסיעות</TableCell>
-              {isManager && <TableCell align="center">פעולות</TableCell>}
+              {canManage && <TableCell align="center">פעולות</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
@@ -451,7 +454,7 @@ export default function EmployeeManager() {
                       {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
                     </TableCell>
                     <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
-                    {isManager && (
+                    {canManage && (
                       <TableCell align="center">
                         <Stack direction="row" spacing={0.5} justifyContent="center">
                           <Tooltip title="דוח שעות">
@@ -505,7 +508,7 @@ export default function EmployeeManager() {
                   const list = employeesByBranch.get(bid) || [];
                   out.push(
                     <TableRow key={`hdr-${bid}`} sx={{ bgcolor: color.header }}>
-                      <TableCell colSpan={isManager ? 9 : 8} sx={{
+                      <TableCell colSpan={canManage ? 9 : 8} sx={{
                         fontWeight: 900, fontSize: '0.9rem', py: 1,
                         color: color.accent, borderTop: '3px solid', borderColor: color.border,
                       }}>

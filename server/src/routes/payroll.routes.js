@@ -17,9 +17,9 @@ router.use(authMiddleware);
 // Employees (payroll)
 router.get('/employees',            c.listEmployees);
 router.get('/employees/:id',        c.getEmployee);
-router.post('/employees',           requireRole('system_admin', 'branch_manager'), c.createEmployee);
-router.put('/employees/:id',        requireRole('system_admin', 'branch_manager'), c.updateEmployee);
-router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager'), c.removeEmployee);
+router.post('/employees',           requireRole('system_admin', 'branch_manager', 'accountant'), c.createEmployee);
+router.put('/employees/:id',        requireRole('system_admin', 'branch_manager', 'accountant'), c.updateEmployee);
+router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager', 'accountant'), c.removeEmployee);
 
 // Attendance & hours
 router.get('/attendance',                      c.attendanceByMonth);

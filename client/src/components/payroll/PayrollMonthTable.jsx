@@ -23,6 +23,7 @@ import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
@@ -346,25 +347,8 @@ const BRANCH_PALETTE = [
 ];
 function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; }
 
-/* ─── Per-gan marker colours ────────────────────────────────────────────
- * Each kindergarten gets a fixed, vivid "marker" colour so its block in the
- * payroll table is instantly recognisable. Matched by substring of the branch
- * name so it survives prefix changes ("כפר סבא - משה דיין" → orange, etc.).
- *   strip      = vivid section-header background
- *   stripText  = header text colour (dark on yellow, white on the rest)
- *   nameTint   = light wash for the sticky name column of every row in the gan
- *   accent     = thick separator / spine colour
- */
-const GAN_MARKERS = [
-  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fecaca', rowTint: '#fef2f2', accent: '#dc2626' }, // red
-  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef08a', rowTint: '#fefce8', accent: '#eab308' }, // yellow
-  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#fed7aa', rowTint: '#fff7ed', accent: '#ea580c' }, // orange
-  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fbcfe8', rowTint: '#fdf2f8', accent: '#db2777' }, // pink
-];
-function ganMarker(branchName) {
-  const n = branchName || '';
-  return GAN_MARKERS.find(g => g.match.some(m => n.includes(m))) || null;
-}
+/* Per-gan marker colours live in utils/branchColors (single source of truth).
+ * `ganMarker` is the name-keyed lookup, aliased for the existing call sites. */
 
 /* ─── Main component ────────────────────────────────────────────────── */
 
