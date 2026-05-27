@@ -163,8 +163,24 @@ export default function BranchManager() {
     setConfirm({ open: false, type: null, id: null, message: '' });
   };
 
+  // --- Device status report (replaces Timedox "דוח סטטיסטיקת מכשירים") ---
+  const deviceStatus = (b) => {
+    if (!b.agent_last_seen_at) return { label: 'לא חובר מעולם', color: '#9ca3af', sev: 3 };
+    const sec = Math.round((Date.now() - new Date(b.agent_last_seen_at).getTime()) / 1000);
+    if (sec < 180) return { label: 'מחובר', color: '#16a34a', sev: 0 };
+    if (sec < 3600) return { label: `${Math.round(sec / 60)} דק׳`, color: '#16a34a', sev: 1 };
+    if (sec < 86400) return { label: `${Math.round(sec / 3600)} שעות`, color: '#d97706', sev: 2 };
+    return { label: `${Math.round(sec / 86400)} ימים — מנותק`, color: '#dc2626', sev: 3 };
+  };
+  const fmtAgo = (d) => {
+    if (!d) return '—';
+    const x = new Date(d);
+    return x.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  };
+  const clocksConfigured = branches.filter(b => b.clock_ip);
+
   return (
-    <Box dir="rtl" sx={{ maxWidth: 900, mx: 'auto' }}>
+    <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>ניהול סניפים וכיתות</Typography>
         <Stack direction="row" spacing={1}>
@@ -178,6 +194,56 @@ export default function BranchManager() {
           </Button>
         </Stack>
       </Stack>
+
+      {/* ===== Device statistics report ===== */}
+      {clocksConfigured.length > 0 && (
+        <Card sx={{ mb: 3, borderRadius: 3 }}>
+          <CardContent>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+              <Typography variant="h6" sx={{ fontWeight: 800 }}>📟 סטטיסטיקת מכשירים</Typography>
+              <Tooltip title="רענן סטטוס">
+                <IconButton size="small" onClick={() => fetchBranches()}><SaveIcon sx={{ transform: 'rotate(0deg)' }} fontSize="small" /></IconButton>
+              </Tooltip>
+            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">IP שעון</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">גרסת סוכן</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">משתמשים בשעון</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">עדכון אחרון</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }} align="center">סטטוס</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {clocksConfigured.map((b) => {
+                  const st = deviceStatus(b);
+                  return (
+                    <TableRow key={b._id || b.id}>
+                      <TableCell sx={{ fontWeight: 600 }}>{b.name}</TableCell>
+                      <TableCell align="center" dir="ltr" sx={{ fontFamily: 'monospace' }}>{b.clock_ip || '—'}</TableCell>
+                      <TableCell align="center">{b.agent_version || '—'}</TableCell>
+                      <TableCell align="center">{(b.clock_users || []).length || '—'}</TableCell>
+                      <TableCell align="center" sx={{ fontSize: '0.8rem' }}>{fmtAgo(b.agent_last_seen_at)}</TableCell>
+                      <TableCell align="center">
+                        <Chip
+                          size="small"
+                          label={st.label}
+                          sx={{ bgcolor: st.color, color: '#fff', fontWeight: 700 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              "מחובר" = דיווח לפני פחות מ-3 דקות. צבע כתום = שעות. אדום = מנותק מעל יממה.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
       {branches.length === 0 ? (
         <Box sx={{ textAlign: 'center', py: 8 }}>
