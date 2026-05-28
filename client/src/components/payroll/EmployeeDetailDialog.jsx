@@ -129,6 +129,9 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
           installment_amount: Number(l.installment_amount) || 0,
           installments_total: Number(l.installments_total) || 0,
           installments_paid: Number(l.installments_paid) || 0,
+          // Preserve the per-month schedule model managed in LoansDialog.
+          start_month: l.start_month || '',
+          payments: Array.isArray(l.payments) ? l.payments : [],
           started_at: l.started_at || null,
           notes: l.notes || '',
         }))

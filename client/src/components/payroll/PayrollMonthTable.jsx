@@ -1103,6 +1103,7 @@ export default function PayrollMonthTable() {
       <LoansDialog
         open={loansDlg.open}
         row={loansDlg.row}
+        month={month}
         onClose={() => setLoansDlg({ open: false, row: null })}
         onSaved={fetchData}
       />

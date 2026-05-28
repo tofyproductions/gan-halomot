@@ -60,17 +60,24 @@ function splitDayOvertime(totalMinutes) {
 }
 
 /**
- * For a loan to be deducted this month:
- *   - installments_paid < installments_total
- *   - (optional) started_at ≤ this month
- * We don't yet track month-by-month payment history — `installments_paid` is
- * the caller's responsibility to advance. This function just tells you how
- * much to deduct THIS run.
+ * How much to deduct for a loan in a given month (YYYY-MM).
+ *
+ * New model: `payments[]` holds an explicit per-month schedule (built on
+ * creation, editable per month). The deduction is whatever is scheduled for
+ * THIS month — zero if nothing is scheduled. The remaining balance is derived
+ * elsewhere from total_amount minus the sum of payments up to a month.
+ *
+ * Legacy fallback (no payments[]): the old count-based rule — deduct
+ * installment_amount while installments_paid < installments_total.
  */
-function loanDeductionThisMonth(loan) {
+function loanDeductionForMonth(loan, ym) {
   if (!loan) return 0;
+  if (Array.isArray(loan.payments) && loan.payments.length > 0) {
+    const p = loan.payments.find(x => x.month === ym);
+    return p ? Math.max(0, Number(p.amount) || 0) : 0;
+  }
   if ((loan.installments_paid || 0) >= (loan.installments_total || 0)) return 0;
-  return Number(loan.installment_amount) || 0;
+  return Math.max(0, Number(loan.installment_amount) || 0);
 }
 
 function bonusAmountThisMonth(bonus, { hoursWorked, daysWorked, refDate }) {
@@ -459,7 +466,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   let loanDeductions = 0;
   const loanDetails = [];
   for (const l of loans) {
-    const amt = loanDeductionThisMonth(l);
+    const amt = loanDeductionForMonth(l, monthYM);
     if (amt > 0) {
       loanDeductions += amt;
       loanDetails.push({

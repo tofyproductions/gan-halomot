@@ -20,9 +20,23 @@ const mongoose = require('mongoose');
 
 const loanSchema = new mongoose.Schema({
   total_amount: { type: Number, required: true },           // e.g. 50000
-  installment_amount: { type: Number, required: true },     // e.g. 5000
+  installment_amount: { type: Number, required: true },     // default monthly payment, e.g. 5000
   installments_total: { type: Number, required: true },     // e.g. 10
-  installments_paid: { type: Number, default: 0 },          // e.g. 3
+  installments_paid: { type: Number, default: 0 },          // legacy count tracker
+  start_month: { type: String, default: '' },               // 'YYYY-MM' — first deduction month
+  // Explicit per-month schedule (new model). Built on creation from
+  // start_month + installment_amount × installments_total, editable per month
+  // afterwards. When present it is the source of truth for both the monthly
+  // deduction and the remaining balance; legacy loans (empty payments) fall
+  // back to the installments_paid/total rule.
+  payments: {
+    type: [{
+      month: { type: String, required: true },              // 'YYYY-MM'
+      amount: { type: Number, default: 0 },                 // ₪ deducted that month
+      _id: false,
+    }],
+    default: [],
+  },
   started_at: { type: Date, default: null },
   notes: { type: String, default: '' },
 }, { _id: true });

@@ -12,26 +12,56 @@ import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
- * Loans management for one employee. Lists every loan with progress
- * (paid / total installments), and lets the manager:
- *   - add a new loan
- *   - delete an inactive loan
- *   - update `installments_paid` (manual progress, e.g. after running
- *     the payslip for this month)
+ * Loans management for one employee. A loan carries a per-month schedule
+ * (payments[]) built from a start month + monthly amount × count. Each month
+ * the manager can edit that month's deduction, which changes the remaining
+ * balance (total − sum of payments deducted so far).
+ *
+ * Legacy loans (no payments[]) keep the old installments_paid/total display.
  *
  * Persisted via PUT /payroll/employees/:id with the full loans[] array.
  */
-export default function LoansDialog({ open, row, onClose, onSaved }) {
+function currentYearMonth() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function nextMonth(ym) {
+  let [y, m] = ym.split('-').map(Number);
+  m += 1; if (m > 12) { m = 1; y += 1; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+function buildSchedule(startMonth, count, amount) {
+  const out = [];
+  let ym = startMonth;
+  for (let i = 0; i < count; i++) { out.push({ month: ym, amount }); ym = nextMonth(ym); }
+  return out;
+}
+const isNew = (l) => Array.isArray(l.payments) && l.payments.length > 0;
+function deductedThrough(l, ym) {
+  if (!isNew(l)) return (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
+  return l.payments.filter(p => p.month <= ym).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+function monthAmount(l, ym) {
+  if (!isNew(l)) {
+    const active = (Number(l.installments_paid) || 0) < (Number(l.installments_total) || 0);
+    return active ? (Number(l.installment_amount) || 0) : 0;
+  }
+  const p = l.payments.find(x => x.month === ym);
+  return p ? (Number(p.amount) || 0) : 0;
+}
+
+export default function LoansDialog({ open, row, month, onClose, onSaved }) {
   const confirm = useConfirm();
+  const ym = month || currentYearMonth();
   const [loans, setLoans] = useState([]);
-  const [draft, setDraft] = useState({ total_amount: '', installment_amount: '', installments_total: '', notes: '' });
+  const [draft, setDraft] = useState({ total_amount: '', installment_amount: '', installments_total: '', start_month: ym, notes: '' });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !row) return;
     setLoans(row.loans_info?.loans || []);
-    setDraft({ total_amount: '', installment_amount: '', installments_total: '', notes: '' });
-  }, [open, row]);
+    setDraft({ total_amount: '', installment_amount: '', installments_total: '', start_month: ym, notes: '' });
+  }, [open, row, ym]);
 
   if (!row) return null;
 
@@ -47,8 +77,9 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
     const total = Number(draft.total_amount);
     const inst = Number(draft.installment_amount);
     const cnt = Number(draft.installments_total);
+    const start = draft.start_month || ym;
     if (!total || !inst || !cnt) {
-      toast.error('חובה למלא: סכום כולל, גובה תשלום, מספר תשלומים');
+      toast.error('חובה למלא: סכום כולל, תשלום חודשי, מספר תשלומים');
       return;
     }
     const next = [...loans, {
@@ -56,6 +87,8 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
       installment_amount: inst,
       installments_total: cnt,
       installments_paid: 0,
+      start_month: start,
+      payments: buildSchedule(start, cnt, inst),
       started_at: new Date(),
       notes: draft.notes || '',
     }];
@@ -70,31 +103,45 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
     persist(next);
   };
 
+  // Edit THIS month's deduction for a (new-model) loan; reduces the balance.
+  const setMonthPayment = (idx, value) => {
+    const v = Math.max(0, Math.round(Number(value) || 0));
+    const next = loans.map((l, i) => {
+      if (i !== idx) return l;
+      const payments = Array.isArray(l.payments) ? [...l.payments] : [];
+      const pi = payments.findIndex(p => p.month === ym);
+      if (pi >= 0) payments[pi] = { ...payments[pi], amount: v };
+      else payments.push({ month: ym, amount: v });
+      return { ...l, payments };
+    });
+    setLoans(next);
+  };
+
+  // Legacy loans: advance the paid-installments counter.
   const updatePaid = (idx, value) => {
     const v = Math.max(0, Math.round(Number(value) || 0));
     const next = loans.map((l, i) => i === idx ? { ...l, installments_paid: v } : l);
     setLoans(next);
   };
 
-  const saveAll = () => {
-    persist(loans);
-  };
+  const saveAll = () => persist(loans);
 
-  const activeLoans = loans.filter(l => (Number(l.installments_paid) || 0) < (Number(l.installments_total) || 0));
-  const monthDeduction = activeLoans.reduce((s, l) => s + (Number(l.installment_amount) || 0), 0);
+  const monthDeduction = loans.reduce((s, l) => s + monthAmount(l, ym), 0);
+  const activeCount = loans.filter(l => (Number(l.total_amount) || 0) - deductedThrough(l, ym) > 0).length;
 
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 1 }}>
         <PaymentsIcon color="error" />
         הלוואות — {row.full_name}
+        <Chip size="small" label={`חודש ${ym}`} sx={{ ml: 'auto' }} />
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Stack direction="row" spacing={2}>
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.50', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">הלוואות פעילות</Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800 }}>{activeLoans.length}</Typography>
+              <Typography variant="h5" sx={{ fontWeight: 800 }}>{activeCount}</Typography>
             </Box>
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ניכוי החודש</Typography>
@@ -110,8 +157,10 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>סכום כולל</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>תשלום חודשי</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>מס׳ תשלומים</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>שולם עד כה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>חודש התחלה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>נוכה עד כה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>יתרה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>ניכוי {ym}</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>הערות</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>סטטוס</TableCell>
                   <TableCell />
@@ -119,31 +168,41 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
               </TableHead>
               <TableBody>
                 {loans.map((l, idx) => {
-                  const paid = Number(l.installments_paid) || 0;
-                  const total = Number(l.installments_total) || 0;
-                  const isActive = paid < total;
+                  const total = Number(l.total_amount) || 0;
+                  const deducted = deductedThrough(l, ym);
+                  const remaining = Math.max(0, total - deducted);
+                  const active = remaining > 0;
+                  const newModel = isNew(l);
                   return (
-                    <TableRow key={idx} hover>
-                      <TableCell>{Number(l.total_amount).toLocaleString('he-IL')} ₪</TableCell>
+                    <TableRow key={l._id || idx} hover>
+                      <TableCell>{total.toLocaleString('he-IL')} ₪</TableCell>
                       <TableCell>{Number(l.installment_amount).toLocaleString('he-IL')} ₪</TableCell>
-                      <TableCell>{total}</TableCell>
+                      <TableCell>{l.start_month || '—'}</TableCell>
+                      <TableCell>{Math.round(deducted).toLocaleString('he-IL')} ₪</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>{Math.round(remaining).toLocaleString('he-IL')} ₪</TableCell>
                       <TableCell>
-                        <TextField
-                          size="small" type="number" value={paid}
-                          onChange={e => updatePaid(idx, e.target.value)}
-                          onBlur={saveAll}
-                          inputProps={{ min: 0, max: total, style: { width: 60, textAlign: 'center' } }}
-                        />
-                        <Typography component="span" variant="caption" sx={{ ml: 0.5 }}>/{total}</Typography>
+                        {newModel ? (
+                          <TextField
+                            size="small" type="number" value={monthAmount(l, ym)}
+                            onChange={e => setMonthPayment(idx, e.target.value)}
+                            onBlur={saveAll}
+                            inputProps={{ min: 0, style: { width: 70, textAlign: 'center' } }}
+                          />
+                        ) : (
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <TextField
+                              size="small" type="number" value={Number(l.installments_paid) || 0}
+                              onChange={e => updatePaid(idx, e.target.value)}
+                              onBlur={saveAll}
+                              inputProps={{ min: 0, max: Number(l.installments_total) || 0, style: { width: 50, textAlign: 'center' } }}
+                            />
+                            <Typography component="span" variant="caption">/{Number(l.installments_total) || 0}</Typography>
+                          </Stack>
+                        )}
                       </TableCell>
-                      <TableCell sx={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.notes || '—'}</TableCell>
+                      <TableCell sx={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.notes || '—'}</TableCell>
                       <TableCell>
-                        <Chip
-                          size="small"
-                          label={isActive ? 'פעילה' : 'שולם'}
-                          color={isActive ? 'warning' : 'success'}
-                          variant="outlined"
-                        />
+                        <Chip size="small" label={active ? 'פעילה' : 'שולם'} color={active ? 'warning' : 'success'} variant="outlined" />
                       </TableCell>
                       <TableCell>
                         <IconButton size="small" onClick={() => removeLoan(idx)} color="error">
@@ -158,28 +217,35 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
           )}
 
           <Divider />
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הוסף הלוואה חדשה</Typography>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הוסף הלוואה / מפרעה חדשה</Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <TextField size="small" type="number" label="סכום כולל"
               value={draft.total_amount} onChange={e => setDraft({ ...draft, total_amount: e.target.value })}
-              sx={{ width: 140 }}
+              sx={{ width: 130 }}
             />
             <TextField size="small" type="number" label="תשלום חודשי"
               value={draft.installment_amount} onChange={e => setDraft({ ...draft, installment_amount: e.target.value })}
-              sx={{ width: 140 }}
+              sx={{ width: 130 }}
             />
             <TextField size="small" type="number" label="מספר תשלומים"
               value={draft.installments_total} onChange={e => setDraft({ ...draft, installments_total: e.target.value })}
-              sx={{ width: 140 }}
+              sx={{ width: 130 }}
+            />
+            <TextField size="small" type="month" label="חודש התחלה" InputLabelProps={{ shrink: true }}
+              value={draft.start_month} onChange={e => setDraft({ ...draft, start_month: e.target.value })}
+              sx={{ width: 150 }}
             />
             <TextField size="small" label="הערות (אופציונלי)"
               value={draft.notes} onChange={e => setDraft({ ...draft, notes: e.target.value })}
-              sx={{ flex: 1, minWidth: 180 }}
+              sx={{ flex: 1, minWidth: 160 }}
             />
             <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={addLoan} disabled={saving}>
               הוסף
             </Button>
           </Stack>
+          <Typography variant="caption" color="text.secondary">
+            מפרעה = סכום כולל + תשלום חודשי זהים + מספר תשלומים 1. תרד מהשכר בחודש ההתחלה.
+          </Typography>
         </Stack>
       </DialogContent>
       <DialogActions>
