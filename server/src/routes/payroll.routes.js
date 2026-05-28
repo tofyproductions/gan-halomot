@@ -35,7 +35,7 @@ router.get('/salary-summary',                  c.salarySummary);
 
 // Manual punch entry / deletion (for corrections)
 router.post('/manual-punches',                 requireRole('system_admin', 'branch_manager', 'accountant'), c.createManualPunches);
-router.delete('/punches/:id',                  requireRole('system_admin', 'branch_manager'), c.deletePunch);
+router.delete('/punches/:id',                  requireRole('system_admin', 'branch_manager', 'accountant'), c.deletePunch);
 
 // Employee commitments (weekly schedules)
 const commitments = require('../controllers/commitments.controller');
@@ -51,7 +51,7 @@ router.get('/punches/pending',                 requireRole('system_admin', 'bran
 router.get('/punches/day',                     requireRole('system_admin', 'branch_manager', 'accountant'), c.listPunchesForDay);
 router.patch('/punches/:id/approve',           requireRole('system_admin', 'branch_manager', 'accountant'), c.approvePunch);
 router.patch('/punches/:id/reject',            requireRole('system_admin', 'branch_manager', 'accountant'), c.rejectPunch);
-router.patch('/punches/:id',                   requireRole('system_admin', 'branch_manager'), c.editPunch);
+router.patch('/punches/:id',                   requireRole('system_admin', 'branch_manager', 'accountant'), c.editPunch);
 
 // Employee self-service (any authenticated user)
 router.get('/my-salary-preview',               c.mySalaryPreview);
