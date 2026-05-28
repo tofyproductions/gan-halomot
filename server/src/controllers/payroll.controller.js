@@ -746,14 +746,19 @@ async function createManualPunches(req, res, next) {
     const emp = await Employee.findById(employee_id).lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
-    // Managers / admins create punches in approved state. Anyone else (e.g.
-    // an employee using the self-service portal) creates pending records
-    // that wait for branch-manager review.
+    // Approval chain (accountant is final). A salary-affecting punch entered by
+    // a branch manager is NOT counted until the accountant approves it.
+    //   - accountant / system_admin → approved immediately (final authority)
+    //   - branch_manager            → pending_accountant (manager is the source)
+    //   - employee (self-service)   → pending_manager
     const role = req.user?.role;
-    const managerLevel = role === 'system_admin' || role === 'branch_manager' || role === 'accountant';
-    const approvalStatus = managerLevel ? 'approved' : 'pending';
-    const decidedAt = managerLevel ? new Date() : null;
-    const decidedBy = managerLevel ? req.user.id : null;
+    const isFinal = role === 'system_admin' || role === 'accountant';
+    const isManager = role === 'branch_manager';
+    const approvalStatus = isFinal ? 'approved' : (isManager ? 'pending_accountant' : 'pending_manager');
+    const decidedAt = isFinal ? new Date() : null;
+    const decidedBy = isFinal ? req.user.id : null;
+    const managerApprovedAt = (isFinal || isManager) ? new Date() : null;
+    const managerApprovedBy = (isFinal || isManager) ? req.user.id : null;
 
     // Build Date objects in Israel time. We piggy-back on toLocaleString
     // with en-CA to get a YYYY-MM-DD HH:mm:ss output and then reparse as
@@ -804,6 +809,8 @@ async function createManualPunches(req, res, next) {
         approval_status: approvalStatus,
         approval_decided_by: decidedBy,
         approval_decided_at: decidedAt,
+        manager_approved_by: managerApprovedBy,
+        manager_approved_at: managerApprovedAt,
       });
       created.push(punch);
     }
@@ -913,22 +920,36 @@ async function createPunchRequest(req, res, next) {
  */
 async function listPendingPunches(req, res, next) {
   try {
-    const filter = { approval_status: 'pending' };
-    if (req.user.role !== 'system_admin' && req.user.role !== 'accountant') {
-      const managed = (req.user.managed_branch_ids || []).map(String);
-      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
-      const allowed = managed.length > 0 ? managed : fallback;
-      if (allowed.length === 0) return res.json({ punches: [] });
-      filter.branch_id = { $in: allowed };
-    } else if (req.query.branch) {
-      filter.branch_id = req.query.branch;
-    }
-    const punches = await Punch.find(filter)
+    const role = req.user.role;
+    const isFinal = role === 'system_admin' || role === 'accountant';
+    const isManager = role === 'branch_manager' || role === 'system_admin';
+    const managed = (req.user.managed_branch_ids || []).map(String);
+    const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+    const allowed = managed.length > 0 ? managed : fallback;
+
+    const load = (filter) => Punch.find(filter)
       .populate('employee_id', 'full_name israeli_id')
       .populate('created_by', 'full_name')
-      .sort({ timestamp: -1 })
-      .lean();
-    res.json({ punches });
+      .sort({ timestamp: -1 }).lean();
+
+    // Stage 1 (branch manager): employee-reported punches in managed branches.
+    let pending_manager = [];
+    if (isManager) {
+      const f = { approval_status: { $in: ['pending_manager', 'pending'] } };
+      if (role !== 'system_admin') {
+        if (allowed.length === 0) return res.json({ pending_manager: [], pending_accountant: [] });
+        f.branch_id = { $in: allowed };
+      } else if (req.query.branch) { f.branch_id = req.query.branch; }
+      pending_manager = await load(f);
+    }
+    // Stage 2 (accountant/admin): manager-approved or manager-created punches.
+    let pending_accountant = [];
+    if (isFinal) {
+      const f = { approval_status: 'pending_accountant' };
+      if (req.query.branch) f.branch_id = req.query.branch;
+      pending_accountant = await load(f);
+    }
+    res.json({ pending_manager, pending_accountant });
   } catch (err) { next(err); }
 }
 
@@ -940,10 +961,25 @@ async function approvePunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
-    p.approval_status = 'approved';
-    p.approval_decided_by = req.user.id;
-    p.approval_decided_at = new Date();
-    p.approval_decided_note = req.body?.note || '';
+    const role = req.user.role;
+    const isFinal = role === 'system_admin' || role === 'accountant';
+    const isManager = role === 'branch_manager' || role === 'system_admin';
+    const st = p.approval_status;
+
+    if ((st === 'pending_manager' || st === 'pending') && isManager) {
+      // Stage 1 → forward to the accountant.
+      p.approval_status = 'pending_accountant';
+      p.manager_approved_by = req.user.id;
+      p.manager_approved_at = new Date();
+    } else if (st === 'pending_accountant' && isFinal) {
+      // Stage 2 → final approval; now counts in salary.
+      p.approval_status = 'approved';
+      p.approval_decided_by = req.user.id;
+      p.approval_decided_at = new Date();
+      p.approval_decided_note = req.body?.note || '';
+    } else {
+      return res.status(403).json({ error: 'אין הרשאה לאשר את ההחתמה בשלב זה' });
+    }
     await p.save();
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
@@ -982,10 +1018,20 @@ async function editPunch(req, res, next) {
     if (req.body.timestamp) p.timestamp = new Date(req.body.timestamp);
     if (req.body.state != null) p.state = Number(req.body.state);
     if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
-    if (p.timestamp_source === 'manual' && p.approval_status === 'pending') {
-      p.approval_status = 'approved';
-      p.approval_decided_by = req.user.id;
-      p.approval_decided_at = new Date();
+    // Editing a still-pending manual punch advances it through the chain:
+    // an accountant/admin edit approves it; a manager edit forwards it to the accountant.
+    const pendingStates = ['pending', 'pending_manager', 'pending_accountant'];
+    if (p.timestamp_source === 'manual' && pendingStates.includes(p.approval_status)) {
+      const role = req.user.role;
+      if (role === 'system_admin' || role === 'accountant') {
+        p.approval_status = 'approved';
+        p.approval_decided_by = req.user.id;
+        p.approval_decided_at = new Date();
+      } else {
+        p.approval_status = 'pending_accountant';
+        p.manager_approved_by = req.user.id;
+        p.manager_approved_at = new Date();
+      }
     }
     await p.save();
     res.json({ ok: true, punch: p });

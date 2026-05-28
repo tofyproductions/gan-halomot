@@ -11,11 +11,20 @@ const employeeRequestSchema = new mongoose.Schema({
   from_date: { type: String, required: true }, // YYYY-MM-DD
   to_date: { type: String, default: null },
   reason: { type: String, default: null },
+  // Approval chain (accountant is final):
+  //   employee submits → 'pending_manager' → manager → 'pending_accountant'
+  //   → accountant/admin → 'approved' (only then applied to payroll).
+  //   Manager-created requests start at 'pending_accountant'.
+  //   'pending' is the legacy single-stage value, treated as pending_manager.
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected'],
-    default: 'pending',
+    enum: ['pending', 'pending_manager', 'pending_accountant', 'approved', 'rejected'],
+    default: 'pending_manager',
   },
+  // Stage-1 (manager) decision.
+  manager_reviewed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  manager_reviewed_at: { type: Date, default: null },
+  // Final (accountant/admin) decision.
   reviewed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   reviewed_at: { type: Date, default: null },
   medical_file_data: { type: String, default: null }, // base64 for sick certificate

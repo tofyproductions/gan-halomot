@@ -34,16 +34,24 @@ const punchSchema = new mongoose.Schema({
 
   // Approval workflow for manual punches reported by employees themselves.
   //   - 'auto'     — clock-originated punch or admin-entered manual punch (no review needed)
-  //   - 'pending'  — employee submitted a missing-punch report; waits for branch manager
-  //   - 'approved' — branch manager / admin approved the manual entry
-  //   - 'rejected' — branch manager / admin rejected (kept for audit; excluded from payroll)
-  // Anything not in {'auto','approved'} is excluded from salary calculation.
+  // Approval chain (accountant is always the final approver):
+  //   - 'auto'              — clock/device punch; counts immediately
+  //   - 'pending_manager'   — employee-reported; waits for branch-manager approval
+  //   - 'pending_accountant'— manager-approved or manager-created; waits for accountant
+  //   - 'approved'          — accountant/admin approved; counts
+  //   - 'rejected'          — rejected at any stage (kept for audit; excluded)
+  //   - 'pending'           — legacy single-stage value, treated as pending_manager
+  // Only {'auto','approved'} are counted in salary.
   approval_status: {
     type: String,
-    enum: ['auto', 'pending', 'approved', 'rejected'],
+    enum: ['auto', 'pending', 'pending_manager', 'pending_accountant', 'approved', 'rejected'],
     default: 'auto',
     index: true,
   },
+  // Stage-1 (branch manager) decision, before it reaches the accountant.
+  manager_approved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  manager_approved_at: { type: Date, default: null },
+  // Final (accountant/admin) decision.
   approval_decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   approval_decided_at: { type: Date, default: null },
   approval_decided_note: { type: String, default: '' },

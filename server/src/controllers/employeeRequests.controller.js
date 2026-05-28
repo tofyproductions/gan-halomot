@@ -124,16 +124,33 @@ async function createRequest(req, res, next) {
 async function getAllRequests(req, res, next) {
   try {
     const filter = {};
-    if (req.query.branch_id) filter.branch_id = req.query.branch_id;
     if (req.query.status) filter.status = req.query.status;
     if (req.query.type) filter.type = req.query.type;
+
+    // Branch managers see only their managed branches; accountant/admin see all.
+    const role = req.user.role;
+    if (role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length > 0 ? managed : fallback;
+      if (allowed.length === 0) return res.json({ requests: [] });
+      filter.branch_id = { $in: allowed };
+    } else if (req.query.branch_id) {
+      filter.branch_id = req.query.branch_id;
+    }
 
     const requests = await EmployeeRequest.find(filter)
       .populate('user_id', 'full_name role position')
       .sort({ created_at: -1 })
       .lean();
 
-    res.json({ requests });
+    res.json({
+      requests: requests.map(r => ({
+        ...r,
+        has_file: !!r.medical_file_data,
+        medical_file_data: undefined, // don't ship base64 in the list
+      })),
+    });
   } catch (error) {
     next(error);
   }
@@ -141,26 +158,45 @@ async function getAllRequests(req, res, next) {
 
 async function updateRequestStatus(req, res, next) {
   try {
-    const { status } = req.body;
-    if (!['approved', 'rejected'].includes(status)) {
+    const action = req.body.status; // 'approved' (advance one stage) | 'rejected'
+    if (!['approved', 'rejected'].includes(action)) {
       return res.status(400).json({ error: 'סטטוס לא תקין' });
     }
-
-    const request = await EmployeeRequest.findByIdAndUpdate(
-      req.params.id,
-      { status, reviewed_by: req.user.id, reviewed_at: new Date() },
-      { new: true }
-    );
-
+    const request = await EmployeeRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
 
-    // Side-effect: approved vacation → push the days into the matching
-    // PayrollMonth row. Failures don't block the status update.
-    if (status === 'approved' && request.type === 'vacation') {
+    const role = req.user.role;
+    const isFinal = role === 'system_admin' || role === 'accountant';
+    const isManager = role === 'branch_manager' || role === 'system_admin';
+
+    if (action === 'rejected') {
+      request.status = 'rejected';
+      request.reviewed_by = req.user.id;
+      request.reviewed_at = new Date();
+    } else {
+      const st = request.status;
+      if ((st === 'pending_manager' || st === 'pending') && isManager) {
+        // Stage 1 → forward to accountant.
+        request.status = 'pending_accountant';
+        request.manager_reviewed_by = req.user.id;
+        request.manager_reviewed_at = new Date();
+      } else if (st === 'pending_accountant' && isFinal) {
+        // Stage 2 → final approval; only now applied to payroll.
+        request.status = 'approved';
+        request.reviewed_by = req.user.id;
+        request.reviewed_at = new Date();
+      } else {
+        return res.status(403).json({ error: 'אין הרשאה לאשר את הבקשה בשלב זה' });
+      }
+    }
+    await request.save();
+
+    // Apply to payroll only once fully approved by the accountant.
+    if (request.status === 'approved' && request.type === 'vacation') {
       try { await applyVacationToPayroll(request); }
       catch (err) { console.error('applyVacationToPayroll failed:', err.message); }
     }
-    if (status === 'approved' && request.type === 'sick') {
+    if (request.status === 'approved' && request.type === 'sick') {
       try { await applySickToPayroll(request); }
       catch (err) { console.error('applySickToPayroll failed:', err.message); }
     }
@@ -278,6 +314,12 @@ async function createAdminRequest(req, res, next) {
     const emp = await Employee.findById(employee_id).select('user_id branch_id').lean();
     if (!emp || !emp.user_id) return res.status(404).json({ error: 'לעובד אין חשבון משתמש מקושר' });
 
+    // Manager-created: stage-1 is implicitly done, so it goes straight to the
+    // accountant. Accountant/admin-created is approved immediately (final).
+    const role = req.user.role;
+    const isFinal = role === 'system_admin' || role === 'accountant';
+    const status = isFinal ? 'approved' : 'pending_accountant';
+
     const request = await EmployeeRequest.create({
       user_id: emp.user_id,
       branch_id: emp.branch_id || null,
@@ -287,14 +329,16 @@ async function createAdminRequest(req, res, next) {
       reason: reason || null,
       medical_file_data: medical_file_data || null,
       medical_file_name: medical_file_name || null,
-      status: 'approved',
-      reviewed_by: req.user.id,
-      reviewed_at: new Date(),
+      status,
+      manager_reviewed_by: req.user.id,
+      manager_reviewed_at: new Date(),
+      reviewed_by: isFinal ? req.user.id : null,
+      reviewed_at: isFinal ? new Date() : null,
     });
 
-    if (type === 'sick') {
+    if (status === 'approved' && type === 'sick') {
       try { await applySickToPayroll(request); } catch (e) { console.error('applySickToPayroll failed:', e.message); }
-    } else if (type === 'vacation') {
+    } else if (status === 'approved' && type === 'vacation') {
       try { await applyVacationToPayroll(request); } catch (e) { console.error('applyVacationToPayroll failed:', e.message); }
     }
     res.status(201).json({ request });

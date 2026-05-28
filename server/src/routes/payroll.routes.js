@@ -49,8 +49,8 @@ router.post('/commitments/link',               requireRole('system_admin', 'bran
 router.post('/punch-requests',                 c.createPunchRequest);
 router.get('/punches/pending',                 requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingPunches);
 router.get('/punches/day',                     requireRole('system_admin', 'branch_manager', 'accountant'), c.listPunchesForDay);
-router.patch('/punches/:id/approve',           requireRole('system_admin', 'branch_manager'), c.approvePunch);
-router.patch('/punches/:id/reject',            requireRole('system_admin', 'branch_manager'), c.rejectPunch);
+router.patch('/punches/:id/approve',           requireRole('system_admin', 'branch_manager', 'accountant'), c.approvePunch);
+router.patch('/punches/:id/reject',            requireRole('system_admin', 'branch_manager', 'accountant'), c.rejectPunch);
 router.patch('/punches/:id',                   requireRole('system_admin', 'branch_manager'), c.editPunch);
 
 // Employee self-service (any authenticated user)

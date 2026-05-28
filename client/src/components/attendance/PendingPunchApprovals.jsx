@@ -25,7 +25,7 @@ export default function PendingPunchApprovals() {
   const load = useCallback(() => {
     setLoading(true);
     api.get('/payroll/punches/pending')
-      .then(res => setPunches(res.data.punches || []))
+      .then(res => setPunches([...(res.data.pending_manager || []), ...(res.data.pending_accountant || [])]))
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -79,7 +79,7 @@ export default function PendingPunchApprovals() {
 
         <Collapse in={expanded}>
           <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
-            דיווחים שעובדים שלחו על החתמות חסרות. אשר לפני שיתועדו בתלוש.
+            החתמות ידניות הממתינות לאישורך. רק לאחר אישור סופי של הנה״ח הן נכנסות לשכר.
           </Alert>
 
           <Stack spacing={1}>
