@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
 import {
   Box, Typography, Stack, Card, CardContent, Button, Chip, Tabs, Tab,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper,
@@ -13,6 +13,18 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranch } from '../../hooks/useBranch';
+
+// Group items by branch_id, preserving order, → [ [branchId, items], ... ].
+function groupByBranch(items) {
+  const m = new Map();
+  for (const it of items) {
+    const k = String(it.branch_id?._id || it.branch_id || 'no-branch');
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(it);
+  }
+  return [...m.entries()];
+}
 
 const STATUS_MAP = {
   pending: { label: 'ממתין לאישור מנהל', color: 'warning' },
@@ -36,6 +48,8 @@ function mimeFromName(name = '') {
 
 export default function RequestsManager() {
   const { isAdmin, isManager, isAccountant } = useAuth();
+  const { branches } = useBranch();
+  const branchName = (id) => branches.find(b => String(b._id || b.id) === String(id))?.name || 'ללא סניף';
   const [requests, setRequests] = useState([]);
   const [punches, setPunches] = useState({ pending_manager: [], pending_accountant: [] });
   const [loading, setLoading] = useState(true);
@@ -131,7 +145,10 @@ export default function RequestsManager() {
                     <TableCell sx={{ fontWeight: 700 }}>פעולות</TableCell>
                   </TableRow></TableHead>
                   <TableBody>
-                    {visibleRequests.map(r => {
+                    {groupByBranch(visibleRequests).map(([bid, items]) => (
+                      <Fragment key={bid}>
+                        <TableRow><TableCell colSpan={7} sx={{ bgcolor: '#fff7ed', fontWeight: 800, color: '#9a3412' }}>🏠 {branchName(bid)} ({items.length})</TableCell></TableRow>
+                        {items.map(r => {
                       const t = TYPE_MAP[r.type] || TYPE_MAP.vacation;
                       const s = STATUS_MAP[r.status] || STATUS_MAP.pending;
                       return (
@@ -156,7 +173,9 @@ export default function RequestsManager() {
                           </TableCell>
                         </TableRow>
                       );
-                    })}
+                        })}
+                      </Fragment>
+                    ))}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -180,7 +199,10 @@ export default function RequestsManager() {
                   <TableCell sx={{ fontWeight: 700 }}>פעולות</TableCell>
                 </TableRow></TableHead>
                 <TableBody>
-                  {pendingPunches.map(p => {
+                  {groupByBranch(pendingPunches).map(([bid, items]) => (
+                    <Fragment key={bid}>
+                      <TableRow><TableCell colSpan={6} sx={{ bgcolor: '#fff7ed', fontWeight: 800, color: '#9a3412' }}>🏠 {branchName(bid)} ({items.length})</TableCell></TableRow>
+                      {items.map(p => {
                     const s = STATUS_MAP[p.approval_status] || STATUS_MAP.pending;
                     const dt = new Date(p.timestamp);
                     return (
@@ -200,7 +222,9 @@ export default function RequestsManager() {
                         </TableCell>
                       </TableRow>
                     );
-                  })}
+                      })}
+                    </Fragment>
+                  ))}
                 </TableBody>
               </Table>
             </TableContainer>
