@@ -19,7 +19,7 @@ import { useConfirm } from '../shared/ConfirmProvider';
  *   - update `installments_paid` (manual progress, e.g. after running
  *     the payslip for this month)
  *
- * Persisted via PATCH /employees/:id with the full loans[] array.
+ * Persisted via PUT /payroll/employees/:id with the full loans[] array.
  */
 export default function LoansDialog({ open, row, onClose, onSaved }) {
   const confirm = useConfirm();
@@ -37,7 +37,7 @@ export default function LoansDialog({ open, row, onClose, onSaved }) {
 
   const persist = (next) => {
     setSaving(true);
-    api.patch(`/employees/${row.employee_id}`, { loans: next })
+    api.put(`/payroll/employees/${row.employee_id}`, { loans: next })
       .then(() => { toast.success('הלוואות עודכנו'); onSaved && onSaved(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
       .finally(() => setSaving(false));
