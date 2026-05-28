@@ -29,6 +29,12 @@ const { loadState, saveState } = require('./lib/state');
 const argv = new Set(process.argv.slice(2));
 const ONCE = argv.has('--once');
 const BOOTSTRAP = argv.has('--bootstrap');
+// --resync: reset the upload baseline so the next poll re-reads the FULL device
+// log and re-uploads everything. The server upserts on (branch, device_user_sn)
+// so duplicates are ignored; this recovers punches that were below the baseline
+// (e.g. records that predate the agent install). Run while the service is
+// stopped, then start it:  systemctl stop … && node agent.js --resync && systemctl start …
+const RESYNC = argv.has('--resync');
 
 function envRequired(name) {
   const v = process.env[name];
@@ -80,6 +86,14 @@ const server = new ServerClient({
   retryBaseMs: cfg.httpRetryBase,
 });
 let state = loadState(cfg.stateFile);
+
+if (RESYNC) {
+  state.last_user_sn = 0;
+  state.bootstrapped = true; // keep bootstrapped so we don't re-baseline to max
+  saveState(cfg.stateFile, state);
+  log.info('resync: baseline reset to 0 — next run will re-upload the full device log');
+  process.exit(0);
+}
 
 log.info('agent starting', {
   branchId: cfg.branchId,
