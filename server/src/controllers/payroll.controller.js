@@ -74,6 +74,9 @@ function summarizeDay(dayPunches) {
     });
     totalMinutes += mins;
   }
+  const PENDING = new Set(['pending', 'pending_manager', 'pending_accountant']);
+  const has_pending = sorted.some(p => PENDING.has(p.approval_status));
+  const has_manual = sorted.some(p => p.timestamp_source === 'manual');
   const incomplete = sorted.length % 2 === 1;
   let trailingPunch = null;
   if (incomplete) {
@@ -90,6 +93,8 @@ function summarizeDay(dayPunches) {
     sessions,
     trailing_punch: trailingPunch,
     incomplete,
+    has_pending,
+    has_manual,
     total_minutes: totalMinutes,
     total_hours: Math.round((totalMinutes / 60) * 100) / 100,
     first_in: sorted.length ? israelTimeHHMM(new Date(sorted[0].timestamp)) : null,

@@ -183,10 +183,12 @@ export default function AttendanceMonitor() {
             }} />
           </TableCell>
         );
-        // Green = complete (has pairs, no trailing). Amber = incomplete.
-        const isComplete = !day.incomplete;
-        const bgColor = isComplete ? '#d1fae5' : '#fef3c7';
-        const textColor = isComplete ? '#065f46' : '#92400e';
+        // Purple = has a manual punch pending approval (not yet counted in salary).
+        // Green = complete & final. Amber = incomplete (missing punch).
+        let bgColor, textColor;
+        if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
+        else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
+        else { bgColor = '#d1fae5'; textColor = '#065f46'; }
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
           <Tooltip key={d} title={
@@ -195,6 +197,7 @@ export default function AttendanceMonitor() {
                 <div key={i}>{s.in_hhmm} → {s.out_hhmm} ({Math.round(s.minutes/60*100)/100}h)</div>
               ))}
               {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
+              {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>
@@ -271,7 +274,7 @@ export default function AttendanceMonitor() {
         const cells = days.map(d => {
           const day = block.days[d];
           if (!day) return '<td></td>';
-          const cls = day.incomplete ? 'warn' : 'ok';
+          const cls = day.has_pending ? 'pending' : (day.incomplete ? 'warn' : 'ok');
           const range = `${day.first_in || '?'}–${day.last_out || '?'}`;
           return `<td><div class="day-cell ${cls}"><div class="h">${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
         }).join('');
@@ -366,6 +369,7 @@ export default function AttendanceMonitor() {
           <div class="legend">
             <span><span class="swatch" style="background:#fff"></span>יום תקין</span>
             <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
+            <span><span class="swatch" style="background:#ede9fe;border-color:#6d28d9"></span>עדכון ידני — ממתין לאישור</span>
             <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
             <span><span class="swatch" style="background:#fff7ed"></span>לא מזוהה</span>
           </div>
@@ -408,6 +412,7 @@ export default function AttendanceMonitor() {
       .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; color: #444; }
       .day-cell.ok { background: #ffffff !important; color: #111; }
       .day-cell.warn { background: #fffbeb !important; color: #92400e; border: 0.5px dashed #d97706; border-radius: 2px; }
+      .day-cell.pending { background: #ede9fe !important; color: #5b21b6; border-radius: 2px; }
       .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #6d28d9 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
