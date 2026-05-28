@@ -35,6 +35,13 @@ function daysInMonth(ym) {
   return new Date(y, m, 0).getDate();
 }
 
+const HEB_DOW = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+// Hebrew weekday letter for a "YYYY-MM-DD" string (0=Sun→'א' .. 6=Sat→'ש').
+function hebWeekday(ymd) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return HEB_DOW[new Date(y, m - 1, d).getDay()];
+}
+
 function formatHours(h) {
   if (!h || h === 0) return '—';
   return `${h}h`;
@@ -257,7 +264,7 @@ export default function AttendanceMonitor() {
         const [y, m] = month.split('-');
         return `${m}/${y}`;
       })();
-      const dayHeaders = days.map(d => `<th class="day-col">${d.slice(-2)}</th>`).join('');
+      const dayHeaders = days.map(d => `<th class="day-col">${d.slice(-2)}<br><span class="dow">${hebWeekday(d)}</span></th>`).join('');
       const buildRow = (block, kind) => {
         const cells = days.map(d => {
           const day = block.days[d];
@@ -388,6 +395,7 @@ export default function AttendanceMonitor() {
       thead th { background: #f3f4f6 !important; padding: 3px 4px; border: 1px solid #777; text-align: center; font-weight: 800; }
       thead th.name-col { text-align: right; width: 120px; }
       thead th.day-col { font-size: 6.5pt; }
+      thead th.day-col .dow { font-size: 5pt; font-weight: 600; color: #64748b; }
       thead th.total-col { background: #e5e7eb !important; width: 42px; }
       tbody tr { page-break-inside: avoid; }
       td { padding: 0; vertical-align: middle; border: 1px solid #ccc; }
@@ -508,11 +516,18 @@ export default function AttendanceMonitor() {
               }}>
                 עובד
               </TableCell>
-              {days.map(d => (
-                <TableCell key={d} align="center" sx={{ fontWeight: 700, fontSize: '0.7rem', minWidth: 40 }}>
-                  {d.slice(-2)}
-                </TableCell>
-              ))}
+              {days.map(d => {
+                const dow = hebWeekday(d);
+                const isSat = dow === 'ש';
+                return (
+                  <TableCell key={d} align="center" sx={{ fontWeight: 700, fontSize: '0.7rem', minWidth: 40, lineHeight: 1.1, bgcolor: isSat ? '#f1f5f9' : undefined }}>
+                    {d.slice(-2)}
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.6rem', fontWeight: 600, color: isSat ? '#94a3b8' : 'text.secondary' }}>
+                      {dow}
+                    </Box>
+                  </TableCell>
+                );
+              })}
               <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: 'primary.50', zIndex: 2 }}>
                 סה״כ
               </TableCell>
