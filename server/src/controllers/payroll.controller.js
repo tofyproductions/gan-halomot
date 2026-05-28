@@ -6,6 +6,7 @@
  * model (login accounts). A future cleanup could merge the two by linking
  * Employee.user_id, but for now they live in parallel.
  */
+const mongoose = require('mongoose');
 const { Employee, Punch, Branch, Amuta, User, AgentCommand } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const bcrypt = require('bcryptjs');
@@ -218,6 +219,9 @@ async function createEmployee(req, res, next) {
     const payload = { ...req.body };
     if (!payload.full_name || !payload.branch_id) {
       return res.status(400).json({ error: 'שם מלא וסניף הם שדות חובה' });
+    }
+    if (!mongoose.isValidObjectId(payload.branch_id)) {
+      return res.status(400).json({ error: 'יש לבחור סניף תקין' });
     }
     payload.amuta_distribution = await resolveAmutaDistribution(payload.amuta_distribution, payload.branch_id);
     const emp = await Employee.create(payload);

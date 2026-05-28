@@ -147,7 +147,7 @@ export default function EmployeeManager() {
   const openAdd = () => setDialog({
     open: true,
     mode: 'add',
-    data: { ...EMPTY_FORM, branch_id: selectedBranch },
+    data: { ...EMPTY_FORM, branch_id: isAllBranches ? '' : selectedBranch },
     original: null,
   });
 
