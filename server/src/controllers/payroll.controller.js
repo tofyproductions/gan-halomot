@@ -931,6 +931,9 @@ async function listPendingPunches(req, res, next) {
     const managed = (req.user.managed_branch_ids || []).map(String);
     const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
     const allowed = managed.length > 0 ? managed : fallback;
+    // The api client auto-appends ?branch=<selectedBranch> to GETs; 'all' is the
+    // cross-branch sentinel and must NOT be used as a branch_id filter.
+    const branchQ = req.query.branch && req.query.branch !== 'all' ? req.query.branch : null;
 
     const load = (filter) => Punch.find(filter)
       .populate('employee_id', 'full_name israeli_id')
@@ -944,14 +947,14 @@ async function listPendingPunches(req, res, next) {
       if (role !== 'system_admin') {
         if (allowed.length === 0) return res.json({ pending_manager: [], pending_accountant: [] });
         f.branch_id = { $in: allowed };
-      } else if (req.query.branch) { f.branch_id = req.query.branch; }
+      } else if (branchQ) { f.branch_id = branchQ; }
       pending_manager = await load(f);
     }
     // Stage 2 (accountant/admin): manager-approved or manager-created punches.
     let pending_accountant = [];
     if (isFinal) {
       const f = { approval_status: 'pending_accountant' };
-      if (req.query.branch) f.branch_id = req.query.branch;
+      if (branchQ) f.branch_id = branchQ;
       pending_accountant = await load(f);
     }
     res.json({ pending_manager, pending_accountant });

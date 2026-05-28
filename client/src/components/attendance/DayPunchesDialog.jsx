@@ -12,6 +12,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { useAuth } from '../../hooks/useAuth';
 
 /**
  * Dialog for managing all punches on a specific (employee × day). Manager
@@ -41,7 +42,9 @@ function israelHHmm(iso) {
 
 function statusChip(p) {
   switch (p.approval_status) {
-    case 'pending':  return <Chip size="small" color="warning" label="ממתין לאישור" />;
+    case 'pending':
+    case 'pending_manager':    return <Chip size="small" color="warning" label="ממתין לאישור מנהל" />;
+    case 'pending_accountant': return <Chip size="small" color="info" label="ממתין לאישור הנה״ח" />;
     case 'approved': return <Chip size="small" color="success" label="מאושר" variant="outlined" />;
     case 'rejected': return <Chip size="small" color="error" label="נדחה" />;
     default:         return null;
@@ -50,6 +53,13 @@ function statusChip(p) {
 
 export default function DayPunchesDialog({ open, onClose, employee, date, branchId, isUnlinked, israeliId, onChanged }) {
   const confirm = useConfirm();
+  const { isAdmin, isManager, isAccountant } = useAuth();
+  // Who may act on a punch at its current stage (accountant is final).
+  const canActPunch = (st) => {
+    if (st === 'pending_manager' || st === 'pending') return isManager || isAdmin;
+    if (st === 'pending_accountant') return isAccountant || isAdmin;
+    return false;
+  };
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState({ in_time: '', out_time: '', note: '' });
@@ -186,7 +196,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
                         }
                       />
                       <Stack direction="row" spacing={0.3}>
-                        {p.approval_status === 'pending' && (
+                        {canActPunch(p.approval_status) && (
                           <>
                             <Tooltip title="אשר"><IconButton size="small" color="success" onClick={() => approve(p)}><CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
                             <Tooltip title="דחה"><IconButton size="small" color="error" onClick={() => reject(p)}><CancelIcon fontSize="small" /></IconButton></Tooltip>
