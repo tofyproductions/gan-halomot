@@ -57,7 +57,6 @@ export default function AttendanceMonitor() {
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
-  const [showInactive, setShowInactive] = useState(false);
 
   const fetchAttendance = useCallback(() => {
     if (!selectedBranch) return;
@@ -245,9 +244,10 @@ export default function AttendanceMonitor() {
     );
   }, [search]);
 
-  const activeEmployees = (data?.employees || []).filter(hasAnyActivity).filter(searchPredicate);
-  const inactiveEmployees = (data?.employees || []).filter(b => !hasAnyActivity(b)).filter(searchPredicate);
-  const inactiveCount = inactiveEmployees.length;
+  // Active employees always appear in attendance — even with no punches —
+  // so a manager can enter hours manually (e.g. staff with no clock yet).
+  // Inactive (archived) employees aren't fetched by the server, so they never show.
+  const activeEmployees = (data?.employees || []).filter(searchPredicate);
   const guestEmployees = (data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0).filter(searchPredicate);
 
   // Aggregate totals across branches in all-branches mode
@@ -564,17 +564,7 @@ export default function AttendanceMonitor() {
                 {data.unlinked.map(block => renderEmployeeRow(block, `unlinked-${block.israeli_id}`))}
               </>
             )}
-            {!loading && data && showInactive && inactiveEmployees.length > 0 && (
-              <>
-                <TableRow>
-                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#eef2ff', fontWeight: 700, py: 1, color: '#3730a3' }}>
-                    עובדים ללא החתמות החודש — לחץ על יום כדי להזין שעות ידנית
-                  </TableCell>
-                </TableRow>
-                {inactiveEmployees.map(block => renderEmployeeRow(block, `inactive-${block.employee_id}`))}
-              </>
-            )}
-            {!loading && data && activeEmployees.length === 0 && (!data.unlinked || data.unlinked.length === 0) && !(showInactive && inactiveEmployees.length > 0) && (
+            {!loading && data && activeEmployees.length === 0 && (!data.unlinked || data.unlinked.length === 0) && (
               <TableRow><TableCell colSpan={days.length + 3} align="center" sx={{ py: 4 }}>אין החתמות בחודש הזה</TableCell></TableRow>
             )}
 
@@ -586,8 +576,7 @@ export default function AttendanceMonitor() {
                 ? { header: mk.strip, sub: mk.rowTint, accent: mk.stripText, border: mk.accent, dot: mk.strip }
                 : branchColor(grp.branch, idx);
               const out = [];
-              const grpActive = (grp.data?.employees || []).filter(hasAnyActivity).filter(searchPredicate);
-              const grpInactive = showInactive ? (grp.data?.employees || []).filter(b => !hasAnyActivity(b)).filter(searchPredicate) : [];
+              const grpActive = (grp.data?.employees || []).filter(searchPredicate);
               const grpGuests = (grp.data?.guests || []).filter(b => b.month_total_hours > 0 || Object.keys(b.days).length > 0).filter(searchPredicate);
               const grpUnlinked = grp.data?.unlinked || [];
               out.push(
@@ -607,7 +596,7 @@ export default function AttendanceMonitor() {
                 </TableRow>
               );
               if (grp.data) {
-                if (grpActive.length === 0 && grpGuests.length === 0 && grpUnlinked.length === 0 && grpInactive.length === 0) {
+                if (grpActive.length === 0 && grpGuests.length === 0 && grpUnlinked.length === 0) {
                   out.push(<TableRow key={`empty-${branchKey}`}><TableCell colSpan={days.length + 3} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין החתמות בסניף זה החודש</TableCell></TableRow>);
                 } else {
                   for (const b of grpActive) out.push(renderEmployeeRow(b, `${branchKey}-${b.employee_id}`));
@@ -631,16 +620,6 @@ export default function AttendanceMonitor() {
                     );
                     for (const b of grpUnlinked) out.push(renderEmployeeRow(b, `${branchKey}-unl-${b.israeli_id}`));
                   }
-                  if (grpInactive.length > 0) {
-                    out.push(
-                      <TableRow key={`inact-hdr-${branchKey}`}>
-                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#eef2ff', fontWeight: 700, py: 0.5, fontSize: '0.85rem', color: '#3730a3' }}>
-                          עובדים ללא החתמות ({grp.branch.name}) — לחץ על יום להזנה ידנית
-                        </TableCell>
-                      </TableRow>
-                    );
-                    for (const b of grpInactive) out.push(renderEmployeeRow(b, `${branchKey}-inact-${b.employee_id}`));
-                  }
                 }
               }
               return out;
@@ -649,15 +628,6 @@ export default function AttendanceMonitor() {
         </Table>
       </TableContainer>
 
-      {!loading && (data || perBranch) && (inactiveCount > 0 || showInactive || perBranch) && (
-        <Box sx={{ mt: 1 }}>
-          <Button size="small" variant="text" onClick={() => setShowInactive(v => !v)}>
-            {showInactive
-              ? 'הסתר עובדים ללא החתמות'
-              : `הצג עובדים ללא החתמות${inactiveCount > 0 ? ` (${inactiveCount})` : ''} — להזנת שעות ידנית`}
-          </Button>
-        </Box>
-      )}
 
       <HoursReportDialog
         open={hoursDialog.open}
