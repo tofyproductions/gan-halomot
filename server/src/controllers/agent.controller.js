@@ -85,6 +85,7 @@ async function uploadPunches(req, res, next) {
     let duplicates = 0;
     let unmatched = 0;
     const errors = [];
+    const ops = [];
 
     for (const p of punches) {
       if (!p || typeof p.device_user_sn !== 'number' || !p.israeli_id || !p.timestamp) {
@@ -100,10 +101,10 @@ async function uploadPunches(req, res, next) {
       const isDeviceTestId =
         !employeeId && String(p.israeli_id).replace(/\D/g, '').length < 7;
 
-      try {
-        const result = await Punch.updateOne(
-          { branch_id: branch._id, device_user_sn: p.device_user_sn },
-          {
+      ops.push({
+        updateOne: {
+          filter: { branch_id: branch._id, device_user_sn: p.device_user_sn },
+          update: {
             $setOnInsert: {
               branch_id: branch._id,
               device_user_sn: p.device_user_sn,
@@ -122,13 +123,30 @@ async function uploadPunches(req, res, next) {
                 : '',
             },
           },
-          { upsert: true }
-        );
-        if (result.upsertedCount === 1) accepted++;
-        else duplicates++;
+          upsert: true,
+        },
+      });
+    }
+
+    // One bulkWrite instead of N updateOne calls — a full re-pull can be
+    // thousands of records, and per-record round-trips blow past the agent's
+    // HTTP timeout. Dedup is via the unique (branch_id, device_user_sn) index;
+    // existing records simply match and don't insert.
+    if (ops.length) {
+      try {
+        const result = await Punch.bulkWrite(ops, { ordered: false });
+        accepted = result.upsertedCount || 0;
       } catch (e) {
-        errors.push({ punch: p, reason: e.message });
+        // Duplicate-key races (e.g. overlapping re-pull) are benign — the
+        // record already exists. Keep whatever was upserted and move on.
+        accepted = e?.result?.upsertedCount || e?.result?.nUpserted || 0;
+        const onlyDupes = Array.isArray(e?.writeErrors)
+          && e.writeErrors.every(we => we?.err?.code === 11000 || we?.code === 11000);
+        if (!onlyDupes && e.code !== 11000) {
+          errors.push({ reason: e.message });
+        }
       }
+      duplicates = ops.length - accepted;
     }
 
     res.json({
