@@ -94,6 +94,12 @@ async function uploadPunches(req, res, next) {
       const employeeId = idMap.get(String(p.israeli_id)) || null;
       if (!employeeId) unmatched++;
 
+      // A real ת"ז normalizes to 9 digits; an unmatched id shorter than 7 is a
+      // TIMEDOX test/demo user (UID 0-9 used while installing a clock), not a
+      // person. Auto-ignore on insert so it never surfaces as "לא מזוהה".
+      const isDeviceTestId =
+        !employeeId && String(p.israeli_id).replace(/\D/g, '').length < 7;
+
       try {
         const result = await Punch.updateOne(
           { branch_id: branch._id, device_user_sn: p.device_user_sn },
@@ -110,6 +116,10 @@ async function uploadPunches(req, res, next) {
               verify_mode: p.verify_mode || 0,
               received_at: new Date(),
               agent_version,
+              ignored: isDeviceTestId,
+              ignored_reason: isDeviceTestId
+                ? 'ת"ז קצרה מ-7 ספרות — משתמש בדיקה בשעון (0-9), לא עובד'
+                : '',
             },
           },
           { upsert: true }
