@@ -3,6 +3,7 @@ import {
   Box, Typography, Button, Stack, MenuItem, Dialog, DialogTitle, DialogContent,
   DialogActions, Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
   Paper, Chip, IconButton, Tooltip, TextField, Divider, InputAdornment, Alert,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -48,8 +49,19 @@ const EMPTY_FORM = {
   recreation_annual: 0,
   pension_exempt: false,
   bituach_leumi_exempt: false,
+  work_days: [0, 1, 2, 3, 4],
   notes: '',
 };
+
+// Weekday picker options (Saturday is always off, so not selectable).
+const WEEKDAY_OPTIONS = [
+  { value: 0, label: 'א' },
+  { value: 1, label: 'ב' },
+  { value: 2, label: 'ג' },
+  { value: 3, label: 'ד' },
+  { value: 4, label: 'ה' },
+  { value: 5, label: 'ו' },
+];
 
 /**
  * Extract editable rate fields from the first amuta in the distribution.
@@ -174,6 +186,7 @@ export default function EmployeeManager() {
         recreation_annual: emp.recreation_annual || 0,
         pension_exempt: !!emp.pension_exempt,
         bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
+        work_days: Array.isArray(emp.work_days) ? emp.work_days : [0, 1, 2, 3, 4],
         notes: emp.notes || '',
         id: emp._id || emp.id,
         branch_rates: (emp.branch_rates || []).map(br => ({
@@ -216,6 +229,7 @@ export default function EmployeeManager() {
       recreation_annual: Number(data.recreation_annual) || 0,
       pension_exempt: data.pension_exempt,
       bituach_leumi_exempt: data.bituach_leumi_exempt,
+      work_days: Array.isArray(data.work_days) ? [...data.work_days].sort((a, b) => a - b) : [0, 1, 2, 3, 4],
       notes: data.notes || '',
     };
     // Only include amuta_distribution in the payload if we can actually
@@ -566,6 +580,24 @@ export default function EmployeeManager() {
                 </TextField>
               )}
             </Stack>
+
+            <Box>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
+                ימי עבודה בשבוע (שבת תמיד חופש) — משמש לחישוב ימי מחלה/היעדרות
+              </Typography>
+              <ToggleButtonGroup
+                size="small"
+                value={Array.isArray(dialog.data.work_days) ? dialog.data.work_days : []}
+                onChange={(_e, next) => updateField('work_days', next)}
+                aria-label="ימי עבודה"
+              >
+                {WEEKDAY_OPTIONS.map(d => (
+                  <ToggleButton key={d.value} value={d.value} sx={{ width: 44, fontWeight: 700 }}>
+                    {d.label}
+                  </ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+            </Box>
 
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>שכר</Typography>

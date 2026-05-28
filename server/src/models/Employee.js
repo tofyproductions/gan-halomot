@@ -118,6 +118,11 @@ const employeeSchema = new mongoose.Schema({
   meal_vouchers: { type: Number, default: 0 },              // סיבוס
   recreation_annual: { type: Number, default: 0 },          // הבראה (annual)
 
+  // Weekly working days (0=Sun … 6=Sat). Used to count sick/absence days:
+  // only weekdays in this set count, and Saturday is always off. Default is
+  // Sun–Thu; adjust per employee from their committed schedule.
+  work_days: { type: [Number], default: [0, 1, 2, 3, 4] },
+
   // Tax / pension flags
   pension_exempt: { type: Boolean, default: false },
   bituach_leumi_exempt: { type: Boolean, default: false },
