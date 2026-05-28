@@ -574,8 +574,10 @@ export default function EmployeeManager() {
               <TextField label="תאריך התחלה" type="date" value={dialog.data.start_date || ''} onChange={e => updateField('start_date', e.target.value)} fullWidth InputLabelProps={{ shrink: true }} />
             </Stack>
             <Stack direction="row" spacing={2}>
-              {isAdmin && (
-                <TextField label="סניף" select value={dialog.data.branch_id || ''} onChange={e => updateField('branch_id', e.target.value)} fullWidth>
+              {(isAdmin || isAllBranches) && (
+                <TextField label="סניף ראשי" select required value={dialog.data.branch_id || ''}
+                  onChange={e => updateField('branch_id', e.target.value)} fullWidth
+                  helperText={!dialog.data.branch_id ? 'בחר סניף ראשי לעובד' : ' '}>
                   {branches.map(b => <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>)}
                 </TextField>
               )}
