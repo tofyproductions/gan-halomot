@@ -26,6 +26,7 @@ import { useConfirm } from '../shared/ConfirmProvider';
 import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
+import SickDetailDialog from './SickDetailDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -374,6 +375,7 @@ export default function PayrollMonthTable() {
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
+  const [sick, setSick] = useState({ open: false, row: null });
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [cibusDlg, setCibusDlg] = useState(false);
@@ -989,7 +991,13 @@ export default function PayrollMonthTable() {
                       </TableCell>
 
                       <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
-                      <TableCell align="center"><NumberCell value={r.manual.sick_days} disabled={locked} onSave={v => patchManual(r.employee_id, { sick_days: v })} /></TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setSick({ open: true, row: r })}>
+                        {Number(r.manual.sick_days) ? (
+                          <Chip size="small" label={Number(r.manual.sick_days)} color="error" />
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">—</Typography>
+                        )}
+                      </TableCell>
                       <TableCell align="center" sx={{ position: 'relative' }}>
                         <NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} />
                         {/* Show the auto-detected absences from commitment vs punches
@@ -1091,6 +1099,13 @@ export default function PayrollMonthTable() {
         row={vacation.row}
         month={month}
         onClose={() => setVacation({ open: false, row: null })}
+        onSaved={fetchData}
+      />
+      <SickDetailDialog
+        open={sick.open}
+        row={sick.row}
+        month={month}
+        onClose={() => setSick({ open: false, row: null })}
         onSaved={fetchData}
       />
       <HolidayPayDetailDialog

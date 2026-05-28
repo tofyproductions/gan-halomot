@@ -11,7 +11,11 @@ router.post('/', c.createRequest);
 
 // Manager endpoints
 router.get('/', requireRole('system_admin', 'branch_manager'), c.getAllRequests);
-router.put('/:id/status', requireRole('system_admin', 'branch_manager'), c.updateRequestStatus);
+router.post('/admin', requireRole('system_admin', 'branch_manager'), c.createAdminRequest);
 router.get('/vacation-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listVacationForMonth);
+router.get('/sick-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listSickForMonth);
+router.get('/pending-for-employee', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingForEmployee);
+router.get('/:id/medical-file', requireRole('system_admin', 'branch_manager', 'accountant'), c.getMedicalFile);
+router.put('/:id/status', requireRole('system_admin', 'branch_manager'), c.updateRequestStatus);
 
 module.exports = router;

@@ -75,6 +75,10 @@ const payrollMonthSchema = new mongoose.Schema({
   // manual.vacation_days and the request id is recorded here so the UI
   // can show the source of each day.
   vacation_request_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'EmployeeRequest', default: [] },
+  // Sick requests (EmployeeRequest._id) approved into this month. Same idea as
+  // vacation_request_ids: approving a sick request adds work-day-counted days
+  // to manual.sick_days and records the source id here (idempotent).
+  sick_request_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'EmployeeRequest', default: [] },
 
   status: {
     type: String,

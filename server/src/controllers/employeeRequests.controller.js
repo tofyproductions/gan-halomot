@@ -1,17 +1,24 @@
 const { EmployeeRequest, Employee, PayrollMonth } = require('../models');
 
 /**
- * Count week-days (Sun-Fri, Israel) from `from` to `to` inclusive (YYYY-MM-DD).
- * Saturdays excluded. Returns 1 if same day and not Saturday.
+ * Count working days from `from` to `to` inclusive (YYYY-MM-DD).
+ * Saturday is always excluded. If `workDays` is given (array of weekday
+ * numbers 0=Sun … 6=Sat — the employee's working days), only those weekdays
+ * count, so an employee's regular day off never counts as a sick/vacation day.
  */
-function countWorkDays(fromYmd, toYmd) {
+function countWorkDays(fromYmd, toYmd, workDays = null) {
   const start = new Date(`${fromYmd}T12:00:00Z`);
   const end = new Date(`${toYmd}T12:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const allowed = Array.isArray(workDays) && workDays.length
+    ? new Set(workDays.map(Number))
+    : null;
   let count = 0;
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-    const wd = d.getUTCDay(); // 0=Sun, 6=Sat
-    if (wd !== 6) count++;
+    const wd = d.getUTCDay(); // 0=Sun … 6=Sat
+    if (wd === 6) continue;                       // Saturday always off
+    if (allowed && !allowed.has(wd)) continue;    // employee's day off
+    count++;
   }
   return count;
 }
@@ -39,6 +46,34 @@ async function applyVacationToPayroll(request) {
     {
       $inc: { 'manual.vacation_days': days },
       $addToSet: { vacation_request_ids: request._id },
+      $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+    },
+    { upsert: true, new: true },
+  );
+}
+
+/**
+ * Apply an approved sick request to the PayrollMonth row for its start month.
+ * Counts only the employee's working days (Saturday + day-off excluded), adds
+ * them to manual.sick_days, and records the request id under sick_request_ids.
+ * Idempotent.
+ */
+async function applySickToPayroll(request) {
+  if (request.type !== 'sick' || request.status !== 'approved') return;
+  const emp = await Employee.findOne({ user_id: request.user_id })
+    .select('_id branch_id work_days').lean();
+  if (!emp) return;
+  const days = countWorkDays(request.from_date, request.to_date || request.from_date, emp.work_days);
+  if (days <= 0) return;
+  const month = request.from_date.slice(0, 7); // YYYY-MM
+  const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
+  const alreadyApplied = (existing?.sick_request_ids || []).map(String).includes(String(request._id));
+  if (alreadyApplied) return;
+  await PayrollMonth.findOneAndUpdate(
+    { employee_id: emp._id, month },
+    {
+      $inc: { 'manual.sick_days': days },
+      $addToSet: { sick_request_ids: request._id },
       $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
     },
     { upsert: true, new: true },
@@ -125,6 +160,10 @@ async function updateRequestStatus(req, res, next) {
       try { await applyVacationToPayroll(request); }
       catch (err) { console.error('applyVacationToPayroll failed:', err.message); }
     }
+    if (status === 'approved' && request.type === 'sick') {
+      try { await applySickToPayroll(request); }
+      catch (err) { console.error('applySickToPayroll failed:', err.message); }
+    }
 
     res.json({ request });
   } catch (error) {
@@ -164,10 +203,124 @@ async function listVacationForMonth(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * GET /api/employee-requests/sick-for-month?employee_id=X&month=YYYY-MM
+ * Approved sick requests for the employee in that month, with work-day counts
+ * and whether a medical certificate is attached.
+ */
+async function listSickForMonth(req, res, next) {
+  try {
+    const { employee_id, month } = req.query;
+    if (!employee_id || !month) return res.status(400).json({ error: 'employee_id and month required' });
+    const emp = await Employee.findById(employee_id).select('user_id work_days').lean();
+    if (!emp || !emp.user_id) return res.json({ requests: [] });
+    const [y, m] = month.split('-');
+    const prefix = `${y}-${m}`;
+    const requests = await EmployeeRequest.find({
+      user_id: emp.user_id,
+      type: 'sick',
+      status: 'approved',
+      from_date: { $regex: `^${prefix}` },
+    }).sort({ from_date: 1 }).lean();
+    res.json({
+      requests: requests.map(r => ({
+        id: String(r._id),
+        from_date: r.from_date,
+        to_date: r.to_date || r.from_date,
+        reason: r.reason || '',
+        days: countWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days),
+        has_file: !!r.medical_file_data,
+        file_name: r.medical_file_name || '',
+      })),
+    });
+  } catch (error) { next(error); }
+}
+
+/**
+ * GET /api/employee-requests/pending-for-employee?employee_id=X&type=sick
+ * Pending requests for one employee (manager view), including the cert flag.
+ */
+async function listPendingForEmployee(req, res, next) {
+  try {
+    const { employee_id, type } = req.query;
+    if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+    const emp = await Employee.findById(employee_id).select('user_id').lean();
+    if (!emp || !emp.user_id) return res.json({ requests: [] });
+    const filter = { user_id: emp.user_id, status: 'pending' };
+    if (type) filter.type = type;
+    const requests = await EmployeeRequest.find(filter).sort({ from_date: 1 }).lean();
+    res.json({
+      requests: requests.map(r => ({
+        id: String(r._id),
+        type: r.type,
+        from_date: r.from_date,
+        to_date: r.to_date || r.from_date,
+        reason: r.reason || '',
+        has_file: !!r.medical_file_data,
+        file_name: r.medical_file_name || '',
+      })),
+    });
+  } catch (error) { next(error); }
+}
+
+/**
+ * POST /api/employee-requests/admin
+ * Manager creates an already-approved request on behalf of an employee
+ * (employee_id), optionally with a medical certificate, and applies it to
+ * payroll. Used by the salary table's sick dialog.
+ */
+async function createAdminRequest(req, res, next) {
+  try {
+    const { employee_id, type, from_date, to_date, reason, medical_file_data, medical_file_name } = req.body;
+    if (!employee_id || !type || !from_date) {
+      return res.status(400).json({ error: 'עובד, סוג ותאריך התחלה נדרשים' });
+    }
+    const emp = await Employee.findById(employee_id).select('user_id branch_id').lean();
+    if (!emp || !emp.user_id) return res.status(404).json({ error: 'לעובד אין חשבון משתמש מקושר' });
+
+    const request = await EmployeeRequest.create({
+      user_id: emp.user_id,
+      branch_id: emp.branch_id || null,
+      type,
+      from_date,
+      to_date: to_date || from_date,
+      reason: reason || null,
+      medical_file_data: medical_file_data || null,
+      medical_file_name: medical_file_name || null,
+      status: 'approved',
+      reviewed_by: req.user.id,
+      reviewed_at: new Date(),
+    });
+
+    if (type === 'sick') {
+      try { await applySickToPayroll(request); } catch (e) { console.error('applySickToPayroll failed:', e.message); }
+    } else if (type === 'vacation') {
+      try { await applyVacationToPayroll(request); } catch (e) { console.error('applyVacationToPayroll failed:', e.message); }
+    }
+    res.status(201).json({ request });
+  } catch (error) { next(error); }
+}
+
+/**
+ * GET /api/employee-requests/:id/medical-file
+ * Returns the stored certificate (base64) for preview/download by a manager.
+ */
+async function getMedicalFile(req, res, next) {
+  try {
+    const r = await EmployeeRequest.findById(req.params.id).select('medical_file_data medical_file_name').lean();
+    if (!r || !r.medical_file_data) return res.status(404).json({ error: 'אין קובץ מצורף' });
+    res.json({ data: r.medical_file_data, name: r.medical_file_name || 'אישור מחלה' });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   getMyRequests,
   createRequest,
   getAllRequests,
   updateRequestStatus,
   listVacationForMonth,
+  listSickForMonth,
+  listPendingForEmployee,
+  createAdminRequest,
+  getMedicalFile,
 };
