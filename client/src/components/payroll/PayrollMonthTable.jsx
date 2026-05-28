@@ -562,37 +562,27 @@ export default function PayrollMonthTable() {
 
   const customColumns = data?.custom_columns || [];
 
-  /* CSV export — one 7-col hours block per row (branch comes from the row's
-     branch_name column), matching the simplified on-screen layout. */
-  const exportCSV = () => {
-    if (!data) return;
-    const rowsAcc = [];
-    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן'];
-
-    const headerTop = ['סניף', 'שם העובד', ...cols,
+  /* Build the full export matrix (header + one row per employee) with every
+     column including notes. Reused by CSV / Excel / PDF exports. */
+  const buildExportMatrix = () => {
+    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן', 'שעות התחייבות'];
+    const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
       'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות'];
+      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('הערות');
-    rowsAcc.push(headerTop);
+    const rowsAcc = [headerTop];
 
     for (const r of data.rows) {
-      const cells = [r.branch_name, r.full_name];
-      // Use the home-branch bucket if present, else the rolled-up hours totals.
+      const cells = [r.branch_name, r.full_name, r.israeli_id || ''];
       const bk = r.breakdown.per_branch?.[r.branch_id];
       if (bk) {
         cells.push(bk.days_worked, bk.regular_hours, bk.ot_125_hours, bk.ot_150_hours, bk.hourly_rate || '', bk.global_salary || '', bk.global_ot_rate || '');
       } else {
-        cells.push(
-          r.breakdown.hours.days_worked,
-          r.breakdown.hours.regular,
-          r.breakdown.hours.ot_125,
-          r.breakdown.hours.ot_150,
-          r.breakdown.rates?.hourly_rate || '',
-          r.breakdown.rates?.global_salary || '',
-          r.breakdown.rates?.global_ot_rate || '',
-        );
+        cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
+          r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '', r.breakdown.rates?.global_ot_rate || '');
       }
+      cells.push(r.commitment?.committed_hours ?? '');
       const tb = r.breakdown?.components?.teken_breakdown;
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
       cells.push(
@@ -607,6 +597,7 @@ export default function PayrollMonthTable() {
         r.manual.cibus?.kind === 'number' ? r.manual.cibus.amount : (r.manual.cibus?.text || ''),
         r.manual.miluim?.kind === 'number' ? r.manual.miluim.amount : (r.manual.miluim?.text || ''),
         r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
+        r.breakdown?.estimated_total != null ? Math.round(r.breakdown.estimated_total) : '',
       );
       for (const c of customColumns) {
         const v = r.manual.custom_values?.[c.id];
@@ -617,16 +608,60 @@ export default function PayrollMonthTable() {
       cells.push(r.manual.notes || '');
       rowsAcc.push(cells);
     }
+    return rowsAcc;
+  };
 
-    const csv = '﻿' + rowsAcc.map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const exportLabel = () => (viewMode === 'amuta'
+    ? (data.amutot.find(x => x.id === selectedAmuta)?.name || 'amuta')
+    : (selectedBranchName || (isAllBranches ? 'all-branches' : 'branch')));
+
+  const downloadBlob = (blob, ext) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const label = viewMode === 'amuta'
-      ? (data.amutot.find(x => x.id === selectedAmuta)?.name || 'amuta')
-      : (selectedBranchName || (isAllBranches ? 'all-branches' : 'branch'));
-    a.href = url; a.download = `payroll-${label}-${month}.csv`; a.click();
+    a.href = url; a.download = `payroll-${exportLabel()}-${month}.${ext}`; a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const exportCSV = () => {
+    if (!data) return;
+    const m = buildExportMatrix();
+    const csv = '﻿' + m.map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
+  };
+
+  const exportExcel = () => {
+    if (!data) return;
+    const m = buildExportMatrix();
+    const head = `<tr>${m[0].map(c => `<th style="background:#fde68a;border:1px solid #999;padding:4px;font-weight:bold">${esc(c)}</th>`).join('')}</tr>`;
+    const body = m.slice(1).map(row => `<tr>${row.map(c => `<td style="border:1px solid #ccc;padding:3px;mso-number-format:'\\@'">${esc(c)}</td>`).join('')}</tr>`).join('');
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><table dir="rtl" border="1">${head}${body}</table></body></html>`;
+    downloadBlob(new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'xls');
+  };
+
+  const exportPDF = () => {
+    if (!data) return;
+    const m = buildExportMatrix();
+    const head = `<tr>${m[0].map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
+    const body = m.slice(1).map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+    const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(exportLabel())} ${month}</title>
+      <style>
+        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:12px}
+        h1{font-size:16px;margin:0 0 8px}
+        table{border-collapse:collapse;width:100%;font-size:7pt}
+        th,td{border:1px solid #bbb;padding:2px 3px;text-align:center;white-space:nowrap}
+        th{background:#fde68a}
+        tr:nth-child(even) td{background:#f8fafc}
+        @page{size:landscape;margin:8mm}
+      </style></head><body>
+      <h1>טבלת שכר — ${esc(exportLabel())} — ${month}</h1>
+      <table>${head}${body}</table>
+      <script>window.onload=()=>{window.print()}<\/script>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('חלון ההדפסה נחסם — אפשר חלונות קופצים'); return; }
+    w.document.write(html); w.document.close();
   };
 
   /* ─── Render ────────────────────────────────────────────────────── */
@@ -748,6 +783,8 @@ export default function PayrollMonthTable() {
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
+          <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />} onClick={exportExcel} disabled={!data}>אקסל</Button>
+          <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />} onClick={exportPDF} disabled={!data}>PDF</Button>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
             ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={stagingMode}>פתח לעריכה</Button>
