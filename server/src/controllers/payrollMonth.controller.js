@@ -291,6 +291,7 @@ async function getMonth(req, res, next) {
         adj_totals: adjTotals,
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,
+          committed_hours: commitmentInfo.committed_hours,  // contracted hours this month
           off_days: commitmentInfo.off_dates.length,
           absent_days: commitmentInfo.absent_dates,         // ymd[] for tooltip
           off_day_workdays: commitmentInfo.off_day_workdays, // ymd[] of compensation

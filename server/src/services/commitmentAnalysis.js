@@ -67,8 +67,15 @@ function analyzeCommitment(commitment, punches, monthYM) {
     workedSet.add(ymd);
   }
 
+  const hhmmToHours = (s) => {
+    if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return 0;
+    const [h, m] = s.split(':').map(Number);
+    return (h || 0) + (m || 0) / 60;
+  };
+
   const committed = [];
   const off = [];
+  let committed_hours = 0; // total contracted hours across the month's committed days
   for (const day of datesInMonth(monthYM)) {
     // Saturday (weekday=6) is never a work day in Israel — skip.
     if (day.weekday === 6) continue;
@@ -78,7 +85,10 @@ function analyzeCommitment(commitment, punches, monthYM) {
       continue;
     }
     if (cd.is_off) off.push(day.ymd);
-    else committed.push(day.ymd);
+    else {
+      committed.push(day.ymd);
+      committed_hours += Math.max(0, hhmmToHours(cd.end_hhmm) - hhmmToHours(cd.start_hhmm));
+    }
   }
 
   const worked = [...workedSet].sort();
@@ -96,6 +106,7 @@ function analyzeCommitment(commitment, punches, monthYM) {
     absent_dates: absent,
     off_day_workdays: offDayWorkdays,
     net_absent,
+    committed_hours: Math.round(committed_hours * 100) / 100,
     has_commitment: true,
   };
 }

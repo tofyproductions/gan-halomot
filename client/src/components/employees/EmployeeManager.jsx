@@ -3,7 +3,7 @@ import {
   Box, Typography, Button, Stack, MenuItem, Dialog, DialogTitle, DialogContent,
   DialogActions, Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
   Paper, Chip, IconButton, Tooltip, TextField, Divider, InputAdornment, Alert,
-  ToggleButton, ToggleButtonGroup,
+  ToggleButton, ToggleButtonGroup, Switch, FormControlLabel,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
@@ -50,6 +50,7 @@ const EMPTY_FORM = {
   pension_exempt: false,
   bituach_leumi_exempt: false,
   work_days: [0, 1, 2, 3, 4],
+  is_active: true,
   notes: '',
 };
 
@@ -187,6 +188,7 @@ export default function EmployeeManager() {
         pension_exempt: !!emp.pension_exempt,
         bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
         work_days: Array.isArray(emp.work_days) ? emp.work_days : [0, 1, 2, 3, 4],
+        is_active: emp.is_active !== false,
         notes: emp.notes || '',
         id: emp._id || emp.id,
         branch_rates: (emp.branch_rates || []).map(br => ({
@@ -230,6 +232,7 @@ export default function EmployeeManager() {
       pension_exempt: data.pension_exempt,
       bituach_leumi_exempt: data.bituach_leumi_exempt,
       work_days: Array.isArray(data.work_days) ? [...data.work_days].sort((a, b) => a - b) : [0, 1, 2, 3, 4],
+      is_active: data.is_active !== false,
       notes: data.notes || '',
     };
     // Only include amuta_distribution in the payload if we can actually
@@ -470,7 +473,20 @@ export default function EmployeeManager() {
                     <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
                     {canManage && (
                       <TableCell align="center">
-                        <Stack direction="row" spacing={0.5} justifyContent="center">
+                        <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
+                          <Tooltip title={emp.is_active ? 'עובד פעיל — לחץ לכיבוי' : 'לא פעיל — לחץ להפעלה'}>
+                            <Switch
+                              size="small"
+                              checked={!!emp.is_active}
+                              onChange={async (e) => {
+                                try {
+                                  await api.put(`/payroll/employees/${empId}`, { is_active: e.target.checked });
+                                  toast.success(e.target.checked ? 'העובד הופעל' : 'העובד כובה');
+                                  fetchEmployees();
+                                } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+                              }}
+                            />
+                          </Tooltip>
                           <Tooltip title="דוח שעות">
                             <IconButton size="small" onClick={() => setHoursDialog({ open: true, employee: emp })}>
                               <ScheduleIcon fontSize="small" />
@@ -600,6 +616,11 @@ export default function EmployeeManager() {
                 ))}
               </ToggleButtonGroup>
             </Box>
+
+            <FormControlLabel
+              control={<Switch checked={dialog.data.is_active !== false} onChange={e => updateField('is_active', e.target.checked)} />}
+              label={dialog.data.is_active !== false ? 'עובד פעיל' : 'עובד לא פעיל (לא יופיע בהחתמות)'}
+            />
 
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>שכר</Typography>

@@ -376,6 +376,7 @@ export default function PayrollMonthTable() {
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
+  const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [cibusDlg, setCibusDlg] = useState(false);
@@ -690,6 +691,8 @@ export default function PayrollMonthTable() {
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
           <TextField type="month" size="small" label="חודש" value={month} onChange={e => setMonth(e.target.value)} sx={{ width: 160 }} InputLabelProps={{ shrink: true }} />
+          <TextField size="small" label="חיפוש עובד" placeholder="שם העובד" value={empSearch}
+            onChange={e => setEmpSearch(e.target.value)} sx={{ width: 200 }} />
           {/* Scope is the global branch picker — show as a read-only chip so
               the current view is obvious. Removed the amuta/branch toggle:
               rows are always grouped by branch via section headers, so the
@@ -800,7 +803,7 @@ export default function PayrollMonthTable() {
                 position: 'sticky', right: 0, zIndex: 4,
                 borderLeft: '2px solid', borderColor: 'divider',
               }} className="ag-divider">שם העובד</TableCell>
-              <TableCell colSpan={7} align="center" sx={{
+              <TableCell colSpan={8} align="center" sx={{
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
@@ -847,7 +850,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 7 + 16 + customColumns.length;
+              const totalCols = 1 + 8 + 16 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -870,7 +873,12 @@ export default function PayrollMonthTable() {
                   לא נבחרו גנים להצגה. בחר גנים מהסינון למעלה.
                 </TableCell></TableRow>);
               }
+              const q = empSearch.trim().toLowerCase();
               for (const group of visibleGroups) {
+                const rows = q
+                  ? group.rows.filter(r => (r.full_name || '').toLowerCase().includes(q))
+                  : group.rows;
+                if (rows.length === 0) continue; // hide branches with no match while searching
                 // Branch section header — wider strip than any data row so it's obvious where the group begins.
                 const marker = ganMarker(group.branch_name);
                 const branchInfo = data.branches_in_view?.find(b => b.id === group.branch_id);
@@ -903,11 +911,11 @@ export default function PayrollMonthTable() {
                       🏠 {group.branch_name}
                     </TableCell>
                     <TableCell colSpan={totalCols - 1} sx={stripCell}>
-                      <Box component="span" sx={{ opacity: 0.9, fontWeight: 700, fontSize: '0.75rem' }}>{group.rows.length} עובדים</Box>
+                      <Box component="span" sx={{ opacity: 0.9, fontWeight: 700, fontSize: '0.75rem' }}>{rows.length} עובדים</Box>
                     </TableCell>
                   </TableRow>
                 );
-                for (const r of group.rows) {
+                for (const r of rows) {
                   const locked = r.status === 'finalized';
                   elements.push(
                     <TableRow key={r.employee_id} sx={marker ? { backgroundColor: marker.rowTint } : undefined}>
@@ -974,6 +982,11 @@ export default function PayrollMonthTable() {
                         };
                         return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
                       })()}
+
+                      {/* שעות התחייבות — contracted hours this month from the schedule */}
+                      <TableCell align="center" sx={{ fontWeight: 600, borderLeft: '3px solid', borderColor: '#93c5fd' }}>
+                        {r.commitment?.committed_hours != null ? `${r.commitment.committed_hours}h` : '—'}
+                      </TableCell>
 
                       {/* תקן breakdown — base / completion (with toggle) / OT addition */}
                       <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
@@ -1406,7 +1419,8 @@ function CustomCell({ column, value, onSave, disabled }) {
 }
 
 function SubHeaderGroup({ color }) {
-  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע״נ תקן'];
+  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע״נ תקן', 'שעות התחייבות'];
+  const last = cells.length - 1;
   return (
     <>
       {cells.map((label, i) => (
@@ -1415,8 +1429,8 @@ function SubHeaderGroup({ color }) {
           sx={{
             fontWeight: 700, fontSize: '0.7rem', lineHeight: 1.1,
             bgcolor: color.sub, color: color.accent,
-            borderLeft: i === 6 ? '3px solid' : undefined,
-            borderColor: i === 6 ? color.border : undefined,
+            borderLeft: i === last ? '3px solid' : undefined,
+            borderColor: i === last ? color.border : undefined,
           }}
         >
           {label}
