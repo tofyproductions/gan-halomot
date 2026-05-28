@@ -52,11 +52,12 @@ export default function RequestsManager() {
 
   const fetchAll = useCallback(() => {
     setLoading(true);
-    const branch = localStorage.getItem('selectedBranch');
-    const branchQ = branch && branch !== 'all' ? `?branch_id=${branch}` : '';
+    // No branch filter: the approvals queue must show everything pending for
+    // this user across all branches. The server already scopes by role —
+    // managers see their managed branches, accountant/admin see all.
     Promise.all([
-      api.get(`/employee-requests${branchQ}`),
-      api.get('/payroll/punches/pending', { params: branch && branch !== 'all' ? { branch } : {} }),
+      api.get('/employee-requests'),
+      api.get('/payroll/punches/pending'),
     ])
       .then(([r, p]) => {
         setRequests(r.data.requests || []);
