@@ -751,6 +751,11 @@ async function createManualPunches(req, res, next) {
     const emp = await Employee.findById(employee_id).lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
+    // Multi-branch workers: the punch can be attributed to a chosen branch
+    // (where the work happened); default to the employee's home branch.
+    const punchBranchId = (req.body.branch_id && mongoose.isValidObjectId(req.body.branch_id))
+      ? req.body.branch_id : emp.branch_id;
+
     // Approval chain (accountant is final). A salary-affecting punch entered by
     // a branch manager is NOT counted until the accountant approves it.
     //   - accountant / system_admin → approved immediately (final authority)
@@ -798,7 +803,7 @@ async function createManualPunches(req, res, next) {
       const ts = ilDateTime(date, time);
       const sn = baseSn - i; // unique per record
       const punch = await Punch.create({
-        branch_id: emp.branch_id,
+        branch_id: punchBranchId,
         employee_id: emp._id,
         israeli_id: emp.israeli_id || '',
         device_user_sn: sn,

@@ -112,8 +112,9 @@ export default function AttendanceMonitor() {
     <TableRow key={key} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
       <TableCell sx={{
         fontWeight: 600,
-        position: 'sticky', right: 0,
-        bgcolor: rowBg || 'background.paper', zIndex: 1,
+        position: 'sticky', right: 0, zIndex: 2,
+        bgcolor: rowBg || '#ffffff',
+        boxShadow: '-6px 0 6px -6px rgba(0,0,0,0.18)',
         borderLeft: '1px solid', borderColor: 'divider',
         minWidth: 200,
         cursor: block.employee_id && !block.unlinked ? 'pointer' : 'default',

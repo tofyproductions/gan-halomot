@@ -13,6 +13,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranch } from '../../hooks/useBranch';
 
 /**
  * Dialog for managing all punches on a specific (employee × day). Manager
@@ -60,10 +61,16 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
     if (st === 'pending_accountant') return isAccountant || isAdmin;
     return false;
   };
+  const { branches } = useBranch();
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState({ in_time: '', out_time: '', note: '' });
+  const [addDate, setAddDate] = useState(date);   // which date the manual punch is for
+  const [addBranch, setAddBranch] = useState(branchId || '');
   const [editing, setEditing] = useState({}); // id → { hhmm, state }
+  const [dirty, setDirty] = useState(false);   // changed anything → refresh parent once on close
+  const markDirty = () => setDirty(true);
+  const handleClose = () => { if (dirty) markDirty(); onClose(); };
 
   const load = useCallback(() => {
     if (!open || !date) return;
@@ -82,7 +89,13 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   }, [open, date, employee, branchId, isUnlinked, israeliId]);
 
   useEffect(load, [load]);
-  useEffect(() => { if (open) { setDraft({ in_time: '', out_time: '', note: '' }); setEditing({}); } }, [open]);
+  useEffect(() => {
+    if (open) {
+      setDraft({ in_time: '', out_time: '', note: '' });
+      setEditing({}); setDirty(false);
+      setAddDate(date); setAddBranch(branchId || '');
+    }
+  }, [open, date, branchId]);
 
   const beginEdit = (p) => {
     setEditing(prev => ({ ...prev, [p._id]: { hhmm: israelHHmm(p.timestamp), state: p.state, manual_note: p.manual_note || '' } }));
@@ -92,7 +105,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
     if (!e) return;
     const ts = timeToIsraelDate(date, e.hhmm);
     api.patch(`/payroll/punches/${p._id}`, { timestamp: ts.toISOString(), state: Number(e.state), manual_note: e.manual_note })
-      .then(() => { setEditing(prev => { const x = { ...prev }; delete x[p._id]; return x; }); load(); onChanged?.(); toast.success('עודכן'); })
+      .then(() => { setEditing(prev => { const x = { ...prev }; delete x[p._id]; return x; }); load(); markDirty(); toast.success('עודכן'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
   const cancelEdit = (id) => setEditing(prev => { const x = { ...prev }; delete x[id]; return x; });
@@ -100,26 +113,34 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   const del = async (p) => {
     if (!(await confirm({ title: 'הסרת החתמה', message: 'להסיר את ההחתמה?', danger: true, remember_key: 'delete-punch' }))) return;
     api.delete(`/payroll/punches/${p._id}`)
-      .then(() => { load(); onChanged?.(); toast.success('נמחק'); })
+      .then(() => { load(); markDirty(); toast.success('נמחק'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
   const approve = (p) => {
     api.patch(`/payroll/punches/${p._id}/approve`)
-      .then(() => { load(); onChanged?.(); toast.success('אושר'); })
+      .then(() => { load(); markDirty(); toast.success('אושר'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
   const reject = (p) => {
     api.patch(`/payroll/punches/${p._id}/reject`)
-      .then(() => { load(); onChanged?.(); toast.success('נדחה'); })
+      .then(() => { load(); markDirty(); toast.success('נדחה'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
   const add = () => {
     if (!employee?._id) return toast.error('לא ניתן להוסיף החתמה לרשומה לא מזוהה');
     if (!draft.in_time && !draft.out_time) return toast.error('יש למלא לפחות אחד מהשדות');
-    api.post('/payroll/manual-punches', { employee_id: employee._id, date, ...draft })
-      .then(() => { setDraft({ in_time: '', out_time: '', note: '' }); load(); onChanged?.(); toast.success('נוספה החתמה'); })
+    const useDate = addDate || date;
+    api.post('/payroll/manual-punches', { employee_id: employee._id, date: useDate, branch_id: addBranch || undefined, ...draft })
+      .then(() => {
+        // Keep date + branch so several punches can be entered quickly; don't
+        // refresh the whole page (deferred to close) so we stay on this employee.
+        setDraft({ in_time: '', out_time: '', note: '' });
+        markDirty();
+        if (useDate === date) load();
+        toast.success(`נוספה החתמה ל-${useDate}`);
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
@@ -130,7 +151,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
     : `החתמות לא מזוהות • ${date}`;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>{title}</DialogTitle>
       <DialogContent dividers>
         {isUnlinked && (
@@ -217,7 +238,19 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
           <>
             <Divider sx={{ my: 1.5 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>הוסף החתמה ידנית</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+              אפשר להוסיף כמה החתמות לתאריכים שונים ברצף — הדף לא יתרענן עד שתסגור.
+            </Typography>
             <Stack spacing={1}>
+              <Stack direction="row" spacing={1}>
+                <TextField type="date" label="תאריך" size="small" value={addDate}
+                  onChange={e => setAddDate(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+                <TextField select label="סניף" size="small" value={addBranch}
+                  onChange={e => setAddBranch(e.target.value)} fullWidth>
+                  <MenuItem value="">סניף הבית</MenuItem>
+                  {(branches || []).map(b => <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>)}
+                </TextField>
+              </Stack>
               <Stack direction="row" spacing={1}>
                 <TextField type="time" label="כניסה" size="small" value={draft.in_time}
                   onChange={e => setDraft({ ...draft, in_time: e.target.value })}
@@ -228,13 +261,13 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
               </Stack>
               <TextField label="הערה" size="small" value={draft.note}
                 onChange={e => setDraft({ ...draft, note: e.target.value })} fullWidth />
-              <Button startIcon={<AddIcon />} variant="contained" onClick={add} size="small">הוסף</Button>
+              <Button startIcon={<AddIcon />} variant="contained" onClick={add} size="small">הוסף החתמה</Button>
             </Stack>
           </>
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>סגור</Button>
+        <Button onClick={handleClose}>סגור</Button>
       </DialogActions>
     </Dialog>
   );
