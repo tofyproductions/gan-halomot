@@ -1,4 +1,4 @@
-const { Branch } = require('../models');
+const { Branch, User } = require('../models');
 
 async function getAll(req, res, next) {
   try {
@@ -6,13 +6,23 @@ async function getAll(req, res, next) {
     // Non-admins see only the branches they manage. system_admin and
     // accountant always see all branches (accountant needs cross-branch
     // visibility for payroll consolidation).
-    const role = req.user?.role;
+    //
+    // Re-read role + managed branches from the DB rather than trusting the JWT:
+    // a token issued before a role/branch change would otherwise keep showing
+    // stale (often too many) branches until it expires.
+    const uid = req.user?.id || req.user?._id;
+    const dbUser = uid
+      ? await User.findById(uid).select('role managed_branch_ids branch_id').lean()
+      : null;
+    const role = dbUser?.role || req.user?.role;
+    const managedRaw = dbUser ? (dbUser.managed_branch_ids || []) : (req.user?.managed_branch_ids || []);
+    const userBranchId = dbUser ? dbUser.branch_id : req.user?.branch_id;
     if (role && role !== 'system_admin' && role !== 'accountant') {
-      const managed = req.user.managed_branch_ids || [];
+      const managed = managedRaw.map(String);
       if (managed.length > 0) {
         filter._id = { $in: managed };
-      } else if (req.user.branch_id) {
-        filter._id = req.user.branch_id;
+      } else if (userBranchId) {
+        filter._id = userBranchId;
       } else {
         // Authenticated user with no branch — return empty list rather than all
         return res.json({ branches: [] });
