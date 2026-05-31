@@ -310,34 +310,33 @@ export default function PricingManager() {
         <tbody>${addonRows}${basketSubtotal}</tbody>
       </table>` : '';
 
-    // 2) Grand total per tier × age: bold = full monthly tariff, below = split.
+    // 2) Grand total per tier × age, broken down: תמ"ת + סל = total, then split.
+    const totalCell = (base, ai) => {
+      const basket = basketByAge[ai];
+      const monthly = base + basket;
+      const per = installmentOf(monthly);
+      return `<td style="border:1px solid #ccc;padding:7px;text-align:center">
+        <div style="font-size:12px;color:#444">תמ"ת: ${ils(base)}</div>
+        <div style="font-size:12px;color:#444">סל שירותים: ${ils(basket)}</div>
+        <div style="font-weight:800;font-size:15px;border-top:1px solid #ddd;margin-top:3px;padding-top:3px">סה"כ ${ils(monthly)}</div>
+        <div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(per)}</div></td>`;
+    };
     const totalRows = pricing.tiers.map(t => {
-      const cells = ag.map((_, ai) => {
-        const monthly = monthlyOf(t, ai);
-        const per = installmentOf(monthly);
-        return `<td style="border:1px solid #ccc;padding:7px;text-align:center">
-          <div style="font-weight:800;font-size:15px">${ils(monthly)}</div>
-          <div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(per)}</div></td>`;
-      }).join('');
+      const cells = ag.map((_, ai) => totalCell(Number(t.prices[ai]) || 0, ai)).join('');
       return `<tr><td style="border:1px solid #ccc;padding:7px;background:#fafafa">${esc(t.label)}</td>${cells}</tr>`;
     }).join('');
     // No-subsidy parent — pays the full tariff (highlighted).
     const noSubsidyRow = `<tr style="background:#fff4e0">
       <td style="border:1px solid #ccc;padding:7px;font-weight:800">ללא זכאות לסבסוד (תעריף מלא)</td>
-      ${ag.map((_, ai) => {
-        const monthly = fullTariffByAge[ai] + basketByAge[ai];
-        return `<td style="border:1px solid #ccc;padding:7px;text-align:center">
-          <div style="font-weight:800;font-size:15px">${ils(monthly)}</div>
-          <div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(installmentOf(monthly))}</div></td>`;
-      }).join('')}
+      ${ag.map((_, ai) => totalCell(fullTariffByAge[ai], ai)).join('')}
     </tr>`;
 
     return `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl;color:#222">${head}
       ${basketTable}
       <div style="font-size:16px;font-weight:800;margin:16px 0 6px">סיכום כללי — תשלום לפי דרגת סבסוד</div>
       <p style="font-size:12px;color:#555;margin:0 0 6px">
-        בכל תא: התעריף החודשי המלא (תמ"ת + סל שירותים) ומתחתיו התשלום בפועל בפריסה ל-${installments} תשלומים
-        (החודשי × 12 ÷ ${installments}; חודש אוגוסט משולם מראש ונפרס על פני השנה).
+        בכל תא מוצגים בנפרד: מחיר התמ"ת, סל השירותים, והסיכום החודשי שלהם יחד; ומתחת — התשלום בפועל בפריסה
+        ל-${installments} תשלומים (החודשי × 12 ÷ ${installments}; חודש אוגוסט משולם מראש ונפרס על פני השנה).
       </p>
       <table style="border-collapse:collapse;width:100%;font-size:14px">
         <thead><tr>${th('דרגת סבסוד (הכנסה לנפש)')}${headerCells}</tr></thead>
