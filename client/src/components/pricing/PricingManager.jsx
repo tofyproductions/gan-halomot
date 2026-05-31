@@ -285,25 +285,49 @@ export default function PricingManager() {
           מחיר חודשי קבוע: <b>${ils(pricing.fixed_monthly_fee)}</b>
         </div></div>`;
     }
-    const headerCells = ag.map(g => `<th style="border:1px solid #ccc;padding:8px;background:#fde9c8">${esc(g)}</th>`).join('');
-    const rows = pricing.tiers.map(t => {
-      const cells = ag.map((_, ai) => {
-        const per = installmentOf(monthlyOf(t, ai));
-        return `<td style="border:1px solid #ccc;padding:8px;text-align:center;font-weight:700">${ils(per)}</td>`;
-      }).join('');
-      return `<tr><td style="border:1px solid #ccc;padding:8px;background:#fafafa">${esc(t.label)}</td>${cells}</tr>`;
+    const th = (txt, bg = '#fde9c8') => `<th style="border:1px solid #ccc;padding:8px;background:${bg}">${esc(txt)}</th>`;
+    const headerCells = ag.map(g => th(g)).join('');
+
+    // 1) Services basket — itemized by product, then a basket subtotal.
+    const activeAddons = pricing.addons.filter(a => a.is_active !== false);
+    const addonRows = activeAddons.map(a => {
+      const cells = ag.map((_, ai) =>
+        `<td style="border:1px solid #ccc;padding:7px;text-align:center">${ils(a.prices?.[ai] || 0)}</td>`).join('');
+      return `<tr><td style="border:1px solid #ccc;padding:7px">${esc(a.label || '—')}</td>${cells}</tr>`;
     }).join('');
-    const basketRow = `<tr><td style="border:1px solid #ccc;padding:8px;background:#f5f5f5">סל שירותים (חודשי)</td>${
-      ag.map((_, ai) => `<td style="border:1px solid #ccc;padding:8px;text-align:center">${ils(basketByAge[ai])}</td>`).join('')
-    }</tr>`;
+    const basketSubtotal = `<tr style="font-weight:800;background:#fff4e0">
+      <td style="border:1px solid #ccc;padding:8px">סך סל השירותים (חודשי)</td>
+      ${ag.map((_, ai) => `<td style="border:1px solid #ccc;padding:8px;text-align:center">${ils(basketByAge[ai])}</td>`).join('')}
+    </tr>`;
+    const basketTable = activeAddons.length ? `
+      <div style="font-size:16px;font-weight:800;margin:14px 0 6px">סל השירותים — פירוט</div>
+      <table style="border-collapse:collapse;width:100%;font-size:13px">
+        <thead><tr>${th('פריט')}${headerCells}</tr></thead>
+        <tbody>${addonRows}${basketSubtotal}</tbody>
+      </table>` : '';
+
+    // 2) Grand total per tier × age: bold = full monthly tariff, below = split.
+    const totalRows = pricing.tiers.map(t => {
+      const cells = ag.map((_, ai) => {
+        const monthly = monthlyOf(t, ai);
+        const per = installmentOf(monthly);
+        return `<td style="border:1px solid #ccc;padding:7px;text-align:center">
+          <div style="font-weight:800;font-size:15px">${ils(monthly)}</div>
+          <div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(per)}</div></td>`;
+      }).join('');
+      return `<tr><td style="border:1px solid #ccc;padding:7px;background:#fafafa">${esc(t.label)}</td>${cells}</tr>`;
+    }).join('');
+
     return `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl;color:#222">${head}
-      <p style="font-size:13px;color:#444;margin:6px 0">
-        התשלום החודשי מחושב בפריסה ל-${installments} תשלומים: התשלום החודשי המלא × 12 ÷ ${installments}
-        (חודש אוגוסט משולם מראש ונפרס על פני השנה). הסכומים כוללים את סל השירותים.
+      ${basketTable}
+      <div style="font-size:16px;font-weight:800;margin:16px 0 6px">סיכום כללי — תשלום לפי דרגת סבסוד</div>
+      <p style="font-size:12px;color:#555;margin:0 0 6px">
+        בכל תא: התעריף החודשי המלא (תמ"ת + סל שירותים) ומתחתיו התשלום בפועל בפריסה ל-${installments} תשלומים
+        (החודשי × 12 ÷ ${installments}; חודש אוגוסט משולם מראש ונפרס על פני השנה).
       </p>
       <table style="border-collapse:collapse;width:100%;font-size:14px">
-        <thead><tr><th style="border:1px solid #ccc;padding:8px;background:#fde9c8">דרגת סבסוד (הכנסה לנפש)</th>${headerCells}</tr></thead>
-        <tbody>${rows}${basketRow}</tbody>
+        <thead><tr>${th('דרגת סבסוד (הכנסה לנפש)')}${headerCells}</tr></thead>
+        <tbody>${totalRows}</tbody>
       </table>
       <div style="margin-top:14px;font-size:13px;line-height:1.9;border:1px solid #eee;border-radius:8px;padding:10px;background:#fcfcfc">
         <div>💳 <b>דמי רישום: ${ils(registration)}</b> — נגבים מראש בכרטיס אשראי לפני הכניסה לגן (חד-פעמי).</div>
@@ -651,7 +675,7 @@ export default function PricingManager() {
             ) : (
               <>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-                  המספר המודגש = התשלום החודשי בפועל בפריסה ל-{installments} תשלומים = (תמ"ת לפי דרגה וגיל + סל שירותים) × 12 ÷ {installments} (גבוה מהתעריף החודשי כי אוגוסט נפרס על השנה). מתחת — התעריף החודשי המלא לפני פריסה.
+                  המספר המודגש = התעריף החודשי המלא (תמ"ת לפי דרגה וגיל + סל שירותים). מתחת — התשלום בפועל בפריסה ל-{installments} תשלומים = החודשי × 12 ÷ {installments} (גבוה מהחודשי כי אוגוסט נפרס על השנה).
                 </Typography>
                 <Box sx={{ overflowX: 'auto' }}>
                   <Table size="small">
@@ -672,9 +696,9 @@ export default function PricingManager() {
                             const perPayment = installmentOf(monthly);
                             return (
                               <TableCell key={ai} align="center">
-                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(perPayment)}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(monthly)}</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  תעריף מלא {fmt(monthly)}
+                                  פריסה ל-{installments}: {fmt(perPayment)}
                                 </Typography>
                               </TableCell>
                             );
