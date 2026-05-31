@@ -65,4 +65,19 @@ async function upsert(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getForBranch, upsert };
+// Parse an uploaded Ministry of Labor (תמ"ת) tuition PDF into a tier×age
+// matrix of parent shares. Stateless helper — does NOT save anything; the
+// client loads the result into the editor for review before saving.
+async function parseTmtPdf(req, res, next) {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'לא צורף קובץ PDF' });
+    const { parseTmtPdfBuffer } = require('../services/tmtPdf');
+    const result = await parseTmtPdfBuffer(req.file.buffer);
+    if (!result.recognized) {
+      return res.status(422).json({ error: 'לא זוהתה טבלת תמ"ת תקנית בקובץ' });
+    }
+    res.json(result);
+  } catch (error) { next(error); }
+}
+
+module.exports = { getAll, getForBranch, upsert, parseTmtPdf };

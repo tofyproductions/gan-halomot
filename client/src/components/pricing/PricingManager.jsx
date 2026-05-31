@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box, Paper, Typography, Stack, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, ToggleButton, ToggleButtonGroup, IconButton, Button, Divider,
@@ -7,6 +7,7 @@ import {
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -43,7 +44,7 @@ const DEFAULT_AGE_GROUPS = ['עד 15 חודש', '15–24 חודש', 'מעל 24 �
 const TMT_5786 = [
   { label: 'דרגה 3 (0–2,330)',      prices: [1157, 938, 941] },
   { label: 'דרגה 4 (2,331–2,880)',  prices: [1401, 1109, 1113] },
-  { label: 'דרגה 5 (2,881–3,330)',  prices: [1663, 1318, 1318] },
+  { label: 'דרגה 5 (2,881–3,330)',  prices: [1663, 1318, 1323] },
   { label: 'דרגה 6 (3,331–3,880)',  prices: [1748, 1377, 1382] },
   { label: 'דרגה 7 (3,881–4,440)',  prices: [2011, 1549, 1554] },
   { label: 'דרגה 8 (4,441–4,880)',  prices: [2180, 1703, 1709] },
@@ -161,6 +162,36 @@ export default function PricingManager() {
         toast.success(`הועתק מ-${copyYear} — בדוק ושמור`);
       })
       .catch(() => toast.error('שגיאה בשכפול'));
+  };
+
+  // Upload the official תמ"ת PDF; the server returns a verified tier×age matrix
+  // (only cells confirmed by parent+government=tariff). Load it for review.
+  const fileRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const uploadTmt = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    setUploading(true);
+    const form = new FormData();
+    form.append('file', file);
+    api.post('/branch-pricing/parse-tmt-pdf', form)
+      .then(res => {
+        const { tiers, age_groups, columns } = res.data;
+        patch({
+          age_groups: [...age_groups],
+          tiers: tiers.map(t => ({ label: t.label, prices: t.prices.map(v => (v == null ? 0 : v)) })),
+        });
+        const ok = (columns || []).filter(c => c.complete).map(c => c.age_group);
+        const partial = (columns || []).filter(c => !c.complete).map(c => c.age_group);
+        if (partial.length) {
+          toast.warning(`נטען מ-PDF. זוהו במלואן: ${ok.join(', ') || 'אין'}. השלם ידנית: ${partial.join(', ')}`);
+        } else {
+          toast.success('טבלת התמ"ת נטענה ואומתה במלואה — בדוק ושמור');
+        }
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בקריאת ה-PDF'))
+      .finally(() => setUploading(false));
   };
 
   // --- subsidized matrix editing (index-aligned) ---
@@ -297,7 +328,25 @@ export default function PricingManager() {
                     שורה = דרגת סבסוד, עמודה = קבוצת גיל. הזן את המחיר שההורה משלם בכל תא.
                   </Typography>
                 </Box>
-                <Button size="small" startIcon={<AddIcon />} onClick={addAgeGroup}>הוסף קבוצת גיל</Button>
+                <Stack direction="row" spacing={1}>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    style={{ display: 'none' }}
+                    onChange={uploadTmt}
+                  />
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={uploading ? <CircularProgress size={14} /> : <UploadFileIcon />}
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                  >
+                    טען מ-PDF
+                  </Button>
+                  <Button size="small" startIcon={<AddIcon />} onClick={addAgeGroup}>הוסף קבוצת גיל</Button>
+                </Stack>
               </Stack>
 
               {!OFFICIAL_TMT[year] && (
