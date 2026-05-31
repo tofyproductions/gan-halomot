@@ -12,7 +12,6 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CalculateIcon from '@mui/icons-material/Calculate';
-import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -289,7 +288,6 @@ export default function PricingManager() {
   const ils = (n) => '₪' + Math.round(Number(n) || 0).toLocaleString('he-IL');
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [downloading, setDownloading] = useState(false);
 
   // Target-price tool: enter the desired total monthly price for a no-subsidy
   // parent; the system back-fills the add-on so (full tariff + add-on) = target.
@@ -396,32 +394,36 @@ export default function PricingManager() {
     </div>`;
   };
 
-  const downloadSheet = async () => {
-    setDownloading(true);
-    const container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.right = '-10000px';
-    container.style.top = '0';
-    container.style.width = '800px';
-    container.dir = 'rtl';
-    container.innerHTML = buildSheetHtml();
-    document.body.appendChild(container);
-    try {
-      await new Promise(r => setTimeout(r, 200));
-      await html2pdf().set({
-        margin: [10, 10, 10, 10],
-        filename: `מחירון ${branchName} ${year}.pdf`,
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-      }).from(container).save();
-    } catch (e) {
-      console.error(e); toast.error('שגיאה בהורדת המחירון');
-    } finally {
-      document.body.removeChild(container);
-      setDownloading(false);
+  // Open the sheet in a new window and let the browser print → "Save as PDF".
+  // This renders Hebrew/RTL natively and avoids html2canvas producing a blank
+  // page (the html2pdf approach gave an empty PDF on macOS Chrome/Safari).
+  const downloadSheet = () => {
+    const printable = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
+<title>מחירון ${esc(branchName)} ${esc(year)}</title>
+<style>
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  html, body { background:#fff; }
+  body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; margin:0; padding:16px; }
+  table { page-break-inside: auto; } tr { page-break-inside: avoid; }
+  @media print { body { padding:0; } .no-print { display:none !important; } }
+  .toolbar { position: fixed; top:8px; left:8px; background:#fbbf24; color:#111; padding:8px 14px;
+    border-radius:6px; font-weight:700; cursor:pointer; border:none; font-size:14px; z-index:9999;
+    box-shadow:0 2px 6px rgba(0,0,0,0.2); }
+</style></head>
+<body>
+  <button class="toolbar no-print" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
+  ${buildSheetHtml()}
+</body></html>`;
+    const win = window.open('', '_blank', 'width=900,height=1000');
+    if (!win) {
+      toast.error('הדפדפן חסם את חלון ההורדה — אפשר חלונות קופצים (popups) ונסה שוב');
+      return;
     }
+    win.document.open();
+    win.document.write(printable);
+    win.document.close();
+    setTimeout(() => { try { win.focus(); win.print(); } catch (e) { /* user can click the button */ } }, 400);
   };
 
   return (
@@ -836,12 +838,7 @@ export default function PricingManager() {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setPreviewOpen(false)}>סגור</Button>
-          <Button
-            variant="contained"
-            startIcon={downloading ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
-            onClick={downloadSheet}
-            disabled={downloading}
-          >
+          <Button variant="contained" startIcon={<DownloadIcon />} onClick={downloadSheet}>
             הורד PDF
           </Button>
         </DialogActions>
