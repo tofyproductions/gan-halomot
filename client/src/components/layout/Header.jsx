@@ -10,6 +10,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import PriceChangeIcon from '@mui/icons-material/PriceChange';
 import ArchiveIcon from '@mui/icons-material/Archive';
 import ContactsIcon from '@mui/icons-material/Contacts';
 import PeopleIcon from '@mui/icons-material/People';
@@ -40,6 +41,7 @@ const ICON_BY_TAB = {
   dashboard: DashboardIcon,
   registrations: PersonAddIcon,
   collections: ReceiptLongIcon,
+  pricing: PriceChangeIcon,
   archive: ArchiveIcon,
   employees: PeopleIcon,
   attendance: FingerprintIcon,

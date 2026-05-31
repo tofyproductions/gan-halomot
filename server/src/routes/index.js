@@ -39,6 +39,7 @@ router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));
 router.use('/discounts', require('./discount.routes'));
+router.use('/branch-pricing', require('./branchPricing.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/stock', require('./stock.routes'));
 

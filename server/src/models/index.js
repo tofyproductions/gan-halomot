@@ -35,6 +35,7 @@ const PayrollCustomColumn = require('./PayrollCustomColumn');
 const SalaryAdjustment = require('./SalaryAdjustment');
 const EmployeeCommitment = require('./EmployeeCommitment');
 const PayrollChangeRequest = require('./PayrollChangeRequest');
+const BranchPricing = require('./BranchPricing');
 
 module.exports = {
   User,
@@ -73,4 +74,5 @@ module.exports = {
   SalaryAdjustment,
   EmployeeCommitment,
   PayrollChangeRequest,
+  BranchPricing,
 };

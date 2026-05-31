@@ -31,6 +31,7 @@ import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
+import PricingManager from './components/pricing/PricingManager';
 import { BranchProvider } from './hooks/useBranch';
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
 
@@ -52,6 +53,11 @@ function AppRoutes() {
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
         <Route path="collections" element={<CollectionsTable />} />
+        <Route path="pricing" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+            <PricingManager />
+          </ProtectedRoute>
+        } />
         <Route path="archive" element={<ArchiveList />} />
         <Route path="contacts" element={<ContactListPDF />} />
         <Route path="branches" element={<BranchManager />} />
