@@ -35,10 +35,11 @@ async function getAll(req, res, next) {
   } catch (error) { next(error); }
 }
 
-// Get one branch's pricing doc (null if none defined yet).
+// Get one branch's pricing doc for a given academic year (null if none yet).
 async function getForBranch(req, res, next) {
   try {
-    const p = await BranchPricing.findOne({ branch_id: req.params.branchId }).lean();
+    const academic_year = req.query.year || '';
+    const p = await BranchPricing.findOne({ branch_id: req.params.branchId, academic_year }).lean();
     res.json({ pricing: p ? { ...p, id: p._id } : null });
   } catch (error) { next(error); }
 }

@@ -11,13 +11,36 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 
+// Academic years (Sept–Aug). A new תמ"ת tuition table + services basket arrives
+// at the end of August each year, so pricing is stored per year.
+const ACADEMIC_YEARS = [
+  { value: 'תשפ"ד', start: 2023 },
+  { value: 'תשפ"ה', start: 2024 },
+  { value: 'תשפ"ו', start: 2025 },
+  { value: 'תשפ"ז', start: 2026 },
+  { value: 'תשפ"ח', start: 2027 },
+  { value: 'תשפ"ט', start: 2028 },
+];
+
+function yearLabel(y) {
+  return `${y.value} (${y.start}/${String(y.start + 1).slice(2)})`;
+}
+
+// The academic year we're currently in (flips in September).
+function currentAcademicYear() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+  const found = ACADEMIC_YEARS.find(y => y.start === startYear);
+  return found ? found.value : ACADEMIC_YEARS[ACADEMIC_YEARS.length - 1].value;
+}
+
 // Age columns for the state subsidy matrix (by age in months).
 const DEFAULT_AGE_GROUPS = ['עד 15 חודש', '15–24 חודש', 'מעל 24 חודש'];
 
 // Official Ministry of Labor tuition table — מעונות יום תשפ"ו, תקינה מורחבת.
 // Each value = the PARENT's share (השתתפות הורים) per age group.
 // Full tariff (parent + state): 3,936 / 2,917 / 2,587. Source: tuition-25-me.pdf.
-const DEFAULT_TIERS = [
+const TMT_5786 = [
   { label: 'דרגה 3 (0–2,330)',      prices: [1157, 938, 941] },
   { label: 'דרגה 4 (2,331–2,880)',  prices: [1401, 1109, 1113] },
   { label: 'דרגה 5 (2,881–3,330)',  prices: [1663, 1318, 1318] },
@@ -32,6 +55,15 @@ const DEFAULT_TIERS = [
   { label: 'דרגה 15',               prices: [952, 731, 734] },
 ];
 
+// Official state tables we have on file, keyed by academic year. A year without
+// an entry starts from the most recent table as an editable template.
+const OFFICIAL_TMT = { 'תשפ"ו': TMT_5786 };
+
+function tiersForYear(year) {
+  const t = OFFICIAL_TMT[year] || TMT_5786;
+  return t.map(x => ({ label: x.label, prices: [...x.prices] }));
+}
+
 const DEFAULT_ADDONS = [
   'חצי שעת הארכה בבוקר',
   'שעת הארכה אחר הצהריים',
@@ -42,13 +74,13 @@ const DEFAULT_ADDONS = [
   'לוח עדכונים דיגיטלי להורים בתינוקייה',
 ];
 
-// Empty pricing shape used when a branch has no doc yet.
-function emptyPricing() {
+// Empty pricing shape used when a branch has no doc yet for the given year.
+function emptyPricing(year) {
   return {
     pricing_type: 'subsidized',
     fixed_monthly_fee: 0,
     age_groups: [...DEFAULT_AGE_GROUPS],
-    tiers: DEFAULT_TIERS.map(t => ({ label: t.label, prices: [...t.prices] })),
+    tiers: tiersForYear(year),
     addons: DEFAULT_ADDONS.map(label => ({ label, price: 0, is_active: true })),
     one_time: { insurance: 0, registration: 0 },
     notes: '',
@@ -56,10 +88,10 @@ function emptyPricing() {
 }
 
 // Normalize a doc from the server into the editable shape (fill defaults if empty).
-function normalize(doc) {
-  if (!doc) return emptyPricing();
+function normalize(doc, year) {
+  if (!doc) return emptyPricing(year);
   const ageGroups = doc.age_groups?.length ? [...doc.age_groups] : [...DEFAULT_AGE_GROUPS];
-  const tiers = (doc.tiers?.length ? doc.tiers : DEFAULT_TIERS)
+  const tiers = (doc.tiers?.length ? doc.tiers : tiersForYear(year))
     .map(t => ({
       label: t.label || '',
       // keep prices index-aligned to ageGroups length
@@ -85,7 +117,9 @@ const shekel = { startAdornment: <InputAdornment position="start">₪</InputAdor
 export default function PricingManager() {
   const { branches } = useBranch();
   const [branchId, setBranchId] = useState('');
-  const [pricing, setPricing] = useState(emptyPricing());
+  const [year, setYear] = useState(currentAcademicYear());
+  const [copyYear, setCopyYear] = useState('');
+  const [pricing, setPricing] = useState(emptyPricing(currentAcademicYear()));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -95,25 +129,38 @@ export default function PricingManager() {
     if (!branchId && branches.length) setBranchId(branches[0]._id || branches[0].id);
   }, [branches, branchId]);
 
-  const load = useCallback((id) => {
+  const load = useCallback((id, yr) => {
     if (!id) return;
     setLoading(true);
-    api.get(`/branch-pricing/${id}`)
-      .then(res => { setPricing(normalize(res.data.pricing)); setDirty(false); })
+    api.get(`/branch-pricing/${id}`, { params: { year: yr } })
+      .then(res => { setPricing(normalize(res.data.pricing, yr)); setDirty(false); })
       .catch(err => { console.error(err); toast.error('שגיאה בטעינת המחירים'); })
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { if (branchId) load(branchId); }, [branchId, load]);
+  useEffect(() => { if (branchId) load(branchId, year); }, [branchId, year, load]);
 
   const patch = (changes) => { setPricing(p => ({ ...p, ...changes })); setDirty(true); };
 
   const save = () => {
     setSaving(true);
-    api.put(`/branch-pricing/${branchId}`, pricing)
-      .then(() => { toast.success('המחירים נשמרו'); setDirty(false); })
+    api.put(`/branch-pricing/${branchId}`, { ...pricing, academic_year: year })
+      .then(() => { toast.success(`המחירים נשמרו (${year})`); setDirty(false); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשמירה'))
       .finally(() => setSaving(false));
+  };
+
+  // Pull another year's saved pricing into the editor (does not save until "שמירה").
+  const copyFromYear = () => {
+    if (!copyYear || copyYear === year) return;
+    api.get(`/branch-pricing/${branchId}`, { params: { year: copyYear } })
+      .then(res => {
+        if (!res.data.pricing) return toast.info(`אין מחירון שמור לשנת ${copyYear}`);
+        setPricing(normalize(res.data.pricing, year));
+        setDirty(true);
+        toast.success(`הועתק מ-${copyYear} — בדוק ושמור`);
+      })
+      .catch(() => toast.error('שגיאה בשכפול'));
   };
 
   // --- subsidized matrix editing (index-aligned) ---
@@ -155,6 +202,11 @@ export default function PricingManager() {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>מחירי המעונות</Typography>
         <Stack direction="row" spacing={1} alignItems="center">
+          <Select size="small" value={year} onChange={e => setYear(e.target.value)} sx={{ minWidth: 150 }}>
+            {ACADEMIC_YEARS.map(y => (
+              <MenuItem key={y.value} value={y.value}>{yearLabel(y)}</MenuItem>
+            ))}
+          </Select>
           <Select size="small" value={branchId} onChange={e => setBranchId(e.target.value)} sx={{ minWidth: 220 }}>
             {branches.map(b => (
               <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
@@ -172,6 +224,29 @@ export default function PricingManager() {
       </Stack>
 
       {dirty && <Alert severity="info" sx={{ mb: 2 }}>יש שינויים שלא נשמרו.</Alert>}
+
+      {/* Copy a previous year's pricing as a starting point for this year. */}
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 2 }}>
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+            מחירון לשנת {year}
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Typography variant="caption" color="text.secondary">שכפל מחירון משנה:</Typography>
+          <Select
+            size="small" value={copyYear} displayEmpty
+            onChange={e => setCopyYear(e.target.value)} sx={{ minWidth: 130 }}
+          >
+            <MenuItem value=""><em>בחר שנה</em></MenuItem>
+            {ACADEMIC_YEARS.filter(y => y.value !== year).map(y => (
+              <MenuItem key={y.value} value={y.value}>{y.value}</MenuItem>
+            ))}
+          </Select>
+          <Button size="small" variant="outlined" onClick={copyFromYear} disabled={!copyYear}>
+            שכפל
+          </Button>
+        </Stack>
+      </Paper>
 
       {loading ? (
         <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>
@@ -224,6 +299,12 @@ export default function PricingManager() {
                 </Box>
                 <Button size="small" startIcon={<AddIcon />} onClick={addAgeGroup}>הוסף קבוצת גיל</Button>
               </Stack>
+
+              {!OFFICIAL_TMT[year] && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  אין טבלת תמ"ת רשמית טעונה לשנת {year}. המספרים מבוססים על תשפ"ו כתבנית — עדכן אותם לפי מחירון התמ"ת החדש.
+                </Alert>
+              )}
 
               <Box sx={{ overflowX: 'auto' }}>
                 <Table size="small">
