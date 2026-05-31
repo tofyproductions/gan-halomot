@@ -134,6 +134,7 @@ export default function PricingManager() {
   const [branchId, setBranchId] = useState('');
   const [year, setYear] = useState(currentAcademicYear());
   const [copyYear, setCopyYear] = useState('');
+  const [copyBranch, setCopyBranch] = useState('');
   const [pricing, setPricing] = useState(emptyPricing(currentAcademicYear()));
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -174,6 +175,20 @@ export default function PricingManager() {
         setPricing(normalize(res.data.pricing, year));
         setDirty(true);
         toast.success(`הועתק מ-${copyYear} — בדוק ושמור`);
+      })
+      .catch(() => toast.error('שגיאה בשכפול'));
+  };
+
+  // Pull another branch's saved pricing (same year) into the editor.
+  const copyFromBranch = () => {
+    if (!copyBranch || copyBranch === branchId) return;
+    const name = branches.find(b => (b._id || b.id) === copyBranch)?.name || 'הסניף';
+    api.get(`/branch-pricing/${copyBranch}`, { params: { year } })
+      .then(res => {
+        if (!res.data.pricing) return toast.info(`אין מחירון שמור ל${name} בשנת ${year}`);
+        setPricing(normalize(res.data.pricing, year));
+        setDirty(true);
+        toast.success(`הועתק מ${name} — בדוק ושמור`);
       })
       .catch(() => toast.error('שגיאה בשכפול'));
   };
@@ -452,10 +467,10 @@ export default function PricingManager() {
             מחירון לשנת {year}
           </Typography>
           <Box sx={{ flex: 1 }} />
-          <Typography variant="caption" color="text.secondary">שכפל מחירון משנה:</Typography>
+          <Typography variant="caption" color="text.secondary">שכפל משנה:</Typography>
           <Select
             size="small" value={copyYear} displayEmpty
-            onChange={e => setCopyYear(e.target.value)} sx={{ minWidth: 130 }}
+            onChange={e => setCopyYear(e.target.value)} sx={{ minWidth: 120 }}
           >
             <MenuItem value=""><em>בחר שנה</em></MenuItem>
             {ACADEMIC_YEARS.filter(y => y.value !== year).map(y => (
@@ -463,6 +478,20 @@ export default function PricingManager() {
             ))}
           </Select>
           <Button size="small" variant="outlined" onClick={copyFromYear} disabled={!copyYear}>
+            שכפל
+          </Button>
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
+          <Typography variant="caption" color="text.secondary">שכפל מסניף:</Typography>
+          <Select
+            size="small" value={copyBranch} displayEmpty
+            onChange={e => setCopyBranch(e.target.value)} sx={{ minWidth: 150 }}
+          >
+            <MenuItem value=""><em>בחר סניף</em></MenuItem>
+            {branches.filter(b => (b._id || b.id) !== branchId).map(b => (
+              <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
+            ))}
+          </Select>
+          <Button size="small" variant="outlined" onClick={copyFromBranch} disabled={!copyBranch}>
             שכפל
           </Button>
         </Stack>
