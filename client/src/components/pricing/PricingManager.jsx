@@ -282,18 +282,24 @@ export default function PricingManager() {
   const [targetIdx, setTargetIdx] = useState(0);
   const [targetVals, setTargetVals] = useState([]);
 
+  // Sum of OTHER active add-ons (excluding `excludeIdx`) for an age group.
+  const otherAddonsSum = (excludeIdx, ai) =>
+    pricing.addons.reduce((s, a, i) =>
+      (i !== excludeIdx && a.is_active !== false ? s + (Number(a.prices?.[ai]) || 0) : s), 0);
+  // The add-on price needed so that full tariff + all add-ons = target.
+  const targetAddonPrice = (idx, ai) =>
+    Math.max(0, Math.round((Number(targetVals[ai]) || 0) - fullTariffByAge[ai] - otherAddonsSum(idx, ai)));
+
   const openTarget = (idx) => {
-    const a = pricing.addons[idx];
     setTargetIdx(idx);
-    setTargetVals(pricing.age_groups.map((_, ai) =>
-      Math.round(fullTariffByAge[ai] + (Number(a?.prices?.[ai]) || 0))));
+    // Start from the current full monthly total (tariff + all active add-ons).
+    setTargetVals(pricing.age_groups.map((_, ai) => Math.round(fullTariffByAge[ai] + basketByAge[ai])));
     setTargetOpen(true);
   };
   const applyTarget = () => {
     patch({
       addons: pricing.addons.map((a, i) => (i === targetIdx
-        ? { ...a, prices: a.prices.map((p, ai) =>
-            (ai < targetVals.length ? Math.max(0, Math.round((Number(targetVals[ai]) || 0) - fullTariffByAge[ai])) : p)) }
+        ? { ...a, prices: a.prices.map((p, ai) => (ai < targetVals.length ? targetAddonPrice(targetIdx, ai) : p)) }
         : a)),
     });
     setTargetOpen(false);
@@ -819,11 +825,12 @@ export default function PricingManager() {
             חישוב "{pricing.addons[targetIdx]?.label || 'תוספת'}" לפי מחיר יעד
           </Typography>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-            הזן את המחיר החודשי הכולל הרצוי להורה (תעריף מלא ללא סבסוד) לכל קבוצת גיל. המערכת תזין את מחיר התוספת כך ש: תעריף תמ"ת מלא + תוספת = היעד.
+            הזן את המחיר החודשי הכולל הרצוי להורה (תעריף מלא ללא סבסוד) לכל קבוצת גיל. המערכת תזין את מחיר התוספת כך ש: תעריף תמ"ת מלא + שאר התוספות + התוספת הזו = היעד.
           </Typography>
           <Stack spacing={2}>
             {pricing.age_groups.map((ag, ai) => {
-              const computed = Math.max(0, Math.round((Number(targetVals[ai]) || 0) - fullTariffByAge[ai]));
+              const others = otherAddonsSum(targetIdx, ai);
+              const computed = targetAddonPrice(targetIdx, ai);
               return (
                 <Stack key={ai} direction="row" spacing={2} alignItems="center">
                   <Typography sx={{ minWidth: 110, fontWeight: 700 }}>{ag || `גיל ${ai + 1}`}</Typography>
@@ -834,7 +841,7 @@ export default function PricingManager() {
                     InputProps={shekel} sx={{ width: 180 }}
                   />
                   <Typography variant="body2" color="text.secondary">
-                    תמ"ת מלא {fmt(fullTariffByAge[ai])} → תוספת = <b>{fmt(computed)}</b>
+                    תמ"ת {fmt(fullTariffByAge[ai])}{others > 0 ? ` + תוספות ${fmt(others)}` : ''} → התוספת = <b>{fmt(computed)}</b>
                   </Typography>
                 </Stack>
               );
