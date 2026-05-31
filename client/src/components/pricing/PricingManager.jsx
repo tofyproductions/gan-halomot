@@ -82,8 +82,9 @@ function emptyPricing(year) {
     fixed_monthly_fee: 0,
     age_groups: [...DEFAULT_AGE_GROUPS],
     tiers: tiersForYear(year),
-    addons: DEFAULT_ADDONS.map(label => ({ label, price: 0, is_active: true })),
+    addons: DEFAULT_ADDONS.map(label => ({ label, prices: DEFAULT_AGE_GROUPS.map(() => 0), is_active: true })),
     one_time: { insurance: 0, registration: 0 },
+    installments: 11,
     notes: '',
   };
 }
@@ -98,17 +99,25 @@ function normalize(doc, year) {
       // keep prices index-aligned to ageGroups length
       prices: ageGroups.map((_, i) => Number(t.prices?.[i] ?? 0)),
     }));
+  const addonsSrc = doc.addons?.length ? doc.addons : DEFAULT_ADDONS.map(label => ({ label }));
+  const addons = addonsSrc.map(a => {
+    let prices;
+    if (Array.isArray(a.prices)) prices = ageGroups.map((_, i) => Number(a.prices[i] ?? 0));
+    else if (a.price != null) prices = ageGroups.map(() => Number(a.price) || 0); // back-compat: single price → all ages
+    else prices = ageGroups.map(() => 0);
+    return { label: a.label || '', prices, is_active: a.is_active !== false };
+  });
   return {
     pricing_type: doc.pricing_type || 'subsidized',
     fixed_monthly_fee: Number(doc.fixed_monthly_fee ?? 0),
     age_groups: ageGroups,
     tiers,
-    addons: (doc.addons?.length ? doc.addons : DEFAULT_ADDONS.map(label => ({ label, price: 0 })))
-      .map(a => ({ label: a.label || '', price: Number(a.price ?? 0), is_active: a.is_active !== false })),
+    addons,
     one_time: {
       insurance: Number(doc.one_time?.insurance ?? 0),
       registration: Number(doc.one_time?.registration ?? 0),
     },
+    installments: Number(doc.installments ?? 11) || 11,
     notes: doc.notes || '',
   };
 }
@@ -213,27 +222,37 @@ export default function PricingManager() {
     patch({
       age_groups: [...pricing.age_groups, ''],
       tiers: pricing.tiers.map(t => ({ ...t, prices: [...t.prices, 0] })),
+      addons: pricing.addons.map(a => ({ ...a, prices: [...a.prices, 0] })),
     });
   const removeAgeGroup = (agIdx) =>
     patch({
       age_groups: pricing.age_groups.filter((_, i) => i !== agIdx),
       tiers: pricing.tiers.map(t => ({ ...t, prices: t.prices.filter((_, j) => j !== agIdx) })),
+      addons: pricing.addons.map(a => ({ ...a, prices: a.prices.filter((_, j) => j !== agIdx) })),
     });
 
-  // --- add-ons ---
-  const setAddon = (idx, changes) =>
-    patch({ addons: pricing.addons.map((a, i) => (i === idx ? { ...a, ...changes } : a)) });
-  const addAddon = () => patch({ addons: [...pricing.addons, { label: '', price: 0, is_active: true }] });
+  // --- add-ons (price per age group, index-aligned to age_groups) ---
+  const setAddonLabel = (idx, label) =>
+    patch({ addons: pricing.addons.map((a, i) => (i === idx ? { ...a, label } : a)) });
+  const setAddonPrice = (idx, agIdx, value) =>
+    patch({ addons: pricing.addons.map((a, i) =>
+      i === idx ? { ...a, prices: a.prices.map((p, j) => (j === agIdx ? value : p)) } : a) });
+  const addAddon = () =>
+    patch({ addons: [...pricing.addons, { label: '', prices: pricing.age_groups.map(() => 0), is_active: true }] });
   const removeAddon = (idx) => patch({ addons: pricing.addons.filter((_, i) => i !== idx) });
 
   const isPrivate = pricing.pricing_type === 'private';
 
   // --- summary computations (what a parent actually pays) ---
-  const fmt = (n) => `₪${Number(n || 0).toLocaleString('he-IL')}`;
-  const basketSum = pricing.addons
-    .filter(a => a.is_active !== false)
-    .reduce((sum, a) => sum + (Number(a.price) || 0), 0);
-  const oneTimeTotal = (Number(pricing.one_time?.insurance) || 0) + (Number(pricing.one_time?.registration) || 0);
+  const fmt = (n) => `₪${Math.round(Number(n) || 0).toLocaleString('he-IL')}`;
+  // Services basket total per age group (sum of active add-ons for that age).
+  const basketByAge = pricing.age_groups.map((_, ai) =>
+    pricing.addons
+      .filter(a => a.is_active !== false)
+      .reduce((sum, a) => sum + (Number(a.prices?.[ai]) || 0), 0));
+  const installments = Number(pricing.installments) || 11;
+  const insurance = Number(pricing.one_time?.insurance) || 0;
+  const registration = Number(pricing.one_time?.registration) || 0;
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto', pb: 6 }}>
@@ -429,69 +448,87 @@ export default function PricingManager() {
             </Paper>
           )}
 
-          {/* Subsidized: add-ons */}
+          {/* Subsidized: add-ons (price per age group) */}
           {!isPrivate && (
             <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>תוספות (חודשי)</Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 700 }}>תוספת</TableCell>
-                    <TableCell sx={{ fontWeight: 700, width: 160 }}>מחיר חודשי</TableCell>
-                    <TableCell />
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {pricing.addons.map((a, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>
-                        <TextField
-                          size="small" variant="standard" value={a.label}
-                          placeholder="שם תוספת"
-                          onChange={e => setAddon(idx, { label: e.target.value })}
-                          fullWidth
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <TextField
-                          size="small" type="number" variant="standard"
-                          value={a.price}
-                          onChange={e => setAddon(idx, { price: Number(e.target.value) })}
-                          sx={{ width: 120 }}
-                        />
-                      </TableCell>
-                      <TableCell align="left">
-                        <IconButton size="small" color="error" onClick={() => removeAddon(idx)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </TableCell>
+              <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.5 }}>תוספות (חודשי, לפי גיל)</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                לכל תוספת אפשר להזין מחיר שונה לכל קבוצת גיל. השאר 0 אם התוספת לא רלוונטית לגיל מסוים.
+              </Typography>
+              <Box sx={{ overflowX: 'auto' }}>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 700, minWidth: 180 }}>תוספת</TableCell>
+                      {pricing.age_groups.map((ag, i) => (
+                        <TableCell key={i} align="center" sx={{ fontWeight: 700, minWidth: 110 }}>{ag || `גיל ${i + 1}`}</TableCell>
+                      ))}
+                      <TableCell />
                     </TableRow>
-                  ))}
-                  {pricing.addons.length === 0 && (
-                    <TableRow><TableCell colSpan={3} align="center" sx={{ color: 'text.disabled' }}>אין תוספות</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {pricing.addons.map((a, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <TextField
+                            size="small" variant="standard" value={a.label}
+                            placeholder="שם תוספת"
+                            onChange={e => setAddonLabel(idx, e.target.value)}
+                            fullWidth
+                          />
+                        </TableCell>
+                        {pricing.age_groups.map((_, ai) => (
+                          <TableCell key={ai} align="center">
+                            <TextField
+                              size="small" type="number" variant="standard"
+                              value={a.prices[ai] ?? 0}
+                              onChange={e => setAddonPrice(idx, ai, Number(e.target.value))}
+                              sx={{ width: 90 }}
+                            />
+                          </TableCell>
+                        ))}
+                        <TableCell align="left">
+                          <IconButton size="small" color="error" onClick={() => removeAddon(idx)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {pricing.addons.length === 0 && (
+                      <TableRow><TableCell colSpan={pricing.age_groups.length + 2} align="center" sx={{ color: 'text.disabled' }}>אין תוספות</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </Box>
               <Button size="small" startIcon={<AddIcon />} onClick={addAddon} sx={{ mt: 1 }}>הוסף תוספת</Button>
             </Paper>
           )}
 
-          {/* One-time fees */}
+          {/* One-time fees + payment plan */}
           {!isPrivate && (
             <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 2 }}>
-              <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>חיובים חד-פעמיים</Typography>
-              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+              <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>חד-פעמי ופריסת תשלומים</Typography>
+              <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="flex-start">
                 <TextField
                   type="number" size="small" label="ביטוח"
+                  helperText="מתווסף לתשלום הראשון"
                   value={pricing.one_time.insurance}
                   onChange={e => patch({ one_time: { ...pricing.one_time, insurance: Number(e.target.value) } })}
                   InputProps={shekel} sx={{ width: 200 }}
                 />
                 <TextField
                   type="number" size="small" label="דמי רישום"
+                  helperText="נגבה מראש בכרטיס אשראי"
                   value={pricing.one_time.registration}
                   onChange={e => patch({ one_time: { ...pricing.one_time, registration: Number(e.target.value) } })}
                   InputProps={shekel} sx={{ width: 200 }}
+                />
+                <TextField
+                  type="number" size="small" label="מספר תשלומים"
+                  helperText="חודשי×12÷מס׳ תשלומים"
+                  value={pricing.installments}
+                  onChange={e => patch({ installments: Number(e.target.value) })}
+                  sx={{ width: 160 }}
                 />
               </Stack>
             </Paper>
@@ -519,7 +556,7 @@ export default function PricingManager() {
             ) : (
               <>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-                  סך הכל = מחיר התמ"ת לפי דרגה וגיל + סל השירותים ({fmt(basketSum)}). הסכומים כוללים את כל התוספות הפעילות.
+                  התשלום החודשי = (תמ"ת לפי דרגה וגיל + סל השירותים) × 12 ÷ {installments}. כל תא מציג את התשלום החודשי השוטף; בסוגריים — סך החודשי המלא לפני פריסה.
                 </Typography>
                 <Box sx={{ overflowX: 'auto' }}>
                   <Table size="small">
@@ -527,7 +564,7 @@ export default function PricingManager() {
                       <TableRow>
                         <TableCell sx={{ fontWeight: 700 }}>דרגת סבסוד</TableCell>
                         {pricing.age_groups.map((ag, i) => (
-                          <TableCell key={i} align="center" sx={{ fontWeight: 700, minWidth: 120 }}>{ag || `גיל ${i + 1}`}</TableCell>
+                          <TableCell key={i} align="center" sx={{ fontWeight: 700, minWidth: 130 }}>{ag || `גיל ${i + 1}`}</TableCell>
                         ))}
                       </TableRow>
                     </TableHead>
@@ -536,12 +573,13 @@ export default function PricingManager() {
                         <TableRow key={ti} hover>
                           <TableCell>{tier.label || `דרגה ${ti + 1}`}</TableCell>
                           {pricing.age_groups.map((_, ai) => {
-                            const base = Number(tier.prices[ai]) || 0;
+                            const monthly = (Number(tier.prices[ai]) || 0) + basketByAge[ai];
+                            const perPayment = installments > 0 ? (monthly * 12) / installments : monthly;
                             return (
                               <TableCell key={ai} align="center">
-                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(base + basketSum)}</Typography>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(perPayment)}</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  {base.toLocaleString('he-IL')} + {basketSum.toLocaleString('he-IL')}
+                                  (חודשי {fmt(monthly)})
                                 </Typography>
                               </TableCell>
                             );
@@ -551,20 +589,16 @@ export default function PricingManager() {
                     </TableBody>
                   </Table>
                 </Box>
-              </>
-            )}
 
-            {!isPrivate && (
-              <>
                 <Divider sx={{ my: 1.5 }} />
-                <Typography variant="body2">
-                  חיובים חד-פעמיים: <b>{fmt(oneTimeTotal)}</b>
-                  {oneTimeTotal > 0 && (
-                    <Typography component="span" variant="caption" color="text.secondary">
-                      {' '}(ביטוח {fmt(pricing.one_time.insurance)} + רישום {fmt(pricing.one_time.registration)})
-                    </Typography>
-                  )}
-                </Typography>
+                <Stack spacing={0.5}>
+                  <Typography variant="body2">
+                    💳 <b>דמי רישום: {fmt(registration)}</b> — נגבים מראש בכרטיס אשראי, לפני הכניסה לגן (חד-פעמי, לא נכלל בתשלום החודשי).
+                  </Typography>
+                  <Typography variant="body2">
+                    🛡️ <b>ביטוח: {fmt(insurance)}</b> — מתווסף לתשלום הראשון בלבד. כלומר התשלום הראשון = התשלום החודשי + {fmt(insurance)}.
+                  </Typography>
+                </Stack>
               </>
             )}
           </Paper>

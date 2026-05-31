@@ -9,11 +9,12 @@ const tierSchema = new mongoose.Schema({
   prices: { type: [Number], default: [] },  // parent monthly price per age group
 }, { _id: false });
 
-// A per-branch add-on (תוספת) on top of the base price.
+// A per-branch add-on (תוספת) on top of the base price. `prices` is
+// index-aligned to age_groups — an add-on can cost differently per age.
 const addonSchema = new mongoose.Schema({
   key: { type: String, default: '' },       // stable-ish slug, optional
   label: { type: String, required: true },   // e.g. "תפריט תזונתי בשרי"
-  price: { type: Number, default: 0 },        // monthly price
+  prices: { type: [Number], default: [] },    // monthly price per age group
   is_active: { type: Boolean, default: true },
 }, { _id: false });
 
@@ -37,9 +38,13 @@ const branchPricingSchema = new mongoose.Schema({
 
   // --- One-time fees ---
   one_time: {
-    insurance: { type: Number, default: 0 },     // ביטוח
-    registration: { type: Number, default: 0 },  // דמי רישום
+    insurance: { type: Number, default: 0 },     // ביטוח — added to the first collection month
+    registration: { type: Number, default: 0 },  // דמי רישום — charged upfront (credit card) before entry
   },
+
+  // Subsidized payment plan: the yearly total is split into N installments
+  // (monthly × 12 / N). The Ministry-branch convention is 11.
+  installments: { type: Number, default: 11 },
 
   notes: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

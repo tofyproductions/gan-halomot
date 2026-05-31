@@ -3,7 +3,7 @@ const { BranchPricing, Branch } = require('../models');
 // Fields the client is allowed to set on a pricing doc.
 const EDITABLE = [
   'academic_year', 'pricing_type', 'fixed_monthly_fee',
-  'age_groups', 'tiers', 'addons', 'one_time', 'notes',
+  'age_groups', 'tiers', 'addons', 'one_time', 'installments', 'notes',
 ];
 
 // List every branch alongside its pricing doc (or null if not set yet), so the
