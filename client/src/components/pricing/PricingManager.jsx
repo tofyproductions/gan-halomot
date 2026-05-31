@@ -258,6 +258,10 @@ export default function PricingManager() {
   const insurance = Number(pricing.one_time?.insurance) || 0;
   const registration = Number(pricing.one_time?.registration) || 0;
   const branchName = branches.find(b => (b._id || b.id) === branchId)?.name || '';
+  // Full state tariff per age = the highest tier's parent share (= no subsidy).
+  // A parent with no subsidy eligibility pays this base + the services basket.
+  const fullTariffByAge = pricing.age_groups.map((_, ai) =>
+    pricing.tiers.reduce((max, t) => Math.max(max, Number(t.prices[ai]) || 0), 0));
 
   // The running monthly payment for a (tier,age): full monthly spread over the
   // installments. monthly × 12 / installments (e.g. 11) → HIGHER than monthly,
@@ -317,6 +321,16 @@ export default function PricingManager() {
       }).join('');
       return `<tr><td style="border:1px solid #ccc;padding:7px;background:#fafafa">${esc(t.label)}</td>${cells}</tr>`;
     }).join('');
+    // No-subsidy parent — pays the full tariff (highlighted).
+    const noSubsidyRow = `<tr style="background:#fff4e0">
+      <td style="border:1px solid #ccc;padding:7px;font-weight:800">ללא זכאות לסבסוד (תעריף מלא)</td>
+      ${ag.map((_, ai) => {
+        const monthly = fullTariffByAge[ai] + basketByAge[ai];
+        return `<td style="border:1px solid #ccc;padding:7px;text-align:center">
+          <div style="font-weight:800;font-size:15px">${ils(monthly)}</div>
+          <div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(installmentOf(monthly))}</div></td>`;
+      }).join('')}
+    </tr>`;
 
     return `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl;color:#222">${head}
       ${basketTable}
@@ -327,7 +341,7 @@ export default function PricingManager() {
       </p>
       <table style="border-collapse:collapse;width:100%;font-size:14px">
         <thead><tr>${th('דרגת סבסוד (הכנסה לנפש)')}${headerCells}</tr></thead>
-        <tbody>${totalRows}</tbody>
+        <tbody>${totalRows}${noSubsidyRow}</tbody>
       </table>
       <div style="margin-top:14px;font-size:13px;line-height:1.9;border:1px solid #eee;border-radius:8px;padding:10px;background:#fcfcfc">
         <div>💳 <b>דמי רישום: ${ils(registration)}</b> — נגבים מראש בכרטיס אשראי לפני הכניסה לגן (חד-פעמי).</div>
@@ -705,6 +719,21 @@ export default function PricingManager() {
                           })}
                         </TableRow>
                       ))}
+                      {/* No-subsidy parent — pays the full tariff */}
+                      <TableRow sx={{ bgcolor: 'warning.light' }}>
+                        <TableCell sx={{ fontWeight: 800 }}>ללא זכאות לסבסוד (תעריף מלא)</TableCell>
+                        {pricing.age_groups.map((_, ai) => {
+                          const monthly = fullTariffByAge[ai] + basketByAge[ai];
+                          return (
+                            <TableCell key={ai} align="center">
+                              <Typography variant="body2" sx={{ fontWeight: 800 }}>{fmt(monthly)}</Typography>
+                              <Typography variant="caption" color="text.secondary">
+                                פריסה ל-{installments}: {fmt(installmentOf(monthly))}
+                              </Typography>
+                            </TableCell>
+                          );
+                        })}
+                      </TableRow>
                     </TableBody>
                   </Table>
                 </Box>
