@@ -3,11 +3,15 @@ import {
   Box, Paper, Typography, Stack, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, ToggleButton, ToggleButtonGroup, IconButton, Button, Divider,
   Alert, InputAdornment, MenuItem, Select, CircularProgress, Tooltip,
+  Dialog, DialogContent, DialogActions,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import AddIcon from '@mui/icons-material/Add';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DownloadIcon from '@mui/icons-material/Download';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -253,6 +257,89 @@ export default function PricingManager() {
   const installments = Number(pricing.installments) || 11;
   const insurance = Number(pricing.one_time?.insurance) || 0;
   const registration = Number(pricing.one_time?.registration) || 0;
+  const branchName = branches.find(b => (b._id || b.id) === branchId)?.name || '';
+
+  // The running monthly payment for a (tier,age): full monthly spread over the
+  // installments. monthly × 12 / installments (e.g. 11) → HIGHER than monthly,
+  // because August is prepaid and spread across the year.
+  const installmentOf = (monthly) => (installments > 0 ? (monthly * 12) / installments : monthly);
+  const monthlyOf = (tier, ai) => (Number(tier.prices[ai]) || 0) + basketByAge[ai];
+
+  // --- parent-facing printable price sheet (downloaded as PDF) ---
+  const ils = (n) => '₪' + Math.round(Number(n) || 0).toLocaleString('he-IL');
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const buildSheetHtml = () => {
+    const ag = pricing.age_groups;
+    const head = `
+      <div style="text-align:center;margin-bottom:14px">
+        <div style="font-size:22px;font-weight:800;color:#b45309">גן החלומות</div>
+        <div style="font-size:18px;font-weight:700;margin-top:2px">מחירון תשלומים להורים — ${esc(branchName)}</div>
+        <div style="font-size:14px;color:#555">שנת הלימודים ${esc(year)}</div>
+      </div>`;
+    if (isPrivate) {
+      return `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl">${head}
+        <div style="font-size:18px;text-align:center;padding:18px;border:2px solid #f0c674;border-radius:10px">
+          מחיר חודשי קבוע: <b>${ils(pricing.fixed_monthly_fee)}</b>
+        </div></div>`;
+    }
+    const headerCells = ag.map(g => `<th style="border:1px solid #ccc;padding:8px;background:#fde9c8">${esc(g)}</th>`).join('');
+    const rows = pricing.tiers.map(t => {
+      const cells = ag.map((_, ai) => {
+        const per = installmentOf(monthlyOf(t, ai));
+        return `<td style="border:1px solid #ccc;padding:8px;text-align:center;font-weight:700">${ils(per)}</td>`;
+      }).join('');
+      return `<tr><td style="border:1px solid #ccc;padding:8px;background:#fafafa">${esc(t.label)}</td>${cells}</tr>`;
+    }).join('');
+    const basketRow = `<tr><td style="border:1px solid #ccc;padding:8px;background:#f5f5f5">סל שירותים (חודשי)</td>${
+      ag.map((_, ai) => `<td style="border:1px solid #ccc;padding:8px;text-align:center">${ils(basketByAge[ai])}</td>`).join('')
+    }</tr>`;
+    return `<div style="font-family:Arial,Heebo,sans-serif;direction:rtl;color:#222">${head}
+      <p style="font-size:13px;color:#444;margin:6px 0">
+        התשלום החודשי מחושב בפריסה ל-${installments} תשלומים: התשלום החודשי המלא × 12 ÷ ${installments}
+        (חודש אוגוסט משולם מראש ונפרס על פני השנה). הסכומים כוללים את סל השירותים.
+      </p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px">
+        <thead><tr><th style="border:1px solid #ccc;padding:8px;background:#fde9c8">דרגת סבסוד (הכנסה לנפש)</th>${headerCells}</tr></thead>
+        <tbody>${rows}${basketRow}</tbody>
+      </table>
+      <div style="margin-top:14px;font-size:13px;line-height:1.9;border:1px solid #eee;border-radius:8px;padding:10px;background:#fcfcfc">
+        <div>💳 <b>דמי רישום: ${ils(registration)}</b> — נגבים מראש בכרטיס אשראי לפני הכניסה לגן (חד-פעמי).</div>
+        <div>🛡️ <b>ביטוח: ${ils(insurance)}</b> — מתווסף לתשלום הראשון בלבד (תשלום ראשון = החודשי + ${ils(insurance)}).</div>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:#999;text-align:center">הופק ממערכת ניהול גן החלומות · ${esc(year)}</div>
+    </div>`;
+  };
+
+  const downloadSheet = async () => {
+    setDownloading(true);
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.right = '-10000px';
+    container.style.top = '0';
+    container.style.width = '800px';
+    container.dir = 'rtl';
+    container.innerHTML = buildSheetHtml();
+    document.body.appendChild(container);
+    try {
+      await new Promise(r => setTimeout(r, 200));
+      await html2pdf().set({
+        margin: [10, 10, 10, 10],
+        filename: `מחירון ${branchName} ${year}.pdf`,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      }).from(container).save();
+    } catch (e) {
+      console.error(e); toast.error('שגיאה בהורדת המחירון');
+    } finally {
+      document.body.removeChild(container);
+      setDownloading(false);
+    }
+  };
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto', pb: 6 }}>
@@ -269,6 +356,14 @@ export default function PricingManager() {
               <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
             ))}
           </Select>
+          <Button
+            variant="outlined"
+            startIcon={<VisibilityIcon />}
+            onClick={() => setPreviewOpen(true)}
+            disabled={loading || !branchId}
+          >
+            תצוגה להורים
+          </Button>
           <Button
             variant="contained"
             startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
@@ -556,7 +651,7 @@ export default function PricingManager() {
             ) : (
               <>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-                  התשלום החודשי = (תמ"ת לפי דרגה וגיל + סל השירותים) × 12 ÷ {installments}. כל תא מציג את התשלום החודשי השוטף; בסוגריים — סך החודשי המלא לפני פריסה.
+                  המספר המודגש = התשלום החודשי בפועל בפריסה ל-{installments} תשלומים = (תמ"ת לפי דרגה וגיל + סל שירותים) × 12 ÷ {installments} (גבוה מהתעריף החודשי כי אוגוסט נפרס על השנה). מתחת — התעריף החודשי המלא לפני פריסה.
                 </Typography>
                 <Box sx={{ overflowX: 'auto' }}>
                   <Table size="small">
@@ -573,13 +668,13 @@ export default function PricingManager() {
                         <TableRow key={ti} hover>
                           <TableCell>{tier.label || `דרגה ${ti + 1}`}</TableCell>
                           {pricing.age_groups.map((_, ai) => {
-                            const monthly = (Number(tier.prices[ai]) || 0) + basketByAge[ai];
-                            const perPayment = installments > 0 ? (monthly * 12) / installments : monthly;
+                            const monthly = monthlyOf(tier, ai);
+                            const perPayment = installmentOf(monthly);
                             return (
                               <TableCell key={ai} align="center">
                                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(perPayment)}</Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  (חודשי {fmt(monthly)})
+                                  תעריף מלא {fmt(monthly)}
                                 </Typography>
                               </TableCell>
                             );
@@ -616,6 +711,24 @@ export default function PricingManager() {
           </Stack>
         </>
       )}
+
+      {/* Parent-facing price sheet — preview + download as PDF */}
+      <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="md" fullWidth dir="rtl">
+        <DialogContent>
+          <Box sx={{ bgcolor: '#fff', p: 1 }} dangerouslySetInnerHTML={{ __html: buildSheetHtml() }} />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setPreviewOpen(false)}>סגור</Button>
+          <Button
+            variant="contained"
+            startIcon={downloading ? <CircularProgress size={16} color="inherit" /> : <DownloadIcon />}
+            onClick={downloadSheet}
+            disabled={downloading}
+          >
+            הורד PDF
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
