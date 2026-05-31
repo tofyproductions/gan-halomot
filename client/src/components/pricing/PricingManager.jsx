@@ -228,6 +228,13 @@ export default function PricingManager() {
 
   const isPrivate = pricing.pricing_type === 'private';
 
+  // --- summary computations (what a parent actually pays) ---
+  const fmt = (n) => `₪${Number(n || 0).toLocaleString('he-IL')}`;
+  const basketSum = pricing.addons
+    .filter(a => a.is_active !== false)
+    .reduce((sum, a) => sum + (Number(a.price) || 0), 0);
+  const oneTimeTotal = (Number(pricing.one_time?.insurance) || 0) + (Number(pricing.one_time?.registration) || 0);
+
   return (
     <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto', pb: 6 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
@@ -499,6 +506,67 @@ export default function PricingManager() {
               onChange={e => patch({ notes: e.target.value })}
               placeholder="הערות פנימיות על המחירון"
             />
+          </Paper>
+
+          {/* Summary — what a parent actually pays */}
+          <Paper variant="outlined" sx={{ borderRadius: 3, p: 2, mb: 2, bgcolor: 'action.hover' }}>
+            <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.5 }}>סיכום — תשלום חודשי להורה</Typography>
+
+            {isPrivate ? (
+              <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                מחיר חודשי קבוע: {fmt(pricing.fixed_monthly_fee)}
+              </Typography>
+            ) : (
+              <>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                  סך הכל = מחיר התמ"ת לפי דרגה וגיל + סל השירותים ({fmt(basketSum)}). הסכומים כוללים את כל התוספות הפעילות.
+                </Typography>
+                <Box sx={{ overflowX: 'auto' }}>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>דרגת סבסוד</TableCell>
+                        {pricing.age_groups.map((ag, i) => (
+                          <TableCell key={i} align="center" sx={{ fontWeight: 700, minWidth: 120 }}>{ag || `גיל ${i + 1}`}</TableCell>
+                        ))}
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pricing.tiers.map((tier, ti) => (
+                        <TableRow key={ti} hover>
+                          <TableCell>{tier.label || `דרגה ${ti + 1}`}</TableCell>
+                          {pricing.age_groups.map((_, ai) => {
+                            const base = Number(tier.prices[ai]) || 0;
+                            return (
+                              <TableCell key={ai} align="center">
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmt(base + basketSum)}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {base.toLocaleString('he-IL')} + {basketSum.toLocaleString('he-IL')}
+                                </Typography>
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Box>
+              </>
+            )}
+
+            {!isPrivate && (
+              <>
+                <Divider sx={{ my: 1.5 }} />
+                <Typography variant="body2">
+                  חיובים חד-פעמיים: <b>{fmt(oneTimeTotal)}</b>
+                  {oneTimeTotal > 0 && (
+                    <Typography component="span" variant="caption" color="text.secondary">
+                      {' '}(ביטוח {fmt(pricing.one_time.insurance)} + רישום {fmt(pricing.one_time.registration)})
+                    </Typography>
+                  )}
+                </Typography>
+              </>
+            )}
           </Paper>
 
           <Divider sx={{ my: 2 }} />
