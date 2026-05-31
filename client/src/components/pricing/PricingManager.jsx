@@ -11,6 +11,7 @@ import AddIcon from '@mui/icons-material/Add';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
+import CalculateIcon from '@mui/icons-material/Calculate';
 import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -274,6 +275,30 @@ export default function PricingManager() {
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   const [previewOpen, setPreviewOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+
+  // Target-price tool: enter the desired total monthly price for a no-subsidy
+  // parent; the system back-fills the add-on so (full tariff + add-on) = target.
+  const [targetOpen, setTargetOpen] = useState(false);
+  const [targetIdx, setTargetIdx] = useState(0);
+  const [targetVals, setTargetVals] = useState([]);
+
+  const openTarget = (idx) => {
+    const a = pricing.addons[idx];
+    setTargetIdx(idx);
+    setTargetVals(pricing.age_groups.map((_, ai) =>
+      Math.round(fullTariffByAge[ai] + (Number(a?.prices?.[ai]) || 0))));
+    setTargetOpen(true);
+  };
+  const applyTarget = () => {
+    patch({
+      addons: pricing.addons.map((a, i) => (i === targetIdx
+        ? { ...a, prices: a.prices.map((p, ai) =>
+            (ai < targetVals.length ? Math.max(0, Math.round((Number(targetVals[ai]) || 0) - fullTariffByAge[ai])) : p)) }
+        : a)),
+    });
+    setTargetOpen(false);
+    toast.success('מחיר הסל חושב לפי מחיר היעד');
+  };
 
   const buildSheetHtml = () => {
     const ag = pricing.age_groups;
@@ -620,6 +645,11 @@ export default function PricingManager() {
                           </TableCell>
                         ))}
                         <TableCell align="left">
+                          <Tooltip title="חשב לפי מחיר חודשי יעד">
+                            <IconButton size="small" color="primary" onClick={() => openTarget(idx)}>
+                              <CalculateIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <IconButton size="small" color="error" onClick={() => removeAddon(idx)}>
                             <DeleteIcon fontSize="small" />
                           </IconButton>
@@ -779,6 +809,41 @@ export default function PricingManager() {
           >
             הורד PDF
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Target-price tool — back-calculate an add-on from a desired total */}
+      <Dialog open={targetOpen} onClose={() => setTargetOpen(false)} maxWidth="sm" fullWidth dir="rtl">
+        <DialogContent>
+          <Typography variant="h6" sx={{ fontWeight: 800, mb: 0.5 }}>
+            חישוב "{pricing.addons[targetIdx]?.label || 'תוספת'}" לפי מחיר יעד
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+            הזן את המחיר החודשי הכולל הרצוי להורה (תעריף מלא ללא סבסוד) לכל קבוצת גיל. המערכת תזין את מחיר התוספת כך ש: תעריף תמ"ת מלא + תוספת = היעד.
+          </Typography>
+          <Stack spacing={2}>
+            {pricing.age_groups.map((ag, ai) => {
+              const computed = Math.max(0, Math.round((Number(targetVals[ai]) || 0) - fullTariffByAge[ai]));
+              return (
+                <Stack key={ai} direction="row" spacing={2} alignItems="center">
+                  <Typography sx={{ minWidth: 110, fontWeight: 700 }}>{ag || `גיל ${ai + 1}`}</Typography>
+                  <TextField
+                    size="small" type="number" label="מחיר יעד חודשי"
+                    value={targetVals[ai] ?? 0}
+                    onChange={e => setTargetVals(v => v.map((x, j) => (j === ai ? Number(e.target.value) : x)))}
+                    InputProps={shekel} sx={{ width: 180 }}
+                  />
+                  <Typography variant="body2" color="text.secondary">
+                    תמ"ת מלא {fmt(fullTariffByAge[ai])} → תוספת = <b>{fmt(computed)}</b>
+                  </Typography>
+                </Stack>
+              );
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setTargetOpen(false)}>ביטול</Button>
+          <Button variant="contained" startIcon={<CalculateIcon />} onClick={applyTarget}>חשב והחל</Button>
         </DialogActions>
       </Dialog>
     </Box>
