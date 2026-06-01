@@ -805,8 +805,9 @@ export default function PayrollMonthTable() {
         }}>
           <colgroup>
             <col style={{ width: W.name }} />
-            {/* 7-col hours block */}
+            {/* 8-col hours block: ימי עבודה + 6 hours/rate cols + שעות התחייבות */}
             <col style={{ width: W.days }} />
+            <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
