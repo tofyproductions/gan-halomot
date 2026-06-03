@@ -198,9 +198,8 @@ async function getMonth(req, res, next) {
 
     // Need ALL branches (not just in-scope) so cross-branch hours can still
     // be shown in the table — an employee from branch A may have punched at B.
-    const allBranchesData = await Branch.find({}).select('_id name amuta_id hourly_bonus').sort({ name: 1 }).lean();
+    const allBranchesData = await Branch.find({}).select('_id name amuta_id').sort({ name: 1 }).lean();
     const branchNameById = new Map(allBranchesData.map(b => [String(b._id), b.name]));
-    const branchBonusById = new Map(allBranchesData.map(b => [String(b._id), Number(b.hourly_bonus) || 0]));
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
@@ -252,26 +251,36 @@ async function getMonth(req, res, next) {
         return acc;
       }, { money_add: 0, money_deduct: 0, hours_delta: 0 });
 
-      // Per-branch hourly bonus (e.g. Herzliya +3₪/hr) for hourly employees:
-      // bonus = branch.hourly_bonus × hours worked at that branch. Surfaced as
-      // an automatic note so the accountant sees it without changing the base.
-      const branchBonusLines = [];
-      let branchBonusTotal = 0;
-      if (emp.salary_type === 'hourly') {
+      // Personal per-branch hourly bonus (individually agreed, e.g. ליאל +3₪/hr
+      // at Herzliya): bonus = rate × hours worked at that branch. Auto-computed,
+      // shown in the dedicated bonus column, and ADDED to the estimated total.
+      const bonusLines = [];
+      let bonusAuto = 0;
+      if (emp.salary_type === 'hourly' && Array.isArray(emp.hourly_bonuses) && emp.hourly_bonuses.length) {
+        const ruleByBranch = new Map(emp.hourly_bonuses.map(b => [String(b.branch_id?._id || b.branch_id), b]));
         for (const [bid, bk] of Object.entries(breakdown.per_branch || {})) {
-          const rate = branchBonusById.get(String(bid)) || 0;
+          const rule = ruleByBranch.get(String(bid));
+          const rate = rule ? (Number(rule.rate) || 0) : 0;
           const hrs = (bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0);
           if (rate > 0 && hrs > 0) {
             const roundedHrs = Math.round(hrs * 10) / 10;
             const amount = Math.round(rate * hrs);
-            branchBonusLines.push({ branch_name: branchNameById.get(String(bid)) || '', hours: roundedHrs, rate, amount });
-            branchBonusTotal += amount;
+            bonusLines.push({ branch_name: branchNameById.get(String(bid)) || '', hours: roundedHrs, rate, amount, reason: rule.reason || '' });
+            bonusAuto += amount;
           }
         }
       }
-      const branchBonusNote = branchBonusLines
-        .map(l => `בונוס ${l.branch_name}: ${l.hours}ש׳ × ₪${l.rate} = ₪${l.amount}`)
+      const bonusAutoNote = bonusLines
+        .map(l => `${l.reason || ('בונוס ' + l.branch_name)}: ${l.hours}ש׳ × ₪${l.rate} = ₪${l.amount}`)
         .join(' · ');
+      const mBonus = manual.bonus || {};
+      const bonusDisabled = !!mBonus.disabled;
+      const bonusEffective = bonusDisabled
+        ? 0
+        : (mBonus.override_amount != null ? Number(mBonus.override_amount) : bonusAuto);
+      const bonusNote = mBonus.note || bonusAutoNote;
+      // Fold the effective bonus into the estimated total so the salary reflects it.
+      if (bonusEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + bonusEffective;
 
       return {
         employee_id: String(emp._id),
@@ -287,7 +296,15 @@ async function getMonth(req, res, next) {
         travel_per_day: emp.travel_per_day || 0,
         travel_monthly_flat: emp.travel_monthly_flat || 0,
         breakdown,
-        branch_bonus: { total: branchBonusTotal, note: branchBonusNote, lines: branchBonusLines },
+        bonus: {
+          auto: bonusAuto,
+          auto_note: bonusAutoNote,
+          effective: bonusEffective,
+          note: bonusNote,
+          disabled: bonusDisabled,
+          override_amount: mBonus.override_amount ?? null,
+          lines: bonusLines,
+        },
         manual: {
           sick_days:      manual.sick_days || 0,
           absence_days:   manual.absence_days || 0,
@@ -307,6 +324,11 @@ async function getMonth(req, res, next) {
           cibus:       manual.cibus       || { kind: 'empty', amount: null, text: '' },
           miluim:      manual.miluim      || { kind: 'empty', amount: null, text: '' },
           travel_override: manual.travel_override ?? null,
+          bonus: {
+            override_amount: manual.bonus?.override_amount ?? null,
+            note: manual.bonus?.note || '',
+            disabled: !!manual.bonus?.disabled,
+          },
           notes: manual.notes || '',
           custom_values: manual.custom_values || {},
           include_salary_completion: manual.include_salary_completion !== false,
@@ -433,7 +455,7 @@ async function upsertEntry(req, res, next) {
       'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
-      'travel_override', 'notes', 'custom_values',
+      'travel_override', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
     ];
     for (const k of allowed) {

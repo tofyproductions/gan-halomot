@@ -78,6 +78,18 @@ const branchRateSchema = new mongoose.Schema({
   required_hours: { type: Number, default: null },
 }, { _id: false });
 
+/**
+ * Personal per-branch hourly bonus — agreed individually with this employee
+ * (NOT branch-wide). bonus = rate × hours worked at branch_id. Surfaced as an
+ * auto-computed value in the payroll table's dedicated bonus column and added
+ * to her estimated total. e.g. ליאל: +3₪/hr at Herzliya.
+ */
+const hourlyBonusSchema = new mongoose.Schema({
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+  rate: { type: Number, default: 0 },        // ₪ per hour worked at this branch
+  reason: { type: String, default: '' },     // e.g. "בונוס אישי - הרצליה"
+}, { _id: false });
+
 const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
@@ -103,6 +115,8 @@ const employeeSchema = new mongoose.Schema({
   amuta_distribution: { type: [amutaSplitSchema], default: [] },
   // Per-branch rate overrides for cross-branch workers. Empty by default.
   branch_rates: { type: [branchRateSchema], default: [] },
+  // Personal per-branch hourly bonuses (individually agreed). Empty by default.
+  hourly_bonuses: { type: [hourlyBonusSchema], default: [] },
 
   // Extras (monthly defaults, can be overridden per PayrollMonth entry)
   // Two travel modes:

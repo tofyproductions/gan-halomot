@@ -55,19 +55,19 @@ export default function BranchManager() {
   }, [branches, fetchClassrooms]);
 
   // --- Branch CRUD ---
-  const openAddBranch = () => setBranchDialog({ open: true, mode: 'add', id: null, name: '', address: '', color: '', hourly_bonus: 0 });
-  const openEditBranch = (b) => setBranchDialog({ open: true, mode: 'edit', id: b._id || b.id, name: b.name, address: b.address || '', color: b.color || '', hourly_bonus: b.hourly_bonus || 0 });
-  const closeBranchDialog = () => setBranchDialog({ open: false, mode: 'add', id: null, name: '', address: '', color: '', hourly_bonus: 0 });
+  const openAddBranch = () => setBranchDialog({ open: true, mode: 'add', id: null, name: '', address: '', color: '' });
+  const openEditBranch = (b) => setBranchDialog({ open: true, mode: 'edit', id: b._id || b.id, name: b.name, address: b.address || '', color: b.color || '' });
+  const closeBranchDialog = () => setBranchDialog({ open: false, mode: 'add', id: null, name: '', address: '', color: '' });
 
   const handleSaveBranch = async () => {
-    const { mode, id, name, address, color, hourly_bonus } = branchDialog;
+    const { mode, id, name, address, color } = branchDialog;
     if (!name.trim()) return toast.error('שם הסניף חובה');
     try {
       if (mode === 'add') {
         await api.post('/branches', { name: name.trim(), address: address.trim() });
         toast.success('סניף נוסף');
       } else {
-        await api.put(`/branches/${id}`, { name: name.trim(), address: address.trim(), color: color || '', hourly_bonus: Number(hourly_bonus) || 0 });
+        await api.put(`/branches/${id}`, { name: name.trim(), address: address.trim(), color: color || '' });
         toast.success('סניף עודכן');
       }
       closeBranchDialog();
@@ -456,16 +456,6 @@ export default function BranchManager() {
               onChange={(e) => setBranchDialog(prev => ({ ...prev, address: e.target.value }))}
               fullWidth
             />
-            {branchDialog.mode === 'edit' && (
-              <TextField
-                label="בונוס שעתי (₪)"
-                type="number"
-                value={branchDialog.hourly_bonus}
-                onChange={(e) => setBranchDialog(prev => ({ ...prev, hourly_bonus: e.target.value }))}
-                helperText="תוספת ₪ לכל שעת עבודה בסניף לעובדים שעתיים — מופיע אוטומטית כבונוס בהערות טבלת השכר. 0 = ללא."
-                sx={{ width: 280 }}
-              />
-            )}
             {branchDialog.mode === 'edit' && (
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block' }}>

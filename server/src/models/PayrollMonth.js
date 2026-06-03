@@ -41,6 +41,15 @@ const payrollMonthSchema = new mongoose.Schema({
     cibus:        { type: numberOrTextSchema, default: () => ({}) },
     miluim:       { type: numberOrTextSchema, default: () => ({}) },
 
+    // Bonus (בונוס): added to the estimated total. `override_amount` overrides
+    // the auto-computed personal bonus (rate × branch hours); `disabled` zeroes
+    // it; `note` documents what the bonus is for (defaults to the auto reason).
+    bonus: {
+      override_amount: { type: Number, default: null },
+      note:            { type: String, default: '' },
+      disabled:        { type: Boolean, default: false },
+    },
+
     // Optional per-month override of the employee's default travel allowance.
     // If null, the auto value (travel_per_day × days_worked or monthly flat) is used.
     travel_override: { type: Number, default: null },

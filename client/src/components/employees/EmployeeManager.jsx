@@ -198,6 +198,11 @@ export default function EmployeeManager() {
           global_ot_rate: br.global_ot_rate ?? '',
           required_hours: br.required_hours ?? '',
         })),
+        hourly_bonuses: (emp.hourly_bonuses || []).map(hb => ({
+          branch_id: String(hb.branch_id?._id || hb.branch_id),
+          rate: hb.rate ?? '',
+          reason: hb.reason || '',
+        })),
         ...primary,
       },
       original: emp,
@@ -249,6 +254,14 @@ export default function EmployeeManager() {
         global_salary: br.global_salary === '' ? null : Number(br.global_salary),
         global_ot_rate: br.global_ot_rate === '' ? null : Number(br.global_ot_rate),
         required_hours: br.required_hours === '' ? null : Number(br.required_hours),
+      }));
+    // Personal per-branch hourly bonuses.
+    payload.hourly_bonuses = (data.hourly_bonuses || [])
+      .filter(hb => hb.branch_id && Number(hb.rate) > 0)
+      .map(hb => ({
+        branch_id: hb.branch_id,
+        rate: Number(hb.rate) || 0,
+        reason: hb.reason || '',
       }));
 
     try {
@@ -729,6 +742,49 @@ export default function EmployeeManager() {
             >
               הוסף תעריף לסניף נוסף
             </Button>
+
+            {dialog.data.salary_type === 'hourly' && (
+              <>
+                <Divider />
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>בונוס אישי לפי סניף</Typography>
+                  <Chip size="small" label="אופציונלי" variant="outlined" />
+                </Stack>
+                <Alert severity="info" sx={{ borderRadius: 2, py: 0.5 }}>
+                  בונוס אישי לשעה לסניף מסוים (למשל +3₪ בהרצליה). הבונוס = הסכום × שעות שעבדה באותו סניף, ומתווסף אוטומטית לשכר ולעמודת הבונוס בטבלה.
+                </Alert>
+                {(dialog.data.hourly_bonuses || []).map((hb, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="center">
+                    <TextField select label="סניף" size="small" sx={{ width: 200 }}
+                      value={hb.branch_id || ''}
+                      onChange={e => { const arr = [...(dialog.data.hourly_bonuses || [])]; arr[i] = { ...arr[i], branch_id: e.target.value }; updateField('hourly_bonuses', arr); }}
+                    >
+                      {(branches || []).map(b => (
+                        <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    <TextField label="₪ לשעה" type="number" size="small" sx={{ width: 120 }}
+                      value={hb.rate}
+                      onChange={e => { const arr = [...(dialog.data.hourly_bonuses || [])]; arr[i] = { ...arr[i], rate: e.target.value }; updateField('hourly_bonuses', arr); }}
+                      InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                    />
+                    <TextField label="סיבה/תיאור" size="small" sx={{ flex: 1, minWidth: 140 }}
+                      value={hb.reason || ''}
+                      onChange={e => { const arr = [...(dialog.data.hourly_bonuses || [])]; arr[i] = { ...arr[i], reason: e.target.value }; updateField('hourly_bonuses', arr); }}
+                    />
+                    <IconButton color="error" onClick={() => updateField('hourly_bonuses', (dialog.data.hourly_bonuses || []).filter((_, idx) => idx !== i))}>
+                      <DeleteIcon />
+                    </IconButton>
+                  </Stack>
+                ))}
+                <Button
+                  startIcon={<AddIcon />} size="small" variant="outlined" sx={{ alignSelf: 'flex-start' }}
+                  onClick={() => updateField('hourly_bonuses', [...(dialog.data.hourly_bonuses || []), { branch_id: '', rate: '', reason: '' }])}
+                >
+                  הוסף בונוס לסניף
+                </Button>
+              </>
+            )}
 
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>תוספות קבועות</Typography>

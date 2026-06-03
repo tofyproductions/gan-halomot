@@ -4,6 +4,7 @@ import {
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
   Chip, Autocomplete, Dialog, DialogTitle, DialogContent, DialogActions, ToggleButton, ToggleButtonGroup,
   CircularProgress, RadioGroup, FormControlLabel, Radio, Checkbox, FormControl, FormLabel,
+  InputAdornment, Alert,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -294,6 +295,86 @@ function NotesDialog({ open, row, onClose, onSave }) {
   );
 }
 
+// Bonus cell — shows the effective bonus (auto or manual override) with a
+// tooltip breakdown. Click opens BonusDialog.
+function BonusCell({ row }) {
+  const b = row.bonus || {};
+  const eff = b.effective || 0;
+  const isManual = b.override_amount != null || b.disabled;
+  if (!eff && !b.auto) {
+    return <Typography variant="body2" color="text.disabled">—</Typography>;
+  }
+  return (
+    <Tooltip arrow title={
+      <Box sx={{ fontSize: '0.72rem' }}>
+        {b.lines?.length
+          ? b.lines.map((l, i) => <div key={i}>{l.reason || ('בונוס ' + l.branch_name)}: {l.hours}ש׳ × ₪{l.rate} = ₪{l.amount}</div>)
+          : <div>אין בונוס אוטומטי</div>}
+        {b.note && <div style={{ marginTop: 4, opacity: 0.85 }}>📝 {b.note}</div>}
+        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה</div>
+      </Box>
+    }>
+      <Box sx={{ cursor: 'help' }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: eff ? '#15803d' : 'text.disabled' }}>
+          {eff ? fmtCurrency(eff) : '₪0'}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.disabled' }}>
+          {b.disabled ? 'בוטל' : (isManual ? 'ידני' : 'אוטומטי')}
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
+}
+
+function BonusDialog({ open, row, onClose, onSave }) {
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [disabled, setDisabled] = useState(false);
+  useEffect(() => {
+    if (row) {
+      const b = row.bonus || {};
+      setAmount(b.override_amount != null ? String(b.override_amount) : '');
+      setNote(b.note || '');
+      setDisabled(!!b.disabled);
+    }
+  }, [row]);
+  if (!row) return null;
+  const auto = row.bonus?.auto || 0;
+  const autoNote = row.bonus?.auto_note || '';
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>בונוס — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Alert severity="info" sx={{ py: 0.5 }}>
+            בונוס אוטומטי: <b>{auto ? fmtCurrency(auto) : '₪0'}</b>{autoNote ? ` — ${autoNote}` : ''}
+          </Alert>
+          <TextField
+            label="סכום ידני (ריק = אוטומטי)" type="number" value={amount}
+            onChange={e => setAmount(e.target.value)} disabled={disabled}
+            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+          />
+          <TextField
+            label="הערה / עבור מה הבונוס" value={note} multiline minRows={2}
+            onChange={e => setNote(e.target.value)} placeholder={autoNote || 'תיאור הבונוס…'}
+          />
+          <FormControlLabel
+            control={<Checkbox checked={disabled} onChange={e => setDisabled(e.target.checked)} />}
+            label="בטל בונוס לחודש זה"
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={() => {
+          onSave({ override_amount: amount === '' ? null : Number(amount), note: note.trim(), disabled });
+          onClose();
+        }}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function AddColumnDialog({ open, month, onClose, onCreated }) {
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState('number');
@@ -379,6 +460,7 @@ export default function PayrollMonthTable() {
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
+  const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
   const [cibusDlg, setCibusDlg] = useState(false);
   const [empDetail, setEmpDetail] = useState({ open: false, employeeId: null });
 
@@ -587,9 +669,10 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן', 'שעות התחייבות'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
       'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט שעות לפי סניף');
+    headerTop.push('בונוס - פירוט');
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
 
@@ -613,6 +696,7 @@ export default function PayrollMonthTable() {
         r.manual.cibus?.kind === 'number' ? r.manual.cibus.amount : (r.manual.cibus?.text || ''),
         r.manual.miluim?.kind === 'number' ? r.manual.miluim.amount : (r.manual.miluim?.text || ''),
         r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
+        r.bonus?.effective ? Math.round(r.bonus.effective) : '',
         r.breakdown?.estimated_total != null ? Math.round(r.breakdown.estimated_total) : '',
       );
       for (const c of customColumns) {
@@ -623,8 +707,8 @@ export default function PayrollMonthTable() {
       }
       const bLines = perBranchBreakdown(r);
       cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
-      // Notes = the auto branch bonus (e.g. Herzliya) + any manual note.
-      cells.push([r.branch_bonus?.note, r.manual.notes].filter(Boolean).join(' · '));
+      cells.push(r.bonus?.note || '');           // בונוס - פירוט
+      cells.push(r.manual.notes || '');          // הערות
       rowsAcc.push(cells);
     }
     return rowsAcc;
@@ -848,6 +932,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
+            <col style={{ width: W.money }} />{/* בונוס */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
@@ -864,7 +949,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={14 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={15 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -884,6 +969,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.50' }}>הלוואות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>בונוס</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -907,7 +993,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 8 + 16 + customColumns.length;
+              const totalCols = 1 + 8 + 17 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -1125,6 +1211,9 @@ export default function PayrollMonthTable() {
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.50' }} onClick={() => setLoansDlg({ open: true, row: r })}>
                         <LoansSummaryCell row={r} />
                       </TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: '#f0fdf4' }} onClick={() => !locked && setBonusDlg({ open: true, row: r })}>
+                        <BonusCell row={r} />
+                      </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
                           <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
@@ -1146,22 +1235,15 @@ export default function PayrollMonthTable() {
                           overflow: 'hidden',
                           maxHeight: 140,
                           textOverflow: 'ellipsis',
-                          bgcolor: (r.manual.notes || r.branch_bonus?.total > 0) ? 'rgba(254, 252, 232, 0.55)' : undefined,
+                          bgcolor: r.manual.notes ? 'rgba(254, 252, 232, 0.55)' : undefined,
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
-                        {r.branch_bonus?.total > 0 && (
-                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.4, color: '#15803d', fontWeight: 700, mb: r.manual.notes ? 0.5 : 0 }}>
-                            <span>🎁</span><span>{r.branch_bonus.note}</span>
-                          </Box>
-                        )}
                         {r.manual.notes
-                          ? <Box component="span" sx={{ color: 'text.primary', fontWeight: 400 }}>{r.manual.notes}</Box>
-                          : (!r.branch_bonus?.total && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
-                                <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
-                              </Box>
-                            ))}
+                          ? r.manual.notes
+                          : <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
+                              <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
+                            </Box>}
                       </TableCell>
                     </TableRow>
                   );
@@ -1175,6 +1257,8 @@ export default function PayrollMonthTable() {
 
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })} />
+      <BonusDialog open={bonusDlg.open} row={bonusDlg.row} onClose={() => setBonusDlg({ open: false, row: null })}
+        onSave={(bonus) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, { bonus })} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
       <SalaryAdjustmentDialog
         open={adjustments.open}
