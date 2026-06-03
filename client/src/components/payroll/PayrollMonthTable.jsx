@@ -595,13 +595,9 @@ export default function PayrollMonthTable() {
 
     for (const r of data.rows) {
       const cells = [r.branch_name, r.full_name, r.israeli_id || ''];
-      const bk = r.breakdown.per_branch?.[r.branch_id];
-      if (bk) {
-        cells.push(bk.days_worked, bk.regular_hours, bk.ot_125_hours, bk.ot_150_hours, bk.hourly_rate || '', bk.global_salary || '', bk.global_ot_rate || '');
-      } else {
-        cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
-          r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '', r.breakdown.rates?.global_ot_rate || '');
-      }
+      // Consolidated hours across all branches (matches the on-screen table).
+      cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
+        r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '', r.breakdown.rates?.global_ot_rate || '');
       cells.push(r.commitment?.committed_hours ?? '');
       const tb = r.breakdown?.components?.teken_breakdown;
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
@@ -627,7 +623,8 @@ export default function PayrollMonthTable() {
       }
       const bLines = perBranchBreakdown(r);
       cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
-      cells.push(r.manual.notes || '');
+      // Notes = the auto branch bonus (e.g. Herzliya) + any manual note.
+      cells.push([r.branch_bonus?.note, r.manual.notes].filter(Boolean).join(' · '));
       rowsAcc.push(cells);
     }
     return rowsAcc;
@@ -1039,10 +1036,11 @@ export default function PayrollMonthTable() {
                       </TableCell>
 
                       {(() => {
-                        // Hour block uses the home-branch bucket. Cross-branch
-                        // hours show in a chip in the name cell (see above).
-                        const bk = r.breakdown.per_branch?.[r.branch_id] || r.breakdown.per_branch?.[group.branch_id];
-                        const totalBk = bk || {
+                        // Consolidated hours across ALL branches (uniform), so the
+                        // displayed hours match the base pay. The per-branch split
+                        // (and any Herzliya-style bonus) shows in the name-cell chip
+                        // tooltip and the notes column.
+                        const totalBk = {
                           days_worked: r.breakdown.hours.days_worked,
                           regular_hours: r.breakdown.hours.regular,
                           ot_125_hours: r.breakdown.hours.ot_125,
@@ -1148,15 +1146,22 @@ export default function PayrollMonthTable() {
                           overflow: 'hidden',
                           maxHeight: 140,
                           textOverflow: 'ellipsis',
-                          bgcolor: r.manual.notes ? 'rgba(254, 252, 232, 0.55)' : undefined,
+                          bgcolor: (r.manual.notes || r.branch_bonus?.total > 0) ? 'rgba(254, 252, 232, 0.55)' : undefined,
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
+                        {r.branch_bonus?.total > 0 && (
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 0.4, color: '#15803d', fontWeight: 700, mb: r.manual.notes ? 0.5 : 0 }}>
+                            <span>🎁</span><span>{r.branch_bonus.note}</span>
+                          </Box>
+                        )}
                         {r.manual.notes
-                          ? r.manual.notes
-                          : <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
-                              <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
-                            </Box>}
+                          ? <Box component="span" sx={{ color: 'text.primary', fontWeight: 400 }}>{r.manual.notes}</Box>
+                          : (!r.branch_bonus?.total && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
+                                <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
+                              </Box>
+                            ))}
                       </TableCell>
                     </TableRow>
                   );

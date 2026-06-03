@@ -198,8 +198,9 @@ async function getMonth(req, res, next) {
 
     // Need ALL branches (not just in-scope) so cross-branch hours can still
     // be shown in the table — an employee from branch A may have punched at B.
-    const allBranchesData = await Branch.find({}).select('_id name amuta_id').sort({ name: 1 }).lean();
+    const allBranchesData = await Branch.find({}).select('_id name amuta_id hourly_bonus').sort({ name: 1 }).lean();
     const branchNameById = new Map(allBranchesData.map(b => [String(b._id), b.name]));
+    const branchBonusById = new Map(allBranchesData.map(b => [String(b._id), Number(b.hourly_bonus) || 0]));
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
@@ -250,6 +251,28 @@ async function getMonth(req, res, next) {
         else if (a.type === 'other') acc.money_add += Number(a.amount) || 0;
         return acc;
       }, { money_add: 0, money_deduct: 0, hours_delta: 0 });
+
+      // Per-branch hourly bonus (e.g. Herzliya +3₪/hr) for hourly employees:
+      // bonus = branch.hourly_bonus × hours worked at that branch. Surfaced as
+      // an automatic note so the accountant sees it without changing the base.
+      const branchBonusLines = [];
+      let branchBonusTotal = 0;
+      if (emp.salary_type === 'hourly') {
+        for (const [bid, bk] of Object.entries(breakdown.per_branch || {})) {
+          const rate = branchBonusById.get(String(bid)) || 0;
+          const hrs = (bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0);
+          if (rate > 0 && hrs > 0) {
+            const roundedHrs = Math.round(hrs * 10) / 10;
+            const amount = Math.round(rate * hrs);
+            branchBonusLines.push({ branch_name: branchNameById.get(String(bid)) || '', hours: roundedHrs, rate, amount });
+            branchBonusTotal += amount;
+          }
+        }
+      }
+      const branchBonusNote = branchBonusLines
+        .map(l => `בונוס ${l.branch_name}: ${l.hours}ש׳ × ₪${l.rate} = ₪${l.amount}`)
+        .join(' · ');
+
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,
@@ -264,6 +287,7 @@ async function getMonth(req, res, next) {
         travel_per_day: emp.travel_per_day || 0,
         travel_monthly_flat: emp.travel_monthly_flat || 0,
         breakdown,
+        branch_bonus: { total: branchBonusTotal, note: branchBonusNote, lines: branchBonusLines },
         manual: {
           sick_days:      manual.sick_days || 0,
           absence_days:   manual.absence_days || 0,

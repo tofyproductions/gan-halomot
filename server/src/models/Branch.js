@@ -14,6 +14,11 @@ const branchSchema = new mongoose.Schema({
   // When empty, the UI falls back to a position-based color.
   color: { type: String, default: '' },
 
+  // Per-hour bonus (₪) for hourly employees who work at this branch. Computed
+  // as bonus = hourly_bonus × hours worked here, surfaced automatically in the
+  // payroll-table notes (e.g. Herzliya pays +3₪/hr). 0 = no bonus.
+  hourly_bonus: { type: Number, default: 0 },
+
   // Legal entity (amuta) this branch belongs to. Drives how punched hours are
   // bucketed in the monthly payroll table: hours at branch X go under the
   // amuta column for X. A single branch belongs to exactly one amuta.
