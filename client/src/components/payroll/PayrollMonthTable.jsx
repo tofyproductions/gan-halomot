@@ -562,6 +562,25 @@ export default function PayrollMonthTable() {
 
   const customColumns = data?.custom_columns || [];
 
+  // Per-branch hours × rate breakdown for cross-branch hourly employees — so the
+  // accountant can reconcile the estimated total with each branch's rate.
+  const branchNameOf = (id) => (data?.branches || []).find(b => b.id === String(id))?.name || 'אחר';
+  const perBranchBreakdown = (r) => {
+    if (r.salary_type !== 'hourly') return [];
+    const pb = r.breakdown?.per_branch || {};
+    const out = [];
+    for (const [bid, bk] of Object.entries(pb)) {
+      const hours = Math.round(((bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0)) * 10) / 10;
+      if (hours > 0) out.push({ name: branchNameOf(bid), hours, rate: bk.hourly_rate || 0 });
+    }
+    return out;
+  };
+  // Show the breakdown only when it adds info: worked at >1 branch, or a single
+  // branch whose rate differs from the employee's standard rate.
+  const breakdownIsInformative = (r, lines) =>
+    lines.length > 1 || (lines.length === 1 && lines[0].rate !== (r.breakdown?.rates?.hourly_rate || lines[0].rate));
+  const breakdownText = (lines) => lines.map(o => `${o.name}: ${o.hours}ש׳ × ₪${o.rate}`).join(' | ');
+
   /* Build the full export matrix (header + one row per employee) with every
      column including notes. Reused by CSV / Excel / PDF exports. */
   const buildExportMatrix = () => {
@@ -570,6 +589,7 @@ export default function PayrollMonthTable() {
       'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
+    headerTop.push('פירוט שעות לפי סניף');
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
 
@@ -605,6 +625,8 @@ export default function PayrollMonthTable() {
         else if (v.kind === 'number') cells.push(v.amount);
         else cells.push(v.text);
       }
+      const bLines = perBranchBreakdown(r);
+      cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
       cells.push(r.manual.notes || '');
       rowsAcc.push(cells);
     }
@@ -992,12 +1014,23 @@ export default function PayrollMonthTable() {
                                 .filter(([id, bk]) => id !== r.branch_id && (bk?.regular_hours || 0) + (bk?.ot_125_hours || 0) + (bk?.ot_150_hours || 0) > 0);
                               if (otherBranches.length === 0) return null;
                               const totalOther = otherBranches.reduce((a, [, bk]) => a + (bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0), 0);
+                              // Full per-branch hours×rate breakdown for the tooltip.
+                              const lines = perBranchBreakdown(r);
                               return (
-                                <Chip
-                                  size="small" color="secondary" variant="outlined"
-                                  label={`+${Math.round(totalOther * 10) / 10}h בסניף אחר`}
-                                  sx={{ height: 16, fontSize: '0.6rem', mt: 0.3 }}
-                                />
+                                <Tooltip arrow title={
+                                  <Box sx={{ fontSize: '0.72rem' }}>
+                                    <b>פירוט שעות לפי סניף</b>
+                                    {lines.map((o, i) => (
+                                      <div key={i}>{o.name}: {o.hours}ש׳ × ₪{o.rate}</div>
+                                    ))}
+                                  </Box>
+                                }>
+                                  <Chip
+                                    size="small" color="secondary" variant="outlined"
+                                    label={`+${Math.round(totalOther * 10) / 10}h בסניף אחר`}
+                                    sx={{ height: 16, fontSize: '0.6rem', mt: 0.3, cursor: 'help' }}
+                                  />
+                                </Tooltip>
                               );
                             })()}
                           </Box>

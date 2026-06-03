@@ -66,15 +66,16 @@ export default function HoursReportDialog({ open, employee, onClose }) {
 
   const exportCSV = () => {
     if (!report) return;
-    const header = ['תאריך', 'כניסה', 'יציאה', 'שעות', 'הערה'];
+    const header = ['תאריך', 'סניף', 'כניסה', 'יציאה', 'שעות', 'הערה'];
     const rows = report.days.map(d => [
       formatDate(d.date),
+      d.branch_label || '',
       d.first_in || '',
       d.last_out || '',
       d.total_hours || 0,
       d.incomplete ? 'חסרה החתמה' : '',
     ]);
-    rows.push(['', '', 'סה״כ', report.totals.total_hours, `${report.totals.days_worked} ימים`]);
+    rows.push(['', '', '', 'סה״כ', report.totals.total_hours, `${report.totals.days_worked} ימים`]);
     const csv = '\uFEFF' + [header, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -105,11 +106,11 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       const dayName = dayOfWeekHebrew(d.date);
       const noteParts = [];
       if (d.incomplete) noteParts.push('חסרה החתמה');
-      if (d.cross_branch_names?.length) noteParts.push('בסניף ' + d.cross_branch_names.join('+'));
       const note = noteParts.join(' • ');
       return `
         <tr ${d.incomplete ? 'class="incomplete"' : ''}>
           <td class="date">${formatDate(d.date)} ${dayName}</td>
+          <td class="branch">${d.branch_label || '—'}</td>
           <td>${d.first_in || '—'}</td>
           <td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
           <td class="num">${fmt(d.total_hours || 0)}</td>
@@ -182,6 +183,7 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   <thead>
     <tr>
       <th>תאריך</th>
+      <th>סניף</th>
       <th>שעת כניסה</th>
       <th>שעת יציאה</th>
       <th>סה״כ שעות</th>
@@ -192,10 +194,10 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       <th>הערות</th>
     </tr>
   </thead>
-  <tbody>${tbodyHtml || `<tr><td colspan="9" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
+  <tbody>${tbodyHtml || `<tr><td colspan="10" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
   <tfoot>
     <tr>
-      <td class="label" colspan="3">סה״כ</td>
+      <td class="label" colspan="4">סה״כ</td>
       <td>${fmt(totals.total)}</td>
       <td>${fmt(totals.regular)}</td>
       <td>${fmt(totals.ot125)}</td>
@@ -292,6 +294,7 @@ export default function HoursReportDialog({ open, employee, onClose }) {
               <TableHead>
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>תאריך</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
                   <TableCell sx={{ fontWeight: 700 }} align="center">כניסה ראשונה</TableCell>
                   <TableCell sx={{ fontWeight: 700 }} align="center">יציאה אחרונה</TableCell>
                   <TableCell sx={{ fontWeight: 700 }} align="center">שעות</TableCell>
@@ -300,21 +303,15 @@ export default function HoursReportDialog({ open, employee, onClose }) {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {loading && <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3 }}>טוען…</TableCell></TableRow>}
+                {loading && <TableRow><TableCell colSpan={7} align="center" sx={{ py: 3 }}>טוען…</TableCell></TableRow>}
                 {!loading && report && report.days.length === 0 && (
-                  <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3 }}>אין נתוני החתמה לחודש זה</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} align="center" sx={{ py: 3 }}>אין נתוני החתמה לחודש זה</TableCell></TableRow>
                 )}
                 {!loading && report && report.days.map(d => (
                   <TableRow key={d.date} hover sx={d.cross_branch_names?.length > 0 ? { bgcolor: '#faf5ff' } : undefined}>
-                    <TableCell sx={{ fontWeight: 600 }}>
-                      {formatDate(d.date)}
-                      {d.cross_branch_names?.length > 0 && (
-                        <Chip
-                          label={`עבד/ה ב${d.cross_branch_names.join(' + ')}`}
-                          size="small"
-                          sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#a855f7', color: 'white', fontWeight: 700 }}
-                        />
-                      )}
+                    <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
+                    <TableCell sx={{ fontWeight: 600, color: d.cross_branch_names?.length > 0 ? '#7e22ce' : 'text.primary' }}>
+                      {d.branch_label || '—'}
                     </TableCell>
                     <TableCell align="center" dir="ltr">{d.first_in || '—'}</TableCell>
                     <TableCell align="center" dir="ltr">{d.last_out || (d.incomplete ? '⚠︎' : '—')}</TableCell>

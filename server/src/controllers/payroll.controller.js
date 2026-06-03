@@ -594,14 +594,19 @@ async function hoursReport(req, res, next) {
       // Tag each session with the branch where its first punch happened, and
       // mark the day with the set of non-home branches the employee visited.
       const branchesVisited = new Set();
+      const allBranches = new Set();
       for (const p of days[k]) {
         const bid = String(p.branch_id);
-        if (bid !== homeBranchId) branchesVisited.add(branchById.get(bid) || 'אחר');
+        const name = branchById.get(bid) || 'אחר';
+        allBranches.add(name);
+        if (bid !== homeBranchId) branchesVisited.add(name);
       }
       return {
         date: k,
         ...summary,
         cross_branch_names: [...branchesVisited],   // empty array if all at home
+        branch_names: [...allBranches],             // every branch worked that day
+        branch_label: [...allBranches].join(' + '), // e.g. "משה דיין" or "משה דיין + הרצליה"
       };
     });
 
