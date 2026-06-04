@@ -4,8 +4,10 @@ import {
   Typography, Chip, CircularProgress, Table, TableHead, TableBody, TableRow, TableCell, Divider,
 } from '@mui/material';
 import PrintIcon from '@mui/icons-material/Print';
+import SendIcon from '@mui/icons-material/Send';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 const DOW = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 function dowHe(ymd) {
@@ -30,8 +32,10 @@ const f1 = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('he-
  * per-branch summary, and a one-click combined print/save of every report.
  */
 export default function MonthlyHoursReports({ open, onClose, month, branch, branchName }) {
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState([]);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -132,6 +136,28 @@ export default function MonthlyHoursReports({ open, onClose, month, branch, bran
     setTimeout(() => { try { win.focus(); win.print(); } catch (e) { /* manual */ } }, 500);
   };
 
+  const sendToManagers = async () => {
+    const scope = branchName || 'כל הסניפים';
+    if (!(await confirm({
+      title: 'שליחה למנהלי הסניפים',
+      message: `לשלוח במייל את דוחות השעות (${month}) למנהלי הסניפים — ${scope}? כל מנהל יקבל את דוחות העובדים של הסניף שלו בלבד.`,
+    }))) return;
+    setSending(true);
+    api.post('/payroll/hours-report/send-managers', { month, branch: branch || 'all' })
+      .then(res => {
+        const results = res.data.results || [];
+        const sent = results.filter(r => r.status === 'sent');
+        const noMgr = results.filter(r => r.status === 'no_manager').map(r => r.branch);
+        const errs = results.filter(r => r.status === 'error').map(r => r.branch);
+        if (sent.length) toast.success(`נשלח ל-${sent.length} סניפים: ${sent.map(r => r.branch).join(', ')}`);
+        if (noMgr.length) toast.warning(`אין מנהל מוגדר עם מייל: ${noMgr.join(', ')}`);
+        if (errs.length) toast.error(`שגיאת שליחה: ${errs.join(', ')}`);
+        if (!sent.length && !noMgr.length && !errs.length) toast.info('אין דוחות לשליחה.');
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה'))
+      .finally(() => setSending(false));
+  };
+
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth dir="rtl">
       <DialogTitle sx={{ fontWeight: 800 }}>דוחות שעות חודשיים — {month}</DialogTitle>
@@ -178,6 +204,12 @@ export default function MonthlyHoursReports({ open, onClose, month, branch, bran
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
+        <Button
+          color="success" startIcon={<SendIcon />} onClick={sendToManagers}
+          disabled={loading || sending || groups.length === 0}
+        >
+          {sending ? 'שולח…' : 'שלח למנהלי הסניפים'}
+        </Button>
         <Button variant="contained" startIcon={<PrintIcon />} onClick={printAll} disabled={loading || groups.length === 0}>
           הדפס / שמור הכל
         </Button>

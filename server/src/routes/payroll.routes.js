@@ -25,6 +25,7 @@ router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager'
 router.get('/attendance',                      c.attendanceByMonth);
 router.get('/employees/:id/hours-report',      c.hoursReport);
 router.get('/hours-report-bulk',               c.hoursReportBulk);
+router.post('/hours-report/send-managers',     c.sendHoursReportsToManagers);
 
 // Clock users (matching UI)
 router.get('/clock-users',                     c.listClockUsers);

@@ -9,6 +9,7 @@
 const mongoose = require('mongoose');
 const { Employee, Punch, Branch, Amuta, User, AgentCommand } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const { dispatchEmail } = require('../services/email.service');
 const bcrypt = require('bcryptjs');
 
 // --- helpers --------------------------------------------------------------
@@ -704,6 +705,120 @@ async function hoursReportBulk(req, res, next) {
     });
 
     res.json({ month: ymPrefix, reports });
+  } catch (err) { next(err); }
+}
+
+// Build a printable HTML hours report for a list of employee report objects.
+function buildHoursReportHtml(title, ymPrefix, reports) {
+  const f1 = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('he-IL');
+  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  const empBlock = (r) => {
+    const rows = r.days.map(d => {
+      const t = Number(d.total_hours) || 0;
+      const reg = Math.min(t, 8), ot125 = Math.max(0, Math.min(t, 10) - 8), ot150 = Math.max(0, t - 10);
+      return `<tr${d.incomplete ? ' style="background:#fffbeb"' : ''}>
+        <td style="text-align:right;font-weight:600;white-space:nowrap">${fmtDate(d.date)}</td>
+        <td>${d.branch_label || '—'}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
+        <td>${f1(t)}</td><td>${f1(reg)}</td><td>${ot125 > 0 ? f1(ot125) : '—'}</td><td>${ot150 > 0 ? f1(ot150) : '—'}</td></tr>`;
+    }).join('');
+    return `<div style="page-break-inside:avoid;margin-bottom:10px">
+      <div style="font-size:12px;border-bottom:1px solid #ccc;padding:3px 2px"><b>${r.employee.full_name}</b>${r.employee.israeli_id ? ` · ת״ז ${r.employee.israeli_id}` : ''}
+        <span style="float:left;color:#1d4ed8;font-weight:700">סה״כ ${f1(r.totals.total_hours)} שעות · ${r.totals.days_worked} ימים${r.totals.incomplete_days ? ` · ${r.totals.incomplete_days} חסרים` : ''}</span></div>
+      <table style="width:100%;border-collapse:collapse;font-size:10.5px;margin-top:3px">
+        <thead><tr>${['תאריך', 'סניף', 'כניסה', 'יציאה', 'שעות', 'רגיל', '125%', '150%'].map(h => `<th style="background:#f3f4f6;border:1px solid #bbb;padding:3px 4px">${h}</th>`).join('')}</tr></thead>
+        <tbody>${rows || '<tr><td colspan="8" style="text-align:center;color:#888;border:1px solid #ccc;padding:3px">אין החתמות</td></tr>'}</tbody>
+      </table></div>`;
+  };
+  return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
+<style>@page{size:A4 portrait;margin:10mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+body{font-family:Arial,sans-serif;color:#111;margin:0;padding:14px}h1{font-size:17px;text-align:center;margin:0 0 10px}
+table td{border:1px solid #ccc;padding:2px 4px;text-align:center}</style></head><body>
+<h1>דוח שעות — ${title} · ${ymPrefix}</h1>${reports.map(empBlock).join('')}</body></html>`;
+}
+
+/**
+ * POST /api/payroll/hours-report/send-managers  { month, branch? }
+ * Emails each branch manager their branch's employees' hours reports.
+ */
+async function sendHoursReportsToManagers(req, res, next) {
+  try {
+    const month = req.body?.month || req.query.month;
+    const range = monthRange(month);
+    if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
+    const ymPrefix = `${range.year}-${String(range.month).padStart(2, '0')}`;
+
+    const reqBranch = req.body?.branch && req.body.branch !== 'all' ? req.body.branch : null;
+    const role = req.user?.role;
+    let allowed = null;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      allowed = managed.length ? managed : (req.user.branch_id ? [String(req.user.branch_id)] : []);
+    }
+    const branchFilter = { is_active: true };
+    if (reqBranch) branchFilter._id = reqBranch;
+    const branches = await Branch.find(branchFilter).select('_id name').lean();
+    const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+
+    const results = [];
+    for (const br of branches) {
+      const bid = String(br._id);
+      if (allowed && !allowed.includes(bid)) continue;
+      const managers = await User.find({
+        role: 'branch_manager',
+        $or: [{ managed_branch_ids: br._id }, { branch_id: br._id }],
+      }).select('email full_name').lean();
+      const emails = [...new Set(managers.map(m => m.email).filter(Boolean))];
+      const employees = await Employee.find({ branch_id: br._id, is_active: true }).populate('branch_id', 'name').sort({ full_name: 1 }).lean();
+      if (employees.length === 0) { results.push({ branch: br.name, status: 'no_employees' }); continue; }
+      if (emails.length === 0) { results.push({ branch: br.name, status: 'no_manager' }); continue; }
+
+      const punches = await Punch.find({
+        employee_id: { $in: employees.map(e => e._id) },
+        timestamp: { $gte: range.from, $lt: range.to }, ignored: { $ne: true },
+      }).sort({ timestamp: 1 }).lean();
+      const byEmp = new Map();
+      for (const p of punches) {
+        const k = israelDateKey(new Date(p.timestamp));
+        if (!k.startsWith(ymPrefix)) continue;
+        const eid = String(p.employee_id);
+        if (!byEmp.has(eid)) byEmp.set(eid, {});
+        (byEmp.get(eid)[k] ||= []).push(p);
+      }
+      const reports = employees.map(emp => {
+        const days = byEmp.get(String(emp._id)) || {};
+        const dayRows = Object.keys(days).sort().map(dk => {
+          const summary = summarizeDay(days[dk]);
+          const all = new Set();
+          for (const p of days[dk]) all.add(branchById.get(String(p.branch_id)) || 'אחר');
+          return { date: dk, ...summary, branch_label: [...all].join(' + ') };
+        });
+        const min = dayRows.reduce((s, d) => s + (d.total_minutes || 0), 0);
+        return {
+          employee: { full_name: emp.full_name, israeli_id: emp.israeli_id || '' },
+          days: dayRows,
+          totals: { days_worked: dayRows.length, total_hours: Math.round(min / 60 * 100) / 100, incomplete_days: dayRows.filter(d => d.incomplete).length },
+        };
+      });
+
+      const html = buildHoursReportHtml(br.name, ymPrefix, reports);
+      // Put the report both inline (works on every email provider) and as an
+      // attachment (the Apps Script provider converts it to a PDF).
+      const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p>
+        <p>דוח שעות העובדים של סניף <b>${br.name}</b> לחודש ${ymPrefix} (${employees.length} עובדים) — מצורף וגם למטה.</p></div><hr>`;
+      try {
+        await dispatchEmail({
+          to: emails,
+          subject: `דוח שעות חודשי — ${br.name} — ${ymPrefix}`,
+          html: intro + html,
+          attachments: [{ name: `דוח שעות ${br.name} ${ymPrefix}`, html }],
+        });
+        results.push({ branch: br.name, status: 'sent', managers: emails, employees: employees.length });
+      } catch (e) {
+        console.error('send hours report failed:', e.message);
+        results.push({ branch: br.name, status: 'error', error: e.message });
+      }
+    }
+    res.json({ month: ymPrefix, results });
   } catch (err) { next(err); }
 }
 
@@ -1421,6 +1536,7 @@ module.exports = {
   attendanceByMonth,
   hoursReport,
   hoursReportBulk,
+  sendHoursReportsToManagers,
   listClockUsers,
   assignIsraeliIds,
   salaryForEmployee,
