@@ -632,6 +632,81 @@ async function hoursReport(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /api/payroll/hours-report-bulk?month=YYYY-MM&branch=X|all
+ * Monthly hours reports for ALL employees in scope, in one shot — for the
+ * branch-grouped overview, bulk print, and the send-to-managers flow.
+ */
+async function hoursReportBulk(req, res, next) {
+  try {
+    const range = monthRange(req.query.month);
+    if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
+
+    const role = req.user?.role;
+    const reqBranch = req.query.branch && req.query.branch !== 'all' ? req.query.branch : null;
+    const empFilter = { is_active: true };
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length ? managed : fallback;
+      if (reqBranch && !allowed.includes(String(reqBranch))) {
+        return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      }
+      empFilter.branch_id = reqBranch || { $in: allowed };
+    } else if (reqBranch) {
+      empFilter.branch_id = reqBranch;
+    }
+
+    const employees = await Employee.find(empFilter)
+      .populate('branch_id', 'name').sort({ full_name: 1 }).lean();
+    const branches = await Branch.find({}).select('_id name').lean();
+    const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+
+    const punches = await Punch.find({
+      employee_id: { $in: employees.map(e => e._id) },
+      timestamp: { $gte: range.from, $lt: range.to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    const ymPrefix = `${range.year}-${String(range.month).padStart(2, '0')}`;
+    const byEmp = new Map();
+    for (const p of punches) {
+      const k = israelDateKey(new Date(p.timestamp));
+      if (!k.startsWith(ymPrefix)) continue;
+      const eid = String(p.employee_id);
+      if (!byEmp.has(eid)) byEmp.set(eid, {});
+      (byEmp.get(eid)[k] ||= []).push(p);
+    }
+
+    const reports = employees.map(emp => {
+      const days = byEmp.get(String(emp._id)) || {};
+      const homeBranchId = String(emp.branch_id?._id || emp.branch_id);
+      const dayRows = Object.keys(days).sort().map(dk => {
+        const summary = summarizeDay(days[dk]);
+        const all = new Set();
+        for (const p of days[dk]) all.add(branchById.get(String(p.branch_id)) || 'אחר');
+        return { date: dk, ...summary, branch_label: [...all].join(' + '), branch_names: [...all] };
+      });
+      const monthMinutes = dayRows.reduce((s, d) => s + (d.total_minutes || 0), 0);
+      return {
+        employee: {
+          id: String(emp._id), full_name: emp.full_name, israeli_id: emp.israeli_id || '',
+          branch_id: homeBranchId, branch_name: emp.branch_id?.name || '—', salary_type: emp.salary_type,
+        },
+        days: dayRows,
+        totals: {
+          days_worked: dayRows.length,
+          total_minutes: monthMinutes,
+          total_hours: Math.round((monthMinutes / 60) * 100) / 100,
+          incomplete_days: dayRows.filter(d => d.incomplete).length,
+        },
+      };
+    });
+
+    res.json({ month: ymPrefix, reports });
+  } catch (err) { next(err); }
+}
+
 // --- Clock users (for matching UI) ----------------------------------------
 
 /**
@@ -1345,6 +1420,7 @@ module.exports = {
   removeEmployee,
   attendanceByMonth,
   hoursReport,
+  hoursReportBulk,
   listClockUsers,
   assignIsraeliIds,
   salaryForEmployee,

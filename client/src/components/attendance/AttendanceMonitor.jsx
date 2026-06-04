@@ -16,6 +16,8 @@ import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor, ganMarkerByName } from '../../utils/branchColors';
 import HoursReportDialog from '../employees/HoursReportDialog';
+import MonthlyHoursReports from './MonthlyHoursReports';
+import DescriptionIcon from '@mui/icons-material/Description';
 import PendingPunchApprovals from './PendingPunchApprovals';
 import DayPunchesDialog from './DayPunchesDialog';
 
@@ -54,6 +56,7 @@ export default function AttendanceMonitor() {
   const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
+  const [reportsOpen, setReportsOpen] = useState(false);
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
@@ -504,6 +507,14 @@ export default function AttendanceMonitor() {
           >
             {exporting ? 'מייצא…' : 'ייצא PDF'}
           </Button>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<DescriptionIcon />}
+            onClick={() => setReportsOpen(true)}
+          >
+            דוחות שעות
+          </Button>
         </Stack>
       </Stack>
 
@@ -639,6 +650,14 @@ export default function AttendanceMonitor() {
         open={hoursDialog.open}
         employee={hoursDialog.employee}
         onClose={() => setHoursDialog({ open: false, employee: null })}
+      />
+
+      <MonthlyHoursReports
+        open={reportsOpen}
+        onClose={() => setReportsOpen(false)}
+        month={month}
+        branch={selectedBranch}
+        branchName={isAllBranches ? 'כל הסניפים' : selectedBranchName}
       />
 
       <DayPunchesDialog
