@@ -418,23 +418,29 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   let tekenBreakdown = null;
   if (employee.salary_type === 'global' && rates.required_hours > 0 && rates.global_salary > 0) {
     const includeCompletion = opts.include_salary_completion !== false;
+    // OT-beyond-commitment addition for תקן employees. Default ON (current
+    // behaviour); the accountant can reject it per employee/month. When rejected
+    // the completion refills to the standard salary, so she gets exactly the
+    // teken salary with no overtime extra.
+    const includeOt = opts.include_teken_ot !== false;
     const hourlyValue = rates.global_salary / rates.required_hours;
     const basePart = regHours * hourlyValue;
     const otPart = ot125Hours * hourlyValue * 1.25 + ot150Hours * hourlyValue * 1.5;
-    const completion = includeCompletion ? Math.max(0, rates.global_salary - basePart - otPart) : 0;
+    const otApplied = includeOt ? otPart : 0;
+    const completion = includeCompletion ? Math.max(0, rates.global_salary - basePart - otApplied) : 0;
     tekenBreakdown = {
       teken_salary: rates.global_salary,
       required_hours: rates.required_hours,
       hourly_value: Math.round(hourlyValue * 100) / 100,
       base_part: Math.round(basePart * 100) / 100,
-      ot_part: Math.round(otPart * 100) / 100,
+      ot_part: Math.round(otPart * 100) / 100,            // computed OT addition
+      ot_applied: Math.round(otApplied * 100) / 100,      // OT actually paid
+      include_ot: includeOt,
       completion: Math.round(completion * 100) / 100,
       include_completion: includeCompletion,
       exceeded_commitment: hoursWorked > rates.required_hours,
     };
-    // Override baseSalary with sum that includes ot_part too, so estimated_total
-    // is correct (was previously just basePart).
-    baseSalary = basePart + completion + otPart;
+    baseSalary = basePart + completion + otApplied;
   }
 
   // --- Extras ---

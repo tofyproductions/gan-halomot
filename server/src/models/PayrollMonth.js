@@ -62,6 +62,10 @@ const payrollMonthSchema = new mongoose.Schema({
     // false to pay only the actual worked hours × hourly_value (no top-up).
     include_salary_completion: { type: Boolean, default: true },
 
+    // Whether to pay the תקן OT addition (overtime beyond commitment hours).
+    // Default true (current behaviour); accountant can reject it per month.
+    include_teken_ot: { type: Boolean, default: true },
+
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
     //   - kind='text'   → only `text` is meaningful

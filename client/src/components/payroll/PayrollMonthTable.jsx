@@ -1155,7 +1155,9 @@ export default function PayrollMonthTable() {
                         />
                       </TableCell>
                       <TableCell align="center" sx={{ bgcolor: '#f0fdf4' }}>
-                        <TekenOtCell row={r} />
+                        <TekenOtCell row={r} disabled={locked}
+                          onToggle={(v) => patchManual(r.employee_id, { include_teken_ot: v })}
+                        />
                       </TableCell>
 
                       <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
@@ -1458,19 +1460,32 @@ function TekenCompletionCell({ row, disabled, onToggle }) {
   );
 }
 
-function TekenOtCell({ row }) {
+function TekenOtCell({ row, disabled, onToggle }) {
   const tb = row.breakdown?.components?.teken_breakdown;
   if (row.salary_type !== 'global' || !tb || !tb.ot_part) {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }
+  // Accountant approves/rejects paying the OT-beyond-commitment addition.
+  const enabled = row.manual.include_teken_ot !== false;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem', color: 'success.dark' }}>
+      <Typography
+        variant="body2"
+        sx={{ fontWeight: 700, fontSize: '0.82rem', color: enabled ? 'success.dark' : 'text.disabled', textDecoration: enabled ? 'none' : 'line-through' }}
+      >
         +{Math.round(tb.ot_part).toLocaleString('he-IL')} ₪
       </Typography>
-      <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-        שע״נ × ערך/שעה
-      </Typography>
+      <Tooltip title={enabled ? 'תוספת שע״נ מעבר להתחייבות — לחץ לדחות' : 'תוספת שע״נ נדחתה — לחץ לאשר'}>
+        <Chip
+          size="small"
+          color={enabled ? 'success' : 'default'}
+          variant={enabled ? 'filled' : 'outlined'}
+          label={enabled ? 'מאושר' : 'נדחה'}
+          disabled={disabled}
+          onClick={(e) => { e.stopPropagation(); onToggle(!enabled); }}
+          sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer' }}
+        />
+      </Tooltip>
     </Stack>
   );
 }

@@ -1175,6 +1175,9 @@ async function salarySummary(req, res, next) {
         days_worked: b.hours.days_worked,
         incomplete_days: b.hours.incomplete_days,
         required_hours: b.rates.required_hours,
+        // תקן OT addition (overtime beyond commitment) for global employees.
+        teken_ot: Math.round((b.components.teken_breakdown?.ot_part || 0)),
+        teken_ot_exceeded: !!b.components.teken_breakdown?.exceeded_commitment,
         base_salary: b.components.base_salary,
         extras: b.components.travel + b.components.meal_vouchers + b.components.recreation_monthly + b.components.bonuses,
         deductions: b.deductions.loans,

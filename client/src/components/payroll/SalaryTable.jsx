@@ -79,7 +79,8 @@ export default function SalaryTable() {
   })();
 
   const exportCSV = () => {
-    const header = ['סניף', 'שם', 'ת״ז', 'סוג', 'שעות', 'ימים', 'שכר בסיס', 'תוספות', 'ניכויים', 'סה״כ מוערך', 'הערות'];
+    const header = ['סניף', 'שם', 'ת״ז', 'סוג', 'שעות', 'שע״נ תקן', 'ימים', 'שכר בסיס', 'תוספות', 'ניכויים', 'סה״כ מוערך', 'הערות'];
+    const otOf = (r) => (r.salary_type === 'global' && r.teken_ot > 0 ? r.teken_ot : '');
     const rows = [];
     if (isAllBranches && perBranch) {
       for (const grp of perBranch) {
@@ -87,24 +88,24 @@ export default function SalaryTable() {
         for (const r of grp.data.rows) {
           rows.push([
             grp.branch.name, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'תקן' : 'שעתי',
-            r.hours_total, r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
+            r.hours_total, otOf(r), r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
             (r.warnings || []).join(' / '),
           ]);
         }
         const t = grp.data.totals;
-        rows.push([grp.branch.name + ' — סה״כ', '', '', '', t.hours, '', t.base, t.extras, t.deductions, t.total, '']);
+        rows.push([grp.branch.name + ' — סה״כ', '', '', '', t.hours, '', '', t.base, t.extras, t.deductions, t.total, '']);
       }
-      if (allTotals) rows.push(['כל הסניפים — סה״כ', '', '', '', allTotals.hours, '', allTotals.base, allTotals.extras, allTotals.deductions, allTotals.total, '']);
+      if (allTotals) rows.push(['כל הסניפים — סה״כ', '', '', '', allTotals.hours, '', '', allTotals.base, allTotals.extras, allTotals.deductions, allTotals.total, '']);
     } else if (data) {
       for (const r of data.rows) {
         rows.push([
           selectedBranchName, r.full_name, r.israeli_id, r.salary_type === 'global' ? 'תקן' : 'שעתי',
-          r.hours_total, r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
+          r.hours_total, otOf(r), r.days_worked, r.base_salary, r.extras, r.deductions, r.estimated_total,
           (r.warnings || []).join(' / '),
         ]);
       }
       const t = data.totals;
-      rows.push([selectedBranchName + ' — סה״כ', '', '', '', t.hours, '', t.base, t.extras, t.deductions, t.total, '']);
+      rows.push([selectedBranchName + ' — סה״כ', '', '', '', t.hours, '', '', t.base, t.extras, t.deductions, t.total, '']);
     } else {
       return;
     }
@@ -169,6 +170,9 @@ export default function SalaryTable() {
       <TableCell align="center" sx={{ fontSize: '0.8rem', color: r.hours_ot150 > 0 ? 'error.main' : 'text.disabled' }}>
         {r.hours_ot150 > 0 ? `${r.hours_ot150}h` : '—'}
       </TableCell>
+      <TableCell align="center" sx={{ fontSize: '0.8rem', fontWeight: 700, color: r.teken_ot > 0 ? 'success.dark' : 'text.disabled' }}>
+        {r.salary_type === 'global' && r.teken_ot > 0 ? `+${formatCurrency(r.teken_ot)}` : '—'}
+      </TableCell>
       <TableCell align="center">{r.days_worked}</TableCell>
       <TableCell align="center">{formatCurrency(r.base_salary)}</TableCell>
       <TableCell align="center" sx={{ color: r.extras > 0 ? 'success.main' : 'text.disabled' }}>
@@ -201,6 +205,7 @@ export default function SalaryTable() {
       <TableCell>{label}</TableCell>
       <TableCell>{t.employees ? t.employees + ' עובדים' : ''}</TableCell>
       <TableCell align="center">{t.hours}h</TableCell>
+      <TableCell align="center" />
       <TableCell align="center" />
       <TableCell align="center" />
       <TableCell align="center">—</TableCell>
@@ -291,6 +296,7 @@ export default function SalaryTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>שעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, color: 'text.secondary', fontSize: '0.75rem' }}>125%</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, color: 'text.secondary', fontSize: '0.75rem' }}>150%</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, color: 'success.dark', fontSize: '0.75rem' }}>שע״נ תקן</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>ימים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>שכר בסיס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>תוספות</TableCell>
@@ -300,12 +306,12 @@ export default function SalaryTable() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {loading && <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4 }}>טוען…</TableCell></TableRow>}
+            {loading && <TableRow><TableCell colSpan={12} align="center" sx={{ py: 4 }}>טוען…</TableCell></TableRow>}
 
             {/* Single-branch mode */}
             {!loading && data && data.rows.map(r => renderEmployeeRow(r))}
             {!loading && data && data.rows.length === 0 && (
-              <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4 }}>אין עובדים בסניף</TableCell></TableRow>
+              <TableRow><TableCell colSpan={12} align="center" sx={{ py: 4 }}>אין עובדים בסניף</TableCell></TableRow>
             )}
             {!loading && data && renderTotalsRow(data.totals, 'סה״כ', 'totals-single', true)}
 
@@ -315,7 +321,7 @@ export default function SalaryTable() {
               const out = [];
               out.push(
                 <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'grey.200' }}>
-                  <TableCell colSpan={11} sx={{ fontWeight: 900, fontSize: '0.95rem', py: 1 }}>
+                  <TableCell colSpan={12} sx={{ fontWeight: 900, fontSize: '0.95rem', py: 1 }}>
                     🏠 {grp.branch.name}
                     {grp.error && <Chip size="small" color="error" label={'שגיאה: ' + grp.error} sx={{ ml: 1 }} />}
                   </TableCell>
@@ -323,7 +329,7 @@ export default function SalaryTable() {
               );
               if (grp.data) {
                 if (grp.data.rows.length === 0) {
-                  out.push(<TableRow key={`empty-${branchKey}`}><TableCell colSpan={11} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין עובדים בחודש זה</TableCell></TableRow>);
+                  out.push(<TableRow key={`empty-${branchKey}`}><TableCell colSpan={12} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין עובדים בחודש זה</TableCell></TableRow>);
                 } else {
                   for (const r of grp.data.rows) out.push(renderEmployeeRow(r, `${branchKey}-`));
                   out.push(renderTotalsRow(grp.data.totals, `${grp.branch.name} — סה״כ`, `totals-${branchKey}`, false));

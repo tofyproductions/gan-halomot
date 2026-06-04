@@ -207,6 +207,7 @@ async function getMonth(req, res, next) {
       const breakdown = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
         include_salary_completion: existingManual.include_salary_completion !== false,
+        include_teken_ot: existingManual.include_teken_ot !== false,
       });
       const row = existingByEmp.get(String(emp._id));
       const manual = row?.manual || {};
@@ -332,6 +333,7 @@ async function getMonth(req, res, next) {
           notes: manual.notes || '',
           custom_values: manual.custom_values || {},
           include_salary_completion: manual.include_salary_completion !== false,
+          include_teken_ot: manual.include_teken_ot !== false,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
@@ -456,7 +458,7 @@ async function upsertEntry(req, res, next) {
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'bonus', 'notes', 'custom_values',
-      'include_salary_completion',
+      'include_salary_completion', 'include_teken_ot',
     ];
     for (const k of allowed) {
       if (Object.prototype.hasOwnProperty.call(body, k)) {
