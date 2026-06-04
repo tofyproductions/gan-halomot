@@ -129,13 +129,26 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     workedSet.add(wd);
   }
 
-  // Commitment: which weekdays is she expected to work?
+  // Commitment: weekdays she is OFF, and weekdays she is REQUIRED to work.
+  // A guard day disqualifies only when the commitment explicitly REQUIRES work
+  // that day (is_off === false) and she didn't show up. Off days — and days not
+  // listed in the commitment at all — never disqualify, since she wasn't
+  // expected to work them.
   const offWeekdays = new Set();
-  if (commitment && Array.isArray(commitment.days)) {
+  const requiredWeekdays = new Set();
+  const hasCommitment = !!(commitment && Array.isArray(commitment.days) && commitment.days.length);
+  if (hasCommitment) {
     for (const d of commitment.days) {
       if (d.is_off) offWeekdays.add(d.day);
+      else requiredWeekdays.add(d.day);
     }
   }
+  // True when a missed adjacent (guard) weekday should NOT disqualify.
+  const guardRelaxed = (wd) => {
+    if (wd === 6) return true;                       // Saturday — no one works
+    if (hasCommitment) return !requiredWeekdays.has(wd); // off or unconfigured → relaxed
+    return false;                                    // no commitment → strict (must have worked)
+  };
 
   const dailyRate = (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8);
 
@@ -150,23 +163,19 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     // commitment uses 0..5 same convention.
     if (wd <= 5 && offWeekdays.has(wd)) reasons.push('יום החג ביום החופש השבועי של העובד');
 
-    // Rule 5: worked day before AND day after (skipping Saturdays/holidays/
-    // employee's weekly off-day). The guard-day rule is relaxed when the
-    // adjacent day was:
-    //   - Saturday (no one works)
-    //   - the employee's weekly off-day per commitment
-    // In both cases the employee couldn't have worked anyway, so absence is
-    // not a disqualifier.
+    // Rule 5: guard days (day before AND day after). She is disqualified ONLY
+    // if her commitment REQUIRES work on that adjacent day and she didn't show
+    // up (see guardRelaxed). Saturday, her off-days, and days her commitment
+    // doesn't require — never disqualify, since she wasn't expected to work.
     const prev = shiftYmd(h.date, -1);
     const next = shiftYmd(h.date, +1);
     const prevWd = weekdayLocal(prev);
     const nextWd = weekdayLocal(next);
-    const prevIsRelaxed = prevWd === 6 || offWeekdays.has(prevWd);
-    const nextIsRelaxed = nextWd === 6 || offWeekdays.has(nextWd);
-    const prevWorked = workedSet.has(prev) || prevIsRelaxed;
-    const nextWorked = workedSet.has(next) || nextIsRelaxed;
-    if (!prevWorked) reasons.push(`לא עבד יום לפני החג (${prev})`);
-    if (!nextWorked) reasons.push(`לא עבד יום אחרי החג (${next})`);
+    const prevWorked = workedSet.has(prev) || guardRelaxed(prevWd);
+    const nextWorked = workedSet.has(next) || guardRelaxed(nextWd);
+    // Per the commitment rule: only a REQUIRED-but-missed guard day disqualifies.
+    if (!prevWorked) reasons.push(`חויב לעבוד יום לפני החג ולא עבד (${prev})`);
+    if (!nextWorked) reasons.push(`חויב לעבוד יום אחרי החג ולא עבד (${next})`);
 
     if (reasons.length === 0) {
       result.eligible_days.push({
