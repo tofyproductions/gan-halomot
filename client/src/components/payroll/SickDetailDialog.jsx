@@ -9,6 +9,8 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
@@ -47,6 +49,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
   const [draft, setDraft] = useState({ from_date: '', to_date: '', reason: '' });
   const [file, setFile] = useState(null); // { name, data }
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState(null); // when set, the form edits this request
 
   const load = () => {
     if (!row) return;
@@ -64,6 +67,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
     if (!open || !row) return;
     setDraft({ from_date: '', to_date: '', reason: '' });
     setFile(null);
+    setEditingId(null);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row, month]);
@@ -90,30 +94,43 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
     }
   };
 
+  const resetForm = () => { setDraft({ from_date: '', to_date: '', reason: '' }); setFile(null); setEditingId(null); };
+
   const addSick = () => {
     if (!draft.from_date) return toast.error('בחר תאריך התחלה');
-    if (!file) {
-      // The certificate tab is the point — warn but allow (cert can be added later).
-    }
     setSaving(true);
-    api.post('/employee-requests/admin', {
-      employee_id: row.employee_id,
-      type: 'sick',
+    const payload = {
       from_date: draft.from_date,
       to_date: draft.to_date || draft.from_date,
       reason: draft.reason || null,
       medical_file_data: file?.data || null,
       medical_file_name: file?.name || null,
-    })
+    };
+    const req = editingId
+      ? api.put(`/employee-requests/${editingId}/admin`, payload)
+      : api.post('/employee-requests/admin', { employee_id: row.employee_id, type: 'sick', ...payload });
+    req
       .then(() => {
-        toast.success('מחלה נרשמה וחושבה לפי ימי העבודה');
-        setDraft({ from_date: '', to_date: '', reason: '' });
-        setFile(null);
+        toast.success(editingId ? 'המחלה עודכנה' : 'מחלה נרשמה וחושבה לפי ימי העבודה');
+        resetForm();
         onSaved && onSaved();
         load();
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
       .finally(() => setSaving(false));
+  };
+
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setDraft({ from_date: r.from_date, to_date: r.to_date || r.from_date, reason: r.reason || '' });
+    setFile(null);
+  };
+
+  const deleteSick = async (r) => {
+    if (!(await confirm({ title: 'מחיקת מחלה', message: `למחוק את המחלה ${r.from_date}–${r.to_date || r.from_date}? ימי המחלה יקוזזו.`, danger: true }))) return;
+    api.delete(`/employee-requests/${r.id}`)
+      .then(() => { toast.success('המחלה נמחקה'); if (editingId === r.id) resetForm(); onSaved && onSaved(); load(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
   const decide = (id, status) => {
@@ -176,8 +193,9 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
                         ) : <Chip size="small" label="ללא אישור" color="warning" variant="outlined" />}
                       </TableCell>
                       <TableCell align="center">
-                        <IconButton size="small" color="success" onClick={() => decide(r.id, 'approved')}><CheckIcon fontSize="small" /></IconButton>
-                        <IconButton size="small" color="error" onClick={() => decide(r.id, 'rejected')}><CloseIcon fontSize="small" /></IconButton>
+                        <Tooltip title="אשר"><IconButton size="small" color="success" onClick={() => decide(r.id, 'approved')}><CheckIcon fontSize="small" /></IconButton></Tooltip>
+                        <Tooltip title="דחה"><IconButton size="small" color="error" onClick={() => decide(r.id, 'rejected')}><CloseIcon fontSize="small" /></IconButton></Tooltip>
+                        <Tooltip title="מחק"><IconButton size="small" onClick={() => deleteSick(r)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -197,21 +215,30 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
                   <TableCell>מתאריך</TableCell>
                   <TableCell>עד תאריך</TableCell>
                   <TableCell align="center">ימים</TableCell>
-                  <TableCell>אישור</TableCell>
+                  <TableCell align="center">אישור</TableCell>
+                  <TableCell align="center">פעולות</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {approved.map(r => (
-                  <TableRow key={r.id}>
+                  <TableRow key={r.id} sx={editingId === r.id ? { bgcolor: 'primary.50' } : undefined}>
                     <TableCell>{r.from_date}</TableCell>
                     <TableCell>{r.to_date}</TableCell>
                     <TableCell align="center"><Chip label={r.days} size="small" color="error" /></TableCell>
-                    <TableCell>
+                    <TableCell align="center">
                       {r.has_file ? (
                         <Tooltip title="צפה באישור">
-                          <IconButton size="small" onClick={() => viewCert(r.id)}><VisibilityIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" color="primary" onClick={() => viewCert(r.id)}><VisibilityIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       ) : <Chip size="small" label="ללא אישור" color="warning" variant="outlined" />}
+                    </TableCell>
+                    <TableCell align="center">
+                      <Tooltip title="ערוך">
+                        <IconButton size="small" onClick={() => startEdit(r)}><EditIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                      <Tooltip title="מחק">
+                        <IconButton size="small" color="error" onClick={() => deleteSick(r)}><DeleteIcon fontSize="small" /></IconButton>
+                      </Tooltip>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -220,9 +247,15 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
           )}
 
           <Divider />
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>רישום מחלה חדשה</Typography>
+          <Stack direction="row" alignItems="center" spacing={1}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+              {editingId ? 'עריכת מחלה' : 'רישום מחלה חדשה'}
+            </Typography>
+            {editingId && <Chip size="small" label="עורך — שמירה תעדכן את הרישום" color="primary" variant="outlined" onDelete={resetForm} />}
+          </Stack>
           <Typography variant="caption" color="text.secondary">
             הזן טווח תאריכים — המערכת תספור רק ימי עבודה (לא שבת ולא היום החופשי של העובד).
+            {editingId && ' אם לא תעלה אישור חדש — האישור הקיים יישמר.'}
           </Typography>
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <TextField size="small" type="date" label="מתאריך" InputLabelProps={{ shrink: true }}
@@ -243,9 +276,10 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
         </Stack>
       </DialogContent>
       <DialogActions>
+        {editingId && <Button onClick={resetForm}>בטל עריכה</Button>}
         <Button onClick={onClose}>סגור</Button>
         <Button variant="contained" color="error" onClick={addSick} disabled={saving || !draft.from_date}>
-          רשום מחלה
+          {editingId ? 'עדכן מחלה' : 'רשום מחלה'}
         </Button>
       </DialogActions>
     </Dialog>

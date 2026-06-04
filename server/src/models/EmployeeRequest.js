@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
 
 const employeeRequestSchema = new mongoose.Schema({
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  // user_id links to a login (when the employee self-files). For admin-recorded
+  // requests on clock-only employees there may be no user, so it's optional and
+  // we key on employee_id instead.
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null, index: true },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   type: {
     type: String,

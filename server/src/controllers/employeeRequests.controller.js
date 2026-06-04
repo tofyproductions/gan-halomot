@@ -58,10 +58,19 @@ async function applyVacationToPayroll(request) {
  * them to manual.sick_days, and records the request id under sick_request_ids.
  * Idempotent.
  */
+async function resolveEmployeeForRequest(request) {
+  if (request.employee_id) {
+    return Employee.findById(request.employee_id).select('_id branch_id work_days').lean();
+  }
+  if (request.user_id) {
+    return Employee.findOne({ user_id: request.user_id }).select('_id branch_id work_days').lean();
+  }
+  return null;
+}
+
 async function applySickToPayroll(request) {
   if (request.type !== 'sick' || request.status !== 'approved') return;
-  const emp = await Employee.findOne({ user_id: request.user_id })
-    .select('_id branch_id work_days').lean();
+  const emp = await resolveEmployeeForRequest(request);
   if (!emp) return;
   const days = countWorkDays(request.from_date, request.to_date || request.from_date, emp.work_days);
   if (days <= 0) return;
@@ -77,6 +86,27 @@ async function applySickToPayroll(request) {
       $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
     },
     { upsert: true, new: true },
+  );
+}
+
+// Reverse applySickToPayroll for a request (used on delete/edit). Decrements the
+// month's sick_days by the days this request contributed and unlinks it.
+async function unapplySickFromPayroll(request) {
+  if (request.type !== 'sick') return;
+  const emp = await resolveEmployeeForRequest(request);
+  if (!emp) return;
+  const month = request.from_date.slice(0, 7);
+  const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
+  if (!existing) return;
+  const wasApplied = (existing.sick_request_ids || []).map(String).includes(String(request._id));
+  if (!wasApplied) return;
+  const days = countWorkDays(request.from_date, request.to_date || request.from_date, emp.work_days);
+  await PayrollMonth.findOneAndUpdate(
+    { employee_id: emp._id, month },
+    {
+      $inc: { 'manual.sick_days': -days },
+      $pull: { sick_request_ids: request._id },
+    },
   );
 }
 
@@ -249,11 +279,14 @@ async function listSickForMonth(req, res, next) {
     const { employee_id, month } = req.query;
     if (!employee_id || !month) return res.status(400).json({ error: 'employee_id and month required' });
     const emp = await Employee.findById(employee_id).select('user_id work_days').lean();
-    if (!emp || !emp.user_id) return res.json({ requests: [] });
+    if (!emp) return res.json({ requests: [] });
     const [y, m] = month.split('-');
     const prefix = `${y}-${m}`;
+    const ownerMatch = emp.user_id
+      ? { $or: [{ employee_id: emp._id }, { user_id: emp.user_id }] }
+      : { employee_id: emp._id };
     const requests = await EmployeeRequest.find({
-      user_id: emp.user_id,
+      ...ownerMatch,
       type: 'sick',
       status: 'approved',
       from_date: { $regex: `^${prefix}` },
@@ -281,14 +314,21 @@ async function listPendingForEmployee(req, res, next) {
     const { employee_id, type } = req.query;
     if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
     const emp = await Employee.findById(employee_id).select('user_id').lean();
-    if (!emp || !emp.user_id) return res.json({ requests: [] });
-    const filter = { user_id: emp.user_id, status: 'pending' };
+    if (!emp) return res.json({ requests: [] });
+    const ownerMatch = emp.user_id
+      ? { $or: [{ employee_id: emp._id }, { user_id: emp.user_id }] }
+      : { employee_id: emp._id };
+    const filter = {
+      ...ownerMatch,
+      status: { $in: ['pending', 'pending_manager', 'pending_accountant'] },
+    };
     if (type) filter.type = type;
     const requests = await EmployeeRequest.find(filter).sort({ from_date: 1 }).lean();
     res.json({
       requests: requests.map(r => ({
         id: String(r._id),
         type: r.type,
+        status: r.status,
         from_date: r.from_date,
         to_date: r.to_date || r.from_date,
         reason: r.reason || '',
@@ -312,7 +352,7 @@ async function createAdminRequest(req, res, next) {
       return res.status(400).json({ error: 'עובד, סוג ותאריך התחלה נדרשים' });
     }
     const emp = await Employee.findById(employee_id).select('user_id branch_id').lean();
-    if (!emp || !emp.user_id) return res.status(404).json({ error: 'לעובד אין חשבון משתמש מקושר' });
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
     // Manager-created: stage-1 is implicitly done, so it goes straight to the
     // accountant. Accountant/admin-created is approved immediately (final).
@@ -321,7 +361,8 @@ async function createAdminRequest(req, res, next) {
     const status = isFinal ? 'approved' : 'pending_accountant';
 
     const request = await EmployeeRequest.create({
-      user_id: emp.user_id,
+      user_id: emp.user_id || null,
+      employee_id: emp._id,
       branch_id: emp.branch_id || null,
       type,
       from_date,
@@ -357,6 +398,54 @@ async function getMedicalFile(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * DELETE /api/employee-requests/:id
+ * Delete a request and reverse its payroll effect (sick days).
+ */
+async function deleteRequest(req, res, next) {
+  try {
+    const request = await EmployeeRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
+    if (request.status === 'approved' && request.type === 'sick') {
+      try { await unapplySickFromPayroll(request); }
+      catch (err) { console.error('unapplySickFromPayroll failed:', err.message); }
+    }
+    await EmployeeRequest.deleteOne({ _id: request._id });
+    res.json({ message: 'נמחק' });
+  } catch (error) { next(error); }
+}
+
+/**
+ * PUT /api/employee-requests/:id/admin
+ * Edit a sick/vacation request's dates / reason / certificate, re-syncing the
+ * payroll day count when it's an approved sick request.
+ */
+async function editAdminRequest(req, res, next) {
+  try {
+    const request = await EmployeeRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
+    const { from_date, to_date, reason, medical_file_data, medical_file_name } = req.body;
+
+    const wasApplied = request.status === 'approved' && request.type === 'sick';
+    if (wasApplied) {
+      try { await unapplySickFromPayroll(request); }
+      catch (err) { console.error('unapplySickFromPayroll failed:', err.message); }
+    }
+
+    if (from_date) request.from_date = from_date;
+    if (to_date !== undefined) request.to_date = to_date || request.from_date;
+    if (reason !== undefined) request.reason = reason || null;
+    if (medical_file_data) { request.medical_file_data = medical_file_data; request.medical_file_name = medical_file_name || request.medical_file_name; }
+    await request.save();
+
+    if (wasApplied) {
+      try { await applySickToPayroll(request); }
+      catch (err) { console.error('applySickToPayroll failed:', err.message); }
+    }
+    res.json({ request });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   getMyRequests,
   createRequest,
@@ -366,5 +455,7 @@ module.exports = {
   listSickForMonth,
   listPendingForEmployee,
   createAdminRequest,
+  editAdminRequest,
+  deleteRequest,
   getMedicalFile,
 };

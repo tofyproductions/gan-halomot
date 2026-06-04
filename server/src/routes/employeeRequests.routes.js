@@ -17,5 +17,7 @@ router.get('/sick-for-month', requireRole('system_admin', 'branch_manager', 'acc
 router.get('/pending-for-employee', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingForEmployee);
 router.get('/:id/medical-file', requireRole('system_admin', 'branch_manager', 'accountant'), c.getMedicalFile);
 router.put('/:id/status', requireRole('system_admin', 'branch_manager', 'accountant'), c.updateRequestStatus);
+router.put('/:id/admin', requireRole('system_admin', 'branch_manager', 'accountant'), c.editAdminRequest);
+router.delete('/:id', requireRole('system_admin', 'branch_manager', 'accountant'), c.deleteRequest);
 
 module.exports = router;
