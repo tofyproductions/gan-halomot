@@ -50,6 +50,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
   const [file, setFile] = useState(null); // { name, data }
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null); // when set, the form edits this request
+  const [manualDays, setManualDays] = useState(''); // direct edit of manual.sick_days (legacy/orphan values)
 
   const load = () => {
     if (!row) return;
@@ -68,6 +69,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
     setDraft({ from_date: '', to_date: '', reason: '' });
     setFile(null);
     setEditingId(null);
+    setManualDays(String(Number(row.manual?.sick_days) || 0));
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row, month]);
@@ -133,6 +135,15 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  // Direct edit of the month's sick-day count — for legacy/orphan values that
+  // have no underlying request record (e.g. imported or manually set).
+  const saveManualDays = (value) => {
+    const n = Math.max(0, Number(value) || 0);
+    api.patch(`/payroll-month/${row.employee_id}`, { manual: { sick_days: n } }, { params: { month } })
+      .then(() => { toast.success('ימי המחלה עודכנו'); setManualDays(String(n)); onSaved && onSaved(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
   const decide = (id, status) => {
     api.put(`/employee-requests/${id}/status`, { status })
       .then(() => {
@@ -163,6 +174,24 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{totalApprovedDays}</Typography>
             </Box>
           </Stack>
+
+          {/* Direct edit of the month's sick-day count (handles legacy/orphan
+              values with no request behind them). */}
+          <Box sx={{ p: 1.5, border: '1px dashed', borderColor: 'divider', borderRadius: 2 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>עריכת מספר ימי המחלה בחודש:</Typography>
+              <TextField
+                type="number" size="small" value={manualDays}
+                onChange={e => setManualDays(e.target.value)}
+                inputProps={{ min: 0, step: 0.5 }} sx={{ width: 100 }}
+              />
+              <Button variant="contained" size="small" onClick={() => saveManualDays(manualDays)}>שמור</Button>
+              <Button variant="outlined" color="error" size="small" onClick={() => saveManualDays(0)}>אפס</Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              שינוי ישיר של מספר הימים החודש (גם אם אין רשומת מחלה מצורפת). לרישום מתועד עם תאריכים ואישור — השתמש בטופס למטה.
+            </Typography>
+          </Box>
 
           {loading && <Box sx={{ textAlign: 'center', py: 1 }}><CircularProgress size={24} /></Box>}
 
