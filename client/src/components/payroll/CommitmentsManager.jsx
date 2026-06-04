@@ -27,14 +27,49 @@ function emptyDays() {
   return [0, 1, 2, 3, 4, 5].map(d => ({ day: d, is_off: true, start_hhmm: '', end_hhmm: '' }));
 }
 
-function CommitmentEditor({ open, initial, employees, onClose, onSaved }) {
-  const [draft, setDraft] = useState(initial || { employee_id: '', classroom: '', days: emptyDays() });
+// Always return a full Sun–Fri (0–5) array, merging any existing day data so the
+// editor shows every day (missing days render as "off"), never a blank form.
+function fullDays(days) {
+  const byDay = new Map((days || []).map(d => [d.day, d]));
+  return [0, 1, 2, 3, 4, 5].map(d => {
+    const ex = byDay.get(d);
+    return ex
+      ? { day: d, is_off: !!ex.is_off, start_hhmm: ex.start_hhmm || '', end_hhmm: ex.end_hhmm || '' }
+      : { day: d, is_off: true, start_hhmm: '', end_hhmm: '' };
+  });
+}
+
+// Build an editable draft from an existing commitment record.
+function draftFromCommitment(c) {
+  return {
+    employee_id: c.employee_id?._id || c.employee_id,
+    classroom: c.classroom || '',
+    days: fullDays(c.days),
+    is_alternating_off: c.is_alternating_off,
+    alternating_day: c.alternating_day,
+    notes: c.notes || '',
+  };
+}
+
+function CommitmentEditor({ open, initial, employees, commitments = [], onClose, onSaved }) {
+  const [draft, setDraft] = useState({ employee_id: '', classroom: '', days: emptyDays() });
 
   useEffect(() => {
     if (open) {
-      setDraft(initial || { employee_id: '', classroom: '', days: emptyDays() });
+      setDraft(initial
+        ? { ...initial, days: fullDays(initial.days) }
+        : { employee_id: '', classroom: '', days: emptyDays() });
     }
   }, [open, initial]);
+
+  // When adding (no fixed employee), picking an employee who already has a
+  // commitment loads their existing hours for editing instead of a blank form.
+  const onPickEmployee = (v) => {
+    const id = v?._id || '';
+    const existing = id && commitments.find(c => String(c.employee_id?._id || c.employee_id) === String(id));
+    if (existing) setDraft(draftFromCommitment(existing));
+    else setDraft(d => ({ ...d, employee_id: id }));
+  };
 
   const updateDay = (dayIdx, patch) => {
     setDraft(d => ({
@@ -53,7 +88,10 @@ function CommitmentEditor({ open, initial, employees, onClose, onSaved }) {
   if (!open) return null;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth dir="rtl">
-      <DialogTitle>{initial?.employee_id ? 'עריכת התחייבות' : 'הוספת התחייבות חדשה'}</DialogTitle>
+      <DialogTitle>
+        {(initial?.employee_id || commitments.some(c => String(c.employee_id?._id || c.employee_id) === String(draft.employee_id)))
+          ? 'עריכת התחייבות' : 'הוספת התחייבות חדשה'}
+      </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Autocomplete
@@ -61,7 +99,7 @@ function CommitmentEditor({ open, initial, employees, onClose, onSaved }) {
             options={employees}
             getOptionLabel={(e) => `${e.full_name}${e.israeli_id ? ` (${e.israeli_id})` : ''}`}
             value={employees.find(e => e._id === draft.employee_id) || null}
-            onChange={(_, v) => setDraft(d => ({ ...d, employee_id: v?._id || '' }))}
+            onChange={(_, v) => onPickEmployee(v)}
             renderInput={(params) => <TextField {...params} label="עובד" size="small" />}
           />
           <TextField label="כיתה" size="small" value={draft.classroom || ''}
@@ -249,6 +287,7 @@ export default function CommitmentsManager() {
   const [loading, setLoading] = useState(true);
   const [editor, setEditor] = useState({ open: false, initial: null });
   const [importOpen, setImportOpen] = useState(false);
+  const [search, setSearch] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -280,12 +319,41 @@ export default function CommitmentsManager() {
     return employees.filter(e => !set.has(String(e._id)));
   }, [employees, commitments]);
 
+  // Filter by search, then group by branch (sorted), employees sorted by name.
+  const branchGroups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = commitments.filter(c => {
+      if (!q) return true;
+      return (c.employee_id?.full_name || '').toLowerCase().includes(q)
+        || (c.branch_id?.name || '').toLowerCase().includes(q)
+        || (c.classroom || '').toLowerCase().includes(q)
+        || String(c.employee_id?.israeli_id || '').includes(q);
+    });
+    const map = new Map();
+    for (const c of filtered) {
+      const name = c.branch_id?.name || 'ללא סניף';
+      if (!map.has(name)) map.set(name, []);
+      map.get(name).push(c);
+    }
+    const groups = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'he'));
+    for (const [, arr] of groups) {
+      arr.sort((a, b) => (a.employee_id?.full_name || '').localeCompare(b.employee_id?.full_name || '', 'he'));
+    }
+    return groups;
+  }, [commitments, search]);
+  const filteredCount = branchGroups.reduce((s, [, arr]) => s + arr.length, 0);
+
   return (
     <Box dir="rtl">
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-          <Typography variant="h6" sx={{ fontWeight: 800, flex: 1 }}>התחייבויות שעות עבודה</Typography>
-          <Chip label={`${commitments.length} עובדות`} color="primary" variant="outlined" />
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>התחייבויות שעות עבודה</Typography>
+          <TextField
+            size="small" placeholder="חיפוש לפי שם / סניף / כיתה / ת״ז"
+            value={search} onChange={e => setSearch(e.target.value)}
+            sx={{ flex: 1, minWidth: 200 }}
+          />
+          <Chip label={`${search ? `${filteredCount}/` : ''}${commitments.length} עובדות`} color="primary" variant="outlined" />
           {employeesWithoutCommitment.length > 0 && (
             <Chip label={`${employeesWithoutCommitment.length} ללא התחייבות`} color="warning" variant="outlined" />
           )}
@@ -298,6 +366,7 @@ export default function CommitmentsManager() {
         <Table size="small">
           <TableHead>
             <TableRow sx={{ bgcolor: 'grey.50' }}>
+              <TableCell align="center" sx={{ fontWeight: 700, width: 44 }}>#</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>כיתה</TableCell>
@@ -314,53 +383,68 @@ export default function CommitmentsManager() {
                 אין התחייבויות מוגדרות. לחץ "ייבא מ-CSV" או "הוסף התחייבות".
               </TableCell></TableRow>
             )}
-            {!loading && commitments.map(c => (
-              <TableRow key={c.id} hover>
-                <TableCell sx={{ fontWeight: 600 }}>{c.employee_id?.full_name || '—'}</TableCell>
-                <TableCell>
-                  <Chip size="small" variant="outlined" label={c.branch_id?.name || '—'} />
-                </TableCell>
-                <TableCell>{c.classroom || '—'}</TableCell>
-                {DAY_LABELS.map((_, dayIdx) => {
-                  const day = (c.days || []).find(d => d.day === dayIdx);
-                  if (!day) return <TableCell key={dayIdx} align="center"><span style={{ opacity: 0.3 }}>—</span></TableCell>;
-                  if (day.is_off) {
-                    return (
-                      <TableCell key={dayIdx} align="center">
-                        <Chip size="small" label={c.is_alternating_off && c.alternating_day === dayIdx ? 'לסירוגין' : 'חופש'}
-                          color={c.is_alternating_off && c.alternating_day === dayIdx ? 'secondary' : 'default'}
-                          sx={{ height: 18, fontSize: '0.65rem' }} />
-                      </TableCell>
-                    );
-                  }
-                  return (
-                    <TableCell key={dayIdx} align="center" sx={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-                      {day.start_hhmm}<br />{day.end_hhmm}
+            {!loading && commitments.length > 0 && filteredCount === 0 && (
+              <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.disabled' }}>
+                לא נמצאו תוצאות לחיפוש "{search}".
+              </TableCell></TableRow>
+            )}
+            {!loading && (() => {
+              const rows = [];
+              let serial = 0;
+              for (const [branchName, list] of branchGroups) {
+                rows.push(
+                  <TableRow key={`hdr-${branchName}`} sx={{ bgcolor: 'grey.200' }}>
+                    <TableCell colSpan={11} sx={{ fontWeight: 900, py: 0.75 }}>
+                      🏠 {branchName} <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500, fontSize: '0.8rem' }}>• {list.length}</Box>
                     </TableCell>
+                  </TableRow>
+                );
+                for (const c of list) {
+                  serial += 1;
+                  rows.push(
+                    <TableRow key={c.id} hover>
+                      <TableCell align="center" sx={{ color: 'text.secondary' }}>{serial}</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>{c.employee_id?.full_name || '—'}</TableCell>
+                      <TableCell>
+                        <Chip size="small" variant="outlined" label={c.branch_id?.name || '—'} />
+                      </TableCell>
+                      <TableCell>{c.classroom || '—'}</TableCell>
+                      {DAY_LABELS.map((_, dayIdx) => {
+                        const day = (c.days || []).find(d => d.day === dayIdx);
+                        if (!day) return <TableCell key={dayIdx} align="center"><span style={{ opacity: 0.3 }}>—</span></TableCell>;
+                        if (day.is_off) {
+                          return (
+                            <TableCell key={dayIdx} align="center">
+                              <Chip size="small" label={c.is_alternating_off && c.alternating_day === dayIdx ? 'לסירוגין' : 'חופש'}
+                                color={c.is_alternating_off && c.alternating_day === dayIdx ? 'secondary' : 'default'}
+                                sx={{ height: 18, fontSize: '0.65rem' }} />
+                            </TableCell>
+                          );
+                        }
+                        return (
+                          <TableCell key={dayIdx} align="center" sx={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
+                            {day.start_hhmm}<br />{day.end_hhmm}
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell align="left">
+                        <Tooltip title="ערוך">
+                          <IconButton size="small" onClick={() => setEditor({ open: true, initial: draftFromCommitment(c) })}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="מחק">
+                          <IconButton size="small" color="error" onClick={() => remove(c.id)}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
                   );
-                })}
-                <TableCell align="left">
-                  <Tooltip title="ערוך">
-                    <IconButton size="small" onClick={() => setEditor({
-                      open: true,
-                      initial: {
-                        employee_id: c.employee_id?._id || c.employee_id,
-                        classroom: c.classroom,
-                        days: c.days?.length ? c.days : emptyDays(),
-                        is_alternating_off: c.is_alternating_off,
-                        alternating_day: c.alternating_day,
-                        notes: c.notes,
-                      },
-                    })}><EditIcon fontSize="small" /></IconButton>
-                  </Tooltip>
-                  <Tooltip title="מחק">
-                    <IconButton size="small" color="error" onClick={() => remove(c.id)}>
-                      <DeleteOutlineIcon fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </TableCell>
-              </TableRow>
-            ))}
+                }
+              }
+              return rows;
+            })()}
           </TableBody>
         </Table>
       </Paper>
@@ -369,6 +453,7 @@ export default function CommitmentsManager() {
         open={editor.open}
         initial={editor.initial}
         employees={employees}
+        commitments={commitments}
         onClose={() => setEditor({ open: false, initial: null })}
         onSaved={() => load()}
       />
