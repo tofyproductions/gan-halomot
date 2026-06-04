@@ -300,7 +300,7 @@ async function updateEmployee(req, res, next) {
       'travel_mode', 'travel_per_day', 'travel_monthly_flat',
       'travel_allowance', 'meal_vouchers', 'recreation_annual',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
-      'loans', 'bonuses', 'notes', 'is_active', 'work_days',
+      'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'work_days',
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
     ];
     for (const f of fields) {

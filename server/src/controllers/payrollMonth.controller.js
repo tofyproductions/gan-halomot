@@ -290,6 +290,7 @@ async function getMonth(req, res, next) {
         branch_id: String(emp.branch_id),
         branch_name: branchNameById.get(String(emp.branch_id)) || '',
         position: emp.position || '',
+        permanent_note: emp.permanent_note || '',
         salary_type: emp.salary_type,
         salary_is_net: !!emp.salary_is_net,
         // Travel config so UI can show "16₪/day" inline

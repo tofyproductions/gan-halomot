@@ -148,6 +148,9 @@ const employeeSchema = new mongoose.Schema({
 
   // Notes / exceptions / free-form
   notes: { type: String, default: '' },
+  // Permanent payroll-table note — shown every month (vs the per-month note on
+  // PayrollMonth.manual.notes which is one-time).
+  permanent_note: { type: String, default: '' },
 
   // Status
   is_active: { type: Boolean, default: true },

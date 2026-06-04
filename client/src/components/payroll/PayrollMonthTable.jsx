@@ -274,22 +274,41 @@ function AdvanceDeductionCell({ row, presets, onSavePresetId, onSaveText, onCrea
 
 /* ─── Dialogs ───────────────────────────────────────────────────────── */
 
-function NotesDialog({ open, row, onClose, onSave }) {
+function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
   const [text, setText] = useState('');
-  useEffect(() => { if (row) setText(row.manual.notes || ''); }, [row]);
+  const [perm, setPerm] = useState('');
+  useEffect(() => {
+    if (row) { setText(row.manual.notes || ''); setPerm(row.permanent_note || ''); }
+  }, [row]);
   if (!row) return null;
+  const committed = row.commitment?.committed_hours;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>הערות — {row.full_name}</DialogTitle>
       <DialogContent>
-        <TextField autoFocus fullWidth multiline minRows={5} value={text}
-          onChange={e => setText(e.target.value)}
-          placeholder="הערות חופשי על העובד החודש…"
-        />
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          {committed != null && (
+            <Alert severity="info" sx={{ py: 0.5 }}>📋 התחייבות שעות לחודש: <b>{committed}h</b></Alert>
+          )}
+          <TextField
+            label="הערה קבועה (תופיע בכל חודש)" fullWidth multiline minRows={2}
+            value={perm} onChange={e => setPerm(e.target.value)}
+            placeholder="הערה שתישמר ותופיע גם בחודשים הבאים…"
+          />
+          <TextField
+            label="הערה חד-פעמית (החודש בלבד)" fullWidth multiline minRows={3}
+            value={text} onChange={e => setText(e.target.value)}
+            placeholder="הערה שתיעלם בחודש הבא…"
+          />
+        </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={() => { onSave(text); onClose(); }}>שמור</Button>
+        <Button variant="contained" onClick={() => {
+          if (perm !== (row.permanent_note || '')) onSavePermanent(perm);
+          onSave(text);
+          onClose();
+        }}>שמור</Button>
       </DialogActions>
     </Dialog>
   );
@@ -526,6 +545,17 @@ export default function PayrollMonthTable() {
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
 
+  // Permanent note lives on the employee (shown every month), not on the month.
+  const savePermanentNote = useCallback((employeeId, text) => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, permanent_note: text } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, { permanent_note: text })
+      .then(() => toast.success('ההערה הקבועה נשמרה'))
+      .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
+  }, [fetchData]);
+
   const submitChangeRequest = useCallback(async () => {
     const changes = Object.values(staged);
     if (changes.length === 0) return;
@@ -708,7 +738,11 @@ export default function PayrollMonthTable() {
       const bLines = perBranchBreakdown(r);
       cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
       cells.push(r.bonus?.note || '');           // בונוס - פירוט
-      cells.push(r.manual.notes || '');          // הערות
+      cells.push([                                // הערות (התחייבות + קבועה + חד-פעמית)
+        r.commitment?.committed_hours != null ? `התחייבות: ${r.commitment.committed_hours}h` : '',
+        r.permanent_note || '',
+        r.manual.notes || '',
+      ].filter(Boolean).join(' · '));
       rowsAcc.push(cells);
     }
     return rowsAcc;
@@ -1232,20 +1266,26 @@ export default function PayrollMonthTable() {
                           padding: '6px 8px !important',
                           fontSize: '0.72rem',
                           lineHeight: 1.35,
-                          color: r.manual.notes ? 'text.primary' : 'text.disabled',
                           whiteSpace: 'pre-wrap',
                           overflow: 'hidden',
                           maxHeight: 140,
                           textOverflow: 'ellipsis',
-                          bgcolor: r.manual.notes ? 'rgba(254, 252, 232, 0.55)' : undefined,
+                          bgcolor: (r.manual.notes || r.permanent_note) ? 'rgba(254, 252, 232, 0.55)' : undefined,
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
-                        {r.manual.notes
-                          ? r.manual.notes
-                          : <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
-                              <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
-                            </Box>}
+                        {r.commitment?.committed_hours != null && (
+                          <Box sx={{ color: '#1d4ed8', fontWeight: 700 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
+                        )}
+                        {r.permanent_note && (
+                          <Box sx={{ color: '#7c3aed', fontWeight: 600 }}>📌 {r.permanent_note}</Box>
+                        )}
+                        {r.manual.notes && <Box sx={{ color: 'text.primary' }}>{r.manual.notes}</Box>}
+                        {!r.commitment?.committed_hours && !r.permanent_note && !r.manual.notes && (
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
+                            <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
+                          </Box>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -1258,7 +1298,8 @@ export default function PayrollMonthTable() {
       </TableContainer>
 
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
-        onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })} />
+        onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
+        onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />
       <BonusDialog open={bonusDlg.open} row={bonusDlg.row} onClose={() => setBonusDlg({ open: false, row: null })}
         onSave={(bonus) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, { bonus })} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
