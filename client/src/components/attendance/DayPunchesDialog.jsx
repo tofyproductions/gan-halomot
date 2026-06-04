@@ -68,9 +68,11 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   const [addDate, setAddDate] = useState(date);   // which date the manual punch is for
   const [addBranch, setAddBranch] = useState(branchId || '');
   const [editing, setEditing] = useState({}); // id → { hhmm, state }
-  const [dirty, setDirty] = useState(false);   // changed anything → refresh parent once on close
-  const markDirty = () => setDirty(true);
-  const handleClose = () => { if (dirty) markDirty(); onClose(); };
+  const [dirty, setDirty] = useState(false);
+  // Notify the parent (e.g. AttendanceMonitor) after every change so its grid
+  // and totals refresh immediately — no manual page reload needed.
+  const markDirty = () => { setDirty(true); if (onChanged) onChanged(); };
+  const handleClose = () => { onClose(); };
 
   const load = useCallback(() => {
     if (!open || !date) return;
@@ -134,11 +136,11 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
     const useDate = addDate || date;
     api.post('/payroll/manual-punches', { employee_id: employee._id, date: useDate, branch_id: addBranch || undefined, ...draft })
       .then(() => {
-        // Keep date + branch so several punches can be entered quickly; don't
-        // refresh the whole page (deferred to close) so we stay on this employee.
+        // Keep date + branch so several punches can be entered quickly. The grid
+        // behind refreshes live (markDirty → onChanged); the dialog stays open.
         setDraft({ in_time: '', out_time: '', note: '' });
-        markDirty();
         if (useDate === date) load();
+        markDirty();
         toast.success(`נוספה החתמה ל-${useDate}`);
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
@@ -239,7 +241,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
             <Divider sx={{ my: 1.5 }} />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>הוסף החתמה ידנית</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
-              אפשר להוסיף כמה החתמות לתאריכים שונים ברצף — הדף לא יתרענן עד שתסגור.
+              אפשר להוסיף כמה החתמות לתאריכים שונים ברצף — הטבלה מתעדכנת אוטומטית אחרי כל פעולה.
             </Typography>
             <Stack spacing={1}>
               <Stack direction="row" spacing={1}>
