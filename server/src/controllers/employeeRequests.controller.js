@@ -60,54 +60,56 @@ async function applyVacationToPayroll(request) {
  */
 async function resolveEmployeeForRequest(request) {
   if (request.employee_id) {
-    return Employee.findById(request.employee_id).select('_id branch_id work_days').lean();
+    return Employee.findById(request.employee_id).select('_id branch_id work_days user_id').lean();
   }
   if (request.user_id) {
-    return Employee.findOne({ user_id: request.user_id }).select('_id branch_id work_days').lean();
+    return Employee.findOne({ user_id: request.user_id }).select('_id branch_id work_days user_id').lean();
   }
   return null;
 }
 
-async function applySickToPayroll(request) {
-  if (request.type !== 'sick' || request.status !== 'approved') return;
-  const emp = await resolveEmployeeForRequest(request);
-  if (!emp) return;
-  const days = countWorkDays(request.from_date, request.to_date || request.from_date, emp.work_days);
-  if (days <= 0) return;
-  const month = request.from_date.slice(0, 7); // YYYY-MM
-  const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
-  const alreadyApplied = (existing?.sick_request_ids || []).map(String).includes(String(request._id));
-  if (alreadyApplied) return;
+/**
+ * Recompute manual.sick_days for (employee, month) as the exact sum of work-days
+ * across ALL approved sick requests in that month. This is the single source of
+ * truth — using a recompute (not $inc) means the count never drifts when a
+ * request is added/edited/deleted, or after a manual reset.
+ */
+async function syncSickDaysForMonth(emp, month) {
+  if (!emp || !month) return;
+  const ownerMatch = emp.user_id
+    ? { $or: [{ employee_id: emp._id }, { user_id: emp.user_id }] }
+    : { employee_id: emp._id };
+  const requests = await EmployeeRequest.find({
+    ...ownerMatch,
+    type: 'sick',
+    status: 'approved',
+    from_date: { $regex: `^${month}` },
+  }).lean();
+  const total = requests.reduce(
+    (s, r) => s + countWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days), 0,
+  );
+  const ids = requests.map(r => r._id);
   await PayrollMonth.findOneAndUpdate(
     { employee_id: emp._id, month },
     {
-      $inc: { 'manual.sick_days': days },
-      $addToSet: { sick_request_ids: request._id },
+      $set: { 'manual.sick_days': total, sick_request_ids: ids },
       $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
     },
     { upsert: true, new: true },
   );
 }
 
-// Reverse applySickToPayroll for a request (used on delete/edit). Decrements the
-// month's sick_days by the days this request contributed and unlinks it.
+// Apply/un-apply a sick request = recompute the month's total from approved
+// requests. Kept as named wrappers so existing call sites stay readable.
+async function applySickToPayroll(request) {
+  if (request.type !== 'sick') return;
+  const emp = await resolveEmployeeForRequest(request);
+  await syncSickDaysForMonth(emp, request.from_date.slice(0, 7));
+}
 async function unapplySickFromPayroll(request) {
   if (request.type !== 'sick') return;
   const emp = await resolveEmployeeForRequest(request);
-  if (!emp) return;
-  const month = request.from_date.slice(0, 7);
-  const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
-  if (!existing) return;
-  const wasApplied = (existing.sick_request_ids || []).map(String).includes(String(request._id));
-  if (!wasApplied) return;
-  const days = countWorkDays(request.from_date, request.to_date || request.from_date, emp.work_days);
-  await PayrollMonth.findOneAndUpdate(
-    { employee_id: emp._id, month },
-    {
-      $inc: { 'manual.sick_days': -days },
-      $pull: { sick_request_ids: request._id },
-    },
-  );
+  await syncSickDaysForMonth(emp, request.from_date.slice(0, 7));
 }
 
 async function getMyRequests(req, res, next) {
@@ -291,7 +293,10 @@ async function listSickForMonth(req, res, next) {
       status: 'approved',
       from_date: { $regex: `^${prefix}` },
     }).sort({ from_date: 1 }).lean();
+    // Authoritative paid sick-days for the month (what the salary uses).
+    const pm = await PayrollMonth.findOne({ employee_id: emp._id, month }).select('manual.sick_days').lean();
     res.json({
+      sick_days: Number(pm?.manual?.sick_days) || 0,
       requests: requests.map(r => ({
         id: String(r._id),
         from_date: r.from_date,
@@ -406,11 +411,14 @@ async function deleteRequest(req, res, next) {
   try {
     const request = await EmployeeRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
-    if (request.status === 'approved' && request.type === 'sick') {
-      try { await unapplySickFromPayroll(request); }
-      catch (err) { console.error('unapplySickFromPayroll failed:', err.message); }
-    }
+    // Delete first, then recompute the month's total from the remaining requests.
+    const emp = request.type === 'sick' ? await resolveEmployeeForRequest(request) : null;
+    const month = request.from_date.slice(0, 7);
     await EmployeeRequest.deleteOne({ _id: request._id });
+    if (emp) {
+      try { await syncSickDaysForMonth(emp, month); }
+      catch (err) { console.error('syncSickDaysForMonth failed:', err.message); }
+    }
     res.json({ message: 'נמחק' });
   } catch (error) { next(error); }
 }
@@ -426,23 +434,40 @@ async function editAdminRequest(req, res, next) {
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
     const { from_date, to_date, reason, medical_file_data, medical_file_name } = req.body;
 
-    const wasApplied = request.status === 'approved' && request.type === 'sick';
-    if (wasApplied) {
-      try { await unapplySickFromPayroll(request); }
-      catch (err) { console.error('unapplySickFromPayroll failed:', err.message); }
-    }
-
+    const oldMonth = request.from_date.slice(0, 7);
     if (from_date) request.from_date = from_date;
     if (to_date !== undefined) request.to_date = to_date || request.from_date;
     if (reason !== undefined) request.reason = reason || null;
     if (medical_file_data) { request.medical_file_data = medical_file_data; request.medical_file_name = medical_file_name || request.medical_file_name; }
     await request.save();
 
-    if (wasApplied) {
-      try { await applySickToPayroll(request); }
-      catch (err) { console.error('applySickToPayroll failed:', err.message); }
+    // Recompute the affected month(s) — covers the case where the edit moved the
+    // sick period to a different month.
+    if (request.type === 'sick') {
+      const emp = await resolveEmployeeForRequest(request);
+      const newMonth = request.from_date.slice(0, 7);
+      try {
+        await syncSickDaysForMonth(emp, newMonth);
+        if (oldMonth !== newMonth) await syncSickDaysForMonth(emp, oldMonth);
+      } catch (err) { console.error('syncSickDaysForMonth failed:', err.message); }
     }
     res.json({ request });
+  } catch (error) { next(error); }
+}
+
+/**
+ * POST /api/employee-requests/sync-sick { employee_id, month }
+ * Recompute manual.sick_days for an employee/month from the approved requests.
+ * Used by the sick dialog to fix a count that drifted from the requests.
+ */
+async function syncSickDays(req, res, next) {
+  try {
+    const { employee_id, month } = req.body;
+    if (!employee_id || !month) return res.status(400).json({ error: 'employee_id and month required' });
+    const emp = await Employee.findById(employee_id).select('_id branch_id work_days user_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    await syncSickDaysForMonth(emp, month);
+    res.json({ ok: true });
   } catch (error) { next(error); }
 }
 
@@ -457,5 +482,6 @@ module.exports = {
   createAdminRequest,
   editAdminRequest,
   deleteRequest,
+  syncSickDays,
   getMedicalFile,
 };

@@ -59,7 +59,11 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
       api.get('/employee-requests/sick-for-month', { params: { employee_id: row.employee_id, month } }),
       api.get('/employee-requests/pending-for-employee', { params: { employee_id: row.employee_id, type: 'sick' } }),
     ])
-      .then(([a, p]) => { setApproved(a.data.requests || []); setPending(p.data.requests || []); })
+      .then(([a, p]) => {
+        setApproved(a.data.requests || []);
+        setPending(p.data.requests || []);
+        if (a.data.sick_days !== undefined) setManualDays(String(Number(a.data.sick_days) || 0));
+      })
       .catch(() => { setApproved([]); setPending([]); })
       .finally(() => setLoading(false));
   };
@@ -144,6 +148,14 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  // Recompute the month's sick-day count from the approved requests (fixes a
+  // count that drifted from the actual records).
+  const syncFromRequests = () => {
+    api.post('/employee-requests/sync-sick', { employee_id: row.employee_id, month })
+      .then(() => { toast.success('סונכרן לפי הבקשות'); onSaved && onSaved(); load(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
   const decide = (id, status) => {
     api.put(`/employee-requests/${id}/status`, { status })
       .then(() => {
@@ -167,13 +179,22 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
           <Stack direction="row" spacing={2}>
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.50', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ימי מחלה החודש</Typography>
-              <Typography variant="h5" sx={{ fontWeight: 800 }}>{Number(row.manual?.sick_days) || 0}</Typography>
+              <Typography variant="h5" sx={{ fontWeight: 800 }}>{Number(manualDays) || 0}</Typography>
             </Box>
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">סך מבקשות מאושרות</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{totalApprovedDays}</Typography>
             </Box>
           </Stack>
+
+          {(Number(manualDays) || 0) !== totalApprovedDays && (
+            <Alert
+              severity="warning"
+              action={<Button color="inherit" size="small" onClick={syncFromRequests}>סנכרן ל-{totalApprovedDays}</Button>}
+            >
+              מספר ימי המחלה ({Number(manualDays) || 0}) אינו תואם לסך הבקשות המאושרות ({totalApprovedDays}).
+            </Alert>
+          )}
 
           {/* Direct edit of the month's sick-day count (handles legacy/orphan
               values with no request behind them). */}
