@@ -162,20 +162,81 @@ async function uploadPunches(req, res, next) {
   }
 }
 
+// Clock-down alerting thresholds. The agent heartbeats every ~60s; we alert
+// only once the clock has been unreachable for a sustained period (so a brief
+// reboot doesn't spam), and re-alert at most once per cooldown window.
+const CLOCK_DOWN_THRESHOLD_MS = 3 * 60 * 60 * 1000;   // 3h unreachable
+const CLOCK_ALERT_COOLDOWN_MS = 12 * 60 * 60 * 1000;  // re-alert every 12h max
+
+/**
+ * Email branch managers + system admins when a branch's clock has been
+ * unreachable while the agent itself is alive — the exact failure mode that
+ * silently hid the May 2026 outage (agent heartbeating, clock not polled).
+ * Never throws to the caller; alerting must not break the heartbeat.
+ */
+async function maybeAlertClockDown(branch, now) {
+  if (branch.clock_reachable !== false) return;
+  const lastOk = branch.clock_last_ok_at ? branch.clock_last_ok_at.getTime() : 0;
+  const downMs = lastOk ? (now.getTime() - lastOk) : Infinity;
+  if (downMs < CLOCK_DOWN_THRESHOLD_MS) return;
+  const sinceAlert = branch.clock_alerted_at ? (now.getTime() - branch.clock_alerted_at.getTime()) : Infinity;
+  if (sinceAlert < CLOCK_ALERT_COOLDOWN_MS) return;
+
+  const { User } = require('../models');
+  const recips = await User.find({
+    is_active: true,
+    $or: [
+      { role: 'system_admin' },
+      { role: 'branch_manager', $or: [{ managed_branch_ids: branch._id }, { branch_id: branch._id }] },
+    ],
+  }).select('email').lean();
+  const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
+  if (!emails.length) return;
+
+  const hours = Number.isFinite(downMs) ? Math.round(downMs / 3600000) : null;
+  const sinceTxt = branch.clock_last_ok_at
+    ? new Date(branch.clock_last_ok_at).toLocaleString('he-IL')
+    : 'לא ידוע';
+  const { dispatchEmail } = require('../services/email.service');
+  await dispatchEmail({
+    to: emails,
+    subject: `⚠️ שעון נוכחות לא מגיב — ${branch.name}`,
+    html: `<div dir="rtl" style="font-family:Arial,sans-serif">
+      <p>שעון הנוכחות בסניף <b>${branch.name}</b> אינו מגיב${hours != null ? ` כבר כ-${hours} שעות` : ''} (תקין לאחרונה: ${sinceTxt}).</p>
+      <p>ייתכן שכתובת ה-IP של השעון השתנתה (DHCP) או שהשעון כבוי/מנותק. <b>החתמות לא נקלטות עד לטיפול.</b></p>
+      <p>הסוכן (Pi) עצמו מחובר — הבעיה בחיבור בין ה-Pi לשעון.</p>
+    </div>`,
+  });
+  branch.clock_alerted_at = now;
+}
+
 /**
  * POST /api/agent/:branchId/heartbeat
- * Body: { agent_version, clock_reachable, clock_user_count, clock_log_count, uptime_s }
+ * Body: { agent_version, clock_reachable, clock_user_count, clock_log_count, last_user_sn }
  */
 async function heartbeat(req, res, next) {
   try {
     const branch = req.branch;
-    const { agent_version = '' } = req.body || {};
-    branch.agent_last_seen_at = new Date();
+    const {
+      agent_version = '',
+      clock_reachable = null,
+      clock_log_count = null,
+      last_user_sn = null,
+    } = req.body || {};
+    const now = new Date();
+    branch.agent_last_seen_at = now;
     if (agent_version) branch.agent_version = agent_version;
+    if (clock_reachable !== null) branch.clock_reachable = clock_reachable;
+    if (clock_log_count != null) branch.clock_log_count = clock_log_count;
+    if (last_user_sn != null) branch.clock_last_user_sn = last_user_sn;
+    if (clock_reachable === true) branch.clock_last_ok_at = now;
+
+    try { await maybeAlertClockDown(branch, now); } catch (e) { /* never fail heartbeat */ }
+
     await branch.save();
     res.json({
       ok: true,
-      server_time: new Date().toISOString(),
+      server_time: now.toISOString(),
       branch_id: String(branch._id),
       branch_name: branch.name,
     });

@@ -144,18 +144,44 @@ function shapePunch(rec) {
 let pollFailureCount = 0;
 const POLL_FAILURE_THRESHOLD = 5; // ~75s of consecutive failures @ 15s loop
 
+// Rewrite CLOCK_IP in the .env file so a DHCP-driven IP change survives a
+// restart (otherwise the agent reverts to the old, dead IP on reboot).
+const ENV_PATH = path.join(__dirname, '.env');
+function persistClockIp(newIp) {
+  try {
+    const fs = require('fs');
+    let txt = fs.readFileSync(ENV_PATH, 'utf8');
+    txt = /^CLOCK_IP=.*$/m.test(txt)
+      ? txt.replace(/^CLOCK_IP=.*$/m, `CLOCK_IP=${newIp}`)
+      : txt + `\nCLOCK_IP=${newIp}\n`;
+    fs.writeFileSync(ENV_PATH, txt);
+    log.info('persisted new CLOCK_IP to .env', { clockIp: newIp });
+  } catch (e) {
+    log.error('failed to persist CLOCK_IP', { err: e.message });
+  }
+}
+
 async function discoverClockIp() {
   const os = require('os');
   const net = require('net');
   const ifaces = os.networkInterfaces();
+  // Pick the real branch-LAN address — NOT the Tailscale/VPN overlay. Earlier
+  // this grabbed tailscale0 (100.x CGNAT) and scanned the wrong subnet, so the
+  // clock was never found after a DHCP IP change. Skip overlay interfaces and
+  // require an RFC-1918 private LAN address.
+  const isPrivateLan = (ip) =>
+    /^10\./.test(ip) ||
+    /^192\.168\./.test(ip) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
   let myIp = null;
-  for (const list of Object.values(ifaces || {})) {
+  for (const [name, list] of Object.entries(ifaces || {})) {
+    if (/^(tailscale|tun|wg|docker|zt|utun)/i.test(name)) continue; // overlay/VPN
     for (const a of list || []) {
-      if (a.family === 'IPv4' && !a.internal) { myIp = a.address; break; }
+      if (a.family === 'IPv4' && !a.internal && isPrivateLan(a.address)) { myIp = a.address; break; }
     }
     if (myIp) break;
   }
-  if (!myIp) { log.warn('discoverClockIp: no local IP'); return null; }
+  if (!myIp) { log.warn('discoverClockIp: no private-LAN IP'); return null; }
   const subnet = myIp.split('.').slice(0, 3).join('.');
   log.warn('discoverClockIp: scanning subnet', { subnet, port: cfg.clockPort, currentIp: clock.ip });
 
@@ -191,11 +217,25 @@ async function pollPunches() {
     }
 
     const lastSeen = state.last_user_sn || 0;
+
+    pollFailureCount = 0; // success — reset
+
+    // Self-heal the userSn baseline: these clocks renumber records from 1 when
+    // their buffer rolls/clears, so a stale-high last_user_sn would filter out
+    // every real punch forever (this is what silently hid the May 29 outage).
+    // If the device's max serial is now BELOW our baseline, the buffer was
+    // reindexed — re-baseline to the current max so new punches flow again.
+    const maxSn = raws.reduce((m, r) => Math.max(m, Number(r.userSn) || 0), 0);
+    if (state.bootstrapped && maxSn > 0 && maxSn < lastSeen) {
+      log.warn('clock buffer reindexed (maxSn < last_seen) — re-baselining', { lastSeen, maxSn });
+      state.last_user_sn = maxSn;
+      saveState(cfg.stateFile, state);
+      return; // next poll uploads anything newer than the corrected baseline
+    }
+
     const fresh = raws
       .filter(r => typeof r.userSn === 'number' && r.userSn > lastSeen && r.deviceUserId)
       .sort((a, b) => a.userSn - b.userSn);
-
-    pollFailureCount = 0; // success — reset
 
     if (fresh.length === 0) {
       log.debug('no new punches', { lastSeen, total: raws.length });
@@ -240,13 +280,11 @@ async function pollPunches() {
       try {
         const newIp = await discoverClockIp();
         if (newIp && newIp !== clock.ip) {
-          log.warn('clock IP appears to have changed, switching in-memory', {
+          log.warn('clock IP changed (DHCP) — switching and persisting', {
             from: clock.ip, to: newIp,
           });
           clock.ip = newIp;
-          // Note: this is a runtime override only — to make it permanent,
-          // update CLOCK_IP in .env and restart. The agent will keep using
-          // the new IP until it dies/restarts.
+          persistClockIp(newIp); // make it survive a restart/reboot
         } else if (!newIp) {
           log.error('discoverClockIp: no clock found on local subnet');
         }

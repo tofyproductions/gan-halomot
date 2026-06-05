@@ -26,6 +26,15 @@ const branchSchema = new mongoose.Schema({
   agent_last_seen_at: { type: Date, default: null }, // updated on heartbeat
   agent_version: { type: String, default: '' },      // reported by agent on heartbeat
 
+  // Clock health, reported by the agent heartbeat. Drives the "clock down"
+  // alert when the clock is unreachable while the agent is still alive (DHCP IP
+  // change, clock powered off) — the failure that silently hid the May 2026 outage.
+  clock_reachable: { type: Boolean, default: null },     // last heartbeat's clock probe
+  clock_last_ok_at: { type: Date, default: null },       // last time clock was reachable
+  clock_log_count: { type: Number, default: null },      // device record count
+  clock_last_user_sn: { type: Number, default: null },   // agent's last_user_sn baseline
+  clock_alerted_at: { type: Date, default: null },       // last "clock down" email sent
+
   // Cached snapshot of the list of users stored on the TIMEDOX device,
   // captured by an on-demand dump from the Pi agent. Used by the admin UI
   // to match clock users to payroll employees during onboarding.
