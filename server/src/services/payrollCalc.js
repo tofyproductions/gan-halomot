@@ -196,10 +196,15 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     return s === 'auto' || s === 'approved';
   });
 
-  // Bucket by Israel-local day
+  // Bucket by Israel-local day. Callers intentionally query a slightly wider
+  // punch window (±buffer days) to catch shifts crossing the month boundary in
+  // UTC, then rely on us to filter back to the target month by Israel-local
+  // date. Without this guard, the first day of the NEXT month leaks into this
+  // month's salary (and is double-counted next month).
   const byDay = new Map();
   for (const p of countablePunches) {
     const key = israelDateKey(new Date(p.timestamp));
+    if (key.slice(0, 7) !== monthYM) continue; // outside target month — skip overflow
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key).push(p);
   }

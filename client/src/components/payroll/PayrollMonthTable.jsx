@@ -282,13 +282,24 @@ function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
   }, [row]);
   if (!row) return null;
   const committed = row.commitment?.committed_hours;
+  const h = row.breakdown?.hours || {};
+  const worked = Math.round(((h.regular || 0) + (h.ot_125 || 0) + (h.ot_150 || 0)) * 10) / 10;
+  const diff = committed != null ? Math.round((worked - committed) * 10) / 10 : null;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>הערות — {row.full_name}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          {committed != null && (
-            <Alert severity="info" sx={{ py: 0.5 }}>📋 התחייבות שעות לחודש: <b>{committed}h</b></Alert>
+          {(committed != null || worked > 0) && (
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              {committed != null && <>📋 התחייבות שעות לחודש: <b>{committed}h</b>{'  •  '}</>}
+              ⏱️ עבד בפועל: <b>{worked}h</b>
+              {diff != null && (
+                <span style={{ color: diff < 0 ? '#b91c1c' : '#15803d' }}>
+                  {' '}({diff >= 0 ? '+' : ''}{diff}h)
+                </span>
+              )}
+            </Alert>
           )}
           <TextField
             label="הערה קבועה (תופיע בכל חודש)" fullWidth multiline minRows={2}
@@ -989,9 +1000,21 @@ export default function PayrollMonthTable() {
             </TableRow>
             <TableRow>
               <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>שכר בסיס</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>השלמת שכר</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>תוספת שכר</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>
+                <Tooltip arrow title="תשלום על השעות שעבדה בפועל. שעתי: שעות × תעריף (כולל מכפילי 125%/150% לשע״נ יומיות). תקן: שעות רגילות × ערך שעה (= שכר תקן ÷ שעות התחייבות). שעות מעבר להתחייבות בתוך יום רגיל (עד 8 ש׳) משולמות כאן ב-100%.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>
+                <Tooltip arrow title="רלוונטי לעובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים את ההפרש עד שכר התקן המלא: max(0, שכר תקן − שכר בסיס − תוספת). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל. עבדה מעבר להתחייבות → 0.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>
+                <Tooltip arrow title="גמול שעות נוספות לפי מבחן יומי בלבד (לא לפי התחייבות): מעל 8 ש׳ ביום ב-125%, מעל 10 ש׳ ב-150%. מחושב על ערך השעה הממוצע של העובדת (= שכר תקן ÷ שעות התחייבות). יום נוסף שכולו ≤8 ש׳ אינו שע״נ ומשולם 100% תחת ׳שכר בסיס׳.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>תוספת שכר ⓘ</span>
+                </Tooltip>
+              </TableCell>
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
