@@ -220,21 +220,13 @@ async function pollPunches() {
 
     pollFailureCount = 0; // success — reset
 
-    // Self-heal the userSn baseline: these clocks renumber records from 1 when
-    // their buffer rolls/clears, so a stale-high last_user_sn would filter out
-    // every real punch forever (this is what silently hid the May 29 outage).
-    // If the device's max serial is now BELOW our baseline, the buffer was
-    // reindexed — re-baseline to the current max so new punches flow again.
-    const maxSn = raws.reduce((m, r) => Math.max(m, Number(r.userSn) || 0), 0);
-    if (state.bootstrapped && maxSn > 0 && maxSn < lastSeen) {
-      log.warn('clock buffer reindexed (maxSn < last_seen) — re-baselining', { lastSeen, maxSn });
-      state.last_user_sn = maxSn;
-      saveState(cfg.stateFile, state);
-      return; // next poll uploads anything newer than the corrected baseline
-    }
-
+    // Exclude TIMEDOX test/demo users (device UID 0-9, used while installing a
+    // clock). They carry broken pre-2010 timestamps, so uploading them would
+    // misdate them to "now"; the server also flags them ignored, but skipping
+    // here keeps them out of the DB entirely.
     const fresh = raws
-      .filter(r => typeof r.userSn === 'number' && r.userSn > lastSeen && r.deviceUserId)
+      .filter(r => typeof r.userSn === 'number' && r.userSn > lastSeen && r.deviceUserId
+        && Number(r.deviceUserId) > 9)
       .sort((a, b) => a.userSn - b.userSn);
 
     if (fresh.length === 0) {
