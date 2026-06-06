@@ -830,13 +830,15 @@ export default function PayrollMonthTable() {
   // Approx column widths so borders sit right
   const W = {
     name: 180,            // sticky right column
-    amutaCell: 68,        // each of 7 cols per amuta/branch
+    amutaCell: 68,        // each of 5 hours cols (days+reg+ot125+ot150+rate)
     travel: 78,
     days: 60,
+    absence: 105,         // ימי היעדרות + ניכוי + ממתין
     advance: 180,
     money: 82,
-    teken: 95,            // base / completion / OT addition (תקן breakdown)
-    notes: 240,           // inline notes — readable without click
+    tekenBase: 150,       // שכר בסיס: amount + ערך/שעה + net/gross chip + OT note
+    teken: 110,           // completion / supplement (chips)
+    notes: 260,           // inline notes — readable without click
     custom: 110,
     adjust: 110,
   };
@@ -966,24 +968,22 @@ export default function PayrollMonthTable() {
         }}>
           <colgroup>
             <col style={{ width: W.name }} />
-            {/* 8-col hours block: ימי עבודה + 6 hours/rate cols + שעות התחייבות */}
+            {/* 6-col hours block: ימי עבודה + רגיל + שע"נ א' + שע"נ ב' + תעריף + שכר תקן */}
             <col style={{ width: W.days }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            {/* תקן breakdown — 3 new columns: base / completion / OT addition */}
-            <col style={{ width: W.teken }} />
+            {/* תקן breakdown — 3 columns: base / completion / supplement */}
+            <col style={{ width: W.tekenBase }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.travel }} />
-            <col style={{ width: W.days }} />
-            <col style={{ width: W.days }} />
-            <col style={{ width: W.days }} />
-            <col style={{ width: W.days }} />
+            <col style={{ width: W.days }} />{/* מחלה */}
+            <col style={{ width: W.absence }} />{/* היעדרות */}
+            <col style={{ width: W.days }} />{/* חופשה */}
+            <col style={{ width: W.days }} />{/* דמי חגים */}
             <col style={{ width: W.advance }} />
             <col style={{ width: W.money }} />
             <col style={{ width: W.money }} />
