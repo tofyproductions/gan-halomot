@@ -1649,24 +1649,36 @@ const absCat = (v) => ABSENCE_CATEGORIES.find(c => c.value === v) || ABSENCE_CAT
 
 // Compact absence summary in the table — count of candidate days + actual
 // deduction + how many still await approval. Click opens the AbsenceDialog.
+const ABSENCE_SOURCE = {
+  holiday: { label: '🏖️ גן סגור / חג', color: 'info' },
+  leave:   { label: '✓ חופשה/מחלה מאושרת', color: 'success' },
+  unknown: { label: 'ללא סיבה — לסימון מנהל', color: 'warning' },
+};
+
 function AbsenceCell({ row }) {
   const ab = row.absence;
-  const candidates = ab?.candidates || [];
+  const days = ab?.days || [];
   const ded = ab?.deduction || 0;
-  if (!candidates.length && !ded) return <Typography variant="body2" color="text.secondary">—</Typography>;
-  const byDate = new Map((ab?.entries || []).map(e => [e.date, e]));
-  const pending = candidates.filter(d => { const e = byDate.get(d); return !(e && e.manager_approved && e.accounting_approved); }).length;
+  if (!days.length && !ded) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  const unknown = ab.unknown_count || 0;
+  const justified = ab.justified_count || 0;
+  const byDate = new Map((ab.entries || []).map(e => [e.date, e]));
+  const pending = days.filter(a => a.source === 'unknown')
+    .filter(a => { const e = byDate.get(a.date); return !(e && e.manager_approved && e.accounting_approved); }).length;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{candidates.length} ימים</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days.length} ימים</Typography>
+      {pending > 0 && <Chip size="small" color="warning" variant="filled" label={`${pending} לסימון`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
+      {justified > 0 && <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.56rem' }}>{justified} חג/חופשה</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
-      {pending > 0 && <Chip size="small" color="warning" variant="outlined" label={`${pending} ממתין`} sx={{ height: 14, fontSize: '0.55rem' }} />}
     </Stack>
   );
 }
 
-// Per-day absence review: pick reason + note, approve as manager / accounting.
-// Deducts the uniform daily rate only for deductible categories approved by both.
+// Per-day absence review. Holiday / approved-leave days are shown auto-justified
+// (read-only, no deduction). UNKNOWN-reason days get a reason + manager/accounting
+// approval; deducted at the uniform daily rate only when both approve a
+// deductible category.
 function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose, onSave }) {
   const [entries, setEntries] = useState({});
   useEffect(() => {
@@ -1674,42 +1686,52 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
     const byDate = {};
     for (const e of (row.absence?.entries || [])) byDate[e.date] = { ...e };
     const init = {};
-    for (const d of (row.absence?.candidates || [])) {
-      init[d] = byDate[d] || { date: d, category: 'unpaid', note: '', manager_approved: false, accounting_approved: false };
+    for (const a of (row.absence?.days || [])) {
+      if (a.source !== 'unknown') continue;
+      init[a.date] = byDate[a.date] || { date: a.date, category: 'unpaid', note: '', manager_approved: false, accounting_approved: false };
     }
     setEntries(init);
   }, [row]);
   if (!row) return null;
-  const candidates = row.absence?.candidates || [];
+  const days = row.absence?.days || [];
   const dailyRate = row.absence?.daily_rate || 0;
   const update = (date, patch) => {
     const next = { ...entries, [date]: { ...entries[date], date, ...patch } };
     setEntries(next);
-    onSave(candidates.map(d => ({ date: d, ...next[d] })));
+    onSave(Object.values(next)); // only unknown-day entries are tracked in state
   };
-  const deduction = candidates.reduce((s, d) => {
-    const e = entries[d]; if (!e) return s;
-    return s + ((absCat(e.category).deduct && e.manager_approved && e.accounting_approved) ? dailyRate : 0);
-  }, 0);
+  const deduction = Object.values(entries).reduce((s, e) =>
+    s + ((absCat(e.category).deduct && e.manager_approved && e.accounting_approved) ? dailyRate : 0), 0);
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>היעדרויות — {row.full_name}</DialogTitle>
       <DialogContent>
-        {candidates.length === 0 ? (
-          <Alert severity="success" sx={{ mt: 1 }}>אין ימי היעדרות החודש (ימי ההתחייבות מולאו, או היו חג/חופשה).</Alert>
+        {days.length === 0 ? (
+          <Alert severity="success" sx={{ mt: 1 }}>אין ימי היעדרות החודש — כל ימי ההתחייבות מולאו.</Alert>
         ) : (
           <Stack spacing={1.5} sx={{ mt: 1 }}>
             <Alert severity="info" sx={{ py: 0.5 }}>
               תעריף יום: ₪{Math.round(dailyRate).toLocaleString('he-IL')} · ניכוי מצטבר: <b>−₪{Math.round(deduction).toLocaleString('he-IL')}</b>
             </Alert>
-            {candidates.map(d => {
+            {days.map(({ date: d, source }) => {
+              const src = ABSENCE_SOURCE[source] || ABSENCE_SOURCE.unknown;
+              if (source !== 'unknown') {
+                return (
+                  <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
+                    <Chip size="small" color={src.color} variant="outlined" label={src.label} />
+                    <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>בתשלום (מוצדק)</Typography>
+                  </Paper>
+                );
+              }
               const e = entries[d] || {};
               const cat = absCat(e.category);
               const bothApproved = e.manager_approved && e.accounting_approved;
               return (
-                <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
+                <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, borderColor: 'warning.light' }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                     <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
+                    <Chip size="small" color="warning" variant="outlined" label="ללא סיבה ידועה" sx={{ height: 18 }} />
                     <TextField select size="small" label="סיבה" value={e.category || 'unpaid'} disabled={disabled}
                       onChange={ev => update(d, { category: ev.target.value })} sx={{ minWidth: 160 }}>
                       {ABSENCE_CATEGORIES.map(c => <MenuItem key={c.value} value={c.value}>{c.label}{c.deduct ? ' (מנכה)' : ''}</MenuItem>)}

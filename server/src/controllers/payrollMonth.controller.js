@@ -245,21 +245,24 @@ async function getMonth(req, res, next) {
       });
 
       // Days the gan was closed (holidays) or she had approved leave — never absences.
-      const excludeDates = new Set();
+      // Dates the gan was closed (holidays) and dates of approved leave — used to
+      // auto-classify WHY a committed day was missed.
+      const holidayDates = new Set();
       for (const h of (holidaysByBranch.get(String(emp.branch_id)) || [])) {
-        addRangeToSet(excludeDates, h.start_date, h.end_date, month);
+        addRangeToSet(holidayDates, h.start_date, h.end_date, month);
       }
+      const leaveDates = new Set();
       for (const r of (leaveByEmp.get(String(emp._id)) || [])) {
-        addRangeToSet(excludeDates, r.from_date, r.to_date, month);
+        addRangeToSet(leaveDates, r.from_date, r.to_date, month);
       }
 
-      // Commitment analysis: committed days she missed (excluding holidays/leave)
-      // are the absence CANDIDATES.
+      // All committed days she missed (NOT excluded) — each is annotated with a
+      // source so the UI can show holiday/leave (justified) vs unknown (the
+      // manager must mark the reason).
       const commitmentInfo = analyzeCommitment(
-        commitmentByEmp.get(String(emp._id)), countablePunches, month, excludeDates,
+        commitmentByEmp.get(String(emp._id)), countablePunches, month,
       );
 
-      // Absence deduction: uniform daily rate × approved deductible absence days.
       // Absence only applies to תקן (global) employees — an hourly employee is
       // paid solely for the hours she punched, so "absence" is meaningless.
       const isTeken = emp.salary_type === 'global';
@@ -267,12 +270,21 @@ async function getMonth(req, res, next) {
       const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
       const dailyRate = (isTeken && committedDays > 0 && tekenSalary > 0)
         ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
-      const absenceCandidates = isTeken ? commitmentInfo.absent_dates : [];
       const absenceEntries = isTeken && Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
-      const deductibleDays = absenceEntries.filter(e =>
-        DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
-        && e.manager_approved === true && e.accounting_approved === true,
-      ).length;
+      const entryByDate = new Map(absenceEntries.map(e => [e.date, e]));
+      const absenceDays = isTeken ? commitmentInfo.absent_dates.map(d => ({
+        date: d,
+        source: holidayDates.has(d) ? 'holiday' : (leaveDates.has(d) ? 'leave' : 'unknown'),
+      })) : [];
+      // Deduct only UNKNOWN-reason days the manager+accounting marked deductible.
+      const deductibleDays = absenceDays.filter(a => {
+        if (a.source !== 'unknown') return false;
+        const e = entryByDate.get(a.date);
+        return e && DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
+          && e.manager_approved === true && e.accounting_approved === true;
+      }).length;
+      const unknownCount = absenceDays.filter(a => a.source === 'unknown').length;
+      const justifiedCount = absenceDays.length - unknownCount;
       const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
 
       // Beyond-commitment supplement is paid only when BOTH manager and
@@ -412,11 +424,14 @@ async function getMonth(req, res, next) {
         adjustments: empAdjustments,
         adj_totals: adjTotals,
         absence: {
-          candidates: absenceCandidates,             // committed days missed (תקן only; excl holidays/leave)
-          entries: absenceEntries,                   // per-day decisions
+          days: absenceDays,                         // [{date, source: holiday|leave|unknown}]
+          candidates: absenceDays.map(a => a.date),  // back-compat
+          entries: absenceEntries,                   // per-day decisions (unknown days)
           daily_rate: dailyRate,                     // S / committed days
           deduction: absenceDeduction,               // amount actually deducted
           deductible_days: deductibleDays,
+          unknown_count: unknownCount,               // days needing the manager's reason
+          justified_count: justifiedCount,           // holiday / approved-leave days
         },
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,
