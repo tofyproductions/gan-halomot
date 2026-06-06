@@ -62,9 +62,18 @@ const payrollMonthSchema = new mongoose.Schema({
     // false to pay only the actual worked hours × hourly_value (no top-up).
     include_salary_completion: { type: Boolean, default: true },
 
-    // Whether to pay the תקן OT addition (overtime beyond commitment hours).
-    // Default true (current behaviour); accountant can reject it per month.
+    // DEPRECATED — no longer read by the calc. Statutory daily overtime is now
+    // always paid automatically; the beyond-commitment supplement is gated by
+    // the two approval flags below. Kept for back-compat with old documents.
     include_teken_ot: { type: Boolean, default: true },
+
+    // Approval gate for the beyond-commitment supplement (extra regular hours a
+    // תקן employee worked above her committed hours). The supplement is paid
+    // ONLY when BOTH the branch manager and accounting approve it. Each flag is
+    // writable solely by the matching role (branch_manager / accountant; admin
+    // may set either).
+    supplement_manager_approved: { type: Boolean, default: false },
+    supplement_accounting_approved: { type: Boolean, default: false },
 
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:

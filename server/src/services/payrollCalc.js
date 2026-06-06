@@ -420,32 +420,50 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   }
 
   // Compute teken breakdown for output (needed below in return object).
+  //
+  // Fair + law-compliant model:
+  //   base_regular + completion  always equal the agreed salary S (when worked
+  //     regular hours ≤ commitment) — completion auto-tops-up a shortfall.
+  //   ot_pay (statutory daily OT, >8h/day) is ALWAYS paid, ON TOP of S — it no
+  //     longer offsets completion (the old "arbitrary split" that absorbed OT).
+  //   extra_reg_pay (regular hours BEYOND the commitment, e.g. an extra ≤8h day)
+  //     is an approval-gated supplement: paid only when opts.pay_excess_supplement
+  //     is true (= branch manager AND accounting both approved). Default: unpaid.
   let tekenBreakdown = null;
   if (employee.salary_type === 'global' && rates.required_hours > 0 && rates.global_salary > 0) {
     const includeCompletion = opts.include_salary_completion !== false;
-    // OT-beyond-commitment addition for תקן employees. Default ON (current
-    // behaviour); the accountant can reject it per employee/month. When rejected
-    // the completion refills to the standard salary, so she gets exactly the
-    // teken salary with no overtime extra.
-    const includeOt = opts.include_teken_ot !== false;
-    const hourlyValue = rates.global_salary / rates.required_hours;
-    const basePart = regHours * hourlyValue;
-    const otPart = ot125Hours * hourlyValue * 1.25 + ot150Hours * hourlyValue * 1.5;
-    const otApplied = includeOt ? otPart : 0;
-    const completion = includeCompletion ? Math.max(0, rates.global_salary - basePart - otApplied) : 0;
+    const payExcess = opts.pay_excess_supplement === true;
+    const S = rates.global_salary;
+    const H = rates.required_hours;
+    const hv = S / H; // average hourly value
+
+    const baseRegular = Math.min(regHours, H) * hv;
+    const completion = includeCompletion ? Math.max(0, S - regHours * hv) : 0;
+    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // statutory, always paid
+    const extraRegHours = Math.max(0, regHours - H);
+    const extraRegPay = extraRegHours * hv;                        // beyond commitment, 100%
+    const supplementApplied = payExcess ? extraRegPay : 0;
+
+    const r2 = (n) => Math.round(n * 100) / 100;
     tekenBreakdown = {
-      teken_salary: rates.global_salary,
-      required_hours: rates.required_hours,
-      hourly_value: Math.round(hourlyValue * 100) / 100,
-      base_part: Math.round(basePart * 100) / 100,
-      ot_part: Math.round(otPart * 100) / 100,            // computed OT addition
-      ot_applied: Math.round(otApplied * 100) / 100,      // OT actually paid
-      include_ot: includeOt,
-      completion: Math.round(completion * 100) / 100,
+      teken_salary: S,
+      required_hours: H,
+      hourly_value: r2(hv),
+      base_regular: r2(baseRegular),
+      completion: r2(completion),
       include_completion: includeCompletion,
-      exceeded_commitment: hoursWorked > rates.required_hours,
+      ot_pay: r2(otPay),                       // statutory daily OT (auto, on top)
+      extra_reg_hours: r2(extraRegHours),
+      extra_reg_pay: r2(extraRegPay),          // approval-gated supplement (computed)
+      supplement_applied: r2(supplementApplied), // actually paid (after approvals)
+      pay_excess_supplement: payExcess,
+      exceeded_commitment: regHours > H,
+      // Back-compat aliases for older consumers (exports / legacy reads):
+      base_part: r2(baseRegular + otPay),
+      ot_part: r2(extraRegPay),
+      ot_applied: r2(supplementApplied),
     };
-    baseSalary = basePart + completion + otApplied;
+    baseSalary = baseRegular + completion + otPay + supplementApplied;
   }
 
   // --- Extras ---

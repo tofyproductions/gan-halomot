@@ -21,7 +21,9 @@ router.post('/change-requests',               requireRole('system_admin', 'accou
 router.get('/change-requests',                requireRole('system_admin', 'accountant', 'branch_manager'), c.listChangeRequests);
 router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accountant'), c.decideChangeRequest);
 
-router.patch('/:employeeId',                  requireRole('system_admin', 'accountant'), c.upsertEntry);
+// accountant/admin edit any field; branch_manager may set ONLY the manager
+// supplement-approval flag for their own branches (enforced in the controller).
+router.patch('/:employeeId',                  requireRole('system_admin', 'accountant', 'branch_manager'), c.upsertEntry);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
 router.post('/:month/reopen',                 requireRole('system_admin', 'accountant'), c.reopenMonth);
 

@@ -466,7 +466,7 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 
 export default function PayrollMonthTable() {
   const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
-  const { isAdmin, isAccountant } = useAuth();
+  const { isAdmin, isAccountant, isManager } = useAuth();
   // Branch managers can't write PayrollMonth directly. They stage edits
   // locally and submit them as one change request to the accountant.
   const isReviewer = isAdmin || isAccountant;
@@ -555,6 +555,19 @@ export default function PayrollMonthTable() {
     api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
+
+  // Supplement approvals (manager / accounting) are written DIRECTLY — even for
+  // a branch manager (who otherwise stages edits). The server enforces that
+  // each role may only set its own flag for its own branches.
+  const patchApproval = useCallback((employeeId, patch) => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, manual: { ...r.manual, ...patch } } : r),
+    });
+    api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
+      .then(() => fetchData())
+      .catch(err => { toast.error(err.response?.data?.error || 'האישור נכשל'); fetchData(); });
+  }, [month, fetchData]);
 
   // Permanent note lives on the employee (shown every month), not on the month.
   const savePermanentNote = useCallback((employeeId, text) => {
@@ -728,7 +741,7 @@ export default function PayrollMonthTable() {
       cells.push(
         r.salary_type === 'global' && tb ? Math.round(tb.base_part) : '',
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
-        r.salary_type === 'global' && tb ? Math.round(tb.ot_part) : '',
+        r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
         r.manual.sick_days || '', r.manual.absence_days || '', r.manual.vacation_days || '', r.manual.holiday_pay || '',
         r.manual.advance_deduction_preset?.label || r.manual.advance_deduction_text || '',
@@ -1001,17 +1014,17 @@ export default function PayrollMonthTable() {
             <TableRow>
               <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>
-                <Tooltip arrow title="תשלום על השעות שעבדה בפועל. שעתי: שעות × תעריף (כולל מכפילי 125%/150% לשע״נ יומיות). תקן: שעות רגילות × ערך שעה (= שכר תקן ÷ שעות התחייבות). שעות מעבר להתחייבות בתוך יום רגיל (עד 8 ש׳) משולמות כאן ב-100%.">
+                <Tooltip arrow title="שעתי: שעות × תעריף (כולל מכפילי 125%/150% לשע״נ יומיות). תקן: שעות רגילות עד ההתחייבות × ערך שעה (= שכר תקן ÷ שעות התחייבות), בתוספת גמול שע״נ יומי חוקי (מעל 8 ש׳/יום ב-125%, מעל 10 ב-150%) — המשולם תמיד, על גבי השכר.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
                 </Tooltip>
               </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>
-                <Tooltip arrow title="רלוונטי לעובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים את ההפרש עד שכר התקן המלא: max(0, שכר תקן − שכר בסיס − תוספת). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל. עבדה מעבר להתחייבות → 0.">
+                <Tooltip arrow title="עובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים אוטומטית עד שכר התקן המלא: max(0, שכר תקן − שעות רגילות × ערך שעה). שכר בסיס + השלמה = השכר המוסכם. ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
                 </Tooltip>
               </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>
-                <Tooltip arrow title="גמול שעות נוספות לפי מבחן יומי בלבד (לא לפי התחייבות): מעל 8 ש׳ ביום ב-125%, מעל 10 ש׳ ב-150%. מחושב על ערך השעה הממוצע של העובדת (= שכר תקן ÷ שעות התחייבות). יום נוסף שכולו ≤8 ש׳ אינו שע״נ ומשולם 100% תחת ׳שכר בסיס׳.">
+                <Tooltip arrow title="תוספת בגין שעות רגילות שמעבר להתחייבות (למשל יום נוסף ≤8 ש׳), על ערך השעה הממוצע. אינה משולמת אוטומטית — דורשת אישור מנהל + הנה״ח (שניהם). שע״נ יומי חוקי אינו כאן אלא תמיד בשכר בסיס.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>תוספת שכר ⓘ</span>
                 </Tooltip>
               </TableCell>
@@ -1212,8 +1225,11 @@ export default function PayrollMonthTable() {
                         />
                       </TableCell>
                       <TableCell align="center" sx={{ bgcolor: '#f0fdf4' }}>
-                        <TekenOtCell row={r} disabled={locked}
-                          onToggle={(v) => patchManual(r.employee_id, { include_teken_ot: v })}
+                        <TekenSupplementCell row={r} disabled={locked}
+                          canManager={isManager || isAdmin}
+                          canAccounting={isAccountant || isAdmin}
+                          onApproveManager={(v) => patchApproval(r.employee_id, { supplement_manager_approved: v })}
+                          onApproveAccounting={(v) => patchApproval(r.employee_id, { supplement_accounting_approved: v })}
                         />
                       </TableCell>
 
@@ -1449,9 +1465,11 @@ function TekenBasePartCell({ row, onOpenHours }) {
   // Render value: תקן uses base_part, hourly uses computed base_salary
   let mainValue = 0;
   let perHourLabel = null;
+  let otNote = null;
   if (row.salary_type === 'global' && tb) {
-    mainValue = tb.base_part;
+    mainValue = tb.base_part; // base_regular + statutory ot_pay
     perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
+    if (tb.ot_pay > 0) otNote = `כולל שע״נ ₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
     mainValue = baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
@@ -1472,6 +1490,11 @@ function TekenBasePartCell({ row, onOpenHours }) {
       {perHourLabel && (
         <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
           {perHourLabel}
+        </Typography>
+      )}
+      {otNote && (
+        <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'success.dark' }}>
+          {otNote}
         </Typography>
       )}
       {incomplete > 0 && (
@@ -1524,32 +1547,48 @@ function TekenCompletionCell({ row, disabled, onToggle }) {
   );
 }
 
-function TekenOtCell({ row, disabled, onToggle }) {
+// Approval-gated supplement for REGULAR hours worked beyond the commitment
+// (e.g. an extra ≤8h day — NOT statutory overtime, which is auto-paid in the
+// base column). Paid only when BOTH the branch manager AND accounting approve.
+function TekenSupplementCell({ row, disabled, canManager, canAccounting, onApproveManager, onApproveAccounting }) {
   const tb = row.breakdown?.components?.teken_breakdown;
-  if (row.salary_type !== 'global' || !tb || !tb.ot_part) {
+  if (row.salary_type !== 'global' || !tb || !(tb.extra_reg_pay > 0)) {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }
-  // Accountant approves/rejects paying the OT-beyond-commitment addition.
-  const enabled = row.manual.include_teken_ot !== false;
+  const mgr = row.manual.supplement_manager_approved === true;
+  const acc = row.manual.supplement_accounting_approved === true;
+  const paid = mgr && acc;
+  const amount = Math.round(tb.extra_reg_pay).toLocaleString('he-IL');
+  const chip = (label, on, can, onApprove, tip) => (
+    <Tooltip title={can ? (on ? `${tip} — לחץ לבטל` : `${tip} — לחץ לאשר`) : 'אין הרשאה'}>
+      <span>
+        <Chip
+          size="small"
+          color={on ? 'success' : 'default'}
+          variant={on ? 'filled' : 'outlined'}
+          label={`${label} ${on ? '✓' : '✗'}`}
+          disabled={disabled || !can}
+          onClick={(e) => { e.stopPropagation(); if (can) onApprove(!on); }}
+          sx={{ height: 16, fontSize: '0.58rem', cursor: can ? 'pointer' : 'default' }}
+        />
+      </span>
+    </Tooltip>
+  );
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
       <Typography
         variant="body2"
-        sx={{ fontWeight: 700, fontSize: '0.82rem', color: enabled ? 'success.dark' : 'text.disabled', textDecoration: enabled ? 'none' : 'line-through' }}
+        sx={{ fontWeight: 700, fontSize: '0.82rem', color: paid ? 'success.dark' : 'text.disabled', textDecoration: paid ? 'none' : 'line-through' }}
       >
-        +{Math.round(tb.ot_part).toLocaleString('he-IL')} ₪
+        +{amount} ₪
       </Typography>
-      <Tooltip title={enabled ? 'תוספת שע״נ מעבר להתחייבות — לחץ לדחות' : 'תוספת שע״נ נדחתה — לחץ לאשר'}>
-        <Chip
-          size="small"
-          color={enabled ? 'success' : 'default'}
-          variant={enabled ? 'filled' : 'outlined'}
-          label={enabled ? 'מאושר' : 'נדחה'}
-          disabled={disabled}
-          onClick={(e) => { e.stopPropagation(); onToggle(!enabled); }}
-          sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer' }}
-        />
-      </Tooltip>
+      {!paid && (
+        <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'warning.dark' }}>ממתין לאישור</Typography>
+      )}
+      <Stack direction="row" spacing={0.3}>
+        {chip('מנהל', mgr, canManager, onApproveManager, 'אישור מנהל')}
+        {chip('הנה״ח', acc, canAccounting, onApproveAccounting, 'אישור הנה״ח')}
+      </Stack>
     </Stack>
   );
 }

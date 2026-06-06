@@ -203,13 +203,23 @@ async function getMonth(req, res, next) {
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
-      const existingManual = existingByEmp.get(String(emp._id))?.manual || {};
-      const breakdown = calculateMonthlySalary(emp, empPunches, month, {
+      const existingRow = existingByEmp.get(String(emp._id));
+      const existingManual = existingRow?.manual || {};
+      // Beyond-commitment supplement is paid only when BOTH manager and
+      // accounting have approved it.
+      const payExcessSupplement = existingManual.supplement_manager_approved === true
+        && existingManual.supplement_accounting_approved === true;
+      let breakdown = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
         include_salary_completion: existingManual.include_salary_completion !== false,
-        include_teken_ot: existingManual.include_teken_ot !== false,
+        pay_excess_supplement: payExcessSupplement,
       });
-      const row = existingByEmp.get(String(emp._id));
+      // Closed months are frozen: serve the snapshot captured at finalize so a
+      // later rate/logic change never shifts an already-paid month.
+      if (existingRow?.status === 'finalized' && existingRow.auto_snapshot) {
+        breakdown = existingRow.auto_snapshot;
+      }
+      const row = existingRow;
       const manual = row?.manual || {};
       // Commitment analysis: count auto-absences (committed days she didn't punch,
       // minus off-day workdays that offset). Only counts countable (approved/auto)
@@ -334,7 +344,8 @@ async function getMonth(req, res, next) {
           notes: manual.notes || '',
           custom_values: manual.custom_values || {},
           include_salary_completion: manual.include_salary_completion !== false,
-          include_teken_ot: manual.include_teken_ot !== false,
+          supplement_manager_approved: manual.supplement_manager_approved === true,
+          supplement_accounting_approved: manual.supplement_accounting_approved === true,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
@@ -453,18 +464,45 @@ async function upsertEntry(req, res, next) {
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
     const body = req.body?.manual || {};
+    const role = req.user?.role;
     const setObj = {};
     const allowed = [
       'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'bonus', 'notes', 'custom_values',
-      'include_salary_completion', 'include_teken_ot',
+      'include_salary_completion',
+      'supplement_manager_approved', 'supplement_accounting_approved',
     ];
-    for (const k of allowed) {
-      if (Object.prototype.hasOwnProperty.call(body, k)) {
-        setObj[`manual.${k}`] = body[k];
+
+    // Per-role write rules for the two supplement-approval flags:
+    //   supplement_manager_approved    → branch_manager (own branches) or admin
+    //   supplement_accounting_approved → accountant or admin
+    const canSetManagerApproval    = role === 'branch_manager' || role === 'system_admin';
+    const canSetAccountingApproval = role === 'accountant'     || role === 'system_admin';
+
+    // A branch manager may ONLY touch the manager-approval flag, and only for an
+    // employee in a branch they manage. All other fields stay accountant/admin.
+    if (role === 'branch_manager') {
+      if (Object.keys(body).some(k => k !== 'supplement_manager_approved')) {
+        return res.status(403).json({ error: 'מנהל סניף רשאי לעדכן רק את אישור המנהל' });
       }
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      if (req.user.branch_id) managed.push(String(req.user.branch_id));
+      if (!managed.includes(String(emp.branch_id))) {
+        return res.status(403).json({ error: 'אין הרשאה לסניף זה' });
+      }
+    }
+
+    for (const k of allowed) {
+      if (!Object.prototype.hasOwnProperty.call(body, k)) continue;
+      if (k === 'supplement_manager_approved' && !canSetManagerApproval) {
+        return res.status(403).json({ error: 'רק מנהל סניף יכול לאשר את חלק המנהל' });
+      }
+      if (k === 'supplement_accounting_approved' && !canSetAccountingApproval) {
+        return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר את חלק ההנה״ח' });
+      }
+      setObj[`manual.${k}`] = body[k];
     }
 
     const row = await PayrollMonth.findOneAndUpdate(
@@ -525,10 +563,23 @@ async function finalizeMonth(req, res, next) {
       punchesByEmp.get(k).push(p);
     }
 
+    // Load each employee's manual toggles so the frozen snapshot honours the
+    // completion toggle and the supplement approvals (was previously ignored).
+    const existingDocs = await PayrollMonth.find({
+      employee_id: { $in: employees.map(e => e._id) }, month,
+    }).select('employee_id manual').lean();
+    const manualByEmp = new Map(existingDocs.map(d => [String(d.employee_id), d.manual || {}]));
+
     let updated = 0;
     for (const emp of employees) {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
-      const snapshot = calculateMonthlySalary(emp, empPunches, month, { branchAmutaMap });
+      const m = manualByEmp.get(String(emp._id)) || {};
+      const snapshot = calculateMonthlySalary(emp, empPunches, month, {
+        branchAmutaMap,
+        include_salary_completion: m.include_salary_completion !== false,
+        pay_excess_supplement: m.supplement_manager_approved === true
+          && m.supplement_accounting_approved === true,
+      });
       await PayrollMonth.findOneAndUpdate(
         { employee_id: emp._id, month },
         {
