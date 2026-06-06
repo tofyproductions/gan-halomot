@@ -1445,19 +1445,20 @@ function TekenBasePartCell({ row, onOpenHours }) {
   const noHours = (row.breakdown?.hours?.total || 0) === 0;
 
   // Render value: תקן uses base_part, hourly uses computed base_salary
+  const netGross = row.salary_is_net ? 'נטו' : 'ברוטו';
   let mainValue = 0;
   let perHourLabel = null;
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
     mainValue = tb.regular_pay != null ? tb.regular_pay : tb.base_part; // שכר יסוד (regular hours)
-    perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
+    perHourLabel = `ערך/שעה: ${tb.hourly_value} · ${netGross}`;
     // OT paid WITHIN the agreed salary — shown separately so the payslip proves
     // she is compensated for the overtime she actually worked.
     if (tb.ot_pay > 0) otNote = `גמול שע״נ +₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
     mainValue = baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
-    if (rate) perHourLabel = `${rate} ₪/שעה`;
+    if (rate) perHourLabel = `${rate} ₪/שעה · ${netGross}`;
   } else {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }

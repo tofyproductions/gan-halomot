@@ -333,6 +333,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
                       {breakdown.salary_type === 'hourly'
                         ? `₪${breakdown.rates.hourly_rate}/שעה`
                         : `גלובלי ₪${breakdown.rates.global_salary}`}
+                      {' · '}{breakdown.salary_is_net ? 'נטו' : 'ברוטו'}
                     </Typography>
                   </CardContent>
                 </Card>
