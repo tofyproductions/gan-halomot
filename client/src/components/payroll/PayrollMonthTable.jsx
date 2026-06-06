@@ -1451,14 +1451,14 @@ function TekenBasePartCell({ row, onOpenHours }) {
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
     mainValue = tb.regular_pay != null ? tb.regular_pay : tb.base_part; // שכר יסוד (regular hours)
-    perHourLabel = `ערך/שעה: ${tb.hourly_value} · ${netGross}`;
+    perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
     // OT paid WITHIN the agreed salary — shown separately so the payslip proves
     // she is compensated for the overtime she actually worked.
     if (tb.ot_pay > 0) otNote = `גמול שע״נ +₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
     mainValue = baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
-    if (rate) perHourLabel = `${rate} ₪/שעה · ${netGross}`;
+    if (rate) perHourLabel = `${rate} ₪/שעה`;
   } else {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }
@@ -1472,10 +1472,21 @@ function TekenBasePartCell({ row, onOpenHours }) {
       ) : (
         <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>
       )}
-      {perHourLabel && (
-        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-          {perHourLabel}
-        </Typography>
+      {(perHourLabel || (row.salary_type === 'global' || row.salary_type === 'hourly')) && (
+        <Stack direction="row" spacing={0.4} alignItems="center">
+          {perHourLabel && (
+            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+              {perHourLabel}
+            </Typography>
+          )}
+          <Chip
+            size="small"
+            color={row.salary_is_net ? 'success' : 'info'}
+            variant="filled"
+            label={netGross}
+            sx={{ height: 15, fontSize: '0.58rem', fontWeight: 800, '& .MuiChip-label': { px: 0.6 } }}
+          />
+        </Stack>
       )}
       {otNote && (
         <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'success.dark' }}>
