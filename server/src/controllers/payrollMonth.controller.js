@@ -260,11 +260,15 @@ async function getMonth(req, res, next) {
       );
 
       // Absence deduction: uniform daily rate × approved deductible absence days.
+      // Absence only applies to תקן (global) employees — an hourly employee is
+      // paid solely for the hours she punched, so "absence" is meaningless.
+      const isTeken = emp.salary_type === 'global';
       const committedDays = commitmentInfo.committed_dates.length;
       const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
-      const dailyRate = (committedDays > 0 && tekenSalary > 0)
+      const dailyRate = (isTeken && committedDays > 0 && tekenSalary > 0)
         ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
-      const absenceEntries = Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
+      const absenceCandidates = isTeken ? commitmentInfo.absent_dates : [];
+      const absenceEntries = isTeken && Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
       const deductibleDays = absenceEntries.filter(e =>
         DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
         && e.manager_approved === true && e.accounting_approved === true,
@@ -408,7 +412,7 @@ async function getMonth(req, res, next) {
         adjustments: empAdjustments,
         adj_totals: adjTotals,
         absence: {
-          candidates: commitmentInfo.absent_dates,   // committed days missed (excl holidays/leave)
+          candidates: absenceCandidates,             // committed days missed (תקן only; excl holidays/leave)
           entries: absenceEntries,                   // per-day decisions
           daily_rate: dailyRate,                     // S / committed days
           deduction: absenceDeduction,               // amount actually deducted
@@ -675,7 +679,8 @@ async function finalizeMonth(req, res, next) {
       const ci = analyzeCommitment(finCommitByEmp.get(String(emp._id)), empPunches, month);
       const committedDays = ci.committed_dates.length;
       const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
-      const dailyRate = (committedDays > 0 && tekenSalary > 0) ? tekenSalary / committedDays : 0;
+      const dailyRate = (emp.salary_type === 'global' && committedDays > 0 && tekenSalary > 0)
+        ? tekenSalary / committedDays : 0;
       const deductibleDays = (Array.isArray(m.absence_entries) ? m.absence_entries : []).filter(e =>
         DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
         && e.manager_approved === true && e.accounting_approved === true,
