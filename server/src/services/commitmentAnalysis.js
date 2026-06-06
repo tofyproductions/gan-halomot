@@ -77,6 +77,12 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     return (h || 0) + (m || 0) / 60;
   };
 
+  // Alternating day (e.g. "Friday every other week" — שישי לסירוגין): she is
+  // committed HALF the time, so we count half its hours and never flag it as an
+  // absence or as an off-day-worked offset (we can't know which specific week).
+  const altDay = (commitment.is_alternating_off && commitment.alternating_day != null)
+    ? commitment.alternating_day : null;
+
   const committed = [];
   const off = [];
   let committed_hours = 0; // total contracted hours across the month's committed days
@@ -88,10 +94,15 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
       // Day not configured: treat as off (no commitment)
       continue;
     }
+    const dayHours = Math.max(0, hhmmToHours(cd.end_hhmm) - hhmmToHours(cd.start_hhmm));
+    if (altDay != null && day.weekday === altDay) {
+      committed_hours += 0.5 * dayHours; // half-time alternating day
+      continue;                          // not absence-flagged, not an offset
+    }
     if (cd.is_off) off.push(day.ymd);
     else {
       committed.push(day.ymd);
-      committed_hours += Math.max(0, hhmmToHours(cd.end_hhmm) - hhmmToHours(cd.start_hhmm));
+      committed_hours += dayHours;
     }
   }
 
