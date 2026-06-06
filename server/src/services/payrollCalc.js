@@ -438,8 +438,12 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     const hv = S / H; // average hourly value
 
     const baseRegular = Math.min(regHours, H) * hv;
-    const completion = includeCompletion ? Math.max(0, S - regHours * hv) : 0;
-    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // statutory, always paid
+    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // daily OT premium value
+    // Completion tops up to the agreed salary S and ABSORBS the OT: an employee
+    // who did NOT reach her monthly commitment receives exactly S, with the OT
+    // value included WITHIN S (never on top — she under-delivered overall). Only
+    // hours BEYOND the commitment (below) become an approval-gated supplement.
+    const completion = includeCompletion ? Math.max(0, S - baseRegular - otPay) : 0;
     const extraRegHours = Math.max(0, regHours - H);
     const extraRegPay = extraRegHours * hv;                        // beyond commitment, 100%
     const supplementApplied = payExcess ? extraRegPay : 0;
