@@ -444,6 +444,12 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
                     <TableCell>ניכוי הלוואות</TableCell>
                     <TableCell align="left" sx={{ color: 'error.main' }}>-{formatCurrency(breakdown.deductions.loans)}</TableCell>
                   </TableRow>
+                  {breakdown.deductions.absence > 0 && (
+                    <TableRow>
+                      <TableCell>ניכוי היעדרות <Typography component="span" variant="caption" color="text.secondary">(ימי היעדרות מאושרים)</Typography></TableCell>
+                      <TableCell align="left" sx={{ color: 'error.main' }}>-{formatCurrency(breakdown.deductions.absence)}</TableCell>
+                    </TableRow>
+                  )}
                   <TableRow sx={{ bgcolor: 'primary.50' }}>
                     <TableCell sx={{ fontWeight: 800 }}>סה״כ מוערך</TableCell>
                     <TableCell align="left" sx={{ fontWeight: 900, fontSize: '1.1rem' }}>{formatCurrency(breakdown.estimated_total)}</TableCell>

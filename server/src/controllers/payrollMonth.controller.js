@@ -6,12 +6,28 @@
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
-  PayrollChangeRequest,
+  PayrollChangeRequest, EmployeeRequest,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
-const { analyzeCommitment } = require('../services/commitmentAnalysis');
+const { analyzeCommitment, datesInMonth } = require('../services/commitmentAnalysis');
 const { computeHolidayPay } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
+
+// Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
+const DEDUCTIBLE_ABSENCE = new Set(['unpaid', 'other']);
+
+// Expand a [from,to] range (YYYY-MM-DD strings or Date objects) into the set of
+// YYYY-MM-DD that fall within the given month — used to mark holiday / approved
+// leave days so they are NOT counted as absences.
+function addRangeToSet(set, from, to, monthYM) {
+  if (!from) return;
+  const toYmd = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  const a = toYmd(from);
+  const b = to ? toYmd(to) : a;
+  for (const { ymd } of datesInMonth(monthYM)) {
+    if (ymd >= a && ymd <= b) set.add(ymd);
+  }
+}
 
 function parseMonthRange(monthYM) {
   const [y, m] = monthYM.split('-').map(Number);
@@ -180,6 +196,21 @@ async function getMonth(req, res, next) {
       if (!holidaysByBranch.has(k)) holidaysByBranch.set(k, []);
       holidaysByBranch.get(k).push(h);
     }
+
+    // Approved leave (vacation/sick) overlapping the month — those days are not
+    // absences. (date fields are YYYY-MM-DD strings, so range queries are lexical.)
+    const leaveRequests = await EmployeeRequest.find({
+      employee_id: { $in: employees.map(e => e._id) },
+      status: 'approved',
+      from_date: { $lte: `${month}-31` },
+      $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }],
+    }).lean();
+    const leaveByEmp = new Map();
+    for (const r of leaveRequests) {
+      const k = String(r.employee_id);
+      if (!leaveByEmp.has(k)) leaveByEmp.set(k, []);
+      leaveByEmp.get(k).push(r);
+    }
     const adjByEmp = new Map();
     for (const adj of adjustments) {
       const k = String(adj.employee_id);
@@ -205,6 +236,41 @@ async function getMonth(req, res, next) {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
       const existingRow = existingByEmp.get(String(emp._id));
       const existingManual = existingRow?.manual || {};
+      const row = existingRow;
+      const manual = row?.manual || {};
+      // Only countable (approved/auto) punches — same filter calculateMonthlySalary uses.
+      const countablePunches = empPunches.filter(p => {
+        const s = p.approval_status || 'auto';
+        return s === 'auto' || s === 'approved';
+      });
+
+      // Days the gan was closed (holidays) or she had approved leave — never absences.
+      const excludeDates = new Set();
+      for (const h of (holidaysByBranch.get(String(emp.branch_id)) || [])) {
+        addRangeToSet(excludeDates, h.start_date, h.end_date, month);
+      }
+      for (const r of (leaveByEmp.get(String(emp._id)) || [])) {
+        addRangeToSet(excludeDates, r.from_date, r.to_date, month);
+      }
+
+      // Commitment analysis: committed days she missed (excluding holidays/leave)
+      // are the absence CANDIDATES.
+      const commitmentInfo = analyzeCommitment(
+        commitmentByEmp.get(String(emp._id)), countablePunches, month, excludeDates,
+      );
+
+      // Absence deduction: uniform daily rate × approved deductible absence days.
+      const committedDays = commitmentInfo.committed_dates.length;
+      const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
+      const dailyRate = (committedDays > 0 && tekenSalary > 0)
+        ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
+      const absenceEntries = Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
+      const deductibleDays = absenceEntries.filter(e =>
+        DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
+        && e.manager_approved === true && e.accounting_approved === true,
+      ).length;
+      const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
+
       // Beyond-commitment supplement is paid only when BOTH manager and
       // accounting have approved it.
       const payExcessSupplement = existingManual.supplement_manager_approved === true
@@ -213,22 +279,13 @@ async function getMonth(req, res, next) {
         branchAmutaMap,
         include_salary_completion: existingManual.include_salary_completion !== false,
         pay_excess_supplement: payExcessSupplement,
+        absence_deduction: absenceDeduction,
       });
       // Closed months are frozen: serve the snapshot captured at finalize so a
       // later rate/logic change never shifts an already-paid month.
       if (existingRow?.status === 'finalized' && existingRow.auto_snapshot) {
         breakdown = existingRow.auto_snapshot;
       }
-      const row = existingRow;
-      const manual = row?.manual || {};
-      // Commitment analysis: count auto-absences (committed days she didn't punch,
-      // minus off-day workdays that offset). Only counts countable (approved/auto)
-      // punches — same filter calculateMonthlySalary uses.
-      const countablePunches = empPunches.filter(p => {
-        const s = p.approval_status || 'auto';
-        return s === 'auto' || s === 'approved';
-      });
-      const commitmentInfo = analyzeCommitment(commitmentByEmp.get(String(emp._id)), countablePunches, month);
 
       // Holiday pay (דמי חגים) — auto-computed only for hourly employees
       // who pass tenure + guard-day rules. Manager can still override via
@@ -346,9 +403,17 @@ async function getMonth(req, res, next) {
           include_salary_completion: manual.include_salary_completion !== false,
           supplement_manager_approved: manual.supplement_manager_approved === true,
           supplement_accounting_approved: manual.supplement_accounting_approved === true,
+          absence_entries: absenceEntries,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
+        absence: {
+          candidates: commitmentInfo.absent_dates,   // committed days missed (excl holidays/leave)
+          entries: absenceEntries,                   // per-day decisions
+          daily_rate: dailyRate,                     // S / committed days
+          deduction: absenceDeduction,               // amount actually deducted
+          deductible_days: deductibleDays,
+        },
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,
           committed_hours: commitmentInfo.committed_hours,  // contracted hours this month
@@ -473,19 +538,21 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
+      'absence_entries',
     ];
 
-    // Per-role write rules for the two supplement-approval flags:
+    // Per-role write rules for the approval flags:
     //   supplement_manager_approved    → branch_manager (own branches) or admin
     //   supplement_accounting_approved → accountant or admin
     const canSetManagerApproval    = role === 'branch_manager' || role === 'system_admin';
     const canSetAccountingApproval = role === 'accountant'     || role === 'system_admin';
 
-    // A branch manager may ONLY touch the manager-approval flag, and only for an
-    // employee in a branch they manage. All other fields stay accountant/admin.
+    // A branch manager may ONLY touch the manager-side approvals (supplement +
+    // absence), and only for an employee in a branch they manage.
     if (role === 'branch_manager') {
-      if (Object.keys(body).some(k => k !== 'supplement_manager_approved')) {
-        return res.status(403).json({ error: 'מנהל סניף רשאי לעדכן רק את אישור המנהל' });
+      const MGR_KEYS = new Set(['supplement_manager_approved', 'absence_entries']);
+      if (Object.keys(body).some(k => !MGR_KEYS.has(k))) {
+        return res.status(403).json({ error: 'מנהל סניף רשאי לעדכן רק אישורי מנהל' });
       }
       const managed = (req.user.managed_branch_ids || []).map(String);
       if (req.user.branch_id) managed.push(String(req.user.branch_id));
@@ -494,7 +561,31 @@ async function upsertEntry(req, res, next) {
       }
     }
 
+    // Absence entries are an array of per-day decisions — merge by date so each
+    // role only writes its own side (manager_approved vs accounting_approved),
+    // preventing one role from flipping the other's approval.
+    if (Object.prototype.hasOwnProperty.call(body, 'absence_entries')) {
+      const incoming = Array.isArray(body.absence_entries) ? body.absence_entries : [];
+      const prevDoc = await PayrollMonth.findOne({ employee_id: employeeId, month })
+        .select('manual.absence_entries').lean();
+      const prevByDate = new Map((prevDoc?.manual?.absence_entries || []).map(e => [e.date, e]));
+      setObj['manual.absence_entries'] = incoming.map(inc => {
+        const prev = prevByDate.get(inc.date) || {};
+        const base = {
+          date: inc.date,
+          category: inc.category ?? prev.category ?? 'unpaid',
+          note: inc.note ?? prev.note ?? '',
+          manager_approved: !!prev.manager_approved,
+          accounting_approved: !!prev.accounting_approved,
+        };
+        if (role === 'branch_manager' || role === 'system_admin') base.manager_approved = !!inc.manager_approved;
+        if (role === 'accountant'     || role === 'system_admin') base.accounting_approved = !!inc.accounting_approved;
+        return base;
+      });
+    }
+
     for (const k of allowed) {
+      if (k === 'absence_entries') continue; // handled above
       if (!Object.prototype.hasOwnProperty.call(body, k)) continue;
       if (k === 'supplement_manager_approved' && !canSetManagerApproval) {
         return res.status(403).json({ error: 'רק מנהל סניף יכול לאשר את חלק המנהל' });
@@ -570,15 +661,31 @@ async function finalizeMonth(req, res, next) {
     }).select('employee_id manual').lean();
     const manualByEmp = new Map(existingDocs.map(d => [String(d.employee_id), d.manual || {}]));
 
+    // Commitments → committed-day count for the absence daily rate.
+    const finCommitments = await EmployeeCommitment.find({
+      employee_id: { $in: employees.map(e => e._id) },
+    }).lean();
+    const finCommitByEmp = new Map(finCommitments.map(c => [String(c.employee_id), c]));
+
     let updated = 0;
     for (const emp of employees) {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
       const m = manualByEmp.get(String(emp._id)) || {};
+      // Approved deductible absence days × uniform daily rate.
+      const ci = analyzeCommitment(finCommitByEmp.get(String(emp._id)), empPunches, month);
+      const committedDays = ci.committed_dates.length;
+      const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
+      const dailyRate = (committedDays > 0 && tekenSalary > 0) ? tekenSalary / committedDays : 0;
+      const deductibleDays = (Array.isArray(m.absence_entries) ? m.absence_entries : []).filter(e =>
+        DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
+        && e.manager_approved === true && e.accounting_approved === true,
+      ).length;
       const snapshot = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
         include_salary_completion: m.include_salary_completion !== false,
         pay_excess_supplement: m.supplement_manager_approved === true
           && m.supplement_accounting_approved === true,
+        absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
       });
       await PayrollMonth.findOneAndUpdate(
         { employee_id: emp._id, month },

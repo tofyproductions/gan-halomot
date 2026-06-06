@@ -487,6 +487,7 @@ export default function PayrollMonthTable() {
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
+  const [absence, setAbsence] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -720,7 +721,7 @@ export default function PayrollMonthTable() {
   /* Build the full export matrix (header + one row per employee) with every
      column including notes. Reused by CSV / Excel / PDF exports. */
   const buildExportMatrix = () => {
-    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע"נ תקן', 'שעות התחייבות'];
+    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
       'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
@@ -734,8 +735,7 @@ export default function PayrollMonthTable() {
       const cells = [r.branch_name, r.full_name, r.israeli_id || ''];
       // Consolidated hours across all branches (matches the on-screen table).
       cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
-        r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '', r.breakdown.rates?.global_ot_rate || '');
-      cells.push(r.commitment?.committed_hours ?? '');
+        r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '');
       const tb = r.breakdown?.components?.teken_breakdown;
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
       cells.push(
@@ -1003,11 +1003,11 @@ export default function PayrollMonthTable() {
                 position: 'sticky', right: 0, zIndex: 4,
                 borderLeft: '2px solid', borderColor: 'divider',
               }} className="ag-divider">שם העובד</TableCell>
-              <TableCell colSpan={8} align="center" sx={{
+              <TableCell colSpan={6} align="center" sx={{
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={15 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={13 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -1063,7 +1063,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 8 + 17 + customColumns.length;
+              const totalCols = 1 + 6 + 15 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -1203,15 +1203,9 @@ export default function PayrollMonthTable() {
                           ot_150_hours: r.breakdown.hours.ot_150,
                           hourly_rate: r.breakdown.rates?.hourly_rate || 0,
                           global_salary: r.breakdown.rates?.global_salary || 0,
-                          global_ot_rate: r.breakdown.rates?.global_ot_rate || 0,
                         };
                         return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
                       })()}
-
-                      {/* שעות התחייבות — contracted hours this month from the schedule */}
-                      <TableCell align="center" sx={{ fontWeight: 600, borderLeft: '3px solid', borderColor: '#93c5fd' }}>
-                        {r.commitment?.committed_hours != null ? `${r.commitment.committed_hours}h` : '—'}
-                      </TableCell>
 
                       {/* תקן breakdown — base / completion (with toggle) / OT addition */}
                       <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
@@ -1241,29 +1235,8 @@ export default function PayrollMonthTable() {
                           <Typography variant="body2" color="text.secondary">—</Typography>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ position: 'relative' }}>
-                        <NumberCell value={r.manual.absence_days} disabled={locked} onSave={v => patchManual(r.employee_id, { absence_days: v })} />
-                        {/* Show the auto-detected absences from commitment vs punches
-                            as a small chip when the admin hasn't entered a manual value. */}
-                        {(!r.manual.absence_days || r.manual.absence_days === 0) && r.commitment?.net_absent > 0 && (
-                          <Tooltip title={
-                            <Box sx={{ fontSize: '0.8rem' }}>
-                              <Box sx={{ fontWeight: 700 }}>{r.commitment.net_absent} ימי היעדרות אוטומטיים</Box>
-                              <Box>חסרה ב: {r.commitment.absent_days.join(', ') || '—'}</Box>
-                              {r.commitment.off_day_workdays.length > 0 && (
-                                <Box>עבדה בחופש: {r.commitment.off_day_workdays.join(', ')} (קוזז)</Box>
-                              )}
-                              <Box sx={{ mt: 0.5, opacity: 0.7, fontSize: '0.7rem' }}>לחץ לעריכה ידנית</Box>
-                            </Box>
-                          }>
-                            <Chip
-                              size="small" color="warning" variant="outlined"
-                              label={`auto: ${r.commitment.net_absent}`}
-                              onClick={() => patchManual(r.employee_id, { absence_days: r.commitment.net_absent })}
-                              sx={{ height: 14, fontSize: '0.6rem', mt: 0.3, cursor: 'pointer' }}
-                            />
-                          </Tooltip>
-                        )}
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setAbsence({ open: true, row: r })}>
+                        <AbsenceCell row={r} />
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setVacation({ open: true, row: r })}>
                         <VacationCell row={r} />
@@ -1362,6 +1335,15 @@ export default function PayrollMonthTable() {
         month={month}
         onClose={() => setSick({ open: false, row: null })}
         onSaved={fetchData}
+      />
+      <AbsenceDialog
+        open={absence.open}
+        row={absence.row}
+        disabled={absence.row?.status === 'finalized'}
+        canManager={isManager || isAdmin}
+        canAccounting={isAccountant || isAdmin}
+        onClose={() => setAbsence({ open: false, row: null })}
+        onSave={(entries) => absence.row && patchApproval(absence.row.employee_id, { absence_entries: entries })}
       />
       <HolidayPayDetailDialog
         open={holidayPay.open}
@@ -1599,6 +1581,109 @@ function TekenSupplementCell({ row, disabled, canManager, canAccounting, onAppro
   );
 }
 
+const ABSENCE_CATEGORIES = [
+  { value: 'unpaid',   label: 'היעדרות ללא תשלום', deduct: true },
+  { value: 'other',    label: 'אחר',               deduct: true },
+  { value: 'sick',     label: 'מחלה',              deduct: false },
+  { value: 'vacation', label: 'חופשה',             deduct: false },
+  { value: 'reserve',  label: 'מילואים',           deduct: false },
+];
+const absCat = (v) => ABSENCE_CATEGORIES.find(c => c.value === v) || ABSENCE_CATEGORIES[0];
+
+// Compact absence summary in the table — count of candidate days + actual
+// deduction + how many still await approval. Click opens the AbsenceDialog.
+function AbsenceCell({ row }) {
+  const ab = row.absence;
+  const candidates = ab?.candidates || [];
+  const ded = ab?.deduction || 0;
+  if (!candidates.length && !ded) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  const byDate = new Map((ab?.entries || []).map(e => [e.date, e]));
+  const pending = candidates.filter(d => { const e = byDate.get(d); return !(e && e.manager_approved && e.accounting_approved); }).length;
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{candidates.length} ימים</Typography>
+      {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
+      {pending > 0 && <Chip size="small" color="warning" variant="outlined" label={`${pending} ממתין`} sx={{ height: 14, fontSize: '0.55rem' }} />}
+    </Stack>
+  );
+}
+
+// Per-day absence review: pick reason + note, approve as manager / accounting.
+// Deducts the uniform daily rate only for deductible categories approved by both.
+function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose, onSave }) {
+  const [entries, setEntries] = useState({});
+  useEffect(() => {
+    if (!row) return;
+    const byDate = {};
+    for (const e of (row.absence?.entries || [])) byDate[e.date] = { ...e };
+    const init = {};
+    for (const d of (row.absence?.candidates || [])) {
+      init[d] = byDate[d] || { date: d, category: 'unpaid', note: '', manager_approved: false, accounting_approved: false };
+    }
+    setEntries(init);
+  }, [row]);
+  if (!row) return null;
+  const candidates = row.absence?.candidates || [];
+  const dailyRate = row.absence?.daily_rate || 0;
+  const update = (date, patch) => {
+    const next = { ...entries, [date]: { ...entries[date], date, ...patch } };
+    setEntries(next);
+    onSave(candidates.map(d => ({ date: d, ...next[d] })));
+  };
+  const deduction = candidates.reduce((s, d) => {
+    const e = entries[d]; if (!e) return s;
+    return s + ((absCat(e.category).deduct && e.manager_approved && e.accounting_approved) ? dailyRate : 0);
+  }, 0);
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
+      <DialogTitle>היעדרויות — {row.full_name}</DialogTitle>
+      <DialogContent>
+        {candidates.length === 0 ? (
+          <Alert severity="success" sx={{ mt: 1 }}>אין ימי היעדרות החודש (ימי ההתחייבות מולאו, או היו חג/חופשה).</Alert>
+        ) : (
+          <Stack spacing={1.5} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              תעריף יום: ₪{Math.round(dailyRate).toLocaleString('he-IL')} · ניכוי מצטבר: <b>−₪{Math.round(deduction).toLocaleString('he-IL')}</b>
+            </Alert>
+            {candidates.map(d => {
+              const e = entries[d] || {};
+              const cat = absCat(e.category);
+              const bothApproved = e.manager_approved && e.accounting_approved;
+              return (
+                <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
+                  <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                    <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
+                    <TextField select size="small" label="סיבה" value={e.category || 'unpaid'} disabled={disabled}
+                      onChange={ev => update(d, { category: ev.target.value })} sx={{ minWidth: 160 }}>
+                      {ABSENCE_CATEGORIES.map(c => <MenuItem key={c.value} value={c.value}>{c.label}{c.deduct ? ' (מנכה)' : ''}</MenuItem>)}
+                    </TextField>
+                    <TextField size="small" label="הערה" value={e.note || ''} disabled={disabled}
+                      onChange={ev => update(d, { note: ev.target.value })} sx={{ flex: 1, minWidth: 110 }} />
+                  </Stack>
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.7 }}>
+                    <Chip size="small" color={e.manager_approved ? 'success' : 'default'} variant={e.manager_approved ? 'filled' : 'outlined'}
+                      label={`מנהל ${e.manager_approved ? '✓' : '✗'}`} disabled={disabled || !canManager}
+                      onClick={() => canManager && update(d, { manager_approved: !e.manager_approved })}
+                      sx={{ cursor: canManager ? 'pointer' : 'default' }} />
+                    <Chip size="small" color={e.accounting_approved ? 'success' : 'default'} variant={e.accounting_approved ? 'filled' : 'outlined'}
+                      label={`הנה״ח ${e.accounting_approved ? '✓' : '✗'}`} disabled={disabled || !canAccounting}
+                      onClick={() => canAccounting && update(d, { accounting_approved: !e.accounting_approved })}
+                      sx={{ cursor: canAccounting ? 'pointer' : 'default' }} />
+                    {cat.deduct && bothApproved
+                      ? <Chip size="small" color="error" variant="outlined" label={`−₪${Math.round(dailyRate).toLocaleString('he-IL')}`} sx={{ ml: 'auto' }} />
+                      : <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>{cat.deduct ? 'ממתין לאישור' : 'בתשלום'}</Typography>}
+                  </Stack>
+                </Paper>
+              );
+            })}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>סגור</Button></DialogActions>
+    </Dialog>
+  );
+}
+
 function HolidayPayCell({ row }) {
   const auto = row.holiday_pay_auto || { total_days: 0, total_pay: 0, is_eligible: false };
   const manualVal = Number(row.manual.holiday_pay) || 0;
@@ -1703,7 +1788,7 @@ function CustomCell({ column, value, onSave, disabled }) {
 }
 
 function SubHeaderGroup({ color }) {
-  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר תקן', 'שע״נ תקן', 'שעות התחייבות'];
+  const cells = ['ימי עבודה', 'שעות רגילות', 'שע״נ א\'', 'שע״נ ב\'', 'שכר שעתי', 'שכר תקן'];
   const last = cells.length - 1;
   return (
     <>
@@ -1731,7 +1816,6 @@ function BranchGroupCells({ bk, salaryType, color }) {
   const ot150 = bk?.ot_150_hours || 0;
   const hourly = salaryType === 'hourly' ? (bk?.hourly_rate || 0) : 0;
   const global = salaryType === 'global' ? (bk?.global_salary || 0) : 0;
-  const globalOt = salaryType === 'global' ? (bk?.global_ot_rate || 0) : 0;
   const cell = (v, opts = {}) => (
     <TableCell
       align="center"
@@ -1750,7 +1834,6 @@ function BranchGroupCells({ bk, salaryType, color }) {
     {cell(ot125)}
     {cell(ot150)}
     {cell(hourly)}
-    {cell(global)}
-    {cell(globalOt, { last: true })}
+    {cell(global, { last: true })}
   </>);
 }

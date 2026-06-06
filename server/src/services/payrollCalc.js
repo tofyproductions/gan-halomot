@@ -536,6 +536,12 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     }
   }
 
+  // --- Absence deduction ---
+  // Approved unpaid absence days (committed days she missed that are NOT a
+  // holiday/vacation). Computed by the controller from manual.absence_entries
+  // (only deductible categories with BOTH approvals) × the uniform daily rate.
+  const absenceDeduction = Math.max(0, Number(opts.absence_deduction) || 0);
+
   // --- Absence / incomplete flags ---
   if (incompleteDays > 0) warnings.push(`${incompleteDays} ימים עם החתמה חסרה`);
   if (daysWorked === 0) warnings.push('אין נתוני החתמה כלל החודש');
@@ -543,7 +549,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // --- Final total (this is NOT net pay — no tax/pension withholding) ---
   const grossBeforeDeductions =
     baseSalary + travel + meal + recreation + bonusTotal;
-  const estimatedTotal = Math.round((grossBeforeDeductions - loanDeductions) * 100) / 100;
+  const estimatedTotal = Math.round((grossBeforeDeductions - loanDeductions - absenceDeduction) * 100) / 100;
 
   return {
     month: monthYM,
@@ -577,6 +583,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     deductions: {
       loans:        Math.round(loanDeductions * 100) / 100,
       loan_details: loanDetails,
+      absence:      Math.round(absenceDeduction * 100) / 100,
     },
     estimated_total: estimatedTotal,
     warnings,

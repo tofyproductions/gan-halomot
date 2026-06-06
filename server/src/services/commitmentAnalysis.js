@@ -46,7 +46,11 @@ function datesInMonth(monthYM) {
  *   has_commitment: boolean,
  * }
  */
-function analyzeCommitment(commitment, punches, monthYM) {
+function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
+  // excludeDates: Set of YYYY-MM-DD that must NOT count as absences (kindergarten
+  // holidays, approved vacation/sick). The gan was closed or the absence is
+  // already accounted for — she is not "absent" on those days.
+  const skip = excludeDates instanceof Set ? excludeDates : new Set(excludeDates || []);
   if (!commitment) {
     return {
       committed_dates: [], off_dates: [], worked_dates: [], absent_dates: [],
@@ -92,7 +96,9 @@ function analyzeCommitment(commitment, punches, monthYM) {
   }
 
   const worked = [...workedSet].sort();
-  const absent = committed.filter(d => !workedSet.has(d));
+  // A committed day with no punch is an absence — UNLESS it's a holiday/vacation
+  // day (the gan was closed or it's already accounted for elsewhere).
+  const absent = committed.filter(d => !workedSet.has(d) && !skip.has(d));
   const offDayWorkdays = off.filter(d => workedSet.has(d));
 
   // Offset: every off-day she still worked cancels one absent day.

@@ -75,6 +75,21 @@ const payrollMonthSchema = new mongoose.Schema({
     supplement_manager_approved: { type: Boolean, default: false },
     supplement_accounting_approved: { type: Boolean, default: false },
 
+    // Per-day absence records for committed days the employee missed (already
+    // excluding kindergarten holidays + approved vacation/sick). Each day needs
+    // BOTH manager and accounting approval; only the deductible categories
+    // (unpaid/other) reduce pay, at the uniform daily rate (S / committed days).
+    absence_entries: {
+      type: [{
+        date: { type: String },                              // YYYY-MM-DD
+        category: { type: String, default: 'unpaid' },       // unpaid|other(deduct) | sick|vacation|reserve(paid)
+        note: { type: String, default: '' },
+        manager_approved: { type: Boolean, default: false },
+        accounting_approved: { type: Boolean, default: false },
+      }],
+      default: [],
+    },
+
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
     //   - kind='text'   → only `text` is meaningful
