@@ -1467,9 +1467,11 @@ function TekenBasePartCell({ row, onOpenHours }) {
   let perHourLabel = null;
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
-    mainValue = tb.base_part; // base_regular + statutory ot_pay
+    mainValue = tb.base_part; // guaranteed base (≤ agreed salary)
     perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
-    if (tb.ot_pay > 0) otNote = `כולל שע״נ ₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
+    // OT is inside the base only when she did NOT exceed the commitment; if she
+    // exceeded, the OT lands in the approval-gated supplement instead.
+    if (tb.ot_pay > 0 && !tb.exceeded_commitment) otNote = `כולל שע״נ ₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
     mainValue = baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;

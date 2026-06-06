@@ -437,37 +437,41 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     const H = rates.required_hours;
     const hv = S / H; // average hourly value
 
-    const baseRegular = Math.min(regHours, H) * hv;
     const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // daily OT premium value
-    // Completion tops up to the agreed salary S and ABSORBS the OT: an employee
-    // who did NOT reach her monthly commitment receives exactly S, with the OT
-    // value included WITHIN S (never on top — she under-delivered overall). Only
-    // hours BEYOND the commitment (below) become an approval-gated supplement.
-    const completion = includeCompletion ? Math.max(0, S - baseRegular - otPay) : 0;
-    const extraRegHours = Math.max(0, regHours - H);
-    const extraRegPay = extraRegHours * hv;                        // beyond commitment, 100%
-    const supplementApplied = payExcess ? extraRegPay : 0;
+    // Value of ALL hours actually worked (regular + OT premium).
+    const workedValue = regHours * hv + otPay;
+    // Guarantee: an employee at/under her commitment receives exactly the agreed
+    // salary S — completion tops up the shortfall (OT included WITHIN S, never on
+    // top). Anything earned ABOVE S (because she exceeded her commitment) becomes
+    // the approval-gated supplement; until manager + accounting approve it she is
+    // paid exactly S.
+    const completion = includeCompletion ? Math.max(0, S - workedValue) : 0;
+    const guaranteedBase = Math.min(workedValue, S); // base + completion === S
+    const excess = Math.max(0, workedValue - S);     // everything above the agreed salary
+    const supplementApplied = payExcess ? excess : 0;
 
     const r2 = (n) => Math.round(n * 100) / 100;
     tekenBreakdown = {
       teken_salary: S,
       required_hours: H,
       hourly_value: r2(hv),
-      base_regular: r2(baseRegular),
+      base_regular: r2(guaranteedBase),
       completion: r2(completion),
       include_completion: includeCompletion,
-      ot_pay: r2(otPay),                       // statutory daily OT (auto, on top)
-      extra_reg_hours: r2(extraRegHours),
-      extra_reg_pay: r2(extraRegPay),          // approval-gated supplement (computed)
-      supplement_applied: r2(supplementApplied), // actually paid (after approvals)
+      ot_pay: r2(otPay),                 // OT premium value earned (for the "incl OT" note)
+      worked_value: r2(workedValue),
+      excess_pay: r2(excess),            // amount above the agreed salary (approval-gated)
+      supplement_applied: r2(supplementApplied),
       pay_excess_supplement: payExcess,
-      exceeded_commitment: regHours > H,
-      // Back-compat aliases for older consumers (exports / legacy reads):
-      base_part: r2(baseRegular + otPay),
-      ot_part: r2(extraRegPay),
+      exceeded_commitment: workedValue > S,
+      // Back-compat aliases for the UI / exports:
+      base_part: r2(guaranteedBase),
+      ot_part: r2(excess),
       ot_applied: r2(supplementApplied),
+      extra_reg_pay: r2(excess),
+      extra_reg_hours: r2(Math.max(0, regHours - H)),
     };
-    baseSalary = baseRegular + completion + otPay + supplementApplied;
+    baseSalary = guaranteedBase + completion + supplementApplied;
   }
 
   // --- Extras ---
