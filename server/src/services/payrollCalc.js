@@ -444,12 +444,18 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     // approval-gated supplement for anything earned ABOVE the salary (because she
     // exceeded her committed basket).
     const regularValue = regHours * hv;
-    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // OT premium value
+    const ot125Value = ot125Hours * hv * 1.25;
+    const ot150Value = ot150Hours * hv * 1.5;
+    const otPay = ot125Value + ot150Value; // OT premium value
     const workedValue = regularValue + otPay;
 
-    // Within-salary split (priority: regular first, then OT, then completion).
+    // Within-salary split (priority: regular → OT125 → OT150 → completion), so
+    // each shown column sums exactly to the agreed salary with no double count.
     const guaranteedRegular = Math.min(regularValue, S);
-    const guaranteedOt = Math.min(otPay, Math.max(0, S - regularValue));
+    let rem = Math.max(0, S - guaranteedRegular);
+    const guaranteedOt125 = Math.min(ot125Value, rem); rem -= guaranteedOt125;
+    const guaranteedOt150 = Math.min(ot150Value, rem); rem -= guaranteedOt150;
+    const guaranteedOt = guaranteedOt125 + guaranteedOt150;
     const completion = includeCompletion ? Math.max(0, S - workedValue) : 0;
     // Above the salary — approval-gated (manager + accounting).
     const excess = Math.max(0, workedValue - S);
@@ -462,7 +468,9 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
       required_hours: H,
       hourly_value: r2(hv),
       regular_pay: r2(guaranteedRegular),   // שכר יסוד (regular hours within the salary)
-      ot_pay: r2(guaranteedOt),             // גמול שע״נ paid within the salary
+      ot125_pay: r2(guaranteedOt125),       // שכר שע״נ 125% (within the salary)
+      ot150_pay: r2(guaranteedOt150),       // שכר שע״נ 150% (within the salary)
+      ot_pay: r2(guaranteedOt),             // total OT paid within the salary
       ot_total: r2(otPay),                  // total OT premium earned (reference)
       completion: r2(completion),           // השלמת שכר
       include_completion: includeCompletion,

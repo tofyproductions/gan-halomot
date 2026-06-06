@@ -723,7 +723,7 @@ export default function PayrollMonthTable() {
   const buildExportMatrix = () => {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
-      'שכר בסיס', 'השלמת שכר', 'תוספת שכר',
+      'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט שעות לפי סניף');
@@ -738,8 +738,12 @@ export default function PayrollMonthTable() {
         r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '');
       const tb = r.breakdown?.components?.teken_breakdown;
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
+      const sp = paySplit(r) || { reg: '', ot125: '', ot150: '' };
+      const rnd = (v) => (v === '' || v == null) ? '' : Math.round(v);
       cells.push(
-        r.salary_type === 'global' && tb ? Math.round(tb.base_part) : '',
+        rnd(sp.reg),
+        rnd(sp.ot125),
+        rnd(sp.ot150),
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
         r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
@@ -975,8 +979,10 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
-            {/* תקן breakdown — 3 columns: base / completion / supplement */}
+            {/* תקן breakdown — 5 columns: base / OT125 / OT150 / completion / supplement */}
             <col style={{ width: W.tekenBase }} />
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.travel }} />
@@ -1007,15 +1013,25 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={13 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
             <TableRow>
               <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>
-                <Tooltip arrow title="שעתי: שעות × תעריף (כולל מכפילי 125%/150% לשע״נ יומיות). תקן: שעות רגילות × ערך שעה (= שכר תקן ÷ שעות התחייבות) + ערך שע״נ יומי (מעל 8 ש׳/יום ב-125%, מעל 10 ב-150%). זהו ערך השעות שעבדה בפועל; כשלא הגיעה להתחייבות, השלמת השכר ממלאת עד השכר המוסכם (השע״נ כלול בתוכו).">
+                <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dbeafe' }}>
+                <Tooltip arrow title="תשלום בגין שעות נוספות ב-125% (שעתיים הראשונות מעל 8 ש׳ ביום). תקן: שעות 125% × ערך שעה × 1.25.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 125% ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dbeafe' }}>
+                <Tooltip arrow title="תשלום בגין שעות נוספות ב-150% (מעל 10 ש׳ ביום). תקן: שעות 150% × ערך שעה × 1.5.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 150% ⓘ</span>
                 </Tooltip>
               </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>
@@ -1063,7 +1079,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 6 + 15 + customColumns.length;
+              const totalCols = 1 + 6 + 19 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -1207,13 +1223,19 @@ export default function PayrollMonthTable() {
                         return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
                       })()}
 
-                      {/* תקן breakdown — base / completion (with toggle) / OT addition */}
-                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff', minWidth: 130 }}>
+                      {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה / תוספת */}
+                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
                         <TekenBasePartCell row={r}
                           onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#fefce8', minWidth: 95 }}>
+                      <TableCell align="center" sx={{ bgcolor: '#eef6ff' }}>
+                        <PayAmountCell value={paySplit(r)?.ot125} />
+                      </TableCell>
+                      <TableCell align="center" sx={{ bgcolor: '#eef6ff' }}>
+                        <PayAmountCell value={paySplit(r)?.ot150} />
+                      </TableCell>
+                      <TableCell align="center" sx={{ bgcolor: '#fefce8' }}>
                         <TekenCompletionCell row={r} disabled={locked}
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
@@ -1436,25 +1458,50 @@ function VacationCell({ row }) {
   );
 }
 
+// Split pay into regular / OT-125% / OT-150% for the salary columns.
+// תקן: from teken_breakdown (already capped within the agreed salary).
+// שעתי: hours × rate × multiplier.
+function paySplit(row) {
+  const tb = row.breakdown?.components?.teken_breakdown;
+  const h = row.breakdown?.hours || {};
+  if (row.salary_type === 'global' && tb) {
+    return { reg: tb.regular_pay || 0, ot125: tb.ot125_pay || 0, ot150: tb.ot150_pay || 0 };
+  }
+  if (row.salary_type === 'hourly') {
+    const rate = row.breakdown?.rates?.hourly_rate || 0;
+    return {
+      reg: (h.regular || 0) * rate,
+      ot125: (h.ot_125 || 0) * rate * 1.25,
+      ot150: (h.ot_150 || 0) * rate * 1.5,
+    };
+  }
+  return null;
+}
+
+// Plain currency cell (used for the OT-125% / OT-150% pay columns).
+function PayAmountCell({ value }) {
+  if (!(value > 0)) return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
+  return <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>{Math.round(value).toLocaleString('he-IL')} ₪</Typography>;
+}
+
 function TekenBasePartCell({ row, onOpenHours }) {
   const tb = row.breakdown?.components?.teken_breakdown;
   const baseSalary = row.breakdown?.components?.base_salary || 0;
   const incomplete = row.breakdown?.hours?.incomplete_days || 0;
   const noHours = (row.breakdown?.hours?.total || 0) === 0;
 
-  // Render value: תקן uses base_part, hourly uses computed base_salary
+  // שכר בסיס = pay for REGULAR hours only. OT (125%/150%) is shown in its own
+  // columns; completion / supplement reconcile to the agreed salary.
   const netGross = row.salary_is_net ? 'נטו' : 'ברוטו';
+  const split = paySplit(row);
   let mainValue = 0;
   let perHourLabel = null;
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
-    mainValue = tb.regular_pay != null ? tb.regular_pay : tb.base_part; // שכר יסוד (regular hours)
+    mainValue = split ? split.reg : (tb.regular_pay ?? tb.base_part);
     perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
-    // OT paid WITHIN the agreed salary — shown separately so the payslip proves
-    // she is compensated for the overtime she actually worked.
-    if (tb.ot_pay > 0) otNote = `גמול שע״נ +₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
-    mainValue = baseSalary;
+    mainValue = split ? split.reg : baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
     if (rate) perHourLabel = `${rate} ₪/שעה`;
   } else {
