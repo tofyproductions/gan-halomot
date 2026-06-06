@@ -1208,17 +1208,17 @@ export default function PayrollMonthTable() {
                       })()}
 
                       {/* תקן breakdown — base / completion (with toggle) / OT addition */}
-                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
+                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff', minWidth: 130 }}>
                         <TekenBasePartCell row={r}
                           onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#fefce8' }}>
+                      <TableCell align="center" sx={{ bgcolor: '#fefce8', minWidth: 95 }}>
                         <TekenCompletionCell row={r} disabled={locked}
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#f0fdf4' }}>
+                      <TableCell align="center" sx={{ bgcolor: '#f0fdf4', minWidth: 120 }}>
                         <TekenSupplementCell row={r} disabled={locked}
                           canManager={isManager || isAdmin}
                           canAccounting={isAccountant || isAdmin}
@@ -1235,7 +1235,7 @@ export default function PayrollMonthTable() {
                           <Typography variant="body2" color="text.secondary">—</Typography>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setAbsence({ open: true, row: r })}>
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important', minWidth: 100 }} onClick={() => setAbsence({ open: true, row: r })}>
                         <AbsenceCell row={r} />
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setVacation({ open: true, row: r })}>
@@ -1473,9 +1473,9 @@ function TekenBasePartCell({ row, onOpenHours }) {
         <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>
       )}
       {(perHourLabel || (row.salary_type === 'global' || row.salary_type === 'hourly')) && (
-        <Stack direction="row" spacing={0.4} alignItems="center">
+        <Stack direction="row" spacing={0.4} alignItems="center" sx={{ flexWrap: 'nowrap' }}>
           {perHourLabel && (
-            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
+            <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled', whiteSpace: 'nowrap' }}>
               {perHourLabel}
             </Typography>
           )}
