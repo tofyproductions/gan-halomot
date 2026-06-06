@@ -437,17 +437,23 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     const H = rates.required_hours;
     const hv = S / H; // average hourly value
 
-    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // daily OT premium value
-    // Value of ALL hours actually worked (regular + OT premium).
-    const workedValue = regHours * hv + otPay;
-    // Guarantee: an employee at/under her commitment receives exactly the agreed
-    // salary S — completion tops up the shortfall (OT included WITHIN S, never on
-    // top). Anything earned ABOVE S (because she exceeded her commitment) becomes
-    // the approval-gated supplement; until manager + accounting approve it she is
-    // paid exactly S.
+    // Transparent decomposition of the agreed salary S (basket includes OT).
+    // The hourly value is S/H; regular hours and overtime are valued against it,
+    // then split into the part that fits WITHIN the agreed salary (shown on the
+    // payslip as שכר יסוד + גמול שע״נ + השלמה, summing to exactly S) and an
+    // approval-gated supplement for anything earned ABOVE the salary (because she
+    // exceeded her committed basket).
+    const regularValue = regHours * hv;
+    const otPay = ot125Hours * hv * 1.25 + ot150Hours * hv * 1.5; // OT premium value
+    const workedValue = regularValue + otPay;
+
+    // Within-salary split (priority: regular first, then OT, then completion).
+    const guaranteedRegular = Math.min(regularValue, S);
+    const guaranteedOt = Math.min(otPay, Math.max(0, S - regularValue));
     const completion = includeCompletion ? Math.max(0, S - workedValue) : 0;
-    const guaranteedBase = Math.min(workedValue, S); // base + completion === S
-    const excess = Math.max(0, workedValue - S);     // everything above the agreed salary
+    // Above the salary — approval-gated (manager + accounting).
+    const excess = Math.max(0, workedValue - S);
+    const excessOt = otPay - guaranteedOt; // OT premium portion that fell into the excess
     const supplementApplied = payExcess ? excess : 0;
 
     const r2 = (n) => Math.round(n * 100) / 100;
@@ -455,23 +461,25 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
       teken_salary: S,
       required_hours: H,
       hourly_value: r2(hv),
-      base_regular: r2(guaranteedBase),
-      completion: r2(completion),
+      regular_pay: r2(guaranteedRegular),   // שכר יסוד (regular hours within the salary)
+      ot_pay: r2(guaranteedOt),             // גמול שע״נ paid within the salary
+      ot_total: r2(otPay),                  // total OT premium earned (reference)
+      completion: r2(completion),           // השלמת שכר
       include_completion: includeCompletion,
-      ot_pay: r2(otPay),                 // OT premium value earned (for the "incl OT" note)
-      worked_value: r2(workedValue),
-      excess_pay: r2(excess),            // amount above the agreed salary (approval-gated)
+      excess_pay: r2(excess),               // תוספת — above the salary (approval-gated)
+      excess_ot: r2(excessOt),              // OT portion inside the excess (for the note)
       supplement_applied: r2(supplementApplied),
       pay_excess_supplement: payExcess,
+      worked_value: r2(workedValue),
       exceeded_commitment: workedValue > S,
       // Back-compat aliases for the UI / exports:
-      base_part: r2(guaranteedBase),
+      base_part: r2(guaranteedRegular + guaranteedOt), // base+OT within salary
       ot_part: r2(excess),
       ot_applied: r2(supplementApplied),
       extra_reg_pay: r2(excess),
       extra_reg_hours: r2(Math.max(0, regHours - H)),
     };
-    baseSalary = guaranteedBase + completion + supplementApplied;
+    baseSalary = guaranteedRegular + guaranteedOt + completion + supplementApplied;
   }
 
   // --- Extras ---

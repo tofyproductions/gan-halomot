@@ -1467,11 +1467,11 @@ function TekenBasePartCell({ row, onOpenHours }) {
   let perHourLabel = null;
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
-    mainValue = tb.base_part; // guaranteed base (≤ agreed salary)
+    mainValue = tb.regular_pay != null ? tb.regular_pay : tb.base_part; // שכר יסוד (regular hours)
     perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
-    // OT is inside the base only when she did NOT exceed the commitment; if she
-    // exceeded, the OT lands in the approval-gated supplement instead.
-    if (tb.ot_pay > 0 && !tb.exceeded_commitment) otNote = `כולל שע״נ ₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
+    // OT paid WITHIN the agreed salary — shown separately so the payslip proves
+    // she is compensated for the overtime she actually worked.
+    if (tb.ot_pay > 0) otNote = `גמול שע״נ +₪${Math.round(tb.ot_pay).toLocaleString('he-IL')}`;
   } else if (row.salary_type === 'hourly') {
     mainValue = baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
@@ -1549,9 +1549,9 @@ function TekenCompletionCell({ row, disabled, onToggle }) {
   );
 }
 
-// Approval-gated supplement for REGULAR hours worked beyond the commitment
-// (e.g. an extra ≤8h day — NOT statutory overtime, which is auto-paid in the
-// base column). Paid only when BOTH the branch manager AND accounting approve.
+// Approval-gated supplement for everything earned ABOVE the agreed salary
+// (because she exceeded her committed basket — incl. any OT premium in that
+// excess). Paid only when BOTH the branch manager AND accounting approve.
 function TekenSupplementCell({ row, disabled, canManager, canAccounting, onApproveManager, onApproveAccounting }) {
   const tb = row.breakdown?.components?.teken_breakdown;
   if (row.salary_type !== 'global' || !tb || !(tb.extra_reg_pay > 0)) {
@@ -1561,6 +1561,7 @@ function TekenSupplementCell({ row, disabled, canManager, canAccounting, onAppro
   const acc = row.manual.supplement_accounting_approved === true;
   const paid = mgr && acc;
   const amount = Math.round(tb.extra_reg_pay).toLocaleString('he-IL');
+  const excessOt = tb.excess_ot > 0 ? `כולל שע״נ ₪${Math.round(tb.excess_ot).toLocaleString('he-IL')}` : null;
   const chip = (label, on, can, onApprove, tip) => (
     <Tooltip title={can ? (on ? `${tip} — לחץ לבטל` : `${tip} — לחץ לאשר`) : 'אין הרשאה'}>
       <span>
@@ -1584,6 +1585,9 @@ function TekenSupplementCell({ row, disabled, canManager, canAccounting, onAppro
       >
         +{amount} ₪
       </Typography>
+      {excessOt && (
+        <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'success.dark' }}>{excessOt}</Typography>
+      )}
       {!paid && (
         <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'warning.dark' }}>ממתין לאישור</Typography>
       )}

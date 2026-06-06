@@ -380,10 +380,50 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
             <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
               <Table size="small">
                 <TableBody>
-                  <TableRow>
-                    <TableCell>שכר בסיס</TableCell>
-                    <TableCell align="left" sx={{ fontWeight: 700 }}>{formatCurrency(breakdown.components.base_salary)}</TableCell>
-                  </TableRow>
+                  {(() => {
+                    const tb = breakdown.components.teken_breakdown;
+                    if (breakdown.salary_type !== 'global' || !tb) {
+                      return (
+                        <TableRow>
+                          <TableCell>שכר בסיס</TableCell>
+                          <TableCell align="left" sx={{ fontWeight: 700 }}>{formatCurrency(breakdown.components.base_salary)}</TableCell>
+                        </TableRow>
+                      );
+                    }
+                    return (
+                      <>
+                        <TableRow>
+                          <TableCell>שכר יסוד <Typography component="span" variant="caption" color="text.secondary">({breakdown.hours.regular}h × ₪{tb.hourly_value})</Typography></TableCell>
+                          <TableCell align="left" sx={{ fontWeight: 700 }}>{formatCurrency(tb.regular_pay)}</TableCell>
+                        </TableRow>
+                        {tb.ot_pay > 0 && (
+                          <TableRow>
+                            <TableCell>גמול שעות נוספות <Typography component="span" variant="caption" color="text.secondary">(125%/150%)</Typography></TableCell>
+                            <TableCell align="left" sx={{ fontWeight: 700, color: 'success.dark' }}>{formatCurrency(tb.ot_pay)}</TableCell>
+                          </TableRow>
+                        )}
+                        {tb.completion > 0 && (
+                          <TableRow>
+                            <TableCell>השלמת שכר <Typography component="span" variant="caption" color="text.secondary">(עד השכר המוסכם)</Typography></TableCell>
+                            <TableCell align="left" sx={{ fontWeight: 700, color: 'warning.dark' }}>{formatCurrency(tb.completion)}</TableCell>
+                          </TableRow>
+                        )}
+                        <TableRow sx={{ bgcolor: 'grey.50' }}>
+                          <TableCell sx={{ fontWeight: 700 }}>שכר מוסכם <Typography component="span" variant="caption" color="text.secondary">(יסוד + שע״נ + השלמה)</Typography></TableCell>
+                          <TableCell align="left" sx={{ fontWeight: 800 }}>{formatCurrency(tb.regular_pay + tb.ot_pay + tb.completion)}</TableCell>
+                        </TableRow>
+                        {tb.excess_pay > 0 && (
+                          <TableRow>
+                            <TableCell sx={{ color: tb.supplement_applied > 0 ? 'inherit' : 'text.disabled' }}>
+                              תוספת מעבר להתחייבות {tb.supplement_applied > 0 ? '(מאושר)' : '(ממתין לאישור)'}
+                              {tb.excess_ot > 0 && <Typography component="span" variant="caption" color="text.secondary"> · כולל שע״נ {formatCurrency(tb.excess_ot)}</Typography>}
+                            </TableCell>
+                            <TableCell align="left" sx={{ fontWeight: 700, textDecoration: tb.supplement_applied > 0 ? 'none' : 'line-through' }}>+{formatCurrency(tb.excess_pay)}</TableCell>
+                          </TableRow>
+                        )}
+                      </>
+                    );
+                  })()}
                   <TableRow>
                     <TableCell>נסיעות</TableCell>
                     <TableCell align="left">{formatCurrency(breakdown.components.travel)}</TableCell>
