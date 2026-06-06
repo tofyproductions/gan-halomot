@@ -1277,22 +1277,20 @@ export default function PayrollMonthTable() {
                           verticalAlign: 'top',
                           padding: '6px 8px !important',
                           fontSize: '0.72rem',
-                          lineHeight: 1.35,
+                          lineHeight: 1.4,
                           whiteSpace: 'pre-wrap',
-                          overflow: 'hidden',
-                          maxHeight: 140,
-                          textOverflow: 'ellipsis',
+                          minWidth: 200,
                           bgcolor: (r.manual.notes || r.permanent_note) ? 'rgba(254, 252, 232, 0.55)' : undefined,
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
                         {r.commitment?.committed_hours != null && (
-                          <Box sx={{ color: '#1d4ed8', fontWeight: 700 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
+                          <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
                         )}
                         {r.permanent_note && (
-                          <Box sx={{ color: '#7c3aed', fontWeight: 600 }}>📌 {r.permanent_note}</Box>
+                          <Box sx={{ color: '#7c3aed', fontWeight: 700, mt: 0.3 }}>📌 {r.permanent_note}</Box>
                         )}
-                        {r.manual.notes && <Box sx={{ color: 'text.primary' }}>{r.manual.notes}</Box>}
+                        {r.manual.notes && <Box sx={{ color: 'text.primary', fontWeight: 600, mt: 0.3 }}>{r.manual.notes}</Box>}
                         {!r.commitment?.committed_hours && !r.permanent_note && !r.manual.notes && (
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.disabled' }}>
                             <NoteAltIcon sx={{ fontSize: 14 }} /> הוסף הערה
