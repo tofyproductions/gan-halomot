@@ -745,7 +745,7 @@ export default function PayrollMonthTable() {
       const absEntryBy = new Map((r.absence?.entries || []).map(e => [e.date, e]));
       const openAbsence = (r.absence?.days || []).filter(a => {
         const e = absEntryBy.get(a.date);
-        return !(e && e.manager_approved && e.accounting_approved && !absCat(e.category).deduct);
+        return !(e && !absCat(e.category).deduct); // settled once a non-deductible reason is set
       }).length;
       const vacDays = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual.vacation_days) || 0);
       const holDays = r.holiday_pay_auto?.total_days || 0; // count only — accountant computes the amount
@@ -1709,11 +1709,11 @@ function AbsenceCell({ row }) {
   const days = ab?.days || [];
   const ded = ab?.deduction || 0;
   const byDate = new Map((ab?.entries || []).map(e => [e.date, e]));
-  // A day fully approved by both with a non-deductible reason (מאושר / מחלה /
-  // חופשה / מילואים) is settled — it should no longer show as an absence.
+  // A day given a non-deductible reason (מאושר / מחלה / חופשה / מילואים) is
+  // settled — it's no longer an open absence and drops out of the count.
   const settled = (a) => {
     const e = byDate.get(a.date);
-    return e && e.manager_approved && e.accounting_approved && !absCat(e.category).deduct;
+    return e && !absCat(e.category).deduct;
   };
   const open = days.filter(a => !settled(a));     // still need attention / deduct
   const approvedCount = days.length - open.length;
