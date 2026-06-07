@@ -1678,6 +1678,7 @@ function TekenSupplementCell({ row, disabled, canManager, canAccounting, onAppro
 }
 
 const ABSENCE_CATEGORIES = [
+  { value: 'approved', label: 'מאושר',             deduct: false },
   { value: 'unpaid',   label: 'היעדרות ללא תשלום', deduct: true },
   { value: 'other',    label: 'אחר',               deduct: true },
   { value: 'sick',     label: 'מחלה',              deduct: false },
