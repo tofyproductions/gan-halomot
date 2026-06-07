@@ -796,32 +796,91 @@ export default function PayrollMonthTable() {
     downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
   };
 
+  // Shared, accountant-ready table HTML: grouped by branch, numeric columns
+  // right-aligned with thousands separators, a totals row, and a title block.
+  const buildReportHTML = ({ excel }) => {
+    const m = buildExportMatrix();
+    const header = m[0];
+    const rows = m.slice(1);
+    const nCols = header.length;
+    // Detect numeric columns (every non-empty data cell parses as a number).
+    const parseNum = (c) => {
+      if (c === '' || c == null) return null;
+      if (typeof c === 'number') return c;
+      const s = String(c).replace(/[,₪\s]/g, '');
+      return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
+    };
+    const numericCol = header.map((_, i) => {
+      let any = false;
+      for (const r of rows) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) return false; any = true; }
+      return any && i >= 3; // skip the id columns
+    });
+    const totals = header.map((_, i) => numericCol[i] ? rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0) : null);
+    const fmt = (c, i) => {
+      const n = numericCol[i] ? parseNum(c) : null;
+      return n != null ? n.toLocaleString('he-IL') : esc(c);
+    };
+    const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
+
+    const thBorder = excel ? '1px solid #999' : '1px solid #94a3b8';
+    const tdBorder = excel ? '1px solid #ccc' : '1px solid #cbd5e1';
+    const headTh = `<tr>${header.map((c, i) => `<th style="background:#1e3a8a;color:#fff;border:${thBorder};padding:5px 4px;font-weight:bold;text-align:${align(i)};white-space:nowrap">${esc(c)}</th>`).join('')}</tr>`;
+
+    let bodyRows = '';
+    let lastBranch = null;
+    for (const r of rows) {
+      const branch = r[0];
+      if (branch !== lastBranch) {
+        lastBranch = branch;
+        bodyRows += `<tr><td colspan="${nCols}" style="background:#dbeafe;color:#1e3a8a;font-weight:bold;border:${tdBorder};padding:5px;text-align:right">🏠 ${esc(branch)}</td></tr>`;
+      }
+      bodyRows += `<tr>${r.map((c, i) => {
+        if (i === 0) c = ''; // branch shown in the section row
+        const numStyle = excel ? "mso-number-format:'\\@'" : '';
+        return `<td style="border:${tdBorder};padding:3px 4px;text-align:${align(i)};white-space:nowrap;${numStyle}">${fmt(c, i)}</td>`;
+      }).join('')}</tr>`;
+    }
+    const totalsRow = `<tr>${header.map((c, i) => {
+      const v = i === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
+      return `<td style="border:${thBorder};padding:5px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:nowrap">${v}</td>`;
+    }).join('')}</tr>`;
+
+    const today = new Date().toLocaleDateString('he-IL');
+    return { header: headTh, body: bodyRows, totals: totalsRow, today, count: rows.length };
+  };
+
   const exportExcel = () => {
     if (!data) return;
-    const m = buildExportMatrix();
-    const head = `<tr>${m[0].map(c => `<th style="background:#fde68a;border:1px solid #999;padding:4px;font-weight:bold">${esc(c)}</th>`).join('')}</tr>`;
-    const body = m.slice(1).map(row => `<tr>${row.map(c => `<td style="border:1px solid #ccc;padding:3px;mso-number-format:'\\@'">${esc(c)}</td>`).join('')}</tr>`).join('');
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><table dir="rtl" border="1">${head}${body}</table></body></html>`;
+    const t = buildReportHTML({ excel: true });
+    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
+      <table dir="rtl" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
+        <thead>${t.header}</thead>
+        <tbody>${t.body}${t.totals}</tbody>
+      </table></body></html>`;
     downloadBlob(new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'xls');
   };
 
   const exportPDF = () => {
     if (!data) return;
-    const m = buildExportMatrix();
-    const head = `<tr>${m[0].map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-    const body = m.slice(1).map(row => `<tr>${row.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('');
+    const t = buildReportHTML({ excel: false });
     const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(exportLabel())} ${month}</title>
       <style>
-        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:12px}
-        h1{font-size:16px;margin:0 0 8px}
-        table{border-collapse:collapse;width:100%;font-size:7pt}
-        th,td{border:1px solid #bbb;padding:2px 3px;text-align:center;white-space:nowrap}
-        th{background:#fde68a}
-        tr:nth-child(even) td{background:#f8fafc}
-        @page{size:landscape;margin:8mm}
+        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:10px;color:#0f172a}
+        .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;border-bottom:2px solid #1e3a8a;padding-bottom:6px}
+        .hdr h1{font-size:15px;margin:0;color:#1e3a8a}
+        .hdr .meta{font-size:9px;color:#475569;text-align:left}
+        table{border-collapse:collapse;width:100%;font-size:6.5pt}
+        th,td{border:1px solid #cbd5e1;padding:2px 3px;white-space:nowrap}
+        thead{display:table-header-group}
+        tr{break-inside:avoid}
+        tbody tr:nth-child(even) td{background:#f8fafc}
+        @page{size:landscape;margin:7mm}
       </style></head><body>
-      <h1>טבלת שכר — ${esc(exportLabel())} — ${month}</h1>
-      <table>${head}${body}</table>
+      <div class="hdr">
+        <h1>טבלת שכר — ${esc(exportLabel())}</h1>
+        <div class="meta">חודש ${esc(month)} · ${t.count} עובדים · הופק ${esc(t.today)}</div>
+      </div>
+      <table><thead>${t.header}</thead><tbody>${t.body}${t.totals}</tbody></table>
       <script>window.onload=()=>{window.print()}<\/script>
       </body></html>`;
     const w = window.open('', '_blank');
