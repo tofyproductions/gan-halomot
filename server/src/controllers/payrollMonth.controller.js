@@ -141,7 +141,14 @@ async function getMonth(req, res, next) {
       .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
     const punchEmpIds = await Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } });
     const pmEmpIds = await PayrollMonth.distinct('employee_id', { month });
-    const relevantInactive = [...new Set([...punchEmpIds, ...pmEmpIds].map(String))];
+    // Orphan punches / payroll rows can carry a null employee_id; drop anything
+    // that isn't a valid ObjectId so the $in below never receives the string
+    // "null" (which would throw a CastError and fail the whole table load).
+    const relevantInactive = [...new Set(
+      [...punchEmpIds, ...pmEmpIds]
+        .filter(id => id && /^[0-9a-f]{24}$/i.test(String(id)))
+        .map(String),
+    )];
     // Show an inactive employee if they were DEACTIVATED IN THE TABLE (they carry
     // an inactive_reason) — they stay visible every following month until they're
     // reactivated or removed — OR if they simply had activity this month. Old
