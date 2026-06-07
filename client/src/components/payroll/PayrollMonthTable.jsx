@@ -495,7 +495,7 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 /* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
-  const { selectedBranch, selectedBranchName, isAllBranches } = useBranch();
+  const { selectedBranch, selectedBranchName, isAllBranches, branches: allBranches } = useBranch();
   const { isAdmin, isAccountant, isManager } = useAuth();
   // Branch managers can't write PayrollMonth directly. They stage edits
   // locally and submit them as one change request to the accountant.
@@ -744,7 +744,12 @@ export default function PayrollMonthTable() {
 
   // Per-branch hours × rate breakdown for cross-branch hourly employees — so the
   // accountant can reconcile the estimated total with each branch's rate.
-  const branchNameOf = (id) => (data?.branches || []).find(b => b.id === String(id))?.name || 'אחר';
+  const branchNameOf = (id) => {
+    const s = String(id);
+    return (data?.branches || []).find(b => b.id === s)?.name
+      || (allBranches || []).find(b => String(b._id || b.id) === s)?.name
+      || 'אחר';
+  };
   const perBranchBreakdown = (r) => {
     if (r.salary_type !== 'hourly') return [];
     const pb = r.breakdown?.per_branch || {};
