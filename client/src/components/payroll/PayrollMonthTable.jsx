@@ -843,16 +843,30 @@ export default function PayrollMonthTable() {
     const fmt = (c, i) => { const n = numericCol[i] ? parseNum(c) : null; return n != null ? n.toLocaleString('he-IL') : esc(c); };
     const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
     const bd = excel ? '#ccc' : '#cbd5e1';
-    const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:5px 4px;font-weight:bold;text-align:${align(i)};white-space:nowrap">${esc(header[i])}</th>`).join('')}</tr>`;
+    const ws = excel ? 'nowrap' : 'normal';
+    // Fixed, identical column widths for every branch page → uniform tables.
+    const colWeight = (label) => {
+      if (label === 'שם העובד') return 3.2;
+      if (label === 'ת"ז') return 1.7;
+      if (label === 'פירוט שעות לפי סניף' || label === 'הערות') return 2.6;
+      if (label === 'בונוס - פירוט') return 1.8;
+      if (label === 'שכר משוער') return 1.7;
+      if (/שכר בסיס|השלמת שכר|תוספת שכר|שע"נ 125|שע"נ 150|קיזוז|הלוואות|בונוס|נסיעות/.test(label)) return 1.4;
+      return 1; // hours / day counts / small money
+    };
+    const weights = cols.map(i => colWeight(header[i]));
+    const wsum = weights.reduce((a, b) => a + b, 0);
+    const colgroup = `<colgroup>${weights.map(w => `<col style="width:${(w / wsum * 100).toFixed(3)}%"/>`).join('')}</colgroup>`;
+    const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:4px 4px;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${esc(header[i])}</th>`).join('')}</tr>`;
     const body = rows.map((r, ri) => `<tr style="${ri % 2 ? `background:${color.rowTint}` : ''}">${cols.map(i => {
       const numStyle = excel ? "mso-number-format:'\\@'" : '';
-      return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:nowrap;${numStyle}">${fmt(r[i], i)}</td>`;
+      return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:${ws};word-break:break-word;${numStyle}">${fmt(r[i], i)}</td>`;
     }).join('')}</tr>`).join('');
     const totalsRow = `<tr>${cols.map((i, idx) => {
       const v = idx === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
-      return `<td style="border:1px solid ${color.accent};padding:5px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:nowrap">${v}</td>`;
+      return `<td style="border:1px solid ${color.accent};padding:4px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${v}</td>`;
     }).join('')}</tr>`;
-    return { th, body, totalsRow, count: rows.length };
+    return { colgroup, th, body, totalsRow, count: rows.length };
   };
 
   // Excel: one separate .xls file per branch, colour-coded.
@@ -888,21 +902,21 @@ export default function PayrollMonthTable() {
           <h1 style="color:${c.accent}"><span class="dot" style="background:${c.strip}"></span> ${esc(branch)} — שכר ${esc(month)}</h1>
           <div class="meta">${t.count} עובדים · הופק ${esc(today)}</div>
         </div>
-        <table><thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody></table>
+        <table>${t.colgroup}<thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody></table>
       </section>`;
     }).join('');
     const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(month)}</title>
       <style>
-        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:10px;color:#0f172a}
+        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:8px;color:#0f172a}
         .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;border-bottom:3px solid;padding-bottom:6px}
-        .hdr h1{font-size:16px;margin:0;display:flex;align-items:center;gap:6px}
-        .hdr .dot{width:14px;height:14px;border-radius:50%;display:inline-block}
-        .hdr .meta{font-size:9px;color:#475569}
-        table{border-collapse:collapse;width:100%;font-size:6.5pt}
-        td,th{padding:2px 3px;white-space:nowrap}
+        .hdr h1{font-size:17px;margin:0;display:flex;align-items:center;gap:7px;font-weight:800}
+        .hdr .dot{width:15px;height:15px;border-radius:50%;display:inline-block}
+        .hdr .meta{font-size:10px;color:#475569}
+        table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8pt}
+        td,th{padding:3px 4px;overflow:hidden;vertical-align:middle}
         thead{display:table-header-group}
         tr{break-inside:avoid}
-        @page{size:landscape;margin:7mm}
+        @page{size:landscape;margin:6mm}
       </style></head><body>${sections}
       <script>window.onload=()=>{window.print()}<\/script></body></html>`;
     const w = window.open('', '_blank');
