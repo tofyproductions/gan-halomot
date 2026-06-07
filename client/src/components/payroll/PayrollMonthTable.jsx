@@ -724,7 +724,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט שעות לפי סניף');
     headerTop.push('בונוס - פירוט');
@@ -748,7 +748,7 @@ export default function PayrollMonthTable() {
         return !(e && e.manager_approved && e.accounting_approved && !absCat(e.category).deduct);
       }).length;
       const vacDays = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual.vacation_days) || 0);
-      const holPay = Number(r.manual.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
+      const holDays = r.holiday_pay_auto?.total_days || 0; // count only — accountant computes the amount
       cells.push(
         rnd(sp.reg),
         rnd(sp.ot125),
@@ -756,7 +756,7 @@ export default function PayrollMonthTable() {
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
         r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
-        r.manual.sick_days || '', openAbsence || '', vacDays || '', holPay ? Math.round(holPay) : '',
+        r.manual.sick_days || '', openAbsence || '', vacDays || '', holDays || '',
         r.manual.advance_deduction_preset?.label || r.manual.advance_deduction_text || '',
         r.manual.gift_card?.kind === 'number' ? r.manual.gift_card.amount : (r.manual.gift_card?.text || ''),
         r.manual.recreation?.kind === 'number' ? r.manual.recreation.amount : (r.manual.recreation?.text || ''),
