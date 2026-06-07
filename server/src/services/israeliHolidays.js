@@ -160,9 +160,10 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     // Rule 3: not Saturday
     if (wd === 6) reasons.push('יום החג בשבת');
 
-    // Rule 4: not employee's off-day. weekday 6=Sat (already filtered),
-    // commitment uses 0..5 same convention.
-    if (wd <= 5 && offWeekdays.has(wd)) reasons.push('יום החג ביום החופש השבועי של העובד');
+    // Rule 4: the holiday must fall on a day she was supposed to WORK. With a
+    // commitment, that means a required weekday (not an off-day and not a weekday
+    // she isn't committed to) — she's not paid for a holiday on a non-work day.
+    if (hasCommitment && !requiredWeekdays.has(wd)) reasons.push('יום החג אינו יום עבודה של העובד');
 
     // Rule 5: guard days (day before AND day after). She is disqualified ONLY
     // if her commitment REQUIRES work on that adjacent day and she didn't show

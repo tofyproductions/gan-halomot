@@ -47,9 +47,13 @@ function parseMonthRange(monthYM) {
  * Returns { total, details: [{date, name, value}] } so the UI can show why.
  */
 function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates) {
-  const offWeekdays = new Set();
-  if (commitment && Array.isArray(commitment.days)) {
-    for (const d of commitment.days) if (d.is_off) offWeekdays.add(d.day);
+  // Only days she was supposed to WORK count as paid vacation. With a commitment
+  // that means a required weekday; a closure on her off-day / a non-work weekday
+  // gives no vacation pay.
+  const requiredWeekdays = new Set();
+  const hasCommitment = !!(commitment && Array.isArray(commitment.days) && commitment.days.length);
+  if (hasCommitment) {
+    for (const d of commitment.days) if (!d.is_off) requiredWeekdays.add(d.day);
   }
   const statutory = statutoryDates instanceof Set ? statutoryDates : new Set(statutoryDates || []);
   const result = { total: 0, details: [] };
@@ -62,7 +66,8 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
       if (!ymd.startsWith(monthYM)) continue;
       const wd = d.getUTCDay();
       if (wd === 6) continue;
-      if (offWeekdays.has(wd)) continue;
+      // Only a day she was supposed to work counts (when a commitment exists).
+      if (hasCommitment && !requiredWeekdays.has(wd)) continue;
       // Statutory-holiday days are paid via דמי חגים, not vacation — skip them.
       if (statutory.has(ymd)) continue;
       const isLastDay = ymd === endYmd;
