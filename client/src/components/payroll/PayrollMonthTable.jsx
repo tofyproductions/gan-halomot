@@ -993,13 +993,25 @@ export default function PayrollMonthTable() {
     const m = buildExportMatrix(branchRows);
     const header = m[0];
     const rows = m.slice(1);
-    const cols = header.map((_, i) => i).filter(i => i !== 0);
+    let cols = header.map((_, i) => i).filter(i => i !== 0);
     const parseNum = (c) => {
       if (c === '' || c == null) return null;
       if (typeof c === 'number') return c;
       const s = String(c).replace(/[,₪\s]/g, '');
       return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
     };
+    // Drop columns with no content for THIS branch (all blank or all zero) so the
+    // PDF doesn't print empty, irrelevant columns. A few core columns are always
+    // kept so every page keeps its identity even if a value happens to be zero.
+    const PROTECTED_COLS = new Set(['שם העובד', 'ת"ז', 'שכר משוער', 'שכר בסיס']);
+    const colHasContent = (i) => rows.some(r => {
+      const v = r[i];
+      if (v === '' || v == null || v === '—') return false;
+      const n = parseNum(v);
+      if (n != null) return n !== 0;      // numeric: content only if non-zero
+      return String(v).trim() !== '';     // text: content if non-empty
+    });
+    cols = cols.filter(i => PROTECTED_COLS.has(header[i]) || colHasContent(i));
     const numericCol = {};
     for (const i of cols) {
       let any = false, ok = true;
