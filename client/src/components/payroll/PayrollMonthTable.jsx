@@ -1043,7 +1043,7 @@ export default function PayrollMonthTable() {
     absence: 105,         // ימי היעדרות + ניכוי + ממתין
     advance: 180,
     money: 82,
-    tekenBase: 150,       // שכר בסיס: amount + ערך/שעה + net/gross chip + OT note
+    tekenBase: 172,       // שכר בסיס: amount + ערך/שעה + net/gross chip + per-branch split
     teken: 110,           // completion / supplement (chips)
     notes: 340,           // inline notes — wider so they don't stack too tall
     custom: 110,
@@ -1439,6 +1439,7 @@ export default function PayrollMonthTable() {
                       {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה / תוספת */}
                       <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
                         <TekenBasePartCell row={r}
+                          branchPay={(() => { const l = perBranchBreakdown(r); return breakdownIsInformative(r, l) ? l : null; })()}
                           onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
                         />
                       </TableCell>
@@ -1679,7 +1680,7 @@ function PayAmountCell({ value }) {
   return <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>{Math.round(value).toLocaleString('he-IL')} ₪</Typography>;
 }
 
-function TekenBasePartCell({ row, onOpenHours }) {
+function TekenBasePartCell({ row, onOpenHours, branchPay }) {
   const tb = row.breakdown?.components?.teken_breakdown;
   const baseSalary = row.breakdown?.components?.base_salary || 0;
   const incomplete = row.breakdown?.hours?.incomplete_days || 0;
@@ -1703,7 +1704,10 @@ function TekenBasePartCell({ row, onOpenHours }) {
   } else if (row.salary_type === 'hourly') {
     mainValue = split ? split.reg : baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
-    if (rate) perHourLabel = `${rate} ₪/שעה`;
+    // Multi-branch with a different rate: a single rate label is misleading —
+    // the per-branch split below carries each branch's rate instead.
+    if (branchPay) perHourLabel = 'תעריף שונה לפי סניף ↓';
+    else if (rate) perHourLabel = `${rate} ₪/שעה`;
   } else {
     return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
   }
@@ -1732,6 +1736,20 @@ function TekenBasePartCell({ row, onOpenHours }) {
             sx={{ height: 15, fontSize: '0.58rem', fontWeight: 800, '& .MuiChip-label': { px: 0.6 } }}
           />
         </Stack>
+      )}
+      {branchPay && (
+        <Box sx={{ mt: 0.3, width: '100%', borderTop: '1px dashed #93c5fd', pt: 0.3 }}>
+          {branchPay.map((o, i) => (
+            <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, lineHeight: 1.25 }}>
+              <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 92 }}>
+                {o.name} · ₪{o.rate}{o.hasOT ? '+שע״נ' : ''}
+              </Typography>
+              <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                ₪{o.amount.toLocaleString('he-IL')}
+              </Typography>
+            </Box>
+          ))}
+        </Box>
       )}
       {otNote && (
         <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'success.dark' }}>
