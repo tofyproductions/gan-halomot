@@ -895,7 +895,7 @@ export default function PayrollMonthTable() {
   /* Build the full export matrix (header + one row per employee) with every
      column including notes. Reused by CSV / Excel / PDF exports. */
   const buildExportMatrix = (rows = (data?.rows || [])) => {
-    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
+    const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
@@ -910,10 +910,15 @@ export default function PayrollMonthTable() {
         ? `⛔ ${r.full_name} (לא פעיל${r.inactive_reason ? ` — ${r.inactive_reason}` : ''})`
         : r.full_name;
       const cells = [r.branch_name, nameCell, r.israeli_id || '', r.employee_number || ''];
+      const tb = r.breakdown?.components?.teken_breakdown;
+      // Per-hour rate paid, for EVERY employee: hourly → the hourly rate;
+      // תקן/global → the computed value-per-hour (agreed salary ÷ required hours).
+      const perHourRate = r.salary_type === 'global'
+        ? (tb?.hourly_value != null ? Math.round(tb.hourly_value * 100) / 100 : '')
+        : (r.breakdown.rates?.hourly_rate || '');
       // Consolidated hours across all branches (matches the on-screen table).
       cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
-        r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '');
-      const tb = r.breakdown?.components?.teken_breakdown;
+        perHourRate, r.breakdown.rates?.global_salary || '');
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
       const sp = paySplit(r) || { reg: '', ot125: '', ot150: '' };
       const rnd = (v) => (v === '' || v == null) ? '' : Math.round(v);
@@ -1060,7 +1065,8 @@ export default function PayrollMonthTable() {
       numericCol[i] = ok && any && i >= 3 && !TEXT_ID_COLS.has(header[i]);
     }
     const totals = {};
-    for (const i of cols) if (numericCol[i]) totals[i] = rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0);
+    const NO_TOTAL = new Set(['תעריף לשעה']); // summing a per-hour rate is meaningless
+    for (const i of cols) if (numericCol[i] && !NO_TOTAL.has(header[i])) totals[i] = rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0);
     const fmt = (c, i) => { const n = numericCol[i] ? parseNum(c) : null; return n != null ? n.toLocaleString('he-IL') : esc(c); };
     const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
     const bd = excel ? '#ccc' : '#cbd5e1';
@@ -1082,7 +1088,7 @@ export default function PayrollMonthTable() {
     // Grouped header row (matches the on-screen table's column groups).
     const groupOf = (label) => {
       if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
-      if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
+      if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'].includes(label)) return 'שעות עבודה';
       if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
         || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
       return 'שכר ותשלומים';
@@ -1143,12 +1149,12 @@ export default function PayrollMonthTable() {
       const aoaBody = body.map(r => r.map((v, i) => (numeric[i] ? (parseNum(v) ?? '') : v)));
       const totals = header.map((_, i) => {
         if (i === 0) return 'סה״כ';
-        if (!numeric[i]) return '';
+        if (!numeric[i] || header[i] === 'תעריף לשעה') return ''; // don't sum a per-hour rate
         return Math.round(body.reduce((s, r) => s + (parseNum(r[i]) || 0), 0));
       });
       const groupOf = (label) => {
         if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
-        if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
+        if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'].includes(label)) return 'שעות עבודה';
         if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
           || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
         return 'שכר ותשלומים';
