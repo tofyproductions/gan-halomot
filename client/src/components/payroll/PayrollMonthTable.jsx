@@ -720,7 +720,7 @@ export default function PayrollMonthTable() {
 
   /* Build the full export matrix (header + one row per employee) with every
      column including notes. Reused by CSV / Excel / PDF exports. */
-  const buildExportMatrix = () => {
+  const buildExportMatrix = (rows = (data?.rows || [])) => {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
@@ -731,7 +731,7 @@ export default function PayrollMonthTable() {
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
 
-    for (const r of data.rows) {
+    for (const r of rows) {
       const cells = [r.branch_name, r.full_name, r.israeli_id || ''];
       // Consolidated hours across all branches (matches the on-screen table).
       cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
@@ -780,10 +780,11 @@ export default function PayrollMonthTable() {
     ? (data.amutot.find(x => x.id === selectedAmuta)?.name || 'amuta')
     : (selectedBranchName || (isAllBranches ? 'all-branches' : 'branch')));
 
-  const downloadBlob = (blob, ext) => {
+  const downloadBlob = (blob, ext, tag) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `payroll-${exportLabel()}-${month}.${ext}`; a.click();
+    const name = (tag || exportLabel()).toString().replace(/[\\/:*?"<>|]+/g, '-');
+    a.href = url; a.download = `שכר-${name}-${month}.${ext}`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -796,93 +797,105 @@ export default function PayrollMonthTable() {
     downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
   };
 
-  // Shared, accountant-ready table HTML: grouped by branch, numeric columns
-  // right-aligned with thousands separators, a totals row, and a title block.
-  const buildReportHTML = ({ excel }) => {
-    const m = buildExportMatrix();
+  // Group the in-scope rows by branch — the accountant gets one file per branch.
+  const exportGroups = () => {
+    const groups = new Map();
+    for (const r of (data?.rows || [])) {
+      const k = r.branch_name || '—';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    return [...groups.entries()];
+  };
+  const exportColor = (branchName) => ganMarker(branchName)
+    || { strip: '#1e3a8a', stripText: '#ffffff', rowTint: '#f1f5f9', accent: '#1e3a8a' };
+
+  // Build one coloured branch table (header + body + totals) from a row subset.
+  // Drops the branch column (the whole file is a single branch).
+  const buildBranchTable = (branchRows, color, { excel }) => {
+    const m = buildExportMatrix(branchRows);
     const header = m[0];
     const rows = m.slice(1);
-    const nCols = header.length;
-    // Detect numeric columns (every non-empty data cell parses as a number).
+    const cols = header.map((_, i) => i).filter(i => i !== 0);
     const parseNum = (c) => {
       if (c === '' || c == null) return null;
       if (typeof c === 'number') return c;
       const s = String(c).replace(/[,₪\s]/g, '');
       return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
     };
-    const numericCol = header.map((_, i) => {
-      let any = false;
-      for (const r of rows) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) return false; any = true; }
-      return any && i >= 3; // skip the id columns
-    });
-    const totals = header.map((_, i) => numericCol[i] ? rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0) : null);
-    const fmt = (c, i) => {
-      const n = numericCol[i] ? parseNum(c) : null;
-      return n != null ? n.toLocaleString('he-IL') : esc(c);
-    };
-    const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
-
-    const thBorder = excel ? '1px solid #999' : '1px solid #94a3b8';
-    const tdBorder = excel ? '1px solid #ccc' : '1px solid #cbd5e1';
-    const headTh = `<tr>${header.map((c, i) => `<th style="background:#1e3a8a;color:#fff;border:${thBorder};padding:5px 4px;font-weight:bold;text-align:${align(i)};white-space:nowrap">${esc(c)}</th>`).join('')}</tr>`;
-
-    let bodyRows = '';
-    let lastBranch = null;
-    for (const r of rows) {
-      const branch = r[0];
-      if (branch !== lastBranch) {
-        lastBranch = branch;
-        bodyRows += `<tr><td colspan="${nCols}" style="background:#dbeafe;color:#1e3a8a;font-weight:bold;border:${tdBorder};padding:5px;text-align:right">🏠 ${esc(branch)}</td></tr>`;
-      }
-      bodyRows += `<tr>${r.map((c, i) => {
-        if (i === 0) c = ''; // branch shown in the section row
-        const numStyle = excel ? "mso-number-format:'\\@'" : '';
-        return `<td style="border:${tdBorder};padding:3px 4px;text-align:${align(i)};white-space:nowrap;${numStyle}">${fmt(c, i)}</td>`;
-      }).join('')}</tr>`;
+    const numericCol = {};
+    for (const i of cols) {
+      let any = false, ok = true;
+      for (const r of rows) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) { ok = false; break; } any = true; }
+      numericCol[i] = ok && any && i >= 3;
     }
-    const totalsRow = `<tr>${header.map((c, i) => {
-      const v = i === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
-      return `<td style="border:${thBorder};padding:5px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:nowrap">${v}</td>`;
+    const totals = {};
+    for (const i of cols) if (numericCol[i]) totals[i] = rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0);
+    const fmt = (c, i) => { const n = numericCol[i] ? parseNum(c) : null; return n != null ? n.toLocaleString('he-IL') : esc(c); };
+    const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
+    const bd = excel ? '#ccc' : '#cbd5e1';
+    const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:5px 4px;font-weight:bold;text-align:${align(i)};white-space:nowrap">${esc(header[i])}</th>`).join('')}</tr>`;
+    const body = rows.map((r, ri) => `<tr style="${ri % 2 ? `background:${color.rowTint}` : ''}">${cols.map(i => {
+      const numStyle = excel ? "mso-number-format:'\\@'" : '';
+      return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:nowrap;${numStyle}">${fmt(r[i], i)}</td>`;
+    }).join('')}</tr>`).join('');
+    const totalsRow = `<tr>${cols.map((i, idx) => {
+      const v = idx === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
+      return `<td style="border:1px solid ${color.accent};padding:5px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:nowrap">${v}</td>`;
     }).join('')}</tr>`;
-
-    const today = new Date().toLocaleDateString('he-IL');
-    return { header: headTh, body: bodyRows, totals: totalsRow, today, count: rows.length };
+    return { th, body, totalsRow, count: rows.length };
   };
 
+  // Excel: one separate .xls file per branch, colour-coded.
   const exportExcel = () => {
     if (!data) return;
-    const t = buildReportHTML({ excel: true });
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
-      <table dir="rtl" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
-        <thead>${t.header}</thead>
-        <tbody>${t.body}${t.totals}</tbody>
-      </table></body></html>`;
-    downloadBlob(new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'xls');
+    const groups = exportGroups();
+    if (!groups.length) return;
+    const today = new Date().toLocaleDateString('he-IL');
+    groups.forEach(([branch, rows], gi) => {
+      const c = exportColor(branch);
+      const t = buildBranchTable(rows, c, { excel: true });
+      const banner = `<tr><td colspan="40" style="background:${c.strip};color:${c.stripText};font-size:15px;font-weight:bold;padding:8px;border:1px solid ${c.accent}">🏠 ${esc(branch)} — שכר ${esc(month)} · ${t.count} עובדים · הופק ${esc(today)}</td></tr>`;
+      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
+        <table dir="rtl" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
+          <tbody>${banner}</tbody><thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody>
+        </table></body></html>`;
+      setTimeout(() => downloadBlob(new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'xls', branch), gi * 400);
+    });
+    toast.success(`${groups.length} קבצי אקסל — קובץ לכל סניף`);
   };
 
+  // PDF: one document, each branch on its own page with a colour-coded banner.
   const exportPDF = () => {
     if (!data) return;
-    const t = buildReportHTML({ excel: false });
-    const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(exportLabel())} ${month}</title>
+    const groups = exportGroups();
+    if (!groups.length) return;
+    const today = new Date().toLocaleDateString('he-IL');
+    const sections = groups.map(([branch, rows], gi) => {
+      const c = exportColor(branch);
+      const t = buildBranchTable(rows, c, { excel: false });
+      return `<section style="page-break-before:${gi > 0 ? 'always' : 'auto'}">
+        <div class="hdr" style="border-color:${c.accent}">
+          <h1 style="color:${c.accent}"><span class="dot" style="background:${c.strip}"></span> ${esc(branch)} — שכר ${esc(month)}</h1>
+          <div class="meta">${t.count} עובדים · הופק ${esc(today)}</div>
+        </div>
+        <table><thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody></table>
+      </section>`;
+    }).join('');
+    const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(month)}</title>
       <style>
         body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:10px;color:#0f172a}
-        .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:8px;border-bottom:2px solid #1e3a8a;padding-bottom:6px}
-        .hdr h1{font-size:15px;margin:0;color:#1e3a8a}
-        .hdr .meta{font-size:9px;color:#475569;text-align:left}
+        .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;border-bottom:3px solid;padding-bottom:6px}
+        .hdr h1{font-size:16px;margin:0;display:flex;align-items:center;gap:6px}
+        .hdr .dot{width:14px;height:14px;border-radius:50%;display:inline-block}
+        .hdr .meta{font-size:9px;color:#475569}
         table{border-collapse:collapse;width:100%;font-size:6.5pt}
-        th,td{border:1px solid #cbd5e1;padding:2px 3px;white-space:nowrap}
+        td,th{padding:2px 3px;white-space:nowrap}
         thead{display:table-header-group}
         tr{break-inside:avoid}
-        tbody tr:nth-child(even) td{background:#f8fafc}
         @page{size:landscape;margin:7mm}
-      </style></head><body>
-      <div class="hdr">
-        <h1>טבלת שכר — ${esc(exportLabel())}</h1>
-        <div class="meta">חודש ${esc(month)} · ${t.count} עובדים · הופק ${esc(t.today)}</div>
-      </div>
-      <table><thead>${t.header}</thead><tbody>${t.body}${t.totals}</tbody></table>
-      <script>window.onload=()=>{window.print()}<\/script>
-      </body></html>`;
+      </style></head><body>${sections}
+      <script>window.onload=()=>{window.print()}<\/script></body></html>`;
     const w = window.open('', '_blank');
     if (!w) { toast.error('חלון ההדפסה נחסם — אפשר חלונות קופצים'); return; }
     w.document.write(html); w.document.close();
