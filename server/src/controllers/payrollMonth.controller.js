@@ -272,19 +272,22 @@ async function getMonth(req, res, next) {
         ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
       const absenceEntries = isTeken && Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
       const entryByDate = new Map(absenceEntries.map(e => [e.date, e]));
-      const absenceDays = isTeken ? commitmentInfo.absent_dates.map(d => ({
-        date: d,
-        source: holidayDates.has(d) ? 'holiday' : (leaveDates.has(d) ? 'leave' : 'unknown'),
-      })) : [];
-      // Deduct only UNKNOWN-reason days the manager+accounting marked deductible.
+      // A committed day missed because the gan was closed (holiday) or for
+      // approved leave is NOT an absence — it's vacation/leave, handled in those
+      // columns. Only truly-unexplained missed days are absences.
+      const absenceDays = isTeken
+        ? commitmentInfo.absent_dates
+            .filter(d => !holidayDates.has(d) && !leaveDates.has(d))
+            .map(d => ({ date: d, source: 'unknown' }))
+        : [];
+      // Deduct only days the manager+accounting marked with a deductible reason.
       const deductibleDays = absenceDays.filter(a => {
-        if (a.source !== 'unknown') return false;
         const e = entryByDate.get(a.date);
         return e && DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
           && e.manager_approved === true && e.accounting_approved === true;
       }).length;
-      const unknownCount = absenceDays.filter(a => a.source === 'unknown').length;
-      const justifiedCount = absenceDays.length - unknownCount;
+      const unknownCount = absenceDays.length;
+      const justifiedCount = 0;
       const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
 
       // Beyond-commitment supplement is paid only when BOTH manager and
@@ -373,6 +376,18 @@ async function getMonth(req, res, next) {
         ? Number(manual.holiday_pay)
         : (holidayPayInfo.total_pay || 0);
       if (holidayPayEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + holidayPayEffective;
+
+      // Vacation: effective days = manual override, else auto from the gan's
+      // holiday calendar. An HOURLY employee is PAID for vacation days she used
+      // (against her balance); a תקן employee's salary already covers them, so
+      // no extra pay — only the balance is drawn down.
+      const vacEffDays = (Number(manual.vacation_days) > 0)
+        ? Number(manual.vacation_days)
+        : (vacationAutoInfo.total || 0);
+      const vacationPay = (!isTeken && vacEffDays > 0)
+        ? Math.round(vacEffDays * (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100
+        : 0;
+      if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
 
       return {
         employee_id: String(emp._id),
@@ -489,6 +504,8 @@ async function getMonth(req, res, next) {
           details: vacationAutoInfo.details,
           source: 'kindergarten_holidays',
         },
+        vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
+        vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
         status: row?.status || 'draft',
       };
     });

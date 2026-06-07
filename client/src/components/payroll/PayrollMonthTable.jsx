@@ -1473,10 +1473,11 @@ export default function PayrollMonthTable() {
 function VacationCell({ row }) {
   const manualVal = Number(row.manual.vacation_days) || 0;
   const auto = row.vacation_days_auto?.total_days || 0;
+  const days = row.vacation_eff_days != null ? row.vacation_eff_days : (manualVal || auto);
   const balance = row.vacation_info?.balance_from_payslip;
-  const remaining = balance != null ? Math.round((balance - manualVal) * 10) / 10 : null;
+  const remaining = balance != null ? Math.round((balance - days) * 10) / 10 : null;
   const isGlobal = row.salary_type === 'global';
-  const days = manualVal || auto;
+  const pay = row.vacation_pay || 0;
   if (!days && balance == null) return <Typography variant="body2" color="text.secondary">—</Typography>;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
@@ -1484,10 +1485,12 @@ function VacationCell({ row }) {
       {manualVal === 0 && auto > 0 && (
         <Chip size="small" color="warning" variant="filled" label={`מלוח ${auto}`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
       )}
-      {isGlobal && days > 0 && <Typography variant="caption" sx={{ fontSize: '0.56rem', color: 'text.secondary' }}>ללא תשלום</Typography>}
+      {days > 0 && (isGlobal
+        ? <Typography variant="caption" sx={{ fontSize: '0.56rem', color: 'text.secondary' }}>בשכר התקן</Typography>
+        : (pay > 0 && <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'success.dark' }}>+₪{Math.round(pay).toLocaleString('he-IL')}</Typography>))}
       {balance != null && (
         <Typography variant="caption" sx={{ fontSize: '0.56rem', color: remaining < 0 ? 'error.main' : 'text.secondary' }}>
-          יתרה: {remaining != null ? remaining : balance}
+          יתרה: {remaining}
         </Typography>
       )}
     </Stack>
