@@ -137,10 +137,17 @@ async function getMonth(req, res, next) {
     const punchEmpIds = await Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } });
     const pmEmpIds = await PayrollMonth.distinct('employee_id', { month });
     const relevantInactive = [...new Set([...punchEmpIds, ...pmEmpIds].map(String))];
-    const inactiveEmps = relevantInactive.length
-      ? await Employee.find({ branch_id: { $in: branchIds }, is_active: false, _id: { $in: relevantInactive } })
-          .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean()
-      : [];
+    // Show an inactive employee if they were DEACTIVATED IN THE TABLE (they carry
+    // an inactive_reason) — they stay visible every following month until they're
+    // reactivated or removed — OR if they simply had activity this month. Old
+    // soft-deleted staff (no reason, no activity) stay hidden.
+    const inactiveEmps = await Employee.find({
+      branch_id: { $in: branchIds }, is_active: false,
+      $or: [
+        { inactive_reason: { $nin: [null, ''] } },
+        ...(relevantInactive.length ? [{ _id: { $in: relevantInactive } }] : []),
+      ],
+    }).populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
     const employees = [...activeEmps, ...inactiveEmps];
 
     // Pull amutot to render column groups

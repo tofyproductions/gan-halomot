@@ -320,7 +320,10 @@ async function removeEmployee(req, res, next) {
     const emp = await Employee.findById(req.params.id);
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
     // Soft delete so historical punches/attendance still reference something.
+    // Clear inactive_reason so a removed employee drops out of the monthly table
+    // (only table-deactivated staff, which carry a reason, stay visible).
     emp.is_active = false;
+    emp.inactive_reason = '';
     await emp.save();
 
     // Deactivate User account
