@@ -20,6 +20,7 @@ import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
+import * as XLSX from 'xlsx';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
@@ -774,7 +775,10 @@ export default function PayrollMonthTable() {
     const rowsAcc = [headerTop];
 
     for (const r of rows) {
-      const cells = [r.branch_name, r.full_name, r.israeli_id || ''];
+      const nameCell = r.is_active === false
+        ? `⛔ ${r.full_name} (לא פעיל${r.inactive_reason ? ` — ${r.inactive_reason}` : ''})`
+        : r.full_name;
+      const cells = [r.branch_name, nameCell, r.israeli_id || ''];
       // Consolidated hours across all branches (matches the on-screen table).
       cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
         r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '');
@@ -900,10 +904,15 @@ export default function PayrollMonthTable() {
     const wsum = weights.reduce((a, b) => a + b, 0);
     const colgroup = `<colgroup>${weights.map(w => `<col style="width:${(w / wsum * 100).toFixed(3)}%"/>`).join('')}</colgroup>`;
     const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:4px 4px;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${esc(header[i])}</th>`).join('')}</tr>`;
-    const body = rows.map((r, ri) => `<tr style="${ri % 2 ? `background:${color.rowTint}` : ''}">${cols.map(i => {
-      const numStyle = excel ? "mso-number-format:'\\@'" : '';
-      return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:${ws};word-break:break-word;${numStyle}">${fmt(r[i], i)}</td>`;
-    }).join('')}</tr>`).join('');
+    const body = rows.map((r, ri) => {
+      const inactive = branchRows[ri]?.is_active === false;
+      const rowBg = inactive ? 'background:#e5e7eb' : (ri % 2 ? `background:${color.rowTint}` : '');
+      const rowExtra = inactive ? 'color:#6b7280;font-style:italic' : '';
+      return `<tr style="${rowBg};${rowExtra}">${cols.map(i => {
+        const numStyle = excel ? "mso-number-format:'\\@'" : '';
+        return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:${ws};word-break:break-word;${numStyle}">${fmt(r[i], i)}</td>`;
+      }).join('')}</tr>`;
+    }).join('');
     const totalsRow = `<tr>${cols.map((i, idx) => {
       const v = idx === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
       return `<td style="border:1px solid ${color.accent};padding:4px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${v}</td>`;
@@ -911,23 +920,64 @@ export default function PayrollMonthTable() {
     return { colgroup, th, body, totalsRow, count: rows.length };
   };
 
-  // Excel: one separate .xls file per branch, colour-coded.
+  // Excel: ONE real .xlsx workbook, one colour-named sheet per branch.
+  // (Replaces the old HTML-as-.xls hack that produced invalid files and lost
+  //  every download after the first because browsers block serial downloads.)
   const exportExcel = () => {
     if (!data) return;
     const groups = exportGroups();
     if (!groups.length) return;
-    const today = new Date().toLocaleDateString('he-IL');
-    groups.forEach(([branch, rows], gi) => {
-      const c = exportColor(branch);
-      const t = buildBranchTable(rows, c, { excel: true });
-      const banner = `<tr><td colspan="40" style="background:${c.strip};color:${c.stripText};font-size:15px;font-weight:bold;padding:8px;border:1px solid ${c.accent}">🏠 ${esc(branch)} — שכר ${esc(month)} · ${t.count} עובדים · הופק ${esc(today)}</td></tr>`;
-      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>
-        <table dir="rtl" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px">
-          <tbody>${banner}</tbody><thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody>
-        </table></body></html>`;
-      setTimeout(() => downloadBlob(new Blob(['﻿' + html], { type: 'application/vnd.ms-excel;charset=utf-8' }), 'xls', branch), gi * 400);
-    });
-    toast.success(`${groups.length} קבצי אקסל — קובץ לכל סניף`);
+    const parseNum = (c) => {
+      if (c === '' || c == null) return null;
+      if (typeof c === 'number') return c;
+      const s = String(c).replace(/[,₪\s]/g, '');
+      return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
+    };
+    const wb = XLSX.utils.book_new();
+    const usedNames = new Set();
+    for (const [branch, rows] of groups) {
+      const m = buildExportMatrix(rows);
+      const header = m[0].slice(1);                 // drop the branch column
+      const body = m.slice(1).map(r => r.slice(1));
+      // Which columns are numeric (sum-able). Index >= 2 to skip name + id.
+      const numeric = header.map((_, i) => {
+        if (i < 2) return false;
+        let any = false;
+        for (const r of body) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) return false; any = true; }
+        return any;
+      });
+      // Coerce numeric cells to real numbers so Excel treats them as numbers.
+      const aoaBody = body.map(r => r.map((v, i) => (numeric[i] ? (parseNum(v) ?? '') : v)));
+      const totals = header.map((_, i) => {
+        if (i === 0) return 'סה״כ';
+        if (!numeric[i]) return '';
+        return Math.round(body.reduce((s, r) => s + (parseNum(r[i]) || 0), 0));
+      });
+      const aoa = [header, ...aoaBody, totals];
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!rtl'] = true;
+      // Column widths roughly matching the on-screen / PDF weighting.
+      ws['!cols'] = header.map((label) => {
+        if (label === 'שם העובד') return { wch: 30 };
+        if (label === 'הערות' || label === 'פירוט שעות לפי סניף') return { wch: 26 };
+        if (label === 'בונוס - פירוט') return { wch: 20 };
+        if (label === 'ת"ז') return { wch: 12 };
+        if (/שכר|השלמת|תוספת|נסיעות|הלוואות|קיזוז|בונוס|חגים/.test(label)) return { wch: 13 };
+        return { wch: 9 };
+      });
+      ws['!freeze'] = { xSplit: 0, ySplit: 1 };      // freeze header row
+      let name = (branch || '—').replace(/[\\/?*[\]:]/g, '-').slice(0, 28).trim() || 'גיליון';
+      let n = name, k = 2;
+      while (usedNames.has(n)) { n = `${name.slice(0, 25)} ${k++}`; }
+      usedNames.add(n);
+      XLSX.utils.book_append_sheet(wb, ws, n);
+    }
+    const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    downloadBlob(
+      new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      'xlsx', exportLabel(),
+    );
+    toast.success(`קובץ אקסל — ${groups.length} גיליונות (סניף לכל גיליון)`);
   };
 
   // PDF: one document, each branch on its own page with a colour-coded banner.
