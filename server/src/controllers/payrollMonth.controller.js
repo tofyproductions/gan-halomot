@@ -366,6 +366,14 @@ async function getMonth(req, res, next) {
       // Fold the effective bonus into the estimated total so the salary reflects it.
       if (bonusEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + bonusEffective;
 
+      // Fold holiday pay (דמי חגים) into the total — manager override if set,
+      // otherwise the auto-eligible amount (hourly employees only). Was computed
+      // and displayed but never actually added to the salary.
+      const holidayPayEffective = (Number(manual.holiday_pay) > 0)
+        ? Number(manual.holiday_pay)
+        : (holidayPayInfo.total_pay || 0);
+      if (holidayPayEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + holidayPayEffective;
+
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,

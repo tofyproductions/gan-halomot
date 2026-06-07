@@ -1397,61 +1397,25 @@ export default function PayrollMonthTable() {
   );
 }
 
+// Compact, consistent with AbsenceCell: bold day count + a status chip + caption.
 function VacationCell({ row }) {
   const manualVal = Number(row.manual.vacation_days) || 0;
   const auto = row.vacation_days_auto?.total_days || 0;
   const balance = row.vacation_info?.balance_from_payslip;
   const remaining = balance != null ? Math.round((balance - manualVal) * 10) / 10 : null;
   const isGlobal = row.salary_type === 'global';
-
-  if (manualVal > 0) {
-    return (
-      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-        <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.85rem', color: 'primary.dark' }}>
-          {manualVal}
-        </Typography>
-        {isGlobal && (
-          <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled' }}>
-            ללא תשלום
-          </Typography>
-        )}
-        {balance != null && (
-          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: remaining < 0 ? 'error.main' : 'text.disabled' }}>
-            יתרה: {remaining}/{balance}
-          </Typography>
-        )}
-      </Stack>
-    );
-  }
-  if (auto > 0) {
-    return (
-      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-        <Tooltip title={`${auto} ימי חופשה מלוח חופשות הגן. לחץ על התא לפירוט ולאישור.`}>
-          <Chip
-            size="small" color="warning" variant="outlined"
-            label={`לוח: ${auto}`}
-            sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', pointerEvents: 'none' }}
-          />
-        </Tooltip>
-        {isGlobal && (
-          <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled' }}>
-            ללא תשלום
-          </Typography>
-        )}
-        {balance != null && (
-          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-            יתרה: {balance}
-          </Typography>
-        )}
-      </Stack>
-    );
-  }
+  const days = manualVal || auto;
+  if (!days && balance == null) return <Typography variant="body2" color="text.secondary">—</Typography>;
   return (
-    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-      <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      {days > 0 && <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days} ימים</Typography>}
+      {manualVal === 0 && auto > 0 && (
+        <Chip size="small" color="warning" variant="filled" label={`מלוח ${auto}`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
+      )}
+      {isGlobal && days > 0 && <Typography variant="caption" sx={{ fontSize: '0.56rem', color: 'text.secondary' }}>ללא תשלום</Typography>}
       {balance != null && (
-        <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-          יתרה: {balance}
+        <Typography variant="caption" sx={{ fontSize: '0.56rem', color: remaining < 0 ? 'error.main' : 'text.secondary' }}>
+          יתרה: {remaining != null ? remaining : balance}
         </Typography>
       )}
     </Stack>
@@ -1764,43 +1728,32 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
 }
 
 function HolidayPayCell({ row }) {
-  const auto = row.holiday_pay_auto || { total_days: 0, total_pay: 0, is_eligible: false };
+  const auto = row.holiday_pay_auto || { total_days: 0, total_pay: 0, is_eligible: false, blocking_reason: null };
   const manualVal = Number(row.manual.holiday_pay) || 0;
-  // If manager entered a manual amount, show it bold; otherwise show eligibility status.
-  if (manualVal > 0) {
+  const amount = manualVal > 0 ? manualVal : (auto.total_pay || 0);
+  // Paid (eligible or manually entered) — bold amount + a green "N ימי חג" chip.
+  if (amount > 0) {
     return (
-      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-        <Typography variant="body2" sx={{ fontWeight: 800, fontSize: '0.85rem', color: 'success.dark' }}>
-          {manualVal.toLocaleString('he-IL')} ₪
+      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem', color: 'success.dark' }}>
+          {Math.round(amount).toLocaleString('he-IL')} ₪
         </Typography>
-        {auto.is_eligible && (
-          <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>
-            {auto.total_days} ימים
-          </Typography>
+        {auto.total_days > 0 && (
+          <Chip size="small" color="success" variant="filled" label={`${auto.total_days} ימי חג`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
         )}
+        {manualVal > 0 && <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'text.secondary' }}>ידני</Typography>}
       </Stack>
     );
   }
-  if (auto.is_eligible) {
-    return (
-      <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
-        <Chip
-          size="small" color="success" variant="filled"
-          label={`זכאי ${auto.total_days}`}
-          sx={{ height: 18, fontSize: '0.7rem', fontWeight: 700 }}
-        />
-        <Typography variant="caption" sx={{ fontSize: '0.62rem', color: 'success.dark' }}>
-          {auto.total_pay} ₪
-        </Typography>
-      </Stack>
-    );
+  // Global employees get holiday pay through their salary — not a separate line.
+  if (row.salary_type === 'global') {
+    return <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'text.disabled' }}>בשכר</Typography>;
   }
+  // Not eligible — show a short reason on hover.
   return (
-    <Chip
-      size="small" color="default" variant="outlined"
-      label="לא זכאי"
-      sx={{ height: 18, fontSize: '0.7rem' }}
-    />
+    <Tooltip title={auto.blocking_reason || 'לא זכאי החודש'}>
+      <Chip size="small" color="default" variant="outlined" label="לא זכאי" sx={{ height: 15, fontSize: '0.55rem', cursor: 'help' }} />
+    </Tooltip>
   );
 }
 
