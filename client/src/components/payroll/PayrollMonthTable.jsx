@@ -740,6 +740,15 @@ export default function PayrollMonthTable() {
       const completionEffective = (r.manual.include_salary_completion !== false) ? (tb?.completion || 0) : 0;
       const sp = paySplit(r) || { reg: '', ot125: '', ot150: '' };
       const rnd = (v) => (v === '' || v == null) ? '' : Math.round(v);
+      // Absence days the accountant should deduct = open days only (a fully
+      // approved, non-deductible day is settled and must NOT appear in the report).
+      const absEntryBy = new Map((r.absence?.entries || []).map(e => [e.date, e]));
+      const openAbsence = (r.absence?.days || []).filter(a => {
+        const e = absEntryBy.get(a.date);
+        return !(e && e.manager_approved && e.accounting_approved && !absCat(e.category).deduct);
+      }).length;
+      const vacDays = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual.vacation_days) || 0);
+      const holPay = Number(r.manual.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
       cells.push(
         rnd(sp.reg),
         rnd(sp.ot125),
@@ -747,7 +756,7 @@ export default function PayrollMonthTable() {
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
         r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
-        r.manual.sick_days || '', r.manual.absence_days || '', r.manual.vacation_days || '', r.manual.holiday_pay || '',
+        r.manual.sick_days || '', openAbsence || '', vacDays || '', holPay ? Math.round(holPay) : '',
         r.manual.advance_deduction_preset?.label || r.manual.advance_deduction_text || '',
         r.manual.gift_card?.kind === 'number' ? r.manual.gift_card.amount : (r.manual.gift_card?.text || ''),
         r.manual.recreation?.kind === 'number' ? r.manual.recreation.amount : (r.manual.recreation?.text || ''),
