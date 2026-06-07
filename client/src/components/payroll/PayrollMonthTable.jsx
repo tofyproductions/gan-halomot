@@ -1699,17 +1699,25 @@ function AbsenceCell({ row }) {
   const ab = row.absence;
   const days = ab?.days || [];
   const ded = ab?.deduction || 0;
-  if (!days.length && !ded) return <Typography variant="body2" color="text.secondary">—</Typography>;
-  const unknown = ab.unknown_count || 0;
-  const justified = ab.justified_count || 0;
-  const byDate = new Map((ab.entries || []).map(e => [e.date, e]));
-  const pending = days.filter(a => a.source === 'unknown')
-    .filter(a => { const e = byDate.get(a.date); return !(e && e.manager_approved && e.accounting_approved); }).length;
+  const byDate = new Map((ab?.entries || []).map(e => [e.date, e]));
+  // A day fully approved by both with a non-deductible reason (מאושר / מחלה /
+  // חופשה / מילואים) is settled — it should no longer show as an absence.
+  const settled = (a) => {
+    const e = byDate.get(a.date);
+    return e && e.manager_approved && e.accounting_approved && !absCat(e.category).deduct;
+  };
+  const open = days.filter(a => !settled(a));     // still need attention / deduct
+  const approvedCount = days.length - open.length;
+  if (!open.length && !ded) {
+    return approvedCount > 0
+      ? <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>✓ מאושר</Typography>
+      : <Typography variant="body2" color="text.secondary">—</Typography>;
+  }
+  const pending = open.filter(a => { const e = byDate.get(a.date); return !(e && e.manager_approved && e.accounting_approved); }).length;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days.length} ימים</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{open.length} ימים</Typography>
       {pending > 0 && <Chip size="small" color="warning" variant="filled" label={`${pending} לסימון`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
-      {justified > 0 && <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.56rem' }}>{justified} חג/חופשה</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
