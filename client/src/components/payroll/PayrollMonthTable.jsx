@@ -773,12 +773,11 @@ export default function PayrollMonthTable() {
   // One readable line per branch incl. the payable amount, so the accountant
   // sees exactly what to pay for each branch's hours at that branch's rate.
   const branchPayLine = (o) => {
-    const amt = `₪${o.amount.toLocaleString('he-IL')}`;
-    if (!o.hasOT) return `${o.name}: ${o.hours}ש׳ × ₪${o.rate} = ${amt}`;
-    const parts = [`${o.reg}×₪${o.rate}`];
-    if (o.ot125) parts.push(`${o.ot125}×₪${o.rate}×125%`);
-    if (o.ot150) parts.push(`${o.ot150}×₪${o.rate}×150%`);
-    return `${o.name}: ${parts.join(' + ')} = ${amt}`;
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const parts = [`רגיל ${o.reg}ש׳×₪${o.rate}`];
+    if (o.ot125) parts.push(`שע״נ125% ${o.ot125}ש׳×₪${r2(o.rate * 1.25)}`);
+    if (o.ot150) parts.push(`שע״נ150% ${o.ot150}ש׳×₪${r2(o.rate * 1.5)}`);
+    return `${o.name}: ${parts.join(' + ')} = ₪${o.amount.toLocaleString('he-IL')}`;
   };
   const breakdownText = (lines) => lines.map(branchPayLine).join('  |  ');
 
@@ -1048,7 +1047,7 @@ export default function PayrollMonthTable() {
     absence: 105,         // ימי היעדרות + ניכוי + ממתין
     advance: 180,
     money: 82,
-    tekenBase: 172,       // שכר בסיס: amount + ערך/שעה + net/gross chip + per-branch split
+    tekenBase: 210,       // שכר בסיס: amount + net/gross chip + detailed per-branch hour split
     teken: 110,           // completion / supplement (chips)
     notes: 340,           // inline notes — wider so they don't stack too tall
     custom: 110,
@@ -1758,24 +1757,39 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
       )}
       {branchPay && (
         <Box sx={{ mt: 0.3, width: '100%', borderTop: '1px dashed #93c5fd', pt: 0.3 }}>
-          {branchPay.map((o, i) => (
-            <Box key={i} sx={{ lineHeight: 1.25, mb: 0.2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
-                <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', fontWeight: 700, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 96 }}>
-                  {o.name}
-                </Typography>
-                <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
-                  ₪{o.amount.toLocaleString('he-IL')}
-                </Typography>
+          {branchPay.map((o, i) => {
+            const r2 = (n) => Math.round(n * 100) / 100;
+            const lines = [
+              { lbl: 'רגיל', h: o.reg, perHour: o.rate },
+              { lbl: 'שע״נ 125%', h: o.ot125, perHour: r2(o.rate * 1.25) },
+              { lbl: 'שע״נ 150%', h: o.ot150, perHour: r2(o.rate * 1.5) },
+            ].filter(l => l.h > 0);
+            return (
+              <Box key={i} sx={{ mb: 0.4, p: 0.3, bgcolor: i % 2 ? '#f8fafc' : '#eff6ff', borderRadius: 0.5 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
+                  <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
+                    {o.name}
+                  </Typography>
+                  <Typography component="span" variant="caption" sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                    ₪{o.amount.toLocaleString('he-IL')}
+                  </Typography>
+                </Box>
+                {lines.map((l, j) => (
+                  <Box key={j} sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, lineHeight: 1.3 }}>
+                    <Typography component="span" variant="caption" sx={{ fontSize: '0.54rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                      {l.lbl}: {l.h}ש׳ × ₪{l.perHour}
+                    </Typography>
+                    <Typography component="span" variant="caption" sx={{ fontSize: '0.54rem', fontWeight: 700, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                      ₪{Math.round(l.h * l.perHour).toLocaleString('he-IL')}
+                    </Typography>
+                  </Box>
+                ))}
               </Box>
-              <Typography component="div" variant="caption" sx={{ fontSize: '0.54rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
-                {o.reg}ר׳{o.hasOT ? ` + ${o.otHours} שע״נ` : ''} · ₪{o.rate}/ש׳
-              </Typography>
-            </Box>
-          ))}
+            );
+          })}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, borderTop: '1px solid #cbd5e1', mt: 0.2, pt: 0.2 }}>
-            <Typography component="span" variant="caption" sx={{ fontSize: '0.56rem', fontWeight: 700, color: 'text.secondary' }}>סה״כ בסיס</Typography>
-            <Typography component="span" variant="caption" sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#0f172a' }}>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', fontWeight: 700, color: 'text.secondary' }}>סה״כ בסיס</Typography>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.64rem', fontWeight: 800, color: '#0f172a' }}>
               ₪{branchPay.reduce((s, o) => s + o.amount, 0).toLocaleString('he-IL')}
             </Typography>
           </Box>
