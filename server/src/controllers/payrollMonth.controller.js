@@ -10,7 +10,7 @@ const {
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment, datesInMonth } = require('../services/commitmentAnalysis');
-const { computeHolidayPay } = require('../services/israeliHolidays');
+const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
@@ -46,11 +46,12 @@ function parseMonthRange(monthYM) {
  *
  * Returns { total, details: [{date, name, value}] } so the UI can show why.
  */
-function computeKindergartenVacationDays(holidays, monthYM, commitment) {
+function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates) {
   const offWeekdays = new Set();
   if (commitment && Array.isArray(commitment.days)) {
     for (const d of commitment.days) if (d.is_off) offWeekdays.add(d.day);
   }
+  const statutory = statutoryDates instanceof Set ? statutoryDates : new Set(statutoryDates || []);
   const result = { total: 0, details: [] };
   for (const h of holidays) {
     const start = new Date(h.start_date);
@@ -62,6 +63,8 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment) {
       const wd = d.getUTCDay();
       if (wd === 6) continue;
       if (offWeekdays.has(wd)) continue;
+      // Statutory-holiday days are paid via דמי חגים, not vacation — skip them.
+      if (statutory.has(ymd)) continue;
       const isLastDay = ymd === endYmd;
       const value = (h.is_half_day && isLastDay) ? 0.5 : 1;
       result.total += value;
@@ -185,6 +188,8 @@ async function getMonth(req, res, next) {
     const [yy, mm] = month.split('-').map(Number);
     const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
     const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
+    // Statutory Israeli-holiday dates this month — paid via דמי חגים (not vacation).
+    const statutoryHolidayDates = new Set(getHolidaysInMonth(month).map(h => h.date));
     const kindergartenHolidays = await Holiday.find({
       branch_id: { $in: branchIds },
       start_date: { $lte: monthEnd },
@@ -321,10 +326,11 @@ async function getMonth(req, res, next) {
         hourlyRate,
         avgDailyHours,
       });
-      // Kindergarten holidays → vacation days for this employee.
+      // Kindergarten closures → vacation days — EXCLUDING statutory-holiday days
+      // (those are paid via דמי חגים, not vacation).
       const kgHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
       const vacationAutoInfo = computeKindergartenVacationDays(
-        kgHolidays, month, commitmentByEmp.get(String(emp._id)),
+        kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates,
       );
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
@@ -1141,9 +1147,10 @@ async function applyKindergartenVacationDays(req, res, next) {
     let skippedAlreadySet = 0;
     let noKindergartenHolidays = 0;
 
+    const statutoryHolidayDates = new Set(getHolidaysInMonth(month).map(h => h.date));
     for (const emp of employees) {
       const empHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
-      const info = computeKindergartenVacationDays(empHolidays, month, commitmentByEmp.get(String(emp._id)));
+      const info = computeKindergartenVacationDays(empHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates);
       if (info.total <= 0) { noKindergartenHolidays++; continue; }
       const cur = Number(existingByEmp.get(String(emp._id))?.manual?.vacation_days) || 0;
       if (cur > 0) { skippedAlreadySet++; continue; }
