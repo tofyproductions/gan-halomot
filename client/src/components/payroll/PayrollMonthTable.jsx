@@ -91,6 +91,19 @@ function computeTravel(row) {
   return Math.min(16 * days, 315);
 }
 
+// The automatic travel amount, ignoring any manual override — shown so the
+// accountant sees what would be paid if no value is entered.
+function autoTravel(row) {
+  const days = row.breakdown?.hours?.days_worked || 0;
+  if (row.travel_mode === 'monthly_flat') return row.travel_monthly_flat || 0;
+  const perDay = row.travel_per_day || 16;
+  return Math.min(perDay * days, 315);
+}
+// True when accounting entered a specific travel amount (override wins).
+function hasTravelOverride(row) {
+  return row.manual?.travel_override != null && row.manual?.travel_override !== '';
+}
+
 /* ─── Inline editors ────────────────────────────────────────────────── */
 
 function NumberCell({ value, onSave, disabled, placeholder = '—' }) {
@@ -355,6 +368,49 @@ function InactiveReasonDialog({ open, row, onClose, onConfirm }) {
   );
 }
 
+// Travel cell dialog — accounting enters the travel amount to pay. When set,
+// that amount is paid (override); when cleared, the automatic calc is used.
+function TravelDialog({ open, row, onClose, onSave, onClear, disabled }) {
+  const [val, setVal] = useState('');
+  useEffect(() => { if (open) setVal(row?.manual?.travel_override ?? ''); }, [open, row]);
+  if (!row) return null;
+  const auto = autoTravel(row);
+  const isOverride = hasTravelOverride(row);
+  const days = row.breakdown?.hours?.days_worked || 0;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>נסיעות — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Alert severity="info" sx={{ mb: 2, mt: 1 }}>
+          אם הנהלת החשבונות מזינה סכום — ישולם הסכום שהוזן. אם השדה ריק — ישולם החישוב האוטומטי.
+        </Alert>
+        <Typography variant="body2" sx={{ mb: 1.5 }}>
+          חישוב אוטומטי: <b>{fmtCurrency(auto)}</b>
+          <Box component="span" sx={{ color: 'text.secondary' }}>
+            {row.travel_mode === 'monthly_flat'
+              ? ' (סכום חודשי קבוע)'
+              : ` (${row.travel_per_day || 16}₪ × ${days} ימים, מוגבל ל-315₪)`}
+          </Box>
+        </Typography>
+        <TextField
+          type="number" label="סכום נסיעות לתשלום (₪)" fullWidth size="small" autoFocus
+          value={val} onChange={e => setVal(e.target.value)} disabled={disabled}
+          placeholder={`אוטומטי: ${auto}`} InputLabelProps={{ shrink: true }}
+          helperText="השאר ריק ולחץ 'חזרה לאוטומטי' כדי לבטל את הסכום הידני"
+        />
+      </DialogContent>
+      <DialogActions>
+        {isOverride && <Button color="warning" onClick={onClear} disabled={disabled}>חזרה לחישוב אוטומטי</Button>}
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" disabled={disabled || val === '' || isNaN(Number(val))} onClick={() => onSave(Number(val))}>
+          שמור סכום ידני
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 // Bonus cell — shows the effective bonus (auto or manual override) with a
 // tooltip breakdown. Click opens BonusDialog.
 function BonusCell({ row }) {
@@ -520,6 +576,7 @@ export default function PayrollMonthTable() {
   const [absence, setAbsence] = useState({ open: false, row: null });
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
   const [exportMenu, setExportMenu] = useState(null); // { type:'excel'|'pdf', anchor }
+  const [travelDlg, setTravelDlg] = useState({ open: false, row: null, locked: false });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -1553,7 +1610,15 @@ export default function PayrollMonthTable() {
                         />
                       </TableCell>
 
-                      <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</TableCell>
+                      <TableCell align="center" className="ag-divider" sx={{ cursor: 'pointer', padding: '6px !important' }}
+                        onClick={() => setTravelDlg({ open: true, row: r, locked })}>
+                        <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>{fmtCurrency(computeTravel(r)) || '—'}</Typography>
+                          {hasTravelOverride(r)
+                            ? <Chip size="small" color="info" variant="filled" label="ידני" sx={{ height: 14, fontSize: '0.55rem', '& .MuiChip-label': { px: 0.5 } }} />
+                            : <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'text.disabled' }}>אוטומטי</Typography>}
+                        </Stack>
+                      </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setSick({ open: true, row: r })}>
                         {Number(r.manual.sick_days) ? (
                           <Chip size="small" label={Number(r.manual.sick_days)} color="error" />
@@ -1647,6 +1712,14 @@ export default function PayrollMonthTable() {
         row={inactiveDlg.row}
         onClose={() => setInactiveDlg({ open: false, row: null })}
         onConfirm={(reason) => { if (inactiveDlg.row) setEmployeeActive(inactiveDlg.row.employee_id, false, reason); setInactiveDlg({ open: false, row: null }); }}
+      />
+      <TravelDialog
+        open={travelDlg.open}
+        row={travelDlg.row}
+        disabled={travelDlg.locked}
+        onClose={() => setTravelDlg({ open: false, row: null, locked: false })}
+        onSave={(amount) => { if (travelDlg.row) patchManual(travelDlg.row.employee_id, { travel_override: amount }); setTravelDlg({ open: false, row: null, locked: false }); }}
+        onClear={() => { if (travelDlg.row) patchManual(travelDlg.row.employee_id, { travel_override: null }); setTravelDlg({ open: false, row: null, locked: false }); }}
       />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
