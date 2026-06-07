@@ -1629,6 +1629,11 @@ function TekenBasePartCell({ row, onOpenHours }) {
   if (row.salary_type === 'global' && tb) {
     mainValue = split ? split.reg : (tb.regular_pay ?? tb.base_part);
     perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
+  } else if (row.salary_type === 'global') {
+    // Flat global salary (no required_hours — e.g. a manager) — show the full
+    // agreed salary so it isn't blank.
+    mainValue = baseSalary;
+    perHourLabel = 'שכר גלובלי';
   } else if (row.salary_type === 'hourly') {
     mainValue = split ? split.reg : baseSalary;
     const rate = row.breakdown?.rates?.hourly_rate;
