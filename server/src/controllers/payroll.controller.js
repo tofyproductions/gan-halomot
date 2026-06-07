@@ -295,7 +295,7 @@ async function updateEmployee(req, res, next) {
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
     const fields = [
-      'full_name', 'israeli_id', 'branch_id', 'phone', 'email', 'address',
+      'full_name', 'israeli_id', 'employee_number', 'branch_id', 'phone', 'email', 'address',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
       'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',

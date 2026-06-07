@@ -428,6 +428,7 @@ async function getMonth(req, res, next) {
         employee_id: String(emp._id),
         full_name: emp.full_name,
         israeli_id: emp.israeli_id || '',
+        employee_number: emp.employee_number || '',
         branch_id: String(emp.branch_id),
         branch_name: branchNameById.get(String(emp.branch_id)) || '',
         position: emp.position || '',

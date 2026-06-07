@@ -94,6 +94,9 @@ const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
   israeli_id: { type: String, default: '', index: true, trim: true }, // 9-digit ת"ז, matches clock userId
+  // Payslip employee number assigned by the accountant's payroll software. Lets
+  // the accountant locate each employee by the same number shown on the תלוש.
+  employee_number: { type: String, default: '', trim: true },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // optional login link
 

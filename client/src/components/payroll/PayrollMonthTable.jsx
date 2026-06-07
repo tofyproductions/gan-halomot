@@ -413,6 +413,32 @@ function TravelDialog({ open, row, onClose, onSave, onClear, disabled }) {
   );
 }
 
+// Employee number (payslip) — saved on the employee, shown every month + export.
+function EmployeeNumberDialog({ open, row, onClose, onSave }) {
+  const [val, setVal] = useState('');
+  useEffect(() => { if (open) setVal(row?.employee_number || ''); }, [open, row]);
+  if (!row) return null;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>מספר עובד — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Alert severity="info" sx={{ mb: 2, mt: 1 }}>
+          המספר כפי שמופיע בתלוש. נשמר לעובד ומוצג כל חודש ובקבצים לרו״ח — כדי לאתר את העובד לפי מספרו.
+        </Alert>
+        <TextField
+          label="מספר עובד (מהתלוש)" fullWidth size="small" autoFocus
+          value={val} onChange={e => setVal(e.target.value)} InputLabelProps={{ shrink: true }}
+          placeholder={`ת"ז: ${row.israeli_id || '—'}`}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={() => onSave(val)}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 // Bonus cell — shows the effective bonus (auto or manual override) with a
 // tooltip breakdown. Click opens BonusDialog.
 function BonusCell({ row }) {
@@ -579,6 +605,7 @@ export default function PayrollMonthTable() {
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
   const [exportMenu, setExportMenu] = useState(null); // { type:'excel'|'pdf', anchor }
   const [travelDlg, setTravelDlg] = useState({ open: false, row: null, locked: false });
+  const [empNumDlg, setEmpNumDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -682,6 +709,18 @@ export default function PayrollMonthTable() {
     });
     api.put(`/payroll/employees/${employeeId}`, { travel_override: amount })
       .then(() => { toast.success(amount == null ? 'נסיעות חזרו לחישוב אוטומטי' : 'תשלום נסיעות נשמר לעובד (כל חודש)'); fetchData(); })
+      .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
+  }, [fetchData]);
+
+  // Payslip employee number lives on the employee → shown every month + export.
+  const setEmployeeNumber = useCallback((employeeId, value) => {
+    const v = (value || '').trim();
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, employee_number: v } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, { employee_number: v })
+      .then(() => { toast.success('מספר העובד נשמר'); fetchData(); })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [fetchData]);
 
@@ -857,7 +896,7 @@ export default function PayrollMonthTable() {
      column including notes. Reused by CSV / Excel / PDF exports. */
   const buildExportMatrix = (rows = (data?.rows || [])) => {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'];
-    const headerTop = ['סניף', 'שם העובד', 'ת"ז', ...cols,
+    const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
@@ -870,7 +909,7 @@ export default function PayrollMonthTable() {
       const nameCell = r.is_active === false
         ? `⛔ ${r.full_name} (לא פעיל${r.inactive_reason ? ` — ${r.inactive_reason}` : ''})`
         : r.full_name;
-      const cells = [r.branch_name, nameCell, r.israeli_id || ''];
+      const cells = [r.branch_name, nameCell, r.israeli_id || '', r.employee_number || ''];
       // Consolidated hours across all branches (matches the on-screen table).
       cells.push(r.breakdown.hours.days_worked, r.breakdown.hours.regular, r.breakdown.hours.ot_125, r.breakdown.hours.ot_150,
         r.breakdown.rates?.hourly_rate || '', r.breakdown.rates?.global_salary || '');
@@ -1003,7 +1042,7 @@ export default function PayrollMonthTable() {
     // Drop columns with no content for THIS branch (all blank or all zero) so the
     // PDF doesn't print empty, irrelevant columns. A few core columns are always
     // kept so every page keeps its identity even if a value happens to be zero.
-    const PROTECTED_COLS = new Set(['שם העובד', 'ת"ז', 'שכר משוער', 'שכר בסיס']);
+    const PROTECTED_COLS = new Set(['שם העובד', 'ת"ז', 'מספר עובד', 'שכר משוער', 'שכר בסיס']);
     const colHasContent = (i) => rows.some(r => {
       const v = r[i];
       if (v === '' || v == null || v === '—') return false;
@@ -1012,11 +1051,13 @@ export default function PayrollMonthTable() {
       return String(v).trim() !== '';     // text: content if non-empty
     });
     cols = cols.filter(i => PROTECTED_COLS.has(header[i]) || colHasContent(i));
+    // ID-like text columns must never be treated as numeric (no summing).
+    const TEXT_ID_COLS = new Set(['ת"ז', 'מספר עובד']);
     const numericCol = {};
     for (const i of cols) {
       let any = false, ok = true;
       for (const r of rows) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) { ok = false; break; } any = true; }
-      numericCol[i] = ok && any && i >= 3;
+      numericCol[i] = ok && any && i >= 3 && !TEXT_ID_COLS.has(header[i]);
     }
     const totals = {};
     for (const i of cols) if (numericCol[i]) totals[i] = rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0);
@@ -1040,7 +1081,7 @@ export default function PayrollMonthTable() {
     const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:4px 4px;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${esc(header[i])}</th>`).join('')}</tr>`;
     // Grouped header row (matches the on-screen table's column groups).
     const groupOf = (label) => {
-      if (label === 'שם העובד' || label === 'ת"ז') return 'עובד';
+      if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
       if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
       if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
         || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
@@ -1106,7 +1147,7 @@ export default function PayrollMonthTable() {
         return Math.round(body.reduce((s, r) => s + (parseNum(r[i]) || 0), 0));
       });
       const groupOf = (label) => {
-        if (label === 'שם העובד' || label === 'ת"ז') return 'עובד';
+        if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
         if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
         if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
           || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
@@ -1548,9 +1589,20 @@ export default function PayrollMonthTable() {
                             </Box>
                             {r.israeli_id && (
                               <Typography variant="caption" sx={{ display: 'block', color: 'text.disabled', fontSize: '0.65rem' }}>
-                                {r.israeli_id}
+                                ת"ז {r.israeli_id}
                               </Typography>
                             )}
+                            <Tooltip title="מספר עובד (כפי שמופיע בתלוש) — לחץ לעריכה">
+                              <Box component="span" onClick={(e) => { e.stopPropagation(); setEmpNumDlg({ open: true, row: r }); }}
+                                sx={{ display: 'inline-block', mt: 0.2, cursor: 'pointer' }}>
+                                {r.employee_number
+                                  ? <Chip size="small" color="primary" variant="outlined" label={`מס׳ עובד: ${r.employee_number}`}
+                                      sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
+                                  : <Typography variant="caption" sx={{ color: 'warning.main', fontSize: '0.6rem', textDecoration: 'underline dotted' }}>
+                                      + הוסף מס׳ עובד
+                                    </Typography>}
+                              </Box>
+                            </Tooltip>
                             {(() => {
                               // Show a chip if this employee also has hours at a
                               // branch other than the section's branch.
@@ -1746,6 +1798,12 @@ export default function PayrollMonthTable() {
         onClose={() => setTravelDlg({ open: false, row: null, locked: false })}
         onSave={(amount) => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, amount); setTravelDlg({ open: false, row: null, locked: false }); }}
         onClear={() => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, null); setTravelDlg({ open: false, row: null, locked: false }); }}
+      />
+      <EmployeeNumberDialog
+        open={empNumDlg.open}
+        row={empNumDlg.row}
+        onClose={() => setEmpNumDlg({ open: false, row: null })}
+        onSave={(value) => { if (empNumDlg.row) setEmployeeNumber(empNumDlg.row.employee_id, value); setEmpNumDlg({ open: false, row: null }); }}
       />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
