@@ -325,6 +325,32 @@ function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
   );
 }
 
+// Prompt for the reason when deactivating an employee.
+function InactiveReasonDialog({ open, row, onClose, onConfirm }) {
+  const [reason, setReason] = useState('');
+  useEffect(() => { if (open) setReason(row?.inactive_reason || ''); }, [open, row]);
+  if (!row) return null;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>סימון כלא פעיל — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Alert severity="warning" sx={{ mb: 2, mt: 1 }}>העובד יסומן כלא פעיל. הסיבה תוצג על שורת העובד.</Alert>
+        <TextField
+          label="סיבת חוסר הפעילות" fullWidth multiline minRows={2} autoFocus
+          value={reason} onChange={e => setReason(e.target.value)}
+          placeholder="לדוגמה: סיום העסקה / עזבה / חופשת לידה…"
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" color="warning" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>
+          סמן כלא פעיל
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 // Bonus cell — shows the effective bonus (auto or manual override) with a
 // tooltip breakdown. Click opens BonusDialog.
 function BonusCell({ row }) {
@@ -488,6 +514,7 @@ export default function PayrollMonthTable() {
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
   const [absence, setAbsence] = useState({ open: false, row: null });
+  const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -569,6 +596,18 @@ export default function PayrollMonthTable() {
       .then(() => fetchData())
       .catch(err => { toast.error(err.response?.data?.error || 'האישור נכשל'); fetchData(); });
   }, [month, fetchData]);
+
+  // Activate / deactivate an employee (deactivation records a reason shown on the row).
+  const setEmployeeActive = useCallback((employeeId, active, reason = '') => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId
+        ? { ...r, is_active: active, inactive_reason: active ? '' : (reason || r.inactive_reason) } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, { is_active: active, inactive_reason: active ? '' : reason })
+      .then(() => fetchData())
+      .catch(err => { toast.error(err.response?.data?.error || 'עדכון נכשל'); fetchData(); });
+  }, [fetchData]);
 
   // Permanent note lives on the employee (shown every month), not on the month.
   const savePermanentNote = useCallback((employeeId, text) => {
@@ -1242,7 +1281,7 @@ export default function PayrollMonthTable() {
                 for (const r of rows) {
                   const locked = r.status === 'finalized';
                   elements.push(
-                    <TableRow key={r.employee_id} sx={marker ? { backgroundColor: marker.rowTint } : undefined}>
+                    <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', right: 0, zIndex: 1,
                         bgcolor: marker?.nameTint || 'background.paper',
@@ -1298,6 +1337,16 @@ export default function PayrollMonthTable() {
                               );
                             })()}
                           </Box>
+                          <Tooltip title={r.is_active === false ? 'עובד לא פעיל — לחץ להפעלה' : 'לחץ לסימון כלא פעיל'}>
+                            <Chip
+                              size="small"
+                              color={r.is_active === false ? 'default' : 'success'}
+                              variant={r.is_active === false ? 'outlined' : 'filled'}
+                              label={r.is_active === false ? 'לא פעיל' : 'פעיל'}
+                              onClick={(e) => { e.stopPropagation(); r.is_active === false ? setEmployeeActive(r.employee_id, true) : setInactiveDlg({ open: true, row: r }); }}
+                              sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
                           {locked && <Chip size="small" label="נעול" sx={{ height: 18, fontSize: '0.62rem' }} />}
                         </Box>
                       </TableCell>
@@ -1416,6 +1465,15 @@ export default function PayrollMonthTable() {
                       </TableCell>
                     </TableRow>
                   );
+                  if (r.is_active === false) {
+                    elements.push(
+                      <TableRow key={`inact-${r.employee_id}`}>
+                        <TableCell colSpan={totalCols} sx={{ bgcolor: '#fff1f2', color: '#b91c1c', fontSize: '0.72rem', fontWeight: 700, py: 0.4, borderBottom: '2px solid #fecaca' }}>
+                          ⛔ עובד לא פעיל{r.inactive_reason ? ` — ${r.inactive_reason}` : ' (לא נרשמה סיבה)'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
                 }
               }
               return elements;
@@ -1424,6 +1482,12 @@ export default function PayrollMonthTable() {
         </Table>
       </TableContainer>
 
+      <InactiveReasonDialog
+        open={inactiveDlg.open}
+        row={inactiveDlg.row}
+        onClose={() => setInactiveDlg({ open: false, row: null })}
+        onConfirm={(reason) => { if (inactiveDlg.row) setEmployeeActive(inactiveDlg.row.employee_id, false, reason); setInactiveDlg({ open: false, row: null }); }}
+      />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
         onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />

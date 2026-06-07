@@ -125,11 +125,23 @@ async function getMonth(req, res, next) {
     }
     const branchIds = branches.map(b => b._id);
 
-    // Pull employees from those branches
-    const employees = await Employee.find({ branch_id: { $in: branchIds }, is_active: true })
-      .populate('amuta_distribution.amuta_id', 'name short_name')
-      .sort({ full_name: 1 })
-      .lean();
+    // Date window for the month (used for punches + inactive-relevance).
+    const { from, to } = parseMonthRange(month);
+
+    // Active employees are always shown. Inactive employees are shown ONLY if
+    // they had activity this month (punches or a payroll record), so a just-
+    // deactivated employee stays visible with their reason — without listing
+    // everyone who ever left.
+    const activeEmps = await Employee.find({ branch_id: { $in: branchIds }, is_active: true })
+      .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
+    const punchEmpIds = await Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } });
+    const pmEmpIds = await PayrollMonth.distinct('employee_id', { month });
+    const relevantInactive = [...new Set([...punchEmpIds, ...pmEmpIds].map(String))];
+    const inactiveEmps = relevantInactive.length
+      ? await Employee.find({ branch_id: { $in: branchIds }, is_active: false, _id: { $in: relevantInactive } })
+          .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean()
+      : [];
+    const employees = [...activeEmps, ...inactiveEmps];
 
     // Pull amutot to render column groups
     const amutot = await Amuta.find({ is_active: true }).sort({ name: 1 }).lean();
@@ -149,7 +161,6 @@ async function getMonth(req, res, next) {
     );
 
     // Pull punches for all in-scope employees
-    const { from, to } = parseMonthRange(month);
     const punches = await Punch.find({
       employee_id: { $in: employees.map(e => e._id) },
       timestamp: { $gte: from, $lt: to },
@@ -403,6 +414,8 @@ async function getMonth(req, res, next) {
         branch_name: branchNameById.get(String(emp.branch_id)) || '',
         position: emp.position || '',
         permanent_note: emp.permanent_note || '',
+        is_active: emp.is_active !== false,
+        inactive_reason: emp.inactive_reason || '',
         salary_type: emp.salary_type,
         salary_is_net: !!emp.salary_is_net,
         // Travel config so UI can show "16₪/day" inline

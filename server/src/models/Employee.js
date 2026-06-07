@@ -154,6 +154,7 @@ const employeeSchema = new mongoose.Schema({
 
   // Status
   is_active: { type: Boolean, default: true },
+  inactive_reason: { type: String, default: '' }, // why the employee was deactivated
   on_maternity_leave: { type: Boolean, default: false },
   maternity_leave_from: { type: Date, default: null },
   maternity_leave_to: { type: Date, default: null },
