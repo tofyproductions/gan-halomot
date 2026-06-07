@@ -336,6 +336,7 @@ async function getMonth(req, res, next) {
         commitment: commitmentByEmp.get(String(emp._id)),
         hourlyRate,
         avgDailyHours,
+        ganClosedDates: holidayDates, // gan-closure days don't fail the guard-day rule
       });
       // Kindergarten closures → vacation days — EXCLUDING statutory-holiday days
       // (those are paid via דמי חגים, not vacation).

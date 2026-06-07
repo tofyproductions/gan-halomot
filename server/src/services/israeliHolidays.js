@@ -72,7 +72,8 @@ function getHolidaysInMonth(monthYM) {
  * @param {Number} args.avgDailyHours — typical working hours/day (for daily pay calc); default 8
  * @returns {{ eligible_days: Array, total_days: Number, total_pay: Number, ineligible_days: Array }}
  */
-function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate, avgDailyHours }) {
+function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate, avgDailyHours, ganClosedDates }) {
+  const ganClosed = ganClosedDates instanceof Set ? ganClosedDates : new Set(ganClosedDates || []);
   const result = {
     eligible_days: [],
     ineligible_days: [],
@@ -171,8 +172,10 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     const next = shiftYmd(h.date, +1);
     const prevWd = weekdayLocal(prev);
     const nextWd = weekdayLocal(next);
-    const prevWorked = workedSet.has(prev) || guardRelaxed(prevWd);
-    const nextWorked = workedSet.has(next) || guardRelaxed(nextWd);
+    // The guard day also doesn't disqualify if the gan was CLOSED that day — she
+    // couldn't have worked because there was no work that day.
+    const prevWorked = workedSet.has(prev) || guardRelaxed(prevWd) || ganClosed.has(prev);
+    const nextWorked = workedSet.has(next) || guardRelaxed(nextWd) || ganClosed.has(next);
     // Per the commitment rule: only a REQUIRED-but-missed guard day disqualifies.
     if (!prevWorked) reasons.push(`חויב לעבוד יום לפני החג ולא עבד (${prev})`);
     if (!nextWorked) reasons.push(`חויב לעבוד יום אחרי החג ולא עבד (${next})`);
