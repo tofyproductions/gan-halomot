@@ -979,7 +979,7 @@ export default function PayrollMonthTable() {
     money: 82,
     tekenBase: 150,       // שכר בסיס: amount + ערך/שעה + net/gross chip + OT note
     teken: 110,           // completion / supplement (chips)
-    notes: 260,           // inline notes — readable without click
+    notes: 340,           // inline notes — wider so they don't stack too tall
     custom: 110,
     adjust: 110,
   };
@@ -1100,7 +1100,7 @@ export default function PayrollMonthTable() {
         <Table size="small" stickyHeader sx={{
           tableLayout: 'fixed',
           minWidth: 1100,
-          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px' },
+          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px', verticalAlign: 'middle' },
           '& td.auto': { bgcolor: 'grey.50', color: 'text.secondary' },
           '& .ag-divider': { borderLeft: '2px solid', borderColor: 'divider' },
           '& tbody tr:nth-of-type(even) td': { bgcolor: 'rgba(0,0,0,0.015)' },
