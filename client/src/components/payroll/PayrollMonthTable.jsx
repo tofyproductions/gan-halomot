@@ -4,7 +4,7 @@ import {
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
   Chip, Autocomplete, Dialog, DialogTitle, DialogContent, DialogActions, ToggleButton, ToggleButtonGroup,
   CircularProgress, RadioGroup, FormControlLabel, Radio, Checkbox, FormControl, FormLabel,
-  InputAdornment, Alert,
+  InputAdornment, Alert, Menu, Divider, ListItemText,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -519,6 +519,7 @@ export default function PayrollMonthTable() {
   const [sick, setSick] = useState({ open: false, row: null });
   const [absence, setAbsence] = useState({ open: false, row: null });
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
+  const [exportMenu, setExportMenu] = useState(null); // { type:'excel'|'pdf', anchor }
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -872,15 +873,45 @@ export default function PayrollMonthTable() {
     downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
   };
 
-  // Group the in-scope rows by branch — the accountant gets one file per branch.
-  const exportGroups = () => {
+  // Group rows by branch — each branch becomes its own file / sheet / PDF page.
+  const exportGroups = (rows = (data?.rows || [])) => {
     const groups = new Map();
-    for (const r of (data?.rows || [])) {
+    for (const r of rows) {
       const k = r.branch_name || '—';
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
     }
     return [...groups.entries()];
+  };
+
+  // Resolve the rows to export for a chosen scope.
+  //   'network' → every branch (fetch the full month if the current view is scoped)
+  //   'current' → only the branch currently selected
+  const resolveExportRows = async (scope) => {
+    if (scope === 'current') {
+      if (!isAllBranches) return data?.rows || [];
+      return (data?.rows || []).filter(r => String(r.branch_id) === String(selectedBranch));
+    }
+    // network
+    if (isAllBranches && data?.rows) return data.rows;
+    try {
+      // branch:'all' overrides the api-client interceptor that would otherwise
+      // inject the currently-selected branch and scope the result.
+      const res = await api.get('/payroll-month', { params: { month, branch: 'all' } });
+      return res.data.rows || [];
+    } catch (e) {
+      console.error(e); toast.error('שגיאה בטעינת נתוני כל הרשת'); return [];
+    }
+  };
+
+  // Run an export (excel/pdf) for a chosen scope (network / current branch).
+  const runExport = async (type, scope) => {
+    setExportMenu(null);
+    const rows = await resolveExportRows(scope);
+    if (!rows.length) { toast.info('אין נתונים לייצוא'); return; }
+    const label = scope === 'network' ? 'כל-הרשת' : (selectedBranchName || 'סניף');
+    if (type === 'excel') exportExcel(rows, label);
+    else exportPDF(rows);
   };
   const exportColor = (branchName) => ganMarker(branchName)
     || { strip: '#1e3a8a', stripText: '#ffffff', rowTint: '#f1f5f9', accent: '#1e3a8a' };
@@ -924,6 +955,24 @@ export default function PayrollMonthTable() {
     const wsum = weights.reduce((a, b) => a + b, 0);
     const colgroup = `<colgroup>${weights.map(w => `<col style="width:${(w / wsum * 100).toFixed(3)}%"/>`).join('')}</colgroup>`;
     const th = `<tr>${cols.map(i => `<th style="background:${color.strip};color:${color.stripText};border:1px solid ${color.accent};padding:4px 4px;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${esc(header[i])}</th>`).join('')}</tr>`;
+    // Grouped header row (matches the on-screen table's column groups).
+    const groupOf = (label) => {
+      if (label === 'שם העובד' || label === 'ת"ז') return 'עובד';
+      if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
+      if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
+        || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
+      return 'שכר ותשלומים';
+    };
+    const groupColor = { 'עובד': '#475569', 'שעות עבודה': '#0369a1', 'שכר ותשלומים': '#15803d', 'נתונים נוספים': '#7c3aed' };
+    let gh = '<tr>';
+    for (let k = 0; k < cols.length;) {
+      const g = groupOf(header[cols[k]]);
+      let span = 1;
+      while (k + span < cols.length && groupOf(header[cols[k + span]]) === g) span++;
+      gh += `<th colspan="${span}" style="background:${groupColor[g] || '#334155'};color:#fff;border:1px solid #fff;padding:3px 4px;font-weight:bold;text-align:center;white-space:nowrap;font-size:${excel ? '11px' : '8pt'}">${esc(g)}</th>`;
+      k += span;
+    }
+    gh += '</tr>';
     const body = rows.map((r, ri) => {
       const inactive = branchRows[ri]?.is_active === false;
       const rowBg = inactive ? 'background:#e5e7eb' : (ri % 2 ? `background:${color.rowTint}` : '');
@@ -937,16 +986,16 @@ export default function PayrollMonthTable() {
       const v = idx === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
       return `<td style="border:1px solid ${color.accent};padding:4px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${v}</td>`;
     }).join('')}</tr>`;
-    return { colgroup, th, body, totalsRow, count: rows.length };
+    return { colgroup, gh, th, body, totalsRow, count: rows.length };
   };
 
   // Excel: ONE real .xlsx workbook, one colour-named sheet per branch.
   // (Replaces the old HTML-as-.xls hack that produced invalid files and lost
   //  every download after the first because browsers block serial downloads.)
-  const exportExcel = () => {
+  const exportExcel = (rows, label) => {
     if (!data) return;
-    const groups = exportGroups();
-    if (!groups.length) return;
+    const groups = exportGroups(rows);
+    if (!groups.length) { toast.info('אין נתונים לייצוא'); return; }
     const parseNum = (c) => {
       if (c === '' || c == null) return null;
       if (typeof c === 'number') return c;
@@ -973,8 +1022,26 @@ export default function PayrollMonthTable() {
         if (!numeric[i]) return '';
         return Math.round(body.reduce((s, r) => s + (parseNum(r[i]) || 0), 0));
       });
-      const aoa = [header, ...aoaBody, totals];
+      const groupOf = (label) => {
+        if (label === 'שם העובד' || label === 'ת"ז') return 'עובד';
+        if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'שכר שעתי', 'שכר תקן'].includes(label)) return 'שעות עבודה';
+        if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
+          || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
+        return 'שכר ותשלומים';
+      };
+      const groupRow = header.map(() => '');
+      const groupMerges = [];
+      for (let k = 0; k < header.length;) {
+        const g = groupOf(header[k]); let span = 1;
+        while (k + span < header.length && groupOf(header[k + span]) === g) span++;
+        groupRow[k] = g;
+        if (span > 1) groupMerges.push({ s: { r: 1, c: k }, e: { r: 1, c: k + span - 1 } });
+        k += span;
+      }
+      const titleRow = [`🏠 ${branch} — שכר ${month} · ${body.length} עובדים`];
+      const aoa = [titleRow, groupRow, header, ...aoaBody, totals];
       const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: header.length - 1 } }, ...groupMerges];
       ws['!rtl'] = true;
       // Column widths roughly matching the on-screen / PDF weighting.
       ws['!cols'] = header.map((label) => {
@@ -985,7 +1052,7 @@ export default function PayrollMonthTable() {
         if (/שכר|השלמת|תוספת|נסיעות|הלוואות|קיזוז|בונוס|חגים/.test(label)) return { wch: 13 };
         return { wch: 9 };
       });
-      ws['!freeze'] = { xSplit: 0, ySplit: 1 };      // freeze header row
+      ws['!freeze'] = { xSplit: 0, ySplit: 3 };      // freeze title + group + header rows
       let name = (branch || '—').replace(/[\\/?*[\]:]/g, '-').slice(0, 28).trim() || 'גיליון';
       let n = name, k = 2;
       while (usedNames.has(n)) { n = `${name.slice(0, 25)} ${k++}`; }
@@ -995,16 +1062,18 @@ export default function PayrollMonthTable() {
     const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
     downloadBlob(
       new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      'xlsx', exportLabel(),
+      'xlsx', label || exportLabel(),
     );
-    toast.success(`קובץ אקסל — ${groups.length} גיליונות (סניף לכל גיליון)`);
+    toast.success(groups.length > 1
+      ? `קובץ אקסל — ${groups.length} גיליונות (סניף לכל גיליון)`
+      : 'קובץ אקסל הורד');
   };
 
   // PDF: one document, each branch on its own page with a colour-coded banner.
-  const exportPDF = () => {
+  const exportPDF = (rows) => {
     if (!data) return;
-    const groups = exportGroups();
-    if (!groups.length) return;
+    const groups = exportGroups(rows);
+    if (!groups.length) { toast.info('אין נתונים לייצוא'); return; }
     const today = new Date().toLocaleDateString('he-IL');
     const sections = groups.map(([branch, rows], gi) => {
       const c = exportColor(branch);
@@ -1014,7 +1083,7 @@ export default function PayrollMonthTable() {
           <h1 style="color:${c.accent}"><span class="dot" style="background:${c.strip}"></span> ${esc(branch)} — שכר ${esc(month)}</h1>
           <div class="meta">${t.count} עובדים · הופק ${esc(today)}</div>
         </div>
-        <table>${t.colgroup}<thead>${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody></table>
+        <table>${t.colgroup}<thead>${t.gh}${t.th}</thead><tbody>${t.body}${t.totalsRow}</tbody></table>
       </section>`;
     }).join('');
     const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(month)}</title>
@@ -1157,8 +1226,25 @@ export default function PayrollMonthTable() {
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
-          <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />} onClick={exportExcel} disabled={!data}>אקסל</Button>
-          <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />} onClick={exportPDF} disabled={!data}>PDF</Button>
+          <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />}
+            onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
+          <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
+            onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
+          <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
+            <MenuItem disabled sx={{ opacity: 1 }}>
+              <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}
+                primary={exportMenu?.type === 'excel' ? 'הורדת אקסל' : 'הורדת PDF'} />
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={() => runExport(exportMenu.type, 'network')}>
+              <ListItemText primary="כל הרשת — קובץ אחד"
+                secondary={exportMenu?.type === 'excel' ? 'גיליון נפרד לכל סניף' : 'עמוד נפרד לכל סניף'} />
+            </MenuItem>
+            <MenuItem onClick={() => runExport(exportMenu.type, 'current')} disabled={isAllBranches}>
+              <ListItemText primary={`סניף נוכחי בלבד${!isAllBranches && selectedBranchName ? ` — ${selectedBranchName}` : ''}`}
+                secondary={isAllBranches ? 'בחר סניף מסוים כדי להפעיל' : null} />
+            </MenuItem>
+          </Menu>
           <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
           {isFinalized
             ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={stagingMode}>פתח לעריכה</Button>
