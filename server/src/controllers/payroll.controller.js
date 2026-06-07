@@ -298,7 +298,7 @@ async function updateEmployee(req, res, next) {
       'full_name', 'israeli_id', 'branch_id', 'phone', 'email', 'address',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
-      'travel_mode', 'travel_per_day', 'travel_monthly_flat',
+      'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',
       'travel_allowance', 'meal_vouchers', 'recreation_annual',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
       'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'work_days',

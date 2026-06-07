@@ -127,6 +127,12 @@ const employeeSchema = new mongoose.Schema({
   travel_per_day: { type: Number, default: 16 },            // ₪/יום ב-mode='per_day'
   travel_monthly_flat: { type: Number, default: 0 },        // ₪/חודש ב-mode='monthly_flat'
 
+  // Standing manual travel amount entered by accounting. When set (non-null) it
+  // is the travel paid EVERY month going forward (overrides the auto per-day /
+  // flat calc) until accounting changes or clears it. A month-specific override
+  // in PayrollMonth.manual.travel_override still takes precedence for that month.
+  travel_override: { type: Number, default: null },
+
   // Kept for backward compatibility — old name. New code should use travel_monthly_flat.
   travel_allowance: { type: Number, default: 0 },
   meal_vouchers: { type: Number, default: 0 },              // סיבוס

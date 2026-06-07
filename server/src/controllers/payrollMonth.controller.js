@@ -327,7 +327,11 @@ async function getMonth(req, res, next) {
         include_salary_completion: existingManual.include_salary_completion !== false,
         pay_excess_supplement: payExcessSupplement,
         absence_deduction: absenceDeduction,
-        travel_override: existingManual.travel_override,
+        // Month-specific override wins for this month; otherwise the standing
+        // per-employee travel amount (carries forward every month) is used.
+        travel_override: (existingManual.travel_override != null && existingManual.travel_override !== '')
+          ? existingManual.travel_override
+          : (emp.travel_override ?? null),
       });
       // Closed months are frozen: serve the snapshot captured at finalize so a
       // later rate/logic change never shifts an already-paid month.
@@ -436,6 +440,7 @@ async function getMonth(req, res, next) {
         travel_mode: emp.travel_mode || 'per_day',
         travel_per_day: emp.travel_per_day || 0,
         travel_monthly_flat: emp.travel_monthly_flat || 0,
+        travel_override: emp.travel_override ?? null, // standing per-employee amount
         breakdown,
         bonus: {
           auto: bonusAuto,

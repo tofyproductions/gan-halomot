@@ -99,9 +99,11 @@ function autoTravel(row) {
   const perDay = row.travel_per_day || 16;
   return Math.min(perDay * days, 315);
 }
-// True when accounting entered a specific travel amount (override wins).
+// True when accounting entered a specific travel amount (override wins) — either
+// a standing per-employee amount (carries forward) or a one-month override.
 function hasTravelOverride(row) {
-  return row.manual?.travel_override != null && row.manual?.travel_override !== '';
+  return (row.travel_override != null && row.travel_override !== '')
+    || (row.manual?.travel_override != null && row.manual?.travel_override !== '');
 }
 
 /* ─── Inline editors ────────────────────────────────────────────────── */
@@ -372,7 +374,7 @@ function InactiveReasonDialog({ open, row, onClose, onConfirm }) {
 // that amount is paid (override); when cleared, the automatic calc is used.
 function TravelDialog({ open, row, onClose, onSave, onClear, disabled }) {
   const [val, setVal] = useState('');
-  useEffect(() => { if (open) setVal(row?.manual?.travel_override ?? ''); }, [open, row]);
+  useEffect(() => { if (open) setVal(row?.travel_override ?? row?.manual?.travel_override ?? ''); }, [open, row]);
   if (!row) return null;
   const auto = autoTravel(row);
   const isOverride = hasTravelOverride(row);
@@ -382,7 +384,7 @@ function TravelDialog({ open, row, onClose, onSave, onClear, disabled }) {
       <DialogTitle>נסיעות — {row.full_name}</DialogTitle>
       <DialogContent>
         <Alert severity="info" sx={{ mb: 2, mt: 1 }}>
-          אם הנהלת החשבונות מזינה סכום — ישולם הסכום שהוזן. אם השדה ריק — ישולם החישוב האוטומטי.
+          סכום שמוזן נשמר לעובד ויחול <b>בכל חודש קדימה</b> — עד שינוי יזום. אם השדה ריק — ישולם החישוב האוטומטי.
         </Alert>
         <Typography variant="body2" sx={{ mb: 1.5 }}>
           חישוב אוטומטי: <b>{fmtCurrency(auto)}</b>
@@ -393,10 +395,10 @@ function TravelDialog({ open, row, onClose, onSave, onClear, disabled }) {
           </Box>
         </Typography>
         <TextField
-          type="number" label="סכום נסיעות לתשלום (₪)" fullWidth size="small" autoFocus
+          type="number" label="סכום נסיעות קבוע לעובד (₪)" fullWidth size="small" autoFocus
           value={val} onChange={e => setVal(e.target.value)} disabled={disabled}
           placeholder={`אוטומטי: ${auto}`} InputLabelProps={{ shrink: true }}
-          helperText="השאר ריק ולחץ 'חזרה לאוטומטי' כדי לבטל את הסכום הידני"
+          helperText="נשמר לעובד ויחול בכל חודש. לחץ 'חזרה לאוטומטי' כדי לבטל."
         />
       </DialogContent>
       <DialogActions>
@@ -669,6 +671,18 @@ export default function PayrollMonthTable() {
     api.put(`/payroll/employees/${employeeId}`, { is_active: active, inactive_reason: active ? '' : reason })
       .then(() => fetchData())
       .catch(err => { toast.error(err.response?.data?.error || 'עדכון נכשל'); fetchData(); });
+  }, [fetchData]);
+
+  // Standing travel amount lives on the employee → carries forward every month
+  // until changed. amount=null clears it (revert to automatic calc).
+  const setEmployeeTravel = useCallback((employeeId, amount) => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, travel_override: amount } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, { travel_override: amount })
+      .then(() => { toast.success(amount == null ? 'נסיעות חזרו לחישוב אוטומטי' : 'תשלום נסיעות נשמר לעובד (כל חודש)'); fetchData(); })
+      .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [fetchData]);
 
   // Permanent note lives on the employee (shown every month), not on the month.
@@ -1718,8 +1732,8 @@ export default function PayrollMonthTable() {
         row={travelDlg.row}
         disabled={travelDlg.locked}
         onClose={() => setTravelDlg({ open: false, row: null, locked: false })}
-        onSave={(amount) => { if (travelDlg.row) patchManual(travelDlg.row.employee_id, { travel_override: amount }); setTravelDlg({ open: false, row: null, locked: false }); }}
-        onClear={() => { if (travelDlg.row) patchManual(travelDlg.row.employee_id, { travel_override: null }); setTravelDlg({ open: false, row: null, locked: false }); }}
+        onSave={(amount) => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, amount); setTravelDlg({ open: false, row: null, locked: false }); }}
+        onClear={() => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, null); setTravelDlg({ open: false, row: null, locked: false }); }}
       />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
