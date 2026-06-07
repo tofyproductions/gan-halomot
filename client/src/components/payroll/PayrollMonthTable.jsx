@@ -748,10 +748,16 @@ export default function PayrollMonthTable() {
   const perBranchBreakdown = (r) => {
     if (r.salary_type !== 'hourly') return [];
     const pb = r.breakdown?.per_branch || {};
+    const r1 = (n) => Math.round((n || 0) * 10) / 10;
     const out = [];
     for (const [bid, bk] of Object.entries(pb)) {
-      const hours = Math.round(((bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0)) * 10) / 10;
-      if (hours > 0) out.push({ name: branchNameOf(bid), hours, rate: bk.hourly_rate || 0 });
+      const reg = bk.regular_hours || 0, ot125 = bk.ot_125_hours || 0, ot150 = bk.ot_150_hours || 0;
+      const hours = r1(reg + ot125 + ot150);
+      if (hours <= 0) continue;
+      const rate = bk.hourly_rate || 0;
+      // What the accountant should pay for this branch's hours (incl. OT premium).
+      const amount = Math.round(reg * rate + ot125 * rate * 1.25 + ot150 * rate * 1.5);
+      out.push({ name: branchNameOf(bid), hours, reg: r1(reg), ot125: r1(ot125), ot150: r1(ot150), rate, amount, hasOT: ot125 + ot150 > 0 });
     }
     return out;
   };
@@ -759,7 +765,17 @@ export default function PayrollMonthTable() {
   // branch whose rate differs from the employee's standard rate.
   const breakdownIsInformative = (r, lines) =>
     lines.length > 1 || (lines.length === 1 && lines[0].rate !== (r.breakdown?.rates?.hourly_rate || lines[0].rate));
-  const breakdownText = (lines) => lines.map(o => `${o.name}: ${o.hours}ש׳ × ₪${o.rate}`).join(' | ');
+  // One readable line per branch incl. the payable amount, so the accountant
+  // sees exactly what to pay for each branch's hours at that branch's rate.
+  const branchPayLine = (o) => {
+    const amt = `₪${o.amount.toLocaleString('he-IL')}`;
+    if (!o.hasOT) return `${o.name}: ${o.hours}ש׳ × ₪${o.rate} = ${amt}`;
+    const parts = [`${o.reg}×₪${o.rate}`];
+    if (o.ot125) parts.push(`${o.ot125}×₪${o.rate}×125%`);
+    if (o.ot150) parts.push(`${o.ot150}×₪${o.rate}×150%`);
+    return `${o.name}: ${parts.join(' + ')} = ${amt}`;
+  };
+  const breakdownText = (lines) => lines.map(branchPayLine).join('  |  ');
 
   /* Build the full export matrix (header + one row per employee) with every
      column including notes. Reused by CSV / Excel / PDF exports. */
@@ -769,7 +785,7 @@ export default function PayrollMonthTable() {
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
-    headerTop.push('פירוט שעות לפי סניף');
+    headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
@@ -894,7 +910,7 @@ export default function PayrollMonthTable() {
     const colWeight = (label) => {
       if (label === 'שם העובד') return 3.2;
       if (label === 'ת"ז') return 1.7;
-      if (label === 'פירוט שעות לפי סניף' || label === 'הערות') return 2.6;
+      if (label === 'פירוט תשלום לפי סניף' || label === 'הערות') return 2.8;
       if (label === 'בונוס - פירוט') return 1.8;
       if (label === 'שכר משוער') return 1.7;
       if (/שכר בסיס|השלמת שכר|תוספת שכר|שע"נ 125|שע"נ 150|קיזוז|הלוואות|בונוס|נסיעות/.test(label)) return 1.4;
@@ -959,7 +975,7 @@ export default function PayrollMonthTable() {
       // Column widths roughly matching the on-screen / PDF weighting.
       ws['!cols'] = header.map((label) => {
         if (label === 'שם העובד') return { wch: 30 };
-        if (label === 'הערות' || label === 'פירוט שעות לפי סניף') return { wch: 26 };
+        if (label === 'הערות' || label === 'פירוט תשלום לפי סניף') return { wch: 34 };
         if (label === 'בונוס - פירוט') return { wch: 20 };
         if (label === 'ת"ז') return { wch: 12 };
         if (/שכר|השלמת|תוספת|נסיעות|הלוואות|קיזוז|בונוס|חגים/.test(label)) return { wch: 13 };
@@ -1375,9 +1391,9 @@ export default function PayrollMonthTable() {
                               return (
                                 <Tooltip arrow title={
                                   <Box sx={{ fontSize: '0.72rem' }}>
-                                    <b>פירוט שעות לפי סניף</b>
+                                    <b>פירוט תשלום לפי סניף</b>
                                     {lines.map((o, i) => (
-                                      <div key={i}>{o.name}: {o.hours}ש׳ × ₪{o.rate}</div>
+                                      <div key={i} style={{ marginTop: 2 }}>{branchPayLine(o)}</div>
                                     ))}
                                   </Box>
                                 }>
