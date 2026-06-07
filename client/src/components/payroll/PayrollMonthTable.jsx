@@ -762,7 +762,7 @@ export default function PayrollMonthTable() {
       const rate = bk.hourly_rate || 0;
       // What the accountant should pay for this branch's hours (incl. OT premium).
       const amount = Math.round(reg * rate + ot125 * rate * 1.25 + ot150 * rate * 1.5);
-      out.push({ name: branchNameOf(bid), hours, reg: r1(reg), ot125: r1(ot125), ot150: r1(ot150), rate, amount, hasOT: ot125 + ot150 > 0 });
+      out.push({ name: branchNameOf(bid), hours, reg: r1(reg), ot125: r1(ot125), ot150: r1(ot150), otHours: r1(ot125 + ot150), rate, amount, hasOT: ot125 + ot150 > 0 });
     }
     return out;
   };
@@ -1669,6 +1669,20 @@ function paySplit(row) {
     return { reg: tb.regular_pay || 0, ot125: tb.ot125_pay || 0, ot150: tb.ot150_pay || 0 };
   }
   if (row.salary_type === 'hourly') {
+    // Multi-branch: each branch's hours are paid at THAT branch's rate (matches
+    // the server's components.base_salary). A single primary rate would wrongly
+    // pay e.g. Herzliya hours (₪45) at the home rate (₪42).
+    const pb = row.breakdown?.per_branch;
+    if (pb && Object.keys(pb).length) {
+      let reg = 0, ot125 = 0, ot150 = 0;
+      for (const b of Object.values(pb)) {
+        const rt = b.hourly_rate || 0;
+        reg += (b.regular_hours || 0) * rt;
+        ot125 += (b.ot_125_hours || 0) * rt * 1.25;
+        ot150 += (b.ot_150_hours || 0) * rt * 1.5;
+      }
+      return { reg, ot125, ot150 };
+    }
     const rate = row.breakdown?.rates?.hourly_rate || 0;
     return {
       reg: (h.regular || 0) * rate,
@@ -1745,15 +1759,26 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
       {branchPay && (
         <Box sx={{ mt: 0.3, width: '100%', borderTop: '1px dashed #93c5fd', pt: 0.3 }}>
           {branchPay.map((o, i) => (
-            <Box key={i} sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, lineHeight: 1.25 }}>
-              <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', color: 'text.secondary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 92 }}>
-                {o.name} · ₪{o.rate}{o.hasOT ? '+שע״נ' : ''}
-              </Typography>
-              <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
-                ₪{o.amount.toLocaleString('he-IL')}
+            <Box key={i} sx={{ lineHeight: 1.25, mb: 0.2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
+                <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', fontWeight: 700, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 96 }}>
+                  {o.name}
+                </Typography>
+                <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                  ₪{o.amount.toLocaleString('he-IL')}
+                </Typography>
+              </Box>
+              <Typography component="div" variant="caption" sx={{ fontSize: '0.54rem', color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                {o.reg}ר׳{o.hasOT ? ` + ${o.otHours} שע״נ` : ''} · ₪{o.rate}/ש׳
               </Typography>
             </Box>
           ))}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, borderTop: '1px solid #cbd5e1', mt: 0.2, pt: 0.2 }}>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.56rem', fontWeight: 700, color: 'text.secondary' }}>סה״כ בסיס</Typography>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#0f172a' }}>
+              ₪{branchPay.reduce((s, o) => s + o.amount, 0).toLocaleString('he-IL')}
+            </Typography>
+          </Box>
         </Box>
       )}
       {otNote && (
