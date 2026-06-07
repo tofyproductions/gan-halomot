@@ -500,16 +500,22 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // skips the cap.
   const TRAVEL_PER_DAY_CAP = 315;
   let travel = 0;
-  const mode = employee.travel_mode || 'per_day';
-  if (mode === 'per_day') {
-    const perDay = (employee.travel_per_day != null && employee.travel_per_day !== '')
-      ? Number(employee.travel_per_day)
-      : 16;
-    travel = Math.min(perDay * daysWorked, TRAVEL_PER_DAY_CAP);
-  } else if (mode === 'monthly_flat') {
-    travel = Number(employee.travel_monthly_flat) || Number(employee.travel_allowance) || 0;
+  // A manager-entered travel override (opts.travel_override) is the amount paid —
+  // it wins over the automatic per-day/flat computation.
+  if (opts.travel_override != null && opts.travel_override !== '') {
+    travel = Number(opts.travel_override) || 0;
   } else {
-    travel = Number(employee.travel_allowance) || 0;
+    const mode = employee.travel_mode || 'per_day';
+    if (mode === 'per_day') {
+      const perDay = (employee.travel_per_day != null && employee.travel_per_day !== '')
+        ? Number(employee.travel_per_day)
+        : 16;
+      travel = Math.min(perDay * daysWorked, TRAVEL_PER_DAY_CAP);
+    } else if (mode === 'monthly_flat') {
+      travel = Number(employee.travel_monthly_flat) || Number(employee.travel_allowance) || 0;
+    } else {
+      travel = Number(employee.travel_allowance) || 0;
+    }
   }
   const meal       = Number(employee.meal_vouchers) || 0;
   const recreation = (Number(employee.recreation_annual) || 0) / 12; // pro-rate annually

@@ -75,6 +75,9 @@ function fmtCurrency(n) {
 }
 
 function computeTravel(row) {
+  // Use the value the salary engine actually paid (it already honours the
+  // manager's manual override) so the displayed travel always equals what's paid.
+  if (row.breakdown?.components?.travel != null) return row.breakdown.components.travel;
   // Manual override takes precedence and skips the monthly free-pass cap —
   // admin entered a specific value on purpose.
   if (row.manual.travel_override != null) return row.manual.travel_override;

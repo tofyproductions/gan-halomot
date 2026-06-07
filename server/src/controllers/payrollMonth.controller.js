@@ -315,6 +315,7 @@ async function getMonth(req, res, next) {
         include_salary_completion: existingManual.include_salary_completion !== false,
         pay_excess_supplement: payExcessSupplement,
         absence_deduction: absenceDeduction,
+        travel_override: existingManual.travel_override,
       });
       // Closed months are frozen: serve the snapshot captured at finalize so a
       // later rate/logic change never shifts an already-paid month.
@@ -751,6 +752,7 @@ async function finalizeMonth(req, res, next) {
         pay_excess_supplement: m.supplement_manager_approved === true
           && m.supplement_accounting_approved === true,
         absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
+        travel_override: m.travel_override,
       });
       await PayrollMonth.findOneAndUpdate(
         { employee_id: emp._id, month },
