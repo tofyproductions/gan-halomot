@@ -336,6 +336,9 @@ async function getMonth(req, res, next) {
         include_salary_completion: existingManual.include_salary_completion !== false,
         pay_excess_supplement: payExcessSupplement,
         absence_deduction: absenceDeduction,
+        // Teken hourly value is based on the employee's committed work hours
+        // (their schedule), not a separate required_hours field that can drift.
+        required_hours_override: commitmentInfo.has_commitment ? commitmentInfo.committed_hours : null,
         // Month-specific override wins for this month; otherwise the standing
         // per-employee travel amount (carries forward every month) is used.
         travel_override: (existingManual.travel_override != null && existingManual.travel_override !== '')

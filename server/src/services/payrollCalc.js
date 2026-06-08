@@ -214,6 +214,13 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const branchBuckets = new Map();  // branchIdStr → bucket
 
   const rates = primaryRates(employee);
+  // The committed hours from the employee's work-schedule (commitment) are the
+  // source of truth for the teken hourly value — NOT a separately-stored
+  // required_hours field, which can drift. When the caller supplies the month's
+  // committed hours, use them so hourly_value = salary / committed_hours.
+  if (opts.required_hours_override != null && Number(opts.required_hours_override) > 0) {
+    rates.required_hours = Number(opts.required_hours_override);
+  }
   const fallbackAmutaId = rates.primary_amuta_id;
 
   const days = [];
