@@ -449,11 +449,20 @@ function parsePage(rawText, pageIndex) {
   // pick as base_salary — so expose every big number on that line and let the
   // comparator match against any. The line is identified by the garbled
   // "שכר יסוד" signature this vendor emits ("—¬–").
+  // The base line is identified STRUCTURALLY (the garbled "שכר יסוד" label
+  // varies between PDF text engines): it carries 2+ big money columns
+  // (סכום התשלום / נטו-לגילום / שכר-לקופ"ג) and ENDS with the small אחוז-משרה
+  // decimal (0 < x ≤ 1.5), e.g. "7,238.00 6,369.00 8,500.00 0.75". We expose all
+  // big numbers so the comparator can match our שכר בסיס against any column.
   result.base_salary_candidates = [];
   for (const line of text.split('\n')) {
-    if (line.includes('—¬–') || /¿»∫º/.test(line)) {
-      const nums = (line.match(/[\d,]+\.\d+/g) || []).map((s) => num(s)).filter((n) => n != null && n >= 100);
-      if (nums.length) { result.base_salary_candidates = [...new Set(nums)]; break; }
+    const nums = (line.match(/[\d,]+\.\d+/g) || []).map((s) => num(s)).filter((n) => n != null);
+    if (nums.length < 3) continue;
+    const last = nums[nums.length - 1];
+    const bigs = nums.filter((n) => n >= 100);
+    if (last > 0 && last <= 1.5 && bigs.length >= 2) {
+      result.base_salary_candidates = [...new Set(bigs)];
+      break;
     }
   }
   if (result.base_salary != null && !result.base_salary_candidates.includes(result.base_salary)) {

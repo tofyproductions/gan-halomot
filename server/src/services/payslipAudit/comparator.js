@@ -455,22 +455,24 @@ function compareOne(table, payslip, method) {
       // נטו לגילום / שכר לקופ"ג). Our "שכר בסיס" matches the נטו-לגילום column,
       // which isn't always the one parsed as base_salary — so accept a match if
       // our value ≈ ANY amount on that line.
+      // Our "שכר בסיס" should equal the payslip שכר-יסוד (סכום-לתשלום column).
+      // The base line has several money columns; accept a match if our value ≈
+      // ANY of them. Flag only when the line WAS parsed but none matches.
       const candidates = Array.isArray(payslip.base_salary_candidates) && payslip.base_salary_candidates.length
         ? payslip.base_salary_candidates
-        : [payslip.base_salary];
-      const matched = candidates.some((c) => Math.abs(tableGlobal - c) <= 2);
-      if (!matched) {
-        // The payslip שכר-יסוד line is columnar/garbled, so we can't reliably
-        // isolate the נטו-לגילום column automatically — surface it as INFO for
-        // manual check against the payslip preview, not a hard critical.
-        const closest = candidates.reduce((b, c) => (Math.abs(c - tableGlobal) < Math.abs(b - tableGlobal) ? c : b), candidates[0]);
-        findings.push({
-          field: 'global_salary',
-          severity: 'info',
-          expected: tableGlobal,
-          actual: closest,
-          message: `שכר בסיס: טבלה ₪${tableGlobal} | בתלוש (שכר יסוד / נטו-לגילום) ₪${closest} — לאמת מול התלוש`,
-        });
+        : [];
+      if (candidates.length) {
+        const matched = candidates.some((c) => Math.abs(tableGlobal - c) <= 2);
+        if (!matched) {
+          const closest = candidates.reduce((b, c) => (Math.abs(c - tableGlobal) < Math.abs(b - tableGlobal) ? c : b), candidates[0]);
+          findings.push({
+            field: 'global_salary',
+            severity: 'critical',
+            expected: tableGlobal,
+            actual: closest,
+            message: `שכר בסיס: טבלה ₪${tableGlobal} | בתלוש (שכר יסוד) ₪${closest} — סטייה ₪${(closest - tableGlobal).toFixed(2)}`,
+          });
+        }
       }
     } else if (tableGlobal != null && payslip.base_salary != null && isNetTarget) {
       // Net target: surface the comparison as info (not a bug) so the user
