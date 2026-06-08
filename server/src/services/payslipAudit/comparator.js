@@ -200,12 +200,37 @@ function findCibusForResult(result, cibusUnused) {
 // AND only if the match is UNIQUE (no other unmatched payslip shares that
 // token). This catches the garbled cases without re-introducing collisions.
 function matchRows(tableRows, payslips) {
-  const out = [];
-  const used = new Set();
+  const used = new Set();                                 // matched payslip indices
+  const matchByTable = new Array(tableRows.length).fill(-1);
+  const methodByTable = new Array(tableRows.length).fill('none');
 
-  // Pass 1: strict
-  const strictMatched = []; // index into out, for unmatched filling later
-  for (const tableRow of tableRows) {
+  // Pass 0: exact ת"ז match (israeli_id ↔ payslip employee_id) — the most
+  // reliable key, immune to name spelling / word-order garbling. Normalized to
+  // 9 digits so leading-zero differences don't matter. xlsx tables carry no
+  // ת"ז, so this pass simply no-ops for them and name matching takes over.
+  const pad9 = (s) => String(s || '').replace(/\D/g, '').padStart(9, '0');
+  for (let ti = 0; ti < tableRows.length; ti++) {
+    const rawId = tableRows[ti].israeli_id;
+    if (!rawId) continue;
+    const tid = pad9(rawId);
+    if (tid === '000000000') continue;
+    for (let i = 0; i < payslips.length; i++) {
+      if (used.has(i)) continue;
+      if (!payslips[i].employee_id) continue;
+      if (pad9(payslips[i].employee_id) === tid) {
+        used.add(i);
+        matchByTable[ti] = i;
+        methodByTable[ti] = 'id';
+        break;
+      }
+    }
+  }
+
+  // Pass 1: strict name — only for table rows not matched by ת"ז.
+  const strictMatched = [];
+  for (let ti = 0; ti < tableRows.length; ti++) {
+    if (matchByTable[ti] >= 0) continue;
+    const tableRow = tableRows[ti];
     const tName = normalizeName(tableRow.employee_name);
     const tTokens = [...new Set(tName.split(' ').filter(Boolean))];
     let bestIdx = -1;
@@ -224,16 +249,16 @@ function matchRows(tableRows, payslips) {
     }
     if (bestIdx >= 0) {
       used.add(bestIdx);
-      out.push({ table: tableRow, payslip: payslips[bestIdx], method: 'name' });
+      matchByTable[ti] = bestIdx;
+      methodByTable[ti] = 'name';
     } else {
-      out.push({ table: tableRow, payslip: null, method: 'none' });
-      strictMatched.push({ outIdx: out.length - 1, tableRow });
+      strictMatched.push({ ti, tableRow });
     }
   }
 
   // Pass 2: loose fallback — single-token match across unmatched only, with
   // a uniqueness check so we don't accidentally pair the wrong "רסקאי".
-  for (const { outIdx, tableRow } of strictMatched) {
+  for (const { ti, tableRow } of strictMatched) {
     const tName = normalizeName(tableRow.employee_name);
     const tTokens = [...new Set(tName.split(' ').filter(Boolean))];
     if (tTokens.length === 0) continue;
@@ -253,10 +278,21 @@ function matchRows(tableRows, payslips) {
     if (candidates.length === 1 || (candidates.length > 1 && candidates[0].common > candidates[1].common)) {
       const idx = candidates[0].idx;
       used.add(idx);
-      out[outIdx] = { table: tableRow, payslip: payslips[idx], method: 'loose' };
+      matchByTable[ti] = idx;
+      methodByTable[ti] = 'loose';
     }
   }
 
+  // Build the result in table-row order, then append orphan payslips.
+  const out = [];
+  for (let ti = 0; ti < tableRows.length; ti++) {
+    const idx = matchByTable[ti];
+    out.push({
+      table: tableRows[ti],
+      payslip: idx >= 0 ? payslips[idx] : null,
+      method: idx >= 0 ? methodByTable[ti] : 'none',
+    });
+  }
   for (let i = 0; i < payslips.length; i++) {
     if (!used.has(i)) out.push({ table: null, payslip: payslips[i], method: 'none' });
   }
