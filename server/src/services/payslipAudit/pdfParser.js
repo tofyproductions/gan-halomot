@@ -326,33 +326,38 @@ function parsePage(rawText, pageIndex) {
       }
     }
 
-    // Re-attempt OT 125% / 150% with the more permissive rate-anchored
-    // matcher when the prefix-based extraction missed (4-number rows).
-    if (ot125Hours == null || ot150Hours == null) {
+    // Re-attempt OT 125% / 150% with an ORDER-INDEPENDENT matcher. The OT line
+    // can appear either "125% <qty> <rate> <amount>" (label first) OR
+    // "<amount> <rate> <qty> 150%" (numbers first) — different vendors / pages
+    // emit different orders. We find the (qty, rate, amount) triple where
+    // qty*rate ≈ amount, then disambiguate qty-vs-rate using the expected OT
+    // rate (base hourly × multiplier); the smaller value is the qty otherwise.
+    const otHoursFromLines = (mult) => {
+      const tag = mult === 1.25 ? '125%' : '150%';
+      const expRate = (result.hourly_rate && result.hourly_rate > 0) ? result.hourly_rate * mult : null;
       for (const line of lines) {
-        if (ot125Hours == null && /125%/.test(line)) {
-          const nums = extractNumbers(line);
-          // qty / rate / amount triple — pick any (rate, qty) where qty*rate ≈ amount
-          if (nums.length >= 3) {
-            const a = nums[nums.length - 1];
-            for (let i = 0; i < nums.length - 1; i++) {
-              const r = nums[i + 1], q = nums[i];
-              if (q > 0 && r > 0 && Math.abs(q * r - a) < 1.5 && q < 200) { ot125Hours = q; break; }
-            }
-          }
-        }
-        if (ot150Hours == null && /150%/.test(line)) {
-          const nums = extractNumbers(line);
-          if (nums.length >= 3) {
-            const a = nums[nums.length - 1];
-            for (let i = 0; i < nums.length - 1; i++) {
-              const r = nums[i + 1], q = nums[i];
-              if (q > 0 && r > 0 && Math.abs(q * r - a) < 1.5 && q < 200) { ot150Hours = q; break; }
+        if (!line.includes(tag)) continue;
+        const nums = extractNumbers(line);
+        if (nums.length < 2) continue;
+        const amount = Math.max(...nums);
+        for (let i = 0; i < nums.length; i++) {
+          for (let j = 0; j < nums.length; j++) {
+            if (i === j) continue;
+            const q = nums[i], r = nums[j];
+            if (q > 0 && r > 0 && q < 400 && Math.abs(q * r - amount) < 1.5) {
+              if (expRate != null) {
+                if (Math.abs(r - expRate) < 2) return q;
+                if (Math.abs(q - expRate) < 2) return r;
+              }
+              return Math.min(q, r); // hours are usually the smaller of the two
             }
           }
         }
       }
-    }
+      return null;
+    };
+    if (ot125Hours == null) ot125Hours = otHoursFromLines(1.25);
+    if (ot150Hours == null) ot150Hours = otHoursFromLines(1.50);
 
     // Global שעות נוספות — for global employees this is a lump-sum row with
     // qty=1, e.g. "<amount> 1.00 <amount>" or amount-last variant. Different
