@@ -33,7 +33,21 @@ function pdfStoragePath(auditId, branch) {
 function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
-const { PayslipAuditRecord, Employee, PayrollMonth } = require('../models');
+const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth } = require('../models');
+
+// Persist payslip PDF bytes to Mongo (durable) so the per-page preview survives
+// host restarts that wipe the ephemeral local disk. Best-effort.
+async function storePayslipPdfDb(auditId, branch, buffer, kind = 'original') {
+  try {
+    await PayslipAuditPdf.findOneAndUpdate(
+      { audit_id: auditId, branch, kind },
+      { $set: { data: buffer } },
+      { upsert: true, new: true },
+    );
+  } catch (err) {
+    console.error('storePayslipPdfDb failed:', err.message);
+  }
+}
 // Reused to build the "table" side from the in-system computed salary data,
 // so the audit can run against the system table (payslips-only upload).
 const { getMonth } = require('./payrollMonth.controller');
@@ -448,6 +462,10 @@ async function runAuditMulti(req, res) {
       } catch (err) {
         console.error('Failed to persist payslip PDFs:', err.message);
       }
+      // Durable copy in Mongo (disk is ephemeral on the host).
+      for (const entry of payslipEntries) {
+        await storePayslipPdfDb(saved._id, entry.branch, entry.file.buffer);
+      }
     }
 
     res.json({
@@ -729,13 +747,22 @@ async function getPayslipPage(req, res) {
     const branch = (req.query.branch || '').toString();
     const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
     if (!branch) return res.status(400).json({ error: 'נדרש שם סניף' });
-    const filePath = pdfStoragePath(auditId, branch);
-    if (!fs.existsSync(filePath)) {
+    const kind = req.query.kind === 'approved' ? 'approved' : 'original';
+    // Prefer the durable Mongo copy (disk is ephemeral and wiped on restart);
+    // fall back to disk for audits saved before Mongo storage existed.
+    let srcBytes = null;
+    const dbDoc = await PayslipAuditPdf.findOne({ audit_id: auditId, branch, kind }).lean();
+    if (dbDoc?.data) {
+      srcBytes = dbDoc.data.buffer ? Buffer.from(dbDoc.data.buffer) : Buffer.from(dbDoc.data);
+    } else {
+      const filePath = pdfStoragePath(auditId, branch);
+      if (fs.existsSync(filePath)) srcBytes = fs.readFileSync(filePath);
+    }
+    if (!srcBytes) {
       return res.status(404).json({ error: 'קובץ תלושים לא נשמר עבור ביקורת זו' });
     }
     // Lazy-load pdf-lib so test setups without it don't crash on import
     const { PDFDocument } = require('pdf-lib');
-    const srcBytes = fs.readFileSync(filePath);
     const srcDoc = await PDFDocument.load(srcBytes);
     if (pageNum > srcDoc.getPageCount()) {
       return res.status(404).json({ error: `עמוד ${pageNum} מחוץ לטווח (יש ${srcDoc.getPageCount()} עמודים)` });
@@ -814,6 +841,7 @@ async function approveAudit(req, res) {
       ensureDir(path.join(PDF_STORAGE_DIR, String(doc._id), 'approved'));
       for (const entry of approvedFiles) {
         fs.writeFileSync(approvedPdfStoragePath(doc._id, entry.branch), entry.file.buffer);
+        await storePayslipPdfDb(doc._id, entry.branch, entry.file.buffer, 'approved'); // durable
       }
       doc.approved_payslip_files = approvedFiles.map((e) => ({
         branch: e.branch,
@@ -1150,6 +1178,10 @@ async function runAuditSystem(req, res) {
         ensureDir(path.join(PDF_STORAGE_DIR, String(saved._id)));
         for (const entry of payslipEntries) fs.writeFileSync(pdfStoragePath(saved._id, entry.branch), entry.file.buffer);
       } catch (err) { console.error('Failed to persist payslip PDFs:', err.message); }
+      // Durable copy in Mongo (disk is ephemeral on the host).
+      for (const entry of payslipEntries) {
+        await storePayslipPdfDb(saved._id, entry.branch, entry.file.buffer);
+      }
     }
 
     res.json({
