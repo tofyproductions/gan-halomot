@@ -33,6 +33,7 @@ import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
 import { BranchProvider } from './hooks/useBranch';
+import { WorkMonthProvider } from './hooks/useWorkMonth';
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
 
 function AppRoutes() {
@@ -109,7 +110,9 @@ export default function App() {
   return (
     <ConfirmProvider>
       <BranchProvider>
-        <AppRoutes />
+        <WorkMonthProvider>
+          <AppRoutes />
+        </WorkMonthProvider>
       </BranchProvider>
     </ConfirmProvider>
   );

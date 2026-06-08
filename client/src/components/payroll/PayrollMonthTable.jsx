@@ -23,6 +23,7 @@ import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useWorkMonth } from '../../hooks/useWorkMonth';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
@@ -617,7 +618,7 @@ export default function PayrollMonthTable() {
   // key `${employeeId}::${field}` → change item
   const [staged, setStaged] = useState({});
   const [submittingReq, setSubmittingReq] = useState(false);
-  const [month, setMonth] = useState(currentYearMonth());
+  const { month, setMonth } = useWorkMonth();
   const [ganFilter, setGanFilter] = useState([]); // [] = show all gans (only used in "all branches" view)
   const [viewMode, setViewMode] = useState('branch'); // 'branch' | 'amuta'
   const [selectedAmuta, setSelectedAmuta] = useState('');

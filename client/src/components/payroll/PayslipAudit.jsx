@@ -22,6 +22,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { useWorkMonth } from '../../hooks/useWorkMonth';
 
 // ── Field labels for the readable side-by-side comparison ──
 //
@@ -1490,7 +1491,7 @@ export default function PayslipAudit() {
   // Audit source: 'system' = compare against the in-system salary table (only
   // payslips uploaded); 'file' = legacy compare against an uploaded xlsx.
   const [auditMode, setAuditMode] = useState('system');
-  const [auditMonth, setAuditMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const { month: auditMonth, setMonth: setAuditMonth } = useWorkMonth();
   const [tableFile, setTableFile] = useState(null);
   // Optional Cibus monthly report (xlsx/csv from Pluxee admin dashboard).
   const [cibusFile, setCibusFile] = useState(null);
