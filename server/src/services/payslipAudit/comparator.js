@@ -451,13 +451,25 @@ function compareOne(table, payslip, method) {
     // gap equals the tax burden). Compare only when both sides are gross.
     const isNetTarget = table.global_salary_kind === 'net';
     if (tableGlobal != null && payslip.base_salary != null && !isNetTarget) {
-      if (Math.abs(tableGlobal - payslip.base_salary) > 1) {
+      // The payslip שכר-יסוד line has several money columns (סכום התשלום /
+      // נטו לגילום / שכר לקופ"ג). Our "שכר בסיס" matches the נטו-לגילום column,
+      // which isn't always the one parsed as base_salary — so accept a match if
+      // our value ≈ ANY amount on that line.
+      const candidates = Array.isArray(payslip.base_salary_candidates) && payslip.base_salary_candidates.length
+        ? payslip.base_salary_candidates
+        : [payslip.base_salary];
+      const matched = candidates.some((c) => Math.abs(tableGlobal - c) <= 2);
+      if (!matched) {
+        // The payslip שכר-יסוד line is columnar/garbled, so we can't reliably
+        // isolate the נטו-לגילום column automatically — surface it as INFO for
+        // manual check against the payslip preview, not a hard critical.
+        const closest = candidates.reduce((b, c) => (Math.abs(c - tableGlobal) < Math.abs(b - tableGlobal) ? c : b), candidates[0]);
         findings.push({
           field: 'global_salary',
-          severity: 'critical',
+          severity: 'info',
           expected: tableGlobal,
-          actual: payslip.base_salary,
-          message: `שכר גלובלי: טבלה ₪${tableGlobal} | תלוש ₪${payslip.base_salary} — סטייה ₪${(payslip.base_salary - tableGlobal).toFixed(2)}`,
+          actual: closest,
+          message: `שכר בסיס: טבלה ₪${tableGlobal} | בתלוש (שכר יסוד / נטו-לגילום) ₪${closest} — לאמת מול התלוש`,
         });
       }
     } else if (tableGlobal != null && payslip.base_salary != null && isNetTarget) {

@@ -443,6 +443,23 @@ function parsePage(rawText, pageIndex) {
     result.base_salary = result.item_base_amount;
   }
 
+  // Base-salary candidate amounts. The שכר-יסוד line carries several money
+  // columns (סכום התשלום, נטו לגילום, שכר לקופ"ג). The system's "שכר בסיס"
+  // (regular pay) matches the נטו-לגילום column, NOT necessarily the one we
+  // pick as base_salary — so expose every big number on that line and let the
+  // comparator match against any. The line is identified by the garbled
+  // "שכר יסוד" signature this vendor emits ("—¬–").
+  result.base_salary_candidates = [];
+  for (const line of text.split('\n')) {
+    if (line.includes('—¬–') || /¿»∫º/.test(line)) {
+      const nums = (line.match(/[\d,]+\.\d+/g) || []).map((s) => num(s)).filter((n) => n != null && n >= 100);
+      if (nums.length) { result.base_salary_candidates = [...new Set(nums)]; break; }
+    }
+  }
+  if (result.base_salary != null && !result.base_salary_candidates.includes(result.base_salary)) {
+    result.base_salary_candidates.push(result.base_salary);
+  }
+
   // 9. Vacation/sick balances. Empirical layout immediately before "חופש\n":
   //    <vacation.balance> <sick.used> <vacation.used> <accrual>
   // Then later: "<sick.prev>\n:\n<vacation.prev>" near the "צבירת חופש" anchor.
