@@ -34,6 +34,9 @@ function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
 const { PayslipAuditRecord, Employee, PayrollMonth } = require('../models');
+// Reused to build the "table" side from the in-system computed salary data,
+// so the audit can run against the system table (payslips-only upload).
+const { getMonth } = require('./payrollMonth.controller');
 
 /**
  * After an audit run completes, copy vacation balance from each parsed
@@ -967,11 +970,174 @@ async function getCycleProgression(req, res) {
   }
 }
 
+// Fetch the in-system computed salary rows for a month by reusing getMonth.
+function fetchSystemMonth(user, month) {
+  return new Promise((resolve, reject) => {
+    const mockReq = { query: { month, branch: 'all' }, user };
+    const mockRes = {
+      json: (data) => resolve(data),
+      status: (code) => ({ json: (body) => reject(new Error(body?.error || `getMonth failed (${code})`)) }),
+    };
+    Promise.resolve(getMonth(mockReq, mockRes, (e) => reject(e))).catch(reject);
+  });
+}
+
+const _num = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+
+// Convert a getMonth row → the SalaryTableRow shape the comparator expects, so
+// the in-system table is compared against payslips exactly like the xlsx was.
+function systemRowToTableRow(r) {
+  const bd = r.breakdown || {};
+  const comp = bd.components || {};
+  const isGlobal = r.salary_type === 'global';
+  const gsal = isGlobal ? _num(bd.rates?.global_salary) : null;
+  const numKind = (o) => (o && o.kind === 'number' ? _num(o.amount) : null);
+  return {
+    branch: r.branch_name || '',
+    employee_name: r.full_name || '',
+    israeli_id: r.israeli_id || '',
+    days: _num(bd.hours?.days_worked),
+    hours_regular: _num(bd.hours?.regular),
+    ot_125: _num(bd.hours?.ot_125),
+    ot_150: _num(bd.hours?.ot_150),
+    hourly_rate: isGlobal ? null : _num(bd.rates?.hourly_rate),
+    global_salary: gsal,
+    global_ot: null,
+    global_salary_kind: isGlobal ? (r.salary_is_net ? 'net' : 'gross') : 'unknown',
+    global_salary_amount: gsal,
+    global_ot_amount: null,
+    emuna_ks_global: null, emuna_ks_global_ot: null, emuna_hz_global: null, emuna_hz_global_ot: null,
+    transport: _num(comp.travel),
+    sick_days: _num(r.manual?.sick_days),
+    absence: null,
+    vacation_days: _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days),
+    holiday_days: _num(r.holiday_pay_auto?.total_days),
+    advance_directive: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || null,
+    gift_card: numKind(r.manual?.gift_card),
+    recuperation: numKind(r.manual?.recreation),
+    cibus: numKind(r.manual?.cibus),
+    reserve_duty: numKind(r.manual?.miluim),
+    notes: r.manual?.notes || null,
+  };
+}
+
+// Audit payslips against the IN-SYSTEM salary table (no xlsx upload). Needs only
+// payslip PDFs + month + per-file branch.
+async function runAuditSystem(req, res) {
+  const month = (req.body?.month || '').trim();
+  if (!month) return res.status(400).json({ error: 'נדרש חודש (YYYY-MM)' });
+
+  const payslipEntries = [];
+  for (const key of Object.keys(req.files || {})) {
+    const m = key.match(/^payslip_file_(\d+)$/);
+    if (!m) continue;
+    const idx = m[1];
+    const file = req.files[key][0];
+    const branch = (req.body[`branch_${idx}`] || '').trim();
+    if (!branch) return res.status(400).json({ error: `חסר שם סניף לקובץ ${file.originalname}` });
+    payslipEntries.push({ idx: Number(idx), file, branch });
+  }
+  payslipEntries.sort((a, b) => a.idx - b.idx);
+  if (payslipEntries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
+
+  try {
+    const monthData = await fetchSystemMonth(req.user, month);
+    const allRows = (monthData.rows || []).map(systemRowToTableRow);
+
+    let cibusReport = null;
+    const cibusFile = req.files?.cibus_file?.[0];
+    if (cibusFile) {
+      try { cibusReport = parseCibusReport(cibusFile.buffer, cibusFile.originalname); }
+      catch (err) { cibusReport = { rows: [], detected_columns: {}, parse_error: err.message }; }
+    }
+    const cibusPool = cibusReport ? [...cibusReport.rows] : [];
+
+    const merged = {
+      year_month: month,
+      table_sheet_name: 'מערכת',
+      branch_filter: payslipEntries.map((e) => e.branch).join(', '),
+      rows_in_table: 0,
+      payslips_in_pdf: 0,
+      results: [], missing_payslips: [], orphan_payslips: [], orphan_cibus_rows: [], per_branch: [],
+      cibus_report_meta: cibusReport ? {
+        sheet_name: cibusReport.sheet_name,
+        detected_columns: cibusReport.detected_columns,
+        aggregated_employee_count: cibusReport.rows.length,
+        transaction_count: cibusReport.transaction_count,
+        warning: cibusReport.warning,
+        parse_error: cibusReport.parse_error,
+      } : null,
+    };
+    const normalizeWS = (s) => (s || '').replace(/\s+/g, ' ').trim();
+
+    for (const entry of payslipEntries) {
+      const entryNorm = normalizeWS(entry.branch);
+      const branchRows = allRows.filter((r) => {
+        const rb = normalizeWS(r.branch);
+        return rb.includes(entryNorm) || entryNorm.includes(rb);
+      });
+      const pdfResult = await parsePayslipsPdf(entry.file.buffer);
+      const audit = comparePayslipsToTable(branchRows, pdfResult.payslips, cibusPool);
+      cibusPool.length = 0;
+      cibusPool.push(...(audit.orphan_cibus_rows || []));
+      stripRawText(audit);
+
+      merged.rows_in_table += audit.rows_in_table;
+      merged.payslips_in_pdf += audit.payslips_in_pdf;
+      for (const r of audit.results) {
+        if (r.table_row && !r.table_row.branch) r.table_row.branch = entry.branch;
+        merged.results.push({ ...r, __source_branch: entry.branch });
+      }
+      for (const mm of audit.missing_payslips) merged.missing_payslips.push({ ...mm, __source_branch: entry.branch });
+      for (const o of audit.orphan_payslips) merged.orphan_payslips.push({ ...o, __source_branch: entry.branch });
+      merged.per_branch.push({
+        branch: entry.branch,
+        rows: audit.rows_in_table,
+        payslips: audit.payslips_in_pdf,
+        critical: audit.results.reduce((s, r) => s + r.findings.filter((f) => f.severity === 'critical').length, 0),
+        warning: audit.results.reduce((s, r) => s + r.findings.filter((f) => f.severity === 'warning').length, 0),
+        missing: audit.missing_payslips.length,
+        orphans: audit.orphan_payslips.length,
+        file_name: entry.file.originalname,
+      });
+    }
+    merged.orphan_cibus_rows = cibusPool.map((row) => ({ ...row, matched_table_row: null }));
+
+    const saved = await persistAudit({
+      audit: merged,
+      user: req.user,
+      table_filename: `מערכת — ${month}`,
+      payslip_files: payslipEntries.map((e) => ({ branch: e.branch, filename: e.file.originalname })),
+      branches: payslipEntries.map((e) => e.branch),
+    });
+    syncVacationBalances(merged).catch((err) => console.error('syncVacationBalances failed:', err.message));
+    if (saved?._id) {
+      try {
+        ensureDir(path.join(PDF_STORAGE_DIR, String(saved._id)));
+        for (const entry of payslipEntries) fs.writeFileSync(pdfStoragePath(saved._id, entry.branch), entry.file.buffer);
+      } catch (err) { console.error('Failed to persist payslip PDFs:', err.message); }
+    }
+
+    res.json({
+      ...merged,
+      from_system_table: true,
+      available_sheets: [],
+      available_branches: [...new Set(allRows.map((r) => r.branch).filter(Boolean))],
+      saved_audit_id: saved?._id || null,
+      saved_at: saved?.created_at || null,
+    });
+  } catch (err) {
+    console.error('runAuditSystem failed:', err);
+    res.status(500).json({ error: err.message || 'שגיאה בהשוואה מול המערכת' });
+  }
+}
+
 module.exports = {
   parseTable,
   parsePayslips,
   runAudit,
   runAuditMulti,
+  runAuditSystem,
   listBranches,
   emailAudit,
   getDefaultRecipients,

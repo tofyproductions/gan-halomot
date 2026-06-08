@@ -110,6 +110,25 @@ router.post(
   audit.runAuditMulti,
 );
 router.post(
+  '/payslip-audit/run-system',
+  requireRole('system_admin', 'branch_manager'),
+  // Payslips-only: compared against the in-system salary table for the month.
+  auditUpload.fields([
+    { name: 'cibus_file', maxCount: 1 },
+    { name: 'payslip_file_0', maxCount: 1 },
+    { name: 'payslip_file_1', maxCount: 1 },
+    { name: 'payslip_file_2', maxCount: 1 },
+    { name: 'payslip_file_3', maxCount: 1 },
+    { name: 'payslip_file_4', maxCount: 1 },
+    { name: 'payslip_file_5', maxCount: 1 },
+    { name: 'payslip_file_6', maxCount: 1 },
+    { name: 'payslip_file_7', maxCount: 1 },
+    { name: 'payslip_file_8', maxCount: 1 },
+    { name: 'payslip_file_9', maxCount: 1 },
+  ]),
+  audit.runAuditSystem,
+);
+router.post(
   '/payslip-audit/email',
   requireRole('system_admin', 'branch_manager'),
   audit.emailAudit,

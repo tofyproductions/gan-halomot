@@ -1426,6 +1426,10 @@ function ResultCard({ result, expanded, onToggle, savedAuditId }) {
  */
 export default function PayslipAudit() {
   const confirm = useConfirm();
+  // Audit source: 'system' = compare against the in-system salary table (only
+  // payslips uploaded); 'file' = legacy compare against an uploaded xlsx.
+  const [auditMode, setAuditMode] = useState('system');
+  const [auditMonth, setAuditMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [tableFile, setTableFile] = useState(null);
   // Optional Cibus monthly report (xlsx/csv from Pluxee admin dashboard).
   const [cibusFile, setCibusFile] = useState(null);
@@ -1932,9 +1936,21 @@ export default function PayslipAudit() {
     setPayslipFiles((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== idx)));
   };
 
+  // In system mode, populate the branch datalist from the system branch list.
+  useEffect(() => {
+    if (auditMode !== 'system') return;
+    api.get('/branches')
+      .then((res) => setAvailableBranches((res.data?.branches || []).map((b) => b.name).filter(Boolean)))
+      .catch(() => {});
+  }, [auditMode]);
+
   const runAudit = async () => {
-    if (!tableFile) {
+    if (auditMode === 'file' && !tableFile) {
       toast.warn('נא לבחור את טבלת השכר');
+      return;
+    }
+    if (auditMode === 'system' && !auditMonth) {
+      toast.warn('נא לבחור חודש');
       return;
     }
     const validRows = payslipFiles.filter((r) => r.file && r.branch.trim());
@@ -1950,8 +1966,12 @@ export default function PayslipAudit() {
     setRunning(true);
     try {
       const form = new FormData();
-      form.append('table_file', tableFile);
-      if (sheetName) form.append('sheet_name', sheetName);
+      if (auditMode === 'system') {
+        form.append('month', auditMonth);
+      } else {
+        form.append('table_file', tableFile);
+        if (sheetName) form.append('sheet_name', sheetName);
+      }
       validRows.forEach((row, i) => {
         form.append(`payslip_file_${i}`, row.file);
         form.append(`branch_${i}`, row.branch);
@@ -1961,7 +1981,10 @@ export default function PayslipAudit() {
       if (cibusFile) {
         form.append('cibus_file', cibusFile);
       }
-      const res = await api.post('/payroll/payslip-audit/run-multi', form, {
+      const endpoint = auditMode === 'system'
+        ? '/payroll/payslip-audit/run-system'
+        : '/payroll/payslip-audit/run-multi';
+      const res = await api.post(endpoint, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setAudit(res.data);
@@ -1994,20 +2017,46 @@ export default function PayslipAudit() {
         <Card>
           <CardContent>
             <Stack spacing={2}>
+              {/* Audit source toggle */}
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>מקור הבדיקה:</Typography>
+                <Button size="small" variant={auditMode === 'system' ? 'contained' : 'outlined'}
+                  onClick={() => setAuditMode('system')}>מול טבלת המערכת</Button>
+                <Button size="small" variant={auditMode === 'file' ? 'contained' : 'outlined'}
+                  onClick={() => setAuditMode('file')}>מול קובץ xlsx</Button>
+                <Typography variant="caption" color="text.secondary">
+                  {auditMode === 'system'
+                    ? 'מעלים רק תלושים — ההשוואה מול הנתונים שבמערכת'
+                    : 'משווים מול קובץ אקסל חיצוני'}
+                </Typography>
+              </Stack>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1fr 2fr' }, gap: 2, alignItems: 'end' }}>
-                <FileInput
-                  label="טבלת שכר מרוכזת (.xlsx) — חובה"
-                  file={tableFile}
-                  onChange={handleTableFileChange}
-                  accept=".xlsx,.xls"
-                />
-                <TextField
-                  label="שם גליון (אופציונלי)"
-                  size="small"
-                  placeholder="למשל: אפריל 26"
-                  value={sheetName}
-                  onChange={(e) => setSheetName(e.target.value)}
-                />
+                {auditMode === 'system' ? (
+                  <TextField
+                    label="חודש לבדיקה"
+                    type="month"
+                    size="small"
+                    value={auditMonth}
+                    onChange={(e) => setAuditMonth(e.target.value)}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                ) : (
+                  <FileInput
+                    label="טבלת שכר מרוכזת (.xlsx) — חובה"
+                    file={tableFile}
+                    onChange={handleTableFileChange}
+                    accept=".xlsx,.xls"
+                  />
+                )}
+                {auditMode === 'file' ? (
+                  <TextField
+                    label="שם גליון (אופציונלי)"
+                    size="small"
+                    placeholder="למשל: אפריל 26"
+                    value={sheetName}
+                    onChange={(e) => setSheetName(e.target.value)}
+                  />
+                ) : <Box />}
                 <FileInput
                   label="דוח סיבוס/Pluxee (אופציונלי, .xlsx/.csv)"
                   file={cibusFile}
@@ -2054,7 +2103,8 @@ export default function PayslipAudit() {
               <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
                 {(() => {
                   const miss = [];
-                  if (!tableFile) miss.push('טבלת שכר מרוכזת (xlsx)');
+                  if (auditMode === 'system') { if (!auditMonth) miss.push('חודש'); }
+                  else if (!tableFile) miss.push('טבלת שכר מרוכזת (xlsx)');
                   if (!payslipFiles.some((r) => r.file)) miss.push('קובץ תלושים (PDF)');
                   if (!miss.length || running) return null;
                   return (
@@ -2068,7 +2118,9 @@ export default function PayslipAudit() {
                   size="large"
                   startIcon={running ? <CircularProgress size={18} color="inherit" /> : <PlayArrowIcon />}
                   onClick={runAudit}
-                  disabled={running || !tableFile || !payslipFiles.some((r) => r.file)}
+                  disabled={running
+                    || (auditMode === 'system' ? !auditMonth : !tableFile)
+                    || !payslipFiles.some((r) => r.file)}
                 >
                   {running ? 'משווה…' : 'הרץ בדיקה'}
                 </Button>
