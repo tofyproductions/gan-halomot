@@ -1996,7 +1996,7 @@ export default function PayslipAudit() {
             <Stack spacing={2}>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1fr 2fr' }, gap: 2, alignItems: 'end' }}>
                 <FileInput
-                  label="טבלת שכר מרוכזת (.xlsx)"
+                  label="טבלת שכר מרוכזת (.xlsx) — חובה"
                   file={tableFile}
                   onChange={handleTableFileChange}
                   accept=".xlsx,.xls"
@@ -2051,7 +2051,18 @@ export default function PayslipAudit() {
                 )}
               </Box>
 
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 2 }}>
+                {(() => {
+                  const miss = [];
+                  if (!tableFile) miss.push('טבלת שכר מרוכזת (xlsx)');
+                  if (!payslipFiles.some((r) => r.file)) miss.push('קובץ תלושים (PDF)');
+                  if (!miss.length || running) return null;
+                  return (
+                    <Typography variant="caption" color="warning.main" sx={{ fontWeight: 600 }}>
+                      ⚠️ כדי להריץ בדיקה חסר: {miss.join(' + ')}
+                    </Typography>
+                  );
+                })()}
                 <Button
                   variant="contained"
                   size="large"
