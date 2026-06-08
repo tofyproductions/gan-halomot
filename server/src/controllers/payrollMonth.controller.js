@@ -108,6 +108,8 @@ async function getMonth(req, res, next) {
     // Enforce per-user branch scope: non-admins are restricted to the
     // branches they manage. system_admin / accountant see everything.
     const role = req.user?.role;
+    // Bank details are sensitive — only accounting / system admin may see them.
+    const canSeeBank = role === 'system_admin' || role === 'accountant';
     if (role && role !== 'system_admin' && role !== 'accountant') {
       const managed = (req.user.managed_branch_ids || []).map(String);
       const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
@@ -436,6 +438,12 @@ async function getMonth(req, res, next) {
         full_name: emp.full_name,
         israeli_id: emp.israeli_id || '',
         employee_number: emp.employee_number || '',
+        // Bank details only for accounting/admin (sensitive).
+        ...(canSeeBank ? {
+          bank_number: emp.bank_number || '',
+          bank_branch: emp.bank_branch || '',
+          bank_account: emp.bank_account || '',
+        } : {}),
         branch_id: String(emp.branch_id),
         branch_name: branchNameById.get(String(emp.branch_id)) || '',
         position: emp.position || '',

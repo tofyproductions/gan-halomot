@@ -439,6 +439,34 @@ function EmployeeNumberDialog({ open, row, onClose, onSave }) {
   );
 }
 
+// Bank details (sensitive — accounting/admin). Saved on the employee, carries forward.
+function BankDialog({ open, row, onClose, onSave }) {
+  const [num, setNum] = useState('');
+  const [branch, setBranch] = useState('');
+  const [acct, setAcct] = useState('');
+  useEffect(() => { if (open) { setNum(row?.bank_number || ''); setBranch(row?.bank_branch || ''); setAcct(row?.bank_account || ''); } }, [open, row]);
+  if (!row) return null;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>פרטי בנק — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Alert severity="warning" sx={{ mb: 2, mt: 1 }}>
+          מידע רגיש לתשלום שכר. נשמר על כרטיס העובד ומוצג להנהלת חשבונות בלבד.
+        </Alert>
+        <Stack spacing={1.5}>
+          <TextField label="בנק (קוד)" size="small" value={num} onChange={e => setNum(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="לדוגמה 10" />
+          <TextField label="סניף" size="small" value={branch} onChange={e => setBranch(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="מספר חשבון" size="small" value={acct} onChange={e => setAcct(e.target.value)} InputLabelProps={{ shrink: true }} />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={() => onSave({ bank_number: num.trim(), bank_branch: branch.trim(), bank_account: acct.trim() })}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 // Bonus cell — shows the effective bonus (auto or manual override) with a
 // tooltip breakdown. Click opens BonusDialog.
 function BonusCell({ row }) {
@@ -606,6 +634,7 @@ export default function PayrollMonthTable() {
   const [exportMenu, setExportMenu] = useState(null); // { type:'excel'|'pdf', anchor }
   const [travelDlg, setTravelDlg] = useState({ open: false, row: null, locked: false });
   const [empNumDlg, setEmpNumDlg] = useState({ open: false, row: null });
+  const [bankDlg, setBankDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -721,6 +750,17 @@ export default function PayrollMonthTable() {
     });
     api.put(`/payroll/employees/${employeeId}`, { employee_number: v })
       .then(() => { toast.success('מספר העובד נשמר'); fetchData(); })
+      .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
+  }, [fetchData]);
+
+  // Bank details live on the employee (carry forward); sensitive → accounting/admin.
+  const setEmployeeBank = useCallback((employeeId, bank) => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, ...bank } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, bank)
+      .then(() => { toast.success('פרטי הבנק נשמרו'); fetchData(); })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [fetchData]);
 
@@ -902,6 +942,7 @@ export default function PayrollMonthTable() {
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
+    headerTop.push('בנק', 'סניף בנק', 'חשבון בנק'); // populated only for accounting/admin
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
 
@@ -957,6 +998,7 @@ export default function PayrollMonthTable() {
       const bLines = perBranchBreakdown(r);
       cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
       cells.push(r.bonus?.note || '');           // בונוס - פירוט
+      cells.push(r.bank_number || '', r.bank_branch || '', r.bank_account || ''); // בנק (only for authorized roles)
       cells.push([                                // הערות (התחייבות + קבועה + חד-פעמית)
         r.commitment?.committed_hours != null ? `התחייבות: ${r.commitment.committed_hours}h` : '',
         r.permanent_note || '',
@@ -1057,7 +1099,7 @@ export default function PayrollMonthTable() {
     });
     cols = cols.filter(i => PROTECTED_COLS.has(header[i]) || colHasContent(i));
     // ID-like text columns must never be treated as numeric (no summing).
-    const TEXT_ID_COLS = new Set(['ת"ז', 'מספר עובד']);
+    const TEXT_ID_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק']);
     const numericCol = {};
     for (const i of cols) {
       let any = false, ok = true;
@@ -1089,6 +1131,7 @@ export default function PayrollMonthTable() {
     const groupOf = (label) => {
       if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
       if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'].includes(label)) return 'שעות עבודה';
+      if (label === 'בנק' || label === 'סניף בנק' || label === 'חשבון בנק') return 'פרטי בנק';
       if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
         || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
       return 'שכר ותשלומים';
@@ -1139,8 +1182,10 @@ export default function PayrollMonthTable() {
       const header = m[0].slice(1);                 // drop the branch column
       const body = m.slice(1).map(r => r.slice(1));
       // Which columns are numeric (sum-able). Index >= 2 to skip name + id.
+      // ID / bank columns stay TEXT so leading zeros survive and they're not summed.
+      const TEXT_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק']);
       const numeric = header.map((_, i) => {
-        if (i < 2) return false;
+        if (i < 2 || TEXT_COLS.has(header[i])) return false;
         let any = false;
         for (const r of body) { const v = r[i]; if (v === '' || v == null) continue; if (parseNum(v) == null) return false; any = true; }
         return any;
@@ -1155,7 +1200,8 @@ export default function PayrollMonthTable() {
       const groupOf = (label) => {
         if (label === 'שם העובד' || label === 'ת"ז' || label === 'מספר עובד') return 'עובד';
         if (['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'].includes(label)) return 'שעות עבודה';
-        if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
+        if (label === 'בנק' || label === 'סניף בנק' || label === 'חשבון בנק') return 'פרטי בנק';
+      if (label === 'פירוט תשלום לפי סניף' || label === 'בונוס - פירוט' || label === 'הערות'
           || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
         return 'שכר ותשלומים';
       };
@@ -1609,6 +1655,21 @@ export default function PayrollMonthTable() {
                                     </Typography>}
                               </Box>
                             </Tooltip>
+                            {/* Bank details — server sends these only to accounting/admin */}
+                            {r.bank_account !== undefined && (
+                              <Tooltip title="פרטי בנק לתשלום שכר — לחץ לעריכה (מוצג להנהלת חשבונות בלבד)">
+                                <Box component="span" onClick={(e) => { e.stopPropagation(); setBankDlg({ open: true, row: r }); }}
+                                  sx={{ display: 'block', mt: 0.2, cursor: 'pointer' }}>
+                                  {(r.bank_number || r.bank_account)
+                                    ? <Chip size="small" color="default" variant="outlined"
+                                        label={`🏦 ${r.bank_number || '?'}-${r.bank_branch || '?'} · ${r.bank_account || '?'}`}
+                                        sx={{ height: 16, fontSize: '0.58rem', fontWeight: 600 }} />
+                                    : <Typography variant="caption" sx={{ color: 'warning.main', fontSize: '0.6rem', textDecoration: 'underline dotted' }}>
+                                        + הוסף פרטי בנק
+                                      </Typography>}
+                                </Box>
+                              </Tooltip>
+                            )}
                             {(() => {
                               // Show a chip if this employee also has hours at a
                               // branch other than the section's branch.
@@ -1810,6 +1871,12 @@ export default function PayrollMonthTable() {
         row={empNumDlg.row}
         onClose={() => setEmpNumDlg({ open: false, row: null })}
         onSave={(value) => { if (empNumDlg.row) setEmployeeNumber(empNumDlg.row.employee_id, value); setEmpNumDlg({ open: false, row: null }); }}
+      />
+      <BankDialog
+        open={bankDlg.open}
+        row={bankDlg.row}
+        onClose={() => setBankDlg({ open: false, row: null })}
+        onSave={(bank) => { if (bankDlg.row) setEmployeeBank(bankDlg.row.employee_id, bank); setBankDlg({ open: false, row: null }); }}
       />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}

@@ -136,6 +136,11 @@ const employeeSchema = new mongoose.Schema({
   // in PayrollMonth.manual.travel_override still takes precedence for that month.
   travel_override: { type: Number, default: null },
 
+  // Bank details for salary payment (sensitive — exposed only to accounting/admin).
+  bank_number: { type: String, default: '' },   // קוד בנק (e.g. 10 = לאומי)
+  bank_branch: { type: String, default: '' },    // מספר סניף
+  bank_account: { type: String, default: '' },   // מספר חשבון
+
   // Kept for backward compatibility — old name. New code should use travel_monthly_flat.
   travel_allowance: { type: Number, default: 0 },
   meal_vouchers: { type: Number, default: 0 },              // סיבוס
