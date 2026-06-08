@@ -1373,6 +1373,29 @@ function ResultCard({ result, expanded, onToggle, savedAuditId }) {
                 )}
               </Box>
             )}
+            {/* Full system-table row — every column the accountant was given, not
+                just the auto-compared numeric fields. */}
+            {result.table_row?.system_detail?.length > 0 && (
+              <Box sx={{ mt: 1.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                  📋 פירוט מלא — שורת המערכת (כל העמודות)
+                </Typography>
+                <Table size="small" sx={{ '& td': { fontSize: 12, py: 0.4, borderColor: 'rgba(0,0,0,0.06)' } }}>
+                  <TableBody>
+                    {result.table_row.system_detail.map((d, i) => (
+                      <TableRow key={i} sx={d.strong ? { bgcolor: '#eef2ff' } : {}}>
+                        <TableCell sx={{ color: 'text.secondary', width: '55%' }}>{d.label}</TableCell>
+                        <TableCell sx={{ fontWeight: d.strong ? 800 : 600 }}>
+                          {d.currency && typeof d.value === 'number'
+                            ? `₪${d.value.toLocaleString('he-IL')}`
+                            : d.value}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>

@@ -989,9 +989,45 @@ const _num = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v
 function systemRowToTableRow(r) {
   const bd = r.breakdown || {};
   const comp = bd.components || {};
+  const tb = comp.teken_breakdown || null;
+  const ded = bd.deductions || {};
   const isGlobal = r.salary_type === 'global';
   const gsal = isGlobal ? _num(bd.rates?.global_salary) : null;
   const numKind = (o) => (o && o.kind === 'number' ? _num(o.amount) : null);
+  const rnd = (n) => (n == null || n === '' || isNaN(Number(n)) ? null : Math.round(Number(n)));
+  const perHour = isGlobal
+    ? (tb?.hourly_value != null ? Math.round(tb.hourly_value * 100) / 100 : null)
+    : _num(bd.rates?.hourly_rate);
+  // Full, ordered detail of every column shown in the system salary table, so the
+  // preview can list each value the accountant was given (not just the compared ones).
+  const system_detail = [
+    { label: 'מספר עובד', value: r.employee_number || '' },
+    { label: 'ת"ז', value: r.israeli_id || '' },
+    { label: 'סוג שכר', value: isGlobal ? 'תקן / גלובלי' : 'שעתי' },
+    { label: 'ימי עבודה', value: _num(bd.hours?.days_worked) },
+    { label: 'שעות רגילות', value: _num(bd.hours?.regular) },
+    { label: 'שע"נ 125%', value: _num(bd.hours?.ot_125) },
+    { label: 'שע"נ 150%', value: _num(bd.hours?.ot_150) },
+    { label: 'תעריף לשעה', value: perHour, currency: true },
+    { label: 'שכר תקן (מוסכם)', value: gsal, currency: true },
+    { label: 'שכר בסיס', value: rnd(comp.base_salary), currency: true },
+    { label: 'השלמת שכר', value: rnd(tb?.completion), currency: true },
+    { label: 'תוספת שכר', value: rnd(tb?.supplement_applied), currency: true },
+    { label: 'נסיעות', value: rnd(comp.travel), currency: true },
+    { label: 'מחלה (ימים)', value: _num(r.manual?.sick_days) },
+    { label: 'חופשה (ימים)', value: _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days) },
+    { label: 'דמי חגים (ימים)', value: _num(r.holiday_pay_auto?.total_days) },
+    { label: 'סיבוס', value: numKind(r.manual?.cibus), currency: true },
+    { label: 'הבראה', value: numKind(r.manual?.recreation), currency: true },
+    { label: 'כרטיס מתנה', value: numKind(r.manual?.gift_card), currency: true },
+    { label: 'מילואים', value: numKind(r.manual?.miluim), currency: true },
+    { label: 'בונוס', value: rnd(r.bonus?.effective), currency: true },
+    { label: 'הלוואות (ניכוי)', value: rnd(ded.loans), currency: true },
+    { label: 'ניכוי היעדרות', value: rnd(ded.absence), currency: true },
+    { label: 'קיזוז מקדמה', value: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || '' },
+    { label: 'שכר משוער (ברוטו)', value: rnd(bd.estimated_total), currency: true, strong: true },
+  ].filter((d) => d.value != null && d.value !== '');
+
   return {
     branch: r.branch_name || '',
     employee_name: r.full_name || '',
@@ -1018,6 +1054,7 @@ function systemRowToTableRow(r) {
     cibus: numKind(r.manual?.cibus),
     reserve_duty: numKind(r.manual?.miluim),
     notes: r.manual?.notes || null,
+    system_detail,
   };
 }
 
