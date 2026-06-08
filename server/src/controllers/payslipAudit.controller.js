@@ -1001,9 +1001,6 @@ function systemRowToTableRow(r) {
   // Full, ordered detail of every column shown in the system salary table, so the
   // preview can list each value the accountant was given (not just the compared ones).
   const system_detail = [
-    { label: 'מספר עובד', value: r.employee_number || '' },
-    { label: 'ת"ז', value: r.israeli_id || '' },
-    { label: 'סוג שכר', value: isGlobal ? 'תקן / גלובלי' : 'שעתי' },
     { label: 'ימי עבודה', value: _num(bd.hours?.days_worked) },
     { label: 'שעות רגילות', value: _num(bd.hours?.regular) },
     { label: 'שע"נ 125%', value: _num(bd.hours?.ot_125) },
