@@ -63,19 +63,19 @@ router.get('/my-payslips',                     c.myPayslips);
 // ── Payslip audit (admin only) — upload xlsx + PDF, get a comparison report ──
 router.post(
   '/payslip-audit/parse-table',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   auditUpload.single('file'),
   audit.parseTable,
 );
 router.post(
   '/payslip-audit/parse-payslips',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   auditUpload.single('file'),
   audit.parsePayslips,
 );
 router.post(
   '/payslip-audit/run',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   auditUpload.fields([
     { name: 'table_file', maxCount: 1 },
     { name: 'payslip_file', maxCount: 1 },
@@ -84,13 +84,13 @@ router.post(
 );
 router.post(
   '/payslip-audit/list-branches',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   auditUpload.single('file'),
   audit.listBranches,
 );
 router.post(
   '/payslip-audit/run-multi',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   // Allow up to 1 table_file + 10 payslip_file_<i> entries (4 expected, 10 cap is safe)
   // + optional cibus_file (Cibus/Pluxee monthly report).
   auditUpload.fields([
@@ -111,7 +111,7 @@ router.post(
 );
 router.post(
   '/payslip-audit/run-system',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   // Payslips-only: compared against the in-system salary table for the month.
   auditUpload.fields([
     { name: 'cibus_file', maxCount: 1 },
@@ -130,55 +130,55 @@ router.post(
 );
 router.post(
   '/payslip-audit/email',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.emailAudit,
 );
 router.get(
   '/payslip-audit/email/defaults',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getDefaultRecipients,
 );
 
 // Audit history (saved runs)
 router.get(
   '/payslip-audit/history',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.listAuditHistory,
 );
 router.get(
   '/payslip-audit/history/:id',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getAuditFromHistory,
 );
 router.delete(
   '/payslip-audit/history/:id',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.deleteAuditFromHistory,
 );
 router.patch(
   '/payslip-audit/history/:id/edits',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.saveAuditEdits,
 );
 router.get(
   '/payslip-audit/history/:id/payslip-page',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getPayslipPage,
 );
 router.get(
   '/payslip-audit/employee-history',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getEmployeeHistory,
 );
 router.get(
   '/payslip-audit/cycle-progression',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getCycleProgression,
 );
 // Approval workflow — accepts up to 10 corrected payslip PDFs
 router.patch(
   '/payslip-audit/history/:id/approve',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   auditUpload.fields([
     { name: 'approved_payslip_0', maxCount: 1 },
     { name: 'approved_payslip_1', maxCount: 1 },
@@ -195,7 +195,7 @@ router.patch(
 );
 router.patch(
   '/payslip-audit/history/:id/unapprove',
-  requireRole('system_admin', 'branch_manager'),
+  requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.unapproveAudit,
 );
 

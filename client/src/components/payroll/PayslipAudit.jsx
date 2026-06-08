@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse,
   Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton,
   LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, TextField, Typography,
@@ -193,10 +193,26 @@ function LeaveRow({ label, leave }) {
 // style behavior achieved with TextField + datalist for simplicity).
 function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
   const inputRef = useRef(null);
-  const datalistId = `branches-${idx}`;
+  const [dragOver, setDragOver] = useState(false);
+  const takeDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = [...(e.dataTransfer?.files || [])].find((x) => /pdf$/i.test(x.name) || x.type === 'application/pdf');
+    if (f) onChange({ file: f });
+  };
   return (
-    <Paper variant="outlined" sx={{ p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center' }}>
-      {/* File picker */}
+    <Paper
+      variant="outlined"
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={takeDrop}
+      sx={{
+        p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center',
+        transition: 'all .15s',
+        ...(dragOver ? { borderColor: 'primary.main', borderStyle: 'dashed', bgcolor: 'primary.50', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' } : {}),
+      }}
+    >
+      {/* File picker (click or drag-and-drop a PDF onto the row) */}
       <Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <Button
@@ -207,9 +223,13 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
           >
             {row.file ? 'החלף' : 'בחר PDF'}
           </Button>
-          {row.file && (
+          {row.file ? (
             <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1 }}>
               ✓ {row.file.name} ({Math.round(row.file.size / 1024)} KB)
+            </Typography>
+          ) : (
+            <Typography variant="caption" color={dragOver ? 'primary.main' : 'text.disabled'} sx={{ flex: 1 }}>
+              {dragOver ? 'שחרר כאן את קובץ ה-PDF' : 'או גרור לכאן קובץ PDF'}
             </Typography>
           )}
         </Stack>
@@ -222,21 +242,19 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
         />
       </Box>
 
-      {/* Branch selector — datalist gives users both autocomplete and free typing */}
-      <Box>
-        <TextField
-          label="סניף"
-          size="small"
-          fullWidth
-          value={row.branch}
-          onChange={(e) => onChange({ branch: e.target.value })}
-          slotProps={{ htmlInput: { list: datalistId } }}
-          placeholder="בחר או הקלד שם סניף"
-        />
-        <datalist id={datalistId}>
-          {branches.map((b) => <option key={b} value={b} />)}
-        </datalist>
-      </Box>
+      {/* Branch selector — MUI Autocomplete (free-solo) so the dropdown matches
+          the app theme instead of the unstyled native datalist. */}
+      <Autocomplete
+        freeSolo
+        size="small"
+        options={branches}
+        value={row.branch}
+        onChange={(_, v) => onChange({ branch: v || '' })}
+        onInputChange={(_, v) => onChange({ branch: v })}
+        renderInput={(params) => (
+          <TextField {...params} label="סניף" placeholder="בחר או הקלד שם סניף" />
+        )}
+      />
 
       {/* Remove row */}
       <Box>

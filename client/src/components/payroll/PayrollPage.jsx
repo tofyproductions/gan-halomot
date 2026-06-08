@@ -29,7 +29,7 @@ const TABS = [
   { id: 'commitments', label: 'התחייבויות',  icon: <EventNoteIcon fontSize="small" />, component: CommitmentsManager, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'change-requests', label: 'בקשות שינוי', icon: <RuleFolderIcon fontSize="small" />, component: PayrollChangeRequests, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'branch_manager'] },
+  { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },
   { id: 'settings',    label: 'הגדרות',      icon: <SettingsIcon fontSize="small" />, component: PayrollSettings, roles: ['system_admin'] },
 ];
