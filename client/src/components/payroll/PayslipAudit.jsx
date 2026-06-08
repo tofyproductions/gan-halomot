@@ -1353,6 +1353,26 @@ function ResultCard({ result, expanded, onToggle, savedAuditId }) {
               payslip={result.payslip}
               cibusRow={result.cibus_row}
             />
+            {/* Notes / directives recorded for the accountant in the system table —
+                free-text that DiffPanel can't compare, shown here so the user can
+                track exactly what was instructed against the payslip. */}
+            {(result.table_row?.notes || result.table_row?.advance_directive) && (
+              <Box sx={{ mt: 1.5, p: 1.25, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
+                  📝 הערות והוראות בטבלת המערכת (לרו״ח)
+                </Typography>
+                {result.table_row.advance_directive && (
+                  <Typography variant="body2" sx={{ fontSize: 12, mb: 0.5 }}>
+                    <b>מקדמה:</b> {result.table_row.advance_directive}
+                  </Typography>
+                )}
+                {result.table_row.notes && (
+                  <Typography variant="body2" sx={{ fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                    {result.table_row.notes}
+                  </Typography>
+                )}
+              </Box>
+            )}
           </Box>
         </DialogContent>
         <DialogActions>
@@ -1708,6 +1728,19 @@ export default function PayslipAudit() {
 
   useEffect(() => { fetchHistory(); }, []);
 
+  // Persist the last viewed audit id so leaving the tab and returning restores
+  // the audit (results + payslip previews) instead of an empty form.
+  useEffect(() => {
+    if (audit?.saved_audit_id) sessionStorage.setItem('lastAuditId', String(audit.saved_audit_id));
+  }, [audit?.saved_audit_id]);
+
+  // On mount, if no audit is loaded, silently restore the last viewed one.
+  useEffect(() => {
+    const last = sessionStorage.getItem('lastAuditId');
+    if (last) loadFromHistory(last, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Whenever the audit changes (run, or load from history), seed the editor
   // with critical+warning findings. The list is kept PARALLEL to audit.results
   // (same order, same length) so each ResultCard on the right can be paired
@@ -1750,7 +1783,7 @@ export default function PayslipAudit() {
     setEditableResults(cloned);
   }, [audit]);
 
-  const loadFromHistory = async (id) => {
+  const loadFromHistory = async (id, silent = false) => {
     try {
       const res = await api.get(`/payroll/payslip-audit/history/${id}`);
       setAudit(res.data);
@@ -1758,11 +1791,13 @@ export default function PayslipAudit() {
       setFilterSev('all');
       setFilterBranch('all');
       setSearchQuery('');
-      toast.info('נטענה ביקורת שמורה');
-      // scroll to top of results
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (!silent) {
+        toast.info('נטענה ביקורת שמורה');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בטעינת ביקורת');
+      if (!silent) toast.error(err.response?.data?.error || 'שגיאה בטעינת ביקורת');
+      sessionStorage.removeItem('lastAuditId');
     }
   };
 
