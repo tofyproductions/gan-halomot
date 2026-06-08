@@ -438,6 +438,7 @@ async function getMonth(req, res, next) {
         full_name: emp.full_name,
         israeli_id: emp.israeli_id || '',
         employee_number: emp.employee_number || '',
+        is_freelancer: !!emp.is_freelancer,
         // Bank details only for accounting/admin (sensitive).
         ...(canSeeBank ? {
           bank_number: emp.bank_number || '',

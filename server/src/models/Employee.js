@@ -97,6 +97,10 @@ const employeeSchema = new mongoose.Schema({
   // Payslip employee number assigned by the accountant's payroll software. Lets
   // the accountant locate each employee by the same number shown on the תלוש.
   employee_number: { type: String, default: '', trim: true },
+  // Freelancer: issues an invoice for her hours instead of getting a payslip.
+  // Shown in the salary table but excluded from the accountant PDF/Excel export
+  // and from the payslip audit (there is no payslip for her).
+  is_freelancer: { type: Boolean, default: false },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // optional login link
 

@@ -730,6 +730,17 @@ export default function PayrollMonthTable() {
       .catch(err => { toast.error(err.response?.data?.error || 'עדכון נכשל'); fetchData(); });
   }, [fetchData]);
 
+  // Freelancer: issues an invoice (no payslip) → excluded from the accountant export.
+  const setEmployeeFreelancer = useCallback((employeeId, isF) => {
+    setData(prev => prev && {
+      ...prev,
+      rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, is_freelancer: isF } : r),
+    });
+    api.put(`/payroll/employees/${employeeId}`, { is_freelancer: isF })
+      .then(() => { toast.success(isF ? 'סומן כפרילנסר (לא יישלח לרו״ח)' : 'בוטל סימון פרילנסר'); fetchData(); })
+      .catch(err => { toast.error(err.response?.data?.error || 'עדכון נכשל'); fetchData(); });
+  }, [fetchData]);
+
   // Standing travel amount lives on the employee → carries forward every month
   // until changed. amount=null clears it (revert to automatic calc).
   const setEmployeeTravel = useCallback((employeeId, amount) => {
@@ -1026,15 +1037,16 @@ export default function PayrollMonthTable() {
 
   const exportCSV = () => {
     if (!data) return;
-    const m = buildExportMatrix();
+    const m = buildExportMatrix((data.rows || []).filter(r => !r.is_freelancer));
     const csv = '﻿' + m.map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
     downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'csv');
   };
 
   // Group rows by branch — each branch becomes its own file / sheet / PDF page.
+  // Freelancers are excluded: they invoice us, the accountant doesn't process them.
   const exportGroups = (rows = (data?.rows || [])) => {
     const groups = new Map();
-    for (const r of rows) {
+    for (const r of rows.filter(x => !x.is_freelancer)) {
       const k = r.branch_name || '—';
       if (!groups.has(k)) groups.set(k, []);
       groups.get(k).push(r);
@@ -1706,6 +1718,16 @@ export default function PayrollMonthTable() {
                               variant={r.is_active === false ? 'outlined' : 'filled'}
                               label={r.is_active === false ? 'לא פעיל' : 'פעיל'}
                               onClick={(e) => { e.stopPropagation(); r.is_active === false ? setEmployeeActive(r.employee_id, true) : setInactiveDlg({ open: true, row: r }); }}
+                              sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                          <Tooltip title={r.is_freelancer ? 'פרילנסרית — מפיקה חשבונית, לא נשלחת לרו״ח. לחץ לביטול' : 'סמן כפרילנסרית (חשבונית, לא תיכלל בייצוא לרו״ח)'}>
+                            <Chip
+                              size="small"
+                              color={r.is_freelancer ? 'warning' : 'default'}
+                              variant={r.is_freelancer ? 'filled' : 'outlined'}
+                              label={r.is_freelancer ? '🧾 פרילנסר' : 'פרילנסר?'}
+                              onClick={(e) => { e.stopPropagation(); setEmployeeFreelancer(r.employee_id, !r.is_freelancer); }}
                               sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
                             />
                           </Tooltip>

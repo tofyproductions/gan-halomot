@@ -1115,7 +1115,8 @@ async function runAuditSystem(req, res) {
 
   try {
     const monthData = await fetchSystemMonth(req.user, month);
-    const allRows = (monthData.rows || []).map(systemRowToTableRow);
+    // Freelancers issue an invoice, not a payslip — exclude them from the audit.
+    const allRows = (monthData.rows || []).filter((r) => !r.is_freelancer).map(systemRowToTableRow);
 
     let cibusReport = null;
     const cibusFile = req.files?.cibus_file?.[0];
