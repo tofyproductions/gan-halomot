@@ -613,6 +613,33 @@ function compareOne(table, payslip, method) {
     }
   }
 
+  // Holiday pay (דמי חגים / "ימי חג"). The payslip item label is garbled in the
+  // PDF text layer, so we match by AMOUNT — look for a payslip line whose amount
+  // ≈ the expected holiday pay (days × daily value). Only runs when the system
+  // supplies an expected amount (run-system mode); amount matching may not be
+  // 100% precise (a same-amount line could be mistaken).
+  if (table.holiday_pay_expected != null && table.holiday_pay_expected > 0) {
+    const matchedHoliday = findClosestItemAmount(payslip.items, table.holiday_pay_expected);
+    const daysTxt = table.holiday_days ? `, ${table.holiday_days} ימי חג` : '';
+    if (matchedHoliday != null) {
+      findings.push({
+        field: 'holiday_pay',
+        severity: 'ok',
+        expected: table.holiday_pay_expected,
+        actual: matchedHoliday,
+        message: `דמי חגים: זוהה תשלום ≈ ₪${Math.round(matchedHoliday)} בתלוש (צפוי ₪${Math.round(table.holiday_pay_expected)}${daysTxt})`,
+      });
+    } else {
+      findings.push({
+        field: 'holiday_pay',
+        severity: 'warning',
+        expected: table.holiday_pay_expected,
+        actual: null,
+        message: `דמי חגים: צפוי ₪${Math.round(table.holiday_pay_expected)}${daysTxt} — לא זוהה תשלום תואם בתלוש (זיהוי לפי סכום)`,
+      });
+    }
+  }
+
   // Transport — only emit the info-only "verify in payslip" finding when the
   // payslip side is missing (parser didn't extract). The actual mismatch
   // check above already covers the both-populated case.

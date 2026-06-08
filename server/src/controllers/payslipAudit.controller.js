@@ -1026,6 +1026,11 @@ function systemRowToTableRow(r) {
   const perHour = isGlobal
     ? (tb?.hourly_value != null ? Math.round(tb.hourly_value * 100) / 100 : null)
     : _num(bd.rates?.hourly_rate);
+  // "שכר בסיס" = pay for REGULAR hours only (matches the on-screen table column).
+  // For a global employee that's the teken regular_pay; otherwise the computed base.
+  const baseRegular = isGlobal
+    ? (tb?.regular_pay != null ? Math.round(tb.regular_pay) : (gsal != null ? Math.round(gsal) : null))
+    : rnd(comp.base_salary);
   // Full, ordered detail of every column shown in the system salary table, so the
   // preview can list each value the accountant was given (not just the compared ones).
   const system_detail = [
@@ -1035,7 +1040,7 @@ function systemRowToTableRow(r) {
     { label: 'שע"נ 150%', value: _num(bd.hours?.ot_150) },
     { label: 'תעריף לשעה', value: perHour, currency: true },
     { label: 'שכר תקן (מוסכם)', value: gsal, currency: true },
-    { label: 'שכר בסיס', value: rnd(comp.base_salary), currency: true },
+    { label: 'שכר בסיס', value: baseRegular, currency: true },
     { label: 'השלמת שכר', value: rnd(tb?.completion), currency: true },
     { label: 'תוספת שכר', value: rnd(tb?.supplement_applied), currency: true },
     { label: 'נסיעות', value: rnd(comp.travel), currency: true },
@@ -1065,7 +1070,12 @@ function systemRowToTableRow(r) {
     global_salary: gsal,
     global_ot: null,
     global_salary_kind: isGlobal ? (r.salary_is_net ? 'net' : 'gross') : 'unknown',
-    global_salary_amount: gsal,
+    // The payslip "שכר יסוד" is compared to OUR regular base (שכר בסיס), not the
+    // agreed teken — the teken absorbs OT/completion while the payslip pays base
+    // + OT separately, so base↔base is the meaningful comparison. Only for global
+    // employees; hourly stay null so they're compared on hours, not base.
+    global_salary_amount: isGlobal ? baseRegular : null,
+    agreed_salary: gsal,
     global_ot_amount: null,
     emuna_ks_global: null, emuna_ks_global_ot: null, emuna_hz_global: null, emuna_hz_global_ot: null,
     transport: _num(comp.travel),
@@ -1073,6 +1083,7 @@ function systemRowToTableRow(r) {
     absence: null,
     vacation_days: _num(r.vacation_eff_days) ?? _num(r.manual?.vacation_days),
     holiday_days: _num(r.holiday_pay_auto?.total_days),
+    holiday_pay_expected: rnd(r.holiday_pay_auto?.total_pay), // for amount-based payslip match
     advance_directive: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || null,
     gift_card: numKind(r.manual?.gift_card),
     recuperation: numKind(r.manual?.recreation),
