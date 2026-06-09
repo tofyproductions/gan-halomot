@@ -1100,13 +1100,17 @@ async function runAuditSystem(req, res) {
   const month = (req.body?.month || '').trim();
   if (!month) return res.status(400).json({ error: 'נדרש חודש (YYYY-MM)' });
 
+  // All-branches mode: one PDF holding payslips of every branch. We compare it
+  // against the WHOLE month (no per-file branch); ת"ז matching routes each
+  // payslip to its employee regardless of branch.
+  const allBranchesMode = req.body?.all_branches === 'true' || req.body?.all_branches === true;
   const payslipEntries = [];
   for (const key of Object.keys(req.files || {})) {
     const m = key.match(/^payslip_file_(\d+)$/);
     if (!m) continue;
     const idx = m[1];
     const file = req.files[key][0];
-    const branch = (req.body[`branch_${idx}`] || '').trim();
+    const branch = (req.body[`branch_${idx}`] || '').trim() || (allBranchesMode ? 'כל הסניפים' : '');
     if (!branch) return res.status(400).json({ error: `חסר שם סניף לקובץ ${file.originalname}` });
     payslipEntries.push({ idx: Number(idx), file, branch });
   }
@@ -1146,7 +1150,9 @@ async function runAuditSystem(req, res) {
 
     for (const entry of payslipEntries) {
       const entryNorm = normalizeWS(entry.branch);
-      const branchRows = allRows.filter((r) => {
+      // All-branches mode compares against every system row; otherwise filter to
+      // the file's branch.
+      const branchRows = allBranchesMode ? allRows : allRows.filter((r) => {
         const rb = normalizeWS(r.branch);
         return rb.includes(entryNorm) || entryNorm.includes(rb);
       });

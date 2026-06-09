@@ -192,7 +192,7 @@ function LeaveRow({ label, leave }) {
 // Single (file + branch) row in the multi-PDF uploader. Branch can be picked
 // from a dropdown of branches detected in the xlsx, or typed freely (Autocomplete-
 // style behavior achieved with TextField + datalist for simplicity).
-function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
+function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove, hideBranch }) {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const takeDrop = (e) => {
@@ -208,7 +208,7 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
       onDragLeave={() => setDragOver(false)}
       onDrop={takeDrop}
       sx={{
-        p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center',
+        p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: hideBranch ? '1fr auto' : '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center',
         transition: 'all .15s',
         ...(dragOver ? { borderColor: 'primary.main', borderStyle: 'dashed', bgcolor: 'primary.50', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' } : {}),
       }}
@@ -243,19 +243,20 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove }) {
         />
       </Box>
 
-      {/* Branch selector — MUI Autocomplete (free-solo) so the dropdown matches
-          the app theme instead of the unstyled native datalist. */}
-      <Autocomplete
-        freeSolo
-        size="small"
-        options={branches}
-        value={row.branch}
-        onChange={(_, v) => onChange({ branch: v || '' })}
-        onInputChange={(_, v) => onChange({ branch: v })}
-        renderInput={(params) => (
-          <TextField {...params} label="סניף" placeholder="בחר או הקלד שם סניף" />
-        )}
-      />
+      {/* Branch selector — hidden in all-branches mode (matched by ת"ז). */}
+      {!hideBranch && (
+        <Autocomplete
+          freeSolo
+          size="small"
+          options={branches}
+          value={row.branch}
+          onChange={(_, v) => onChange({ branch: v || '' })}
+          onInputChange={(_, v) => onChange({ branch: v })}
+          renderInput={(params) => (
+            <TextField {...params} label="סניף" placeholder="בחר או הקלד שם סניף" />
+          )}
+        />
+      )}
 
       {/* Remove row */}
       <Box>
@@ -1491,6 +1492,8 @@ export default function PayslipAudit() {
   // Audit source: 'system' = compare against the in-system salary table (only
   // payslips uploaded); 'file' = legacy compare against an uploaded xlsx.
   const [auditMode, setAuditMode] = useState('system');
+  // One PDF holding every branch's payslips (matched to the system by ת"ז).
+  const [allBranchesFile, setAllBranchesFile] = useState(false);
   const { month: auditMonth, setMonth: setAuditMonth } = useWorkMonth();
   const [tableFile, setTableFile] = useState(null);
   // Optional Cibus monthly report (xlsx/csv from Pluxee admin dashboard).
@@ -2030,28 +2033,35 @@ export default function PayslipAudit() {
       toast.warn('נא לבחור חודש');
       return;
     }
-    const validRows = payslipFiles.filter((r) => r.file && r.branch.trim());
+    // All-branches mode (system only): one PDF, no per-file branch.
+    const allMode = auditMode === 'system' && allBranchesFile;
+    const validRows = allMode
+      ? payslipFiles.filter((r) => r.file)
+      : payslipFiles.filter((r) => r.file && r.branch.trim());
     if (validRows.length === 0) {
-      toast.warn('נא לבחור לפחות קובץ תלושים אחד עם סניף');
+      toast.warn(allMode ? 'נא לבחור קובץ תלושים' : 'נא לבחור לפחות קובץ תלושים אחד עם סניף');
       return;
     }
-    const missingBranch = payslipFiles.find((r) => r.file && !r.branch.trim());
-    if (missingBranch) {
-      toast.warn(`חסר סניף לקובץ "${missingBranch.file.name}"`);
-      return;
+    if (!allMode) {
+      const missingBranch = payslipFiles.find((r) => r.file && !r.branch.trim());
+      if (missingBranch) {
+        toast.warn(`חסר סניף לקובץ "${missingBranch.file.name}"`);
+        return;
+      }
     }
     setRunning(true);
     try {
       const form = new FormData();
       if (auditMode === 'system') {
         form.append('month', auditMonth);
+        if (allMode) form.append('all_branches', 'true');
       } else {
         form.append('table_file', tableFile);
         if (sheetName) form.append('sheet_name', sheetName);
       }
       validRows.forEach((row, i) => {
         form.append(`payslip_file_${i}`, row.file);
-        form.append(`branch_${i}`, row.branch);
+        if (!allMode) form.append(`branch_${i}`, row.branch);
       });
       // Optional Cibus monthly report (xlsx/csv) — comparator does a triple
       // cross-check (table ↔ payslip ↔ cibus) when present.
@@ -2107,6 +2117,20 @@ export default function PayslipAudit() {
                     : 'משווים מול קובץ אקסל חיצוני'}
                 </Typography>
               </Stack>
+              {auditMode === 'system' && (
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Typography variant="caption" sx={{ fontWeight: 700 }}>מבנה הקובץ:</Typography>
+                  <Button size="small" variant={!allBranchesFile ? 'contained' : 'outlined'}
+                    onClick={() => setAllBranchesFile(false)}>קובץ לכל סניף</Button>
+                  <Button size="small" variant={allBranchesFile ? 'contained' : 'outlined'}
+                    onClick={() => setAllBranchesFile(true)}>📄 קובץ אחד לכל הסניפים</Button>
+                  <Typography variant="caption" color="text.secondary">
+                    {allBranchesFile
+                      ? 'PDF אחד עם כל התלושים — ההתאמה לפי ת"ז'
+                      : 'קובץ נפרד לכל סניף'}
+                  </Typography>
+                </Stack>
+              )}
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '2fr 1fr 2fr' }, gap: 2, alignItems: 'end' }}>
                 {auditMode === 'system' ? (
                   <TextField
@@ -2146,25 +2170,30 @@ export default function PayslipAudit() {
               <Box>
                 <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, flex: 1 }}>
-                    קבצי תלושים (PDF) — אחד לכל סניף
+                    {allBranchesFile && auditMode === 'system'
+                      ? 'קובץ תלושים אחד (כל הסניפים)'
+                      : 'קבצי תלושים (PDF) — אחד לכל סניף'}
                   </Typography>
-                  <Button
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={addPayslipRow}
-                    disabled={payslipFiles.length >= 10}
-                  >
-                    הוסף קובץ
-                  </Button>
+                  {!(allBranchesFile && auditMode === 'system') && (
+                    <Button
+                      size="small"
+                      startIcon={<AddIcon />}
+                      onClick={addPayslipRow}
+                      disabled={payslipFiles.length >= 10}
+                    >
+                      הוסף קובץ
+                    </Button>
+                  )}
                 </Stack>
                 <Stack spacing={1}>
-                  {payslipFiles.map((row, idx) => (
+                  {(allBranchesFile && auditMode === 'system' ? payslipFiles.slice(0, 1) : payslipFiles).map((row, idx) => (
                     <PayslipFileRow
                       key={idx}
                       row={row}
                       idx={idx}
                       branches={availableBranches}
-                      canRemove={payslipFiles.length > 1}
+                      hideBranch={allBranchesFile && auditMode === 'system'}
+                      canRemove={payslipFiles.length > 1 && !(allBranchesFile && auditMode === 'system')}
                       onChange={(patch) => updatePayslipRow(idx, patch)}
                       onRemove={() => removePayslipRow(idx)}
                     />
