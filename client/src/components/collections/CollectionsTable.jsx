@@ -771,6 +771,11 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
               const isDupOverride = m.is_duplicate_override === true;
               const cellSx = getCellSx(paid, expected, isBeforeStart);
               const hasContent = !!(receipt || notes);
+              // A cell is a real billable month (and thus editable) whenever it
+              // has a month record — expected_amount != null — EVEN when that
+              // amount is 0 (a manual override to 0). The old `expected > 0`
+              // check locked a 0-override cell so it could never be re-edited.
+              const editable = !isBeforeStart && m.expected_amount != null;
 
               return (
                 <TableCell
@@ -778,14 +783,14 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
                   align="center"
                   sx={{
                     p: 0.5,
-                    cursor: !isBeforeStart && expected > 0 ? 'pointer' : 'default',
+                    cursor: editable ? 'pointer' : 'default',
                     ...cellSx,
                     fontSize: '0.85rem',
                     fontWeight: hasContent ? 600 : 400,
                     position: 'relative',
                   }}
                   onClick={() => {
-                    if (!isBeforeStart && expected > 0) {
+                    if (editable) {
                       onCellClick(regId, monthNum, receipt, expected, row.child_name, notes, m);
                     }
                   }}
@@ -797,7 +802,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
                         <span style={{ fontSize: '0.7rem', fontWeight: 500, opacity: 0.85 }}>{notes}</span>
                       )}
                     </Box>
-                  ) : (expected > 0 ? formatCurrency(expected) : '')}
+                  ) : (m.expected_amount != null ? formatCurrency(expected) : '')}
                   {isDupOverride && (
                     <Box
                       component="span"
