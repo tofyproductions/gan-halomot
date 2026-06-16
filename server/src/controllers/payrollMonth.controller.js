@@ -339,6 +339,11 @@ async function getMonth(req, res, next) {
         // Teken hourly value is based on the employee's committed work hours
         // (their schedule), not a separate required_hours field that can drift.
         required_hours_override: commitmentInfo.has_commitment ? commitmentInfo.committed_hours : null,
+        // The שכר תקן already includes the premium for OT built into the schedule,
+        // so the BASE hourly value uses the OT-weighted committed hours — working
+        // exactly the committed schedule then yields exactly the salary (no phantom
+        // excess). Only OT beyond the commitment surfaces as a supplement.
+        committed_weighted_override: commitmentInfo.has_commitment ? commitmentInfo.committed_weighted_hours : null,
         // Month-specific override wins for this month; otherwise the standing
         // per-employee travel amount (carries forward every month) is used.
         travel_override: (existingManual.travel_override != null && existingManual.travel_override !== '')
@@ -789,6 +794,11 @@ async function finalizeMonth(req, res, next) {
         pay_excess_supplement: m.supplement_manager_approved === true
           && m.supplement_accounting_approved === true,
         absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
+        // Mirror the live view exactly so finalizing never shifts the teken
+        // hourly value: committed clock hours for display/threshold, OT-weighted
+        // committed hours for the base hourly value.
+        required_hours_override: ci.has_commitment ? ci.committed_hours : null,
+        committed_weighted_override: ci.has_commitment ? ci.committed_weighted_hours : null,
         travel_override: m.travel_override,
       });
       await PayrollMonth.findOneAndUpdate(

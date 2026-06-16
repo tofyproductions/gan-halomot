@@ -54,7 +54,8 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
   if (!commitment) {
     return {
       committed_dates: [], off_dates: [], worked_dates: [], absent_dates: [],
-      off_day_workdays: [], net_absent: 0, has_commitment: false,
+      off_day_workdays: [], net_absent: 0, committed_hours: 0,
+      committed_weighted_hours: 0, has_commitment: false,
     };
   }
 
@@ -77,6 +78,21 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     return (h || 0) + (m || 0) / 60;
   };
 
+  // A committed day's OT-WEIGHTED hours: the agreed standard salary (שכר תקן) is
+  // a basket that already includes the premium for the OT built into the regular
+  // schedule (e.g. a 8.5h day = 8 regular + 0.5 at 125%). To get a base hourly
+  // value that doesn't manufacture a phantom "excess" when she works exactly her
+  // schedule, the OT portion of each committed day must be weighted by its
+  // premium here — mirroring splitDayOvertime() in payrollCalc.js (8h reg, next
+  // 2h ×1.25, above 10h ×1.5).
+  const weightedDayHours = (h) => {
+    const reg = Math.min(h, 8);
+    const after8 = Math.max(0, h - 8);
+    const ot125 = Math.min(after8, 2);
+    const ot150 = Math.max(0, after8 - 2);
+    return reg + ot125 * 1.25 + ot150 * 1.5;
+  };
+
   // Alternating day (e.g. "Friday every other week" — שישי לסירוגין): she is
   // committed HALF the time, so we count half its hours and never flag it as an
   // absence or as an off-day-worked offset (we can't know which specific week).
@@ -85,7 +101,8 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
 
   const committed = [];
   const off = [];
-  let committed_hours = 0; // total contracted hours across the month's committed days
+  let committed_hours = 0;          // total contracted CLOCK hours this month (for display)
+  let committed_weighted_hours = 0; // same hours but OT-weighted (for the teken hourly value)
   for (const day of datesInMonth(monthYM)) {
     // Saturday (weekday=6) is never a work day in Israel — skip.
     if (day.weekday === 6) continue;
@@ -96,13 +113,15 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     }
     const dayHours = Math.max(0, hhmmToHours(cd.end_hhmm) - hhmmToHours(cd.start_hhmm));
     if (altDay != null && day.weekday === altDay) {
-      committed_hours += 0.5 * dayHours; // half-time alternating day
-      continue;                          // not absence-flagged, not an offset
+      committed_hours += 0.5 * dayHours;                       // half-time alternating day
+      committed_weighted_hours += 0.5 * weightedDayHours(dayHours);
+      continue;                                                // not absence-flagged, not an offset
     }
     if (cd.is_off) off.push(day.ymd);
     else {
       committed.push(day.ymd);
       committed_hours += dayHours;
+      committed_weighted_hours += weightedDayHours(dayHours);
     }
   }
 
@@ -124,6 +143,7 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     off_day_workdays: offDayWorkdays,
     net_absent,
     committed_hours: Math.round(committed_hours * 100) / 100,
+    committed_weighted_hours: Math.round(committed_weighted_hours * 100) / 100,
     has_commitment: true,
   };
 }

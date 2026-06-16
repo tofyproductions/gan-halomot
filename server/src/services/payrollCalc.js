@@ -221,6 +221,15 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   if (opts.required_hours_override != null && Number(opts.required_hours_override) > 0) {
     rates.required_hours = Number(opts.required_hours_override);
   }
+  // OT-weighted committed hours drive the BASE hourly value (the שכר תקן already
+  // includes the premium for OT built into the schedule). required_hours above
+  // stays the real clock hours — used for display and the exceed-commitment
+  // threshold. Defaults to required_hours when the caller doesn't supply it, so
+  // schedules with no >8h day are unchanged.
+  rates.required_hours_weighted =
+    (opts.committed_weighted_override != null && Number(opts.committed_weighted_override) > 0)
+      ? Number(opts.committed_weighted_override)
+      : rates.required_hours;
   const fallbackAmutaId = rates.primary_amuta_id;
 
   const days = [];
@@ -384,7 +393,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     //      she gets base (capped by commitment + OT addition) + OT addition.
     const includeCompletion = opts.include_salary_completion !== false;
     if (rates.required_hours > 0 && rates.global_salary > 0) {
-      const hourlyValue = rates.global_salary / rates.required_hours;
+      const hourlyValue = rates.global_salary / rates.required_hours_weighted;
 
       // Cap regular hours at commitment — anything above goes to OT bucket
       // (it should have been categorized as OT already by per-day rules, but
@@ -441,8 +450,10 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     const includeCompletion = opts.include_salary_completion !== false;
     const payExcess = opts.pay_excess_supplement === true;
     const S = rates.global_salary;
-    const H = rates.required_hours;
-    const hv = S / H; // average hourly value
+    const H = rates.required_hours;          // real clock hours (display + exceed threshold)
+    const hv = S / rates.required_hours_weighted; // BASE hourly value — OT in the schedule
+                                             // is weighted into the denominator, so working
+                                             // exactly the committed schedule yields exactly S.
 
     // Transparent decomposition of the agreed salary S (basket includes OT).
     // The hourly value is S/H; regular hours and overtime are valued against it,
