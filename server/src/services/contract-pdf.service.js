@@ -37,7 +37,11 @@ function generateContractHTML(data) {
   const startTime = config.start_time || data.startTime || '07:00';
   const endTime = config.end_time || data.endTime || '17:00';
   const friEnd = config.fri_time || data.friTime || '12:30';
-  const signature = data.signature_data || data.signature || '';
+  // Signature priority: the new-system field, then a top-level field, then the
+  // imported old-system signature which lives inside configuration.signature
+  // (digitally signed in the old app, carried over in the config JSON but never
+  // copied to signature_data).
+  const signature = data.signature_data || data.signature || config.signature || '';
 
   const augCalc = calculateAugustPayment(monthlyFee, startDate);
   const firstMonth = calculateFirstMonthPayment(monthlyFee, startDate);
@@ -167,6 +171,7 @@ function generateContractHTML(data) {
           font-size: 0.95rem;
         }
         .sig-box img { max-width: 240px; max-height: 100px; display: block; }
+        .sig-line { height: 60px; border-bottom: 1.5px solid #1e3a8a; margin: 4px 0 8px; }
         .sig-meta { font-size: 0.8rem; color: #64748b; margin-top: 6px; }
         .footer {
           margin-top: 30px;
@@ -240,13 +245,15 @@ function generateContractHTML(data) {
         <li>באם יודיע ההורה על הפסקת ההתקשרות – הרי שישולם על ידו שכר הלימוד עבור אותו חודש בו נתנה ההודעה וכן עבור חודש נוסף שלאחר מכן כפיצוי קבוע ומוסכם מראש.</li>
       </ol>
 
-        ${signature ? `
+        ${`
           <div class="sig-block">
             <div class="sig-box">
               <p class="sig-label">חתימת ההורה</p>
-              <img src="${signature}" alt="חתימה">
+              ${signature
+                ? `<img src="${signature}" alt="חתימה">`
+                : `<div class="sig-line"></div>`}
               <p class="sig-meta">${parentName}${parentId ? ` · ת.ז. ${parentId}` : ''}</p>
-              <p class="sig-meta">תאריך: ${today}</p>
+              <p class="sig-meta">תאריך: ${signature ? today : '_____________'}</p>
             </div>
           </div>
         ` : ''}
