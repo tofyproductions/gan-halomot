@@ -16,7 +16,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
-import { renderHtmlToPdf } from '../../utils/contractPdf';
+import { printContractHtml } from '../../utils/contractPdf';
 
 /**
  * ChildDetailDialog — view and edit details of a single child.
@@ -343,7 +343,8 @@ function ContractSection({ registrationId }) {
     try {
       const res = await api.get(`/registrations/contract-versions/${versionId}/download`);
       if (res.data?.html) {
-        await renderHtmlToPdf(res.data.html, `חוזה_גרסה_${versionId}.pdf`);
+        toast.info('נפתחת תצוגת הדפסה — בחר/י "שמירה כ-PDF"');
+        await printContractHtml(res.data.html);
       } else if (res.data?.url) {
         const a = document.createElement('a');
         a.href = res.data.url;
@@ -361,7 +362,8 @@ function ContractSection({ registrationId }) {
     try {
       const res = await api.get(`/registrations/${registrationId}/contract-download`);
       if (res.data?.html) {
-        await renderHtmlToPdf(res.data.html, 'חוזה.pdf');
+        toast.info('נפתחת תצוגת הדפסה — בחר/י "שמירה כ-PDF"');
+        await printContractHtml(res.data.html);
       } else if (res.data?.url) {
         const a = document.createElement('a');
         a.href = res.data.url;

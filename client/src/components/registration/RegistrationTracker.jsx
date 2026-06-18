@@ -20,7 +20,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { getHebrewYear } from '../../utils/hebrewYear';
-import { renderHtmlToPdf } from '../../utils/contractPdf';
+import { printContractHtml } from '../../utils/contractPdf';
 
 const STATUS_CONFIG = {
   link_generated: { label: 'בתהליך', color: '#fef3c7', textColor: '#92400e', border: '#f59e0b' },
@@ -101,7 +101,8 @@ export default function RegistrationTracker() {
     try {
       const res = await api.get(`/registrations/${regId}/contract-download`);
       if (res.data?.html) {
-        await renderHtmlToPdf(res.data.html, `חוזה_${docsDialog.reg?.child_name || regId}.pdf`);
+        toast.info('נפתחת תצוגת הדפסה — בחר/י "שמירה כ-PDF"');
+        await printContractHtml(res.data.html);
       } else if (res.data?.url) {
         // Saved PDF in R2 — download directly.
         const a = document.createElement('a');

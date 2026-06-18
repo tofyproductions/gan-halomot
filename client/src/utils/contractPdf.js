@@ -43,6 +43,53 @@ function mount(html) {
   return { wrapper, content, worker };
 }
 
+// Open the contract in a hidden iframe and trigger the browser's NATIVE print
+// dialog ("Save as PDF"). The browser paginates the full HTML document itself —
+// real text (selectable, sharp), correct RTL list numbering, honored @page
+// margins, no mid-line cuts, and the signature <img> rendered natively. This is
+// far more reliable than html2canvas rasterization. Downside: the user picks
+// "Save as PDF" in the dialog instead of a silent download.
+export async function printContractHtml(html) {
+  const iframe = document.createElement('iframe');
+  Object.assign(iframe.style, {
+    position: 'fixed', right: '0', bottom: '0', width: '0', height: '0', border: '0',
+  });
+  document.body.appendChild(iframe);
+  const win = iframe.contentWindow;
+  const doc = win.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  // Wait for the document to load, fonts to be ready, and every image
+  // (signature + logo data-URIs) to decode before opening the print dialog.
+  await new Promise((resolve) => {
+    let done = false;
+    const ready = () => { if (!done) { done = true; resolve(); } };
+    if (doc.readyState === 'complete') ready();
+    win.addEventListener('load', ready, { once: true });
+    setTimeout(ready, 2000); // fallback
+  });
+  try { if (doc.fonts?.ready) await doc.fonts.ready; } catch { /* noop */ }
+  const imgs = Array.from(doc.querySelectorAll('img'));
+  await Promise.all(imgs.map((img) => {
+    if (img.complete && img.naturalWidth > 0) return null;
+    return new Promise((res) => {
+      img.addEventListener('load', res, { once: true });
+      img.addEventListener('error', res, { once: true });
+    });
+  }));
+
+  const cleanup = () => setTimeout(() => {
+    try { document.body.removeChild(iframe); } catch { /* already gone */ }
+  }, 500);
+  win.addEventListener('afterprint', cleanup, { once: true });
+  setTimeout(cleanup, 120000); // hard fallback if afterprint never fires
+
+  win.focus();
+  win.print();
+}
+
 async function settle(content) {
   try {
     if (document.fonts?.ready) await document.fonts.ready;
