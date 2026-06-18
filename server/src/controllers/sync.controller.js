@@ -55,9 +55,34 @@ function getAcademicYear(date) {
   return `${s}-${s + 1}`;
 }
 
+// Digits-only normalization for matching ת"ז across rows / registrations.
+const normId = (s) => String(s || '').replace(/\D/g, '');
+
+// Build a { parent-ת"ז → signature data-URI } map from the contracts sheet.
+// Old-system contracts stored the parent's digital signature inside the config
+// JSON (col 11) as a data:image. Children often have several rows (early manual
+// import without a signature + a later digitally-signed row), so keying by the
+// parent's ת"ז lets us attach a recovered signature to whichever registration
+// is active in the new system.
+function buildSignatureMap(leads) {
+  const map = {};
+  for (let i = 1; i < leads.length; i++) {
+    const row = leads[i];
+    if (!row) continue;
+    let cfg = {};
+    try { cfg = JSON.parse(row[11] || '{}'); } catch { cfg = {}; }
+    const sig = (typeof cfg.signature === 'string' && cfg.signature.startsWith('data:image'))
+      ? cfg.signature : null;
+    if (!sig) continue;
+    const pid = normId(row[5]);
+    if (pid && !map[pid]) map[pid] = sig;
+  }
+  return map;
+}
+
 async function syncFromSheets(req, res, next) {
   try {
-    const results = { registrations: 0, children: 0, collections: 0, updated: 0 };
+    const results = { registrations: 0, children: 0, collections: 0, updated: 0, signaturesAttached: 0 };
 
     // Find kaplan branch
     const kaplan = await Branch.findOne({ name: /קפלן/ });
@@ -221,14 +246,83 @@ async function syncFromSheets(req, res, next) {
       }
     }
 
+    // Backfill recovered signatures: attach a signature (from the contracts
+    // sheet, matched by parent ת"ז) to every active registration that lacks one.
+    // Handles duplicate registrations where the signature sits on a sibling uid.
+    const sigMap = buildSignatureMap(leads);
+    const regsForSig = await Registration.find({ branch_id: kaplan._id })
+      .select('signature_data configuration parent_id_number');
+    for (const reg of regsForSig) {
+      if (reg.signature_data) continue;
+      const fromConfig = reg.configuration && reg.configuration.signature;
+      const sig = (typeof fromConfig === 'string' && fromConfig.startsWith('data:image'))
+        ? fromConfig
+        : sigMap[normId(reg.parent_id_number)];
+      if (sig) {
+        reg.signature_data = sig;
+        await reg.save();
+        results.signaturesAttached++;
+      }
+    }
+
     res.json({
       message: 'סנכרון הושלם',
       results,
-      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות`,
+      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות, ${results.signaturesAttached} חתימות הושלמו`,
     });
   } catch (error) {
     next(error);
   }
 }
 
-module.exports = { syncFromSheets };
+// Read-only pre-check: report what a sync would do WITHOUT writing anything —
+// which contract rows are missing from the new system, and how many signatures
+// would be recovered (matched by parent ת"ז).
+async function syncCheck(req, res, next) {
+  try {
+    const kaplan = await Branch.findOne({ name: /קפלן/ });
+    if (!kaplan) return res.status(400).json({ error: 'סניף קפלן לא נמצא' });
+
+    const leads = parseCSV(await fetchCSV('הסכמי התקשרות'));
+    const sigMap = buildSignatureMap(leads);
+
+    const missingImports = [];
+    let sheetRows = 0;
+    for (let i = 1; i < leads.length; i++) {
+      const row = leads[i];
+      const uid = (row[1] || '').trim();
+      if (!uid) continue;
+      sheetRows++;
+      const exists = await Registration.exists({ unique_id: uid });
+      if (!exists) missingImports.push({ unique_id: uid, child_name: row[2] || '', signed: row[9] === 'כן' });
+    }
+
+    // Signatures that would be attached to existing registrations missing one.
+    const regs = await Registration.find({ branch_id: kaplan._id })
+      .select('signature_data configuration parent_id_number child_name');
+    const backfillCandidates = [];
+    let alreadyHaveSignature = 0;
+    for (const reg of regs) {
+      const fromConfig = reg.configuration && reg.configuration.signature;
+      const hasConfigSig = typeof fromConfig === 'string' && fromConfig.startsWith('data:image');
+      if (reg.signature_data || hasConfigSig) { alreadyHaveSignature++; continue; }
+      if (sigMap[normId(reg.parent_id_number)]) {
+        backfillCandidates.push({ child_name: reg.child_name });
+      }
+    }
+
+    res.json({
+      message: 'בדיקה בלבד — לא בוצעו שינויים',
+      sheet_rows: sheetRows,
+      signatures_in_sheet: Object.keys(sigMap).length,
+      existing_registrations: regs.length,
+      already_have_signature: alreadyHaveSignature,
+      missing_imports: { count: missingImports.length, list: missingImports },
+      signatures_to_attach: { count: backfillCandidates.length, list: backfillCandidates },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { syncFromSheets, syncCheck };

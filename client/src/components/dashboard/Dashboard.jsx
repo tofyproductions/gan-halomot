@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [yearTab, setYearTab] = useState(0);
   const [syncing, setSyncing] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [selectedChild, setSelectedChild] = useState(null);
 
   const handleSync = async () => {
@@ -30,6 +31,36 @@ export default function Dashboard() {
       toast.error(err.response?.data?.error || 'שגיאה בסנכרון');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // Read-only pre-check: what would a sync import, and how many signatures
+  // would be recovered — without writing anything.
+  const handleCheck = async () => {
+    setChecking(true);
+    try {
+      const { data: d } = await api.post('/sync/check');
+      const summary = [
+        `שורות בגיליון: ${d.sheet_rows}`,
+        `חתימות בגיליון: ${d.signatures_in_sheet}`,
+        `רישומים חסרים לייבוא: ${d.missing_imports.count}`,
+        `חתימות שיושלמו: ${d.signatures_to_attach.count}`,
+      ];
+      const detail = [];
+      if (d.missing_imports.count) {
+        detail.push('', `— חסרים לייבוא (${d.missing_imports.count}) —`);
+        d.missing_imports.list.forEach(x => detail.push(`• ${x.child_name}${x.signed ? ' (חתום)' : ''}`));
+      }
+      if (d.signatures_to_attach.count) {
+        detail.push('', `— חתימות שיושלמו (${d.signatures_to_attach.count}) —`);
+        d.signatures_to_attach.list.forEach(x => detail.push(`• ${x.child_name}`));
+      }
+      toast.info(summary.join(' · '));
+      window.alert([...summary, ...detail].join('\n'));
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בבדיקה');
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -86,8 +117,15 @@ export default function Dashboard() {
         </Box>
         <Stack direction="row" spacing={1}>
           <Button
+            variant="outlined" size="small"
+            onClick={handleCheck} disabled={checking || syncing}
+            sx={{ borderColor: '#6366f1', color: '#6366f1' }}
+          >
+            {checking ? 'בודק...' : 'בדיקת סנכרון'}
+          </Button>
+          <Button
             variant="outlined" size="small" startIcon={<SyncIcon />}
-            onClick={handleSync} disabled={syncing}
+            onClick={handleSync} disabled={syncing || checking}
             sx={{ borderColor: '#10b981', color: '#10b981' }}
           >
             {syncing ? 'מסנכרן...' : 'סנכרון'}

@@ -46,5 +46,6 @@ router.use('/stock', require('./stock.routes'));
 // Sync endpoint
 const syncController = require('../controllers/sync.controller');
 router.post('/sync', syncController.syncFromSheets);
+router.post('/sync/check', syncController.syncCheck);
 
 module.exports = router;
