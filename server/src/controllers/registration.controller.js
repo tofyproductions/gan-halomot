@@ -446,6 +446,15 @@ async function listContractVersions(req, res, next) {
   }
 }
 
+// Server-generated contracts (digital signature / server "generate") are stored
+// as HTML bytes under a .pdf key — the real PDF is produced on the client via
+// html2pdf. Serving those bytes directly downloads HTML named .pdf, which opens
+// BLANK in a PDF reader. So they must be re-rendered to HTML on download. Only
+// genuine uploaded binaries (manual finalize) are served directly.
+function isGeneratedHtmlContract(key) {
+  return /_(signed|contract)_/.test(key || '');
+}
+
 async function downloadContractVersion(req, res, next) {
   try {
     const { versionId } = req.params;
@@ -453,7 +462,7 @@ async function downloadContractVersion(req, res, next) {
     if (!version) {
       return res.status(404).json({ error: 'Contract version not found' });
     }
-    if (version.contract_pdf_path) {
+    if (version.contract_pdf_path && !isGeneratedHtmlContract(version.contract_pdf_path)) {
       try {
         const url = await fileStorage.getPresignedUrl(version.contract_pdf_path, 600);
         return res.json({ url });
@@ -482,8 +491,10 @@ async function downloadContract(req, res, next) {
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found' });
     }
-    // If we have a stored PDF/HTML in R2, return its presigned URL.
-    if (registration.contract_pdf_path) {
+    // A genuine uploaded file (manual finalize) is a real binary — serve it
+    // directly. Server-generated contracts are HTML-as-.pdf and must be
+    // re-rendered below so the client makes a real PDF (else: blank page).
+    if (registration.contract_pdf_path && !isGeneratedHtmlContract(registration.contract_pdf_path)) {
       try {
         const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
         return res.json({ url });
