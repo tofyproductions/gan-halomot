@@ -11,6 +11,10 @@ router.get('/register/:token', publicController.getRegistrationForm);
 // POST /api/public/register/:token/sign
 router.post('/register/:token/sign', publicController.submitSignature);
 
+// POST /api/public/register/:token/contract-pdf — real signed PDF from the
+// parent's browser (html2pdf): stored in R2 and emailed.
+router.post('/register/:token/contract-pdf', publicController.storeSignedContract);
+
 // POST /api/public/register/:token/upload
 router.post(
   '/register/:token/upload',

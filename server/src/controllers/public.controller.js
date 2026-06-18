@@ -86,39 +86,67 @@ async function submitSignature(req, res, next) {
 
     await registration.save();
 
-    // Best-effort: generate PDF, upload to R2, email parent. Do not fail the
-    // signature request if any of these throw (e.g. R2 not configured).
-    let pdfBuffer = null;
+    // The real PDF is rendered in the parent's browser (html2pdf) and posted
+    // back to /contract-pdf — which stores it in R2 and emails it. The server
+    // has no HTML→PDF engine (no Chromium), so we return the authoritative
+    // signed-contract HTML here for that client-side render.
+    const pdfData = {
+      ...registration.toObject(),
+      classroom: registration.classroom_id?.name || null,
+      signature_data: signature,
+    };
+    const contractHtml = generateContractHTML(pdfData);
+
+    res.json({ message: 'Contract signed successfully', status: 'contract_signed', contractHtml });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Receives the REAL signed-contract PDF rendered by the parent's browser
+// (html2pdf), stores it in R2, and emails it. Separating this from /sign keeps
+// PDF generation on the client (the server has no Chromium) while the signed
+// HTML stays the server's single source of truth.
+async function storeSignedContract(req, res, next) {
+  try {
+    const { token } = req.params;
+    const { pdf } = req.body; // base64 (optionally a data: URI) of the real PDF
+    if (!pdf) return res.status(400).json({ error: 'pdf is required' });
+
+    const registration = await Registration.findOne({ access_token: token })
+      .populate('classroom_id', 'name');
+    if (!registration) {
+      return res.status(404).json({ error: 'Registration not found or link expired' });
+    }
+
+    const base64 = String(pdf).replace(/^data:application\/pdf(;base64)?,/, '');
+    const pdfBuffer = Buffer.from(base64, 'base64');
+    // Guard: a real PDF begins with "%PDF". Refuse anything else (e.g. HTML).
+    if (pdfBuffer.length < 5 || pdfBuffer.slice(0, 4).toString('latin1') !== '%PDF') {
+      return res.status(400).json({ error: 'Invalid PDF content' });
+    }
+
     try {
-      const pdfData = { ...registration.toObject(), classroom: registration.classroom_id?.name || null, signature_data: signature };
-      pdfBuffer = await generateContractPDF(pdfData);
-    } catch (pdfErr) {
-      console.error('Failed to generate contract PDF:', pdfErr.message);
+      const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
+      await fileStorage.upload(pdfBuffer, key, 'application/pdf');
+      registration.contract_pdf_path = key;
+      await registration.save();
+    } catch (uploadErr) {
+      console.error('Failed to upload signed contract:', uploadErr.message);
     }
 
-    if (pdfBuffer) {
-      try {
-        const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
-        await fileStorage.upload(pdfBuffer, key, 'application/pdf');
-        registration.contract_pdf_path = key;
-        await registration.save();
-      } catch (uploadErr) {
-        console.error('Failed to upload signed contract:', uploadErr.message);
-      }
-
-      try {
-        await sendAgreementEmail({
-          childName: registration.child_name,
-          parentName: registration.parent_name,
-          parentEmail: parentEmail || registration.parent_email,
-          contractPdfBuffer: pdfBuffer,
-        });
-      } catch (emailErr) {
-        console.error('Failed to send agreement email:', emailErr.message);
-      }
+    try {
+      await sendAgreementEmail({
+        childName: registration.child_name,
+        parentName: registration.parent_name,
+        parentEmail: registration.parent_email,
+        contractPdfBuffer: pdfBuffer,
+      });
+    } catch (emailErr) {
+      console.error('Failed to send agreement email:', emailErr.message);
     }
 
-    res.json({ message: 'Contract signed successfully', status: 'contract_signed' });
+    res.json({ ok: true });
   } catch (error) {
     next(error);
   }
@@ -265,4 +293,4 @@ async function uploadDocument(req, res, next) {
   }
 }
 
-module.exports = { getRegistrationForm, submitSignature, uploadDocument };
+module.exports = { getRegistrationForm, submitSignature, storeSignedContract, uploadDocument };
