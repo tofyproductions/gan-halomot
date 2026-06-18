@@ -65,6 +65,14 @@ async function download(req, res, next) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
+    // Externally-hosted docs (e.g. Google Drive files migrated from the old
+    // system) redirect straight to their URL; R2-hosted files get a presigned URL.
+    if (document.external_url) {
+      return res.redirect(document.external_url);
+    }
+    if (!document.file_path) {
+      return res.status(404).json({ error: 'Document has no file' });
+    }
     const url = await fileStorage.getPresignedUrl(document.file_path, 600);
     res.redirect(url);
   } catch (error) {

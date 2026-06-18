@@ -45,6 +45,7 @@ export default function Dashboard() {
         `חתימות בגיליון: ${d.signatures_in_sheet}`,
         `רישומים חסרים לייבוא: ${d.missing_imports.count}`,
         `חתימות שיושלמו: ${d.signatures_to_attach.count}`,
+        `מסמכים שיושלמו: ${d.documents_to_attach?.count ?? 0}`,
       ];
       const detail = [];
       if (d.missing_imports.count) {

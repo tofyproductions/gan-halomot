@@ -1,5 +1,5 @@
 const https = require('https');
-const { Registration, Child, Collection, Classroom, Branch } = require('../models');
+const { Registration, Child, Collection, Classroom, Branch, Document } = require('../models');
 
 const SPREADSHEET_ID = '1H-pCIZQEIm6aXYfgZt_ZU6LXn6rUIfh7t1j6N0adpy0';
 
@@ -80,9 +80,34 @@ function buildSignatureMap(leads) {
   return map;
 }
 
+const driveView = (fileId) => `https://drive.google.com/file/d/${fileId}/view`;
+
+// Build a { parent-ת"ז → [{doc_type, file_name, external_url}] } map from the
+// contracts sheet. Old-system parents uploaded their ID copy + payment proof to
+// Google Drive; the config JSON stores the Drive file IDs under `files`
+// ({ id, payment }). We carry these over as external-URL Document records.
+function buildFilesMap(leads) {
+  const map = {};
+  for (let i = 1; i < leads.length; i++) {
+    const row = leads[i];
+    if (!row) continue;
+    let cfg = {};
+    try { cfg = JSON.parse(row[11] || '{}'); } catch { cfg = {}; }
+    const f = cfg.files;
+    if (!f || typeof f !== 'object') continue;
+    const pid = normId(row[5]);
+    if (!pid || map[pid]) continue;
+    const docs = [];
+    if (f.id) docs.push({ doc_type: 'id_copy', file_name: 'צילום תעודת זהות', external_url: driveView(f.id) });
+    if (f.payment) docs.push({ doc_type: 'payment_proof', file_name: 'אישור תשלום', external_url: driveView(f.payment) });
+    if (docs.length) map[pid] = docs;
+  }
+  return map;
+}
+
 async function syncFromSheets(req, res, next) {
   try {
-    const results = { registrations: 0, children: 0, collections: 0, updated: 0, signaturesAttached: 0 };
+    const results = { registrations: 0, children: 0, collections: 0, updated: 0, signaturesAttached: 0, documentsAttached: 0 };
 
     // Find kaplan branch
     const kaplan = await Branch.findOne({ name: /קפלן/ });
@@ -265,10 +290,31 @@ async function syncFromSheets(req, res, next) {
       }
     }
 
+    // Backfill recovered documents: parents' ID copy + payment proof were
+    // uploaded to Google Drive in the old system (config.files = { id, payment }).
+    // Carry them over as external-URL Document records, matched by parent ת"ז,
+    // for registrations that have no documents yet.
+    const filesMap = buildFilesMap(leads);
+    for (const reg of regsForSig) {
+      const docs = filesMap[normId(reg.parent_id_number)];
+      if (!docs || !docs.length) continue;
+      const existing = await Document.countDocuments({ registration_id: reg._id });
+      if (existing > 0) continue;
+      for (const d of docs) {
+        await Document.create({
+          registration_id: reg._id,
+          doc_type: d.doc_type,
+          file_name: d.file_name,
+          external_url: d.external_url,
+        });
+        results.documentsAttached++;
+      }
+    }
+
     res.json({
       message: 'סנכרון הושלם',
       results,
-      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות, ${results.signaturesAttached} חתימות הושלמו`,
+      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות, ${results.signaturesAttached} חתימות הושלמו, ${results.documentsAttached} מסמכים שוחזרו`,
     });
   } catch (error) {
     next(error);
@@ -285,6 +331,7 @@ async function syncCheck(req, res, next) {
 
     const leads = parseCSV(await fetchCSV('הסכמי התקשרות'));
     const sigMap = buildSignatureMap(leads);
+    const filesMap = buildFilesMap(leads);
 
     const missingImports = [];
     let sheetRows = 0;
@@ -302,12 +349,18 @@ async function syncCheck(req, res, next) {
       .select('signature_data configuration parent_id_number child_name');
     const backfillCandidates = [];
     let alreadyHaveSignature = 0;
+    let docsToAttach = 0;
     for (const reg of regs) {
       const fromConfig = reg.configuration && reg.configuration.signature;
       const hasConfigSig = typeof fromConfig === 'string' && fromConfig.startsWith('data:image');
-      if (reg.signature_data || hasConfigSig) { alreadyHaveSignature++; continue; }
-      if (sigMap[normId(reg.parent_id_number)]) {
+      if (!(reg.signature_data || hasConfigSig) && sigMap[normId(reg.parent_id_number)]) {
         backfillCandidates.push({ child_name: reg.child_name });
+      }
+      if (reg.signature_data || hasConfigSig) alreadyHaveSignature++;
+      const docs = filesMap[normId(reg.parent_id_number)];
+      if (docs && docs.length) {
+        const existing = await Document.countDocuments({ registration_id: reg._id });
+        if (existing === 0) docsToAttach += docs.length;
       }
     }
 
@@ -319,6 +372,7 @@ async function syncCheck(req, res, next) {
       already_have_signature: alreadyHaveSignature,
       missing_imports: { count: missingImports.length, list: missingImports },
       signatures_to_attach: { count: backfillCandidates.length, list: backfillCandidates },
+      documents_to_attach: { count: docsToAttach },
     });
   } catch (error) {
     next(error);
