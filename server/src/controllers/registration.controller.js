@@ -1,4 +1,4 @@
-const { Registration, Classroom, Child, Archive, Collection, ContractVersion } = require('../models');
+const { Registration, Classroom, Child, Archive, Collection, ContractVersion, Document } = require('../models');
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
 const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
@@ -82,6 +82,21 @@ async function getAll(req, res, next) {
       .sort({ created_at: -1 })
       .lean();
 
+    // Which required documents each registration has (one query for the page).
+    // Required for a signed contract: ID copy + payment proof.
+    const REQUIRED_DOCS = ['id_copy', 'payment_proof'];
+    const docTypesByReg = new Map();
+    const regIds = registrations.map(r => r._id);
+    if (regIds.length) {
+      const docs = await Document.find({ registration_id: { $in: regIds } })
+        .select('registration_id doc_type').lean();
+      for (const d of docs) {
+        const key = String(d.registration_id);
+        if (!docTypesByReg.has(key)) docTypesByReg.set(key, new Set());
+        docTypesByReg.get(key).add(d.doc_type);
+      }
+    }
+
     const formatted = registrations.map(r => {
       // A signature lives in signature_data, or (for old-system imports) inside
       // configuration.signature. signature_missing flags a reg that's marked
@@ -102,6 +117,9 @@ async function getAll(req, res, next) {
         classroom_id: r.classroom_id?._id || r.classroom_id,
         has_signature: hasSignature,
         signature_missing: !!r.agreement_signed && !hasSignature,
+        missing_doc_types: REQUIRED_DOCS.filter(t => !(docTypesByReg.get(String(r._id))?.has(t))),
+        documents_missing: !!r.agreement_signed
+          && REQUIRED_DOCS.some(t => !(docTypesByReg.get(String(r._id))?.has(t))),
         start_date_formatted: r.start_date
           ? new Date(r.start_date).toLocaleDateString('he-IL')
           : null,

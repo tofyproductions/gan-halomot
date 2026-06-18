@@ -39,6 +39,7 @@ export default function RegistrationTracker() {
   const [statusFilter, setStatusFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [missingSigOnly, setMissingSigOnly] = useState(false);
+  const [missingDocsOnly, setMissingDocsOnly] = useState(false);
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
@@ -152,6 +153,7 @@ export default function RegistrationTracker() {
     if (statusFilter && r.status !== statusFilter) return false;
     if (yearFilter && (!r.start_date || getHebrewYear(r.start_date) !== yearFilter)) return false;
     if (missingSigOnly && !r.signature_missing) return false;
+    if (missingDocsOnly && !r.documents_missing) return false;
     return true;
   });
 
@@ -177,19 +179,27 @@ export default function RegistrationTracker() {
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };
 
-  // Send the parent a reminder to (re-)sign the contract: refresh the signing
-  // link so it's valid, then open WhatsApp with a reminder message.
-  const handleSignReminder = async (reg) => {
+  const DOC_NAMES = { id_copy: 'צילום תעודת זהות', payment_proof: 'אישור תשלום' };
+
+  // Send the parent a reminder to complete whatever is still missing (signature
+  // and/or required documents): refresh the signing link, then open WhatsApp.
+  const handleReminder = async (reg) => {
     const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
     if (!phone) return toast.error('אין מספר טלפון להורה');
+    const docNames = (reg.missing_doc_types || []).map(t => DOC_NAMES[t] || t).join(' ו');
+    let what;
+    if (reg.signature_missing && reg.documents_missing) what = `להשלמת החתימה על החוזה והעלאת המסמכים הנדרשים (${docNames})`;
+    else if (reg.signature_missing) what = 'להשלמת החתימה על חוזה הרישום';
+    else if (reg.documents_missing) what = `להעלאת המסמכים הנדרשים (${docNames})`;
+    else what = 'להשלמת הרישום';
     try {
       const res = await api.post(`/registrations/${reg._id || reg.id}/generate-link`);
       const link = `${window.location.origin}/register/${res.data.access_token}`;
       const text = encodeURIComponent(
-        `שלום ${reg.parent_name}, זוהי תזכורת להשלמת החתימה על חוזה הרישום של ${reg.child_name} בגן החלומות 🌟\nנא להיכנס לקישור ולחתום על המסמך:\n${link}`
+        `שלום ${reg.parent_name}, זוהי תזכורת ${what} של ${reg.child_name} בגן החלומות 🌟\nנא להיכנס לקישור:\n${link}`
       );
       window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
-      toast.success('נפתחה תזכורת חתימה בוואטסאפ');
+      toast.success('נפתחה תזכורת בוואטסאפ');
     } catch {
       toast.error('שגיאה ביצירת תזכורת');
     }
@@ -216,6 +226,7 @@ export default function RegistrationTracker() {
   const completedCount = registrations.filter(r => r.status === 'completed').length;
   const pendingCount = registrations.filter(r => r.status !== 'completed').length;
   const missingSigCount = registrations.filter(r => r.signature_missing).length;
+  const missingDocsCount = registrations.filter(r => r.documents_missing).length;
 
   return (
     <Box dir="rtl">
@@ -234,6 +245,17 @@ export default function RegistrationTracker() {
                 size="small"
                 variant={missingSigOnly ? 'filled' : 'outlined'}
                 onClick={() => setMissingSigOnly(v => !v)}
+                sx={{ cursor: 'pointer', fontWeight: 700 }}
+              />
+            )}
+            {missingDocsCount > 0 && (
+              <Chip
+                icon={<DescriptionIcon />}
+                label={`${missingDocsCount} חסרי מסמכים`}
+                color="warning"
+                size="small"
+                variant={missingDocsOnly ? 'filled' : 'outlined'}
+                onClick={() => setMissingDocsOnly(v => !v)}
                 sx={{ cursor: 'pointer', fontWeight: 700 }}
               />
             )}
@@ -353,6 +375,17 @@ export default function RegistrationTracker() {
                           />
                         </Tooltip>
                       )}
+                      {reg.documents_missing && (
+                        <Tooltip title={`חסר: ${(reg.missing_doc_types || []).map(t => DOC_NAMES[t] || t).join(', ')}`}>
+                          <Chip
+                            icon={<DescriptionIcon />}
+                            label="חסרים מסמכים"
+                            size="small"
+                            color="warning"
+                            sx={{ fontWeight: 700 }}
+                          />
+                        </Tooltip>
+                      )}
                     </Stack>
                   </Box>
                 </Stack>
@@ -379,9 +412,13 @@ export default function RegistrationTracker() {
                       <WhatsAppIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  {reg.signature_missing && (
-                    <Tooltip title="תזכורת חתימה להורה (וואטסאפ)">
-                      <IconButton size="small" sx={{ color: '#dc2626' }} onClick={() => handleSignReminder(reg)}>
+                  {(reg.signature_missing || reg.documents_missing) && (
+                    <Tooltip title={
+                      reg.signature_missing && reg.documents_missing ? 'תזכורת חתימה ומסמכים (וואטסאפ)'
+                        : reg.signature_missing ? 'תזכורת חתימה להורה (וואטסאפ)'
+                          : 'תזכורת מסמכים להורה (וואטסאפ)'
+                    }>
+                      <IconButton size="small" sx={{ color: '#dc2626' }} onClick={() => handleReminder(reg)}>
                         <HistoryEduIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
