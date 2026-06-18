@@ -74,7 +74,13 @@ async function submitSignature(req, res, next) {
 
     registration.signature_data = signature;
     registration.agreement_signed = true;
-    registration.status = 'contract_signed';
+    // Don't regress a registration that already advanced past signing — e.g. a
+    // completed contract re-signing from a "signature reminder". Only move
+    // forward from the initial link_generated state.
+    const statusRank = { link_generated: 0, contract_signed: 1, docs_uploaded: 2, completed: 3 };
+    if ((statusRank[registration.status] ?? 0) < statusRank.contract_signed) {
+      registration.status = 'contract_signed';
+    }
 
     if (parentEmail) registration.parent_email = parentEmail;
     if (phone) registration.parent_phone = phone;

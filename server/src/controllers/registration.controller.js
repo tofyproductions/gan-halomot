@@ -82,18 +82,34 @@ async function getAll(req, res, next) {
       .sort({ created_at: -1 })
       .lean();
 
-    const formatted = registrations.map(r => ({
-      ...r,
-      id: r._id,
-      classroom_name: r.classroom_id?.name || null,
-      classroom_id: r.classroom_id?._id || r.classroom_id,
-      start_date_formatted: r.start_date
-        ? new Date(r.start_date).toLocaleDateString('he-IL')
-        : null,
-      end_date_formatted: r.end_date
-        ? new Date(r.end_date).toLocaleDateString('he-IL')
-        : null,
-    }));
+    const formatted = registrations.map(r => {
+      // A signature lives in signature_data, or (for old-system imports) inside
+      // configuration.signature. signature_missing flags a reg that's marked
+      // signed but has neither — i.e. a completed contract that still needs a
+      // signature. Strip the heavy base64 signature out of the list payload.
+      const hasSignature = !!(r.signature_data || (r.configuration && r.configuration.signature));
+      const { signature_data, ...rest } = r;
+      let configuration = rest.configuration;
+      if (configuration && configuration.signature) {
+        configuration = { ...configuration };
+        delete configuration.signature;
+      }
+      return {
+        ...rest,
+        configuration,
+        id: r._id,
+        classroom_name: r.classroom_id?.name || null,
+        classroom_id: r.classroom_id?._id || r.classroom_id,
+        has_signature: hasSignature,
+        signature_missing: !!r.agreement_signed && !hasSignature,
+        start_date_formatted: r.start_date
+          ? new Date(r.start_date).toLocaleDateString('he-IL')
+          : null,
+        end_date_formatted: r.end_date
+          ? new Date(r.end_date).toLocaleDateString('he-IL')
+          : null,
+      };
+    });
 
     res.json({ registrations: formatted });
   } catch (error) {

@@ -16,6 +16,8 @@ import AddIcon from '@mui/icons-material/Add';
 import FolderIcon from '@mui/icons-material/Folder';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
+import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
@@ -36,6 +38,7 @@ export default function RegistrationTracker() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [missingSigOnly, setMissingSigOnly] = useState(false);
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
@@ -148,6 +151,7 @@ export default function RegistrationTracker() {
     if (q && !r.child_name?.toLowerCase().includes(q) && !r.parent_name?.toLowerCase().includes(q)) return false;
     if (statusFilter && r.status !== statusFilter) return false;
     if (yearFilter && (!r.start_date || getHebrewYear(r.start_date) !== yearFilter)) return false;
+    if (missingSigOnly && !r.signature_missing) return false;
     return true;
   });
 
@@ -173,6 +177,24 @@ export default function RegistrationTracker() {
     window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
   };
 
+  // Send the parent a reminder to (re-)sign the contract: refresh the signing
+  // link so it's valid, then open WhatsApp with a reminder message.
+  const handleSignReminder = async (reg) => {
+    const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
+    if (!phone) return toast.error('אין מספר טלפון להורה');
+    try {
+      const res = await api.post(`/registrations/${reg._id || reg.id}/generate-link`);
+      const link = `${window.location.origin}/register/${res.data.access_token}`;
+      const text = encodeURIComponent(
+        `שלום ${reg.parent_name}, זוהי תזכורת להשלמת החתימה על חוזה הרישום של ${reg.child_name} בגן החלומות 🌟\nנא להיכנס לקישור ולחתום על המסמך:\n${link}`
+      );
+      window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+      toast.success('נפתחה תזכורת חתימה בוואטסאפ');
+    } catch {
+      toast.error('שגיאה ביצירת תזכורת');
+    }
+  };
+
   const handleCopyLink = (reg) => {
     if (!reg.access_token) return toast.error('אין קישור');
     const link = `${window.location.origin}/register/${reg.access_token}`;
@@ -193,6 +215,7 @@ export default function RegistrationTracker() {
 
   const completedCount = registrations.filter(r => r.status === 'completed').length;
   const pendingCount = registrations.filter(r => r.status !== 'completed').length;
+  const missingSigCount = registrations.filter(r => r.signature_missing).length;
 
   return (
     <Box dir="rtl">
@@ -203,6 +226,17 @@ export default function RegistrationTracker() {
             <Chip label={`${registrations.length} רישומים`} size="small" />
             <Chip label={`${completedCount} הושלמו`} color="success" size="small" variant="outlined" />
             <Chip label={`${pendingCount} בתהליך`} color="warning" size="small" variant="outlined" />
+            {missingSigCount > 0 && (
+              <Chip
+                icon={<WarningAmberIcon />}
+                label={`${missingSigCount} ללא חתימה`}
+                color="error"
+                size="small"
+                variant={missingSigOnly ? 'filled' : 'outlined'}
+                onClick={() => setMissingSigOnly(v => !v)}
+                sx={{ cursor: 'pointer', fontWeight: 700 }}
+              />
+            )}
           </Stack>
         </Box>
         <Stack direction="row" spacing={1}>
@@ -297,16 +331,29 @@ export default function RegistrationTracker() {
                   </Box>
                   <Box>
                     <Typography variant="body2" color="text.secondary">חוזה וכרטיסיה</Typography>
-                    <Chip
-                      label={status.label}
-                      size="small"
-                      sx={{
-                        fontWeight: 700,
-                        bgcolor: 'white',
-                        color: status.textColor,
-                        border: `1px solid ${status.border}`,
-                      }}
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center">
+                      <Chip
+                        label={status.label}
+                        size="small"
+                        sx={{
+                          fontWeight: 700,
+                          bgcolor: 'white',
+                          color: status.textColor,
+                          border: `1px solid ${status.border}`,
+                        }}
+                      />
+                      {reg.signature_missing && (
+                        <Tooltip title="מסומן כחתום אך חסרה חתימת הורה">
+                          <Chip
+                            icon={<WarningAmberIcon />}
+                            label="חסרה חתימה"
+                            size="small"
+                            color="error"
+                            sx={{ fontWeight: 700 }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Stack>
                   </Box>
                 </Stack>
 
@@ -332,6 +379,13 @@ export default function RegistrationTracker() {
                       <WhatsAppIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
+                  {reg.signature_missing && (
+                    <Tooltip title="תזכורת חתימה להורה (וואטסאפ)">
+                      <IconButton size="small" sx={{ color: '#dc2626' }} onClick={() => handleSignReminder(reg)}>
+                        <HistoryEduIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
                   <Tooltip title="עריכה">
                     <IconButton size="small" onClick={() => navigate(`/edit-registration/${id}`)}>
                       <EditIcon fontSize="small" />
