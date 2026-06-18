@@ -33,27 +33,41 @@ function mount(html) {
       image: { type: 'jpeg', quality: 0.95 },
       html2canvas: { scale: 2, useCORS: true, allowTaint: true, backgroundColor: '#ffffff' },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
+      // NOTE: no 'avoid-all' — it bumps any block that would straddle a page
+      // boundary wholesale to the next page, leaving large white gaps. 'css' +
+      // 'legacy' slices the rendered canvas at the page height instead.
+      pagebreak: { mode: ['css', 'legacy'] },
     })
     .from(content);
 
-  return { wrapper, worker };
+  return { wrapper, content, worker };
 }
 
-async function settle() {
+async function settle(content) {
   try {
     if (document.fonts?.ready) await document.fonts.ready;
   } catch {
     /* fonts API unavailable — fall back to the timeout below */
   }
-  await new Promise((r) => setTimeout(r, 350));
+  // Wait for every <img> (logo + the parent's signature data-URI) to finish
+  // decoding — html2canvas captures un-loaded images as blank, which is why the
+  // signature was missing from the PDF.
+  const imgs = Array.from(content.querySelectorAll('img'));
+  await Promise.all(imgs.map((img) => {
+    if (img.complete && img.naturalWidth > 0) return null;
+    return new Promise((res) => {
+      img.addEventListener('load', res, { once: true });
+      img.addEventListener('error', res, { once: true });
+    });
+  }));
+  await new Promise((r) => setTimeout(r, 200));
 }
 
 // Render the contract HTML and trigger a PDF download.
 export async function renderHtmlToPdf(html, filename) {
-  const { wrapper, worker } = mount(html);
+  const { wrapper, content, worker } = mount(html);
   try {
-    await settle();
+    await settle(content);
     await worker.set({ filename: filename || 'contract.pdf' }).save();
   } finally {
     document.body.removeChild(wrapper);
@@ -63,9 +77,9 @@ export async function renderHtmlToPdf(html, filename) {
 // Render the contract HTML to a PDF data-URI string (no download) — used to
 // upload the signed contract to the server.
 export async function renderHtmlToPdfDataUri(html) {
-  const { wrapper, worker } = mount(html);
+  const { wrapper, content, worker } = mount(html);
   try {
-    await settle();
+    await settle(content);
     return await worker.outputPdf('datauristring');
   } finally {
     document.body.removeChild(wrapper);

@@ -156,6 +156,8 @@ function generateContractHTML(data) {
           border-radius: 12px;
           background: #f8fafc;
           min-width: 280px;
+          page-break-inside: avoid;
+          break-inside: avoid;
         }
         .sig-box .sig-label {
           font-weight: 700;
