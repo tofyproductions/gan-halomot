@@ -9,7 +9,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import SignatureCanvas from 'react-signature-canvas';
 import { toast } from 'react-toastify';
 import axios from 'axios';
-import html2pdf from 'html2pdf.js';
+import { renderHtmlToPdfDataUri } from '../../utils/contractPdf';
 import { isValidIsraeliID } from '../../utils/hebrewYear';
 
 const STEPS = ['ברוכים הבאים', 'חוזה וחתימה', 'כרטיס רישום', 'סיום'];
@@ -90,31 +90,8 @@ export default function ParentOnboarding() {
   // Best-effort: a failure must never block onboarding — the admin can always
   // re-download the contract.
   const uploadSignedPdf = async (html) => {
-    const container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.right = '-10000px';
-    container.style.top = '0';
-    container.style.width = '900px';
-    container.dir = 'rtl';
-    container.innerHTML = html;
-    document.body.appendChild(container);
-    try {
-      // Give fonts/images a moment to load before rasterizing.
-      await new Promise((r) => setTimeout(r, 250));
-      const dataUri = await html2pdf()
-        .set({
-          margin: [10, 10, 10, 10],
-          image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-        })
-        .from(container)
-        .outputPdf('datauristring');
-      await publicApi.post(`/register/${token}/contract-pdf`, { pdf: dataUri });
-    } finally {
-      document.body.removeChild(container);
-    }
+    const dataUri = await renderHtmlToPdfDataUri(html);
+    await publicApi.post(`/register/${token}/contract-pdf`, { pdf: dataUri });
   };
 
   // Step 2: Sign contract

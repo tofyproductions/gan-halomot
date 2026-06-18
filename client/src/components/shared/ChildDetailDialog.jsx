@@ -16,34 +16,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
-import html2pdf from 'html2pdf.js';
-
-async function renderHtmlToPdf(html, filename) {
-  const container = document.createElement('div');
-  container.style.position = 'fixed';
-  container.style.right = '-10000px';
-  container.style.top = '0';
-  container.style.width = '900px';
-  container.dir = 'rtl';
-  container.innerHTML = html;
-  document.body.appendChild(container);
-  try {
-    await new Promise(r => setTimeout(r, 250));
-    await html2pdf()
-      .set({
-        margin: [10, 10, 10, 10],
-        filename: filename || 'contract.pdf',
-        image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-      })
-      .from(container)
-      .save();
-  } finally {
-    document.body.removeChild(container);
-  }
-}
+import { renderHtmlToPdf } from '../../utils/contractPdf';
 
 /**
  * ChildDetailDialog — view and edit details of a single child.

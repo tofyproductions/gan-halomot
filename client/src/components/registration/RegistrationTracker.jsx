@@ -20,7 +20,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { getHebrewYear } from '../../utils/hebrewYear';
-import html2pdf from 'html2pdf.js';
+import { renderHtmlToPdf } from '../../utils/contractPdf';
 
 const STATUS_CONFIG = {
   link_generated: { label: 'בתהליך', color: '#fef3c7', textColor: '#92400e', border: '#f59e0b' },
@@ -94,34 +94,6 @@ export default function RegistrationTracker() {
       await refreshDocs();
     } catch {
       toast.error('שגיאה בסיום ידני');
-    }
-  };
-
-  const renderHtmlToPdf = async (html, filename) => {
-    const container = document.createElement('div');
-    container.style.position = 'fixed';
-    container.style.right = '-10000px';
-    container.style.top = '0';
-    container.style.width = '900px';
-    container.dir = 'rtl';
-    container.innerHTML = html;
-    document.body.appendChild(container);
-    try {
-      // Wait briefly for fonts/images to load.
-      await new Promise(r => setTimeout(r, 250));
-      await html2pdf()
-        .set({
-          margin: [10, 10, 10, 10],
-          filename: filename || 'contract.pdf',
-          image: { type: 'jpeg', quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true, allowTaint: true },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-          pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-        })
-        .from(container)
-        .save();
-    } finally {
-      document.body.removeChild(container);
     }
   };
 
