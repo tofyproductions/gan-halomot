@@ -15,4 +15,8 @@ services:
         sync: false
       - key: FRONTEND_URL
         sync: false
+      # AI sick-note scanning (Claude vision). Value set in the Render dashboard.
+      # Without it the scan endpoint returns 501 and manual entry still works.
+      - key: ANTHROPIC_API_KEY
+        sync: false
     healthCheckPath: /api/health
