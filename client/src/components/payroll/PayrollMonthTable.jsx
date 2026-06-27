@@ -1488,7 +1488,10 @@ export default function PayrollMonthTable() {
             <TableRow>
               <TableCell rowSpan={2} sx={{
                 fontWeight: 800, bgcolor: 'background.paper',
-                position: 'sticky', right: 0, zIndex: 4,
+                // RTL: the stylis rtl plugin flips left<->right, so `left: 0`
+                // here renders as `right: 0` — freezing this column to the RTL
+                // start (visual right) so the name stays put on sideways scroll.
+                position: 'sticky', left: 0, zIndex: 4,
                 borderLeft: '2px solid', borderColor: 'divider',
               }} className="ag-divider">שם העובד</TableCell>
               <TableCell colSpan={6} align="center" sx={{
@@ -1615,7 +1618,7 @@ export default function PayrollMonthTable() {
                         exactly under the frozen "שם העובד" column. */}
                     <TableCell sx={{
                       ...stripCell,
-                      position: 'sticky', right: 0, zIndex: 3,
+                      position: 'sticky', left: 0, zIndex: 3, // RTL plugin flips to right:0
                       borderLeft: '2px solid', borderLeftColor: stripBorder,
                       whiteSpace: 'nowrap',
                     }}>
@@ -1631,7 +1634,7 @@ export default function PayrollMonthTable() {
                   elements.push(
                     <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
                       <TableCell sx={{
-                        fontWeight: 700, position: 'sticky', right: 0, zIndex: 1,
+                        fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0
                         bgcolor: marker?.nameTint || 'background.paper',
                         borderLeft: marker ? '3px solid' : '2px solid',
                         borderColor: marker?.accent || 'divider',
