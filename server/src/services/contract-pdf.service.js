@@ -245,18 +245,16 @@ function generateContractHTML(data) {
         <li>באם יודיע ההורה על הפסקת ההתקשרות – הרי שישולם על ידו שכר הלימוד עבור אותו חודש בו נתנה ההודעה וכן עבור חודש נוסף שלאחר מכן כפיצוי קבוע ומוסכם מראש.</li>
       </ol>
 
-        ${`
-          <div class="sig-block">
-            <div class="sig-box">
-              <p class="sig-label">חתימת ההורה</p>
-              ${signature
-                ? `<img src="${signature}" alt="חתימה">`
-                : `<div class="sig-line"></div>`}
-              <p class="sig-meta">${parentName}${parentId ? ` · ת.ז. ${parentId}` : ''}</p>
-              <p class="sig-meta">תאריך: ${signature ? today : '_____________'}</p>
-            </div>
+        <div class="sig-block">
+          <div class="sig-box">
+            <p class="sig-label">חתימת ההורה</p>
+            ${signature
+              ? `<img src="${signature}" alt="חתימה">`
+              : `<div class="sig-line"></div>`}
+            <p class="sig-meta">${parentName}${parentId ? ` · ת.ז. ${parentId}` : ''}</p>
+            <p class="sig-meta">תאריך: ${signature ? today : '_____________'}</p>
           </div>
-        ` : ''}
+        </div>
 
         <div class="footer">
           גן החלומות · "כל ילד חולם להיות בו"
