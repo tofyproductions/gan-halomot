@@ -10,6 +10,7 @@
     "import": "node scripts/import-from-gsheets.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.106.0",
     "@aws-sdk/client-s3": "^3.665.0",
     "@aws-sdk/s3-request-presigner": "^3.665.0",
     "@simplewebauthn/server": "^13.3.0",

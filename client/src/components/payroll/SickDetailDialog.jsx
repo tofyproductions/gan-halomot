@@ -13,6 +13,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import BoltIcon from '@mui/icons-material/Bolt';
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
@@ -94,6 +95,8 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null); // when set, the form edits this request
   const [manualDays, setManualDays] = useState(''); // direct edit of manual.sick_days (legacy/orphan values)
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState(null); // { detected, suggested_work_days }
 
   // Sick-pay settings, seeded from the row's server-computed sick_info and
   // editable here. Used for the live preview; "שמור הגדרות" persists to the employee.
@@ -154,9 +157,35 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
   const onPickFile = (e) => {
     const f = e.target.files?.[0];
     if (!f) return;
+    setScanResult(null);
     const reader = new FileReader();
     reader.onload = () => setFile({ name: f.name, data: reader.result.split(',')[1] });
     reader.readAsDataURL(f);
+  };
+
+  // Send the uploaded certificate to Claude vision; pre-fill the date range and
+  // surface the detected day count for the accountant to confirm (not applied).
+  const scanFile = () => {
+    if (!file?.data) return toast.error('העלה אישור קודם');
+    setScanning(true);
+    api.post('/employee-requests/scan-medical', {
+      file_data: file.data, file_name: file.name, employee_id: row.employee_id,
+    })
+      .then(res => {
+        const { detected, suggested_work_days } = res.data;
+        setScanResult({ detected, suggested_work_days });
+        if (detected?.from_date) {
+          setDraft(d => ({ ...d, from_date: detected.from_date, to_date: detected.to_date || detected.from_date }));
+        }
+        if (detected?.is_sick_note === false) toast.warn('המסמך אינו נראה כאישור מחלה');
+        else toast.success('הסריקה הושלמה — בדוק/י את התאריכים');
+      })
+      .catch(err => {
+        const code = err.response?.status;
+        if (code === 501) toast.error('סריקת AI אינה מוגדרת במערכת (חסר מפתח API)');
+        else toast.error(err.response?.data?.error || 'שגיאה בסריקה');
+      })
+      .finally(() => setScanning(false));
   };
 
   const viewCert = async (id) => {
@@ -171,7 +200,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
     }
   };
 
-  const resetForm = () => { setDraft({ from_date: '', to_date: '', reason: '', pay_from_first_day: false }); setFile(null); setEditingId(null); };
+  const resetForm = () => { setDraft({ from_date: '', to_date: '', reason: '', pay_from_first_day: false }); setFile(null); setEditingId(null); setScanResult(null); };
 
   const addSick = () => {
     if (!draft.from_date) return toast.error('בחר תאריך התחלה');
@@ -499,7 +528,16 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
               {file ? 'החלף אישור' : 'העלה אישור מחלה'}
               <input type="file" hidden accept="image/*,application/pdf" onChange={onPickFile} />
             </Button>
-            {file && <Chip label={file.name} size="small" onDelete={() => setFile(null)} />}
+            {file && <Chip label={file.name} size="small" onDelete={() => { setFile(null); setScanResult(null); }} />}
+            {file && (
+              <Button
+                variant="outlined" color="secondary" size="small"
+                startIcon={scanning ? <CircularProgress size={14} /> : <AutoAwesomeIcon />}
+                onClick={scanFile} disabled={scanning}
+              >
+                סרוק אישור (AI)
+              </Button>
+            )}
             {!file && <Typography variant="caption" color="warning.main">מומלץ לצרף אישור</Typography>}
             <FormControlLabel
               sx={{ ml: 'auto' }}
@@ -507,6 +545,26 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
               label={<Typography variant="body2">שלם מהיום הראשון</Typography>}
             />
           </Stack>
+          {scanResult?.detected && (
+            <Alert severity={scanResult.detected.is_sick_note === false ? 'warning' : 'info'} sx={{ py: 0.5 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                תוצאת סריקה (לאישורך):
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.5, fontSize: 13 }}>
+                <span>תאריכים: <b>{scanResult.detected.from_date || '—'}</b> → <b>{scanResult.detected.to_date || '—'}</b></span>
+                {scanResult.suggested_work_days != null && <span>ימי עבודה: <b>{scanResult.suggested_work_days}</b></span>}
+                {scanResult.detected.total_days != null && <span>ימים באישור: <b>{scanResult.detected.total_days}</b></span>}
+                {scanResult.detected.employee_name && <span>שם: <b>{scanResult.detected.employee_name}</b></span>}
+                <Chip size="small" label={`ביטחון: ${scanResult.detected.confidence || '—'}`}
+                  color={scanResult.detected.confidence === 'high' ? 'success' : scanResult.detected.confidence === 'low' ? 'error' : 'default'} />
+              </Stack>
+              {scanResult.detected.notes && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  {scanResult.detected.notes}
+                </Typography>
+              )}
+            </Alert>
+          )}
         </Stack>
       </DialogContent>
       <DialogActions>

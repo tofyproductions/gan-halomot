@@ -1,4 +1,5 @@
 const { EmployeeRequest, Employee, PayrollMonth } = require('../models');
+const { scanSickNote } = require('../services/sickNoteScan');
 
 /**
  * Count working days from `from` to `to` inclusive (YYYY-MM-DD).
@@ -474,9 +475,41 @@ async function syncSickDays(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * POST /api/employee-requests/scan-medical
+ * Body: { file_data (base64), file_name, mime_type?, employee_id? }
+ * Reads a sick certificate with Claude vision and returns the extracted dates /
+ * day count as a SUGGESTION for the accountant to confirm (never auto-applied).
+ */
+async function scanMedical(req, res, next) {
+  try {
+    const { file_data, file_name, mime_type, employee_id } = req.body;
+    if (!file_data) return res.status(400).json({ error: 'נדרש קובץ לסריקה' });
+
+    let detected;
+    try {
+      detected = await scanSickNote(file_data, file_name, mime_type);
+    } catch (e) {
+      // NO_API_KEY → 501 (feature not configured); other scan errors → 422.
+      const status = e.code === 'NO_API_KEY' ? 501 : 422;
+      return res.status(status).json({ error: e.message || 'שגיאה בסריקה', code: e.code || null });
+    }
+
+    // When dates were detected and we know the employee, also suggest the
+    // work-day count the salary will actually use (Sat + day-off excluded).
+    let suggested_work_days = null;
+    if (detected?.from_date && employee_id) {
+      const emp = await Employee.findById(employee_id).select('work_days').lean();
+      suggested_work_days = countWorkDays(detected.from_date, detected.to_date || detected.from_date, emp?.work_days);
+    }
+    res.json({ detected, suggested_work_days });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   getMyRequests,
   createRequest,
+  scanMedical,
   getAllRequests,
   updateRequestStatus,
   listVacationForMonth,

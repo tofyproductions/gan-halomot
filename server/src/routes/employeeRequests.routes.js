@@ -12,6 +12,7 @@ router.post('/', c.createRequest);
 // Manager / accountant endpoints
 router.get('/', requireRole('system_admin', 'branch_manager', 'accountant'), c.getAllRequests);
 router.post('/admin', requireRole('system_admin', 'branch_manager', 'accountant'), c.createAdminRequest);
+router.post('/scan-medical', requireRole('system_admin', 'branch_manager', 'accountant'), c.scanMedical);
 router.post('/sync-sick', requireRole('system_admin', 'branch_manager', 'accountant'), c.syncSickDays);
 router.get('/vacation-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listVacationForMonth);
 router.get('/sick-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listSickForMonth);
