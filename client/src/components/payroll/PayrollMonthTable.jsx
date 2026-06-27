@@ -1635,7 +1635,10 @@ export default function PayrollMonthTable() {
                     <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0
-                        bgcolor: marker?.nameTint || 'background.paper',
+                        // Opaque background, forced past the translucent zebra /
+                        // hover rules (high specificity + !important) so the frozen
+                        // column never reveals the cells scrolling underneath it.
+                        '&&&': { backgroundColor: `${marker?.nameTint || '#ffffff'} !important` },
                         borderLeft: marker ? '3px solid' : '2px solid',
                         borderColor: marker?.accent || 'divider',
                       }}>
