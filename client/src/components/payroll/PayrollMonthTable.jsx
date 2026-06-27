@@ -607,15 +607,17 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 /* Per-gan marker colours live in utils/branchColors (single source of truth).
  * `ganMarker` is the name-keyed lookup, aliased for the existing call sites. */
 
-/* Darken an opaque hex colour by `amt` (0–1), staying opaque. Used to give the
- * frozen name column a subtle zebra between rows while keeping the branch hue. */
-function darkenHex(hex, amt = 0.06) {
+/* Blend an opaque hex colour toward white by `amt` (0–1), staying opaque. Used
+ * to give the frozen name column a light, subtle zebra between rows while still
+ * keeping each branch's hue. */
+function lightenHex(hex, amt = 0.5) {
   const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
   if (!m) return hex;
   const n = parseInt(m[1], 16);
-  const r = Math.max(0, Math.round(((n >> 16) & 255) * (1 - amt)));
-  const g = Math.max(0, Math.round(((n >> 8) & 255) * (1 - amt)));
-  const b = Math.max(0, Math.round((n & 255) * (1 - amt)));
+  const L = (c) => Math.min(255, Math.round(c + (255 - c) * amt));
+  const r = L((n >> 16) & 255);
+  const g = L((n >> 8) & 255);
+  const b = L(n & 255);
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
 
@@ -1647,11 +1649,12 @@ export default function PayrollMonthTable() {
                 for (let ri = 0; ri < rows.length; ri++) {
                   const r = rows[ri];
                   const locked = r.status === 'finalized';
-                  // Opaque zebra for the frozen name column: alternate the branch
-                  // tint (or white) with a slightly darker opaque shade per row, so
-                  // rows stay distinguishable while keeping the branch colour.
-                  const nameBase = marker?.nameTint || '#ffffff';
-                  const nameBg = ri % 2 === 1 ? darkenHex(nameBase, 0.07) : nameBase;
+                  // Opaque, LIGHT zebra for the frozen name column: a pale branch
+                  // tint alternating between two light shades so rows stay
+                  // distinguishable while keeping the branch colour (not too dark).
+                  const nameBg = marker?.nameTint
+                    ? (ri % 2 === 1 ? lightenHex(marker.nameTint, 0.45) : lightenHex(marker.nameTint, 0.7))
+                    : (ri % 2 === 1 ? '#f3f4f6' : '#ffffff');
                   elements.push(
                     <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
                       <TableCell sx={{
@@ -1663,8 +1666,8 @@ export default function PayrollMonthTable() {
                         borderLeft: marker ? '3px solid' : '2px solid',
                         borderColor: marker?.accent || 'divider',
                       }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Box sx={{ flex: 1, lineHeight: 1.2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap', rowGap: 0.4 }}>
+                          <Box sx={{ flex: '1 1 100%', minWidth: 0, lineHeight: 1.2 }}>
                             <Box
                               component="span"
                               onClick={() => setEmpDetail({ open: true, employeeId: r.employee_id })}
@@ -1877,15 +1880,20 @@ export default function PayrollMonthTable() {
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
-                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.3 }}>
-                          <Button
-                            size="small" variant="text"
-                            startIcon={<AttachFileIcon sx={{ fontSize: 14 }} />}
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.4 }}>
+                          <Chip
+                            size="small" clickable
+                            icon={<AttachFileIcon sx={{ fontSize: 14 }} />}
+                            label="קבצים"
                             onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
-                            sx={{ minWidth: 0, py: 0, px: 0.5, fontSize: '0.62rem', color: 'primary.main' }}
-                          >
-                            קבצים
-                          </Button>
+                            sx={{
+                              height: 22, borderRadius: 1.5, fontSize: '0.64rem', fontWeight: 600,
+                              color: 'primary.main', bgcolor: '#eef2ff',
+                              border: '1px solid #c7d2fe',
+                              '& .MuiChip-icon': { color: 'primary.main', ml: '6px', mr: '-2px' },
+                              '&:hover': { bgcolor: '#e0e7ff' },
+                            }}
+                          />
                         </Box>
                         {r.commitment?.committed_hours != null && (
                           <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
