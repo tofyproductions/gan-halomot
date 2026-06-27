@@ -19,6 +19,8 @@ router.use('/payroll', require('./payroll.routes'));
 router.use('/payroll-month', require('./payrollMonth.routes'));
 // Employee requests (vacation, sick leave)
 router.use('/employee-requests', require('./employeeRequests.routes'));
+// Employee documents — files attached to an employee from the salary table
+router.use('/employee-documents', require('./employeeDocuments.routes'));
 
 // All other routes use optional auth (backward compatible - works without login too)
 router.use(optionalAuth);

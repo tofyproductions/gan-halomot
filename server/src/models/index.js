@@ -37,6 +37,7 @@ const SalaryAdjustment = require('./SalaryAdjustment');
 const EmployeeCommitment = require('./EmployeeCommitment');
 const PayrollChangeRequest = require('./PayrollChangeRequest');
 const BranchPricing = require('./BranchPricing');
+const EmployeeDocument = require('./EmployeeDocument');
 
 module.exports = {
   User,
@@ -77,4 +78,5 @@ module.exports = {
   EmployeeCommitment,
   PayrollChangeRequest,
   BranchPricing,
+  EmployeeDocument,
 };

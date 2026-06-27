@@ -11,6 +11,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import NoteAltIcon from '@mui/icons-material/NoteAlt';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import NumbersIcon from '@mui/icons-material/Numbers';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -30,6 +31,7 @@ import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
+import EmployeeDocsDialog from './EmployeeDocsDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -605,6 +607,18 @@ function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; 
 /* Per-gan marker colours live in utils/branchColors (single source of truth).
  * `ganMarker` is the name-keyed lookup, aliased for the existing call sites. */
 
+/* Darken an opaque hex colour by `amt` (0–1), staying opaque. Used to give the
+ * frozen name column a subtle zebra between rows while keeping the branch hue. */
+function darkenHex(hex, amt = 0.06) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || ''));
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const r = Math.max(0, Math.round(((n >> 16) & 255) * (1 - amt)));
+  const g = Math.max(0, Math.round(((n >> 8) & 255) * (1 - amt)));
+  const b = Math.max(0, Math.round((n & 255) * (1 - amt)));
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
 /* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
@@ -626,6 +640,7 @@ export default function PayrollMonthTable() {
   const [loading, setLoading] = useState(false);
   const [presets, setPresets] = useState([]);
   const [notes, setNotes] = useState({ open: false, row: null });
+  const [docsDlg, setDocsDlg] = useState({ open: false, row: null });
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
@@ -1629,16 +1644,22 @@ export default function PayrollMonthTable() {
                     </TableCell>
                   </TableRow>
                 );
-                for (const r of rows) {
+                for (let ri = 0; ri < rows.length; ri++) {
+                  const r = rows[ri];
                   const locked = r.status === 'finalized';
+                  // Opaque zebra for the frozen name column: alternate the branch
+                  // tint (or white) with a slightly darker opaque shade per row, so
+                  // rows stay distinguishable while keeping the branch colour.
+                  const nameBase = marker?.nameTint || '#ffffff';
+                  const nameBg = ri % 2 === 1 ? darkenHex(nameBase, 0.07) : nameBase;
                   elements.push(
                     <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0
-                        // Opaque background, forced past the translucent zebra /
-                        // hover rules (high specificity + !important) so the frozen
-                        // column never reveals the cells scrolling underneath it.
-                        '&&&': { backgroundColor: `${marker?.nameTint || '#ffffff'} !important` },
+                        // Forced past the translucent zebra / hover rules (high
+                        // specificity + !important) so the frozen column never
+                        // reveals the cells scrolling underneath it.
+                        '&&&': { backgroundColor: `${nameBg} !important` },
                         borderLeft: marker ? '3px solid' : '2px solid',
                         borderColor: marker?.accent || 'divider',
                       }}>
@@ -1856,6 +1877,16 @@ export default function PayrollMonthTable() {
                           '&:hover': { bgcolor: 'rgba(254, 252, 232, 0.85)' },
                         }}
                       >
+                        <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.3 }}>
+                          <Button
+                            size="small" variant="text"
+                            startIcon={<AttachFileIcon sx={{ fontSize: 14 }} />}
+                            onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
+                            sx={{ minWidth: 0, py: 0, px: 0.5, fontSize: '0.62rem', color: 'primary.main' }}
+                          >
+                            קבצים
+                          </Button>
+                        </Box>
                         {r.commitment?.committed_hours != null && (
                           <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
                         )}
@@ -1940,6 +1971,12 @@ export default function PayrollMonthTable() {
         month={month}
         onClose={() => setSick({ open: false, row: null })}
         onSaved={fetchData}
+      />
+      <EmployeeDocsDialog
+        open={docsDlg.open}
+        row={docsDlg.row}
+        month={month}
+        onClose={() => setDocsDlg({ open: false, row: null })}
       />
       <AbsenceDialog
         open={absence.open}
