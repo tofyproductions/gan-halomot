@@ -305,6 +305,7 @@ async function listSickForMonth(req, res, next) {
         days: countWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days),
         has_file: !!r.medical_file_data,
         file_name: r.medical_file_name || '',
+        pay_from_first_day: !!r.pay_from_first_day,
       })),
     });
   } catch (error) { next(error); }
@@ -352,7 +353,7 @@ async function listPendingForEmployee(req, res, next) {
  */
 async function createAdminRequest(req, res, next) {
   try {
-    const { employee_id, type, from_date, to_date, reason, medical_file_data, medical_file_name } = req.body;
+    const { employee_id, type, from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day } = req.body;
     if (!employee_id || !type || !from_date) {
       return res.status(400).json({ error: 'עובד, סוג ותאריך התחלה נדרשים' });
     }
@@ -375,6 +376,7 @@ async function createAdminRequest(req, res, next) {
       reason: reason || null,
       medical_file_data: medical_file_data || null,
       medical_file_name: medical_file_name || null,
+      pay_from_first_day: !!pay_from_first_day,
       status,
       manager_reviewed_by: req.user.id,
       manager_reviewed_at: new Date(),
@@ -432,12 +434,13 @@ async function editAdminRequest(req, res, next) {
   try {
     const request = await EmployeeRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
-    const { from_date, to_date, reason, medical_file_data, medical_file_name } = req.body;
+    const { from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day } = req.body;
 
     const oldMonth = request.from_date.slice(0, 7);
     if (from_date) request.from_date = from_date;
     if (to_date !== undefined) request.to_date = to_date || request.from_date;
     if (reason !== undefined) request.reason = reason || null;
+    if (pay_from_first_day !== undefined) request.pay_from_first_day = !!pay_from_first_day;
     if (medical_file_data) { request.medical_file_data = medical_file_data; request.medical_file_name = medical_file_name || request.medical_file_name; }
     await request.save();
 

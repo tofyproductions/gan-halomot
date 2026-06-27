@@ -302,6 +302,7 @@ async function updateEmployee(req, res, next) {
       'travel_allowance', 'meal_vouchers', 'recreation_annual',
       'bank_number', 'bank_branch', 'bank_account',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
+      'sick_pay_policy', 'sick_balance_opening', 'sick_daily_value_override',
       'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'work_days',
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
     ];

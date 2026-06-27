@@ -155,6 +155,23 @@ const employeeSchema = new mongoose.Schema({
   // Sun–Thu; adjust per employee from their committed schedule.
   work_days: { type: [Number], default: [0, 1, 2, 3, 4] },
 
+  // Sick-pay policy (חוק דמי מחלה):
+  //   'statutory' — day 1 unpaid, days 2-3 at 50%, day 4+ at 100% (default)
+  //   'full'      — every sick day paid 100% from the first day (per contract)
+  // A per-certificate "pay_from_first_day" toggle can force full for one cert.
+  sick_pay_policy: { type: String, enum: ['statutory', 'full'], default: 'statutory' },
+  // Opening sick-day balance as of the END of as_of_month. The system accrues
+  // 1.5 days for each full month after as_of_month (capped at 90) and subtracts
+  // sick days used. Leave days=0/as_of_month=null to start accrual from hire.
+  sick_balance_opening: {
+    days: { type: Number, default: 0 },
+    as_of_month: { type: String, default: null }, // 'YYYY-MM'
+  },
+  // Manual override of the ₪ value of one sick day. When null the payroll
+  // derives it from the employee's daily wage (rate × daily hours, or global
+  // salary ÷ monthly work-days).
+  sick_daily_value_override: { type: Number, default: null },
+
   // Tax / pension flags
   pension_exempt: { type: Boolean, default: false },
   bituach_leumi_exempt: { type: Boolean, default: false },

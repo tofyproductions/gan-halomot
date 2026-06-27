@@ -12,6 +12,7 @@ const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment, datesInMonth } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
+const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
 const DEDUCTIBLE_ABSENCE = new Set(['unpaid', 'other']);
@@ -34,6 +35,28 @@ function parseMonthRange(monthYM) {
   const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
   const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
   return { from, to };
+}
+
+/**
+ * Count an employee's sick WORK-days in [from,to] (YYYY-MM-DD), excluding
+ * Saturday and the employee's day off (work_days). When monthYM is given, only
+ * days inside that calendar month count. Mirrors the leave-day counting in
+ * employeeRequests.controller so paid days reconcile with manual.sick_days.
+ */
+function countSickWorkDays(fromYmd, toYmd, workDays, monthYM = null) {
+  const start = new Date(`${fromYmd}T12:00:00Z`);
+  const end = new Date(`${toYmd || fromYmd}T12:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const allowed = Array.isArray(workDays) && workDays.length ? new Set(workDays.map(Number)) : null;
+  let count = 0;
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const wd = d.getUTCDay();
+    if (wd === 6) continue;                    // Saturday always off
+    if (allowed && !allowed.has(wd)) continue; // employee's day off
+    if (monthYM && d.toISOString().slice(0, 7) !== monthYM) continue;
+    count++;
+  }
+  return count;
 }
 
 /**
@@ -248,6 +271,30 @@ async function getMonth(req, res, next) {
       if (!leaveByEmp.has(k)) leaveByEmp.set(k, []);
       leaveByEmp.get(k).push(r);
     }
+
+    // Approved sick certificates — this month AND history (for sick-pay brackets
+    // and the accrued-balance ceiling). Self-filed requests key on user_id, so
+    // match by employee_id OR user_id and resolve back to the employee.
+    const empUserIds = employees.filter(e => e.user_id).map(e => e.user_id);
+    const userIdToEmpId = new Map(
+      employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]),
+    );
+    const sickRequests = await EmployeeRequest.find({
+      type: 'sick',
+      status: 'approved',
+      from_date: { $lte: `${month}-31` },
+      $or: [
+        { employee_id: { $in: employees.map(e => e._id) } },
+        ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+      ],
+    }).lean();
+    const sickReqByEmp = new Map();
+    for (const r of sickRequests) {
+      const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
+      if (!eid) continue;
+      if (!sickReqByEmp.has(eid)) sickReqByEmp.set(eid, []);
+      sickReqByEmp.get(eid).push(r);
+    }
     const adjByEmp = new Map();
     for (const adj of adjustments) {
       const k = String(adj.employee_id);
@@ -441,6 +488,50 @@ async function getMonth(req, res, next) {
         : 0;
       if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
 
+      // --- Sick pay (דמי מחלה) --------------------------------------------
+      // Each approved certificate is its OWN spell ("אין רצף") — bracketed per
+      // חוק דמי מחלה (day 1 = 0%, days 2-3 = 50%, day 4+ = 100%), unless the
+      // employee's policy is 'full' or a certificate is flagged pay_from_first_day.
+      // Daily value = the employee's daily wage (overridable). Paid days are
+      // capped by the accrued sick-day balance (1.5/month, max 90, minus used).
+      const sickDailyValue = (emp.sick_daily_value_override != null && emp.sick_daily_value_override !== '')
+        ? Number(emp.sick_daily_value_override)
+        : (isTeken
+            ? (dailyRate > 0 ? dailyRate : (tekenSalary > 0 ? Math.round((tekenSalary / 22) * 100) / 100 : 0))
+            : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100);
+      const empSickReqs = sickReqByEmp.get(String(emp._id)) || [];
+      const sickCertsThisMonth = empSickReqs
+        .filter(r => String(r.from_date).slice(0, 7) === month)
+        .sort((a, b) => String(a.from_date).localeCompare(String(b.from_date)))
+        .map(r => ({
+          id: String(r._id),
+          from_date: r.from_date,
+          to_date: r.to_date || r.from_date,
+          work_days: countSickWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days, month),
+          pay_from_first_day: !!r.pay_from_first_day,
+        }));
+      // Sick work-days consumed in months strictly before this one — drawn down
+      // from the accrued balance before this month's certificates.
+      const sickUsedBefore = empSickReqs
+        .filter(r => String(r.from_date).slice(0, 7) < month)
+        .reduce((s, r) => s + countSickWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days, null), 0);
+      // Effective opening for the balance ceiling: an explicit opening wins;
+      // otherwise accrue 1.5/month from the hire date (start_date). With neither,
+      // leave the balance UNCAPPED (null) so sick pay isn't wrongly zeroed for
+      // employees whose balance hasn't been configured yet.
+      const sickOpening = (emp.sick_balance_opening && emp.sick_balance_opening.as_of_month)
+        ? emp.sick_balance_opening
+        : (emp.start_date ? { days: 0, as_of_month: new Date(emp.start_date).toISOString().slice(0, 7) } : null);
+      const sickAccrued = sickOpening ? accruedBalance(sickOpening, month) : null;
+      const sickAvail = sickOpening ? availableBalance(sickOpening, month, sickUsedBefore) : null; // null = uncapped
+      const sickCalc = computeSickPay(sickCertsThisMonth, {
+        dailyValue: sickDailyValue,
+        balanceAvailable: sickAvail, // null → uncapped (computeSickPay treats as Infinity)
+        policyFull: emp.sick_pay_policy === 'full',
+      });
+      const sickPay = sickCalc.total_amount;
+      if (sickPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + sickPay;
+
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,
@@ -569,6 +660,25 @@ async function getMonth(req, res, next) {
         },
         vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
         vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
+        sick_info: {
+          policy: emp.sick_pay_policy || 'statutory',
+          daily_value: Math.round(sickDailyValue * 100) / 100,
+          daily_value_override: emp.sick_daily_value_override ?? null,
+          balance_opening: {
+            // Effective opening actually used (explicit, else derived from hire).
+            days: Number(sickOpening?.days) || 0,
+            as_of_month: sickOpening?.as_of_month || null,
+          },
+          balance_capped: sickOpening != null, // false → no balance limit configured
+          balance_accrued: sickAccrued == null ? null : Math.round(sickAccrued * 100) / 100,
+          balance_available: sickAvail == null ? null : Math.round(sickAvail * 100) / 100,
+          used_before_month: Math.round(sickUsedBefore * 100) / 100,
+          days_used_this_month: sickCalc.total_days_used,
+          days_uncovered: sickCalc.total_days_uncovered,
+          paid_days: sickCalc.total_paid_days,
+          pay: sickPay,
+          certs: sickCalc.results,   // per-cert: work_days, covered_days, paid_days, paid_amount, full_from_day_1
+        },
         status: row?.status || 'draft',
       };
     });

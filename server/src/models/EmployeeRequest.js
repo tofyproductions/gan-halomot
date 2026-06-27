@@ -33,6 +33,10 @@ const employeeRequestSchema = new mongoose.Schema({
   reviewed_at: { type: Date, default: null },
   medical_file_data: { type: String, default: null }, // base64 for sick certificate
   medical_file_name: { type: String, default: null },
+  // Per-certificate override: pay every day of THIS spell at 100% (skip the
+  // statutory day-1=0 / days-2-3=50% brackets). Used for the "שלם מהיום הראשון"
+  // button. Employee-level policy='full' has the same effect for all certs.
+  pay_from_first_day: { type: Boolean, default: false },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 employeeRequestSchema.index({ user_id: 1, type: 1 });

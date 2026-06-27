@@ -1789,7 +1789,14 @@ export default function PayrollMonthTable() {
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setSick({ open: true, row: r })}>
                         {Number(r.manual.sick_days) ? (
-                          <Chip size="small" label={Number(r.manual.sick_days)} color="error" />
+                          <Stack spacing={0.25} alignItems="center">
+                            <Chip size="small" label={`${Number(r.manual.sick_days)} ימים`} color="error" />
+                            {Number(r.sick_info?.pay) > 0 && (
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main' }}>
+                                ₪{Math.round(Number(r.sick_info.pay)).toLocaleString('he-IL')}
+                              </Typography>
+                            )}
+                          </Stack>
                         ) : (
                           <Typography variant="body2" color="text.secondary">—</Typography>
                         )}
