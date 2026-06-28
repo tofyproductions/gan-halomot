@@ -2033,7 +2033,7 @@ export default function PayrollMonthTable() {
         disabled={partialAbs.row?.status === 'finalized'}
         canAccounting={isAccountant || isAdmin}
         onClose={() => setPartialAbs({ open: false, row: null })}
-        onSave={(entries) => partialAbs.row && patchApproval(partialAbs.row.employee_id, { partial_absence_entries: entries })}
+        onSave={(payload) => partialAbs.row && patchApproval(partialAbs.row.employee_id, payload)}
       />
       <HolidayPayDetailDialog
         open={holidayPay.open}
@@ -2401,6 +2401,7 @@ function PartialAbsenceCell({ row }) {
       {totalHours > 0 && <Chip size="small" color="warning" label={`${totalHours} ש׳ חוסר`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
       {extra > 0 && <Chip size="small" color="success" variant="outlined" label={`+${extra} ש׳ תוספת`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
+      {(pa.extra_pay || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>+₪{Math.round(pa.extra_pay).toLocaleString('he-IL')}</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
@@ -2414,17 +2415,20 @@ function PartialAbsenceCell({ row }) {
 function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClose, onSave }) {
   const [excused, setExcused] = useState({});
   const [reasons, setReasons] = useState({});
+  const [extraAppr, setExtraAppr] = useState({});
+  const [extraReasons, setExtraReasons] = useState({});
   useEffect(() => {
     if (!open || !row) return;
-    const ex = {}, rs = {};
+    const ex = {}, rs = {}, ea = {}, er = {};
     (row.partial_absence?.candidates || []).forEach(c => { ex[c.date] = !!c.excused; rs[c.date] = c.reason || ''; });
-    setExcused(ex); setReasons(rs);
+    (row.partial_absence?.extra_candidates || []).forEach(c => { ea[c.date] = !!c.approved; er[c.date] = c.reason || ''; });
+    setExcused(ex); setReasons(rs); setExtraAppr(ea); setExtraReasons(er);
   }, [open, row]);
   if (!row) return null;
   const pa = row.partial_absence || {};
   const cands = pa.candidates || [];
+  const extras = pa.extra_candidates || [];
   const hv = pa.hourly_value || 0;
-  const surplus = pa.surplus_hours || 0;
   const netDeficit = pa.net_deficit_hours || 0;
   const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
   // Unexcused hours are deducted; cap at net monthly deficit (made-up offset).
@@ -2432,7 +2436,14 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
   const effectiveHours = Math.round(Math.min(deductHours, netDeficit) * 100) / 100;
   const deduction = Math.round(effectiveHours * hv);
   const cappedByMakeup = deductHours > effectiveHours;
-  const save = () => onSave(cands.map(c => ({ date: c.date, excused: !!excused[c.date], reason: (reasons[c.date] || '').trim() })));
+  // Approved extra (over-commitment / off-day) hours are PAID.
+  const extraApprovedHours = Math.round(extras.filter(c => extraAppr[c.date]).reduce((s, c) => s + c.hours, 0) * 100) / 100;
+  const extraPay = Math.round(extraApprovedHours * hv);
+  const kindLabel = (k) => (k === 'offday' ? 'יום חופשי' : 'מעבר להתחייבות');
+  const save = () => onSave({
+    partial_absence_entries: cands.map(c => ({ date: c.date, excused: !!excused[c.date], reason: (reasons[c.date] || '').trim() })),
+    partial_extra_entries: extras.map(c => ({ date: c.date, approved: !!extraAppr[c.date], reason: (extraReasons[c.date] || '').trim() })),
+  });
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>היעדרות שעות — {row.full_name} ({month})</DialogTitle>
@@ -2442,26 +2453,52 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
             <Alert severity="info">רלוונטי לעובדי תקן בלבד — עובד/ת שעתי/ת מקבל/ת תשלום לפי שעות בפועל.</Alert>
           ) : (
             <>
-              {surplus > 0 && (
-                <Alert severity="success" sx={{ py: 0.5 }}>
-                  עבד/ה <b>{surplus} שעות מעבר</b> להתחייבות החודש (עבד/ה {pa.worked_hours} ש׳ מול {pa.committed_hours} ש׳).
-                </Alert>
-              )}
-              {(pa.overage_hours || 0) > 0 && (
-                <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
-                  <b>תוספת — מעבר להתחייבות באותו יום ({pa.overage_hours} ש׳):</b>
-                  <span style={{ marginInlineStart: 6 }}>
-                    {(pa.overage_dates || []).map(o => `${fmtDate(o.date)} (התחייבות ${o.committed_h}, עבד/ה ${o.worked_h} → +${o.over_h}ש׳)`).join(' · ')}
-                  </span>
-                </Alert>
-              )}
-              {(pa.off_day_hours || 0) > 0 && (
-                <Alert severity="info" sx={{ py: 0.5 }}>
-                  עבד/ה <b>{pa.off_day_hours} שעות בימים שאינם יום עבודה</b> (יום חופשי):
-                  <span style={{ marginInlineStart: 6 }}>
-                    {(pa.off_day_dates || []).map(o => `${fmtDate(o.date)} (${o.hours}ש׳)`).join(' · ')}
-                  </span>
-                </Alert>
+              {extras.length > 0 && (
+                <>
+                  <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
+                    <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
+                      <span>תוספת שעות (מעבר/יום חופשי): <b>{pa.extra_hours} ש׳</b></span>
+                      <span>אושרו לתשלום: <b>{extraApprovedHours} ש׳</b></span>
+                      <span>תשלום תוספת: <b style={{ color: '#15803d' }}>+₪{extraPay.toLocaleString('he-IL')}</b></span>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                      ברירת מחדל: לא משולם. סמן/י "מאושר" כדי <b>לשלם</b> את שעות התוספת (עם סיבה אופציונלית).
+                    </Typography>
+                  </Alert>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>תאריך</TableCell>
+                        <TableCell align="center">סוג</TableCell>
+                        <TableCell align="center">התחייבות</TableCell>
+                        <TableCell align="center">עבד/ה</TableCell>
+                        <TableCell align="center">תוספת</TableCell>
+                        <TableCell align="center">מאושר (לשלם)</TableCell>
+                        <TableCell>סיבה (אופציונלי)</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {extras.map(c => (
+                        <TableRow key={c.date} sx={extraAppr[c.date] ? { bgcolor: '#ecfdf5' } : undefined}>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(c.date)}</TableCell>
+                          <TableCell align="center"><Chip size="small" variant="outlined" color={c.kind === 'offday' ? 'info' : 'success'} label={kindLabel(c.kind)} sx={{ height: 18, fontSize: '0.6rem' }} /></TableCell>
+                          <TableCell align="center">{c.kind === 'offday' ? '—' : `${c.committed_h} ש׳`}</TableCell>
+                          <TableCell align="center">{c.worked_h} ש׳</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 700, color: 'success.dark' }}>+{c.hours} ש׳</TableCell>
+                          <TableCell align="center">
+                            <Checkbox size="small" color="success" checked={!!extraAppr[c.date]} disabled={disabled || !canAccounting}
+                              onChange={e => setExtraAppr(a => ({ ...a, [c.date]: e.target.checked }))} />
+                          </TableCell>
+                          <TableCell>
+                            <TextField size="small" variant="standard" placeholder="סיבה…" fullWidth
+                              value={extraReasons[c.date] || ''} disabled={disabled || !canAccounting}
+                              onChange={e => setExtraReasons(a => ({ ...a, [c.date]: e.target.value }))} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </>
               )}
               {cands.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">אין ימים עם חוסר מעל שעה מההתחייבות החודש. ✓</Typography>
@@ -2519,7 +2556,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
-        {cands.length > 0 && canAccounting && !disabled && (
+        {(cands.length > 0 || extras.length > 0) && canAccounting && !disabled && (
           <Button variant="contained" color="warning" onClick={save}>שמור</Button>
         )}
       </DialogActions>

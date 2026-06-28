@@ -682,6 +682,20 @@ async function getMonth(req, res, next) {
       const paOverHours = Math.round(paOverages.reduce((s, d) => s + d.over_h, 0) * 100) / 100;
       // Total "תוספת" surfaced in the absence column = over-commitment + off-day work.
       const paExtraHours = Math.round((paOverHours + paOffDayHours) * 100) / 100;
+      // Unified per-day EXTRA candidates (over-commitment + off-day). Default not
+      // approved; approving a day PAYS its extra hours at the committed hourly value.
+      const paExtraEntries = Array.isArray(existingManual.partial_extra_entries) ? existingManual.partial_extra_entries : [];
+      const paExtraApprovedDates = new Set(paExtraEntries.filter(e => e.approved).map(e => e.date));
+      const paExtraReasonByDate = new Map(paExtraEntries.map(e => [e.date, e.reason || '']));
+      const paExtraCandidates = [
+        ...paOverages.map(d => ({ date: d.date, kind: 'overage', hours: d.over_h, committed_h: d.committed_h, worked_h: d.worked_h })),
+        ...paOffDayWork.map(d => ({ date: d.date, kind: 'offday', hours: d.hours, committed_h: 0, worked_h: d.hours })),
+      ].sort((a, b) => a.date.localeCompare(b.date)).map(c => ({
+        ...c, approved: paExtraApprovedDates.has(c.date), reason: paExtraReasonByDate.get(c.date) || '',
+      }));
+      const paExtraApprovedHours = Math.round(paExtraCandidates.filter(c => c.approved).reduce((s, c) => s + c.hours, 0) * 100) / 100;
+      const paExtraPay = Math.round(paExtraApprovedHours * paHourlyValue * 100) / 100;
+      if (paExtraPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + paExtraPay;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
 
       return {
@@ -750,6 +764,7 @@ async function getMonth(req, res, next) {
           supplement_accounting_approved: manual.supplement_accounting_approved === true,
           absence_entries: absenceEntries,
           partial_absence_entries: paEntries,
+          partial_extra_entries: paExtraEntries,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
@@ -780,6 +795,9 @@ async function getMonth(req, res, next) {
           overage_hours: paOverHours,                // committed days worked > 1h beyond commitment
           overage_dates: paOverages,                 // [{date, committed_h, worked_h, over_h}]
           extra_hours: paExtraHours,                 // total addition = overage + off-day work
+          extra_candidates: paExtraCandidates,       // [{date, kind, hours, committed_h, worked_h, approved, reason}]
+          extra_approved_hours: paExtraApprovedHours,
+          extra_pay: paExtraPay,                     // ₪ paid for approved extra hours
           has_commitment: paHasCommitment,
           made_up: paMadeUp,                         // shortfalls fully compensated elsewhere
           deduction: paDeduction,
@@ -931,7 +949,7 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
-      'absence_entries', 'partial_absence_entries',
+      'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
     ];
 
     // Per-role write rules for the approval flags:

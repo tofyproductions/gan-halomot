@@ -103,6 +103,17 @@ const payrollMonthSchema = new mongoose.Schema({
       }],
       default: [],
     },
+    // Per-day EXTRA-hours approvals: days the employee worked beyond their
+    // commitment (over-commitment) or on a day off. Default = not approved (not
+    // paid); approving a day pays its extra hours at the committed hourly value.
+    partial_extra_entries: {
+      type: [{
+        date: { type: String },                          // YYYY-MM-DD
+        approved: { type: Boolean, default: false },     // approved → PAY the extra hours
+        reason: { type: String, default: '' },           // optional reason
+      }],
+      default: [],
+    },
 
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
