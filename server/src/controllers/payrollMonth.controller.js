@@ -589,28 +589,34 @@ async function getMonth(req, res, next) {
 
       // --- Partial-day absence (היעדרות שעות) ------------------------------
       // Days the employee worked but fell > 1h short of their committed hours.
-      // Accountant approves per day; approved hours are deducted proportionally
-      // at the committed hourly value. תקן (global) only — hourly staff are paid
-      // strictly for hours worked, so a short day already reduces their pay.
+      // By default every shortfall is deducted; the accountant can mark a day as
+      // EXCUSED (justified, optional reason) so it is NOT deducted. Unexcused
+      // hours are deducted proportionally at the committed hourly value. The
+      // deduction is also capped at the net monthly deficit so hours made up on
+      // other days aren't charged. תקן (global) only.
+      const paHasCommitment = !!commitmentInfo.has_commitment;
       const paExcl = new Set([...holidayDates, ...leaveDates]);
       const paCandidatesRaw = isTeken
         ? partialAbsenceCandidates(commitmentByEmp.get(String(emp._id)), breakdown.days || [], paExcl, 1)
         : [];
       const paEntries = Array.isArray(existingManual.partial_absence_entries) ? existingManual.partial_absence_entries : [];
-      const paApprovedDates = new Set(paEntries.filter(e => e.accounting_approved).map(e => e.date));
+      const paExcusedDates = new Set(paEntries.filter(e => e.excused).map(e => e.date));
+      const paReasonByDate = new Map(paEntries.map(e => [e.date, e.reason || '']));
       const paHourlyValue = (isTeken && tekenSalary > 0 && commitmentInfo.committed_hours > 0)
         ? Math.round((tekenSalary / commitmentInfo.committed_hours) * 100) / 100 : 0;
-      const paCandidates = paCandidatesRaw.map(c => ({ ...c, approved: paApprovedDates.has(c.date) }));
-      const paApprovedHours = Math.round(paCandidates.filter(c => c.approved).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
-      // Make-up offset: if the employee worked extra on OTHER days, the missing
-      // hours were made up — don't deduct them. Cap the deduction at the NET
-      // monthly deficit (committed − actually-worked), so approved short days that
-      // were compensated elsewhere are not charged.
+      const paCandidates = paCandidatesRaw.map(c => ({
+        ...c, excused: paExcusedDates.has(c.date), reason: paReasonByDate.get(c.date) || '',
+      }));
+      const paTotalShortfall = Math.round(paCandidates.reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
+      // Unexcused hours = what gets deducted (before the made-up cap).
+      const paDeductGross = Math.round(paCandidates.filter(c => !c.excused).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
+      // Monthly committed vs actually worked → surplus (overtime beyond commitment)
+      // and net deficit (cap so made-up hours aren't deducted).
       const paCommittedH = Math.round((commitmentInfo.committed_hours || 0) * 100) / 100;
       const paWorkedH = Math.round((breakdown.hours?.total || 0) * 100) / 100;
-      const paNetDeficit = Math.max(0, Math.round((paCommittedH - paWorkedH) * 100) / 100);
-      const paSurplus = Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100);
-      const paEffectiveHours = isTeken ? Math.min(paApprovedHours, paNetDeficit) : 0;
+      const paNetDeficit = paHasCommitment ? Math.max(0, Math.round((paCommittedH - paWorkedH) * 100) / 100) : 0;
+      const paSurplus = paHasCommitment ? Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100) : 0;
+      const paEffectiveHours = isTeken ? Math.min(paDeductGross, paNetDeficit) : 0;
       const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
       const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
@@ -694,19 +700,23 @@ async function getMonth(req, res, next) {
           unknown_count: unknownCount,               // days needing the manager's reason
           justified_count: justifiedCount,           // holiday / approved-leave days
         },
-        // Partial-day absence (worked but > 1h short) — accountant approves per day.
+        // Partial-day absence (worked but > 1h short). Default = deduct; the
+        // accountant marks days as EXCUSED (with optional reason) to not deduct.
         partial_absence: {
-          candidates: paCandidates,                  // [{date, committed_h, worked_h, shortfall_h, approved}]
+          candidates: paCandidates,                  // [{date, committed_h, worked_h, shortfall_h, excused, reason}]
           hourly_value: paHourlyValue,
-          approved_hours: paApprovedHours,           // gross approved shortfall hours
+          total_shortfall_hours: paTotalShortfall,   // sum of all flagged shortfalls
+          deduct_gross_hours: paDeductGross,         // unexcused shortfall hours
+          effective_hours: paEffectiveHours,         // hours actually deducted (after made-up cap)
           committed_hours: paCommittedH,             // monthly committed
           worked_hours: paWorkedH,                   // monthly actually worked
           net_deficit_hours: paNetDeficit,           // committed − worked (≥0)
-          surplus_hours: paSurplus,                  // worked − committed (≥0) — made-up elsewhere
-          effective_hours: paEffectiveHours,         // hours actually deducted (capped at net deficit)
+          surplus_hours: paSurplus,                  // worked − committed (≥0) — overtime beyond commitment
+          has_commitment: paHasCommitment,
           made_up: paMadeUp,                         // shortfalls fully compensated elsewhere
           deduction: paDeduction,
-          pending_count: paCandidates.filter(c => !c.approved).length,
+          excused_count: paCandidates.filter(c => c.excused).length,
+          deduct_count: paCandidates.filter(c => !c.excused).length,
         },
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,

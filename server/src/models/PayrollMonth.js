@@ -98,7 +98,8 @@ const payrollMonthSchema = new mongoose.Schema({
     partial_absence_entries: {
       type: [{
         date: { type: String },                          // YYYY-MM-DD
-        accounting_approved: { type: Boolean, default: false },
+        excused: { type: Boolean, default: false },      // approved as justified → NOT deducted
+        reason: { type: String, default: '' },           // optional reason for excusing
       }],
       default: [],
     },

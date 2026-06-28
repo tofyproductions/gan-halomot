@@ -2389,101 +2389,114 @@ function AbsenceCell({ row }) {
 function PartialAbsenceCell({ row }) {
   const pa = row.partial_absence;
   const cands = pa?.candidates || [];
-  if (!cands.length) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  const surplus = pa?.surplus_hours || 0;
+  if (!cands.length && surplus <= 0) return <Typography variant="body2" color="text.secondary">—</Typography>;
   const ded = pa.deduction || 0;
-  const pending = pa.pending_count || 0;
-  // Total absence hours across the flagged days (sum of shortfalls).
-  const totalHours = Math.round(cands.reduce((s, c) => s + (c.shortfall_h || 0), 0) * 10) / 10;
+  // Total absence hours across the flagged short days (sum of shortfalls).
+  const totalHours = pa.total_shortfall_hours != null
+    ? pa.total_shortfall_hours
+    : Math.round(cands.reduce((s, c) => s + (c.shortfall_h || 0), 0) * 10) / 10;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Chip size="small" color="warning" label={`${totalHours} ש׳`} sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }} />
-      {pa.made_up && ded === 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700 }} />}
-      {pending > 0 && <Chip size="small" color="error" variant="outlined" label={`${pending} לאישור`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
+      {totalHours > 0 && <Chip size="small" color="warning" label={`${totalHours} ש׳ חוסר`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
+      {surplus > 0 && <Chip size="small" color="success" variant="outlined" label={`+${surplus} ש׳ מעבר`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
+      {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
 }
 
-// Per-day partial-absence review (תקן only). Lists each day worked > 1h short of
-// the committed hours; the accountant approves the days to deduct. Approved hours
-// are deducted proportionally at the committed hourly value.
+// Per-day partial-absence review (תקן only). Every short day is deducted by
+// default; the accountant marks days as EXCUSED (justified, optional reason) so
+// they are NOT deducted. Unexcused hours are deducted at the committed hourly
+// value, capped at the net monthly deficit (made-up hours aren't charged). Also
+// shows overtime worked beyond the commitment.
 function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClose, onSave }) {
-  const [appr, setAppr] = useState({});
+  const [excused, setExcused] = useState({});
+  const [reasons, setReasons] = useState({});
   useEffect(() => {
     if (!open || !row) return;
-    const init = {};
-    (row.partial_absence?.candidates || []).forEach(c => { init[c.date] = !!c.approved; });
-    setAppr(init);
+    const ex = {}, rs = {};
+    (row.partial_absence?.candidates || []).forEach(c => { ex[c.date] = !!c.excused; rs[c.date] = c.reason || ''; });
+    setExcused(ex); setReasons(rs);
   }, [open, row]);
   if (!row) return null;
   const pa = row.partial_absence || {};
   const cands = pa.candidates || [];
   const hv = pa.hourly_value || 0;
-  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
-  const approvedHours = Math.round(cands.filter(c => appr[c.date]).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
-  // Cap the deduction at the NET monthly deficit — hours made up on other days
-  // (surplus) are not charged.
-  const netDeficit = pa.net_deficit_hours || 0;
   const surplus = pa.surplus_hours || 0;
-  const effectiveHours = Math.round(Math.min(approvedHours, netDeficit) * 100) / 100;
+  const netDeficit = pa.net_deficit_hours || 0;
+  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  // Unexcused hours are deducted; cap at net monthly deficit (made-up offset).
+  const deductHours = Math.round(cands.filter(c => !excused[c.date]).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
+  const effectiveHours = Math.round(Math.min(deductHours, netDeficit) * 100) / 100;
   const deduction = Math.round(effectiveHours * hv);
-  const madeUpCovered = approvedHours > effectiveHours; // some approved hours were compensated elsewhere
-  const save = () => onSave(cands.map(c => ({ date: c.date, accounting_approved: !!appr[c.date] })));
+  const cappedByMakeup = deductHours > effectiveHours;
+  const save = () => onSave(cands.map(c => ({ date: c.date, excused: !!excused[c.date], reason: (reasons[c.date] || '').trim() })));
   return (
-    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>היעדרות שעות — {row.full_name} ({month})</DialogTitle>
       <DialogContent>
         <Stack spacing={1.5} sx={{ mt: 1 }}>
           {row.salary_type !== 'global' ? (
             <Alert severity="info">רלוונטי לעובדי תקן בלבד — עובד/ת שעתי/ת מקבל/ת תשלום לפי שעות בפועל.</Alert>
-          ) : cands.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">אין ימים עם חוסר מעל שעה מההתחייבות החודש. ✓</Typography>
           ) : (
             <>
-              {pa.made_up && (
+              {surplus > 0 && (
                 <Alert severity="success" sx={{ py: 0.5 }}>
-                  העובד/ת <b>השלים/ה</b> את השעות החסרות בימים אחרים (עבד/ה {pa.worked_hours} ש׳ מול {pa.committed_hours} ש׳ התחייבות) — אין צורך לקזז.
+                  עבד/ה <b>{surplus} שעות מעבר</b> להתחייבות החודש (עבד/ה {pa.worked_hours} ש׳ מול {pa.committed_hours} ש׳).
                 </Alert>
               )}
-              <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
-                <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
-                  <span>התחייבות חודשית: <b>{pa.committed_hours} ש׳</b></span>
-                  <span>עבד/ה בפועל: <b>{pa.worked_hours} ש׳</b></span>
-                  {surplus > 0 && <span style={{ color: '#15803d' }}>עודף (השלמה): <b>+{surplus} ש׳</b></span>}
-                  <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
-                  <span>שעות שאושרו: <b>{approvedHours}</b></span>
-                  <span>ניכוי בפועל: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
-                </Stack>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  כל יום: עבד/ה מעל שעה פחות מההתחייבות. אשר/י את הימים לקיזוז.
-                  {madeUpCovered && ` שים/י לב: חלק מהשעות הושלמו בימים אחרים — הניכוי מוגבל לחוסר נטו (${netDeficit} ש׳).`}
-                </Typography>
-              </Alert>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>תאריך</TableCell>
-                    <TableCell align="center">התחייבות</TableCell>
-                    <TableCell align="center">עבד/ה</TableCell>
-                    <TableCell align="center">חוסר</TableCell>
-                    <TableCell align="center">לקזז</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {cands.map(c => (
-                    <TableRow key={c.date} sx={appr[c.date] ? { bgcolor: '#fff7ed' } : undefined}>
-                      <TableCell>{fmtDate(c.date)}</TableCell>
-                      <TableCell align="center">{c.committed_h} ש׳</TableCell>
-                      <TableCell align="center">{c.worked_h} ש׳</TableCell>
-                      <TableCell align="center" sx={{ fontWeight: 700, color: 'error.main' }}>{c.shortfall_h} ש׳</TableCell>
-                      <TableCell align="center">
-                        <Checkbox size="small" checked={!!appr[c.date]} disabled={disabled || !canAccounting}
-                          onChange={e => setAppr(a => ({ ...a, [c.date]: e.target.checked }))} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              {cands.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">אין ימים עם חוסר מעל שעה מההתחייבות החודש. ✓</Typography>
+              ) : (
+                <>
+                  <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
+                    <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
+                      <span>התחייבות חודשית: <b>{pa.committed_hours} ש׳</b></span>
+                      <span>עבד/ה בפועל: <b>{pa.worked_hours} ש׳</b></span>
+                      <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
+                      <span>שעות לקיזוז (לא מאושרות): <b>{deductHours}</b></span>
+                      <span>ניכוי בפועל: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                      ברירת מחדל: כל יום חוסר מקוזז. סמן/י "מאושר" כדי <b>לא</b> לקזז יום (עם סיבה אופציונלית).
+                      {cappedByMakeup && ` חלק מהשעות הושלמו בימים אחרים — הניכוי מוגבל לחוסר נטו (${netDeficit} ש׳).`}
+                    </Typography>
+                  </Alert>
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>תאריך</TableCell>
+                        <TableCell align="center">התחייבות</TableCell>
+                        <TableCell align="center">עבד/ה</TableCell>
+                        <TableCell align="center">חוסר</TableCell>
+                        <TableCell align="center">מאושר (לא לקזז)</TableCell>
+                        <TableCell>סיבה (אופציונלי)</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {cands.map(c => (
+                        <TableRow key={c.date} sx={excused[c.date] ? { bgcolor: '#ecfdf5' } : undefined}>
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(c.date)}</TableCell>
+                          <TableCell align="center">{c.committed_h} ש׳</TableCell>
+                          <TableCell align="center">{c.worked_h} ש׳</TableCell>
+                          <TableCell align="center" sx={{ fontWeight: 700, color: excused[c.date] ? 'text.disabled' : 'error.main' }}>{c.shortfall_h} ש׳</TableCell>
+                          <TableCell align="center">
+                            <Checkbox size="small" color="success" checked={!!excused[c.date]} disabled={disabled || !canAccounting}
+                              onChange={e => setExcused(a => ({ ...a, [c.date]: e.target.checked }))} />
+                          </TableCell>
+                          <TableCell>
+                            <TextField size="small" variant="standard" placeholder="סיבה…" fullWidth
+                              value={reasons[c.date] || ''} disabled={disabled || !canAccounting}
+                              onChange={e => setReasons(a => ({ ...a, [c.date]: e.target.value }))} />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </>
+              )}
             </>
           )}
         </Stack>
@@ -2491,7 +2504,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
         {cands.length > 0 && canAccounting && !disabled && (
-          <Button variant="contained" color="warning" onClick={save}>שמור אישורים</Button>
+          <Button variant="contained" color="warning" onClick={save}>שמור</Button>
         )}
       </DialogActions>
     </Dialog>
