@@ -94,9 +94,12 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
 
   const viewDoc = async (d) => {
     try {
-      const res = await api.get(`/employee-documents/${d.id}/file`);
+      // Sick/vacation certificates live on the request; uploaded docs on the doc.
+      const res = d.source === 'request'
+        ? await api.get(`/employee-requests/${d.id}/medical-file`)
+        : await api.get(`/employee-documents/${d.id}/file`);
       const { data, name: fn, mimetype } = res.data;
-      const url = URL.createObjectURL(base64ToBlob(data, mimetype || mimeFromName(fn)));
+      const url = URL.createObjectURL(base64ToBlob(data, mimetype || mimeFromName(fn || d.file_name)));
       window.open(url, '_blank', 'noopener');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err) {
@@ -139,6 +142,9 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
                 {docs.map(d => (
                   <TableRow key={d.id}>
                     <TableCell sx={{ fontWeight: 600 }}>
+                      {d.source === 'request' && (
+                        <Chip size="small" color="error" variant="outlined" label="אישור מחלה" sx={{ ml: 0.5, height: 18, fontSize: '0.6rem' }} />
+                      )}
                       {d.name}
                       {d.month && <Chip size="small" label={d.month} sx={{ ml: 0.5 }} variant="outlined" />}
                     </TableCell>
@@ -148,7 +154,9 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
                     </TableCell>
                     <TableCell align="center">
                       <Tooltip title="צפה"><IconButton size="small" color="primary" onClick={() => viewDoc(d)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
-                      <Tooltip title="מחק"><IconButton size="small" color="error" onClick={() => del(d)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>
+                      {d.source === 'request'
+                        ? <Tooltip title="אישור מחלה — מנוהל בלשונית מחלה"><span><IconButton size="small" disabled><DeleteIcon fontSize="small" /></IconButton></span></Tooltip>
+                        : <Tooltip title="מחק"><IconButton size="small" color="error" onClick={() => del(d)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>}
                     </TableCell>
                   </TableRow>
                 ))}
