@@ -621,6 +621,16 @@ async function getMonth(req, res, next) {
       const paEffectiveHours = isTeken ? Math.min(paDeductGross, paNetDeficit) : 0;
       const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
       const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
+      // Off-day work (תקן): days the employee worked that are NOT a committed work
+      // day (their day off). Shown in the absence column as extra worked hours.
+      const paWorkSet = new Set(workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days));
+      const paOffDayWork = (isTeken && paHasCommitment)
+        ? (breakdown.days || [])
+            .filter(d => (Number(d.minutes) || 0) > 0 && !paExcl.has(d.date)
+              && !paWorkSet.has(new Date(`${d.date}T12:00:00Z`).getUTCDay()))
+            .map(d => ({ date: d.date, hours: Math.round((Number(d.minutes) / 60) * 100) / 100 }))
+        : [];
+      const paOffDayHours = Math.round(paOffDayWork.reduce((s, d) => s + d.hours, 0) * 100) / 100;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
 
       return {
@@ -714,6 +724,8 @@ async function getMonth(req, res, next) {
           worked_hours: paWorkedH,                   // monthly actually worked
           net_deficit_hours: paNetDeficit,           // committed − worked (≥0)
           surplus_hours: paSurplus,                  // worked − committed (≥0) — overtime beyond commitment
+          off_day_hours: paOffDayHours,              // worked on non-committed (day-off) days
+          off_day_dates: paOffDayWork,               // [{date, hours}]
           has_commitment: paHasCommitment,
           made_up: paMadeUp,                         // shortfalls fully compensated elsewhere
           deduction: paDeduction,

@@ -2390,7 +2390,8 @@ function PartialAbsenceCell({ row }) {
   const pa = row.partial_absence;
   const cands = pa?.candidates || [];
   const surplus = pa?.surplus_hours || 0;
-  if (!cands.length && surplus <= 0) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  const offDay = pa?.off_day_hours || 0;
+  if (!cands.length && surplus <= 0 && offDay <= 0) return <Typography variant="body2" color="text.secondary">—</Typography>;
   const ded = pa.deduction || 0;
   // Total absence hours across the flagged short days (sum of shortfalls).
   const totalHours = pa.total_shortfall_hours != null
@@ -2400,6 +2401,7 @@ function PartialAbsenceCell({ row }) {
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
       {totalHours > 0 && <Chip size="small" color="warning" label={`${totalHours} ש׳ חוסר`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
       {surplus > 0 && <Chip size="small" color="success" variant="outlined" label={`+${surplus} ש׳ מעבר`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
+      {offDay > 0 && <Chip size="small" color="info" variant="outlined" label={`${offDay} ש׳ ביום חופשי`} sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700 }} />}
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
@@ -2445,6 +2447,14 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
               {surplus > 0 && (
                 <Alert severity="success" sx={{ py: 0.5 }}>
                   עבד/ה <b>{surplus} שעות מעבר</b> להתחייבות החודש (עבד/ה {pa.worked_hours} ש׳ מול {pa.committed_hours} ש׳).
+                </Alert>
+              )}
+              {(pa.off_day_hours || 0) > 0 && (
+                <Alert severity="info" sx={{ py: 0.5 }}>
+                  עבד/ה <b>{pa.off_day_hours} שעות בימים שאינם יום עבודה</b> (יום חופשי):
+                  <span style={{ marginInlineStart: 6 }}>
+                    {(pa.off_day_dates || []).map(o => `${fmtDate(o.date)} (${o.hours}ש׳)`).join(' · ')}
+                  </span>
                 </Alert>
               )}
               {cands.length === 0 ? (
