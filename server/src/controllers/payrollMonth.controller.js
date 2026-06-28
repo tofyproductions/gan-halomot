@@ -112,6 +112,49 @@ function partialAbsenceCandidates(commitment, workedDays, excludeSet, graceH = 1
 }
 
 /**
+ * Mirror of partialAbsenceCandidates for the OTHER direction: committed days the
+ * employee worked MORE than their committed hours by > grace. Returns the extra
+ * hours per day so over-commitment work is surfaced in the absence column.
+ * @returns [{ date, committed_h, worked_h, over_h }]
+ */
+function committedDayOverages(commitment, workedDays, excludeSet, graceH = 1) {
+  if (!commitment || !Array.isArray(commitment.days) || commitment.days.length === 0) return [];
+  const hhmm = (s) => {
+    if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return 0;
+    const [h, m] = s.split(':').map(Number);
+    return (h || 0) + (m || 0) / 60;
+  };
+  const byWeekday = new Map();
+  for (const d of commitment.days) byWeekday.set(Number(d.day), d);
+  const altDay = (commitment.is_alternating_off && commitment.alternating_day != null)
+    ? Number(commitment.alternating_day) : null;
+  const out = [];
+  for (const wd of (workedDays || [])) {
+    if (wd.incomplete) continue;
+    const workedH = (Number(wd.minutes) || 0) / 60;
+    if (workedH <= 0) continue;
+    if (excludeSet && excludeSet.has(wd.date)) continue;
+    const weekday = new Date(`${wd.date}T12:00:00Z`).getUTCDay();
+    if (weekday === 6) continue;
+    if (altDay != null && weekday === altDay) continue;
+    const cd = byWeekday.get(weekday);
+    if (!cd || cd.is_off) continue;            // off-day work is handled separately
+    const committedH = Math.max(0, hhmm(cd.end_hhmm) - hhmm(cd.start_hhmm));
+    if (committedH <= 0) continue;
+    const over = workedH - committedH;
+    if (over > graceH) {
+      out.push({
+        date: wd.date,
+        committed_h: Math.round(committedH * 100) / 100,
+        worked_h: Math.round(workedH * 100) / 100,
+        over_h: Math.round(over * 100) / 100,
+      });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * Compute the number of "vacation days" an employee accrues this month from
  * kindergarten holidays (Holiday docs). Every weekday inside a holiday range
  * counts as one vacation day, EXCEPT:
@@ -631,6 +674,14 @@ async function getMonth(req, res, next) {
             .map(d => ({ date: d.date, hours: Math.round((Number(d.minutes) / 60) * 100) / 100 }))
         : [];
       const paOffDayHours = Math.round(paOffDayWork.reduce((s, d) => s + d.hours, 0) * 100) / 100;
+      // Over-commitment work: committed days worked > 1h beyond the committed hours
+      // (e.g. committed 08:00–13:45 but worked to 16:00 = +2.25h).
+      const paOverages = (isTeken && paHasCommitment)
+        ? committedDayOverages(commitmentByEmp.get(String(emp._id)), breakdown.days || [], paExcl, 1)
+        : [];
+      const paOverHours = Math.round(paOverages.reduce((s, d) => s + d.over_h, 0) * 100) / 100;
+      // Total "תוספת" surfaced in the absence column = over-commitment + off-day work.
+      const paExtraHours = Math.round((paOverHours + paOffDayHours) * 100) / 100;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
 
       return {
@@ -726,6 +777,9 @@ async function getMonth(req, res, next) {
           surplus_hours: paSurplus,                  // worked − committed (≥0) — overtime beyond commitment
           off_day_hours: paOffDayHours,              // worked on non-committed (day-off) days
           off_day_dates: paOffDayWork,               // [{date, hours}]
+          overage_hours: paOverHours,                // committed days worked > 1h beyond commitment
+          overage_dates: paOverages,                 // [{date, committed_h, worked_h, over_h}]
+          extra_hours: paExtraHours,                 // total addition = overage + off-day work
           has_commitment: paHasCommitment,
           made_up: paMadeUp,                         // shortfalls fully compensated elsewhere
           deduction: paDeduction,
