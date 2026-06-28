@@ -9,7 +9,7 @@ const {
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
-const { analyzeCommitment, datesInMonth } = require('../services/commitmentAnalysis');
+const { analyzeCommitment, datesInMonth, workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
@@ -551,6 +551,9 @@ async function getMonth(req, res, next) {
         : (isTeken
             ? (dailyRate > 0 ? dailyRate : (tekenSalary > 0 ? Math.round((tekenSalary / 22) * 100) / 100 : 0))
             : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100);
+      // Count sick days by the employee's REAL working days (commitment schedule),
+      // falling back to work_days — so a day she works (e.g. Friday) isn't dropped.
+      const sickWorkdays = workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days);
       const empSickReqs = sickReqByEmp.get(String(emp._id)) || [];
       const sickCertsThisMonth = empSickReqs
         .filter(r => String(r.from_date).slice(0, 7) === month)
@@ -559,14 +562,14 @@ async function getMonth(req, res, next) {
           id: String(r._id),
           from_date: r.from_date,
           to_date: r.to_date || r.from_date,
-          work_days: countSickWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days, month),
+          work_days: countSickWorkDays(r.from_date, r.to_date || r.from_date, sickWorkdays, month),
           pay_from_first_day: !!r.pay_from_first_day,
         }));
       // Sick work-days consumed in months strictly before this one — drawn down
       // from the accrued balance before this month's certificates.
       const sickUsedBefore = empSickReqs
         .filter(r => String(r.from_date).slice(0, 7) < month)
-        .reduce((s, r) => s + countSickWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days, null), 0);
+        .reduce((s, r) => s + countSickWorkDays(r.from_date, r.to_date || r.from_date, sickWorkdays, null), 0);
       // Effective opening for the balance ceiling: an explicit opening wins;
       // otherwise accrue 1.5/month from the hire date (start_date). With neither,
       // leave the balance UNCAPPED (null) so sick pay isn't wrongly zeroed for

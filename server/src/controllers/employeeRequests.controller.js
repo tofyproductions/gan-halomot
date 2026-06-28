@@ -1,5 +1,6 @@
-const { EmployeeRequest, Employee, PayrollMonth } = require('../models');
+const { EmployeeRequest, Employee, PayrollMonth, EmployeeCommitment } = require('../models');
 const { scanSickNote } = require('../services/sickNoteScan');
+const { workingWeekdays } = require('../services/commitmentAnalysis');
 
 /**
  * Count working days from `from` to `to` inclusive (YYYY-MM-DD).
@@ -86,8 +87,12 @@ async function syncSickDaysForMonth(emp, month) {
     status: 'approved',
     from_date: { $regex: `^${month}` },
   }).lean();
+  // Count by the employee's REAL working days (commitment schedule), falling back
+  // to work_days — so a day she actually works (e.g. Friday) isn't dropped.
+  const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
+  const wd = workingWeekdays(commitment, emp.work_days);
   const total = requests.reduce(
-    (s, r) => s + countWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days), 0,
+    (s, r) => s + countWorkDays(r.from_date, r.to_date || r.from_date, wd), 0,
   );
   const ids = requests.map(r => r._id);
   await PayrollMonth.findOneAndUpdate(
@@ -283,6 +288,8 @@ async function listSickForMonth(req, res, next) {
     if (!employee_id || !month) return res.status(400).json({ error: 'employee_id and month required' });
     const emp = await Employee.findById(employee_id).select('user_id work_days').lean();
     if (!emp) return res.json({ requests: [] });
+    const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
+    const wd = workingWeekdays(commitment, emp.work_days);
     const [y, m] = month.split('-');
     const prefix = `${y}-${m}`;
     const ownerMatch = emp.user_id
@@ -303,7 +310,7 @@ async function listSickForMonth(req, res, next) {
         from_date: r.from_date,
         to_date: r.to_date || r.from_date,
         reason: r.reason || '',
-        days: countWorkDays(r.from_date, r.to_date || r.from_date, emp.work_days),
+        days: countWorkDays(r.from_date, r.to_date || r.from_date, wd),
         has_file: !!r.medical_file_data,
         file_name: r.medical_file_name || '',
         pay_from_first_day: !!r.pay_from_first_day,

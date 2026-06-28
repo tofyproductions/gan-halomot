@@ -148,4 +148,20 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
   };
 }
 
-module.exports = { analyzeCommitment, israelDayInfo, datesInMonth };
+/**
+ * The weekdays (0=Sun … 5=Fri) an employee actually works. Prefers the
+ * EmployeeCommitment schedule (non-off days) — the authoritative weekly
+ * schedule — and falls back to Employee.work_days, then Sun–Thu. Used by sick /
+ * leave day counting so a day she really works (e.g. Friday) isn't dropped just
+ * because the coarse work_days field is stale.
+ */
+function workingWeekdays(commitment, fallbackWorkDays) {
+  if (commitment && Array.isArray(commitment.days) && commitment.days.length) {
+    const w = commitment.days.filter(d => !d.is_off).map(d => Number(d.day));
+    if (w.length) return w;
+  }
+  if (Array.isArray(fallbackWorkDays) && fallbackWorkDays.length) return fallbackWorkDays.map(Number);
+  return [0, 1, 2, 3, 4];
+}
+
+module.exports = { analyzeCommitment, israelDayInfo, datesInMonth, workingWeekdays };
