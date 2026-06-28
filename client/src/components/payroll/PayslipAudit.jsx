@@ -2860,7 +2860,7 @@ export default function PayslipAudit() {
                   <Table size="small" sx={{ '& td, & th': { fontSize: 12, py: 0.5 } }}>
                     <TableHead>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700, position: 'sticky', right: 0, bgcolor: 'background.paper', zIndex: 1 }}>עובד</TableCell>
+                        <TableCell sx={{ fontWeight: 700, position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>עובד</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
                         {rounds.map((r) => (
                           <TableCell key={r.audit_id} align="center" sx={{ fontWeight: 700, minWidth: 80 }}>
@@ -2876,7 +2876,7 @@ export default function PayslipAudit() {
                     <TableBody>
                       {sorted.map((emp) => (
                         <TableRow key={emp.key} hover>
-                          <TableCell sx={{ position: 'sticky', right: 0, bgcolor: 'background.paper', fontWeight: 600 }}>
+                          <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', fontWeight: 600 }}>
                             {emp.name}
                             {emp.employee_no != null && (
                               <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>#{emp.employee_no}</Typography>

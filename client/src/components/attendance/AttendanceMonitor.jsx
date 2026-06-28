@@ -115,7 +115,7 @@ export default function AttendanceMonitor() {
     <TableRow key={key} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
       <TableCell sx={{
         fontWeight: 600,
-        position: 'sticky', right: 0, zIndex: 2,
+        position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0 (freeze name on the right)
         bgcolor: rowBg || '#ffffff',
         boxShadow: '-6px 0 6px -6px rgba(0,0,0,0.18)',
         borderLeft: '1px solid', borderColor: 'divider',
@@ -223,12 +223,12 @@ export default function AttendanceMonitor() {
         );
       })}
       <TableCell align="center" sx={{
-        fontWeight: 800, bgcolor: 'primary.50', position: 'sticky', left: 0,
+        fontWeight: 800, bgcolor: 'primary.50', position: 'sticky', right: 0, // RTL plugin flips to left:0 (totals on the left)
         borderRight: '1px solid', borderColor: 'divider',
       }}>
         {block.month_total_hours}h
       </TableCell>
-      <TableCell align="center" sx={{ position: 'sticky', left: 60 }}>
+      <TableCell align="center" sx={{ position: 'sticky', right: 60 }}>{/* RTL plugin flips to left:60 */}
         {!block.unlinked && block.employee_id && (
           <IconButton size="small" onClick={() => setHoursDialog({
             open: true,
@@ -529,7 +529,7 @@ export default function AttendanceMonitor() {
           <TableHead>
             <TableRow>
               <TableCell sx={{
-                fontWeight: 700, position: 'sticky', right: 0, zIndex: 3,
+                fontWeight: 700, position: 'sticky', left: 0, zIndex: 3, // RTL plugin flips to right:0 (freeze name on the right)
                 bgcolor: 'background.paper', minWidth: 180,
                 borderLeft: '1px solid', borderColor: 'divider',
               }}>
@@ -547,10 +547,10 @@ export default function AttendanceMonitor() {
                   </TableCell>
                 );
               })}
-              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: 'primary.50', zIndex: 2 }}>
+              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: 'primary.50', zIndex: 2 }}>{/* RTL flips to left:0 */}
                 סה״כ
               </TableCell>
-              <TableCell sx={{ position: 'sticky', left: 60, bgcolor: 'background.paper', zIndex: 2 }}>
+              <TableCell sx={{ position: 'sticky', right: 60, bgcolor: 'background.paper', zIndex: 2 }}>{/* RTL flips to left:60 */}
               </TableCell>
             </TableRow>
           </TableHead>
@@ -600,7 +600,7 @@ export default function AttendanceMonitor() {
                 <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: color.header }}>
                   <TableCell colSpan={days.length + 3} sx={{
                     fontWeight: 900, fontSize: '0.95rem', py: 1,
-                    position: 'sticky', right: 0, zIndex: 2,
+                    position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0 (branch strip aligns under the frozen name)
                     bgcolor: color.header, color: color.accent,
                     borderTop: '3px solid', borderColor: color.border,
                   }}>

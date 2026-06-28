@@ -294,7 +294,7 @@ export default function PermissionsManager() {
         <Table size="small" sx={{ minWidth: 1200 }}>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', position: 'sticky', right: 0, zIndex: 2, minWidth: 220 }}>
+              <TableCell sx={{ fontWeight: 800, bgcolor: '#f8fafc', position: 'sticky', left: 0, zIndex: 2, minWidth: 220 }}>
                 משתמש
               </TableCell>
               {TAB_GROUPS.map(group => (
@@ -323,7 +323,7 @@ export default function PermissionsManager() {
               const dirty = isUserDirty(user);
               return (
                 <TableRow key={user._id} hover sx={{ bgcolor: dirty ? '#fef3c7' : 'inherit' }}>
-                  <TableCell sx={{ position: 'sticky', right: 0, zIndex: 1, bgcolor: dirty ? '#fef3c7' : '#fff' }}>
+                  <TableCell sx={{ position: 'sticky', left: 0, zIndex: 1, bgcolor: dirty ? '#fef3c7' : '#fff' }}>
                     <Stack spacing={0.3}>
                       <Box sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{user.full_name || user.email}</Box>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>

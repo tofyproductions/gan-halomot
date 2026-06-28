@@ -371,7 +371,7 @@ export default function CollectionsTable() {
         <Table stickyHeader size="small" sx={{ minWidth: 1400 }}>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, zIndex: 3, bgcolor: 'background.paper', minWidth: 140 }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper', minWidth: 140 }}>
                 שם הילד/ה
               </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, minWidth: 75, bgcolor: '#fef9c3' }}>דמי רישום</TableCell>
@@ -397,7 +397,7 @@ export default function CollectionsTable() {
 
             {/* Monthly Summary */}
             <TableRow sx={{ bgcolor: '#f0fdf4' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#f0fdf4', zIndex: 2, fontSize: '0.8rem' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#f0fdf4', zIndex: 2, fontSize: '0.8rem' }}>
                 נגבה בפועל
               </TableCell>
               <TableCell />
@@ -409,7 +409,7 @@ export default function CollectionsTable() {
               <TableCell />
             </TableRow>
             <TableRow sx={{ bgcolor: '#eff6ff' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#eff6ff', zIndex: 2, fontSize: '0.8rem' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#eff6ff', zIndex: 2, fontSize: '0.8rem' }}>
                 צפוי
               </TableCell>
               <TableCell />
@@ -421,7 +421,7 @@ export default function CollectionsTable() {
               <TableCell />
             </TableRow>
             <TableRow sx={{ bgcolor: '#fefce8' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#fefce8', zIndex: 2, fontSize: '0.85rem' }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#fefce8', zIndex: 2, fontSize: '0.85rem' }}>
                 אחוז גבייה
               </TableCell>
               <TableCell />
@@ -728,7 +728,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
     <>
       {/* Classroom header */}
       <TableRow>
-        <TableCell colSpan={15} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', right: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
+        <TableCell colSpan={15} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', left: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
           <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: getClassroomColor(classroom).primary, color: '#fff' }} />
         </TableCell>
       </TableRow>
@@ -743,7 +743,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
           <TableRow key={regId} hover sx={{ '& td:first-of-type': { borderRight: `3px solid ${cc.border}` } }}>
             <TableCell
               sx={{
-                fontWeight: 600, position: 'sticky', right: 0, zIndex: 1,
+                fontWeight: 600, position: 'sticky', left: 0, zIndex: 1,
                 bgcolor: cc.bg, cursor: 'pointer',
                 '&:hover': { bgcolor: cc.border },
               }}
@@ -856,7 +856,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
 
       {/* Subtotals row */}
       <TableRow sx={{ bgcolor: '#f8fafc' }}>
-        <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', position: 'sticky', right: 0, bgcolor: '#f8fafc', zIndex: 1 }}>
+        <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', position: 'sticky', left: 0, bgcolor: '#f8fafc', zIndex: 1 }}>
           סה״כ {classroom}
         </TableCell>
         <TableCell />
