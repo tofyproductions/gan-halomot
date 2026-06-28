@@ -617,6 +617,45 @@ async function hoursReport(req, res, next) {
     });
 
     const monthMinutes = dayRows.reduce((s, d) => s + d.total_minutes, 0);
+
+    // Pull the AUTHORITATIVE per-day shortfall / extra-hours data from the same
+    // payroll-month computation that drives the salary table's "היעדרות (שעות)"
+    // column, so the report's missing/extra hours match the actual deduction and
+    // extra pay exactly (commitment-based, grace 1h, excused, made-up, approval).
+    let partial = null;
+    try {
+      const { fetchMonthData } = require('./payrollMonth.controller');
+      const branchId = String(emp.branch_id?._id || emp.branch_id || '');
+      const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, req.user);
+      const row = (md?.rows || []).find(r => String(r.employee_id) === String(emp._id));
+      partial = row?.partial_absence || null;
+      if (partial) {
+        const shortByDate = new Map((partial.candidates || []).map(c => [c.date, c]));
+        const extraByDate = new Map((partial.extra_candidates || []).map(c => [c.date, c]));
+        // A day's shortfall is actually deducted only when it is unexcused AND
+        // the month was not fully made up elsewhere (made_up caps net to zero).
+        const monthMadeUp = !!partial.made_up;
+        for (const d of dayRows) {
+          const sc = shortByDate.get(d.date);
+          if (sc) {
+            d.committed_hours = sc.committed_h;
+            d.shortfall_hours = sc.shortfall_h;
+            d.shortfall_excused = !!sc.excused;
+            d.shortfall_reason = sc.reason || '';
+            // deducted | excused | madeup
+            d.shortfall_status = sc.excused ? 'excused' : (monthMadeUp ? 'madeup' : 'deducted');
+          }
+          const ec = extraByDate.get(d.date);
+          if (ec) {
+            d.extra_hours = ec.hours;
+            d.extra_kind = ec.kind;            // 'overage' | 'offday'
+            d.extra_approved = !!ec.approved;
+            d.extra_reason = ec.reason || '';
+          }
+        }
+      }
+    } catch (e) { /* non-fatal: report still renders without shortfall/extra */ }
+
     res.json({
       month: ymPrefix,
       employee: {
@@ -628,6 +667,20 @@ async function hoursReport(req, res, next) {
         salary_type: emp.salary_type,
       },
       days: dayRows,
+      // Authoritative shortfall / extra-hours summary (null if no commitment or
+      // for hourly staff, where neither concept applies).
+      partial_absence: partial && partial.has_commitment ? {
+        has_commitment: true,
+        committed_hours: partial.committed_hours,
+        worked_hours: partial.worked_hours,
+        deduct_hours: partial.effective_hours,        // hours actually deducted
+        deduct_gross_hours: partial.deduct_gross_hours,
+        deduction: partial.deduction,                 // ₪ deducted
+        made_up: !!partial.made_up,
+        extra_approved_hours: partial.extra_approved_hours,
+        extra_hours: partial.extra_hours,
+        extra_pay: partial.extra_pay,                 // ₪ extra paid
+      } : null,
       totals: {
         days_worked: dayRows.length,
         total_minutes: monthMinutes,

@@ -2045,4 +2045,7 @@ module.exports = {
   applyAutoHolidays,
   applyVacationRequests,
   applyKindergartenVacationDays,
+  // Internal helper reused by the per-employee hours report so it shows the
+  // SAME authoritative shortfall/extra numbers as the salary table.
+  fetchMonthData,
 };
