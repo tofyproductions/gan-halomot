@@ -6,13 +6,14 @@
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
-  PayrollChangeRequest, EmployeeRequest,
+  PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment, datesInMonth } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
+const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
 const DEDUCTIBLE_ABSENCE = new Set(['unpaid', 'other']);
@@ -1681,8 +1682,152 @@ async function decideChangeRequest(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// ── Send monthly salary table + supporting files to the accountant ──────
+
+// Reuse getMonth's EXACT computation by invoking it with a captured response,
+// so the emailed table matches the on-screen table (no duplicated salary logic).
+function fetchMonthData(query, user) {
+  return new Promise((resolve, reject) => {
+    const req = { query, user };
+    const res = {
+      json: (data) => resolve(data),
+      status: () => ({ json: (data) => resolve(data) }),
+    };
+    getMonth(req, res, reject);
+  });
+}
+
+function mimeFromName(name = '') {
+  const ext = String(name).split('.').pop()?.toLowerCase();
+  const map = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+  return map[ext] || 'application/octet-stream';
+}
+function extOf(name = '', mime = '') {
+  const m = /\.([a-z0-9]{1,5})$/i.exec(String(name));
+  if (m) return '.' + m[1].toLowerCase();
+  const rev = { 'application/pdf': '.pdf', 'image/png': '.png', 'image/jpeg': '.jpg', 'image/gif': '.gif', 'image/webp': '.webp' };
+  return rev[mime] || '';
+}
+const safeName = (s) => String(s || '').replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+function buildAccountantHtml(month, rows) {
+  const f = (n) => Math.round(Number(n) || 0).toLocaleString('he-IL');
+  const n1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('he-IL');
+  const heads = ['עובד', 'ימים', 'שעות', 'בסיס', 'נסיעות', 'מחלה', 'חופשה', 'חגים', 'בונוס', 'ניכויים', 'סה״כ', 'הערות'];
+  const total = rows.reduce((s, r) => s + (r.breakdown?.estimated_total || 0), 0);
+  const tr = (r) => {
+    const b = r.breakdown || {}, c = b.components || {}, d = b.deductions || {};
+    const sickPay = r.sick_info?.pay || 0;
+    const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
+    const bonus = r.bonus?.effective || 0;
+    const ded = (d.loans || 0) + (d.absence || 0);
+    const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
+    return `<tr>
+      <td style="text-align:right;font-weight:600;white-space:nowrap">${r.full_name}${r.employee_number ? ` · #${r.employee_number}` : ''}<div style="font-size:9px;color:#666">${r.israeli_id || ''}</div></td>
+      <td>${n1(b.hours?.days_worked)}</td><td>${n1(b.hours?.total)}</td>
+      <td>${f(c.base_salary)}</td><td>${c.travel ? f(c.travel) : '—'}</td>
+      <td>${r.manual?.sick_days ? `${n1(r.manual.sick_days)}${sickPay ? ` · ₪${f(sickPay)}` : ''}` : '—'}</td>
+      <td>${r.vacation_eff_days ? n1(r.vacation_eff_days) : '—'}</td>
+      <td>${holiday ? f(holiday) : '—'}</td><td>${bonus ? f(bonus) : '—'}</td>
+      <td>${ded ? f(ded) : '—'}</td>
+      <td style="font-weight:800;background:#eef2ff">${f(b.estimated_total)}</td>
+      <td style="text-align:right;font-size:10px">${notes}</td>
+    </tr>`;
+  };
+  return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
+<style>@page{size:A4 landscape;margin:8mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+body{font-family:Arial,sans-serif;color:#111;margin:0;padding:12px}h1{font-size:16px;text-align:center;margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #cbd5e1;padding:3px 5px;text-align:center}
+th{background:#1e293b;color:#fff}tbody tr:nth-child(even){background:#f8fafc}tfoot td{font-weight:800;background:#dbeafe}</style></head>
+<body><h1>טבלת שכר — ${month} · גן החלומות</h1>
+<table><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead>
+<tbody>${rows.map(tr).join('')}</tbody>
+<tfoot><tr><td colspan="10" style="text-align:left">סה״כ לתשלום · ${rows.length} עובדים</td><td>₪${f(total)}</td><td></td></tr></tfoot>
+</table></body></html>`;
+}
+
+/**
+ * POST /api/payroll-month/:month/send-accountant?branch=<id|all>
+ * Body: { email? }  — emails the month's salary table (same data as the screen),
+ * per-employee notes, and every supporting file for the month (sick certificates
+ * + uploaded documents) to the accountant.
+ */
+async function sendToAccountant(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const branch = req.query.branch || 'all';
+
+    // Recipient: explicit override (also persisted) or the stored setting.
+    const override = (req.body?.email || '').trim();
+    const stored = await Setting.findOne({ key: 'accountant_email' }).lean();
+    const to = override || stored?.value || '';
+    if (!to) return res.status(400).json({ error: 'מייל רואה חשבון לא מוגדר' });
+    if (override && override !== stored?.value) {
+      await Setting.findOneAndUpdate({ key: 'accountant_email' }, { value: override }, { upsert: true });
+    }
+
+    // Exact same table data as the screen.
+    const data = await fetchMonthData({ month, branch }, req.user);
+    const rows = (data.rows || []).filter(r => !r.is_freelancer);
+    if (rows.length === 0) return res.status(400).json({ error: 'אין עובדים לשליחה בחודש זה' });
+    const html = buildAccountantHtml(month, rows);
+
+    // Gather supporting files for the month: sick/vacation certificates + uploads.
+    const empIds = rows.map(r => r.employee_id);
+    const emps = await Employee.find({ _id: { $in: empIds } }).select('_id full_name user_id').lean();
+    const nameById = new Map(emps.map(e => [String(e._id), e.full_name]));
+    const userIds = emps.filter(e => e.user_id).map(e => e.user_id);
+    const userToEmp = new Map(emps.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
+
+    const fileAttachments = [];
+    const certs = await EmployeeRequest.find({
+      type: { $in: ['sick', 'vacation'] }, status: 'approved',
+      from_date: { $regex: `^${month}` }, medical_file_data: { $ne: null },
+      $or: [{ employee_id: { $in: empIds } }, ...(userIds.length ? [{ user_id: { $in: userIds } }] : [])],
+    }).select('employee_id user_id type from_date medical_file_data medical_file_name').lean();
+    for (const c of certs) {
+      const eid = c.employee_id ? String(c.employee_id) : userToEmp.get(String(c.user_id));
+      const nm = nameById.get(eid) || 'עובד';
+      const label = c.type === 'sick' ? 'אישור מחלה' : 'אישור חופשה';
+      fileAttachments.push({
+        filename: safeName(`${nm} - ${label} ${c.from_date}`) + extOf(c.medical_file_name),
+        contentBase64: c.medical_file_data,
+        contentType: mimeFromName(c.medical_file_name),
+      });
+    }
+    const docs = await EmployeeDocument.find({ employee_id: { $in: empIds }, month })
+      .select('employee_id name file_data file_name file_mimetype').lean();
+    for (const d of docs) {
+      const nm = nameById.get(String(d.employee_id)) || 'עובד';
+      fileAttachments.push({
+        filename: safeName(`${nm} - ${d.name}`) + extOf(d.file_name, d.file_mimetype),
+        contentBase64: d.file_data,
+        contentType: d.file_mimetype || mimeFromName(d.file_name),
+      });
+    }
+
+    const intro = `<div dir="rtl" style="font-family:Arial,sans-serif">
+      <p>שלום,</p>
+      <p>מצורפת טבלת השכר של גן החלומות לחודש <b>${month}</b> (${rows.length} עובדים), כולל הערות לכל עובד.</p>
+      <p>מצורפים גם ${fileAttachments.length} מסמכים תומכים לאותו חודש (אישורי מחלה, מילואים וכו').</p>
+    </div><hr>`;
+
+    const result = await dispatchEmail({
+      to,
+      subject: `טבלת שכר ${month} — גן החלומות`,
+      html: intro + html,
+      attachments: [{ name: `טבלת שכר ${month}`, html }], // GAS converts to a PDF copy
+      fileAttachments,
+    });
+
+    res.json({ ok: true, sent_to: to, employees: rows.length, attachments: fileAttachments.length, provider: result?.provider || null });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getMonth,
+  sendToAccountant,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

@@ -24,7 +24,7 @@ function getTransporter() {
  * "onboarding@resend.dev". Once a domain is verified set RESEND_FROM to
  * something like 'גן החלומות <orders@yourdomain.com>'.
  */
-async function sendViaResend({ to, cc, subject, html, text, from }) {
+async function sendViaResend({ to, cc, subject, html, text, from, fileAttachments }) {
   if (!env.RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
 
   const fromAddr = from || env.RESEND_FROM || 'גן החלומות <onboarding@resend.dev>';
@@ -36,6 +36,9 @@ async function sendViaResend({ to, cc, subject, html, text, from }) {
   };
   if (cc) body.cc = Array.isArray(cc) ? cc : [cc].filter(Boolean);
   if (text) body.text = text;
+  if (fileAttachments?.length) {
+    body.attachments = fileAttachments.map(f => ({ filename: f.filename, content: f.contentBase64 }));
+  }
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -63,7 +66,7 @@ async function sendViaResend({ to, cc, subject, html, text, from }) {
  * limits apply (100/day free, 1500/day Workspace). The script is expected
  * to accept a JSON POST: { secret, to, cc, subject, html, text }.
  */
-async function sendViaGAS({ to, cc, subject, html, text, attachments }) {
+async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttachments }) {
   if (!env.GAS_EMAIL_URL) throw new Error('GAS_EMAIL_URL not configured');
   const body = {
     secret: env.GAS_EMAIL_SECRET || '',
@@ -73,6 +76,9 @@ async function sendViaGAS({ to, cc, subject, html, text, attachments }) {
     html,
     text: text || '',
     attachments: attachments || [], // [{ name, html }] — Apps Script converts each HTML to PDF
+    // [{ filename, contentBase64, contentType }] — Apps Script attaches raw files
+    // (requires the Apps Script to support the `files` field; ignored otherwise).
+    files: fileAttachments || [],
   };
   const res = await fetch(env.GAS_EMAIL_URL, {
     method: 'POST',
@@ -98,12 +104,12 @@ async function sendViaGAS({ to, cc, subject, html, text, attachments }) {
  * sends via user's Gmail) > Resend (HTTPS, needs verified domain to send to
  * arbitrary addresses) > SMTP (blocked on Render).
  */
-async function dispatchEmail({ to, cc, subject, html, text, from, attachments }) {
+async function dispatchEmail({ to, cc, subject, html, text, from, attachments, fileAttachments }) {
   if (env.GAS_EMAIL_URL) {
-    return sendViaGAS({ to, cc, subject, html, text, attachments });
+    return sendViaGAS({ to, cc, subject, html, text, attachments, fileAttachments });
   }
   if (env.RESEND_API_KEY) {
-    return sendViaResend({ to, cc, subject, html, text, from });
+    return sendViaResend({ to, cc, subject, html, text, from, fileAttachments });
   }
   if (!env.SMTP_USER) throw new Error('No email provider configured (set GAS_EMAIL_URL, RESEND_API_KEY, or SMTP_*)');
   const info = await getTransporter().sendMail({
@@ -111,6 +117,12 @@ async function dispatchEmail({ to, cc, subject, html, text, from, attachments })
     to: Array.isArray(to) ? to.join(',') : to,
     cc: Array.isArray(cc) ? cc.join(',') : cc,
     subject, html, text,
+    // nodemailer native attachments (binary files)
+    attachments: (fileAttachments || []).map(f => ({
+      filename: f.filename,
+      content: Buffer.from(f.contentBase64, 'base64'),
+      contentType: f.contentType || undefined,
+    })),
   });
   return { messageId: info.messageId, provider: 'smtp' };
 }

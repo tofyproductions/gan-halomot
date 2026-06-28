@@ -12,6 +12,7 @@ import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import NoteAltIcon from '@mui/icons-material/NoteAlt';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
+import SendIcon from '@mui/icons-material/Send';
 import NumbersIcon from '@mui/icons-material/Numbers';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -892,6 +893,21 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  const [sendingAcc, setSendingAcc] = useState(false);
+  const sendToAccountant = async () => {
+    if (!(await confirm({
+      title: 'שליחה לרואה חשבון',
+      message: `לשלוח את טבלת השכר של ${month} לרואה החשבון — כולל ההערות וכל הקבצים המצורפים לחודש (אישורי מחלה, מילואים וכו')?`,
+    }))) return;
+    setSendingAcc(true);
+    const params = {};
+    if (selectedBranch && !isAllBranches) params.branch = selectedBranch;
+    api.post(`/payroll-month/${month}/send-accountant`, {}, { params })
+      .then(res => toast.success(`נשלח ל-${res.data.sent_to} · ${res.data.employees} עובדים · ${res.data.attachments} קבצים`))
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה לרו״ח'))
+      .finally(() => setSendingAcc(false));
+  };
+
   const finalize = async () => {
     if (!(await confirm({ title: 'נעילת חודש', message: 'לנעול את החודש? לא ניתן יהיה לערוך עד ביטול הנעילה.', danger: true, remember_key: 'finalize-month' }))) return;
     const params = {};
@@ -1436,6 +1452,9 @@ export default function PayrollMonthTable() {
             onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
           <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
+          <Button size="small" variant="contained" color="primary"
+            startIcon={sendingAcc ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
+            onClick={sendToAccountant} disabled={!data || sendingAcc || stagingMode}>שלח לרו״ח</Button>
           <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
             <MenuItem disabled sx={{ opacity: 1 }}>
               <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}

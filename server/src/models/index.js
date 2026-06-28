@@ -38,6 +38,7 @@ const EmployeeCommitment = require('./EmployeeCommitment');
 const PayrollChangeRequest = require('./PayrollChangeRequest');
 const BranchPricing = require('./BranchPricing');
 const EmployeeDocument = require('./EmployeeDocument');
+const Setting = require('./Setting');
 
 module.exports = {
   User,
@@ -79,4 +80,5 @@ module.exports = {
   PayrollChangeRequest,
   BranchPricing,
   EmployeeDocument,
+  Setting,
 };
