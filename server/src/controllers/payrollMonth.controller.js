@@ -469,10 +469,10 @@ async function getMonth(req, res, next) {
       const justifiedCount = 0;
       const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
 
-      // Beyond-commitment supplement is paid only when BOTH manager and
-      // accounting have approved it.
-      const payExcessSupplement = existingManual.supplement_manager_approved === true
-        && existingManual.supplement_accounting_approved === true;
+      // RETIRED — the old beyond-commitment "תוספת שכר" supplement is disabled.
+      // Extra hours above commitment are now paid via the partial-absence /
+      // extra-hours mechanism (partial_extra_entries, flat × hourly value).
+      const payExcessSupplement = false;
       let breakdown = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
         include_salary_completion: existingManual.include_salary_completion !== false,
@@ -1095,8 +1095,7 @@ async function finalizeMonth(req, res, next) {
       const snapshot = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
         include_salary_completion: m.include_salary_completion !== false,
-        pay_excess_supplement: m.supplement_manager_approved === true
-          && m.supplement_accounting_approved === true,
+        pay_excess_supplement: false, // RETIRED — see getMonth
         absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
         // Mirror the live view exactly so finalizing never shifts the teken
         // hourly value: committed clock hours for display/threshold, OT-weighted

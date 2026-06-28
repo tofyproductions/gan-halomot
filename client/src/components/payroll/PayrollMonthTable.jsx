@@ -983,7 +983,7 @@ export default function PayrollMonthTable() {
   const buildExportMatrix = (rows = (data?.rows || [])) => {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
-      'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
+      'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר',
       'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
@@ -1023,7 +1023,6 @@ export default function PayrollMonthTable() {
         rnd(sp.ot125),
         rnd(sp.ot150),
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
-        r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
         r.manual.sick_days || '', openAbsence || '',
         r.partial_absence?.deduction ? -Math.round(r.partial_absence.deduction) : '',
@@ -1500,9 +1499,8 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
             <col style={{ width: W.amutaCell }} />
-            {/* תקן breakdown — 5 columns: base / OT125 / OT150 / completion / supplement */}
+            {/* תקן breakdown — 4 columns: base / OT125 / OT150 / completion */}
             <col style={{ width: W.tekenBase }} />
-            <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
             <col style={{ width: W.teken }} />
@@ -1538,7 +1536,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={18 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -1562,11 +1560,6 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>
                 <Tooltip arrow title="עובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים אוטומטית עד השכר המוסכם המלא: max(0, שכר מוסכם − שכר בסיס − שע״נ). שכר בסיס + השלמה = השכר המוסכם בדיוק (השע״נ כלול, לא נוסף מעליו). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>
-                <Tooltip arrow title="תוספת בגין שעות רגילות שמעבר להתחייבות (למשל יום נוסף ≤8 ש׳), על ערך השעה הממוצע. אינה משולמת אוטומטית — דורשת אישור מנהל + הנה״ח (שניהם). שע״נ יומי חוקי אינו כאן אלא תמיד בשכר בסיס.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>תוספת שכר ⓘ</span>
                 </Tooltip>
               </TableCell>
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
@@ -1609,7 +1602,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 6 + 20 + customColumns.length;
+              const totalCols = 1 + 6 + 19 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -1809,7 +1802,7 @@ export default function PayrollMonthTable() {
                         return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
                       })()}
 
-                      {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה / תוספת */}
+                      {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה */}
                       <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
                         <TekenBasePartCell row={r}
                           branchPay={(() => { const l = perBranchBreakdown(r); return breakdownIsInformative(r, l) ? l : null; })()}
@@ -1827,15 +1820,6 @@ export default function PayrollMonthTable() {
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#f0fdf4', minWidth: 120 }}>
-                        <TekenSupplementCell row={r} disabled={locked}
-                          canManager={isManager || isAdmin}
-                          canAccounting={isAccountant || isAdmin}
-                          onApproveManager={(v) => patchApproval(r.employee_id, { supplement_manager_approved: v })}
-                          onApproveAccounting={(v) => patchApproval(r.employee_id, { supplement_accounting_approved: v })}
-                        />
-                      </TableCell>
-
                       <TableCell align="center" className="ag-divider" sx={{ cursor: 'pointer', padding: '6px !important' }}
                         onClick={() => setTravelDlg({ open: true, row: r, locked })}>
                         <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.1 }}>
@@ -2283,56 +2267,6 @@ function TekenCompletionCell({ row, disabled, onToggle }) {
           sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer' }}
         />
       </Tooltip>
-    </Stack>
-  );
-}
-
-// Approval-gated supplement for everything earned ABOVE the agreed salary
-// (because she exceeded her committed basket — incl. any OT premium in that
-// excess). Paid only when BOTH the branch manager AND accounting approve.
-function TekenSupplementCell({ row, disabled, canManager, canAccounting, onApproveManager, onApproveAccounting }) {
-  const tb = row.breakdown?.components?.teken_breakdown;
-  if (row.salary_type !== 'global' || !tb || !(tb.extra_reg_pay > 0)) {
-    return <Typography variant="body2" sx={{ fontSize: '0.78rem', color: 'text.disabled' }}>—</Typography>;
-  }
-  const mgr = row.manual.supplement_manager_approved === true;
-  const acc = row.manual.supplement_accounting_approved === true;
-  const paid = mgr && acc;
-  const amount = Math.round(tb.extra_reg_pay).toLocaleString('he-IL');
-  const excessOt = tb.excess_ot > 0 ? `כולל שע״נ ₪${Math.round(tb.excess_ot).toLocaleString('he-IL')}` : null;
-  const chip = (label, on, can, onApprove, tip) => (
-    <Tooltip title={can ? (on ? `${tip} — לחץ לבטל` : `${tip} — לחץ לאשר`) : 'אין הרשאה'}>
-      <span>
-        <Chip
-          size="small"
-          color={on ? 'success' : 'default'}
-          variant={on ? 'filled' : 'outlined'}
-          label={`${label} ${on ? '✓' : '✗'}`}
-          disabled={disabled || !can}
-          onClick={(e) => { e.stopPropagation(); if (can) onApprove(!on); }}
-          sx={{ height: 16, fontSize: '0.58rem', cursor: can ? 'pointer' : 'default' }}
-        />
-      </span>
-    </Tooltip>
-  );
-  return (
-    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography
-        variant="body2"
-        sx={{ fontWeight: 700, fontSize: '0.82rem', color: paid ? 'success.dark' : 'text.disabled', textDecoration: paid ? 'none' : 'line-through' }}
-      >
-        +{amount} ₪
-      </Typography>
-      {excessOt && (
-        <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'success.dark' }}>{excessOt}</Typography>
-      )}
-      {!paid && (
-        <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'warning.dark' }}>ממתין לאישור</Typography>
-      )}
-      <Stack direction="row" spacing={0.3}>
-        {chip('מנהל', mgr, canManager, onApproveManager, 'אישור מנהל')}
-        {chip('הנה״ח', acc, canAccounting, onApproveAccounting, 'אישור הנה״ח')}
-      </Stack>
     </Stack>
   );
 }
