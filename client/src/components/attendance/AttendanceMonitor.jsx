@@ -187,11 +187,15 @@ export default function AttendanceMonitor() {
             }} />
           </TableCell>
         );
-        // Purple = has a manual punch pending approval (not yet counted in salary).
-        // Green = complete & final. Amber = incomplete (missing punch).
+        // Cell colour by source/state:
+        //   Purple = manual punch pending accounting approval (not yet in salary)
+        //   Amber  = incomplete (missing a clock-out)
+        //   Blue   = manual update entered by accounting (approved, counted)
+        //   Green  = punched on the clock by the employee (complete)
         let bgColor, textColor;
         if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
         else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
+        else if (day.has_manual) { bgColor = '#dbeafe'; textColor = '#1e40af'; }
         else { bgColor = '#d1fae5'; textColor = '#065f46'; }
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
@@ -202,6 +206,7 @@ export default function AttendanceMonitor() {
               ))}
               {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
+              {!day.has_pending && day.has_manual && <div style={{color:'#93c5fd'}}>✎ עודכן ידנית ע״י הנה״ח</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>
@@ -213,7 +218,9 @@ export default function AttendanceMonitor() {
                 transition: 'transform 0.1s',
                 '&:hover': { transform: 'scale(1.06)' },
               }}>
-                <Box sx={{ fontWeight: 800, fontSize: '0.75rem' }}>{day.total_hours}h</Box>
+                <Box sx={{ fontWeight: 800, fontSize: '0.75rem' }}>
+                  {!day.has_pending && day.has_manual && <span style={{ fontSize: '0.6rem' }}>✎ </span>}{day.total_hours}h
+                </Box>
                 <Box dir="ltr" sx={{ fontSize: '0.55rem', fontWeight: 600, opacity: 0.75, letterSpacing: '-0.02em' }}>
                   {timeRange}
                 </Box>
@@ -278,9 +285,10 @@ export default function AttendanceMonitor() {
         const cells = days.map(d => {
           const day = block.days[d];
           if (!day) return '<td></td>';
-          const cls = day.has_pending ? 'pending' : (day.incomplete ? 'warn' : 'ok');
+          const cls = day.has_pending ? 'pending' : (day.incomplete ? 'warn' : (day.has_manual ? 'manual' : 'ok'));
           const range = `${day.first_in || '?'}–${day.last_out || '?'}`;
-          return `<td><div class="day-cell ${cls}"><div class="h">${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
+          const mark = (!day.has_pending && day.has_manual) ? '✎ ' : '';
+          return `<td><div class="day-cell ${cls}"><div class="h">${mark}${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
         }).join('');
         const guestBadge = kind === 'guest' && block.home_branch_name
           ? `<span class="badge-guest">אורח/ת מ-${block.home_branch_name}</span>` : '';
@@ -371,9 +379,10 @@ export default function AttendanceMonitor() {
             <tbody>${bodyRows}</tbody>
           </table>
           <div class="legend">
-            <span><span class="swatch" style="background:#fff"></span>יום תקין</span>
+            <span><span class="swatch" style="background:#fff"></span>החתמת שעון</span>
+            <span><span class="swatch" style="background:#dbeafe;border-color:#1e40af"></span>✎ עדכון ידני (הנה״ח)</span>
             <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
-            <span><span class="swatch" style="background:#ede9fe;border-color:#6d28d9"></span>עדכון ידני — ממתין לאישור</span>
+            <span><span class="swatch" style="background:#ede9fe;border-color:#6d28d9"></span>ידני — ממתין לאישור</span>
             <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
             <span><span class="swatch" style="background:#fff7ed"></span>לא מזוהה</span>
           </div>
@@ -417,6 +426,7 @@ export default function AttendanceMonitor() {
       .day-cell.ok { background: #ffffff !important; color: #111; }
       .day-cell.warn { background: #fffbeb !important; color: #92400e; border: 0.5px dashed #d97706; border-radius: 2px; }
       .day-cell.pending { background: #ede9fe !important; color: #5b21b6; border-radius: 2px; }
+      .day-cell.manual { background: #dbeafe !important; color: #1e40af; border-radius: 2px; }
       .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #6d28d9 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
@@ -516,6 +526,21 @@ export default function AttendanceMonitor() {
             דוחות שעות
           </Button>
         </Stack>
+      </Stack>
+
+      {/* Colour legend so the source/state of each cell is clear. */}
+      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5, px: 0.5, alignItems: 'center' }}>
+        {[
+          { c: '#d1fae5', t: '#065f46', label: 'החתמת שעון' },
+          { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני (הנה״ח)' },
+          { c: '#fef3c7', t: '#92400e', label: 'חסרה יציאה' },
+          { c: '#ede9fe', t: '#5b21b6', label: 'ידני — ממתין לאישור' },
+        ].map(item => (
+          <Stack key={item.label} direction="row" spacing={0.5} alignItems="center">
+            <Box sx={{ width: 16, height: 14, borderRadius: 0.75, bgcolor: item.c, border: '1px solid', borderColor: 'rgba(0,0,0,0.15)' }} />
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>{item.label}</Typography>
+          </Stack>
+        ))}
       </Stack>
 
       {data && data.unlinked && data.unlinked.length > 0 && (
