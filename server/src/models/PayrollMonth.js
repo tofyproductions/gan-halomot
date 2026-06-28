@@ -90,6 +90,19 @@ const payrollMonthSchema = new mongoose.Schema({
       default: [],
     },
 
+    // Per-day PARTIAL-absence approvals: committed days the employee DID show up
+    // for but worked > 1h short of their committed hours. Hours are recomputed
+    // live (commitment − worked); this only records the accountant's per-day
+    // approval. Approved hours are deducted proportionally (separate from the
+    // whole-day absence_entries above).
+    partial_absence_entries: {
+      type: [{
+        date: { type: String },                          // YYYY-MM-DD
+        accounting_approved: { type: Boolean, default: false },
+      }],
+      default: [],
+    },
+
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
     //   - kind='text'   → only `text` is meaningful

@@ -61,6 +61,57 @@ function countSickWorkDays(fromYmd, toYmd, workDays, monthYM = null) {
 }
 
 /**
+ * Partial-day absence: committed days the employee DID work but fell short of
+ * their committed hours by MORE than the grace (1h). Lateness / leaving slightly
+ * early (≤ grace) is ignored (salary completed in full). Each qualifying day's
+ * FULL shortfall is a candidate; the accountant approves per day, and approved
+ * hours are deducted proportionally. Whole no-show days are NOT included here —
+ * those are handled by the separate whole-day absence column.
+ *
+ * @param commitment  EmployeeCommitment doc (days[] with start/end per weekday)
+ * @param workedDays  breakdown.days: [{ date, minutes }]
+ * @param excludeSet  Set of YMD to skip (holidays / approved leave)
+ * @returns [{ date, committed_h, worked_h, shortfall_h }]
+ */
+function partialAbsenceCandidates(commitment, workedDays, excludeSet, graceH = 1) {
+  if (!commitment || !Array.isArray(commitment.days) || commitment.days.length === 0) return [];
+  const hhmm = (s) => {
+    if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return 0;
+    const [h, m] = s.split(':').map(Number);
+    return (h || 0) + (m || 0) / 60;
+  };
+  const byWeekday = new Map();
+  for (const d of commitment.days) byWeekday.set(Number(d.day), d);
+  const altDay = (commitment.is_alternating_off && commitment.alternating_day != null)
+    ? Number(commitment.alternating_day) : null;
+  const out = [];
+  for (const wd of (workedDays || [])) {
+    const date = wd.date;
+    if (wd.incomplete) continue;                // missing clock-out → minutes unreliable, don't deduct
+    const workedH = (Number(wd.minutes) || 0) / 60;
+    if (workedH <= 0) continue;                 // no-show is the other column
+    if (excludeSet && excludeSet.has(date)) continue;
+    const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+    if (weekday === 6) continue;                // Saturday
+    if (altDay != null && weekday === altDay) continue; // alternating week — skip (ambiguous)
+    const cd = byWeekday.get(weekday);
+    if (!cd || cd.is_off) continue;             // not a committed day
+    const committedH = Math.max(0, hhmm(cd.end_hhmm) - hhmm(cd.start_hhmm));
+    if (committedH <= 0) continue;
+    const shortfall = committedH - workedH;
+    if (shortfall > graceH) {
+      out.push({
+        date,
+        committed_h: Math.round(committedH * 100) / 100,
+        worked_h: Math.round(workedH * 100) / 100,
+        shortfall_h: Math.round(shortfall * 100) / 100,
+      });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
  * Compute the number of "vacation days" an employee accrues this month from
  * kindergarten holidays (Holiday docs). Every weekday inside a holiday range
  * counts as one vacation day, EXCEPT:
@@ -533,6 +584,24 @@ async function getMonth(req, res, next) {
       const sickPay = sickCalc.total_amount;
       if (sickPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + sickPay;
 
+      // --- Partial-day absence (היעדרות שעות) ------------------------------
+      // Days the employee worked but fell > 1h short of their committed hours.
+      // Accountant approves per day; approved hours are deducted proportionally
+      // at the committed hourly value. תקן (global) only — hourly staff are paid
+      // strictly for hours worked, so a short day already reduces their pay.
+      const paExcl = new Set([...holidayDates, ...leaveDates]);
+      const paCandidatesRaw = isTeken
+        ? partialAbsenceCandidates(commitmentByEmp.get(String(emp._id)), breakdown.days || [], paExcl, 1)
+        : [];
+      const paEntries = Array.isArray(existingManual.partial_absence_entries) ? existingManual.partial_absence_entries : [];
+      const paApprovedDates = new Set(paEntries.filter(e => e.accounting_approved).map(e => e.date));
+      const paHourlyValue = (isTeken && tekenSalary > 0 && commitmentInfo.committed_hours > 0)
+        ? Math.round((tekenSalary / commitmentInfo.committed_hours) * 100) / 100 : 0;
+      const paCandidates = paCandidatesRaw.map(c => ({ ...c, approved: paApprovedDates.has(c.date) }));
+      const paApprovedHours = Math.round(paCandidates.filter(c => c.approved).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
+      const paDeduction = Math.round(paApprovedHours * paHourlyValue * 100) / 100;
+      if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
+
       return {
         employee_id: String(emp._id),
         full_name: emp.full_name,
@@ -598,6 +667,7 @@ async function getMonth(req, res, next) {
           supplement_manager_approved: manual.supplement_manager_approved === true,
           supplement_accounting_approved: manual.supplement_accounting_approved === true,
           absence_entries: absenceEntries,
+          partial_absence_entries: paEntries,
         },
         adjustments: empAdjustments,
         adj_totals: adjTotals,
@@ -610,6 +680,14 @@ async function getMonth(req, res, next) {
           deductible_days: deductibleDays,
           unknown_count: unknownCount,               // days needing the manager's reason
           justified_count: justifiedCount,           // holiday / approved-leave days
+        },
+        // Partial-day absence (worked but > 1h short) — accountant approves per day.
+        partial_absence: {
+          candidates: paCandidates,                  // [{date, committed_h, worked_h, shortfall_h, approved}]
+          hourly_value: paHourlyValue,
+          approved_hours: paApprovedHours,
+          deduction: paDeduction,
+          pending_count: paCandidates.filter(c => !c.approved).length,
         },
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,
@@ -756,7 +834,7 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
-      'absence_entries',
+      'absence_entries', 'partial_absence_entries',
     ];
 
     // Per-role write rules for the approval flags:
@@ -1720,7 +1798,7 @@ function buildAccountantHtml(month, rows) {
     const sickPay = r.sick_info?.pay || 0;
     const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
     const bonus = r.bonus?.effective || 0;
-    const ded = (d.loans || 0) + (d.absence || 0);
+    const ded = (d.loans || 0) + (d.absence || 0) + (r.partial_absence?.deduction || 0);
     const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
     return `<tr>
       <td style="text-align:right;font-weight:600;white-space:nowrap">${r.full_name}${r.employee_number ? ` · #${r.employee_number}` : ''}<div style="font-size:9px;color:#666">${r.israeli_id || ''}</div></td>

@@ -649,6 +649,7 @@ export default function PayrollMonthTable() {
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
   const [absence, setAbsence] = useState({ open: false, row: null });
+  const [partialAbs, setPartialAbs] = useState({ open: false, row: null });
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
   const [exportMenu, setExportMenu] = useState(null); // { type:'excel'|'pdf', anchor }
   const [travelDlg, setTravelDlg] = useState({ open: false, row: null, locked: false });
@@ -983,7 +984,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר', 'תוספת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
@@ -1024,7 +1025,9 @@ export default function PayrollMonthTable() {
         r.salary_type === 'global' && tb ? Math.round(completionEffective) : '',
         r.salary_type === 'global' && tb ? Math.round(tb.supplement_applied || 0) : '',
         computeTravel(r),
-        r.manual.sick_days || '', openAbsence || '', vacDays || '', holDays || '',
+        r.manual.sick_days || '', openAbsence || '',
+        r.partial_absence?.deduction ? -Math.round(r.partial_absence.deduction) : '',
+        vacDays || '', holDays || '',
         r.manual.advance_deduction_preset?.label || r.manual.advance_deduction_text || '',
         r.manual.gift_card?.kind === 'number' ? r.manual.gift_card.amount : (r.manual.gift_card?.text || ''),
         r.manual.recreation?.kind === 'number' ? r.manual.recreation.amount : (r.manual.recreation?.text || ''),
@@ -1506,6 +1509,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.travel }} />
             <col style={{ width: W.days }} />{/* מחלה */}
             <col style={{ width: W.absence }} />{/* היעדרות */}
+            <col style={{ width: W.absence }} />{/* היעדרות שעות */}
             <col style={{ width: W.days }} />{/* חופשה */}
             <col style={{ width: W.days }} />{/* דמי חגים */}
             <col style={{ width: W.advance }} />
@@ -1534,7 +1538,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={18 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -1568,6 +1572,11 @@ export default function PayrollMonthTable() {
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fff7ed' }}>
+                <Tooltip arrow title="עובד תקן בלבד. ימים שבהם הגיע/ה אך עבד/ה מעל שעה פחות משעות ההתחייבות. שעה ראשונה חסרה = גרייס (לא מנוכה). מעל שעה — כל השעות החסרות מנוכות יחסית, לאחר אישור הנה״ח לכל יום.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>היעדרות (שעות) ⓘ</span>
+                </Tooltip>
+              </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>חופשה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>דמי חגים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>קיזוז מקדמה</TableCell>
@@ -1600,7 +1609,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 6 + 19 + customColumns.length;
+              const totalCols = 1 + 6 + 20 + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -1853,6 +1862,9 @@ export default function PayrollMonthTable() {
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important', minWidth: 100 }} onClick={() => setAbsence({ open: true, row: r })}>
                         <AbsenceCell row={r} />
                       </TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important', minWidth: 90 }} onClick={() => setPartialAbs({ open: true, row: r })}>
+                        <PartialAbsenceCell row={r} />
+                      </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setVacation({ open: true, row: r })}>
                         <VacationCell row={r} />
                       </TableCell>
@@ -2013,6 +2025,15 @@ export default function PayrollMonthTable() {
         canAccounting={isAccountant || isAdmin}
         onClose={() => setAbsence({ open: false, row: null })}
         onSave={(entries) => absence.row && patchApproval(absence.row.employee_id, { absence_entries: entries })}
+      />
+      <PartialAbsenceDialog
+        open={partialAbs.open}
+        row={partialAbs.row}
+        month={month}
+        disabled={partialAbs.row?.status === 'finalized'}
+        canAccounting={isAccountant || isAdmin}
+        onClose={() => setPartialAbs({ open: false, row: null })}
+        onSave={(entries) => partialAbs.row && patchApproval(partialAbs.row.employee_id, { partial_absence_entries: entries })}
       />
       <HolidayPayDetailDialog
         open={holidayPay.open}
@@ -2359,6 +2380,105 @@ function AbsenceCell({ row }) {
       {pending > 0 && <Chip size="small" color="warning" variant="filled" label={`${pending} לסימון`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
+  );
+}
+
+// Partial-day absence cell: days the employee worked but came up > 1h short of
+// their committed hours. Shows approved hours + ₪ deduction + how many days
+// still await accounting approval. Click opens PartialAbsenceDialog.
+function PartialAbsenceCell({ row }) {
+  const pa = row.partial_absence;
+  const cands = pa?.candidates || [];
+  if (!cands.length) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  const ded = pa.deduction || 0;
+  const pending = pa.pending_count || 0;
+  return (
+    <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      {pa.approved_hours > 0
+        ? <Chip size="small" color="warning" label={`${pa.approved_hours} ש׳`} sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }} />
+        : <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>{cands.length} ימים</Typography>}
+      {pending > 0 && <Chip size="small" color="error" variant="outlined" label={`${pending} לאישור`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
+      {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
+    </Stack>
+  );
+}
+
+// Per-day partial-absence review (תקן only). Lists each day worked > 1h short of
+// the committed hours; the accountant approves the days to deduct. Approved hours
+// are deducted proportionally at the committed hourly value.
+function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClose, onSave }) {
+  const [appr, setAppr] = useState({});
+  useEffect(() => {
+    if (!open || !row) return;
+    const init = {};
+    (row.partial_absence?.candidates || []).forEach(c => { init[c.date] = !!c.approved; });
+    setAppr(init);
+  }, [open, row]);
+  if (!row) return null;
+  const pa = row.partial_absence || {};
+  const cands = pa.candidates || [];
+  const hv = pa.hourly_value || 0;
+  const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  const approvedHours = Math.round(cands.filter(c => appr[c.date]).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
+  const deduction = Math.round(approvedHours * hv);
+  const save = () => onSave(cands.map(c => ({ date: c.date, accounting_approved: !!appr[c.date] })));
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>היעדרות שעות — {row.full_name} ({month})</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 1 }}>
+          {row.salary_type !== 'global' ? (
+            <Alert severity="info">רלוונטי לעובדי תקן בלבד — עובד/ת שעתי/ת מקבל/ת תשלום לפי שעות בפועל.</Alert>
+          ) : cands.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">אין ימים עם חוסר מעל שעה מההתחייבות החודש. ✓</Typography>
+          ) : (
+            <>
+              <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
+                <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
+                  <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
+                  <span>שעות לקיזוז (מאושרות): <b>{approvedHours}</b></span>
+                  <span>ניכוי: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  כל יום ברשימה: עבד/ה מעל שעה פחות מההתחייבות. אשר/י את הימים שיש לקזז.
+                </Typography>
+              </Alert>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>תאריך</TableCell>
+                    <TableCell align="center">התחייבות</TableCell>
+                    <TableCell align="center">עבד/ה</TableCell>
+                    <TableCell align="center">חוסר</TableCell>
+                    <TableCell align="center">לקזז</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {cands.map(c => (
+                    <TableRow key={c.date} sx={appr[c.date] ? { bgcolor: '#fff7ed' } : undefined}>
+                      <TableCell>{fmtDate(c.date)}</TableCell>
+                      <TableCell align="center">{c.committed_h} ש׳</TableCell>
+                      <TableCell align="center">{c.worked_h} ש׳</TableCell>
+                      <TableCell align="center" sx={{ fontWeight: 700, color: 'error.main' }}>{c.shortfall_h} ש׳</TableCell>
+                      <TableCell align="center">
+                        <Checkbox size="small" checked={!!appr[c.date]} disabled={disabled || !canAccounting}
+                          onChange={e => setAppr(a => ({ ...a, [c.date]: e.target.checked }))} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>סגור</Button>
+        {cands.length > 0 && canAccounting && !disabled && (
+          <Button variant="contained" color="warning" onClick={save}>שמור אישורים</Button>
+        )}
+      </DialogActions>
+    </Dialog>
   );
 }
 
