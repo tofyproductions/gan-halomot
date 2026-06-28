@@ -599,7 +599,17 @@ async function getMonth(req, res, next) {
         ? Math.round((tekenSalary / commitmentInfo.committed_hours) * 100) / 100 : 0;
       const paCandidates = paCandidatesRaw.map(c => ({ ...c, approved: paApprovedDates.has(c.date) }));
       const paApprovedHours = Math.round(paCandidates.filter(c => c.approved).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
-      const paDeduction = Math.round(paApprovedHours * paHourlyValue * 100) / 100;
+      // Make-up offset: if the employee worked extra on OTHER days, the missing
+      // hours were made up — don't deduct them. Cap the deduction at the NET
+      // monthly deficit (committed − actually-worked), so approved short days that
+      // were compensated elsewhere are not charged.
+      const paCommittedH = Math.round((commitmentInfo.committed_hours || 0) * 100) / 100;
+      const paWorkedH = Math.round((breakdown.hours?.total || 0) * 100) / 100;
+      const paNetDeficit = Math.max(0, Math.round((paCommittedH - paWorkedH) * 100) / 100);
+      const paSurplus = Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100);
+      const paEffectiveHours = isTeken ? Math.min(paApprovedHours, paNetDeficit) : 0;
+      const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
+      const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
 
       return {
@@ -685,7 +695,13 @@ async function getMonth(req, res, next) {
         partial_absence: {
           candidates: paCandidates,                  // [{date, committed_h, worked_h, shortfall_h, approved}]
           hourly_value: paHourlyValue,
-          approved_hours: paApprovedHours,
+          approved_hours: paApprovedHours,           // gross approved shortfall hours
+          committed_hours: paCommittedH,             // monthly committed
+          worked_hours: paWorkedH,                   // monthly actually worked
+          net_deficit_hours: paNetDeficit,           // committed − worked (≥0)
+          surplus_hours: paSurplus,                  // worked − committed (≥0) — made-up elsewhere
+          effective_hours: paEffectiveHours,         // hours actually deducted (capped at net deficit)
+          made_up: paMadeUp,                         // shortfalls fully compensated elsewhere
           deduction: paDeduction,
           pending_count: paCandidates.filter(c => !c.approved).length,
         },

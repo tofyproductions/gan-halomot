@@ -2394,11 +2394,10 @@ function PartialAbsenceCell({ row }) {
   const pending = pa.pending_count || 0;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      {pa.approved_hours > 0
-        ? <Chip size="small" color="warning" label={`${pa.approved_hours} ש׳`} sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }} />
-        : <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>{cands.length} ימים</Typography>}
+      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>{cands.length} ימים</Typography>
+      {pa.made_up && ded === 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700 }} />}
       {pending > 0 && <Chip size="small" color="error" variant="outlined" label={`${pending} לאישור`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
-      {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
+      {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
 }
@@ -2420,7 +2419,13 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
   const hv = pa.hourly_value || 0;
   const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
   const approvedHours = Math.round(cands.filter(c => appr[c.date]).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
-  const deduction = Math.round(approvedHours * hv);
+  // Cap the deduction at the NET monthly deficit — hours made up on other days
+  // (surplus) are not charged.
+  const netDeficit = pa.net_deficit_hours || 0;
+  const surplus = pa.surplus_hours || 0;
+  const effectiveHours = Math.round(Math.min(approvedHours, netDeficit) * 100) / 100;
+  const deduction = Math.round(effectiveHours * hv);
+  const madeUpCovered = approvedHours > effectiveHours; // some approved hours were compensated elsewhere
   const save = () => onSave(cands.map(c => ({ date: c.date, accounting_approved: !!appr[c.date] })));
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
@@ -2433,14 +2438,23 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
             <Typography variant="body2" color="text.secondary">אין ימים עם חוסר מעל שעה מההתחייבות החודש. ✓</Typography>
           ) : (
             <>
+              {pa.made_up && (
+                <Alert severity="success" sx={{ py: 0.5 }}>
+                  העובד/ת <b>השלים/ה</b> את השעות החסרות בימים אחרים (עבד/ה {pa.worked_hours} ש׳ מול {pa.committed_hours} ש׳ התחייבות) — אין צורך לקזז.
+                </Alert>
+              )}
               <Alert severity="warning" icon={false} sx={{ py: 0.5 }}>
                 <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
+                  <span>התחייבות חודשית: <b>{pa.committed_hours} ש׳</b></span>
+                  <span>עבד/ה בפועל: <b>{pa.worked_hours} ש׳</b></span>
+                  {surplus > 0 && <span style={{ color: '#15803d' }}>עודף (השלמה): <b>+{surplus} ש׳</b></span>}
                   <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
-                  <span>שעות לקיזוז (מאושרות): <b>{approvedHours}</b></span>
-                  <span>ניכוי: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
+                  <span>שעות שאושרו: <b>{approvedHours}</b></span>
+                  <span>ניכוי בפועל: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
                 </Stack>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                  כל יום ברשימה: עבד/ה מעל שעה פחות מההתחייבות. אשר/י את הימים שיש לקזז.
+                  כל יום: עבד/ה מעל שעה פחות מההתחייבות. אשר/י את הימים לקיזוז.
+                  {madeUpCovered && ` שים/י לב: חלק מהשעות הושלמו בימים אחרים — הניכוי מוגבל לחוסר נטו (${netDeficit} ש׳).`}
                 </Typography>
               </Alert>
               <Table size="small">
