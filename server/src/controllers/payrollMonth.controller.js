@@ -615,7 +615,9 @@ async function getMonth(req, res, next) {
       const paCommittedH = Math.round((commitmentInfo.committed_hours || 0) * 100) / 100;
       const paWorkedH = Math.round((breakdown.hours?.total || 0) * 100) / 100;
       const paNetDeficit = paHasCommitment ? Math.max(0, Math.round((paCommittedH - paWorkedH) * 100) / 100) : 0;
-      const paSurplus = paHasCommitment ? Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100) : 0;
+      // Overtime-beyond-commitment is meaningful only for תקן — hourly staff are
+      // paid per hour worked, so "extra vs commitment" is not shown for them.
+      const paSurplus = (paHasCommitment && isTeken) ? Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100) : 0;
       const paEffectiveHours = isTeken ? Math.min(paDeductGross, paNetDeficit) : 0;
       const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
       const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
