@@ -2392,9 +2392,11 @@ function PartialAbsenceCell({ row }) {
   if (!cands.length) return <Typography variant="body2" color="text.secondary">—</Typography>;
   const ded = pa.deduction || 0;
   const pending = pa.pending_count || 0;
+  // Total absence hours across the flagged days (sum of shortfalls).
+  const totalHours = Math.round(cands.reduce((s, c) => s + (c.shortfall_h || 0), 0) * 10) / 10;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>{cands.length} ימים</Typography>
+      <Chip size="small" color="warning" label={`${totalHours} ש׳`} sx={{ height: 18, fontSize: '0.62rem', fontWeight: 700 }} />
       {pa.made_up && ded === 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700 }} />}
       {pending > 0 && <Chip size="small" color="error" variant="outlined" label={`${pending} לאישור`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
