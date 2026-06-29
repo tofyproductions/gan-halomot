@@ -144,6 +144,8 @@ const employeeSchema = new mongoose.Schema({
   bank_number: { type: String, default: '' },   // קוד בנק (e.g. 10 = לאומי)
   bank_branch: { type: String, default: '' },    // מספר סניף
   bank_account: { type: String, default: '' },   // מספר חשבון
+  pension_fund: { type: String, default: '' },     // קופת פנסיה (שם/מספר) — for the accountant
+  education_fund: { type: String, default: '' },   // קרן השתלמות (שם/מספר)
 
   // Kept for backward compatibility — old name. New code should use travel_monthly_flat.
   travel_allowance: { type: Number, default: 0 },

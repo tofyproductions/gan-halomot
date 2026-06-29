@@ -449,11 +449,18 @@ function BankDialog({ open, row, onClose, onSave }) {
   const [num, setNum] = useState('');
   const [branch, setBranch] = useState('');
   const [acct, setAcct] = useState('');
-  useEffect(() => { if (open) { setNum(row?.bank_number || ''); setBranch(row?.bank_branch || ''); setAcct(row?.bank_account || ''); } }, [open, row]);
+  const [pension, setPension] = useState('');
+  const [edu, setEdu] = useState('');
+  useEffect(() => {
+    if (open) {
+      setNum(row?.bank_number || ''); setBranch(row?.bank_branch || ''); setAcct(row?.bank_account || '');
+      setPension(row?.pension_fund || ''); setEdu(row?.education_fund || '');
+    }
+  }, [open, row]);
   if (!row) return null;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
-      <DialogTitle>פרטי בנק — {row.full_name}</DialogTitle>
+      <DialogTitle>בנק וקופות — {row.full_name}</DialogTitle>
       <DialogContent>
         <Alert severity="warning" sx={{ mb: 2, mt: 1 }}>
           מידע רגיש לתשלום שכר. נשמר על כרטיס העובד ומוצג להנהלת חשבונות בלבד.
@@ -462,11 +469,14 @@ function BankDialog({ open, row, onClose, onSave }) {
           <TextField label="בנק (קוד)" size="small" value={num} onChange={e => setNum(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="לדוגמה 10" />
           <TextField label="סניף" size="small" value={branch} onChange={e => setBranch(e.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField label="מספר חשבון" size="small" value={acct} onChange={e => setAcct(e.target.value)} InputLabelProps={{ shrink: true }} />
+          <Divider />
+          <TextField label="קופת פנסיה" size="small" value={pension} onChange={e => setPension(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="שם / מספר הקופה" />
+          <TextField label="קרן השתלמות" size="small" value={edu} onChange={e => setEdu(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="שם / מספר הקרן" />
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={() => onSave({ bank_number: num.trim(), bank_branch: branch.trim(), bank_account: acct.trim() })}>שמור</Button>
+        <Button variant="contained" onClick={() => onSave({ bank_number: num.trim(), bank_branch: branch.trim(), bank_account: acct.trim(), pension_fund: pension.trim(), education_fund: edu.trim() })}>שמור</Button>
       </DialogActions>
     </Dialog>
   );
@@ -957,7 +967,7 @@ export default function PayrollMonthTable() {
       rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, ...bank } : r),
     });
     api.put(`/payroll/employees/${employeeId}`, bank)
-      .then(() => { toast.success('פרטי הבנק נשמרו'); fetchData(); })
+      .then(() => { toast.success('פרטי בנק וקופות נשמרו'); fetchData(); })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [fetchData]);
 
@@ -1143,7 +1153,7 @@ export default function PayrollMonthTable() {
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
-    headerTop.push('בנק', 'סניף בנק', 'חשבון בנק'); // populated only for accounting/admin
+    headerTop.push('בנק', 'סניף בנק', 'חשבון בנק', 'קופת פנסיה', 'קרן השתלמות'); // populated only for accounting/admin
     headerTop.push('הערות');
     const rowsAcc = [headerTop];
 
@@ -1200,7 +1210,7 @@ export default function PayrollMonthTable() {
       const bLines = perBranchBreakdown(r);
       cells.push(breakdownIsInformative(r, bLines) ? breakdownText(bLines) : '');
       cells.push(r.bonus?.note || '');           // בונוס - פירוט
-      cells.push(r.bank_number || '', r.bank_branch || '', r.bank_account || ''); // בנק (only for authorized roles)
+      cells.push(r.bank_number || '', r.bank_branch || '', r.bank_account || '', r.pension_fund || '', r.education_fund || ''); // בנק + קופות (authorized roles only)
       cells.push([                                // הערות (התחייבות + קבועה + חד-פעמית)
         r.commitment?.committed_hours != null ? `התחייבות: ${r.commitment.committed_hours}h` : '',
         r.permanent_note || '',
@@ -1302,7 +1312,7 @@ export default function PayrollMonthTable() {
     });
     cols = cols.filter(i => PROTECTED_COLS.has(header[i]) || colHasContent(i));
     // ID-like text columns must never be treated as numeric (no summing).
-    const TEXT_ID_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק']);
+    const TEXT_ID_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק', 'קופת פנסיה', 'קרן השתלמות']);
     const numericCol = {};
     for (const i of cols) {
       let any = false, ok = true;
@@ -1386,7 +1396,7 @@ export default function PayrollMonthTable() {
       const body = m.slice(1).map(r => r.slice(1));
       // Which columns are numeric (sum-able). Index >= 2 to skip name + id.
       // ID / bank columns stay TEXT so leading zeros survive and they're not summed.
-      const TEXT_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק']);
+      const TEXT_COLS = new Set(['ת"ז', 'מספר עובד', 'בנק', 'סניף בנק', 'חשבון בנק', 'קופת פנסיה', 'קרן השתלמות']);
       const numeric = header.map((_, i) => {
         if (i < 2 || TEXT_COLS.has(header[i])) return false;
         let any = false;
@@ -1879,15 +1889,19 @@ export default function PayrollMonthTable() {
                             </Tooltip>
                             {/* Bank details — server sends these only to accounting/admin */}
                             {r.bank_account !== undefined && (
-                              <Tooltip title="פרטי בנק לתשלום שכר — לחץ לעריכה (מוצג להנהלת חשבונות בלבד)">
+                              <Tooltip title="בנק וקופות (פנסיה / השתלמות) לתשלום שכר — לחץ לעריכה (הנהלת חשבונות בלבד)">
                                 <Box component="span" onClick={(e) => { e.stopPropagation(); setBankDlg({ open: true, row: r }); }}
                                   sx={{ display: 'block', mt: 0.2, cursor: 'pointer' }}>
-                                  {(r.bank_number || r.bank_account)
-                                    ? <Chip size="small" color="default" variant="outlined"
-                                        label={`🏦 ${r.bank_number || '?'}-${r.bank_branch || '?'} · ${r.bank_account || '?'}`}
-                                        sx={{ height: 16, fontSize: '0.58rem', fontWeight: 600 }} />
+                                  {(r.bank_number || r.bank_account || r.pension_fund || r.education_fund)
+                                    ? <Stack direction="row" spacing={0.3} flexWrap="wrap" useFlexGap>
+                                        {(r.bank_number || r.bank_account) && <Chip size="small" color="default" variant="outlined"
+                                          label={`🏦 ${r.bank_number || '?'}-${r.bank_branch || '?'} · ${r.bank_account || '?'}`}
+                                          sx={{ height: 16, fontSize: '0.58rem', fontWeight: 600 }} />}
+                                        {r.pension_fund && <Chip size="small" color="default" variant="outlined" label={`פנסיה: ${r.pension_fund}`} sx={{ height: 16, fontSize: '0.58rem' }} />}
+                                        {r.education_fund && <Chip size="small" color="default" variant="outlined" label={`השתלמות: ${r.education_fund}`} sx={{ height: 16, fontSize: '0.58rem' }} />}
+                                      </Stack>
                                     : <Typography variant="caption" sx={{ color: 'warning.main', fontSize: '0.6rem', textDecoration: 'underline dotted' }}>
-                                        + הוסף פרטי בנק
+                                        + הוסף בנק / קופות
                                       </Typography>}
                                 </Box>
                               </Tooltip>

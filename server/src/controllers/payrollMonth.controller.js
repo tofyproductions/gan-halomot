@@ -726,6 +726,8 @@ async function getMonth(req, res, next) {
           bank_number: emp.bank_number || '',
           bank_branch: emp.bank_branch || '',
           bank_account: emp.bank_account || '',
+          pension_fund: emp.pension_fund || '',
+          education_fund: emp.education_fund || '',
         } : {}),
         branch_id: String(emp.branch_id),
         branch_name: branchNameById.get(String(emp.branch_id)) || '',
@@ -2033,16 +2035,17 @@ function buildAccountantHtml(month, rows) {
         ${cell('סה״כ ניכויים', totalDed ? '−' + f(totalDed) : '', { color: '#b91c1c', bold: true })}
         ${cell('', '')}
       </tr>
-      ${bank ? `<tr>
+      ${(bank || r.pension_fund || r.education_fund) ? `<tr>
         ${cell('בנק', r.bank_number || '')}
         ${cell('סניף בנק', r.bank_branch || '')}
         ${cell('חשבון בנק', r.bank_account || '')}
-        <td colspan="3" style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top">
-          <div style="font-size:8.5px;color:#64748b;font-weight:700">הערות</div>
-          <div style="font-size:10px;color:#334155">${notes || '—'}</div></td>
-      </tr>` : (notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
+        ${cell('קופת פנסיה', r.pension_fund || '')}
+        ${cell('קרן השתלמות', r.education_fund || '')}
+        ${cell('', '')}
+      </tr>` : ''}
+      ${notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
           <span style="font-size:8.5px;color:#64748b;font-weight:700">הערות: </span>
-          <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : '')}
+          <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : ''}
     </table>`;
   };
 
@@ -2061,10 +2064,12 @@ function buildAccountantHtml(month, rows) {
   }).join('');
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
-<style>@page{size:A4 portrait;margin:9mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;box-sizing:border-box}
-body{font-family:Arial,sans-serif;color:#111;margin:0;padding:4px}
+<style>@page{size:A4 portrait;margin:7mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:Arial,sans-serif;color:#111;width:100%}
+table{width:100%}
 h1{font-size:17px;text-align:center;margin:0 0 2px}
-.sub{text-align:center;color:#475569;font-size:11px;margin:0 0 4px}</style></head>
+.sub{text-align:center;color:#475569;font-size:11px;margin:0 0 6px}</style></head>
 <body>
 <h1>כרטיסי שכר עובדים — ${month}</h1>
 <div class="sub">גן החלומות · ${rows.length} עובדים · סה״כ לתשלום ${f(grand)}</div>
