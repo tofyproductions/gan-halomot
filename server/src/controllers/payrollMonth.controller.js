@@ -2248,7 +2248,10 @@ async function sendToAccountant(req, res, next) {
     }
 
     res.json({ ok: true, sent_to: to.join(', '), cc: cc.join(', '), employees: rows.length, attachments: fileAttachments.length, emails: batches.length, provider });
-  } catch (err) { next(err); }
+  } catch (err) {
+    console.error('sendToAccountant failed:', err.message, JSON.stringify(err.detail || err.code || ''));
+    return res.status(502).json({ error: `שגיאה בשליחה: ${err.message}` });
+  }
 }
 
 module.exports = {
