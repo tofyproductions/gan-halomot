@@ -34,6 +34,11 @@ const branchSchema = new mongoose.Schema({
   clock_log_count: { type: Number, default: null },      // device record count
   clock_last_user_sn: { type: Number, default: null },   // agent's last_user_sn baseline
   clock_alerted_at: { type: Date, default: null },       // last "clock down" email sent
+  // A server-side watchdog alerts when the AGENT (Pi) itself goes silent — no
+  // heartbeats at all. The heartbeat-driven clock-down alert can't catch this
+  // (a dead agent sends nothing), which is exactly how the Moshe Dayan June 2026
+  // 5-day gap went unnoticed. This stamps the last "agent silent" email sent.
+  agent_alerted_at: { type: Date, default: null },
 
   // Cached snapshot of the list of users stored on the TIMEDOX device,
   // captured by an on-demand dump from the Pi agent. Used by the admin UI

@@ -63,6 +63,12 @@ connectDB().then(() => {
     // First sync after 30 seconds, then every hour
     setTimeout(runSync, 30000);
     setInterval(runSync, 60 * 60 * 1000);
+
+    // Dead-agent watchdog: alert when a branch's attendance agent (Pi) goes
+    // fully silent — the heartbeat-driven clock-down alert can't catch this.
+    const { checkStaleAgents } = require('./controllers/agent.controller');
+    setTimeout(checkStaleAgents, 90000);           // first check after 90s
+    setInterval(checkStaleAgents, 60 * 60 * 1000); // then hourly
   });
 });
 

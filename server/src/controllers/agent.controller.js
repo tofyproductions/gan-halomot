@@ -224,6 +224,9 @@ async function heartbeat(req, res, next) {
       last_user_sn = null,
     } = req.body || {};
     const now = new Date();
+    // Recovery: a heartbeat means the agent is alive again — clear the
+    // "agent silent" alert stamp so a future outage re-alerts immediately.
+    if (branch.agent_alerted_at) branch.agent_alerted_at = null;
     branch.agent_last_seen_at = now;
     if (agent_version) branch.agent_version = agent_version;
     if (clock_reachable !== null) branch.clock_reachable = clock_reachable;
@@ -312,9 +315,77 @@ async function commandResult(req, res, next) {
   }
 }
 
+// --- Dead-agent watchdog (server-side, timer-driven) ---------------------
+// The heartbeat-driven clock-down alert only runs when a heartbeat arrives, so
+// it CANNOT detect an agent that has gone fully silent (the Moshe Dayan June
+// 2026 outage: Pi offline 5+ days, zero alerts). This watchdog runs on a server
+// timer and emails when a branch hasn't heartbeated for a sustained period.
+const AGENT_SILENT_THRESHOLD_MS = 3 * 60 * 60 * 1000;   // 3h with no heartbeat = down
+const AGENT_ALERT_COOLDOWN_MS  = 12 * 60 * 60 * 1000;   // re-alert at most every 12h
+
+/**
+ * Scan all branches for an agent that has stopped heartbeating and email the
+ * branch managers + system admins. Idempotent and rate-limited per branch via
+ * agent_alerted_at. Never throws — must not crash the timer.
+ * Call periodically (e.g. hourly) from the server bootstrap.
+ */
+async function checkStaleAgents() {
+  try {
+    const now = new Date();
+    // Only nag during Israel daytime (07:00–21:00) so a night blip doesn't
+    // email at 3am. A multi-day outage still alerts on the next daytime tick.
+    const ilHour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jerusalem', hour: '2-digit', hour12: false,
+    }).format(now));
+    if (ilHour < 7 || ilHour >= 21) return;
+
+    const { Branch, User } = require('../models');
+    const { dispatchEmail } = require('../services/email.service');
+    // Only branches that have EVER had an agent (ignore branches with no clock).
+    const branches = await Branch.find({ agent_last_seen_at: { $ne: null } });
+    for (const branch of branches) {
+      const lastSeen = branch.agent_last_seen_at ? branch.agent_last_seen_at.getTime() : 0;
+      const downMs = now.getTime() - lastSeen;
+      if (downMs < AGENT_SILENT_THRESHOLD_MS) continue;
+      const sinceAlert = branch.agent_alerted_at ? (now.getTime() - branch.agent_alerted_at.getTime()) : Infinity;
+      if (sinceAlert < AGENT_ALERT_COOLDOWN_MS) continue;
+
+      const recips = await User.find({
+        is_active: true,
+        $or: [
+          { role: 'system_admin' },
+          { role: 'branch_manager', $or: [{ managed_branch_ids: branch._id }, { branch_id: branch._id }] },
+        ],
+      }).select('email').lean();
+      const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
+      if (!emails.length) continue;
+
+      const hours = Math.round(downMs / 3600000);
+      const sinceTxt = branch.agent_last_seen_at
+        ? new Date(branch.agent_last_seen_at).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })
+        : 'לא ידוע';
+      await dispatchEmail({
+        to: emails,
+        subject: `🛑 סוכן הנוכחות מנותק — ${branch.name}`,
+        html: `<div dir="rtl" style="font-family:Arial,sans-serif">
+          <p>הסוכן (Pi) בסניף <b>${branch.name}</b> אינו מדווח כבר כ-<b>${hours} שעות</b> (פעיל לאחרונה: ${sinceTxt}).</p>
+          <p><b>החתמות מהשעון לא נקלטות עד שהסוכן יחזור לפעול.</b> ייתכן שה-Pi כבוי, מנותק מהחשמל או מהרשת.</p>
+          <p>יש לבדוק את החיבור הפיזי בסניף (חשמל + רשת ל-Pi ולשעון). לאחר חיבור מחדש הנתונים ייקלטו אוטומטית.</p>
+        </div>`,
+      });
+      branch.agent_alerted_at = now;
+      await branch.save();
+      console.log(`🛑 Agent-silent alert sent for ${branch.name} (${hours}h)`);
+    }
+  } catch (e) {
+    console.error('checkStaleAgents error:', e.message);
+  }
+}
+
 module.exports = {
   uploadPunches,
   heartbeat,
   pendingCommands,
   commandResult,
+  checkStaleAgents,
 };
