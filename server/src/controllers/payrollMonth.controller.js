@@ -668,17 +668,28 @@ async function getMonth(req, res, next) {
       // day (their day off). Shown in the absence column as extra worked hours.
       const paCommitmentDoc = commitmentByEmp.get(String(emp._id));
       const paWorkSet = new Set(workingWeekdays(paCommitmentDoc, emp.work_days));
-      // The alternating day (e.g. one Friday a month) is a COMMITTED day, not a
-      // day off — exclude it so working it isn't mistaken for off-day extra.
+      // Alternating day (e.g. "one Friday a month"): the FIRST N worked occurrences
+      // count as her commitment (neutral — not extra); every Friday BEYOND that N
+      // is extra pay (תוספת). N = alternating_per_month (default 1).
       const paAltDay = (paCommitmentDoc && paCommitmentDoc.is_alternating_off && paCommitmentDoc.alternating_day != null)
         ? Number(paCommitmentDoc.alternating_day) : null;
-      if (paAltDay != null) paWorkSet.add(paAltDay);
-      const paOffDayWork = (isTeken && paHasCommitment)
-        ? (breakdown.days || [])
-            .filter(d => (Number(d.minutes) || 0) > 0 && !paExcl.has(d.date)
-              && !paWorkSet.has(new Date(`${d.date}T12:00:00Z`).getUTCDay()))
-            .map(d => ({ date: d.date, hours: Math.round((Number(d.minutes) / 60) * 100) / 100 }))
+      const paAltCommittedN = paAltDay != null
+        ? (paCommitmentDoc.alternating_per_month != null ? Number(paCommitmentDoc.alternating_per_month) : 1)
+        : 0;
+      let paOffCandidates = (isTeken && paHasCommitment)
+        ? (breakdown.days || []).filter(d => (Number(d.minutes) || 0) > 0 && !paExcl.has(d.date)
+            && !paWorkSet.has(new Date(`${d.date}T12:00:00Z`).getUTCDay()))
         : [];
+      if (paAltDay != null) {
+        // Drop the first N worked alternating-day occurrences (her commitment);
+        // the rest remain as off-day extra.
+        const altWorked = paOffCandidates
+          .filter(d => new Date(`${d.date}T12:00:00Z`).getUTCDay() === paAltDay)
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const committedAlt = new Set(altWorked.slice(0, paAltCommittedN).map(d => d.date));
+        paOffCandidates = paOffCandidates.filter(d => !committedAlt.has(d.date));
+      }
+      const paOffDayWork = paOffCandidates.map(d => ({ date: d.date, hours: Math.round((Number(d.minutes) / 60) * 100) / 100 }));
       const paOffDayHours = Math.round(paOffDayWork.reduce((s, d) => s + d.hours, 0) * 100) / 100;
       // Over-commitment work: committed days worked > 1h beyond the committed hours
       // (e.g. committed 08:00–13:45 but worked to 16:00 = +2.25h).
