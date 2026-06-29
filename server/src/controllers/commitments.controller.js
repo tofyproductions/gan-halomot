@@ -78,7 +78,7 @@ async function list(req, res, next) {
 
 async function upsert(req, res, next) {
   try {
-    const { employee_id, branch_id, classroom, days, notes, is_alternating_off, alternating_day } = req.body;
+    const { employee_id, branch_id, classroom, days, notes, is_alternating_off, alternating_day, alternating_per_month } = req.body;
     if (!employee_id) return res.status(400).json({ error: 'employee_id is required' });
     const emp = await Employee.findById(employee_id).select('branch_id').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
@@ -91,6 +91,7 @@ async function upsert(req, res, next) {
       notes: notes || '',
       is_alternating_off: !!is_alternating_off,
       alternating_day: alternating_day ?? null,
+      alternating_per_month: is_alternating_off ? (alternating_per_month ?? null) : null,
     };
     const c = await EmployeeCommitment.findOneAndUpdate(
       { employee_id },

@@ -13,6 +13,7 @@ import LockOpenIcon from '@mui/icons-material/LockOpen';
 import NoteAltIcon from '@mui/icons-material/NoteAlt';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SendIcon from '@mui/icons-material/Send';
+import ContactMailIcon from '@mui/icons-material/ContactMail';
 import NumbersIcon from '@mui/icons-material/Numbers';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
@@ -622,6 +623,77 @@ function lightenHex(hex, amt = 0.5) {
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
 
+/* Manage the accountant recipient list + the office copy (cc) address. The
+   monthly "send to accountant" goes to every address here, with the office
+   always cc'd. */
+function AccountantContactsDialog({ open, onClose }) {
+  const [emails, setEmails] = useState([]);
+  const [office, setOffice] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    api.get('/payroll-month/accountant-contacts')
+      .then(res => { setEmails(res.data.accountant_emails || []); setOffice(res.data.office_cc || ''); })
+      .catch(() => toast.error('שגיאה בטעינת אנשי קשר'))
+      .finally(() => setLoading(false));
+  }, [open]);
+  const addEmail = () => {
+    const e = newEmail.trim();
+    if (!e) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { toast.error('מייל לא תקין'); return; }
+    if (!emails.includes(e)) setEmails(prev => [...prev, e]);
+    setNewEmail('');
+  };
+  const removeEmail = (e) => setEmails(prev => prev.filter(x => x !== e));
+  const save = () => {
+    setSaving(true);
+    api.put('/payroll-month/accountant-contacts', { accountant_emails: emails, office_cc: office.trim() })
+      .then(() => { toast.success('נשמר'); onClose(); })
+      .catch(() => toast.error('שגיאה בשמירה'))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>נמעני רואה חשבון</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            הטבלה החודשית תישלח לכל הכתובות הבאות. עותק נשלח תמיד למשרד.
+          </Typography>
+          <Stack spacing={1}>
+            {!loading && emails.length === 0 && (
+              <Typography variant="caption" color="text.disabled">אין כתובות — הוסף לפחות אחת.</Typography>
+            )}
+            {emails.map(e => (
+              <Stack key={e} direction="row" spacing={1} alignItems="center">
+                <Chip label={e} dir="ltr" sx={{ flex: 1, justifyContent: 'space-between', fontFamily: 'monospace' }} />
+                <IconButton size="small" color="error" onClick={() => removeEmail(e)}><DeleteOutlineIcon fontSize="small" /></IconButton>
+              </Stack>
+            ))}
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <TextField size="small" fullWidth label="הוסף מייל רו״ח" value={newEmail} dir="ltr"
+              onChange={e => setNewEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }} />
+            <Button variant="outlined" onClick={addEmail}>הוסף</Button>
+          </Stack>
+          <Divider />
+          <TextField size="small" fullWidth label="עותק למשרד (CC)" value={office} dir="ltr"
+            onChange={e => setOffice(e.target.value)}
+            helperText="כתובת זו מקבלת עותק מכל שליחה לרו״ח" />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={save} disabled={saving || loading}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
@@ -895,6 +967,7 @@ export default function PayrollMonthTable() {
   };
 
   const [sendingAcc, setSendingAcc] = useState(false);
+  const [acctContactsOpen, setAcctContactsOpen] = useState(false);
   const sendToAccountant = async () => {
     if (!(await confirm({
       title: 'שליחה לרואה חשבון',
@@ -904,7 +977,7 @@ export default function PayrollMonthTable() {
     const params = {};
     if (selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/send-accountant`, {}, { params })
-      .then(res => toast.success(`נשלח ל-${res.data.sent_to} · ${res.data.employees} עובדים · ${res.data.attachments} קבצים`))
+      .then(res => toast.success(`נשלח ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} · ${res.data.employees} עובדים · ${res.data.attachments} קבצים`))
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה לרו״ח'))
       .finally(() => setSendingAcc(false));
   };
@@ -1457,6 +1530,9 @@ export default function PayrollMonthTable() {
           <Button size="small" variant="contained" color="primary"
             startIcon={sendingAcc ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
             onClick={sendToAccountant} disabled={!data || sendingAcc || stagingMode}>שלח לרו״ח</Button>
+          <Tooltip title="הגדרת נמעני רו״ח"><span>
+            <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
+          </span></Tooltip>
           <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
             <MenuItem disabled sx={{ opacity: 1 }}>
               <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}
@@ -1956,6 +2032,7 @@ export default function PayrollMonthTable() {
         onSave={(amount) => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, amount); setTravelDlg({ open: false, row: null, locked: false }); }}
         onClear={() => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, null); setTravelDlg({ open: false, row: null, locked: false }); }}
       />
+      <AccountantContactsDialog open={acctContactsOpen} onClose={() => setAcctContactsOpen(false)} />
       <EmployeeNumberDialog
         open={empNumDlg.open}
         row={empNumDlg.row}

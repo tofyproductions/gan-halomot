@@ -47,6 +47,7 @@ function draftFromCommitment(c) {
     days: fullDays(c.days),
     is_alternating_off: c.is_alternating_off,
     alternating_day: c.alternating_day,
+    alternating_per_month: c.alternating_per_month ?? null,
     notes: c.notes || '',
   };
 }
@@ -160,8 +161,24 @@ function CommitmentEditor({ open, initial, employees, commitments = [], onClose,
                   {DAY_LABELS.map((l, i) => <MenuItem key={i} value={i}>{l}</MenuItem>)}
                 </Select>
               )}
+              {draft.is_alternating_off && (
+                <Select value={draft.alternating_per_month ?? ''}
+                  onChange={e => setDraft(d => ({ ...d, alternating_per_month: e.target.value === '' ? null : Number(e.target.value) }))}
+                  displayEmpty>
+                  <MenuItem value="">כל שבועיים (ברירת מחדל)</MenuItem>
+                  <MenuItem value={1}>פעם בחודש</MenuItem>
+                  <MenuItem value={2}>פעמיים בחודש</MenuItem>
+                  <MenuItem value={3}>3 פעמים בחודש</MenuItem>
+                  <MenuItem value={4}>4 פעמים בחודש</MenuItem>
+                </Select>
+              )}
             </Stack>
           </FormControl>
+          {draft.is_alternating_off && (
+            <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+              היום הנבחר לא ייספר כהיעדרות. השעות החודשיות = מספר הפעמים × שעות אותו יום.
+            </Typography>
+          )}
 
           <TextField label="הערות" size="small" multiline minRows={2} value={draft.notes || ''}
             onChange={e => setDraft(d => ({ ...d, notes: e.target.value }))} />

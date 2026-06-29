@@ -666,7 +666,13 @@ async function getMonth(req, res, next) {
       const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
       // Off-day work (תקן): days the employee worked that are NOT a committed work
       // day (their day off). Shown in the absence column as extra worked hours.
-      const paWorkSet = new Set(workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days));
+      const paCommitmentDoc = commitmentByEmp.get(String(emp._id));
+      const paWorkSet = new Set(workingWeekdays(paCommitmentDoc, emp.work_days));
+      // The alternating day (e.g. one Friday a month) is a COMMITTED day, not a
+      // day off — exclude it so working it isn't mistaken for off-day extra.
+      const paAltDay = (paCommitmentDoc && paCommitmentDoc.is_alternating_off && paCommitmentDoc.alternating_day != null)
+        ? Number(paCommitmentDoc.alternating_day) : null;
+      if (paAltDay != null) paWorkSet.add(paAltDay);
       const paOffDayWork = (isTeken && paHasCommitment)
         ? (breakdown.days || [])
             .filter(d => (Number(d.minutes) || 0) > 0 && !paExcl.has(d.date)
@@ -1944,20 +1950,63 @@ th{background:#1e293b;color:#fff}tbody tr:nth-child(even){background:#f8fafc}tfo
  * per-employee notes, and every supporting file for the month (sick certificates
  * + uploaded documents) to the accountant.
  */
+const OFFICE_CC_DEFAULT = 'tofy10.office@gmail.com';
+
+// GET the accountant contact list + the office copy address.
+async function getAccountantContacts(req, res, next) {
+  try {
+    const listDoc = await Setting.findOne({ key: 'accountant_emails' }).lean();
+    let emails = Array.isArray(listDoc?.value) ? listDoc.value.map(e => String(e).trim()).filter(Boolean) : [];
+    if (emails.length === 0) {
+      const single = await Setting.findOne({ key: 'accountant_email' }).lean();
+      if (single?.value) emails = [String(single.value).trim()].filter(Boolean);
+    }
+    const officeDoc = await Setting.findOne({ key: 'office_cc_email' }).lean();
+    const office_cc = (officeDoc && typeof officeDoc.value === 'string' && officeDoc.value.trim())
+      ? officeDoc.value.trim() : OFFICE_CC_DEFAULT;
+    res.json({ accountant_emails: emails, office_cc });
+  } catch (err) { next(err); }
+}
+
+// PUT the accountant contact list (and optionally the office copy address).
+async function setAccountantContacts(req, res, next) {
+  try {
+    const emails = Array.isArray(req.body?.accountant_emails)
+      ? [...new Set(req.body.accountant_emails.map(e => String(e).trim()).filter(Boolean))] : [];
+    await Setting.findOneAndUpdate({ key: 'accountant_emails' }, { value: emails }, { upsert: true });
+    if (typeof req.body?.office_cc === 'string') {
+      await Setting.findOneAndUpdate({ key: 'office_cc_email' }, { value: req.body.office_cc.trim() }, { upsert: true });
+    }
+    res.json({ ok: true, accountant_emails: emails });
+  } catch (err) { next(err); }
+}
+
 async function sendToAccountant(req, res, next) {
   try {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const branch = req.query.branch || 'all';
 
-    // Recipient: explicit override (also persisted) or the stored setting.
-    const override = (req.body?.email || '').trim();
-    const stored = await Setting.findOne({ key: 'accountant_email' }).lean();
-    const to = override || stored?.value || '';
-    if (!to) return res.status(400).json({ error: 'מייל רואה חשבון לא מוגדר' });
-    if (override && override !== stored?.value) {
-      await Setting.findOneAndUpdate({ key: 'accountant_email' }, { value: override }, { upsert: true });
+    // Recipients: the saved accountant-contact list (fallback to the legacy
+    // single setting). An optional per-send override list is also persisted.
+    let toList = [];
+    const listDoc = await Setting.findOne({ key: 'accountant_emails' }).lean();
+    if (Array.isArray(listDoc?.value)) toList = listDoc.value.map(e => String(e).trim()).filter(Boolean);
+    if (toList.length === 0) {
+      const single = await Setting.findOne({ key: 'accountant_email' }).lean();
+      if (single?.value) toList = [String(single.value).trim()].filter(Boolean);
     }
+    if (Array.isArray(req.body?.emails) && req.body.emails.length) {
+      toList = req.body.emails.map(e => String(e).trim()).filter(Boolean);
+      await Setting.findOneAndUpdate({ key: 'accountant_emails' }, { value: toList }, { upsert: true });
+    }
+    if (toList.length === 0) return res.status(400).json({ error: 'מייל רואה חשבון לא מוגדר' });
+    // The office always gets a copy (cc), editable via the office_cc_email setting.
+    const officeDoc = await Setting.findOne({ key: 'office_cc_email' }).lean();
+    const officeCc = (officeDoc && typeof officeDoc.value === 'string' && officeDoc.value.trim())
+      ? officeDoc.value.trim() : 'tofy10.office@gmail.com';
+    const to = toList;
+    const cc = officeCc ? [officeCc] : [];
 
     // Exact same table data as the screen.
     const data = await fetchMonthData({ month, branch }, req.user);
@@ -2007,19 +2056,22 @@ async function sendToAccountant(req, res, next) {
 
     const result = await dispatchEmail({
       to,
+      cc,
       subject: `טבלת שכר ${month} — גן החלומות`,
       html: intro + html,
       attachments: [{ name: `טבלת שכר ${month}`, html }], // GAS converts to a PDF copy
       fileAttachments,
     });
 
-    res.json({ ok: true, sent_to: to, employees: rows.length, attachments: fileAttachments.length, provider: result?.provider || null });
+    res.json({ ok: true, sent_to: to.join(', '), cc: cc.join(', '), employees: rows.length, attachments: fileAttachments.length, provider: result?.provider || null });
   } catch (err) { next(err); }
 }
 
 module.exports = {
   getMonth,
   sendToAccountant,
+  getAccountantContacts,
+  setAccountantContacts,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

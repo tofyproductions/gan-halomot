@@ -93,11 +93,19 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     return reg + ot125 * 1.25 + ot150 * 1.5;
   };
 
-  // Alternating day (e.g. "Friday every other week" — שישי לסירוגין): she is
-  // committed HALF the time, so we count half its hours and never flag it as an
-  // absence or as an off-day-worked offset (we can't know which specific week).
+  // Alternating day (e.g. "Friday once a month" — שישי לסירוגין): she is committed
+  // only SOME occurrences, so we never flag it as an absence or as an off-day
+  // offset (we can't know which specific week). The monthly committed hours for
+  // that day are added ONCE after the loop:
+  //   alternating_per_month set (N) → N × the day's hours
+  //   legacy (null)                 → half time per occurrence (≈ every other week)
   const altDay = (commitment.is_alternating_off && commitment.alternating_day != null)
     ? commitment.alternating_day : null;
+  const altPerMonth = (altDay != null && commitment.alternating_per_month != null)
+    ? Number(commitment.alternating_per_month) : null;
+  const altDayHours = altDay != null
+    ? Math.max(0, hhmmToHours(byWeekday.get(altDay)?.end_hhmm) - hhmmToHours(byWeekday.get(altDay)?.start_hhmm))
+    : 0;
 
   const committed = [];
   const off = [];
@@ -113,8 +121,12 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     }
     const dayHours = Math.max(0, hhmmToHours(cd.end_hhmm) - hhmmToHours(cd.start_hhmm));
     if (altDay != null && day.weekday === altDay) {
-      committed_hours += 0.5 * dayHours;                       // half-time alternating day
-      committed_weighted_hours += 0.5 * weightedDayHours(dayHours);
+      // A fixed count per month is added once, after the loop; the legacy mode
+      // accrues half the day's hours on every occurrence.
+      if (altPerMonth == null) {
+        committed_hours += 0.5 * dayHours;
+        committed_weighted_hours += 0.5 * weightedDayHours(dayHours);
+      }
       continue;                                                // not absence-flagged, not an offset
     }
     if (cd.is_off) off.push(day.ymd);
@@ -123,6 +135,11 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
       committed_hours += dayHours;
       committed_weighted_hours += weightedDayHours(dayHours);
     }
+  }
+  // Fixed alternating count: add the whole month's contribution once.
+  if (altPerMonth != null && altDayHours > 0) {
+    committed_hours += altPerMonth * altDayHours;
+    committed_weighted_hours += altPerMonth * weightedDayHours(altDayHours);
   }
 
   const worked = [...workedSet].sort();

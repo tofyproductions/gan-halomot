@@ -16,6 +16,11 @@ router.use(authMiddleware);
 // Edits go through pending change-request flow (see /change-requests below).
 router.get('/',                               c.getMonth);
 
+// Accountant contact list (recipients of the monthly send) + office copy address.
+// Literal paths — declared before the /:param routes below.
+router.get('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.getAccountantContacts);
+router.put('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.setAccountantContacts);
+
 // Change-request workflow: branch managers stage edits → accountant approves.
 router.post('/change-requests',               requireRole('system_admin', 'accountant', 'branch_manager'), c.createChangeRequest);
 router.get('/change-requests',                requireRole('system_admin', 'accountant', 'branch_manager'), c.listChangeRequests);

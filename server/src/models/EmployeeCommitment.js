@@ -23,6 +23,12 @@ const employeeCommitmentSchema = new mongoose.Schema({
   // flag so the integrator can decide which weeks the day counts.
   is_alternating_off: { type: Boolean, default: false },
   alternating_day: { type: Number, default: null },      // 0..5 — the day that alternates
+  // How many times PER MONTH the alternating day is actually worked (e.g. one
+  // Friday a month = 1, every other week ≈ 2). null → legacy "every other week"
+  // (counted at half time per occurrence). The monthly committed hours for that
+  // day = alternating_per_month × the day's hours, and the day is never flagged
+  // as an absence (we can't know which specific occurrence she works).
+  alternating_per_month: { type: Number, default: null }, // 1 | 2 | 3 | 4
   notes: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
