@@ -30,6 +30,8 @@ router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accou
 // supplement-approval flag for their own branches (enforced in the controller).
 router.patch('/:employeeId',                  requireRole('system_admin', 'accountant', 'branch_manager'), c.upsertEntry);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
+// Preview the accountant PDF (no send) — drives the preview dialog.
+router.get('/:month/accountant-preview',      requireRole('system_admin', 'accountant'), c.previewAccountant);
 // Email the month's salary table + supporting files to the accountant.
 router.post('/:month/send-accountant',        requireRole('system_admin', 'accountant'), c.sendToAccountant);
 router.post('/:month/reopen',                 requireRole('system_admin', 'accountant'), c.reopenMonth);

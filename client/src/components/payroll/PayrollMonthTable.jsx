@@ -694,6 +694,100 @@ function AccountantContactsDialog({ open, onClose }) {
   );
 }
 
+/* Preview the accountant PDF before sending, and choose recipients per-send.
+   Renders the same cards HTML the PDF is built from inside an iframe. */
+function AccountantPreviewDialog({ open, month, branch, onClose, onManageContacts }) {
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [data, setData] = useState(null);
+  const [selected, setSelected] = useState({});
+  const [extra, setExtra] = useState([]);
+  const [newEmail, setNewEmail] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setData(null); setExtra([]); setNewEmail('');
+    setLoading(true);
+    const params = {};
+    if (branch) params.branch = branch;
+    api.get(`/payroll-month/${month}/accountant-preview`, { params })
+      .then(res => {
+        setData(res.data);
+        const sel = {}; (res.data.accountant_emails || []).forEach(e => { sel[e] = true; });
+        setSelected(sel);
+      })
+      .catch(err => { toast.error(err.response?.data?.error || 'שגיאה בטעינת תצוגה מקדימה'); onClose(); })
+      .finally(() => setLoading(false));
+  }, [open, month, branch]);
+
+  const chosen = [...Object.keys(selected).filter(e => selected[e]), ...extra];
+  const addExtra = () => {
+    const e = newEmail.trim();
+    if (!e) return;
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { toast.error('מייל לא תקין'); return; }
+    if (!chosen.includes(e)) setExtra(prev => [...prev, e]);
+    setNewEmail('');
+  };
+  const send = () => {
+    if (chosen.length === 0) { toast.error('בחר לפחות נמען אחד'); return; }
+    setSending(true);
+    const params = {};
+    if (branch) params.branch = branch;
+    api.post(`/payroll-month/${month}/send-accountant`, { emails: chosen }, { params })
+      .then(res => { toast.success(`נשלח ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} · ${res.data.attachments} קבצים`); onClose(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה'))
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '92vh' } }}>
+      <DialogTitle sx={{ fontWeight: 700 }}>
+        תצוגה מקדימה — שליחה לרו״ח{data ? ` · ${data.employees} עובדים · ${data.attachments} קבצים מצורפים` : ''}
+      </DialogTitle>
+      <DialogContent dividers sx={{ display: 'flex', gap: 1.5, p: 1.5 }}>
+        <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
+          {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><CircularProgress /></Box>}
+          {!loading && data && <iframe title="preview" srcDoc={data.html} style={{ width: '100%', height: '100%', border: 'none' }} />}
+        </Box>
+        <Box sx={{ width: 290, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>נמענים</Typography>
+          <Typography variant="caption" color="text.secondary">בחר לאן לשלוח. עותק נשלח תמיד למשרד.</Typography>
+          <Box sx={{ flex: 1, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
+            {data && (data.accountant_emails || []).length === 0 && extra.length === 0 && (
+              <Alert severity="warning" sx={{ fontSize: '0.72rem' }}>לא הוגדרו נמענים. הוסף למטה או דרך ניהול אנשי קשר.</Alert>
+            )}
+            {data && (data.accountant_emails || []).map(e => (
+              <FormControlLabel key={e} sx={{ display: 'flex', m: 0 }}
+                control={<Checkbox size="small" checked={!!selected[e]} onChange={ev => setSelected(s => ({ ...s, [e]: ev.target.checked }))} />}
+                label={<Typography variant="body2" dir="ltr" sx={{ fontFamily: 'monospace', fontSize: '0.74rem' }}>{e}</Typography>} />
+            ))}
+            {extra.map(e => (
+              <Stack key={e} direction="row" alignItems="center" spacing={0.5}>
+                <Checkbox size="small" checked disabled />
+                <Typography variant="body2" dir="ltr" sx={{ flex: 1, fontFamily: 'monospace', fontSize: '0.74rem' }}>{e}</Typography>
+                <IconButton size="small" onClick={() => setExtra(prev => prev.filter(x => x !== e))}><DeleteOutlineIcon fontSize="small" /></IconButton>
+              </Stack>
+            ))}
+          </Box>
+          <Stack direction="row" spacing={0.5}>
+            <TextField size="small" fullWidth placeholder="מייל נוסף (חד-פעמי)" value={newEmail} dir="ltr"
+              onChange={e => setNewEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addExtra(); } }} />
+            <Button size="small" variant="outlined" onClick={addExtra}>הוסף</Button>
+          </Stack>
+          {data && <Typography variant="caption" color="text.secondary">עותק למשרד: <span dir="ltr">{data.office_cc}</span></Typography>}
+          <Button size="small" onClick={onManageContacts}>ניהול אנשי קשר קבועים</Button>
+        </Box>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" startIcon={sending ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
+          onClick={send} disabled={loading || sending || chosen.length === 0}>שלח עכשיו</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /* ─── Main component ────────────────────────────────────────────────── */
 
 export default function PayrollMonthTable() {
@@ -966,21 +1060,9 @@ export default function PayrollMonthTable() {
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const [sendingAcc, setSendingAcc] = useState(false);
   const [acctContactsOpen, setAcctContactsOpen] = useState(false);
-  const sendToAccountant = async () => {
-    if (!(await confirm({
-      title: 'שליחה לרואה חשבון',
-      message: `לשלוח את טבלת השכר של ${month} לרואה החשבון — כולל ההערות וכל הקבצים המצורפים לחודש (אישורי מחלה, מילואים וכו')?`,
-    }))) return;
-    setSendingAcc(true);
-    const params = {};
-    if (selectedBranch && !isAllBranches) params.branch = selectedBranch;
-    api.post(`/payroll-month/${month}/send-accountant`, {}, { params })
-      .then(res => toast.success(`נשלח ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} · ${res.data.employees} עובדים · ${res.data.attachments} קבצים`))
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה לרו״ח'))
-      .finally(() => setSendingAcc(false));
-  };
+  const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
+  const acctBranch = (selectedBranch && !isAllBranches) ? selectedBranch : null;
 
   const finalize = async () => {
     if (!(await confirm({ title: 'נעילת חודש', message: 'לנעול את החודש? לא ניתן יהיה לערוך עד ביטול הנעילה.', danger: true, remember_key: 'finalize-month' }))) return;
@@ -1528,8 +1610,8 @@ export default function PayrollMonthTable() {
           <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
           <Button size="small" variant="contained" color="primary"
-            startIcon={sendingAcc ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
-            onClick={sendToAccountant} disabled={!data || sendingAcc || stagingMode}>שלח לרו״ח</Button>
+            startIcon={<SendIcon />}
+            onClick={() => setAcctPreviewOpen(true)} disabled={!data || stagingMode}>שלח לרו״ח</Button>
           <Tooltip title="הגדרת נמעני רו״ח"><span>
             <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
           </span></Tooltip>
@@ -2033,6 +2115,8 @@ export default function PayrollMonthTable() {
         onClear={() => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, null); setTravelDlg({ open: false, row: null, locked: false }); }}
       />
       <AccountantContactsDialog open={acctContactsOpen} onClose={() => setAcctContactsOpen(false)} />
+      <AccountantPreviewDialog open={acctPreviewOpen} month={month} branch={acctBranch}
+        onClose={() => setAcctPreviewOpen(false)} onManageContacts={() => { setAcctPreviewOpen(false); setAcctContactsOpen(true); }} />
       <EmployeeNumberDialog
         open={empNumDlg.open}
         row={empNumDlg.row}

@@ -2068,6 +2068,21 @@ ${sections}
  */
 const OFFICE_CC_DEFAULT = 'tofy10.office@gmail.com';
 
+// Shared read of the saved accountant recipient list + office copy address.
+async function readAccountantRecipients() {
+  let toList = [];
+  const listDoc = await Setting.findOne({ key: 'accountant_emails' }).lean();
+  if (Array.isArray(listDoc?.value)) toList = listDoc.value.map(e => String(e).trim()).filter(Boolean);
+  if (toList.length === 0) {
+    const single = await Setting.findOne({ key: 'accountant_email' }).lean();
+    if (single?.value) toList = [String(single.value).trim()].filter(Boolean);
+  }
+  const officeDoc = await Setting.findOne({ key: 'office_cc_email' }).lean();
+  const officeCc = (officeDoc && typeof officeDoc.value === 'string' && officeDoc.value.trim())
+    ? officeDoc.value.trim() : OFFICE_CC_DEFAULT;
+  return { toList, officeCc };
+}
+
 // GET the accountant contact list + the office copy address.
 async function getAccountantContacts(req, res, next) {
   try {
@@ -2097,32 +2112,49 @@ async function setAccountantContacts(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Build the accountant PDF HTML WITHOUT sending — drives the preview dialog.
+// Returns the rendered cards + the default recipients + supporting-file count.
+async function previewAccountant(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const branch = req.query.branch || 'all';
+    const data = await fetchMonthData({ month, branch }, req.user);
+    const rows = (data.rows || []).filter(r => !r.is_freelancer);
+    if (rows.length === 0) return res.status(400).json({ error: 'אין עובדים לשליחה בחודש זה' });
+    const html = buildAccountantHtml(month, rows);
+    const { toList, officeCc } = await readAccountantRecipients();
+    // Count the supporting files that would be attached (certs + month docs).
+    const empIds = rows.map(r => r.employee_id);
+    const emps = await Employee.find({ _id: { $in: empIds } }).select('_id user_id').lean();
+    const userIds = emps.filter(e => e.user_id).map(e => e.user_id);
+    const certCount = await EmployeeRequest.countDocuments({
+      type: { $in: ['sick', 'vacation'] }, status: 'approved',
+      from_date: { $regex: `^${month}` }, medical_file_data: { $ne: null },
+      $or: [{ employee_id: { $in: empIds } }, ...(userIds.length ? [{ user_id: { $in: userIds } }] : [])],
+    });
+    const docCount = await EmployeeDocument.countDocuments({ employee_id: { $in: empIds }, month });
+    res.json({ html, employees: rows.length, attachments: certCount + docCount, accountant_emails: toList, office_cc: officeCc });
+  } catch (err) { next(err); }
+}
+
 async function sendToAccountant(req, res, next) {
   try {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const branch = req.query.branch || 'all';
 
-    // Recipients: the saved accountant-contact list (fallback to the legacy
-    // single setting). An optional per-send override list is also persisted.
-    let toList = [];
-    const listDoc = await Setting.findOne({ key: 'accountant_emails' }).lean();
-    if (Array.isArray(listDoc?.value)) toList = listDoc.value.map(e => String(e).trim()).filter(Boolean);
-    if (toList.length === 0) {
-      const single = await Setting.findOne({ key: 'accountant_email' }).lean();
-      if (single?.value) toList = [String(single.value).trim()].filter(Boolean);
-    }
+    // Recipients: the saved contact list, OR an explicit per-send selection from
+    // the preview dialog (one-off — does NOT overwrite the saved defaults; edit
+    // those via the contacts dialog). The office always gets a copy.
+    const saved = await readAccountantRecipients();
+    let toList = saved.toList;
     if (Array.isArray(req.body?.emails) && req.body.emails.length) {
-      toList = req.body.emails.map(e => String(e).trim()).filter(Boolean);
-      await Setting.findOneAndUpdate({ key: 'accountant_emails' }, { value: toList }, { upsert: true });
+      toList = [...new Set(req.body.emails.map(e => String(e).trim()).filter(Boolean))];
     }
     if (toList.length === 0) return res.status(400).json({ error: 'מייל רואה חשבון לא מוגדר' });
-    // The office always gets a copy (cc), editable via the office_cc_email setting.
-    const officeDoc = await Setting.findOne({ key: 'office_cc_email' }).lean();
-    const officeCc = (officeDoc && typeof officeDoc.value === 'string' && officeDoc.value.trim())
-      ? officeDoc.value.trim() : 'tofy10.office@gmail.com';
     const to = toList;
-    const cc = officeCc ? [officeCc] : [];
+    const cc = saved.officeCc ? [saved.officeCc] : [];
 
     // Exact same table data as the screen.
     const data = await fetchMonthData({ month, branch }, req.user);
@@ -2187,6 +2219,7 @@ async function sendToAccountant(req, res, next) {
 module.exports = {
   getMonth,
   sendToAccountant,
+  previewAccountant,
   getAccountantContacts,
   setAccountantContacts,
   upsertEntry,
