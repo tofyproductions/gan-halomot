@@ -1982,22 +1982,22 @@ function buildAccountantHtml(month, rows) {
     const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
     const bank = [r.bank_number, r.bank_branch, r.bank_account].some(Boolean);
 
-    return `<table style="width:100%;border-collapse:collapse;border:2px solid ${m.accent};margin:0 0 8px;page-break-inside:avoid;border-radius:6px;overflow:hidden">
+    return `<table style="width:100%;table-layout:fixed;border-collapse:collapse;border:2px solid ${m.accent};margin:0 0 8px;page-break-inside:avoid">
       <tr style="background:${m.tint}">
-        <td style="padding:6px 8px;border-bottom:1px solid ${m.accent}">
+        <td style="width:72%;padding:6px 8px;border-bottom:1px solid ${m.accent}">
           <span style="font-size:14px;font-weight:800;color:#0f172a">${r.full_name}</span>
           ${r.employee_number ? `<span style="font-size:10px;color:#475569"> · מס׳ ${r.employee_number}</span>` : ''}
           <span style="font-size:10px;color:#475569"> · ת״ז ${r.israeli_id || '—'}</span>
           ${r.position ? `<span style="font-size:10px;color:#475569"> · ${r.position}</span>` : ''}
           <span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:9px;background:${m.strip};color:${m.stripText};font-size:9px;font-weight:700">${isGlobal ? 'תקן' : 'שעתי'}</span>
         </td>
-        <td style="padding:6px 8px;text-align:left;border-bottom:1px solid ${m.accent};white-space:nowrap">
+        <td style="width:28%;padding:6px 8px;text-align:left;border-bottom:1px solid ${m.accent};white-space:nowrap">
           <span style="font-size:9px;color:#64748b">סה״כ משוער</span>
           <span style="font-size:16px;font-weight:800;color:${m.accent}">${f(b.estimated_total)}</span>
         </td>
       </tr>
       <tr><td colspan="2" style="padding:0">
-        <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
+        <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-family:Arial,sans-serif">
           <tr>
             ${cell('ימי עבודה', n1(h.days_worked))}
             ${cell('סה״כ שעות', n1(h.total))}
