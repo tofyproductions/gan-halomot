@@ -2255,8 +2255,11 @@ async function sendToAccountant(req, res, next) {
       provider = r?.provider || provider;
     }
     console.log(`accountant send complete: ${month} → ${to.join(', ')} · ${rows.length} emp · ${batches.length} emails · ${provider}`);
+    try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: true, month, provider, emails: batches.length, employees: rows.length, files: fileAttachments.length, to } }, { upsert: true }); } catch (_) {}
     } catch (e) {
       console.error('accountant send (bg) failed:', e.message, JSON.stringify(e.detail || e.code || ''));
+      // Record the failure so it can be diagnosed (read from the settings store).
+      try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: false, month, message: e.message, code: e.code || null, responseCode: e.responseCode || null, detail: e.detail || null } }, { upsert: true }); } catch (_) {}
       // Notify the office so a silent failure doesn't go unnoticed.
       try {
         await dispatchEmail({
