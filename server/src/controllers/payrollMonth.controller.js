@@ -1908,40 +1908,156 @@ function extOf(name = '', mime = '') {
 }
 const safeName = (s) => String(s || '').replace(/[\/\\:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
 
+// Per-gan marker colours — mirror of client GAN_MARKERS so the accountant PDF
+// matches the on-screen branch colours. Matched by substring of the branch name.
+const ACCT_GAN_MARKERS = [
+  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', tint: '#fef2f2', accent: '#dc2626' },
+  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', tint: '#fefce8', accent: '#eab308' },
+  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', tint: '#fff7ed', accent: '#ea580c' },
+  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', tint: '#fdf2f8', accent: '#db2777' },
+];
+const acctMarker = (name) => ACCT_GAN_MARKERS.find(g => g.match.some(m => (name || '').includes(m)))
+  || { strip: '#475569', stripText: '#ffffff', tint: '#f8fafc', accent: '#334155' };
+
+// One print-ready PDF for the accountant: a card per employee with every field
+// needed to build a payslip, grouped by branch with matching gan colours.
 function buildAccountantHtml(month, rows) {
-  const f = (n) => Math.round(Number(n) || 0).toLocaleString('he-IL');
+  const f = (n) => '₪' + Math.round(Number(n) || 0).toLocaleString('he-IL');
   const n1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('he-IL');
-  const heads = ['עובד', 'ימים', 'שעות', 'בסיס', 'נסיעות', 'מחלה', 'חופשה', 'חגים', 'בונוס', 'ניכויים', 'סה״כ', 'הערות'];
-  const total = rows.reduce((s, r) => s + (r.breakdown?.estimated_total || 0), 0);
-  const tr = (r) => {
-    const b = r.breakdown || {}, c = b.components || {}, d = b.deductions || {};
-    const sickPay = r.sick_info?.pay || 0;
-    const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
-    const bonus = r.bonus?.effective || 0;
-    const ded = (d.loans || 0) + (d.absence || 0) + (r.partial_absence?.deduction || 0);
-    const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
-    return `<tr>
-      <td style="text-align:right;font-weight:600;white-space:nowrap">${r.full_name}${r.employee_number ? ` · #${r.employee_number}` : ''}<div style="font-size:9px;color:#666">${r.israeli_id || ''}</div></td>
-      <td>${n1(b.hours?.days_worked)}</td><td>${n1(b.hours?.total)}</td>
-      <td>${f(c.base_salary)}</td><td>${c.travel ? f(c.travel) : '—'}</td>
-      <td>${r.manual?.sick_days ? `${n1(r.manual.sick_days)}${sickPay ? ` · ₪${f(sickPay)}` : ''}` : '—'}</td>
-      <td>${r.vacation_eff_days ? n1(r.vacation_eff_days) : '—'}</td>
-      <td>${holiday ? f(holiday) : '—'}</td><td>${bonus ? f(bonus) : '—'}</td>
-      <td>${ded ? f(ded) : '—'}</td>
-      <td style="font-weight:800;background:#eef2ff">${f(b.estimated_total)}</td>
-      <td style="text-align:right;font-size:10px">${notes}</td>
-    </tr>`;
+  const nt = (field) => {
+    if (!field || field.kind === 'empty') return '';
+    if (field.kind === 'number') return field.amount != null ? f(field.amount) : '';
+    return field.text || '';
   };
+  const grand = rows.reduce((s, r) => s + (r.breakdown?.estimated_total || 0), 0);
+
+  // Group rows by branch, preserving a stable alphabetical branch order.
+  const byBranch = new Map();
+  for (const r of rows) {
+    const key = r.branch_name || '—';
+    if (!byBranch.has(key)) byBranch.set(key, []);
+    byBranch.get(key).push(r);
+  }
+  const branchNames = [...byBranch.keys()].sort((a, b) => a.localeCompare(b, 'he'));
+
+  // A single labelled field cell (label over value). Empty values render muted.
+  const cell = (label, value, opts = {}) => {
+    const has = value !== '' && value != null && value !== '—';
+    const valColor = opts.color || (has ? '#0f172a' : '#cbd5e1');
+    return `<td style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top;width:${opts.w || '16.6%'}">
+      <div style="font-size:8.5px;color:#64748b;font-weight:700">${label}</div>
+      <div style="font-size:11px;font-weight:${opts.bold ? 800 : 600};color:${valColor}">${has ? value : '—'}</div>
+    </td>`;
+  };
+
+  const card = (r) => {
+    const b = r.breakdown || {}, c = b.components || {}, d = b.deductions || {}, h = b.hours || {};
+    const tb = c.teken_breakdown || {};
+    const isGlobal = r.salary_type === 'global';
+    const m = acctMarker(r.branch_name);
+    const sickPay = r.sick_info?.pay || 0;
+    const sickDays = Number(r.manual?.sick_days) || 0;
+    const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
+    const vac = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0);
+    const bonus = r.bonus?.effective || 0;
+    const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
+    const paDed = r.partial_absence?.deduction || 0;
+    const paExtra = r.partial_absence?.extra_pay || 0;
+    const totalDed = (d.loans || 0) + (d.absence || 0) + paDed;
+    const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
+    const rateCell = isGlobal
+      ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''), b.rates?.global_salary ? f(b.rates.global_salary) : '')
+      : cell('תעריף שעה', b.rates?.hourly_rate ? f(b.rates.hourly_rate) : '');
+    const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
+    const bank = [r.bank_number, r.bank_branch, r.bank_account].some(Boolean);
+
+    return `<table style="width:100%;border-collapse:collapse;border:2px solid ${m.accent};margin:0 0 8px;page-break-inside:avoid;border-radius:6px;overflow:hidden">
+      <tr style="background:${m.tint}">
+        <td style="padding:6px 8px;border-bottom:1px solid ${m.accent}">
+          <span style="font-size:14px;font-weight:800;color:#0f172a">${r.full_name}</span>
+          ${r.employee_number ? `<span style="font-size:10px;color:#475569"> · מס׳ ${r.employee_number}</span>` : ''}
+          <span style="font-size:10px;color:#475569"> · ת״ז ${r.israeli_id || '—'}</span>
+          ${r.position ? `<span style="font-size:10px;color:#475569"> · ${r.position}</span>` : ''}
+          <span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:9px;background:${m.strip};color:${m.stripText};font-size:9px;font-weight:700">${isGlobal ? 'תקן' : 'שעתי'}</span>
+        </td>
+        <td style="padding:6px 8px;text-align:left;border-bottom:1px solid ${m.accent};white-space:nowrap">
+          <span style="font-size:9px;color:#64748b">סה״כ משוער</span>
+          <span style="font-size:16px;font-weight:800;color:${m.accent}">${f(b.estimated_total)}</span>
+        </td>
+      </tr>
+      <tr><td colspan="2" style="padding:0">
+        <table style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif">
+          <tr>
+            ${cell('ימי עבודה', n1(h.days_worked))}
+            ${cell('סה״כ שעות', n1(h.total))}
+            ${cell('רגילות', n1(h.regular))}
+            ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
+            ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
+            ${rateCell}
+          </tr>
+          <tr>
+            ${cell('שכר בסיס', f(c.base_salary), { bold: true })}
+            ${cell('השלמת שכר', completion ? f(completion) : '')}
+            ${cell('נסיעות', c.travel ? f(c.travel) : '')}
+            ${cell('דמי חגים', holiday ? f(holiday) : '')}
+            ${cell('בונוס', bonus ? f(bonus) : '')}
+            ${cell('מחלה', sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '')}
+          </tr>
+          <tr>
+            ${cell('חופשה', vac ? `${n1(vac)} ימים` : '')}
+            ${cell('מילואים', nt(r.manual?.miluim))}
+            ${cell('GIFT CARD', nt(r.manual?.gift_card))}
+            ${cell('הבראה', nt(r.manual?.recreation))}
+            ${cell('סיבוס', nt(r.manual?.cibus))}
+            ${cell('תוספת שעות', paExtra ? f(paExtra) : '', { color: '#15803d' })}
+          </tr>
+          <tr>
+            ${cell('קיזוז מקדמה', advance)}
+            ${cell('הלוואות', d.loans ? '−' + f(d.loans) : '', { color: '#b91c1c' })}
+            ${cell('קיזוז היעדרות', paDed ? '−' + f(paDed) : '', { color: '#b91c1c' })}
+            ${cell('קיזוז ימי היעדרות', d.absence ? '−' + f(d.absence) : '', { color: '#b91c1c' })}
+            ${cell('סה״כ ניכויים', totalDed ? '−' + f(totalDed) : '', { color: '#b91c1c', bold: true })}
+            ${cell('', '')}
+          </tr>
+          ${bank ? `<tr>
+            ${cell('בנק', r.bank_number || '')}
+            ${cell('סניף בנק', r.bank_branch || '')}
+            ${cell('חשבון בנק', r.bank_account || '')}
+            <td colspan="3" style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top">
+              <div style="font-size:8.5px;color:#64748b;font-weight:700">הערות</div>
+              <div style="font-size:10px;color:#334155">${notes || '—'}</div></td>
+          </tr>` : (notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
+              <span style="font-size:8.5px;color:#64748b;font-weight:700">הערות: </span>
+              <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : '')}
+        </table>
+      </td></tr>
+    </table>`;
+  };
+
+  const sections = branchNames.map(name => {
+    const list = byBranch.get(name);
+    const m = acctMarker(name);
+    const subtotal = list.reduce((s, r) => s + (r.breakdown?.estimated_total || 0), 0);
+    return `<div style="page-break-inside:avoid">
+      <table style="width:100%;border-collapse:collapse;margin:14px 0 8px">
+        <tr style="background:${m.strip}">
+          <td style="padding:6px 10px;color:${m.stripText};font-size:14px;font-weight:800;border-radius:5px 0 0 5px">${name}</td>
+          <td style="padding:6px 10px;color:${m.stripText};font-size:11px;text-align:left;border-radius:0 5px 5px 0">${list.length} עובדים · ${f(subtotal)}</td>
+        </tr>
+      </table>
+    </div>${list.map(card).join('')}`;
+  }).join('');
+
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
-<style>@page{size:A4 landscape;margin:8mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
-body{font-family:Arial,sans-serif;color:#111;margin:0;padding:12px}h1{font-size:16px;text-align:center;margin:0 0 10px}
-table{width:100%;border-collapse:collapse;font-size:11px}th,td{border:1px solid #cbd5e1;padding:3px 5px;text-align:center}
-th{background:#1e293b;color:#fff}tbody tr:nth-child(even){background:#f8fafc}tfoot td{font-weight:800;background:#dbeafe}</style></head>
-<body><h1>טבלת שכר — ${month} · גן החלומות</h1>
-<table><thead><tr>${heads.map(h => `<th>${h}</th>`).join('')}</tr></thead>
-<tbody>${rows.map(tr).join('')}</tbody>
-<tfoot><tr><td colspan="10" style="text-align:left">סה״כ לתשלום · ${rows.length} עובדים</td><td>₪${f(total)}</td><td></td></tr></tfoot>
-</table></body></html>`;
+<style>@page{size:A4 portrait;margin:9mm}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;box-sizing:border-box}
+body{font-family:Arial,sans-serif;color:#111;margin:0;padding:4px}
+h1{font-size:17px;text-align:center;margin:0 0 2px}
+.sub{text-align:center;color:#475569;font-size:11px;margin:0 0 4px}</style></head>
+<body>
+<h1>כרטיסי שכר עובדים — ${month}</h1>
+<div class="sub">גן החלומות · ${rows.length} עובדים · סה״כ לתשלום ${f(grand)}</div>
+${sections}
+</body></html>`;
 }
 
 /**
@@ -2050,16 +2166,17 @@ async function sendToAccountant(req, res, next) {
 
     const intro = `<div dir="rtl" style="font-family:Arial,sans-serif">
       <p>שלום,</p>
-      <p>מצורפת טבלת השכר של גן החלומות לחודש <b>${month}</b> (${rows.length} עובדים), כולל הערות לכל עובד.</p>
+      <p>מצורף קובץ PDF מוכן להדפסה עם <b>כרטיס שכר לכל עובד</b> לחודש <b>${month}</b> (${rows.length} עובדים),
+         מחולק לפי סניפים וצבעים, הכולל את כל הנתונים הנדרשים להפקת התלושים.</p>
       <p>מצורפים גם ${fileAttachments.length} מסמכים תומכים לאותו חודש (אישורי מחלה, מילואים וכו').</p>
     </div><hr>`;
 
     const result = await dispatchEmail({
       to,
       cc,
-      subject: `טבלת שכר ${month} — גן החלומות`,
+      subject: `כרטיסי שכר ${month} — גן החלומות`,
       html: intro + html,
-      attachments: [{ name: `טבלת שכר ${month}`, html }], // GAS converts to a PDF copy
+      attachments: [{ name: `כרטיסי שכר ${month}`, html }], // GAS converts to a print-ready PDF
       fileAttachments,
     });
 
@@ -2100,4 +2217,5 @@ module.exports = {
   // Internal helper reused by the per-employee hours report so it shows the
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
+  buildAccountantHtml,
 };
