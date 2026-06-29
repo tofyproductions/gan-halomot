@@ -2167,10 +2167,18 @@ async function sendToAccountant(req, res, next) {
     const to = toList;
     const cc = saved.officeCc ? [saved.officeCc] : [];
 
+    // Respond immediately — building 84 cards into a print-ready PDF and sending
+    // up to ~25MB of attachments through GAS takes far longer than the client's
+    // 30s HTTP timeout. Do the heavy work in the background and report "started".
+    res.json({ ok: true, queued: true, sent_to: to.join(', '), cc: cc.join(', ') });
+
+    // ----- background send (not awaited; never throws to the request) -----
+    void (async () => {
+    try {
     // Exact same table data as the screen.
     const data = await fetchMonthData({ month, branch }, req.user);
     const rows = (data.rows || []).filter(r => !r.is_freelancer);
-    if (rows.length === 0) return res.status(400).json({ error: 'אין עובדים לשליחה בחודש זה' });
+    if (rows.length === 0) { console.warn('accountant send: no employees for', month); return; }
     const html = buildAccountantHtml(month, rows);
 
     // Gather supporting files for the month: sick/vacation certificates + uploads.
@@ -2246,10 +2254,21 @@ async function sendToAccountant(req, res, next) {
       });
       provider = r?.provider || provider;
     }
-
-    res.json({ ok: true, sent_to: to.join(', '), cc: cc.join(', '), employees: rows.length, attachments: fileAttachments.length, emails: batches.length, provider });
+    console.log(`accountant send complete: ${month} → ${to.join(', ')} · ${rows.length} emp · ${batches.length} emails · ${provider}`);
+    } catch (e) {
+      console.error('accountant send (bg) failed:', e.message, JSON.stringify(e.detail || e.code || ''));
+      // Notify the office so a silent failure doesn't go unnoticed.
+      try {
+        await dispatchEmail({
+          to: cc.length ? cc : to,
+          subject: `⚠️ שליחת טבלת שכר ${month} לרו״ח נכשלה`,
+          html: `<div dir="rtl" style="font-family:Arial,sans-serif"><p>השליחה האוטומטית של טבלת השכר לחודש <b>${month}</b> לרו״ח נכשלה.</p><p>פרטי השגיאה: ${e.message}</p><p>נסו שוב מהמערכת.</p></div>`,
+        });
+      } catch (e2) { console.error('accountant failure-notice email also failed:', e2.message); }
+    }
+    })();
   } catch (err) {
-    console.error('sendToAccountant failed:', err.message, JSON.stringify(err.detail || err.code || ''));
+    console.error('sendToAccountant setup failed:', err.message);
     return res.status(502).json({ error: `שגיאה בשליחה: ${err.message}` });
   }
 }

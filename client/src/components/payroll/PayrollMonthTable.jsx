@@ -734,7 +734,7 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
     const params = {};
     if (branch) params.branch = branch;
     api.post(`/payroll-month/${month}/send-accountant`, { emails: chosen }, { params })
-      .then(res => { toast.success(`נשלח ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} · ${res.data.attachments} קבצים${res.data.emails > 1 ? ` · ${res.data.emails} מיילים` : ''}`); onClose(); })
+      .then(res => { toast.success(`השליחה יצאה ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} — הכרטיסים והמסמכים יגיעו תוך כמה דקות`, { autoClose: 6000 }); onClose(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה'))
       .finally(() => setSending(false));
   };
