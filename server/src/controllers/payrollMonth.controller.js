@@ -1982,66 +1982,67 @@ function buildAccountantHtml(month, rows) {
     const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
     const bank = [r.bank_number, r.bank_branch, r.bank_account].some(Boolean);
 
+    // Single fixed-layout table with a colgroup of 6 equal columns. A top-level
+    // table is stretched to 100% by GAS's renderer (a NESTED one is not), so the
+    // whole card — header + grid — fills the page width.
+    const cg = '<colgroup>' + '<col style="width:16.66%"></col>'.repeat(6) + '</colgroup>';
     return `<table style="width:100%;table-layout:fixed;border-collapse:collapse;border:2px solid ${m.accent};margin:0 0 8px;page-break-inside:avoid">
+      ${cg}
       <tr style="background:${m.tint}">
-        <td style="width:72%;padding:6px 8px;border-bottom:1px solid ${m.accent}">
+        <td colspan="4" style="padding:6px 8px;border-bottom:1px solid ${m.accent}">
           <span style="font-size:14px;font-weight:800;color:#0f172a">${r.full_name}</span>
           ${r.employee_number ? `<span style="font-size:10px;color:#475569"> · מס׳ ${r.employee_number}</span>` : ''}
           <span style="font-size:10px;color:#475569"> · ת״ז ${r.israeli_id || '—'}</span>
           ${r.position ? `<span style="font-size:10px;color:#475569"> · ${r.position}</span>` : ''}
           <span style="display:inline-block;margin-right:6px;padding:1px 7px;border-radius:9px;background:${m.strip};color:${m.stripText};font-size:9px;font-weight:700">${isGlobal ? 'תקן' : 'שעתי'}</span>
         </td>
-        <td style="width:28%;padding:6px 8px;text-align:left;border-bottom:1px solid ${m.accent};white-space:nowrap">
+        <td colspan="2" style="padding:6px 8px;text-align:left;border-bottom:1px solid ${m.accent};white-space:nowrap">
           <span style="font-size:9px;color:#64748b">סה״כ משוער</span>
           <span style="font-size:16px;font-weight:800;color:${m.accent}">${f(b.estimated_total)}</span>
         </td>
       </tr>
-      <tr><td colspan="2" style="padding:0">
-        <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-family:Arial,sans-serif">
-          <tr>
-            ${cell('ימי עבודה', n1(h.days_worked))}
-            ${cell('סה״כ שעות', n1(h.total))}
-            ${cell('רגילות', n1(h.regular))}
-            ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
-            ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
-            ${rateCell}
-          </tr>
-          <tr>
-            ${cell('שכר בסיס', f(c.base_salary), { bold: true })}
-            ${cell('השלמת שכר', completion ? f(completion) : '')}
-            ${cell('נסיעות', c.travel ? f(c.travel) : '')}
-            ${cell('דמי חגים', holiday ? f(holiday) : '')}
-            ${cell('בונוס', bonus ? f(bonus) : '')}
-            ${cell('מחלה', sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '')}
-          </tr>
-          <tr>
-            ${cell('חופשה', vac ? `${n1(vac)} ימים` : '')}
-            ${cell('מילואים', nt(r.manual?.miluim))}
-            ${cell('GIFT CARD', nt(r.manual?.gift_card))}
-            ${cell('הבראה', nt(r.manual?.recreation))}
-            ${cell('סיבוס', nt(r.manual?.cibus))}
-            ${cell('תוספת שעות', paExtra ? f(paExtra) : '', { color: '#15803d' })}
-          </tr>
-          <tr>
-            ${cell('קיזוז מקדמה', advance)}
-            ${cell('הלוואות', d.loans ? '−' + f(d.loans) : '', { color: '#b91c1c' })}
-            ${cell('קיזוז היעדרות', paDed ? '−' + f(paDed) : '', { color: '#b91c1c' })}
-            ${cell('קיזוז ימי היעדרות', d.absence ? '−' + f(d.absence) : '', { color: '#b91c1c' })}
-            ${cell('סה״כ ניכויים', totalDed ? '−' + f(totalDed) : '', { color: '#b91c1c', bold: true })}
-            ${cell('', '')}
-          </tr>
-          ${bank ? `<tr>
-            ${cell('בנק', r.bank_number || '')}
-            ${cell('סניף בנק', r.bank_branch || '')}
-            ${cell('חשבון בנק', r.bank_account || '')}
-            <td colspan="3" style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top">
-              <div style="font-size:8.5px;color:#64748b;font-weight:700">הערות</div>
-              <div style="font-size:10px;color:#334155">${notes || '—'}</div></td>
-          </tr>` : (notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
-              <span style="font-size:8.5px;color:#64748b;font-weight:700">הערות: </span>
-              <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : '')}
-        </table>
-      </td></tr>
+      <tr>
+        ${cell('ימי עבודה', n1(h.days_worked))}
+        ${cell('סה״כ שעות', n1(h.total))}
+        ${cell('רגילות', n1(h.regular))}
+        ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
+        ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
+        ${rateCell}
+      </tr>
+      <tr>
+        ${cell('שכר בסיס', f(c.base_salary), { bold: true })}
+        ${cell('השלמת שכר', completion ? f(completion) : '')}
+        ${cell('נסיעות', c.travel ? f(c.travel) : '')}
+        ${cell('דמי חגים', holiday ? f(holiday) : '')}
+        ${cell('בונוס', bonus ? f(bonus) : '')}
+        ${cell('מחלה', sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '')}
+      </tr>
+      <tr>
+        ${cell('חופשה', vac ? `${n1(vac)} ימים` : '')}
+        ${cell('מילואים', nt(r.manual?.miluim))}
+        ${cell('GIFT CARD', nt(r.manual?.gift_card))}
+        ${cell('הבראה', nt(r.manual?.recreation))}
+        ${cell('סיבוס', nt(r.manual?.cibus))}
+        ${cell('תוספת שעות', paExtra ? f(paExtra) : '', { color: '#15803d' })}
+      </tr>
+      <tr>
+        ${cell('קיזוז מקדמה', advance)}
+        ${cell('הלוואות', d.loans ? '−' + f(d.loans) : '', { color: '#b91c1c' })}
+        ${cell('קיזוז היעדרות', paDed ? '−' + f(paDed) : '', { color: '#b91c1c' })}
+        ${cell('קיזוז ימי היעדרות', d.absence ? '−' + f(d.absence) : '', { color: '#b91c1c' })}
+        ${cell('סה״כ ניכויים', totalDed ? '−' + f(totalDed) : '', { color: '#b91c1c', bold: true })}
+        ${cell('', '')}
+      </tr>
+      ${bank ? `<tr>
+        ${cell('בנק', r.bank_number || '')}
+        ${cell('סניף בנק', r.bank_branch || '')}
+        ${cell('חשבון בנק', r.bank_account || '')}
+        <td colspan="3" style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top">
+          <div style="font-size:8.5px;color:#64748b;font-weight:700">הערות</div>
+          <div style="font-size:10px;color:#334155">${notes || '—'}</div></td>
+      </tr>` : (notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
+          <span style="font-size:8.5px;color:#64748b;font-weight:700">הערות: </span>
+          <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : '')}
     </table>`;
   };
 
