@@ -2207,23 +2207,47 @@ async function sendToAccountant(req, res, next) {
       });
     }
 
+    // Email size: Gmail/GAS caps a whole message at ~25MB. Pack the supporting
+    // files into batches under a budget so a heavy month never bounces — the
+    // cards PDF goes in email #1, extra files follow in additional emails.
+    const FILE_BUDGET = 18 * 1024 * 1024; // base64 chars per email
+    const batches = [];
+    let cur = [], curSize = 0;
+    for (const fa of fileAttachments) {
+      const sz = (fa.contentBase64 || '').length;
+      if (cur.length && curSize + sz > FILE_BUDGET) { batches.push(cur); cur = []; curSize = 0; }
+      cur.push(fa); curSize += sz;
+    }
+    if (cur.length) batches.push(cur);
+    if (batches.length === 0) batches.push([]); // at least the cards email
+
     const intro = `<div dir="rtl" style="font-family:Arial,sans-serif">
       <p>שלום,</p>
       <p>מצורף קובץ PDF מוכן להדפסה עם <b>כרטיס שכר לכל עובד</b> לחודש <b>${month}</b> (${rows.length} עובדים),
          מחולק לפי סניפים וצבעים, הכולל את כל הנתונים הנדרשים להפקת התלושים.</p>
-      <p>מצורפים גם ${fileAttachments.length} מסמכים תומכים לאותו חודש (אישורי מחלה, מילואים וכו').</p>
+      <p>מצורפים גם ${fileAttachments.length} מסמכים תומכים לאותו חודש (אישורי מחלה, מילואים וכו')${
+        batches.length > 1 ? `, מחולקים ל-${batches.length} מיילים בשל גודלם` : ''}.</p>
     </div><hr>`;
 
-    const result = await dispatchEmail({
-      to,
-      cc,
-      subject: `כרטיסי שכר ${month} — גן החלומות`,
-      html: intro + html,
-      attachments: [{ name: `כרטיסי שכר ${month}`, html }], // GAS converts to a print-ready PDF
-      fileAttachments,
-    });
+    let provider = null;
+    for (let i = 0; i < batches.length; i++) {
+      const first = i === 0;
+      const r = await dispatchEmail({
+        to,
+        cc,
+        subject: first
+          ? `כרטיסי שכר ${month} — גן החלומות`
+          : `מסמכים תומכים (${i + 1}/${batches.length}) — שכר ${month} · גן החלומות`,
+        html: first
+          ? intro + html
+          : `<div dir="rtl" style="font-family:Arial,sans-serif"><p>המשך — מסמכים תומכים לחודש <b>${month}</b> (חלק ${i + 1} מתוך ${batches.length}).</p></div>`,
+        attachments: first ? [{ name: `כרטיסי שכר ${month}`, html }] : [], // GAS → print-ready PDF (first email only)
+        fileAttachments: batches[i],
+      });
+      provider = r?.provider || provider;
+    }
 
-    res.json({ ok: true, sent_to: to.join(', '), cc: cc.join(', '), employees: rows.length, attachments: fileAttachments.length, provider: result?.provider || null });
+    res.json({ ok: true, sent_to: to.join(', '), cc: cc.join(', '), employees: rows.length, attachments: fileAttachments.length, emails: batches.length, provider });
   } catch (err) { next(err); }
 }
 
