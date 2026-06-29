@@ -2218,7 +2218,7 @@ async function sendToAccountant(req, res, next) {
     // Email size: Gmail/GAS caps a whole message at ~25MB. Pack the supporting
     // files into batches under a budget so a heavy month never bounces — the
     // cards PDF goes in email #1, extra files follow in additional emails.
-    const FILE_BUDGET = 18 * 1024 * 1024; // base64 chars per email
+    const FILE_BUDGET = 14 * 1024 * 1024; // base64 chars per email (headroom under GmailApp's 25MB)
     const batches = [];
     let cur = [], curSize = 0;
     for (const fa of fileAttachments) {
@@ -2247,7 +2247,7 @@ async function sendToAccountant(req, res, next) {
           ? `כרטיסי שכר ${month} — גן החלומות`
           : `מסמכים תומכים (${i + 1}/${batches.length}) — שכר ${month} · גן החלומות`,
         html: first
-          ? intro + html
+          ? intro  // short body only — the 84 cards go as the attached PDF, not inline (GmailApp caps body size)
           : `<div dir="rtl" style="font-family:Arial,sans-serif"><p>המשך — מסמכים תומכים לחודש <b>${month}</b> (חלק ${i + 1} מתוך ${batches.length}).</p></div>`,
         attachments: first ? [{ name: `כרטיסי שכר ${month}`, html }] : [], // GAS → print-ready PDF (first email only)
         fileAttachments: batches[i],
