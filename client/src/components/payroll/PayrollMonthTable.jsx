@@ -2512,6 +2512,21 @@ function PartialAbsenceCell({ row }) {
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {(pa.extra_pay || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>+₪{Math.round(pa.extra_pay).toLocaleString('he-IL')}</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
+      {(extra > 0 || totalHours > 0) && (() => {
+        // Net summary: extra hours beyond commitment minus the missing hours.
+        const net = Math.round((extra - totalHours) * 10) / 10;
+        return (
+          <Tooltip arrow title="סיכום: שעות מעבר להתחייבות פחות שעות חסר">
+            <Typography variant="caption" sx={{
+              mt: 0.2, pt: 0.2, width: '100%', textAlign: 'center', fontWeight: 800, fontSize: '0.64rem',
+              borderTop: '1px dashed', borderColor: 'divider',
+              color: net > 0 ? 'success.dark' : net < 0 ? 'error.main' : 'text.secondary',
+            }}>
+              נטו {net > 0 ? '+' : ''}{net} ש׳
+            </Typography>
+          </Tooltip>
+        );
+      })()}
     </Stack>
   );
 }
