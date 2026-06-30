@@ -2512,21 +2512,6 @@ function PartialAbsenceCell({ row }) {
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {(pa.extra_pay || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>+₪{Math.round(pa.extra_pay).toLocaleString('he-IL')}</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
-      {(extra > 0 || totalHours > 0) && (() => {
-        // Net summary: extra hours beyond commitment minus the missing hours.
-        const net = Math.round((extra - totalHours) * 10) / 10;
-        return (
-          <Tooltip arrow title="סיכום: שעות מעבר להתחייבות פחות שעות חסר">
-            <Typography variant="caption" sx={{
-              mt: 0.2, pt: 0.2, width: '100%', textAlign: 'center', fontWeight: 800, fontSize: '0.64rem',
-              borderTop: '1px dashed', borderColor: 'divider',
-              color: net > 0 ? 'success.dark' : net < 0 ? 'error.main' : 'text.secondary',
-            }}>
-              נטו {net > 0 ? '+' : ''}{net} ש׳
-            </Typography>
-          </Tooltip>
-        );
-      })()}
     </Stack>
   );
 }
@@ -2577,6 +2562,41 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
             <Alert severity="info">רלוונטי לעובדי תקן בלבד — עובד/ת שעתי/ת מקבל/ת תשלום לפי שעות בפועל.</Alert>
           ) : (
             <>
+              {(() => {
+                // Net summary reflecting the current approve/excuse selections:
+                // approved extra hours minus the shortfall hours that will be deducted.
+                const netHours = Math.round((extraApprovedHours - effectiveHours) * 10) / 10;
+                const netPay = extraPay - deduction;
+                const c = netHours > 0 ? '#15803d' : netHours < 0 ? '#b91c1c' : '#64748b';
+                return (
+                  <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderWidth: 2,
+                    borderColor: netHours > 0 ? 'success.light' : netHours < 0 ? 'error.light' : 'divider', bgcolor: '#f8fafc' }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.8 }}>סיכום נטו (לפי המאושר)</Typography>
+                    <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="caption" color="text.secondary">תוספת מאושרת</Typography>
+                        <Typography sx={{ fontWeight: 700, fontSize: 18, color: 'success.dark' }}>+{extraApprovedHours} ש׳</Typography>
+                      </Box>
+                      <Typography sx={{ fontSize: 22, color: 'text.disabled' }}>−</Typography>
+                      <Box sx={{ textAlign: 'center' }}>
+                        <Typography variant="caption" color="text.secondary">חוסר לקיזוז</Typography>
+                        <Typography sx={{ fontWeight: 700, fontSize: 18, color: 'error.main' }}>{effectiveHours} ש׳</Typography>
+                      </Box>
+                      <Typography sx={{ fontSize: 22, color: 'text.disabled' }}>=</Typography>
+                      <Box sx={{ textAlign: 'center', px: 2.5, py: 0.6, borderRadius: 2, minWidth: 120,
+                        bgcolor: netHours > 0 ? '#dcfce7' : netHours < 0 ? '#fee2e2' : '#f1f5f9' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700 }}>נטו</Typography>
+                        <Typography sx={{ fontWeight: 900, fontSize: 30, lineHeight: 1.05, color: c }}>
+                          {netHours > 0 ? '+' : ''}{netHours} <span style={{ fontSize: 16 }}>ש׳</span>
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: c }}>
+                          {netPay >= 0 ? '+' : '−'}₪{Math.abs(netPay).toLocaleString('he-IL')}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Paper>
+                );
+              })()}
               {extras.length > 0 && (
                 <>
                   <Alert severity="success" icon={false} sx={{ py: 0.5 }}>
