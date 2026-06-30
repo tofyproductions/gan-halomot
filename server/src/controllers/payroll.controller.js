@@ -623,12 +623,25 @@ async function hoursReport(req, res, next) {
     // column, so the report's missing/extra hours match the actual deduction and
     // extra pay exactly (commitment-based, grace 1h, excused, made-up, approval).
     let partial = null;
+    let leaveSummary = null;
     try {
       const { fetchMonthData } = require('./payrollMonth.controller');
       const branchId = String(emp.branch_id?._id || emp.branch_id || '');
       const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, req.user);
       const row = (md?.rows || []).find(r => String(r.employee_id) === String(emp._id));
       partial = row?.partial_absence || null;
+      if (row) {
+        // Monthly leave/absence tallies for the report's summary.
+        const ntVal = (f) => (f && f.kind === 'number') ? f.amount : (f?.text || '');
+        const openAbsence = (row.absence?.days || []).length;
+        leaveSummary = {
+          sick_days: Number(row.manual?.sick_days) || 0,
+          absence_days: openAbsence,
+          vacation_days: row.vacation_eff_days != null ? row.vacation_eff_days : (Number(row.manual?.vacation_days) || 0),
+          holiday_days: row.holiday_pay_auto?.total_days || 0,
+          miluim: ntVal(row.manual?.miluim),
+        };
+      }
       if (partial) {
         const shortByDate = new Map((partial.candidates || []).map(c => [c.date, c]));
         const extraByDate = new Map((partial.extra_candidates || []).map(c => [c.date, c]));
@@ -681,6 +694,7 @@ async function hoursReport(req, res, next) {
         extra_hours: partial.extra_hours,
         extra_pay: partial.extra_pay,                 // ₪ extra paid
       } : null,
+      leave_summary: leaveSummary,   // monthly מחלה/היעדרות/חופשה/חגים/מילואים tallies
       totals: {
         days_worked: dayRows.length,
         total_minutes: monthMinutes,

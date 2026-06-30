@@ -297,6 +297,20 @@ ${hasCommit ? `<div class="legend">
       חישוב 125%/150% הוא לפי כמות השעות ביום (8&ndash;10h ≡ 125%, מעל 10h ≡ 150%).
     </div>
   </div>`}
+  ${(() => {
+    const ls = report.leave_summary || {};
+    const items = [
+      ['ימי מחלה', ls.sick_days],
+      ['ימי היעדרות', ls.absence_days],
+      ['ימי חופשה', ls.vacation_days],
+      ['דמי חגים (ימים)', ls.holiday_days],
+      ['מילואים', ls.miluim],
+    ];
+    return `<div class="box">
+      <div class="box-title">מחלה · היעדרות · חופשה · מילואים</div>
+      ${items.map(([l, v]) => `<div class="row"><span>${l}</span><span class="v">${(v === 0 || v == null || v === '') ? '—' : v}</span></div>`).join('')}
+    </div>`;
+  })()}
 </div>
 <div class="signatures">
   <div class="sig">חתימת העובד</div>
