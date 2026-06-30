@@ -451,6 +451,11 @@ async function getMonth(req, res, next) {
         ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
       const absenceEntries = isTeken && Array.isArray(existingManual.absence_entries) ? existingManual.absence_entries : [];
       const entryByDate = new Map(absenceEntries.map(e => [e.date, e]));
+      // Approved whole-day-absence ↔ extra-hours offsets: the absence day is not
+      // deducted and (below) the matched extra day is not paid.
+      const offsetEntries = isTeken && Array.isArray(existingManual.absence_offset_entries) ? existingManual.absence_offset_entries : [];
+      const offsetAbsenceDates = new Set(offsetEntries.filter(o => o.approved).map(o => o.absence_date));
+      const offsetExtraDates = new Set(offsetEntries.filter(o => o.approved).map(o => o.extra_date));
       // A committed day missed because the gan was closed (holiday) or for
       // approved leave is NOT an absence — it's vacation/leave, handled in those
       // columns. Only truly-unexplained missed days are absences.
@@ -459,8 +464,10 @@ async function getMonth(req, res, next) {
             .filter(d => !holidayDates.has(d) && !leaveDates.has(d))
             .map(d => ({ date: d, source: 'unknown' }))
         : [];
-      // Deduct only days the manager+accounting marked with a deductible reason.
+      // Deduct only days the manager+accounting marked with a deductible reason —
+      // EXCLUDING days offset against extra hours (those cancel out, not deducted).
       const deductibleDays = absenceDays.filter(a => {
+        if (offsetAbsenceDates.has(a.date)) return false;
         const e = entryByDate.get(a.date);
         return e && DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
           && e.manager_approved === true && e.accounting_approved === true;
@@ -709,11 +716,38 @@ async function getMonth(req, res, next) {
         ...paOffDayWork.map(d => ({ date: d.date, kind: 'offday', hours: d.hours, committed_h: 0, worked_h: d.hours })),
       ].sort((a, b) => a.date.localeCompare(b.date)).map(c => ({
         ...c, approved: paExtraApprovedDates.has(c.date), reason: paExtraReasonByDate.get(c.date) || '',
+        offset_used: offsetExtraDates.has(c.date), // consumed by an approved absence offset → not paid
       }));
-      const paExtraApprovedHours = Math.round(paExtraCandidates.filter(c => c.approved).reduce((s, c) => s + c.hours, 0) * 100) / 100;
+      // Offset-consumed extra days are never paid (they cancelled a whole-day absence).
+      const paExtraApprovedHours = Math.round(paExtraCandidates.filter(c => c.approved && !c.offset_used).reduce((s, c) => s + c.hours, 0) * 100) / 100;
       const paExtraPay = Math.round(paExtraApprovedHours * paHourlyValue * 100) / 100;
       if (paExtraPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + paExtraPay;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
+
+      // Suggested whole-day-absence ↔ extra-hours offsets (day-to-day, ±1h). For
+      // each missed committed day, pair an extra day of a similar size so the
+      // accountant can approve cancelling them out (absence not deducted, extra
+      // not paid). Already-approved offsets keep their saved pairing.
+      const offHhmm = (s) => { if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return 0; const [h, m] = s.split(':').map(Number); return (h || 0) + (m || 0) / 60; };
+      const offByWd = new Map((commitmentByEmp.get(String(emp._id))?.days || []).map(d => [Number(d.day), d]));
+      const committedHoursForDate = (date) => {
+        const cd = offByWd.get(new Date(`${date}T12:00:00Z`).getUTCDay());
+        return cd && !cd.is_off ? Math.max(0, offHhmm(cd.end_hhmm) - offHhmm(cd.start_hhmm)) : 0;
+      };
+      const offUsedExtra = new Set(offsetExtraDates);
+      const offsetSuggestions = [];
+      for (const a of absenceDays) {
+        const committedH = Math.round(committedHoursForDate(a.date) * 100) / 100;
+        if (committedH <= 0) continue;
+        const appr = offsetEntries.find(o => o.absence_date === a.date && o.approved);
+        if (appr) {
+          const m = paExtraCandidates.find(c => c.date === appr.extra_date);
+          offsetSuggestions.push({ absence_date: a.date, committed_h: committedH, extra_date: appr.extra_date, extra_h: m ? m.hours : null, approved: true });
+          continue;
+        }
+        const m = paExtraCandidates.find(c => !offUsedExtra.has(c.date) && Math.abs(c.hours - committedH) <= 1);
+        if (m) { offUsedExtra.add(m.date); offsetSuggestions.push({ absence_date: a.date, committed_h: committedH, extra_date: m.date, extra_h: m.hours, approved: false }); }
+      }
 
       return {
         employee_id: String(emp._id),
@@ -796,6 +830,8 @@ async function getMonth(req, res, next) {
           deductible_days: deductibleDays,
           unknown_count: unknownCount,               // days needing the manager's reason
           justified_count: justifiedCount,           // holiday / approved-leave days
+          offset_suggestions: offsetSuggestions,     // [{absence_date, committed_h, extra_date, extra_h, approved}]
+          offset_entries: offsetEntries,             // saved offset decisions
         },
         // Partial-day absence (worked but > 1h short). Default = deduct; the
         // accountant marks days as EXCUSED (with optional reason) to not deduct.
@@ -969,6 +1005,7 @@ async function upsertEntry(req, res, next) {
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
+      'absence_offset_entries',
     ];
 
     // Per-role write rules for the approval flags:

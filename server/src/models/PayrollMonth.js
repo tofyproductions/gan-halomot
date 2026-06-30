@@ -115,6 +115,19 @@ const payrollMonthSchema = new mongoose.Schema({
       default: [],
     },
 
+    // Whole-day-absence ↔ extra-hours OFFSET approvals. When a committed day was
+    // missed but a similar-sized extra day (±1h) was worked elsewhere, the
+    // accountant can approve an offset: the absence day is NOT deducted and the
+    // matched extra day is NOT paid (they cancel out). Keyed by the absence date.
+    absence_offset_entries: {
+      type: [{
+        absence_date: { type: String },   // YYYY-MM-DD — the missed committed day
+        extra_date: { type: String },     // YYYY-MM-DD — the extra-hours day it cancels against
+        approved: { type: Boolean, default: false },
+      }],
+      default: [],
+    },
+
     // Ad-hoc admin-added columns for this month — keyed by PayrollCustomColumn id.
     // Value shape matches numberOrTextSchema regardless of column kind:
     //   - kind='text'   → only `text` is meaningful

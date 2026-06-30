@@ -2184,6 +2184,7 @@ export default function PayrollMonthTable() {
         canAccounting={isAccountant || isAdmin}
         onClose={() => setAbsence({ open: false, row: null })}
         onSave={(entries) => absence.row && patchApproval(absence.row.employee_id, { absence_entries: entries })}
+        onSaveOffsets={(offsets) => absence.row && patchApproval(absence.row.employee_id, { absence_offset_entries: offsets })}
       />
       <PartialAbsenceDialog
         open={partialAbs.open}
@@ -2712,8 +2713,9 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
 // (read-only, no deduction). UNKNOWN-reason days get a reason + manager/accounting
 // approval; deducted at the uniform daily rate only when both approve a
 // deductible category.
-function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose, onSave }) {
+function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose, onSave, onSaveOffsets }) {
   const [entries, setEntries] = useState({});
+  const [offsetState, setOffsetState] = useState({});
   useEffect(() => {
     if (!row) return;
     const byDate = {};
@@ -2724,7 +2726,15 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
       init[a.date] = byDate[a.date] || { date: a.date, category: 'unpaid', note: '', manager_approved: false, accounting_approved: false };
     }
     setEntries(init);
+    const o = {};
+    for (const s of (row.absence?.offset_suggestions || [])) o[s.absence_date] = { extra_date: s.extra_date, approved: !!s.approved };
+    setOffsetState(o);
   }, [row]);
+  const toggleOffset = (s, approved) => {
+    const next = { ...offsetState, [s.absence_date]: { extra_date: s.extra_date, approved } };
+    setOffsetState(next);
+    onSaveOffsets && onSaveOffsets(Object.entries(next).map(([absence_date, v]) => ({ absence_date, extra_date: v.extra_date, approved: !!v.approved })));
+  };
   if (!row) return null;
   const days = row.absence?.days || [];
   const dailyRate = row.absence?.daily_rate || 0;
@@ -2788,6 +2798,36 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
                 </Paper>
               );
             })}
+            {(row.absence?.offset_suggestions || []).length > 0 && (
+              <Box>
+                <Divider sx={{ mb: 1 }} />
+                <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>קיזוז מול תוספת שעות</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.8 }}>
+                  ימי היעדרות שהושלמו ע״י תוספת שעות בהיקף דומה (±שעה). אישור = ההיעדרות לא תקוזז והתוספת לא תשולם (מתקזזות).
+                </Typography>
+                <Stack spacing={1}>
+                  {row.absence.offset_suggestions.map(s => {
+                    const st = offsetState[s.absence_date] || { approved: false };
+                    return (
+                      <Paper key={s.absence_date} variant="outlined" sx={{ p: 1, borderRadius: 2, display: 'flex', alignItems: 'center', gap: 1,
+                        borderColor: st.approved ? 'success.light' : 'divider', bgcolor: st.approved ? '#f0fdf4' : undefined }}>
+                        <Checkbox size="small" checked={!!st.approved} disabled={disabled || !canAccounting}
+                          onChange={e => toggleOffset(s, e.target.checked)} />
+                        <Box sx={{ flex: 1 }}>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                            היעדרות {s.absence_date} ({s.committed_h} ש׳) ↔ תוספת {s.extra_date} ({s.extra_h} ש׳)
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            סיבה אוטומטית: "הושלם ע״י תוספת שעות ב-{s.extra_date}"
+                          </Typography>
+                        </Box>
+                        {st.approved && <Chip size="small" color="success" label="מקוזז" sx={{ height: 18 }} />}
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              </Box>
+            )}
           </Stack>
         )}
       </DialogContent>
