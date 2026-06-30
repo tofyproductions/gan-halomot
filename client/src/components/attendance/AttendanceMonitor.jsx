@@ -230,12 +230,14 @@ export default function AttendanceMonitor() {
         );
       })}
       <TableCell align="center" sx={{
-        fontWeight: 800, bgcolor: 'primary.50', position: 'sticky', right: 0, // RTL plugin flips to left:0 (totals on the left)
+        fontWeight: 800, position: 'sticky', right: 0, zIndex: 2, // RTL plugin flips to left:0 (totals frozen on the left)
+        bgcolor: rowBg || '#e8eefc',                              // opaque — hides day cells scrolling underneath
+        boxShadow: '6px 0 6px -6px rgba(0,0,0,0.18)',
         borderRight: '1px solid', borderColor: 'divider',
       }}>
         {block.month_total_hours}h
       </TableCell>
-      <TableCell align="center" sx={{ position: 'sticky', right: 60 }}>{/* RTL plugin flips to left:60 */}
+      <TableCell align="center" sx={{ position: 'sticky', right: 60, zIndex: 2, bgcolor: rowBg || '#ffffff' }}>{/* RTL plugin flips to left:60 */}
         {!block.unlinked && block.employee_id && (
           <IconButton size="small" onClick={() => setHoursDialog({
             open: true,
@@ -572,10 +574,10 @@ export default function AttendanceMonitor() {
                   </TableCell>
                 );
               })}
-              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: 'primary.50', zIndex: 2 }}>{/* RTL flips to left:0 */}
+              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#dbeafe', zIndex: 3 }}>{/* RTL flips to left:0 · opaque */}
                 סה״כ
               </TableCell>
-              <TableCell sx={{ position: 'sticky', right: 60, bgcolor: 'background.paper', zIndex: 2 }}>{/* RTL flips to left:60 */}
+              <TableCell sx={{ position: 'sticky', right: 60, bgcolor: '#ffffff', zIndex: 3 }}>{/* RTL flips to left:60 */}
               </TableCell>
             </TableRow>
           </TableHead>
