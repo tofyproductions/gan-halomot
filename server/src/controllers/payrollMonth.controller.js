@@ -878,21 +878,41 @@ async function getMonth(req, res, next) {
         },
         loans_info: (() => {
           const list = Array.isArray(emp.loans) ? emp.loans : [];
-          const active = list.filter(l => (l.installments_paid || 0) < (l.installments_total || 0));
-          const monthDeduction = active.reduce((s, l) => s + (Number(l.installment_amount) || 0), 0);
+          const hasSchedule = (l) => Array.isArray(l.payments) && l.payments.length > 0;
+          // This month's scheduled deduction (per-month payments[] is the source of
+          // truth; legacy loans fall back to the count-based rule).
+          const monthAmt = (l) => {
+            if (hasSchedule(l)) { const p = l.payments.find(x => x.month === month); return p ? Math.max(0, Number(p.amount) || 0) : 0; }
+            if ((l.installments_paid || 0) >= (l.installments_total || 0)) return 0;
+            return Math.max(0, Number(l.installment_amount) || 0);
+          };
+          const deductedThrough = (l) => hasSchedule(l)
+            ? l.payments.filter(p => p.month <= month).reduce((s, p) => s + (Number(p.amount) || 0), 0)
+            : (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
+          const monthDeduction = list.reduce((s, l) => s + monthAmt(l), 0);
           return {
-            count: active.length,
+            count: list.filter(l => ((Number(l.total_amount) || 0) - deductedThrough(l)) > 0).length,
             month_deduction: Math.round(monthDeduction * 100) / 100,
-            loans: list.map(l => ({
-              id: String(l._id),
-              total_amount: l.total_amount,
-              installment_amount: l.installment_amount,
-              installments_total: l.installments_total,
-              installments_paid: l.installments_paid || 0,
-              started_at: l.started_at || null,
-              notes: l.notes || '',
-              active: (l.installments_paid || 0) < (l.installments_total || 0),
-            })),
+            loans: list.map(l => {
+              const total = Number(l.total_amount) || 0;
+              const ded = deductedThrough(l);
+              const p = hasSchedule(l) ? l.payments.find(x => x.month === month) : null;
+              return {
+                id: String(l._id),
+                total_amount: total,
+                installment_amount: l.installment_amount,
+                installments_total: l.installments_total,
+                installments_paid: l.installments_paid || 0,
+                start_month: l.start_month || '',
+                started_at: l.started_at || null,
+                notes: l.notes || '',
+                month_amount: Math.round(monthAmt(l) * 100) / 100,   // this month's deduction
+                deducted_through: Math.round(ded * 100) / 100,
+                remaining: Math.round(Math.max(0, total - ded) * 100) / 100,
+                paused: !!(p && p.paused),                            // this month is a paused (skipped) month
+                active: (total - ded) > 0,
+              };
+            }),
           };
         })(),
         vacation_info: (() => {

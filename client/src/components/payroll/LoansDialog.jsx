@@ -7,6 +7,8 @@ import {
 import PaymentsIcon from '@mui/icons-material/Payments';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
+import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
@@ -117,6 +119,46 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
     setLoans(next);
   };
 
+  // Pause THIS month's deduction: zero it out and extend the loan by one month
+  // at the end, so the total is still fully repaid — just one month later.
+  const pauseMonth = (idx) => {
+    const next = loans.map((l, i) => {
+      if (i !== idx) return l;
+      const inst = Number(l.installment_amount) || 0;
+      let payments = Array.isArray(l.payments) && l.payments.length
+        ? [...l.payments]
+        : buildSchedule(l.start_month || ym, Number(l.installments_total) || 0, inst);
+      const pi = payments.findIndex(p => p.month === ym);
+      if (pi >= 0) payments[pi] = { ...payments[pi], amount: 0, paused: true };
+      else payments.push({ month: ym, amount: 0, paused: true });
+      const maxMonth = payments.reduce((mx, p) => (p.month > mx ? p.month : mx), ym);
+      payments.push({ month: nextMonth(maxMonth), amount: inst, paused: false }); // extension month
+      return { ...l, payments };
+    });
+    setLoans(next);
+    persist(next);
+  };
+
+  // Resume: restore this month's installment and drop one extension month.
+  const resumeMonth = (idx) => {
+    const next = loans.map((l, i) => {
+      if (i !== idx) return l;
+      const inst = Number(l.installment_amount) || 0;
+      const payments = Array.isArray(l.payments) ? [...l.payments] : [];
+      const pi = payments.findIndex(p => p.month === ym);
+      if (pi >= 0) payments[pi] = { ...payments[pi], amount: inst, paused: false };
+      if (payments.length) {
+        let lastIdx = 0;
+        payments.forEach((p, i2) => { if (p.month > payments[lastIdx].month) lastIdx = i2; });
+        payments.splice(lastIdx, 1);
+      }
+      return { ...l, payments };
+    });
+    setLoans(next);
+    persist(next);
+  };
+  const isPaused = (l) => { const p = (Array.isArray(l.payments) ? l.payments : []).find(x => x.month === ym); return !!(p && p.paused); };
+
   // Legacy loans: advance the paid-installments counter.
   const updatePaid = (idx, value) => {
     const v = Math.max(0, Math.round(Number(value) || 0));
@@ -182,12 +224,19 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                       <TableCell sx={{ fontWeight: 700 }}>{Math.round(remaining).toLocaleString('he-IL')} ₪</TableCell>
                       <TableCell>
                         {newModel ? (
-                          <TextField
-                            size="small" type="number" value={monthAmount(l, ym)}
-                            onChange={e => setMonthPayment(idx, e.target.value)}
-                            onBlur={saveAll}
-                            inputProps={{ min: 0, style: { width: 70, textAlign: 'center' } }}
-                          />
+                          <Stack spacing={0.4} alignItems="center">
+                            <TextField
+                              size="small" type="number" value={monthAmount(l, ym)}
+                              onChange={e => setMonthPayment(idx, e.target.value)}
+                              onBlur={saveAll} disabled={isPaused(l)}
+                              inputProps={{ min: 0, style: { width: 70, textAlign: 'center' } }}
+                            />
+                            {active && (isPaused(l)
+                              ? <Button size="small" color="success" startIcon={<PlayArrowIcon sx={{ fontSize: 14 }} />} onClick={() => resumeMonth(idx)} sx={{ fontSize: '0.65rem', py: 0 }}>חדש תשלום</Button>
+                              : <Button size="small" color="warning" startIcon={<PauseCircleOutlineIcon sx={{ fontSize: 14 }} />} onClick={() => pauseMonth(idx)} sx={{ fontSize: '0.65rem', py: 0 }}>עצור החודש</Button>
+                            )}
+                            {isPaused(l) && <Chip size="small" color="warning" label="מושהה — הוארך בחודש" sx={{ height: 15, fontSize: '0.52rem' }} />}
+                          </Stack>
                         ) : (
                           <Stack direction="row" spacing={0.5} alignItems="center">
                             <TextField

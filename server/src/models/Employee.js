@@ -33,6 +33,7 @@ const loanSchema = new mongoose.Schema({
     type: [{
       month: { type: String, required: true },              // 'YYYY-MM'
       amount: { type: Number, default: 0 },                 // ₪ deducted that month
+      paused: { type: Boolean, default: false },            // month skipped — loan extended by one
       _id: false,
     }],
     default: [],
