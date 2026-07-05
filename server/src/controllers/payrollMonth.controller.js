@@ -2047,21 +2047,22 @@ function buildAccountantHtml(month, rows) {
     const paDed = r.partial_absence?.deduction || 0;
     const paExtra = r.partial_absence?.extra_pay || 0;
     const totalDed = (d.loans || 0) + (d.absence || 0) + paDed;
-    // Absence-day deduction: show the amount + the specific dates being deducted.
+    // Absence deductions in the accountant PDF show the QUANTITY to offset — total
+    // days (whole-day) / total hours (hourly) — NOT the ₪ amount (the accountant
+    // applies the rate themselves). The specific dates are listed underneath.
     const ddmm = (ymd) => { const p = String(ymd).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
+    const subLine = (s) => `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${s}</div>`;
     const absDates = r.absence?.deductible_dates || [];
-    const absVal = d.absence
-      ? '−' + f(d.absence) + (absDates.length
-          ? `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${absDates.map(ddmm).join(' · ')}</div>`
-          : '')
+    const absDays = r.absence?.deductible_days || 0;
+    const absVal = absDays > 0
+      ? `${absDays} ${absDays === 1 ? 'יום' : 'ימים'}` + (absDates.length ? subLine(absDates.map(ddmm).join(' · ')) : '')
       : '';
-    // Partial-absence (hourly) deduction: list the unexcused short days + hours,
-    // so the box reflects only what is actually offset (not the full shortfall).
+    // Partial-absence (hourly): total HOURS to offset (effective, after excused +
+    // made-up cap), with the unexcused short days + hours listed underneath.
     const paDedDays = (r.partial_absence?.candidates || []).filter(c => !c.excused);
-    const paDedVal = paDed
-      ? '−' + f(paDed) + (paDedDays.length
-          ? `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')}</div>`
-          : '')
+    const paEffHours = r.partial_absence?.effective_hours || 0;
+    const paDedVal = paEffHours > 0
+      ? `${n1(paEffHours)} ש׳` + (paDedDays.length ? subLine(paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')) : '')
       : '';
     const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
     const rateCell = isGlobal
