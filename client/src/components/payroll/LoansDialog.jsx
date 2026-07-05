@@ -8,6 +8,7 @@ import PaymentsIcon from '@mui/icons-material/Payments';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -58,11 +59,15 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
   const [loans, setLoans] = useState([]);
   const [draft, setDraft] = useState({ total_amount: '', installment_amount: '', installments_total: '', start_month: ym, notes: '' });
   const [saving, setSaving] = useState(false);
+  const [editIdx, setEditIdx] = useState(-1);
+  const [editDraft, setEditDraft] = useState(null);
 
   useEffect(() => {
     if (!open || !row) return;
     setLoans(row.loans_info?.loans || []);
     setDraft({ total_amount: '', installment_amount: '', installments_total: '', start_month: ym, notes: '' });
+    setEditIdx(-1);
+    setEditDraft(null);
   }, [open, row, ym]);
 
   if (!row) return null;
@@ -103,6 +108,47 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
     const next = loans.filter((_, i) => i !== idx);
     setLoans(next);
     persist(next);
+  };
+
+  // Full edit of a loan's parameters (start month, monthly amount, count, total,
+  // notes). Rebuilds the payment schedule from scratch — the month-aware
+  // deducted/remaining figures recompute from the new schedule.
+  const startEdit = (idx, l) => {
+    const count = isNew(l)
+      ? l.payments.filter(p => (Number(p.amount) || 0) > 0).length
+      : (Number(l.installments_total) || 0);
+    const start = l.start_month || (isNew(l) && l.payments[0] ? l.payments[0].month : ym);
+    setEditIdx(idx);
+    setEditDraft({
+      total_amount: l.total_amount ?? '',
+      installment_amount: l.installment_amount ?? '',
+      installments_total: count || '',
+      start_month: start,
+      notes: l.notes || '',
+    });
+  };
+  const cancelEdit = () => { setEditIdx(-1); setEditDraft(null); };
+  const saveEdit = () => {
+    const total = Number(editDraft.total_amount);
+    const inst = Number(editDraft.installment_amount);
+    const cnt = Number(editDraft.installments_total);
+    const start = editDraft.start_month || ym;
+    if (!total || !inst || !cnt) {
+      toast.error('חובה למלא: סכום כולל, תשלום חודשי, מספר תשלומים');
+      return;
+    }
+    const next = loans.map((l, i) => i === editIdx ? {
+      ...l,
+      total_amount: total,
+      installment_amount: inst,
+      installments_total: cnt,
+      start_month: start,
+      notes: editDraft.notes || '',
+      payments: buildSchedule(start, cnt, inst),
+    } : l);
+    setLoans(next);
+    persist(next);
+    cancelEdit();
   };
 
   // Edit THIS month's deduction for a (new-model) loan; reduces the balance.
@@ -215,7 +261,7 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                   const remaining = Math.max(0, total - deducted);
                   const active = remaining > 0;
                   const newModel = isNew(l);
-                  return (
+                  const mainRow = (
                     <TableRow key={l._id || idx} hover>
                       <TableCell>{total.toLocaleString('he-IL')} ₪</TableCell>
                       <TableCell>{Number(l.installment_amount).toLocaleString('he-IL')} ₪</TableCell>
@@ -257,12 +303,43 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                         <Chip size="small" label={active ? 'פעילה' : 'שולם'} color={active ? 'warning' : 'success'} variant="outlined" />
                       </TableCell>
                       <TableCell>
-                        <IconButton size="small" onClick={() => removeLoan(idx)} color="error">
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
+                        <Stack direction="row" spacing={0}>
+                          <IconButton size="small" onClick={() => (editIdx === idx ? cancelEdit() : startEdit(idx, l))} color={editIdx === idx ? 'primary' : 'default'}>
+                            <EditOutlinedIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" onClick={() => removeLoan(idx)} color="error">
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       </TableCell>
                     </TableRow>
-                  );
+                    );
+                  const editRow = editIdx === idx && editDraft ? (
+                    <TableRow key={`${l._id || idx}-edit`}>
+                      <TableCell colSpan={9} sx={{ bgcolor: 'grey.50' }}>
+                        <Stack spacing={1}>
+                          <Typography variant="caption" color="text.secondary">
+                            עריכת הלוואה — שינוי כל פרמטר יבנה מחדש את לוח התשלומים לפי הערכים החדשים.
+                          </Typography>
+                          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                            <TextField size="small" type="number" label="סכום כולל"
+                              value={editDraft.total_amount} onChange={e => setEditDraft({ ...editDraft, total_amount: e.target.value })} sx={{ width: 120 }} />
+                            <TextField size="small" type="number" label="תשלום חודשי"
+                              value={editDraft.installment_amount} onChange={e => setEditDraft({ ...editDraft, installment_amount: e.target.value })} sx={{ width: 120 }} />
+                            <TextField size="small" type="number" label="מספר תשלומים"
+                              value={editDraft.installments_total} onChange={e => setEditDraft({ ...editDraft, installments_total: e.target.value })} sx={{ width: 120 }} />
+                            <TextField size="small" type="month" label="חודש התחלה" InputLabelProps={{ shrink: true }}
+                              value={editDraft.start_month} onChange={e => setEditDraft({ ...editDraft, start_month: e.target.value })} sx={{ width: 150 }} />
+                            <TextField size="small" label="הערות"
+                              value={editDraft.notes} onChange={e => setEditDraft({ ...editDraft, notes: e.target.value })} sx={{ width: 180 }} />
+                            <Button size="small" variant="contained" onClick={saveEdit} disabled={saving}>שמור</Button>
+                            <Button size="small" onClick={cancelEdit}>ביטול</Button>
+                          </Stack>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ) : null;
+                  return [mainRow, editRow];
                 })}
               </TableBody>
             </Table>
