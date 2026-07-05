@@ -236,6 +236,9 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                               : <Button size="small" color="warning" startIcon={<PauseCircleOutlineIcon sx={{ fontSize: 14 }} />} onClick={() => pauseMonth(idx)} sx={{ fontSize: '0.65rem', py: 0 }}>עצור החודש</Button>
                             )}
                             {isPaused(l) && <Chip size="small" color="warning" label="מושהה — הוארך בחודש" sx={{ height: 15, fontSize: '0.52rem' }} />}
+                            {l.paying_installments > 0 && monthAmount(l, ym) > 0 && (
+                              <Typography sx={{ fontSize: '0.6rem', color: 'text.secondary' }}>תשלום {l.installment_index}/{l.paying_installments}</Typography>
+                            )}
                           </Stack>
                         ) : (
                           <Stack direction="row" spacing={0.5} alignItems="center">

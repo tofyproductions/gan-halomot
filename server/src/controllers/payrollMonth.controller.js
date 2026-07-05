@@ -896,7 +896,15 @@ async function getMonth(req, res, next) {
             loans: list.map(l => {
               const total = Number(l.total_amount) || 0;
               const ded = deductedThrough(l);
-              const p = hasSchedule(l) ? l.payments.find(x => x.month === month) : null;
+              const sched = hasSchedule(l);
+              const p = sched ? l.payments.find(x => x.month === month) : null;
+              // month-aware installment number: how many paying installments through THIS month
+              const payingTotal = sched
+                ? l.payments.filter(x => (Number(x.amount) || 0) > 0).length
+                : (Number(l.installments_total) || 0);
+              const idxThrough = sched
+                ? l.payments.filter(x => x.month <= month && (Number(x.amount) || 0) > 0).length
+                : Math.min(Number(l.installments_paid) || 0, Number(l.installments_total) || 0);
               return {
                 id: String(l._id),
                 total_amount: total,
@@ -906,6 +914,9 @@ async function getMonth(req, res, next) {
                 start_month: l.start_month || '',
                 started_at: l.started_at || null,
                 notes: l.notes || '',
+                payments: sched ? l.payments.map(x => ({ month: x.month, amount: Number(x.amount) || 0, paused: !!x.paused })) : [],
+                installment_index: idxThrough,        // which paying installment this month is (month-aware)
+                paying_installments: payingTotal,      // denominator for "X of Y"
                 month_amount: Math.round(monthAmt(l) * 100) / 100,   // this month's deduction
                 deducted_through: Math.round(ded * 100) / 100,
                 remaining: Math.round(Math.max(0, total - ded) * 100) / 100,

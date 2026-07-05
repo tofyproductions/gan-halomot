@@ -2873,6 +2873,11 @@ function LoansSummaryCell({ row }) {
   }
   const active = info.count;
   const monthDed = info.month_deduction;
+  // month-aware "payment X of Y" — only meaningful when a single loan is deducting this month
+  const payingLoans = (info.loans || []).filter(l => l.month_amount > 0);
+  const prog = payingLoans.length === 1 && payingLoans[0].paying_installments > 0
+    ? `תשלום ${payingLoans[0].installment_index}/${payingLoans[0].paying_installments}`
+    : null;
   return (
     <Stack spacing={0.3} alignItems="center">
       {monthDed > 0 ? (
@@ -2881,6 +2886,9 @@ function LoansSummaryCell({ row }) {
         </Typography>
       ) : (
         <Typography variant="body2" sx={{ color: 'text.disabled', fontSize: '0.78rem' }}>—</Typography>
+      )}
+      {prog && (
+        <Typography sx={{ fontSize: '0.6rem', color: 'text.secondary', lineHeight: 1 }}>{prog}</Typography>
       )}
       {active > 0 && (
         <Chip
