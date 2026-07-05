@@ -466,12 +466,13 @@ async function getMonth(req, res, next) {
         : [];
       // Deduct only days the manager+accounting marked with a deductible reason —
       // EXCLUDING days offset against extra hours (those cancel out, not deducted).
-      const deductibleDays = absenceDays.filter(a => {
+      const deductibleDates = absenceDays.filter(a => {
         if (offsetAbsenceDates.has(a.date)) return false;
         const e = entryByDate.get(a.date);
         return e && DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
           && e.manager_approved === true && e.accounting_approved === true;
-      }).length;
+      }).map(a => a.date);
+      const deductibleDays = deductibleDates.length;
       const unknownCount = absenceDays.length;
       const justifiedCount = 0;
       const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
@@ -828,6 +829,7 @@ async function getMonth(req, res, next) {
           daily_rate: dailyRate,                     // S / committed days
           deduction: absenceDeduction,               // amount actually deducted
           deductible_days: deductibleDays,
+          deductible_dates: deductibleDates,         // ymd[] of the days being deducted
           unknown_count: unknownCount,               // days needing the manager's reason
           justified_count: justifiedCount,           // holiday / approved-leave days
           offset_suggestions: offsetSuggestions,     // [{absence_date, committed_h, extra_date, extra_h, approved}]
@@ -2045,6 +2047,22 @@ function buildAccountantHtml(month, rows) {
     const paDed = r.partial_absence?.deduction || 0;
     const paExtra = r.partial_absence?.extra_pay || 0;
     const totalDed = (d.loans || 0) + (d.absence || 0) + paDed;
+    // Absence-day deduction: show the amount + the specific dates being deducted.
+    const ddmm = (ymd) => { const p = String(ymd).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
+    const absDates = r.absence?.deductible_dates || [];
+    const absVal = d.absence
+      ? '−' + f(d.absence) + (absDates.length
+          ? `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${absDates.map(ddmm).join(' · ')}</div>`
+          : '')
+      : '';
+    // Partial-absence (hourly) deduction: list the unexcused short days + hours,
+    // so the box reflects only what is actually offset (not the full shortfall).
+    const paDedDays = (r.partial_absence?.candidates || []).filter(c => !c.excused);
+    const paDedVal = paDed
+      ? '−' + f(paDed) + (paDedDays.length
+          ? `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')}</div>`
+          : '')
+      : '';
     const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
     const rateCell = isGlobal
       ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''), b.rates?.global_salary ? f(b.rates.global_salary) : '')
@@ -2098,8 +2116,8 @@ function buildAccountantHtml(month, rows) {
       <tr>
         ${cell('קיזוז מקדמה', advance)}
         ${cell('הלוואות', d.loans ? '−' + f(d.loans) : '', { color: '#b91c1c' })}
-        ${cell('קיזוז היעדרות', paDed ? '−' + f(paDed) : '', { color: '#b91c1c' })}
-        ${cell('קיזוז ימי היעדרות', d.absence ? '−' + f(d.absence) : '', { color: '#b91c1c' })}
+        ${cell('קיזוז היעדרות', paDedVal, { color: '#b91c1c' })}
+        ${cell('קיזוז ימי היעדרות', absVal, { color: '#b91c1c' })}
         ${cell('סה״כ ניכויים', totalDed ? '−' + f(totalDed) : '', { color: '#b91c1c', bold: true })}
         ${cell('', '')}
       </tr>

@@ -2502,13 +2502,19 @@ function PartialAbsenceCell({ row }) {
   const extra = pa?.extra_hours || 0; // over-commitment + off-day work
   if (!cands.length && extra <= 0) return <Typography variant="body2" color="text.secondary">—</Typography>;
   const ded = pa.deduction || 0;
-  // Total absence hours across the flagged short days (sum of shortfalls).
+  // Total flagged shortfall vs. what actually gets deducted after excused days
+  // are removed and the made-up cap applied. Show the DEDUCTIBLE figure — the
+  // hours to actually offset per what accounting approved — not the raw total.
   const totalHours = pa.total_shortfall_hours != null
     ? pa.total_shortfall_hours
     : Math.round(cands.reduce((s, c) => s + (c.shortfall_h || 0), 0) * 10) / 10;
+  const deductHours = pa.effective_hours != null ? pa.effective_hours : totalHours;
+  const excusedCount = pa.excused_count || 0;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
-      {totalHours > 0 && <Chip size="small" color="warning" label={`${totalHours} ש׳ חוסר`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
+      {deductHours > 0 && <Chip size="small" color="warning" label={`${deductHours} ש׳ לקיזוז`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
+      {deductHours <= 0 && totalHours > 0 && !pa.made_up && <Chip size="small" color="success" variant="outlined" label="✓ אין קיזוז" sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
+      {excusedCount > 0 && <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.55rem' }}>{excusedCount} אושרו · מתוך {totalHours} ש׳</Typography>}
       {extra > 0 && <Chip size="small" color="success" variant="outlined" label={`+${extra} ש׳ תוספת`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {(pa.extra_pay || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>+₪{Math.round(pa.extra_pay).toLocaleString('he-IL')}</Typography>}
@@ -2745,6 +2751,12 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
   };
   const deduction = Object.values(entries).reduce((s, e) =>
     s + ((absCat(e.category).deduct && e.manager_approved && e.accounting_approved) ? dailyRate : 0), 0);
+  // A day is "handled" (טופל) once accounting entered a reason for it. Track the
+  // count so the accountant can verify every absent day got a reason.
+  const isHandled = (e) => !!((e?.note || '').trim());
+  const unknownDays = days.filter(a => a.source === 'unknown');
+  const handledCount = unknownDays.filter(a => isHandled(entries[a.date])).length;
+  const allHandled = unknownDays.length > 0 && handledCount === unknownDays.length;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>היעדרויות — {row.full_name}</DialogTitle>
@@ -2756,6 +2768,13 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
             <Alert severity="info" sx={{ py: 0.5 }}>
               תעריף יום: ₪{Math.round(dailyRate).toLocaleString('he-IL')} · ניכוי מצטבר: <b>−₪{Math.round(deduction).toLocaleString('he-IL')}</b>
             </Alert>
+            {unknownDays.length > 0 && (
+              <Alert severity={allHandled ? 'success' : 'warning'} icon={false} sx={{ py: 0.5 }}>
+                {allHandled
+                  ? <><b>✓ כל ימי ההיעדרות טופלו</b> — הנה״ח הזינה סיבה לכל {unknownDays.length} הימים.</>
+                  : <>טופלו <b>{handledCount}</b> מתוך <b>{unknownDays.length}</b> ימים · נותרו <b>{unknownDays.length - handledCount}</b> ללא סיבה מהנה״ח.</>}
+              </Alert>
+            )}
             {days.map(({ date: d, source }) => {
               const src = ABSENCE_SOURCE[source] || ABSENCE_SOURCE.unknown;
               if (source !== 'unknown') {
@@ -2770,11 +2789,12 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
               const e = entries[d] || {};
               const cat = absCat(e.category);
               const bothApproved = e.manager_approved && e.accounting_approved;
+              const handled = isHandled(e);
               return (
-                <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, borderColor: 'warning.light' }}>
+                <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, borderColor: handled ? 'success.light' : 'warning.light', bgcolor: handled ? '#f6fdf9' : undefined }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
                     <Typography sx={{ fontWeight: 700, minWidth: 90 }}>{d}</Typography>
-                    <Chip size="small" color="warning" variant="outlined" label="ללא סיבה ידועה" sx={{ height: 18 }} />
+                    <Chip size="small" color={handled ? 'success' : 'warning'} variant={handled ? 'filled' : 'outlined'} label={handled ? '✓ טופל' : 'ללא סיבה'} sx={{ height: 18, fontWeight: 700 }} />
                     <TextField select size="small" label="סיבה" value={e.category || 'unpaid'} disabled={disabled}
                       onChange={ev => update(d, { category: ev.target.value })} sx={{ minWidth: 160 }}>
                       {ABSENCE_CATEGORIES.map(c => <MenuItem key={c.value} value={c.value}>{c.label}{c.deduct ? ' (מנכה)' : ''}</MenuItem>)}
