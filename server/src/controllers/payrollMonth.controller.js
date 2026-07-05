@@ -464,13 +464,14 @@ async function getMonth(req, res, next) {
             .filter(d => !holidayDates.has(d) && !leaveDates.has(d))
             .map(d => ({ date: d, source: 'unknown' }))
         : [];
-      // Deduct only days the manager+accounting marked with a deductible reason —
-      // EXCLUDING days offset against extra hours (those cancel out, not deducted).
+      // Default = DEDUCT (like היעדרות שעות). An unexplained absent day is deducted
+      // at the daily rate; it is NOT deducted only when given a non-deductible
+      // reason (מאושר/מחלה/חופשה/מילואים) or offset against extra hours. No manager/
+      // accounting approval gate — the reason itself is the decision.
       const deductibleDates = absenceDays.filter(a => {
         if (offsetAbsenceDates.has(a.date)) return false;
         const e = entryByDate.get(a.date);
-        return e && DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
-          && e.manager_approved === true && e.accounting_approved === true;
+        return DEDUCTIBLE_ABSENCE.has((e && e.category) || 'unpaid');
       }).map(a => a.date);
       const deductibleDays = deductibleDates.length;
       const unknownCount = absenceDays.length;

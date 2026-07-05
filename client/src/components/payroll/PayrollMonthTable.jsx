@@ -2483,11 +2483,11 @@ function AbsenceCell({ row }) {
       ? <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>✓ מאושר</Typography>
       : <Typography variant="body2" color="text.secondary">—</Typography>;
   }
-  const pending = open.filter(a => { const e = byDate.get(a.date); return !(e && e.manager_approved && e.accounting_approved); }).length;
+  const noReason = open.filter(a => { const e = byDate.get(a.date); return !((e?.note || '').trim()); }).length;
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
       <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{open.length} ימים</Typography>
-      {pending > 0 && <Chip size="small" color="warning" variant="filled" label={`${pending} לסימון`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
+      {noReason > 0 && <Chip size="small" color="warning" variant="filled" label={`${noReason} ללא סיבה`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
@@ -2749,8 +2749,11 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
     setEntries(next);
     onSave(Object.values(next)); // only unknown-day entries are tracked in state
   };
+  // Default = deduct. A day is deducted when its category is deductible (unpaid)
+  // and it isn't offset against extra hours — no approval gate.
+  const offApprovedDate = (d) => !!(offsetState[d] && offsetState[d].approved);
   const deduction = Object.values(entries).reduce((s, e) =>
-    s + ((absCat(e.category).deduct && e.manager_approved && e.accounting_approved) ? dailyRate : 0), 0);
+    s + ((absCat(e.category).deduct && !offApprovedDate(e.date)) ? dailyRate : 0), 0);
   // A day is "handled" (טופל) once accounting entered a reason for it. Track the
   // count so the accountant can verify every absent day got a reason.
   const isHandled = (e) => !!((e?.note || '').trim());
@@ -2788,8 +2791,8 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
               }
               const e = entries[d] || {};
               const cat = absCat(e.category);
-              const bothApproved = e.manager_approved && e.accounting_approved;
               const handled = isHandled(e);
+              const offApproved = offApprovedDate(d);
               return (
                 <Paper key={d} variant="outlined" sx={{ p: 1, borderRadius: 2, borderColor: handled ? 'success.light' : 'warning.light', bgcolor: handled ? '#f6fdf9' : undefined }}>
                   <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
@@ -2803,17 +2806,14 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
                       onChange={ev => update(d, { note: ev.target.value })} sx={{ flex: 1, minWidth: 110 }} />
                   </Stack>
                   <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.7 }}>
-                    <Chip size="small" color={e.manager_approved ? 'success' : 'default'} variant={e.manager_approved ? 'filled' : 'outlined'}
-                      label={`מנהל ${e.manager_approved ? '✓' : '✗'}`} disabled={disabled || !canManager}
-                      onClick={() => canManager && update(d, { manager_approved: !e.manager_approved })}
-                      sx={{ cursor: canManager ? 'pointer' : 'default' }} />
-                    <Chip size="small" color={e.accounting_approved ? 'success' : 'default'} variant={e.accounting_approved ? 'filled' : 'outlined'}
-                      label={`הנה״ח ${e.accounting_approved ? '✓' : '✗'}`} disabled={disabled || !canAccounting}
-                      onClick={() => canAccounting && update(d, { accounting_approved: !e.accounting_approved })}
-                      sx={{ cursor: canAccounting ? 'pointer' : 'default' }} />
-                    {cat.deduct && bothApproved
-                      ? <Chip size="small" color="error" variant="outlined" label={`−₪${Math.round(dailyRate).toLocaleString('he-IL')}`} sx={{ ml: 'auto' }} />
-                      : <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>{cat.deduct ? 'ממתין לאישור' : 'בתשלום'}</Typography>}
+                    <Typography variant="caption" color="text.secondary">
+                      {cat.deduct ? 'ברירת מחדל: מנכה — בחר/י סיבה מוצדקת כדי לא לנכות' : 'סיבה מוצדקת — בתשלום'}
+                    </Typography>
+                    {offApproved
+                      ? <Chip size="small" color="success" variant="outlined" label="מקוזז מול תוספת" sx={{ ml: 'auto' }} />
+                      : cat.deduct
+                        ? <Chip size="small" color="error" variant="outlined" label={`מנכה −₪${Math.round(dailyRate).toLocaleString('he-IL')}`} sx={{ ml: 'auto' }} />
+                        : <Chip size="small" color="success" variant="outlined" label="בתשלום" sx={{ ml: 'auto' }} />}
                   </Stack>
                 </Paper>
               );
