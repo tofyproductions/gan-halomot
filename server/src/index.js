@@ -23,7 +23,8 @@ if (env.NODE_ENV !== 'test') {
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', db: 'mongodb' });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', db: 'mongodb',
+    commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null });
 });
 
 // API routes
