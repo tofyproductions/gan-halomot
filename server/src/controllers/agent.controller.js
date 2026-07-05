@@ -59,26 +59,28 @@ async function uploadPunches(req, res, next) {
     const israeliIds = [...new Set(
       punches.map(p => p && p.israeli_id).filter(Boolean).map(String)
     )];
+    const idMap = new Map();
+    // Map an employee's real ID AND any clock_aliases that appear in this batch.
+    const mapEmp = (e) => {
+      if (e.israeli_id && israeliIds.includes(e.israeli_id) && !idMap.has(e.israeli_id)) idMap.set(e.israeli_id, e._id);
+      for (const a of (e.clock_aliases || [])) if (israeliIds.includes(a) && !idMap.has(a)) idMap.set(a, e._id);
+    };
     const sameBranchEmployees = israeliIds.length
       ? await Employee.find({
           branch_id: branch._id,
-          israeli_id: { $in: israeliIds },
           is_active: true,
-        }).select('_id israeli_id').lean()
+          $or: [{ israeli_id: { $in: israeliIds } }, { clock_aliases: { $in: israeliIds } }],
+        }).select('_id israeli_id clock_aliases').lean()
       : [];
-    const idMap = new Map(sameBranchEmployees.map(e => [e.israeli_id, e._id]));
+    sameBranchEmployees.forEach(mapEmp);
 
     const stillMissing = israeliIds.filter(id => !idMap.has(id));
     if (stillMissing.length) {
       const guests = await Employee.find({
-        israeli_id: { $in: stillMissing },
         is_active: true,
-      }).select('_id israeli_id branch_id').lean();
-      // If multiple branches happen to have the same israeli_id (data quirk),
-      // keep the first one and ignore the rest — better than silently dropping.
-      for (const e of guests) {
-        if (!idMap.has(e.israeli_id)) idMap.set(e.israeli_id, e._id);
-      }
+        $or: [{ israeli_id: { $in: stillMissing } }, { clock_aliases: { $in: stillMissing } }],
+      }).select('_id israeli_id clock_aliases branch_id').lean();
+      guests.forEach(mapEmp);
     }
 
     let accepted = 0;

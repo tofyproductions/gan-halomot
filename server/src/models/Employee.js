@@ -95,6 +95,10 @@ const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
   israeli_id: { type: String, default: '', index: true, trim: true }, // 9-digit ת"ז, matches clock userId
+  // Extra IDs the CLOCK sends for this worker when it was enrolled with a wrong
+  // ת"ז (typo/digit-shift). Punches with these IDs are matched to this employee
+  // too, so they don't come in as "unidentified". Stored normalized to 9 digits.
+  clock_aliases: { type: [String], default: [], index: true },
   // Payslip employee number assigned by the accountant's payroll software. Lets
   // the accountant locate each employee by the same number shown on the תלוש.
   employee_number: { type: String, default: '', trim: true },

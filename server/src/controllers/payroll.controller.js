@@ -300,7 +300,7 @@ async function updateEmployee(req, res, next) {
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
       'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',
       'travel_allowance', 'meal_vouchers', 'recreation_annual',
-      'bank_number', 'bank_branch', 'bank_account', 'pension_fund', 'education_fund',
+      'bank_number', 'bank_branch', 'bank_account', 'pension_fund', 'education_fund', 'clock_aliases',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
       'sick_pay_policy', 'sick_balance_opening', 'sick_daily_value_override',
       'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'work_days',
