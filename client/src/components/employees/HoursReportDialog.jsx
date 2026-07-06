@@ -105,7 +105,8 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       // NOT count it toward worked-day totals (return before the tallies below).
       if (d.is_absence) {
         const dn = dayOfWeekHebrew(d.date);
-        const cls = d.leave_type === 'absence' ? 'r-ded' : 'r-exc';
+        // Hard (unexcused) absence → red tint; approved absence / leave → amber.
+        const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
         return `
         <tr class="${cls}">
           <td class="date">${formatDate(d.date)} ${dn}</td>
@@ -412,15 +413,18 @@ ${hasCommit ? `<div class="legend">
                 )}
                 {!loading && report && report.days.map(d => {
                   if (d.is_absence) {
-                    const color = LEAVE_COLOR[d.leave_type] || 'error';
-                    const bg = LEAVE_BG[d.leave_type] || '#fef2f2';
+                    // An unexcused absence is a hard red; an approved one is softened.
+                    const hardAbsence = d.leave_type === 'absence' && !d.absence_approved;
+                    const approvedAbs = d.leave_type === 'absence' && d.absence_approved;
+                    const color = approvedAbs ? 'warning' : (LEAVE_COLOR[d.leave_type] || 'error');
+                    const bg = approvedAbs ? '#fffbeb' : (LEAVE_BG[d.leave_type] || '#fef2f2');
                     return (
                       <TableRow key={d.date} hover sx={{ bgcolor: bg }}>
                         <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
                         <TableCell colSpan={5} align="center" sx={{ color: 'text.disabled' }}>—</TableCell>
                         <TableCell colSpan={2} align="center">
                           <Chip size="small" color={color} label={d.note}
-                            variant={d.leave_type === 'absence' ? 'filled' : 'outlined'}
+                            variant={hardAbsence ? 'filled' : 'outlined'}
                             sx={{ fontWeight: 700 }} />
                         </TableCell>
                       </TableRow>

@@ -679,7 +679,12 @@ async function hoursReport(req, res, next) {
     try {
       const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
       const ci = analyzeCommitment(commitment, filtered, ymPrefix);
-      if (ci.has_commitment && ci.absent_dates.length) {
+      // Only days that have already PASSED count as absence — a committed day
+      // still in the future (today or later this month) hasn't happened yet, so
+      // it must not be marked absent.
+      const todayKey = israelDateKey(new Date());
+      const pastAbsent = (ci.absent_dates || []).filter(d => d < todayKey);
+      if (ci.has_commitment && pastAbsent.length) {
         // Expand an inclusive [from,to] range into YYYY-MM-DD keys in this month.
         const expand = (from, to) => {
           const out = [];
@@ -707,22 +712,27 @@ async function hoursReport(req, res, next) {
         const entryByDate = new Map((manualAbsenceEntries || []).map(e => [e.date, e]));
 
         const LEAVE_LABEL = { sick: 'מחלה', vacation: 'חופשה', miluim: 'מילואים', holiday: 'חג / סגירת גן', absence: 'היעדרות — לא הגיע/ה' };
+        // Non-deductible categories: sick/vacation/reserve map to a leave type;
+        // 'approved' is a justified absence — still "היעדרות", but marked אושרה.
         const CAT_TO_TYPE = { sick: 'sick', vacation: 'vacation', reserve: 'miluim' };
 
         const existing = new Set(dayRows.map(d => d.date));
-        for (const date of ci.absent_dates) {
+        for (const date of pastAbsent) {
           if (existing.has(date)) continue; // absent == no punch, but guard anyway
           const entry = entryByDate.get(date);
           const leave = leaveByDate.get(date);
-          let type = 'absence', reason = '';
+          let type = 'absence', reason = '', approved = false;
           if (entry && CAT_TO_TYPE[entry.category]) { type = CAT_TO_TYPE[entry.category]; reason = entry.note || ''; }
+          else if (entry && entry.category === 'approved') { approved = true; reason = entry.note || ''; }
           else if (leave) { type = leave.type; reason = leave.reason || ''; }
           else if (holidayName.has(date)) { type = 'holiday'; reason = holidayName.get(date); }
+          const label = (type === 'absence' && approved) ? 'היעדרות (אושרה)' : LEAVE_LABEL[type];
           dayRows.push({
             date,
             is_absence: true,
             leave_type: type,
-            note: LEAVE_LABEL[type] + (reason ? ` — ${reason}` : ''),
+            absence_approved: approved,
+            note: label + (reason ? ` — ${reason}` : ''),
             sessions: [], total_minutes: 0, total_hours: 0,
             first_in: null, last_out: null, incomplete: false,
             cross_branch_names: [], branch_names: [], branch_label: '',
