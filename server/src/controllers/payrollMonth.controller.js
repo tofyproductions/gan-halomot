@@ -2146,9 +2146,9 @@ function buildAccountantHtml(month, rows) {
         ${cell('קרן השתלמות', r.education_fund || '')}
         ${cell('', '')}
       </tr>` : ''}
-      ${notes ? `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 6px">
-          <span style="font-size:8.5px;color:#64748b;font-weight:700">הערות: </span>
-          <span style="font-size:10px;color:#334155">${notes}</span></td></tr>` : ''}
+      ${notes ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:6px 9px">
+          <span style="font-size:10.5px;color:#92400e;font-weight:800">הערות: </span>
+          <span style="font-size:13px;color:#111827;font-weight:800">${notes}</span></td></tr>` : ''}
     </table>`;
   };
 
