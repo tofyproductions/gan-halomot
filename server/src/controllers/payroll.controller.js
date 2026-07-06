@@ -7,8 +7,9 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const bcrypt = require('bcryptjs');
 
@@ -624,12 +625,14 @@ async function hoursReport(req, res, next) {
     // extra pay exactly (commitment-based, grace 1h, excused, made-up, approval).
     let partial = null;
     let leaveSummary = null;
+    let manualAbsenceEntries = [];
     try {
       const { fetchMonthData } = require('./payrollMonth.controller');
       const branchId = String(emp.branch_id?._id || emp.branch_id || '');
       const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, req.user);
       const row = (md?.rows || []).find(r => String(r.employee_id) === String(emp._id));
       partial = row?.partial_absence || null;
+      manualAbsenceEntries = row?.manual?.absence_entries || [];
       if (row) {
         // Monthly leave/absence tallies for the report's summary.
         const ntVal = (f) => (f && f.kind === 'number') ? f.amount : (f?.text || '');
@@ -669,6 +672,66 @@ async function hoursReport(req, res, next) {
       }
     } catch (e) { /* non-fatal: report still renders without shortfall/extra */ }
 
+    // Absence + leave days: a committed work day with NO punch should still show
+    // up in the report, marked as absence — or, when the day is covered by
+    // sick / vacation / holiday / reserve, with that note instead of a bare
+    // "didn't show up". Only for employees with a schedule (commitment).
+    try {
+      const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
+      const ci = analyzeCommitment(commitment, filtered, ymPrefix);
+      if (ci.has_commitment && ci.absent_dates.length) {
+        // Expand an inclusive [from,to] range into YYYY-MM-DD keys in this month.
+        const expand = (from, to) => {
+          const out = [];
+          if (!from) return out;
+          const e = to ? new Date(to) : new Date(from);
+          for (let t = new Date(from); t <= e; t.setDate(t.getDate() + 1)) {
+            const key = israelDateKey(t);
+            if (key.startsWith(ymPrefix)) out.push(key);
+          }
+          return out;
+        };
+        // Kindergarten closures (holidays) → name.
+        const holidayName = new Map();
+        for (const h of await Holiday.find({ branch_id: emp.branch_id?._id || emp.branch_id }).lean()) {
+          for (const k of expand(h.start_date, h.end_date)) if (!holidayName.has(k)) holidayName.set(k, h.name || 'חופשת גן');
+        }
+        // Approved sick / vacation requests → type + reason.
+        const leaveByDate = new Map();
+        const reqs = await EmployeeRequest.find({
+          type: { $in: ['sick', 'vacation'] }, status: 'approved',
+          $or: [{ employee_id: emp._id }, ...(emp.user_id ? [{ user_id: emp.user_id }] : [])],
+        }).select('type from_date to_date reason').lean();
+        for (const r of reqs) for (const k of expand(r.from_date, r.to_date)) if (!leaveByDate.has(k)) leaveByDate.set(k, { type: r.type, reason: r.reason || '' });
+        // Office per-day marks from the salary month (reserve / explicit category).
+        const entryByDate = new Map((manualAbsenceEntries || []).map(e => [e.date, e]));
+
+        const LEAVE_LABEL = { sick: 'מחלה', vacation: 'חופשה', miluim: 'מילואים', holiday: 'חג / סגירת גן', absence: 'היעדרות — לא הגיע/ה' };
+        const CAT_TO_TYPE = { sick: 'sick', vacation: 'vacation', reserve: 'miluim' };
+
+        const existing = new Set(dayRows.map(d => d.date));
+        for (const date of ci.absent_dates) {
+          if (existing.has(date)) continue; // absent == no punch, but guard anyway
+          const entry = entryByDate.get(date);
+          const leave = leaveByDate.get(date);
+          let type = 'absence', reason = '';
+          if (entry && CAT_TO_TYPE[entry.category]) { type = CAT_TO_TYPE[entry.category]; reason = entry.note || ''; }
+          else if (leave) { type = leave.type; reason = leave.reason || ''; }
+          else if (holidayName.has(date)) { type = 'holiday'; reason = holidayName.get(date); }
+          dayRows.push({
+            date,
+            is_absence: true,
+            leave_type: type,
+            note: LEAVE_LABEL[type] + (reason ? ` — ${reason}` : ''),
+            sessions: [], total_minutes: 0, total_hours: 0,
+            first_in: null, last_out: null, incomplete: false,
+            cross_branch_names: [], branch_names: [], branch_label: '',
+          });
+        }
+        dayRows.sort((a, b) => a.date.localeCompare(b.date));
+      }
+    } catch (e) { /* non-fatal: report still renders without absence rows */ }
+
     res.json({
       month: ymPrefix,
       employee: {
@@ -696,7 +759,8 @@ async function hoursReport(req, res, next) {
       } : null,
       leave_summary: leaveSummary,   // monthly מחלה/היעדרות/חופשה/חגים/מילואים tallies
       totals: {
-        days_worked: dayRows.length,
+        days_worked: dayRows.filter(d => !d.is_absence).length,
+        absence_days_shown: dayRows.filter(d => d.is_absence).length,
         total_minutes: monthMinutes,
         total_hours: Math.round((monthMinutes / 60) * 100) / 100,
         incomplete_days: dayRows.filter(d => d.incomplete).length,

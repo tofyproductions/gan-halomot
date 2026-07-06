@@ -11,6 +11,10 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 
 const HEBREW_DAY_NAMES = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+
+// Absence / leave day styling (a committed day with no punch).
+const LEAVE_COLOR = { absence: 'error', sick: 'warning', vacation: 'info', miluim: 'secondary', holiday: 'default' };
+const LEAVE_BG = { absence: '#fef2f2', sick: '#fffbeb', vacation: '#eff6ff', miluim: '#f5f3ff', holiday: '#f8fafc' };
 function dayOfWeekHebrew(yyyyMmDd) {
   if (!yyyyMmDd) return '';
   const [y, m, d] = yyyyMmDd.split('-').map(Number);
@@ -97,6 +101,22 @@ export default function HoursReportDialog({ open, employee, onClose }) {
     let totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
     const EXTRA_KIND = { overage: 'מעבר להתחייבות', offday: 'עבודה ביום חופש' };
     const tbodyHtml = report.days.map(d => {
+      // Absence / leave day — no punch. Render a full row with the note, and do
+      // NOT count it toward worked-day totals (return before the tallies below).
+      if (d.is_absence) {
+        const dn = dayOfWeekHebrew(d.date);
+        const cls = d.leave_type === 'absence' ? 'r-ded' : 'r-exc';
+        return `
+        <tr class="${cls}">
+          <td class="date">${formatDate(d.date)} ${dn}</td>
+          <td class="branch">—</td>
+          <td>—</td><td>—</td>
+          <td class="num mute">—</td><td class="num mute">—</td>
+          <td class="num mute">—</td><td class="num mute">—</td>
+          <td class="num mute">—</td><td class="num mute">—</td>
+          <td class="note">${d.note || 'היעדרות'}</td>
+        </tr>`;
+      }
       const { regular, ot125, ot150 } = splitDailyHours(d.total_hours);
       totals.regular += regular;
       totals.ot125 += ot125;
@@ -391,6 +411,21 @@ ${hasCommit ? `<div class="legend">
                   <TableRow><TableCell colSpan={8} align="center" sx={{ py: 3 }}>אין נתוני החתמה לחודש זה</TableCell></TableRow>
                 )}
                 {!loading && report && report.days.map(d => {
+                  if (d.is_absence) {
+                    const color = LEAVE_COLOR[d.leave_type] || 'error';
+                    const bg = LEAVE_BG[d.leave_type] || '#fef2f2';
+                    return (
+                      <TableRow key={d.date} hover sx={{ bgcolor: bg }}>
+                        <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
+                        <TableCell colSpan={5} align="center" sx={{ color: 'text.disabled' }}>—</TableCell>
+                        <TableCell colSpan={2} align="center">
+                          <Chip size="small" color={color} label={d.note}
+                            variant={d.leave_type === 'absence' ? 'filled' : 'outlined'}
+                            sx={{ fontWeight: 700 }} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  }
                   const sh = Number(d.shortfall_hours) || 0;
                   const ex = Number(d.extra_hours) || 0;
                   const rowBg = (sh > 0 && d.shortfall_status === 'deducted') ? '#fef2f2'
