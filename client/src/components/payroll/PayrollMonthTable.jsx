@@ -2545,16 +2545,23 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
   const cands = pa.candidates || [];
   const extras = pa.extra_candidates || [];
   const hv = pa.hourly_value || 0;
-  const netDeficit = pa.net_deficit_hours || 0;
   const fmtDate = (ymd) => { const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
-  // Unexcused hours are deducted; cap at net monthly deficit (made-up offset).
+  // Approved extra (over-commitment / off-day) hours are PAID — computed LIVE
+  // from the current selections.
+  const extraApprovedHours = Math.round(extras.filter(c => extraAppr[c.date]).reduce((s, c) => s + c.hours, 0) * 100) / 100;
+  const extraPay = Math.round(extraApprovedHours * hv);
+  // Net deficit EXCLUDES approved-paid extra from the make-up pool (mirrors the
+  // server): hours approved for payment are paid separately, so they no longer
+  // cancel the shortfall. Recomputed LIVE here so the preview updates as you
+  // approve extra — not the server's value from before the approval.
+  const worked = pa.worked_hours || 0;
+  const committed = pa.committed_hours || 0;
+  const netDeficit = Math.max(0, Math.round((committed - (worked - extraApprovedHours)) * 100) / 100);
+  // Unexcused hours are deducted; cap at the net deficit (made-up offset).
   const deductHours = Math.round(cands.filter(c => !excused[c.date]).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
   const effectiveHours = Math.round(Math.min(deductHours, netDeficit) * 100) / 100;
   const deduction = Math.round(effectiveHours * hv);
   const cappedByMakeup = deductHours > effectiveHours;
-  // Approved extra (over-commitment / off-day) hours are PAID.
-  const extraApprovedHours = Math.round(extras.filter(c => extraAppr[c.date]).reduce((s, c) => s + c.hours, 0) * 100) / 100;
-  const extraPay = Math.round(extraApprovedHours * hv);
   const kindLabel = (k) => (k === 'offday' ? 'יום חופשי' : 'מעבר להתחייבות');
   const save = () => onSave({
     partial_absence_entries: cands.map(c => ({ date: c.date, excused: !!excused[c.date], reason: (reasons[c.date] || '').trim() })),
