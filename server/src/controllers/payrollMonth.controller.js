@@ -2055,6 +2055,10 @@ function buildAccountantHtml(month, rows) {
     const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
     const paDed = r.partial_absence?.deduction || 0;
     const paExtra = r.partial_absence?.extra_pay || 0;
+    // Extra-hours-beyond-commitment shown in HOURS (not ₪); the salary total
+    // already carries the pay. Commitment hours are shown per teken employee.
+    const paExtraHrs = r.partial_absence?.extra_approved_hours || 0;
+    const commitHrs = tb?.required_hours || r.partial_absence?.committed_hours || 0;
     const totalDed = (d.loans || 0) + (d.absence || 0) + paDed;
     // Absence deductions in the accountant PDF show the QUANTITY to offset — total
     // days (whole-day) / total hours (hourly) — NOT the ₪ amount (the accountant
@@ -2116,7 +2120,7 @@ function buildAccountantHtml(month, rows) {
       ${inactiveNoteRow}
       <tr>
         ${cell('ימי עבודה', n1(h.days_worked))}
-        ${cell('סה״כ שעות', n1(h.total))}
+        ${cell('סה״כ שעות', isGlobal && commitHrs ? `${n1(h.total)}${subLine('התחייבות: ' + n1(commitHrs) + ' ש׳')}` : n1(h.total))}
         ${cell('רגילות', n1(h.regular))}
         ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
         ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
@@ -2136,7 +2140,7 @@ function buildAccountantHtml(month, rows) {
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}
         ${cell('סיבוס', nt(r.manual?.cibus))}
-        ${cell('תוספת שעות', paExtra ? f(paExtra) : '', { color: '#15803d' })}
+        ${cell('תוספת שעות (מעל התקן)', paExtraHrs ? `${n1(paExtraHrs)} ש׳` : '', { color: '#15803d' })}
       </tr>
       <tr>
         ${cell('קיזוז מקדמה', advance)}

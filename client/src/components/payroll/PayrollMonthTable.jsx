@@ -2517,7 +2517,7 @@ function PartialAbsenceCell({ row }) {
       {excusedCount > 0 && <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.55rem' }}>{excusedCount} אושרו · מתוך {totalHours} ש׳</Typography>}
       {extra > 0 && <Chip size="small" color="success" variant="outlined" label={`+${extra} ש׳ תוספת`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
-      {(pa.extra_pay || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>+₪{Math.round(pa.extra_pay).toLocaleString('he-IL')}</Typography>}
+      {(pa.extra_approved_hours || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>שולם: +{pa.extra_approved_hours} ש׳</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
   );
