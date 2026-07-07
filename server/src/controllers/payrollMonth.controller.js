@@ -662,17 +662,11 @@ async function getMonth(req, res, next) {
       const paTotalShortfall = Math.round(paCandidates.reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
       // Unexcused hours = what gets deducted (before the made-up cap).
       const paDeductGross = Math.round(paCandidates.filter(c => !c.excused).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
-      // Monthly committed vs actually worked → surplus (overtime beyond commitment)
-      // and net deficit (cap so made-up hours aren't deducted).
+      // Monthly committed vs actually worked. The net deficit that caps the
+      // deduction is computed BELOW, once approved-paid extra hours are known —
+      // those are excluded from the "made up on other days" pool (see there).
       const paCommittedH = Math.round((commitmentInfo.committed_hours || 0) * 100) / 100;
       const paWorkedH = Math.round((breakdown.hours?.total || 0) * 100) / 100;
-      const paNetDeficit = paHasCommitment ? Math.max(0, Math.round((paCommittedH - paWorkedH) * 100) / 100) : 0;
-      // Overtime-beyond-commitment is meaningful only for תקן — hourly staff are
-      // paid per hour worked, so "extra vs commitment" is not shown for them.
-      const paSurplus = (paHasCommitment && isTeken) ? Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100) : 0;
-      const paEffectiveHours = isTeken ? Math.min(paDeductGross, paNetDeficit) : 0;
-      const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
-      const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
       // Off-day work (תקן): days the employee worked that are NOT a committed work
       // day (their day off). Shown in the absence column as extra worked hours.
       const paCommitmentDoc = commitmentByEmp.get(String(emp._id));
@@ -723,6 +717,20 @@ async function getMonth(req, res, next) {
       // Offset-consumed extra days are never paid (they cancelled a whole-day absence).
       const paExtraApprovedHours = Math.round(paExtraCandidates.filter(c => c.approved && !c.offset_used).reduce((s, c) => s + c.hours, 0) * 100) / 100;
       const paExtraPay = Math.round(paExtraApprovedHours * paHourlyValue * 100) / 100;
+
+      // Net deficit EXCLUDES approved-paid extra hours from the make-up pool:
+      // hours approved for payment are paid separately, so they must NOT also
+      // cancel the shortfall (that would double-credit the employee). Extra hours
+      // that are NOT approved still make up the shortfall (no pay, no deduction).
+      const paMakeUpWorked = Math.round((paWorkedH - paExtraApprovedHours) * 100) / 100;
+      const paNetDeficit = paHasCommitment ? Math.max(0, Math.round((paCommittedH - paMakeUpWorked) * 100) / 100) : 0;
+      // Overtime-beyond-commitment is meaningful only for תקן — hourly staff are
+      // paid per hour worked, so "extra vs commitment" is not shown for them.
+      const paSurplus = (paHasCommitment && isTeken) ? Math.max(0, Math.round((paWorkedH - paCommittedH) * 100) / 100) : 0;
+      const paEffectiveHours = isTeken ? Math.min(paDeductGross, paNetDeficit) : 0;
+      const paDeduction = Math.round(paEffectiveHours * paHourlyValue * 100) / 100;
+      const paMadeUp = isTeken && paCandidatesRaw.length > 0 && paNetDeficit <= 0;
+
       if (paExtraPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + paExtraPay;
       if (paDeduction) breakdown.estimated_total = (breakdown.estimated_total || 0) - paDeduction;
 
