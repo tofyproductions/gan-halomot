@@ -790,14 +790,21 @@ async function getPayslipPage(req, res) {
  */
 async function saveAuditEdits(req, res) {
   try {
-    const verifications = req.body?.editor_verifications;
-    if (!verifications || typeof verifications !== 'object') {
-      return res.status(400).json({ error: 'נדרש שדה editor_verifications (אובייקט)' });
+    const { editor_verifications, reviewed_payslips } = req.body || {};
+    const hasV = editor_verifications && typeof editor_verifications === 'object';
+    const hasR = reviewed_payslips && typeof reviewed_payslips === 'object';
+    if (!hasV && !hasR) {
+      return res.status(400).json({ error: 'נדרש editor_verifications או reviewed_payslips' });
     }
     const doc = await PayslipAuditRecord.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
-    // Mutate full_result and mark Mixed type as modified so Mongoose persists
-    doc.full_result = { ...doc.full_result, editor_verifications: verifications };
+    // Mutate full_result and mark Mixed type as modified so Mongoose persists.
+    // editor_verifications = per-finding decisions; reviewed_payslips = the
+    // "נבדק" checkmark per payslip (keyed by a stable employee id).
+    const next = { ...doc.full_result };
+    if (hasV) next.editor_verifications = editor_verifications;
+    if (hasR) next.reviewed_payslips = reviewed_payslips;
+    doc.full_result = next;
     doc.markModified('full_result');
     await doc.save();
     res.json({ success: true, saved_at: new Date() });
@@ -1031,6 +1038,23 @@ function systemRowToTableRow(r) {
   const baseRegular = isGlobal
     ? (tb?.regular_pay != null ? Math.round(tb.regular_pay) : (gsal != null ? Math.round(gsal) : null))
     : rnd(comp.base_salary);
+  // Absence breakdown for the auditor: the number of DAYS and/or HOURS to offset
+  // (not just the ₪ amount), plus any hours worked BEYOND the commitment that
+  // were approved for payment. ded.absence = whole-day deduction; the partial
+  // (hours) shortfall deduction lives on r.partial_absence.
+  const abs = r.absence || {};
+  const pa = r.partial_absence || {};
+  const n1 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+  const ddmm = (ymd) => { const p = String(ymd).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
+  const absDatesStr = (abs.deductible_dates || []).map(ddmm).join(', ');
+  const totalAbsenceDed = rnd((_num(ded.absence) || 0) + (_num(pa.deduction) || 0));
+  const absenceDetail = [
+    { label: 'ימי היעדרות לקיזוז', value: abs.deductible_days ? `${abs.deductible_days} ${abs.deductible_days === 1 ? 'יום' : 'ימים'}${absDatesStr ? ` (${absDatesStr})` : ''}` : '' },
+    { label: 'שעות חוסר לקיזוז', value: pa.effective_hours ? `${n1(pa.effective_hours)} ש׳` : '' },
+    { label: 'שעות מעבר להתחייבות (אושרו לתשלום)', value: pa.extra_approved_hours ? `${n1(pa.extra_approved_hours)} ש׳${pa.extra_pay ? ` · ₪${Math.round(pa.extra_pay).toLocaleString('he-IL')}` : ''}` : '' },
+    { label: 'סה״כ ניכוי היעדרות', value: totalAbsenceDed || null, currency: true },
+  ];
+
   // Full, ordered detail of every column shown in the system salary table, so the
   // preview can list each value the accountant was given (not just the compared ones).
   const system_detail = [
@@ -1053,7 +1077,7 @@ function systemRowToTableRow(r) {
     { label: 'מילואים', value: numKind(r.manual?.miluim), currency: true },
     { label: 'בונוס', value: rnd(r.bonus?.effective), currency: true },
     { label: 'הלוואות (ניכוי)', value: rnd(ded.loans), currency: true },
-    { label: 'ניכוי היעדרות', value: rnd(ded.absence), currency: true },
+    ...absenceDetail,
     { label: 'קיזוז מקדמה', value: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || '' },
     { label: 'שכר משוער (ברוטו)', value: rnd(bd.estimated_total), currency: true, strong: true },
   ].filter((d) => d.value != null && d.value !== '');

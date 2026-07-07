@@ -335,7 +335,7 @@ function RecipientEditor({ label, required, chips, onRemove, inputValue, onInput
 function PerEmployeePairedView({
   filteredResults, audit, editableResults, expanded, setExpanded,
   updateFinding, removeFinding, addFinding, removeEmployee, addManualEmployee,
-  onSendEmail, onSaveEdits,
+  onSendEmail, onSaveEdits, reviewedMap, onToggleReviewed,
 }) {
   const [showAllEmpty, setShowAllEmpty] = useState(false);
   const [newName, setNewName] = useState('');
@@ -463,6 +463,8 @@ function PerEmployeePairedView({
                   expanded={expanded === idx}
                   onToggle={() => setExpanded(expanded === idx ? null : idx)}
                   savedAuditId={audit.saved_audit_id}
+                  reviewed={!!reviewedMap?.[idx]}
+                  onToggleReviewed={() => onToggleReviewed(idx)}
                 />
                 {/* Left column (RTL second): per-employee editor.
                     Side stripe color reflects review state — green when all
@@ -1127,7 +1129,7 @@ function StatTile({ label, value, color = 'default' }) {
   );
 }
 
-function ResultCard({ result, expanded, onToggle, savedAuditId }) {
+function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed }) {
   const name = result.table_row?.employee_name || result.payslip?.employee_name || '—';
   // Prefer __source_branch (set by /run-multi) — it's the canonical branch the
   // PDF was tagged with — over the table_row's branch column which may have
@@ -1214,13 +1216,14 @@ function ResultCard({ result, expanded, onToggle, savedAuditId }) {
     : 'ok';
 
   const borderColor =
-    topSeverity === 'critical' ? 'error.main'
+    reviewed ? 'success.main'
+    : topSeverity === 'critical' ? 'error.main'
     : topSeverity === 'warning' ? 'warning.main'
     : topSeverity === 'info' ? 'info.light'
     : 'success.light';
 
   return (
-    <Card variant="outlined" sx={{ borderRadius: 2, border: 2, borderColor }}>
+    <Card variant="outlined" sx={{ borderRadius: 2, border: 2, borderColor, bgcolor: reviewed ? 'rgba(46,125,50,0.04)' : undefined }}>
       <Box
         onClick={onToggle}
         sx={{ px: 2, py: 1.5, display: 'flex', alignItems: 'center', cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' } }}
@@ -1244,6 +1247,17 @@ function ResultCard({ result, expanded, onToggle, savedAuditId }) {
           )}
         </Box>
         <Stack direction="row" spacing={0.5} alignItems="center">
+          {onToggleReviewed && (
+            <Chip
+              size="small"
+              icon={<CheckCircleIcon />}
+              label="נבדק"
+              color={reviewed ? 'success' : 'default'}
+              variant={reviewed ? 'filled' : 'outlined'}
+              onClick={(e) => { e.stopPropagation(); onToggleReviewed(); }}
+              sx={{ fontWeight: 700, cursor: 'pointer' }}
+            />
+          )}
           {counts.critical > 0 && <Chip size="small" color="error"   label={counts.critical} />}
           {counts.warning > 0  && <Chip size="small" color="warning" label={counts.warning} />}
           {counts.info > 0     && <Chip size="small" color="info"    label={counts.info} />}
@@ -1524,6 +1538,19 @@ export default function PayslipAudit() {
   // builder still has employee context — only `findings` array is meant to be
   // mutated. New manually-added employees use `__manual: true`.
   const [editableResults, setEditableResults] = useState([]);
+  // "נבדק" checkmark per payslip (keyed by audit index), persisted on the record.
+  const [reviewedMap, setReviewedMap] = useState({});
+
+  const toggleReviewed = (idx) => {
+    setReviewedMap((prev) => {
+      const next = { ...prev, [idx]: !prev[idx] };
+      if (audit?.saved_audit_id) {
+        api.patch(`/payroll/payslip-audit/history/${audit.saved_audit_id}/edits`, { reviewed_payslips: next })
+          .catch(() => toast.error('שגיאה בשמירת סימון נבדק'));
+      }
+      return next;
+    });
+  };
 
   const stats = useMemo(() => {
     if (!audit) return null;
@@ -1782,8 +1809,10 @@ export default function PayslipAudit() {
   useEffect(() => {
     if (!audit) {
       setEditableResults([]);
+      setReviewedMap({});
       return;
     }
+    setReviewedMap(audit.reviewed_payslips || {});
     const savedEdits = audit.editor_verifications || {}; // { auditIdx: [{field, message, status, note}] }
     const cloned = audit.results.map((r, idx) => {
       const savedFindings = savedEdits[idx] || [];
@@ -2642,6 +2671,8 @@ export default function PayslipAudit() {
             addManualEmployee={addManualEmployee}
             onSendEmail={openEmailDialog}
             onSaveEdits={() => saveEdits(false)}
+            reviewedMap={reviewedMap}
+            onToggleReviewed={toggleReviewed}
           />
         )}
 
