@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box, Paper, Stack, Typography, TextField, Select, MenuItem, IconButton, Button,
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
@@ -13,6 +13,7 @@ import LockOpenIcon from '@mui/icons-material/LockOpen';
 import NoteAltIcon from '@mui/icons-material/NoteAlt';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import SendIcon from '@mui/icons-material/Send';
+import PrintIcon from '@mui/icons-material/Print';
 import ContactMailIcon from '@mui/icons-material/ContactMail';
 import NumbersIcon from '@mui/icons-material/Numbers';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
@@ -713,6 +714,15 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
   const [selected, setSelected] = useState({});
   const [extra, setExtra] = useState([]);
   const [newEmail, setNewEmail] = useState('');
+  const iframeRef = useRef(null);
+
+  // Print the same cards HTML shown in the preview (the accountant report).
+  const handlePrint = () => {
+    const w = iframeRef.current?.contentWindow;
+    if (!w) return;
+    w.focus();
+    w.print();
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -757,7 +767,7 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
       <DialogContent dividers sx={{ display: 'flex', gap: 1.5, p: 1.5 }}>
         <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
           {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><CircularProgress /></Box>}
-          {!loading && data && <iframe title="preview" srcDoc={data.html} style={{ width: '100%', height: '100%', border: 'none' }} />}
+          {!loading && data && <iframe ref={iframeRef} title="preview" srcDoc={data.html} style={{ width: '100%', height: '100%', border: 'none' }} />}
         </Box>
         <Box sx={{ width: 290, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>נמענים</Typography>
@@ -791,6 +801,7 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
+        <Button startIcon={<PrintIcon />} onClick={handlePrint} disabled={loading || !data}>הדפסה</Button>
         <Button variant="contained" startIcon={sending ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
           onClick={send} disabled={loading || sending || chosen.length === 0}>שלח עכשיו</Button>
       </DialogActions>
