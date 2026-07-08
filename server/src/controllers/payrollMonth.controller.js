@@ -2013,7 +2013,7 @@ const acctMarker = (name) => ACCT_GAN_MARKERS.find(g => g.match.some(m => (name 
 
 // One print-ready PDF for the accountant: a card per employee with every field
 // needed to build a payslip, grouped by branch with matching gan colours.
-function buildAccountantHtml(month, rows) {
+function buildAccountantHtml(month, rows, branchNameById = new Map()) {
   const f = (n) => '₪' + Math.round(Number(n) || 0).toLocaleString('he-IL');
   const n1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('he-IL');
   const nt = (field) => {
@@ -2115,6 +2115,36 @@ function buildAccountantHtml(month, rows) {
       ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
       : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('השלמת שכר', completion ? f(completion) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
 
+    // Per-branch payment detail — hourly staff who worked at >1 branch (or a
+    // single branch at a non-standard rate), so the accountant sees exactly what
+    // to pay for each branch's hours at that branch's rate (mirrors the table).
+    let branchDetailRow = '';
+    if (r.salary_type === 'hourly') {
+      const pb = r.breakdown?.per_branch || {};
+      const stdRate = r.breakdown?.rates?.hourly_rate || 0;
+      const r1 = (x) => Math.round((x || 0) * 10) / 10;
+      const lines = [];
+      for (const [bid, bk] of Object.entries(pb)) {
+        const reg = bk.regular_hours || 0, ot125 = bk.ot_125_hours || 0, ot150 = bk.ot_150_hours || 0;
+        if (reg + ot125 + ot150 <= 0) continue;
+        const rate = bk.hourly_rate || 0;
+        const amount = Math.round(reg * rate + ot125 * rate * 1.25 + ot150 * rate * 1.5);
+        lines.push({ name: branchNameById.get(String(bid)) || 'אחר', reg: r1(reg), ot125: r1(ot125), ot150: r1(ot150), rate, amount });
+      }
+      const informative = lines.length > 1 || (lines.length === 1 && lines[0].rate !== stdRate);
+      if (informative && lines.length) {
+        const parts = lines.map((o) => {
+          const seg = [`רגיל ${o.reg}ש׳×₪${o.rate}`];
+          if (o.ot125) seg.push(`שע״נ125% ${o.ot125}ש׳×₪${Math.round(o.rate * 1.25 * 100) / 100}`);
+          if (o.ot150) seg.push(`שע״נ150% ${o.ot150}ש׳×₪${Math.round(o.rate * 1.5 * 100) / 100}`);
+          return `<b>${o.name}</b>: ${seg.join(' + ')} = ₪${o.amount.toLocaleString('he-IL')}`;
+        }).join(' &nbsp;·&nbsp; ');
+        branchDetailRow = `<tr><td colspan="6" style="border:1px solid #e2e8f0;padding:4px 8px;background:#faf5ff">
+          <span style="font-size:8.5px;color:#7e22ce;font-weight:800">פירוט תשלום לפי סניף: </span>
+          <span style="font-size:10px;color:#334155">${parts}</span></td></tr>`;
+      }
+    }
+
     // Single fixed-layout table with a colgroup of 6 equal columns. A top-level
     // table is stretched to 100% by GAS's renderer (a NESTED one is not), so the
     // whole card — header + grid — fills the page width.
@@ -2172,6 +2202,7 @@ function buildAccountantHtml(month, rows) {
         ${cell('קרן השתלמות', r.education_fund || '')}
         ${cell('', '')}
       </tr>` : ''}
+      ${branchDetailRow}
       ${notes ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:6px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">הערות: </span>
           <span style="font-size:13px;color:#111827;font-weight:800">${notes}</span></td></tr>` : ''}
@@ -2268,7 +2299,8 @@ async function previewAccountant(req, res, next) {
     const data = await fetchMonthData({ month, branch }, req.user);
     const rows = (data.rows || []).filter(r => !r.is_freelancer);
     if (rows.length === 0) return res.status(400).json({ error: 'אין עובדים לשליחה בחודש זה' });
-    const html = buildAccountantHtml(month, rows);
+    const branchNameById = new Map((data.branches || []).map(b => [String(b.id), b.name]));
+    const html = buildAccountantHtml(month, rows, branchNameById);
     const { toList, officeCc } = await readAccountantRecipients();
     // Count the supporting files that would be attached (certs + month docs).
     const empIds = rows.map(r => r.employee_id);
@@ -2314,7 +2346,8 @@ async function sendToAccountant(req, res, next) {
     const data = await fetchMonthData({ month, branch }, req.user);
     const rows = (data.rows || []).filter(r => !r.is_freelancer);
     if (rows.length === 0) { console.warn('accountant send: no employees for', month); return; }
-    const html = buildAccountantHtml(month, rows);
+    const branchNameById = new Map((data.branches || []).map(b => [String(b.id), b.name]));
+    const html = buildAccountantHtml(month, rows, branchNameById);
 
     // Gather supporting files for the month: sick/vacation certificates + uploads.
     const empIds = rows.map(r => r.employee_id);
