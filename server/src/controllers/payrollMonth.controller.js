@@ -2097,6 +2097,24 @@ function buildAccountantHtml(month, rows) {
       ? `<tr><td colspan="6" style="padding:4px 8px;background:#fef2f2;border-bottom:1px solid ${borderColor};font-size:10px;font-weight:700;color:#b91c1c">⛔ עובד לא פעיל${inactiveReasonTxt}</td></tr>`
       : '';
 
+    const sickVal = sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '';
+    // Teken salary split — same columns as the salary table: שכר בסיס (regular) +
+    // שכר שע״נ 125% + שכר שע״נ 150% + השלמת שכר, which sum to the agreed teken
+    // salary. Only for teken; hourly staff keep a single שכר בסיס below.
+    const tekenSplitRow = (isGlobal && tb.teken_salary) ? `<tr style="background:#f6f9ff">
+        ${cell('שכר בסיס', tb.regular_pay != null ? f(tb.regular_pay) : '', { bold: true })}
+        ${cell('שכר שע״נ 125%', tb.ot125_pay ? f(tb.ot125_pay) : '')}
+        ${cell('שכר שע״נ 150%', tb.ot150_pay ? f(tb.ot150_pay) : '')}
+        ${cell('השלמת שכר', completion ? f(completion) : '')}
+        ${cell('סה״כ שכר תקן', f((tb.regular_pay || 0) + (tb.ot125_pay || 0) + (tb.ot150_pay || 0) + (completion || 0)), { bold: true })}
+        ${cell('', '')}
+      </tr>` : '';
+    // The pay row: teken already showed base/OT/completion above, so it only lists
+    // allowances; hourly shows its single base + completion here.
+    const payRow = isGlobal
+      ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
+      : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('השלמת שכר', completion ? f(completion) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
+
     // Single fixed-layout table with a colgroup of 6 equal columns. A top-level
     // table is stretched to 100% by GAS's renderer (a NESTED one is not), so the
     // whole card — header + grid — fills the page width.
@@ -2126,13 +2144,9 @@ function buildAccountantHtml(month, rows) {
         ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
         ${rateCell}
       </tr>
+      ${tekenSplitRow}
       <tr>
-        ${cell('שכר בסיס', f(c.base_salary), { bold: true })}
-        ${cell('השלמת שכר', completion ? f(completion) : '')}
-        ${cell('נסיעות', c.travel ? f(c.travel) : '')}
-        ${cell('דמי חגים', holiday ? f(holiday) : '')}
-        ${cell('בונוס', bonus ? f(bonus) : '')}
-        ${cell('מחלה', sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '')}
+        ${payRow}
       </tr>
       <tr>
         ${cell('חופשה', vac ? `${n1(vac)} ימים` : '')}
