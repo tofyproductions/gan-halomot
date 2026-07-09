@@ -1403,35 +1403,50 @@ async function sendPayslipsToEmployees(req, res) {
 // (tag "כל הסניפים") split correctly per branch for the manager send. Each
 // employee keeps its `source_branch` — the stored PDF its page physically lives
 // in — separate from its real branch (for email + grouping).
+const OFFICE_KEY = '__office__';
+const OFFICE_NAME = 'כל הסניפים';
+// OFFICE_EMAIL is declared once near the top of this file (accountant section).
+
 async function buildManagerBranchGroups(doc) {
   const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
   const results = doc.full_result?.results || [];
   const allBranches = await Branch.find({}).select('_id name').lean();
-  const byName = new Map(allBranches.map(b => [norm(b.name), b]));
   const byId = new Map(allBranches.map(b => [String(b._id), b]));
   const havePdf = new Set((await PayslipAuditPdf.find({ audit_id: doc._id }).select('branch').lean()).map(p => norm(p.branch)));
   const groups = new Map();
+  // Office master copy — the FULL set of payslips, sent to the office email.
+  // Kept first (insertion order) and holds every payslip.
+  groups.set(OFFICE_KEY, { name: OFFICE_NAME, br: null, isOffice: true, employees: [], hasPdfSource: false });
+  const office = groups.get(OFFICE_KEY);
   for (const r of results) {
     const sourceBranch = norm(r.__source_branch || r.table_row?.branch || '');
     const iid = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
     const page = r.payslip?.page_index || null;
     const emp = iid ? await Employee.findOne({ israeli_id: iid }).select('_id full_name branch_id').lean() : null;
-    let key, br = null;
-    if (emp && emp.branch_id && byId.has(String(emp.branch_id))) { br = byId.get(String(emp.branch_id)); key = norm(br.name); }
-    else { key = sourceBranch || 'לא מזוהה'; br = byName.get(key) || null; }
-    if (!groups.has(key)) groups.set(key, { name: br ? br.name : key, br, employees: [], hasPdfSource: false });
-    const g = groups.get(key);
-    g.employees.push({
+    const entry = {
       employee_id: emp ? String(emp._id) : null,
       name: emp ? emp.full_name : (r.payslip?.employee_name || r.table_row?.employee_name || '—'),
       israeli_id: iid, page, has_page: !!page, matched: !!emp, source_branch: sourceBranch,
-    });
-    if (havePdf.has(sourceBranch)) g.hasPdfSource = true;
+    };
+    // Every payslip goes into the office master copy…
+    office.employees.push(entry);
+    if (havePdf.has(sourceBranch)) office.hasPdfSource = true;
+    // …and matched ones also into their real branch group.
+    if (emp && emp.branch_id && byId.has(String(emp.branch_id))) {
+      const br = byId.get(String(emp.branch_id));
+      const key = norm(br.name);
+      if (!groups.has(key)) groups.set(key, { name: br.name, br, employees: [], hasPdfSource: false });
+      const g = groups.get(key);
+      g.employees.push(entry);
+      if (havePdf.has(sourceBranch)) g.hasPdfSource = true;
+    }
   }
   return groups;
 }
 
-async function managerBranchEmails(br, stored) {
+async function managerBranchEmails(group, stored) {
+  if (group && group.isOffice) return [OFFICE_EMAIL];
+  const br = group && group.br;
   if (!br) return [];
   if (stored[String(br._id)]) return [stored[String(br._id)]];
   const mgrs = await User.find({ role: 'branch_manager', $or: [{ managed_branch_ids: br._id }, { branch_id: br._id }] }).select('email').lean();
@@ -1475,9 +1490,10 @@ async function sendPayslipsToManagers(req, res) {
       const out = [];
       for (const key of branchKeys) {
         const g = groups.get(key);
+        const label = g.br ? g.br.name : g.name;
         try {
-          if (!g.br) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
-          const emails = await managerBranchEmails(g.br, stored);
+          if (!g.br && !g.isOffice) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
+          const emails = await managerBranchEmails(g, stored);
           if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
           const sel = branchSel.get(norm(g.name));
           const chosen = g.employees.filter(e => e.employee_id && e.has_page && (!sel || sel.has(e.employee_id)));
@@ -1502,20 +1518,21 @@ async function sendPayslipsToManagers(req, res) {
           if (includeHours) {
             const emps = await Employee.find({ _id: { $in: chosen.map(e => e.employee_id) } }).sort({ full_name: 1 }).lean();
             const reports = await buildHoursReportsForEmployees(emps, range, month);
-            attachments.push({ name: `דוח-שעות-${g.br.name}-${month}`, html: buildHoursReportHtml(g.br.name, month, reports) });
+            attachments.push({ name: `דוח-שעות-${label}-${month}`, html: buildHoursReportHtml(label, month, reports) });
           }
+          const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;
           const introBody = includeHours
-            ? `<p>מצורפים תלושי השכר של סניף <b>${g.br.name}</b> לחודש ${month}, וכן דוח שעות.</p>`
-            : `<p>מצורפים תלושי השכר של סניף <b>${g.br.name}</b> לחודש ${month}.</p>`;
+            ? `<p>מצורפים תלושי השכר של ${scopeTxt} לחודש ${month}, וכן דוח שעות.</p>`
+            : `<p>מצורפים תלושי השכר של ${scopeTxt} לחודש ${month}.</p>`;
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({
             to: emails,
-            subject: includeHours ? `תלושי שכר ודוח שעות — ${g.br.name} — ${month}` : `תלושי שכר — ${g.br.name} — ${month}`,
+            subject: includeHours ? `תלושי שכר ודוח שעות — ${label} — ${month}` : `תלושי שכר — ${label} — ${month}`,
             html: intro,
-            fileAttachments: [{ filename: `תלושים-${g.br.name}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }],
+            fileAttachments: [{ filename: `תלושים-${label}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }],
             attachments,
           });
-          out.push({ branch: g.br.name, emails, status: 'sent' });
+          out.push({ branch: label, emails, status: 'sent' });
         } catch (e) {
           out.push({ branch: g.name, status: 'error', error: e.message });
         }
@@ -1629,11 +1646,12 @@ async function managerDistributionPreview(req, res) {
     const groups = await buildManagerBranchGroups(doc);
     const items = [];
     for (const [, g] of groups) {
-      const email = (await managerBranchEmails(g.br, stored)).join(', ');
+      const email = (await managerBranchEmails(g, stored)).join(', ');
       const employees = g.employees.slice().sort((a, b) => a.name.localeCompare(b.name, 'he'));
-      items.push({ branch: g.name, payslip_count: employees.length, email, has_pdf: g.hasPdfSource, employees });
+      items.push({ branch: g.name, payslip_count: employees.length, email, has_pdf: g.hasPdfSource, employees, is_office: !!g.isOffice });
     }
-    items.sort((a, b) => a.branch.localeCompare(b.branch, 'he'));
+    // Office master copy ("כל הסניפים") pinned first; real branches alphabetically.
+    items.sort((a, b) => (b.is_office - a.is_office) || a.branch.localeCompare(b.branch, 'he'));
     res.json({ month: doc.year_month, items, distribution: doc.full_result?.distribution?.managers || null });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
