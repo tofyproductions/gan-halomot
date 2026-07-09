@@ -1496,6 +1496,58 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
   );
 }
 
+/* Edit the stored per-branch manager email — the address the consolidated
+   payslip bundle is sent to for each branch. */
+function BranchManagerEmailsDialog({ open, onClose }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    api.get('/payroll/payslip-audit/branch-manager-emails')
+      .then(res => setRows(res.data.branches || []))
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
+      .finally(() => setLoading(false));
+  }, [open]);
+  const save = () => {
+    setSaving(true);
+    const emails = {};
+    rows.forEach(r => { if ((r.email || '').trim()) emails[r.id] = r.email.trim(); });
+    api.put('/payroll/payslip-audit/branch-manager-emails', { emails })
+      .then(() => { toast.success('מיילי המנהלים נשמרו'); onClose(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשמירה'))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>מיילי מנהלי סניפים</DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="caption" color="text.secondary">
+          כתובת המייל של מנהל/ת כל סניף — אליה נשלח מייל מרוכז עם כל תלושי הסניף ודוח השעות.
+          אם ריק, נשלח למשתמשי "מנהל סניף" המוגדרים במערכת.
+        </Typography>
+        {loading ? <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress size={24} /></Box> : (
+          <Stack spacing={1.2} sx={{ mt: 1.5 }}>
+            {rows.map((r, i) => (
+              <Stack key={r.id} direction="row" spacing={1} alignItems="center">
+                <Typography sx={{ width: 140, fontWeight: 600, flexShrink: 0 }}>{r.name}</Typography>
+                <TextField size="small" fullWidth dir="ltr" placeholder="manager@example.com" value={r.email || ''}
+                  onChange={e => setRows(prev => prev.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
+              </Stack>
+            ))}
+            {rows.length === 0 && <Typography variant="body2" color="text.secondary">אין סניפים.</Typography>}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={save} disabled={saving || loading}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /**
  * Payslip Audit page — manager uploads the salary table xlsx (sent to the
  * accountant) and the payslip PDF (received back); the system flags
@@ -1915,6 +1967,24 @@ export default function PayslipAudit() {
   const [approveFiles, setApproveFiles] = useState([]);
   const [approveNote, setApproveNote] = useState('');
   const [approveSending, setApproveSending] = useState(false);
+  const [mgrEmailsOpen, setMgrEmailsOpen] = useState(false);
+
+  // Distribute the approved payslips: each employee gets their payslip + hours
+  // report; each branch manager gets the branch bundle. Runs in the background.
+  const sendToEmployees = async (h) => {
+    if (!window.confirm(`לשלוח לכל עובד את התלוש שלו + דוח שעות (חודש ${h.year_month})?`)) return;
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${h._id}/send-employees`);
+      toast.success(`השליחה החלה — ${res.data.count} עובדים. התלושים יגיעו תוך כמה דקות.`, { autoClose: 6000 });
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
+  };
+  const sendToManagers = async (h) => {
+    if (!window.confirm(`לשלוח לכל מנהל/ת סניף את כל התלושים + דוח שעות הסניף (חודש ${h.year_month})?`)) return;
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${h._id}/send-managers`);
+      toast.success(`השליחה למנהלים החלה — ${res.data.count} סניפים.`, { autoClose: 6000 });
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
+  };
 
   // Round-progression dialog: shows a per-employee × per-round matrix of
   // critical/warning counts so the user can see fix-cycle progress at a glance.
@@ -2276,6 +2346,7 @@ export default function PayslipAudit() {
                   ({history.length})
                 </Typography>
                 <Box sx={{ flex: 1 }} />
+                <Button size="small" startIcon={<EmailIcon />} onClick={() => setMgrEmailsOpen(true)}>מיילי מנהלים</Button>
                 <Button size="small" onClick={fetchHistory} disabled={historyLoading}>
                   רענן
                 </Button>
@@ -2409,7 +2480,11 @@ export default function PayslipAudit() {
                                 <TableCell align="center">
                                   <Stack direction="row" spacing={0.5} justifyContent="center">
                                     {h.approved ? (
-                                      <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); unapproveAudit(h._id); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>בטל אישור</Button>
+                                      <>
+                                        <Button size="small" variant="outlined" color="primary" onClick={(e) => { e.stopPropagation(); sendToEmployees(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלח לכל עובד את התלוש שלו + דוח שעות">לעובדים</Button>
+                                        <Button size="small" variant="outlined" color="secondary" onClick={(e) => { e.stopPropagation(); sendToManagers(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלח מרוכז לכל מנהל/ת סניף">למנהלים</Button>
+                                        <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); unapproveAudit(h._id); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>בטל אישור</Button>
+                                      </>
                                     ) : (
                                       <Button size="small" variant="contained" color="success" onClick={(e) => { e.stopPropagation(); openApproveDialog(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>אשר סבב</Button>
                                     )}
@@ -2736,6 +2811,8 @@ export default function PayslipAudit() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <BranchManagerEmailsDialog open={mgrEmailsOpen} onClose={() => setMgrEmailsOpen(false)} />
 
       {/* Phase 3: approve audit dialog — accept optional corrected payslip
           PDFs (one per branch) + admin note. Saving stamps the record as
