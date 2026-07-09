@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress, Collapse,
   Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton,
   LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell,
   TableHead, TableRow, TextField, Typography,
@@ -1548,6 +1548,136 @@ function BranchManagerEmailsDialog({ open, onClose }) {
   );
 }
 
+const DIST_STATUS_HE = {
+  sent: 'נשלח', no_email: 'אין מייל', no_match: 'לא הותאם', no_page: 'אין עמוד',
+  no_pdf: 'אין קובץ', error: 'שגיאה',
+};
+
+/* Distribute payslips to employees: review the ת"ז match per payslip, edit +
+   save each employee's email, pick who to send to (or all), and see the log. */
+function PayslipDistributionDialog({ open, audit, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState([]);
+  const [sel, setSel] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState(null);
+
+  const load = () => {
+    if (!audit?._id) return;
+    setLoading(true);
+    api.get(`/payroll/payslip-audit/history/${audit._id}/distribution-preview`)
+      .then(res => {
+        const its = res.data.items || [];
+        setItems(its);
+        const s = {};
+        its.forEach(it => { if (it.employee_id && it.email && it.has_page) s[it.employee_id] = true; });
+        setSel(s);
+        setLog(res.data.distribution?.employees || null);
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, audit?._id]);
+
+  const selectableIds = items.filter(it => it.employee_id).map(it => it.employee_id);
+  const selectedIds = selectableIds.filter(id => sel[id]);
+  const allChecked = selectableIds.length > 0 && selectedIds.length === selectableIds.length;
+  const someChecked = selectedIds.length > 0 && !allChecked;
+
+  const persistEmails = async () => {
+    const updates = items.filter(it => it.employee_id).map(it => ({ employee_id: it.employee_id, email: (it.email || '').trim() }));
+    try { await api.put('/payroll/payslip-audit/employees/emails', { updates }); return true; }
+    catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשמירת מיילים'); return false; }
+  };
+  const saveEmails = async () => { setBusy(true); if (await persistEmails()) toast.success('מיילים נשמרו'); setBusy(false); };
+
+  const send = async (all) => {
+    const ids = all ? [] : selectedIds;
+    if (!all && ids.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
+    if (!window.confirm(all ? 'לשלוח לכל העובדים המותאמים את התלוש + דוח השעות?' : `לשלוח ל-${ids.length} עובדים נבחרים?`)) return;
+    setBusy(true);
+    await persistEmails();
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-employees`, all ? {} : { employee_ids: ids });
+      toast.success(`השליחה החלה — ${res.data.count} עובדים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
+    finally { setBusy(false); }
+  };
+
+  const logCounts = (log?.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '90vh' } }}>
+      <DialogTitle sx={{ fontWeight: 700 }}>הפצת תלושים לעובדים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="caption" color="text.secondary">
+          כל תלוש מותאם לעובד לפי <b>ת"ז</b>. ערכ/י מייל לכל עובד (נשמר לעתיד), בחר/י למי לשלוח — כל עובד מקבל את התלוש שלו + דוח השעות שלו.
+        </Typography>
+        {loading ? <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box> : (
+          <Table size="small" sx={{ mt: 1.5 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox"><Checkbox size="small" checked={allChecked} indeterminate={someChecked} onChange={e => { const v = e.target.checked; const s = {}; selectableIds.forEach(id => { s[id] = v; }); setSel(s); }} /></TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>עובד</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>ת"ז</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>התאמה</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>מייל (ניתן לעריכה)</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">עמוד</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((it, i) => (
+                <TableRow key={i} sx={{ bgcolor: !it.matched ? '#fef2f2' : !it.has_page ? '#fffbeb' : undefined }}>
+                  <TableCell padding="checkbox"><Checkbox size="small" disabled={!it.employee_id || !it.has_page} checked={!!sel[it.employee_id]} onChange={() => setSel(s => ({ ...s, [it.employee_id]: !s[it.employee_id] }))} /></TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>{it.employee_name || it.payslip_name || '—'}</TableCell>
+                  <TableCell dir="ltr">{it.payslip_id || '—'}</TableCell>
+                  <TableCell>
+                    {!it.matched ? <Chip size="small" color="error" label="לא הותאם" />
+                      : it.id_verified ? <Chip size="small" color="success" label='✓ ת"ז מאומת' />
+                        : <Chip size="small" color="warning" label="הותאם (בדוק)" />}
+                  </TableCell>
+                  <TableCell>
+                    <TextField size="small" fullWidth dir="ltr" placeholder="—" value={it.email || ''} disabled={!it.employee_id}
+                      onChange={e => setItems(prev => prev.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
+                  </TableCell>
+                  <TableCell align="center">{it.has_page ? it.page : <Chip size="small" color="error" label="חסר" />}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {log && (
+          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
+              <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
+              <Box sx={{ flex: 1 }} />
+              {Object.entries(logCounts).map(([st, n]) => (
+                <Chip key={st} size="small" color={st === 'sent' ? 'success' : st === 'error' ? 'error' : 'default'} label={`${DIST_STATUS_HE[st] || st}: ${n}`} />
+              ))}
+            </Stack>
+            <Box sx={{ maxHeight: 130, overflowY: 'auto' }}>
+              {(log.results || []).map((r, i) => (
+                <Typography key={i} variant="caption" sx={{ display: 'block', color: r.status === 'sent' ? 'success.dark' : r.status === 'error' ? 'error.main' : 'text.secondary' }}>
+                  {r.name} — {DIST_STATUS_HE[r.status] || r.status}{r.email ? ` · ${r.email}` : ''}
+                </Typography>
+              ))}
+            </Box>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={saveEmails} disabled={busy || loading}>שמור מיילים</Button>
+        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח לנבחרים ({selectedIds.length})</Button>
+        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח לכולם</Button>
+        <Button onClick={onClose}>סגור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 /**
  * Payslip Audit page — manager uploads the salary table xlsx (sent to the
  * accountant) and the payslip PDF (received back); the system flags
@@ -1968,16 +2098,10 @@ export default function PayslipAudit() {
   const [approveNote, setApproveNote] = useState('');
   const [approveSending, setApproveSending] = useState(false);
   const [mgrEmailsOpen, setMgrEmailsOpen] = useState(false);
+  const [distDialog, setDistDialog] = useState({ open: false, audit: null });
 
-  // Distribute the approved payslips: each employee gets their payslip + hours
-  // report; each branch manager gets the branch bundle. Runs in the background.
-  const sendToEmployees = async (h) => {
-    if (!window.confirm(`לשלוח לכל עובד את התלוש שלו + דוח שעות (חודש ${h.year_month})?`)) return;
-    try {
-      const res = await api.post(`/payroll/payslip-audit/history/${h._id}/send-employees`);
-      toast.success(`השליחה החלה — ${res.data.count} עובדים. התלושים יגיעו תוך כמה דקות.`, { autoClose: 6000 });
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
-  };
+  // Employees are distributed via the dialog (review ת"ז, edit emails, select).
+  // Each branch manager gets the whole branch bundle. Both run in the background.
   const sendToManagers = async (h) => {
     if (!window.confirm(`לשלוח לכל מנהל/ת סניף את כל התלושים + דוח שעות הסניף (חודש ${h.year_month})?`)) return;
     try {
@@ -2481,8 +2605,8 @@ export default function PayslipAudit() {
                                   <Stack direction="row" spacing={0.5} justifyContent="center">
                                     {h.approved ? (
                                       <>
-                                        <Button size="small" variant="outlined" color="primary" onClick={(e) => { e.stopPropagation(); sendToEmployees(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלח לכל עובד את התלוש שלו + דוח שעות">לעובדים</Button>
-                                        <Button size="small" variant="outlined" color="secondary" onClick={(e) => { e.stopPropagation(); sendToManagers(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלח מרוכז לכל מנהל/ת סניף">למנהלים</Button>
+                                        <Button size="small" variant="outlined" color="secondary" onClick={(e) => { e.stopPropagation(); sendToManagers(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 1: שלח מרוכז לכל מנהל/ת סניף">1· למנהלים</Button>
+                                        <Button size="small" variant="outlined" color="primary" onClick={(e) => { e.stopPropagation(); setDistDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 2: הפצה לעובדים (בחירה, אימות ת&quot;ז, עריכת מיילים)">2· לעובדים</Button>
                                         <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); unapproveAudit(h._id); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>בטל אישור</Button>
                                       </>
                                     ) : (
@@ -2813,6 +2937,7 @@ export default function PayslipAudit() {
       </Dialog>
 
       <BranchManagerEmailsDialog open={mgrEmailsOpen} onClose={() => setMgrEmailsOpen(false)} />
+      <PayslipDistributionDialog open={distDialog.open} audit={distDialog.audit} onClose={() => setDistDialog({ open: false, audit: null })} />
 
       {/* Phase 3: approve audit dialog — accept optional corrected payslip
           PDFs (one per branch) + admin note. Saving stamps the record as
