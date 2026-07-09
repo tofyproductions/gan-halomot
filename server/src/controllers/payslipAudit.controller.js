@@ -1627,21 +1627,18 @@ async function hoursReportPreview(req, res) {
     const range = monthRange(month);
     let title = ''; let employees = [];
     if (req.query.scope === 'branch') {
+      // Hours for exactly the employees in this branch's audit bundle (matches
+      // the payslip PDF + the actual send) — NOT the full is_active roster.
       const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
-      if (bname === OFFICE_NAME) {
-        // Office master copy — hours for every matched employee in the audit.
-        title = OFFICE_NAME;
-        const groups = await buildManagerBranchGroups(doc);
-        const office = groups.get(OFFICE_KEY);
-        const ids = [...new Set((office?.employees || []).filter(e => e.employee_id).map(e => e.employee_id))];
-        employees = await Employee.find({ _id: { $in: ids } }).sort({ full_name: 1 }).lean();
-      } else {
-        const all = await Branch.find({}).select('_id name').lean();
-        const br = all.find(b => b.name.replace(/\s+/g, ' ').trim() === bname);
-        if (!br) return res.status(404).send('סניף לא נמצא');
-        title = br.name;
-        employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
-      }
+      const groups = await buildManagerBranchGroups(doc);
+      let g = null;
+      for (const [, gg] of groups) { if (gg.name.replace(/\s+/g, ' ').trim() === bname) { g = gg; break; } }
+      if (!g) return res.status(404).send('סניף לא נמצא');
+      title = g.name;
+      const ids = [...new Set(g.employees.filter(e => e.employee_id).map(e => String(e.employee_id)))];
+      const found = await Employee.find({ _id: { $in: ids } }).lean();
+      const byId = new Map(found.map(e => [String(e._id), e]));
+      employees = ids.map(id => byId.get(id)).filter(Boolean); // preserve audit order
     } else {
       const emp = await Employee.findById(req.query.employee_id).lean();
       if (!emp) return res.status(404).send('עובד לא נמצא');
