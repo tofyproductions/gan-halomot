@@ -193,6 +193,28 @@ router.patch(
   ]),
   audit.approveAudit,
 );
+// Payslip distribution — email each employee their payslip + hours report,
+// and a consolidated bundle to each branch manager.
+router.get(
+  '/payslip-audit/branch-manager-emails',
+  requireRole('system_admin', 'accountant'),
+  audit.getBranchManagerEmails,
+);
+router.put(
+  '/payslip-audit/branch-manager-emails',
+  requireRole('system_admin', 'accountant'),
+  audit.setBranchManagerEmails,
+);
+router.post(
+  '/payslip-audit/history/:id/send-employees',
+  requireRole('system_admin', 'accountant'),
+  audit.sendPayslipsToEmployees,
+);
+router.post(
+  '/payslip-audit/history/:id/send-managers',
+  requireRole('system_admin', 'accountant'),
+  audit.sendPayslipsToManagers,
+);
 router.patch(
   '/payslip-audit/history/:id/unapprove',
   requireRole('system_admin', 'branch_manager', 'accountant'),

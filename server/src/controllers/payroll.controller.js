@@ -882,6 +882,41 @@ table td{border:1px solid #ccc;padding:2px 4px;text-align:center}</style></head>
 <h1>דוח שעות — ${title} · ${ymPrefix}</h1>${reports.map(empBlock).join('')}</body></html>`;
 }
 
+// Build per-employee hours-report data ({employee, days, totals}) for a list of
+// employees in a month — the exact shape buildHoursReportHtml() consumes. Reused
+// by the manager send and the payslip-distribution flow.
+async function buildHoursReportsForEmployees(employees, range, ymPrefix) {
+  const branches = await Branch.find({}).select('_id name').lean();
+  const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+  const punches = await Punch.find({
+    employee_id: { $in: employees.map(e => e._id) },
+    timestamp: { $gte: range.from, $lt: range.to }, ignored: { $ne: true },
+  }).sort({ timestamp: 1 }).lean();
+  const byEmp = new Map();
+  for (const p of punches) {
+    const k = israelDateKey(new Date(p.timestamp));
+    if (!k.startsWith(ymPrefix)) continue;
+    const eid = String(p.employee_id);
+    if (!byEmp.has(eid)) byEmp.set(eid, {});
+    (byEmp.get(eid)[k] ||= []).push(p);
+  }
+  return employees.map(emp => {
+    const days = byEmp.get(String(emp._id)) || {};
+    const dayRows = Object.keys(days).sort().map(dk => {
+      const summary = summarizeDay(days[dk]);
+      const all = new Set();
+      for (const p of days[dk]) all.add(branchById.get(String(p.branch_id)) || 'אחר');
+      return { date: dk, ...summary, branch_label: [...all].join(' + ') };
+    });
+    const min = dayRows.reduce((s, d) => s + (d.total_minutes || 0), 0);
+    return {
+      employee: { full_name: emp.full_name, israeli_id: emp.israeli_id || '' },
+      days: dayRows,
+      totals: { days_worked: dayRows.length, total_hours: Math.round(min / 60 * 100) / 100, incomplete_days: dayRows.filter(d => d.incomplete).length },
+    };
+  });
+}
+
 /**
  * POST /api/payroll/hours-report/send-managers  { month, branch? }
  * Emails each branch manager their branch's employees' hours reports.
@@ -918,33 +953,7 @@ async function sendHoursReportsToManagers(req, res, next) {
       if (employees.length === 0) { results.push({ branch: br.name, status: 'no_employees' }); continue; }
       if (emails.length === 0) { results.push({ branch: br.name, status: 'no_manager' }); continue; }
 
-      const punches = await Punch.find({
-        employee_id: { $in: employees.map(e => e._id) },
-        timestamp: { $gte: range.from, $lt: range.to }, ignored: { $ne: true },
-      }).sort({ timestamp: 1 }).lean();
-      const byEmp = new Map();
-      for (const p of punches) {
-        const k = israelDateKey(new Date(p.timestamp));
-        if (!k.startsWith(ymPrefix)) continue;
-        const eid = String(p.employee_id);
-        if (!byEmp.has(eid)) byEmp.set(eid, {});
-        (byEmp.get(eid)[k] ||= []).push(p);
-      }
-      const reports = employees.map(emp => {
-        const days = byEmp.get(String(emp._id)) || {};
-        const dayRows = Object.keys(days).sort().map(dk => {
-          const summary = summarizeDay(days[dk]);
-          const all = new Set();
-          for (const p of days[dk]) all.add(branchById.get(String(p.branch_id)) || 'אחר');
-          return { date: dk, ...summary, branch_label: [...all].join(' + ') };
-        });
-        const min = dayRows.reduce((s, d) => s + (d.total_minutes || 0), 0);
-        return {
-          employee: { full_name: emp.full_name, israeli_id: emp.israeli_id || '' },
-          days: dayRows,
-          totals: { days_worked: dayRows.length, total_hours: Math.round(min / 60 * 100) / 100, incomplete_days: dayRows.filter(d => d.incomplete).length },
-        };
-      });
+      const reports = await buildHoursReportsForEmployees(employees, range, ymPrefix);
 
       const html = buildHoursReportHtml(br.name, ymPrefix, reports);
       // Put the report both inline (works on every email provider) and as an
@@ -1698,4 +1707,8 @@ module.exports = {
   mySalaryPreview,
   myPunches,
   myPayslips,
+  // Reused by the payslip-distribution flow (payslipAudit.controller):
+  buildHoursReportHtml,
+  buildHoursReportsForEmployees,
+  monthRange,
 };
