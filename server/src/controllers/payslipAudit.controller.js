@@ -1502,6 +1502,51 @@ async function updateEmployeeEmails(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// GET /payslip-audit/history/:id/hours-preview?scope=employee&employee_id=..
+//   OR ?scope=branch&branch=.. — the exact hours-report HTML that WILL be sent,
+// so the user can preview it before distributing.
+async function hoursReportPreview(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id).lean();
+    if (!doc) return res.status(404).send('ביקורת לא נמצאה');
+    const month = doc.year_month;
+    const { monthRange, buildHoursReportsForEmployees, buildHoursReportHtml } = require('./payroll.controller');
+    const range = monthRange(month);
+    let title = ''; let employees = [];
+    if (req.query.scope === 'branch') {
+      const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
+      const all = await Branch.find({}).select('_id name').lean();
+      const br = all.find(b => b.name.replace(/\s+/g, ' ').trim() === bname);
+      if (!br) return res.status(404).send('סניף לא נמצא');
+      title = br.name;
+      employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
+    } else {
+      const emp = await Employee.findById(req.query.employee_id).lean();
+      if (!emp) return res.status(404).send('עובד לא נמצא');
+      title = emp.full_name;
+      employees = [emp];
+    }
+    const reports = await buildHoursReportsForEmployees(employees, range, month);
+    const html = buildHoursReportHtml(title, month, reports);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
+}
+
+// GET /payslip-audit/history/:id/branch-pdf?branch=.. — the full consolidated
+// branch payslip PDF (what the branch manager receives), for preview.
+async function branchPdfPreview(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const bytes = await loadBranchPdf(doc._id, String(req.query.branch || '').replace(/\s+/g, ' ').trim());
+    if (!bytes) return res.status(404).json({ error: 'אין קובץ לסניף זה' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="branch.pdf"');
+    res.send(bytes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 // GET /payslip-audit/history/:id/manager-preview — per-branch review before the
 // manager send: manager email, whether the branch PDF exists, payslip count.
 async function managerDistributionPreview(req, res) {
@@ -1593,6 +1638,8 @@ module.exports = {
   setBranchManagerEmails,
   distributionPreview,
   managerDistributionPreview,
+  hoursReportPreview,
+  branchPdfPreview,
   listSavedPayslips,
   downloadSavedPayslip,
   exportSavedPayslips,

@@ -225,6 +225,16 @@ router.get(
   requireRole('system_admin', 'accountant'),
   audit.managerDistributionPreview,
 );
+router.get(
+  '/payslip-audit/history/:id/hours-preview',
+  requireRole('system_admin', 'accountant'),
+  audit.hoursReportPreview,
+);
+router.get(
+  '/payslip-audit/history/:id/branch-pdf',
+  requireRole('system_admin', 'accountant'),
+  audit.branchPdfPreview,
+);
 router.post(
   '/payslip-audit/history/:id/send-managers',
   requireRole('system_admin', 'accountant'),

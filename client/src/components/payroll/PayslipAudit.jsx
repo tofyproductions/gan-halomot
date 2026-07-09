@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress, Collapse,
   Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
-  LinearProgress, MenuItem, Paper, Select, Stack, Switch, Table, TableBody, TableCell,
-  TableHead, TableRow, TextField, Tooltip, Typography,
+  LinearProgress, MenuItem, Paper, Select, Stack, Switch, Tab, Table, TableBody, TableCell,
+  TableHead, TableRow, Tabs, TextField, Tooltip, Typography,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -1553,6 +1553,57 @@ const DIST_STATUS_HE = {
   no_pdf: 'אין קובץ', error: 'שגיאה',
 };
 
+/* Preview the EXACT content that will be emailed — the payslip PDF and the
+   hours report — in two tabs, before sending. Works for both an employee
+   (payslip page + personal hours) and a branch manager (branch PDF + branch
+   hours). */
+function SendContentPreview({ open, onClose, auditId, title, pdfEndpoint, pdfQuery, hoursQuery }) {
+  const [tab, setTab] = useState('payslip');
+  const [pdfUrl, setPdfUrl] = useState(null);
+  const [html, setHtml] = useState('');
+  const [loadingPdf, setLoadingPdf] = useState(false);
+  const [loadingHours, setLoadingHours] = useState(false);
+  const [err, setErr] = useState(null);
+  useEffect(() => {
+    if (!open || !auditId) return;
+    setTab('payslip'); setErr(null);
+    let url;
+    setLoadingPdf(true); setPdfUrl(null);
+    api.get(`/payroll/payslip-audit/history/${auditId}/${pdfEndpoint}`, { params: pdfQuery, responseType: 'blob' })
+      .then(res => { url = URL.createObjectURL(res.data); setPdfUrl(url); })
+      .catch(e => setErr('התלוש אינו זמין לתצוגה'))
+      .finally(() => setLoadingPdf(false));
+    setLoadingHours(true); setHtml('');
+    api.get(`/payroll/payslip-audit/history/${auditId}/hours-preview`, { params: hoursQuery, responseType: 'text' })
+      .then(res => setHtml(res.data)).catch(() => {}).finally(() => setLoadingHours(false));
+    return () => { if (url) URL.revokeObjectURL(url); };
+    // eslint-disable-next-line
+  }, [open, auditId, JSON.stringify(pdfQuery), JSON.stringify(hoursQuery)]);
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '92vh' } }}>
+      <DialogTitle sx={{ fontWeight: 700, pb: 0 }}>
+        תצוגה מקדימה — {title}
+        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mt: 1, minHeight: 36 }}>
+          <Tab value="payslip" label="תלוש שכר" sx={{ minHeight: 36 }} />
+          <Tab value="hours" label="דוח שעות" sx={{ minHeight: 36 }} />
+        </Tabs>
+      </DialogTitle>
+      <DialogContent dividers sx={{ p: 0, bgcolor: '#f1f5f9' }}>
+        {tab === 'payslip' ? (
+          loadingPdf ? <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>
+            : err ? <Alert severity="warning" sx={{ m: 2 }}>{err}</Alert>
+            : pdfUrl ? <iframe title="payslip" src={pdfUrl} style={{ width: '100%', height: '100%', border: 0 }} />
+            : null
+        ) : (
+          loadingHours ? <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>
+            : <iframe title="hours" srcDoc={html} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
+        )}
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>סגור</Button></DialogActions>
+    </Dialog>
+  );
+}
+
 /* Distribute payslips to employees: review the ת"ז match per payslip, edit +
    save each employee's email, pick who to send to (or all), and see the log. */
 function PayslipDistributionDialog({ open, audit, onClose }) {
@@ -1562,22 +1613,7 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
-  const [previewing, setPreviewing] = useState(null);
-
-  // Open a single payslip page (auth-fetched → blob) in a new tab for preview.
-  const previewPage = async (it) => {
-    if (!audit?._id || !it.has_page) return;
-    setPreviewing(it.employee_id || it.payslip_id);
-    try {
-      const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/payslip-page`, {
-        params: { branch: it.branch, page: it.page }, responseType: 'blob',
-      });
-      const url = URL.createObjectURL(res.data);
-      window.open(url, '_blank', 'noopener');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בתצוגת התלוש'); }
-    finally { setPreviewing(null); }
-  };
+  const [preview, setPreview] = useState(null); // { it } — the row being previewed
 
   const load = () => {
     if (!audit?._id) return;
@@ -1626,6 +1662,7 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
   const logCounts = (log?.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '90vh' } }}>
       <DialogTitle sx={{ fontWeight: 700 }}>הפצת תלושים לעובדים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
       <DialogContent dividers>
@@ -1661,10 +1698,8 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
                   </TableCell>
                   <TableCell align="center">
                     {it.has_page ? (
-                      <Button size="small" variant="text" onClick={() => previewPage(it)}
-                        disabled={previewing === (it.employee_id || it.payslip_id)}
-                        sx={{ minWidth: 0, fontSize: 11 }}>
-                        {previewing === (it.employee_id || it.payslip_id) ? '…' : `תצוגה (עמ׳ ${it.page})`}
+                      <Button size="small" variant="text" onClick={() => setPreview({ it })} sx={{ minWidth: 0, fontSize: 11 }}>
+                        תצוגה
                       </Button>
                     ) : <Chip size="small" color="error" label="חסר" />}
                   </TableCell>
@@ -1708,6 +1743,14 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
     </Dialog>
+    <SendContentPreview
+      open={!!preview} onClose={() => setPreview(null)} auditId={audit?._id}
+      title={preview?.it?.employee_name || preview?.it?.payslip_name || ''}
+      pdfEndpoint="payslip-page"
+      pdfQuery={preview ? { branch: preview.it.branch, page: preview.it.page } : {}}
+      hoursQuery={preview ? { scope: 'employee', employee_id: preview.it.employee_id } : {}}
+    />
+    </>
   );
 }
 
@@ -1721,6 +1764,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
+  const [preview, setPreview] = useState(null); // { branch }
 
   const load = () => {
     if (!audit?._id) return;
@@ -1761,6 +1805,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   const logCounts = (log?.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
       <DialogTitle sx={{ fontWeight: 700 }}>שליחת תלושים למנהלי סניפים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
       <DialogContent dividers>
@@ -1775,7 +1820,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
                 <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
                 <TableCell sx={{ fontWeight: 700 }} align="center">תלושים</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>מייל מנהל/ת</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">קובץ</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">תצוגה</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1785,7 +1830,11 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
                   <TableCell sx={{ fontWeight: 600 }}>{it.branch}</TableCell>
                   <TableCell align="center">{it.payslip_count}</TableCell>
                   <TableCell dir="ltr">{it.email || <Chip size="small" color="error" label="אין מייל" />}</TableCell>
-                  <TableCell align="center">{it.has_pdf ? '✓' : <Chip size="small" color="error" label="חסר" />}</TableCell>
+                  <TableCell align="center">
+                    {it.has_pdf ? (
+                      <Button size="small" variant="text" onClick={() => setPreview({ branch: it.branch })} sx={{ minWidth: 0, fontSize: 11 }}>תצוגה</Button>
+                    ) : <Chip size="small" color="error" label="חסר" />}
+                  </TableCell>
                 </TableRow>
               ))}
               {items.length === 0 && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין סניפים.</TableCell></TableRow>}
@@ -1823,6 +1872,14 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
     </Dialog>
+    <SendContentPreview
+      open={!!preview} onClose={() => setPreview(null)} auditId={audit?._id}
+      title={preview?.branch || ''}
+      pdfEndpoint="branch-pdf"
+      pdfQuery={preview ? { branch: preview.branch } : {}}
+      hoursQuery={preview ? { scope: 'branch', branch: preview.branch } : {}}
+    />
+    </>
   );
 }
 
