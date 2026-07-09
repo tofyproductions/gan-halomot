@@ -205,6 +205,16 @@ router.put(
   requireRole('system_admin', 'accountant'),
   audit.setBranchManagerEmails,
 );
+router.get(
+  '/payslip-audit/history/:id/distribution-preview',
+  requireRole('system_admin', 'accountant'),
+  audit.distributionPreview,
+);
+router.put(
+  '/payslip-audit/employees/emails',
+  requireRole('system_admin', 'accountant'),
+  audit.updateEmployeeEmails,
+);
 router.post(
   '/payslip-audit/history/:id/send-employees',
   requireRole('system_admin', 'accountant'),

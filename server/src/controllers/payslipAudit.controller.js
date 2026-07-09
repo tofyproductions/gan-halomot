@@ -1316,8 +1316,11 @@ async function sendPayslipsToEmployees(req, res) {
     if (!month) return res.status(400).json({ error: 'לביקורת אין חודש (year_month)' });
     const results = doc.full_result?.results || [];
     if (results.length === 0) return res.status(400).json({ error: 'אין תלושים בביקורת' });
+    // Optional selection: send only to these employee _ids. Absent → send to all.
+    const selectedIds = (Array.isArray(req.body?.employee_ids) && req.body.employee_ids.length)
+      ? new Set(req.body.employee_ids.map(String)) : null;
     const userId = req.user?.id || null;
-    res.json({ ok: true, queued: true, count: results.length });
+    res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
     void (async () => {
       const { monthRange, buildHoursReportsForEmployees, buildHoursReportHtml } = require('./payroll.controller');
@@ -1332,6 +1335,7 @@ async function sendPayslipsToEmployees(req, res) {
         try {
           const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
           if (!emp) { out.push({ name: dispName, status: 'no_match' }); continue; }
+          if (selectedIds && !selectedIds.has(String(emp._id))) continue; // not selected for this send
           const email = (emp.email && emp.email.trim()) || emp.user_id?.email || null;
           if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
           if (!page || !branch) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
@@ -1415,11 +1419,61 @@ async function sendPayslipsToManagers(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// GET /payslip-audit/history/:id/distribution-preview — per-payslip review
+// before sending: match each payslip to an employee (by ת"ז), surface the email
+// + ת"ז-verification status, and the last send log for display.
+async function distributionPreview(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const results = doc.full_result?.results || [];
+    const items = [];
+    for (const r of results) {
+      const payslipName = r.payslip?.employee_name || r.table_row?.employee_name || '';
+      const israeliId = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
+      const branch = (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim();
+      const page = r.payslip?.page_index || null;
+      const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
+      const email = emp ? ((emp.email && emp.email.trim()) || emp.user_id?.email || '') : '';
+      items.push({
+        payslip_name: payslipName,
+        payslip_id: israeliId,
+        branch, page,
+        matched: !!emp,
+        id_verified: !!(emp && israeliId && String(emp.israeli_id).trim() === israeliId),
+        employee_id: emp ? String(emp._id) : null,
+        employee_name: emp ? emp.full_name : null,
+        email,
+        email_from_employee: !!(emp && emp.email && emp.email.trim()),
+        has_page: !!page,
+      });
+    }
+    res.json({ month: doc.year_month, items, distribution: doc.full_result?.distribution || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// PUT /payslip-audit/employees/emails { updates: [{ employee_id, email }] } —
+// persist each employee's email so it's reused on future sends.
+async function updateEmployeeEmails(req, res) {
+  try {
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates : [];
+    let saved = 0;
+    for (const u of updates) {
+      if (!u || !u.employee_id) continue;
+      await Employee.findByIdAndUpdate(u.employee_id, { email: String(u.email || '').trim() });
+      saved++;
+    }
+    res.json({ ok: true, saved });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 module.exports = {
   parseTable,
   parsePayslips,
   getBranchManagerEmails,
   setBranchManagerEmails,
+  distributionPreview,
+  updateEmployeeEmails,
   sendPayslipsToEmployees,
   sendPayslipsToManagers,
   runAudit,
