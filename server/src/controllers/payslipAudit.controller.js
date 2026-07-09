@@ -1263,6 +1263,31 @@ async function extractPage(srcBytes, pageNum) {
   return Buffer.from(await outDoc.save());
 }
 
+// Merge the payslip pages of a set of grouped employees (each carries its page +
+// the source PDF that holds it) into one PDF Buffer. Used to build a branch's
+// bundle when there's no dedicated per-branch PDF (all-in-one audits).
+async function mergeGroupPages(doc, employees, pdfCache) {
+  const { PDFDocument } = require('pdf-lib');
+  const chosen = (employees || []).filter(e => e.has_page && e.page);
+  if (chosen.length === 0) return null;
+  const bySource = new Map();
+  for (const e of chosen) { if (!bySource.has(e.source_branch)) bySource.set(e.source_branch, []); bySource.get(e.source_branch).push(e.page); }
+  const merged = await PDFDocument.create();
+  for (const [src, pages] of bySource) {
+    let bytes;
+    if (pdfCache) { if (!pdfCache.has(src)) pdfCache.set(src, await loadBranchPdf(doc._id, src)); bytes = pdfCache.get(src); }
+    else bytes = await loadBranchPdf(doc._id, src);
+    if (!bytes) continue;
+    const srcDoc = await PDFDocument.load(bytes);
+    const total = srcDoc.getPageCount();
+    const idx = [...new Set(pages)].filter(p => p >= 1 && p <= total).map(p => p - 1);
+    const cp = await merged.copyPages(srcDoc, idx);
+    cp.forEach(pg => merged.addPage(pg));
+  }
+  if (merged.getPageCount() === 0) return null;
+  return Buffer.from(await merged.save());
+}
+
 // Extract several 1-based pages (in the given order) → one merged PDF Buffer.
 async function extractPages(srcBytes, pageNums) {
   const { PDFDocument } = require('pdf-lib');
@@ -1603,11 +1628,20 @@ async function hoursReportPreview(req, res) {
     let title = ''; let employees = [];
     if (req.query.scope === 'branch') {
       const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
-      const all = await Branch.find({}).select('_id name').lean();
-      const br = all.find(b => b.name.replace(/\s+/g, ' ').trim() === bname);
-      if (!br) return res.status(404).send('סניף לא נמצא');
-      title = br.name;
-      employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
+      if (bname === OFFICE_NAME) {
+        // Office master copy — hours for every matched employee in the audit.
+        title = OFFICE_NAME;
+        const groups = await buildManagerBranchGroups(doc);
+        const office = groups.get(OFFICE_KEY);
+        const ids = [...new Set((office?.employees || []).filter(e => e.employee_id).map(e => e.employee_id))];
+        employees = await Employee.find({ _id: { $in: ids } }).sort({ full_name: 1 }).lean();
+      } else {
+        const all = await Branch.find({}).select('_id name').lean();
+        const br = all.find(b => b.name.replace(/\s+/g, ' ').trim() === bname);
+        if (!br) return res.status(404).send('סניף לא נמצא');
+        title = br.name;
+        employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
+      }
     } else {
       const emp = await Employee.findById(req.query.employee_id).lean();
       if (!emp) return res.status(404).send('עובד לא נמצא');
@@ -1627,7 +1661,17 @@ async function branchPdfPreview(req, res) {
   try {
     const doc = await PayslipAuditRecord.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
-    const bytes = await loadBranchPdf(doc._id, String(req.query.branch || '').replace(/\s+/g, ' ').trim());
+    const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+    const wanted = norm(req.query.branch);
+    // Direct stored PDF (per-branch upload, or the combined "כל הסניפים" PDF).
+    let bytes = await loadBranchPdf(doc._id, wanted);
+    if (!bytes) {
+      // No dedicated PDF — build the branch bundle from its employees' pages.
+      const groups = await buildManagerBranchGroups(doc);
+      let g = null;
+      for (const [, gg] of groups) { if (norm(gg.name) === wanted) { g = gg; break; } }
+      if (g) bytes = await mergeGroupPages(doc, g.employees, null);
+    }
     if (!bytes) return res.status(404).json({ error: 'אין קובץ לסניף זה' });
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="branch.pdf"');
