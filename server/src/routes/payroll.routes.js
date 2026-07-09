@@ -220,10 +220,32 @@ router.post(
   requireRole('system_admin', 'accountant'),
   audit.sendPayslipsToEmployees,
 );
+router.get(
+  '/payslip-audit/history/:id/manager-preview',
+  requireRole('system_admin', 'accountant'),
+  audit.managerDistributionPreview,
+);
 router.post(
   '/payslip-audit/history/:id/send-managers',
   requireRole('system_admin', 'accountant'),
   audit.sendPayslipsToManagers,
+);
+// Saved (archived) payslips per employee — produced when payslips are sent to
+// employees. List / download one / export several merged.
+router.get(
+  '/employees/:id/saved-payslips',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  audit.listSavedPayslips,
+);
+router.get(
+  '/employees/:id/saved-payslips/:ym/pdf',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  audit.downloadSavedPayslip,
+);
+router.post(
+  '/employees/:id/saved-payslips/export',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  audit.exportSavedPayslips,
 );
 router.patch(
   '/payslip-audit/history/:id/unapprove',

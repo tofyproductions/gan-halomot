@@ -842,6 +842,7 @@ export default function PayrollMonthTable() {
   const [travelDlg, setTravelDlg] = useState({ open: false, row: null, locked: false });
   const [empNumDlg, setEmpNumDlg] = useState({ open: false, row: null });
   const [bankDlg, setBankDlg] = useState({ open: false, row: null });
+  const [savedDlg, setSavedDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
@@ -1898,6 +1899,19 @@ export default function PayrollMonthTable() {
                                     </Typography>}
                               </Box>
                             </Tooltip>
+                            {/* Saved payslips archive + paid badge */}
+                            <Box sx={{ display: 'block', mt: 0.2 }}>
+                              <Tooltip title="תלושים שמורים — הפקה/ייצוא לכל חודש">
+                                <Chip size="small" variant="outlined" color="default" label="תלושים 🗂"
+                                  onClick={(e) => { e.stopPropagation(); setSavedDlg({ open: true, row: r }); }}
+                                  sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer', mr: 0.3 }} />
+                              </Tooltip>
+                              {r.payslip_paid && (
+                                <Tooltip title={r.payslip_paid_at ? `אושר ושולם · ${new Date(r.payslip_paid_at).toLocaleDateString('he-IL')}` : 'אושר ושולם'}>
+                                  <Chip size="small" color="success" label="✓ שולם" sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
+                                </Tooltip>
+                              )}
+                            </Box>
                             {/* Bank details — server sends these only to accounting/admin */}
                             {r.bank_account !== undefined && (
                               <Tooltip title="בנק וקופות (פנסיה / השתלמות) לתשלום שכר — לחץ לעריכה (הנהלת חשבונות בלבד)">
@@ -2154,6 +2168,7 @@ export default function PayrollMonthTable() {
         onClose={() => setBankDlg({ open: false, row: null })}
         onSave={(bank) => { if (bankDlg.row) setEmployeeBank(bankDlg.row.employee_id, bank); setBankDlg({ open: false, row: null }); }}
       />
+      <SavedPayslipsDialog open={savedDlg.open} row={savedDlg.row} onClose={() => setSavedDlg({ open: false, row: null })} />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
         onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />
@@ -2475,6 +2490,89 @@ const ABSENCE_SOURCE = {
   leave:   { label: '✓ חופשה/מחלה מאושרת', color: 'success' },
   unknown: { label: 'ללא סיבה — לסימון מנהל', color: 'warning' },
 };
+
+// An employee's archived payslips (created when payslips were sent to them).
+// List every saved month, open one, or export several merged into one PDF.
+function SavedPayslipsDialog({ open, row, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [list, setList] = useState([]);
+  const [sel, setSel] = useState({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open || !row) return;
+    setLoading(true); setSel({});
+    api.get(`/payroll/employees/${row.employee_id}/saved-payslips`)
+      .then(res => setList(res.data.payslips || []))
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
+      .finally(() => setLoading(false));
+  }, [open, row]);
+  if (!row) return null;
+  const openPdf = async (ym, { download } = {}) => {
+    try {
+      const res = await api.get(`/payroll/employees/${row.employee_id}/saved-payslips/${ym}/pdf`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      if (download) { const a = document.createElement('a'); a.href = url; a.download = `תלוש-${row.full_name}-${ym}.pdf`; a.click(); }
+      else window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בפתיחת התלוש'); }
+  };
+  const selectedMonths = list.filter(p => sel[p.year_month]).map(p => p.year_month);
+  const exportMerged = async () => {
+    const months = selectedMonths.length ? selectedMonths : list.map(p => p.year_month);
+    if (!months.length) return;
+    setBusy(true);
+    try {
+      const res = await api.post(`/payroll/employees/${row.employee_id}/saved-payslips/export`, { months }, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a'); a.href = url; a.download = `תלושים-${row.full_name}.pdf`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בייצוא'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>תלושים שמורים — {row.full_name}</DialogTitle>
+      <DialogContent dividers>
+        {loading ? <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress size={24} /></Box>
+          : list.length === 0 ? <Alert severity="info">אין תלושים שמורים לעובד/ת זה. תלוש נשמר אוטומטית כששולח/ים אותו לעובד/ת.</Alert>
+          : (
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell padding="checkbox" />
+                  <TableCell sx={{ fontWeight: 700 }}>חודש</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>נשלח</TableCell>
+                  <TableCell align="center" />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {list.map(p => (
+                  <TableRow key={p.year_month} hover>
+                    <TableCell padding="checkbox"><Checkbox size="small" checked={!!sel[p.year_month]} onChange={() => setSel(s => ({ ...s, [p.year_month]: !s[p.year_month] }))} /></TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>{p.year_month}</TableCell>
+                    <TableCell>{p.branch || '—'}</TableCell>
+                    <TableCell><Typography variant="caption">{p.sent_at ? new Date(p.sent_at).toLocaleDateString('he-IL') : '—'}</Typography></TableCell>
+                    <TableCell align="center">
+                      <Button size="small" onClick={() => openPdf(p.year_month)} sx={{ minWidth: 0, fontSize: 11 }}>הצג</Button>
+                      <Button size="small" onClick={() => openPdf(p.year_month, { download: true })} sx={{ minWidth: 0, fontSize: 11 }}>הורד</Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={exportMerged} variant="contained" disabled={busy || loading || list.length === 0}>
+          ייצא {selectedMonths.length ? `נבחרים (${selectedMonths.length})` : 'הכל'} כ-PDF אחד
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={onClose}>סגור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
 
 function AbsenceCell({ row }) {
   const ab = row.absence;

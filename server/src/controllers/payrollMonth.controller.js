@@ -765,6 +765,8 @@ async function getMonth(req, res, next) {
         israeli_id: emp.israeli_id || '',
         employee_number: emp.employee_number || '',
         is_freelancer: !!emp.is_freelancer,
+        payslip_paid: !!existingRow?.payslip_paid,            // payslip sent to employee (אושר ושולם)
+        payslip_paid_at: existingRow?.payslip_paid_at || null,
         // Bank details only for accounting/admin (sensitive).
         ...(canSeeBank ? {
           bank_number: emp.bank_number || '',

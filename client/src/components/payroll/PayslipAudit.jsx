@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress, Collapse,
-  Dialog, DialogActions, DialogContent, DialogTitle, Divider, IconButton,
-  LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell,
-  TableHead, TableRow, TextField, Typography,
+  Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
+  LinearProgress, MenuItem, Paper, Select, Stack, Switch, Table, TableBody, TableCell,
+  TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -1561,6 +1561,23 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
   const [sel, setSel] = useState({});
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState(null);
+  const [includeHours, setIncludeHours] = useState(true);
+  const [previewing, setPreviewing] = useState(null);
+
+  // Open a single payslip page (auth-fetched → blob) in a new tab for preview.
+  const previewPage = async (it) => {
+    if (!audit?._id || !it.has_page) return;
+    setPreviewing(it.employee_id || it.payslip_id);
+    try {
+      const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/payslip-page`, {
+        params: { branch: it.branch, page: it.page }, responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בתצוגת התלוש'); }
+    finally { setPreviewing(null); }
+  };
 
   const load = () => {
     if (!audit?._id) return;
@@ -1594,11 +1611,13 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
   const send = async (all) => {
     const ids = all ? [] : selectedIds;
     if (!all && ids.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
-    if (!window.confirm(all ? 'לשלוח לכל העובדים המותאמים את התלוש + דוח השעות?' : `לשלוח ל-${ids.length} עובדים נבחרים?`)) return;
+    const who = all ? 'לכל העובדים המותאמים' : `ל-${ids.length} עובדים נבחרים`;
+    if (!window.confirm(`לשלוח ${who} את התלוש${includeHours ? ' + דוח השעות' : ''}?\nהפעולה מסמנת את חודש השכר כאושר+שולם ושומרת עותק בתיק כל עובד.`)) return;
     setBusy(true);
     await persistEmails();
     try {
-      const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-employees`, all ? {} : { employee_ids: ids });
+      const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-employees`,
+        { ...(all ? {} : { employee_ids: ids }), include_hours: includeHours });
       toast.success(`השליחה החלה — ${res.data.count} עובדים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
@@ -1640,7 +1659,15 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
                     <TextField size="small" fullWidth dir="ltr" placeholder="—" value={it.email || ''} disabled={!it.employee_id}
                       onChange={e => setItems(prev => prev.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
                   </TableCell>
-                  <TableCell align="center">{it.has_page ? it.page : <Chip size="small" color="error" label="חסר" />}</TableCell>
+                  <TableCell align="center">
+                    {it.has_page ? (
+                      <Button size="small" variant="text" onClick={() => previewPage(it)}
+                        disabled={previewing === (it.employee_id || it.payslip_id)}
+                        sx={{ minWidth: 0, fontSize: 11 }}>
+                        {previewing === (it.employee_id || it.payslip_id) ? '…' : `תצוגה (עמ׳ ${it.page})`}
+                      </Button>
+                    ) : <Chip size="small" color="error" label="חסר" />}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1666,11 +1693,132 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
           </Box>
         )}
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={{ flexWrap: 'wrap' }}>
+        <FormControlLabel sx={{ ml: 0 }}
+          control={<Switch size="small" checked={includeHours} onChange={e => setIncludeHours(e.target.checked)} />}
+          label={<Typography variant="caption">צרף דוח שעות</Typography>} />
+        <Tooltip title="שליחה לעובד נועלת את חודש השכר שלו כאושר+שולם ושומרת עותק של התלוש בתיק העובד">
+          <Typography variant="caption" color="text.secondary" sx={{ mr: 1 }}>שליחה = אושר ושולם ✓</Typography>
+        </Tooltip>
         <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
         <Box sx={{ flex: 1 }} />
         <Button onClick={saveEmails} disabled={busy || loading}>שמור מיילים</Button>
         <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח לנבחרים ({selectedIds.length})</Button>
+        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח לכולם</Button>
+        <Button onClick={onClose}>סגור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/* Distribute the consolidated per-branch payslip bundle to each branch manager.
+   Preview which branches will be sent, their manager email + payslip count, pick
+   which branches, toggle the hours report, then send. */
+function ManagerDistributionDialog({ open, audit, onClose }) {
+  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState([]);
+  const [sel, setSel] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [log, setLog] = useState(null);
+  const [includeHours, setIncludeHours] = useState(true);
+
+  const load = () => {
+    if (!audit?._id) return;
+    setLoading(true);
+    api.get(`/payroll/payslip-audit/history/${audit._id}/manager-preview`)
+      .then(res => {
+        const its = res.data.items || [];
+        setItems(its);
+        const s = {};
+        its.forEach(it => { if (it.email && it.has_pdf) s[it.branch] = true; });
+        setSel(s);
+        setLog(res.data.distribution || null);
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, audit?._id]);
+
+  const sendable = items.filter(it => it.email && it.has_pdf).map(it => it.branch);
+  const selectedBranches = sendable.filter(b => sel[b]);
+  const allChecked = sendable.length > 0 && selectedBranches.length === sendable.length;
+  const someChecked = selectedBranches.length > 0 && !allChecked;
+
+  const send = async (all) => {
+    const branches = all ? [] : selectedBranches;
+    if (!all && branches.length === 0) { toast.error('בחר/י לפחות סניף אחד'); return; }
+    const who = all ? 'לכל הסניפים' : `ל-${branches.length} סניפים נבחרים`;
+    if (!window.confirm(`לשלוח ${who} את כל תלושי הסניף${includeHours ? ' + דוח שעות מרוכז' : ''}?`)) return;
+    setBusy(true);
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-managers`,
+        { ...(all ? {} : { branches }), include_hours: includeHours });
+      toast.success(`השליחה למנהלים החלה — ${res.data.count} סניפים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
+    finally { setBusy(false); }
+  };
+
+  const logCounts = (log?.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>שליחת תלושים למנהלי סניפים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
+      <DialogContent dividers>
+        <Typography variant="caption" color="text.secondary">
+          כל מנהל/ת סניף מקבל/ת מייל עם <b>כל תלושי הסניף</b> (PDF מרוכז){includeHours ? ' ודוח שעות מרוכז לעובדי הסניף' : ''}. בחר/י אילו סניפים לשלוח.
+        </Typography>
+        {loading ? <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box> : (
+          <Table size="small" sx={{ mt: 1.5 }}>
+            <TableHead>
+              <TableRow>
+                <TableCell padding="checkbox"><Checkbox size="small" checked={allChecked} indeterminate={someChecked} onChange={e => { const v = e.target.checked; const s = {}; sendable.forEach(b => { s[b] = v; }); setSel(s); }} /></TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">תלושים</TableCell>
+                <TableCell sx={{ fontWeight: 700 }}>מייל מנהל/ת</TableCell>
+                <TableCell sx={{ fontWeight: 700 }} align="center">קובץ</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((it, i) => (
+                <TableRow key={i} sx={{ bgcolor: !it.email ? '#fef2f2' : !it.has_pdf ? '#fffbeb' : undefined }}>
+                  <TableCell padding="checkbox"><Checkbox size="small" disabled={!it.email || !it.has_pdf} checked={!!sel[it.branch]} onChange={() => setSel(s => ({ ...s, [it.branch]: !s[it.branch] }))} /></TableCell>
+                  <TableCell sx={{ fontWeight: 600 }}>{it.branch}</TableCell>
+                  <TableCell align="center">{it.payslip_count}</TableCell>
+                  <TableCell dir="ltr">{it.email || <Chip size="small" color="error" label="אין מייל" />}</TableCell>
+                  <TableCell align="center">{it.has_pdf ? '✓' : <Chip size="small" color="error" label="חסר" />}</TableCell>
+                </TableRow>
+              ))}
+              {items.length === 0 && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין סניפים.</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        )}
+        {log && (
+          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
+              <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
+              <Box sx={{ flex: 1 }} />
+              {Object.entries(logCounts).map(([st, n]) => (
+                <Chip key={st} size="small" color={st === 'sent' ? 'success' : st === 'error' ? 'error' : 'default'} label={`${DIST_STATUS_HE[st] || st}: ${n}`} />
+              ))}
+            </Stack>
+            <Box sx={{ maxHeight: 130, overflowY: 'auto' }}>
+              {(log.results || []).map((r, i) => (
+                <Typography key={i} variant="caption" sx={{ display: 'block', color: r.status === 'sent' ? 'success.dark' : r.status === 'error' ? 'error.main' : 'text.secondary' }}>
+                  {r.branch} — {DIST_STATUS_HE[r.status] || r.status}{r.emails ? ` · ${[].concat(r.emails).join(', ')}` : ''}
+                </Typography>
+              ))}
+            </Box>
+          </Box>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ flexWrap: 'wrap' }}>
+        <FormControlLabel sx={{ ml: 0 }}
+          control={<Switch size="small" checked={includeHours} onChange={e => setIncludeHours(e.target.checked)} />}
+          label={<Typography variant="caption">צרף דוח שעות מרוכז</Typography>} />
+        <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
+        <Box sx={{ flex: 1 }} />
+        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח לנבחרים ({selectedBranches.length})</Button>
         <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח לכולם</Button>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
@@ -2099,16 +2247,7 @@ export default function PayslipAudit() {
   const [approveSending, setApproveSending] = useState(false);
   const [mgrEmailsOpen, setMgrEmailsOpen] = useState(false);
   const [distDialog, setDistDialog] = useState({ open: false, audit: null });
-
-  // Employees are distributed via the dialog (review ת"ז, edit emails, select).
-  // Each branch manager gets the whole branch bundle. Both run in the background.
-  const sendToManagers = async (h) => {
-    if (!window.confirm(`לשלוח לכל מנהל/ת סניף את כל התלושים + דוח שעות הסניף (חודש ${h.year_month})?`)) return;
-    try {
-      const res = await api.post(`/payroll/payslip-audit/history/${h._id}/send-managers`);
-      toast.success(`השליחה למנהלים החלה — ${res.data.count} סניפים.`, { autoClose: 6000 });
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
-  };
+  const [mgrDialog, setMgrDialog] = useState({ open: false, audit: null });
 
   // Round-progression dialog: shows a per-employee × per-round matrix of
   // critical/warning counts so the user can see fix-cycle progress at a glance.
@@ -2605,8 +2744,8 @@ export default function PayslipAudit() {
                                   <Stack direction="row" spacing={0.5} justifyContent="center">
                                     {h.approved ? (
                                       <>
-                                        <Button size="small" variant="outlined" color="secondary" onClick={(e) => { e.stopPropagation(); sendToManagers(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 1: שלח מרוכז לכל מנהל/ת סניף">1· למנהלים</Button>
-                                        <Button size="small" variant="outlined" color="primary" onClick={(e) => { e.stopPropagation(); setDistDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 2: הפצה לעובדים (בחירה, אימות ת&quot;ז, עריכת מיילים)">2· לעובדים</Button>
+                                        <Button size="small" variant="contained" color="secondary" onClick={(e) => { e.stopPropagation(); setMgrDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 1: תצוגה מקדימה + שליחה מרוכזת לכל מנהל/ת סניף">1· למנהלים</Button>
+                                        <Button size="small" variant="contained" color="primary" onClick={(e) => { e.stopPropagation(); setDistDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 2: תצוגה מקדימה + הפצה לעובדים (בחירה, אימות ת&quot;ז, עריכת מיילים)">2· לעובדים</Button>
                                         <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); unapproveAudit(h._id); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>בטל אישור</Button>
                                       </>
                                     ) : (
@@ -2938,6 +3077,7 @@ export default function PayslipAudit() {
 
       <BranchManagerEmailsDialog open={mgrEmailsOpen} onClose={() => setMgrEmailsOpen(false)} />
       <PayslipDistributionDialog open={distDialog.open} audit={distDialog.audit} onClose={() => setDistDialog({ open: false, audit: null })} />
+      <ManagerDistributionDialog open={mgrDialog.open} audit={mgrDialog.audit} onClose={() => setMgrDialog({ open: false, audit: null })} />
 
       {/* Phase 3: approve audit dialog — accept optional corrected payslip
           PDFs (one per branch) + admin note. Saving stamps the record as

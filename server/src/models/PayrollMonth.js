@@ -162,6 +162,13 @@ const payrollMonthSchema = new mongoose.Schema({
   },
   finalized_at: { type: Date, default: null },
   finalized_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+  // Payslip payment state. Set when the payslip is sent to the employee
+  // ("אושר ושולם") — marks the month approved+paid and archives the payslip
+  // (see SavedPayslip). Distinct from `status` (draft/finalized editing lock).
+  payslip_paid:    { type: Boolean, default: false },
+  payslip_paid_at: { type: Date, default: null },
+  payslip_sent_to: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 payrollMonthSchema.index({ employee_id: 1, month: 1 }, { unique: true });

@@ -33,7 +33,7 @@ function pdfStoragePath(auditId, branch) {
 function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
-const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth, Branch, User, Setting } = require('../models');
+const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth, Branch, User, Setting, SavedPayslip } = require('../models');
 
 // Persist payslip PDF bytes to Mongo (durable) so the per-page preview survives
 // host restarts that wipe the ephemeral local disk. Best-effort.
@@ -1319,6 +1319,7 @@ async function sendPayslipsToEmployees(req, res) {
     // Optional selection: send only to these employee _ids. Absent → send to all.
     const selectedIds = (Array.isArray(req.body?.employee_ids) && req.body.employee_ids.length)
       ? new Set(req.body.employee_ids.map(String)) : null;
+    const includeHours = req.body?.include_hours !== false; // default: attach hours report
     const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
@@ -1344,16 +1345,36 @@ async function sendPayslipsToEmployees(req, res) {
           if (!bytes) { out.push({ name: emp.full_name, status: 'no_pdf' }); continue; }
           const pageBuf = await extractPage(bytes, page);
           if (!pageBuf) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
-          const reports = await buildHoursReportsForEmployees([emp], range, month);
-          const hoursHtml = buildHoursReportHtml(emp.full_name, month, reports);
-          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          const attachments = [];
+          if (includeHours) {
+            const reports = await buildHoursReportsForEmployees([emp], range, month);
+            const hoursHtml = buildHoursReportHtml(emp.full_name, month, reports);
+            attachments.push({ name: `דוח-שעות-${emp.full_name}-${month}`, html: hoursHtml });
+          }
+          const introBody = includeHours
+            ? `<p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p>`
+            : `<p>מצורף תלוש השכר שלך לחודש ${month}.</p>`;
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({
             to: email,
-            subject: `תלוש שכר ודוח שעות — ${month}`,
+            subject: includeHours ? `תלוש שכר ודוח שעות — ${month}` : `תלוש שכר — ${month}`,
             html: intro,
             fileAttachments: [{ filename: `תלוש-${emp.full_name}-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }],
-            attachments: [{ name: `דוח-שעות-${emp.full_name}-${month}`, html: hoursHtml }],
+            attachments,
           });
+          // Archive the payslip to the employee's file + mark the month paid.
+          try {
+            await SavedPayslip.findOneAndUpdate(
+              { employee_id: emp._id, year_month: month },
+              { employee_id: emp._id, israeli_id: emp.israeli_id || israeliId, year_month: month, branch,
+                data: pageBuf, audit_id: doc._id, page, sent_to: email, sent_at: new Date(), sent_by: userId },
+              { upsert: true },
+            );
+            await PayrollMonth.findOneAndUpdate(
+              { employee_id: emp._id, month },
+              { payslip_paid: true, payslip_paid_at: new Date(), payslip_sent_to: email },
+            );
+          } catch (se) { console.error('archive payslip failed:', emp.full_name, se.message); }
           out.push({ name: emp.full_name, email, status: 'sent' });
         } catch (e) {
           out.push({ name: dispName, status: 'error', error: e.message });
@@ -1372,9 +1393,16 @@ async function sendPayslipsToManagers(req, res) {
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
     const month = doc.year_month;
     if (!month) return res.status(400).json({ error: 'לביקורת אין חודש (year_month)' });
-    const branchNames = [...new Set((doc.full_result?.results || [])
+    let branchNames = [...new Set((doc.full_result?.results || [])
       .map(r => (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim()).filter(Boolean))];
     if (branchNames.length === 0) return res.status(400).json({ error: 'אין סניפים בביקורת' });
+    // Optional selection: send only to these branch names. Absent → all branches.
+    if (Array.isArray(req.body?.branches) && req.body.branches.length) {
+      const sel = new Set(req.body.branches.map(b => String(b).replace(/\s+/g, ' ').trim()));
+      branchNames = branchNames.filter(b => sel.has(b));
+      if (branchNames.length === 0) return res.status(400).json({ error: 'לא נבחרו סניפים תקפים' });
+    }
+    const includeHours = req.body?.include_hours !== false; // default: attach hours report
     const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: branchNames.length });
 
@@ -1398,16 +1426,23 @@ async function sendPayslipsToManagers(req, res) {
           if (emails.length === 0) { out.push({ branch: bname, status: 'no_manager' }); continue; }
           const bytes = await loadBranchPdf(doc._id, bname);
           if (!bytes) { out.push({ branch: bname, status: 'no_pdf' }); continue; }
-          const employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
-          const reports = await buildHoursReportsForEmployees(employees, range, month);
-          const hoursHtml = buildHoursReportHtml(br.name, month, reports);
-          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים כל תלושי השכר של סניף <b>${br.name}</b> לחודש ${month}, וכן דוח שעות מרוכז לעובדי הסניף.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          const attachments = [];
+          if (includeHours) {
+            const employees = await Employee.find({ branch_id: br._id, is_active: true }).sort({ full_name: 1 }).lean();
+            const reports = await buildHoursReportsForEmployees(employees, range, month);
+            const hoursHtml = buildHoursReportHtml(br.name, month, reports);
+            attachments.push({ name: `דוח-שעות-${br.name}-${month}`, html: hoursHtml });
+          }
+          const introBody = includeHours
+            ? `<p>מצורפים כל תלושי השכר של סניף <b>${br.name}</b> לחודש ${month}, וכן דוח שעות מרוכז לעובדי הסניף.</p>`
+            : `<p>מצורפים כל תלושי השכר של סניף <b>${br.name}</b> לחודש ${month}.</p>`;
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({
             to: emails,
-            subject: `תלושי שכר ודוח שעות — ${br.name} — ${month}`,
+            subject: includeHours ? `תלושי שכר ודוח שעות — ${br.name} — ${month}` : `תלושי שכר — ${br.name} — ${month}`,
             html: intro,
             fileAttachments: [{ filename: `תלושים-${br.name}-${month}.pdf`, contentBase64: bytes.toString('base64'), contentType: 'application/pdf' }],
-            attachments: [{ name: `דוח-שעות-${br.name}-${month}`, html: hoursHtml }],
+            attachments,
           });
           out.push({ branch: br.name, emails, status: 'sent' });
         } catch (e) {
@@ -1467,12 +1502,100 @@ async function updateEmployeeEmails(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// GET /payslip-audit/history/:id/manager-preview — per-branch review before the
+// manager send: manager email, whether the branch PDF exists, payslip count.
+async function managerDistributionPreview(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const results = doc.full_result?.results || [];
+    const counts = new Map();
+    for (const r of results) {
+      const b = (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim();
+      if (b) counts.set(b, (counts.get(b) || 0) + 1);
+    }
+    const stored = await readBranchManagerEmails();
+    const allBranches = await Branch.find({}).select('_id name').lean();
+    const byName = new Map(allBranches.map(b => [b.name.replace(/\s+/g, ' ').trim(), b]));
+    const havePdf = new Set((await PayslipAuditPdf.find({ audit_id: doc._id }).select('branch').lean())
+      .map(p => (p.branch || '').replace(/\s+/g, ' ').trim()));
+    const items = [];
+    for (const [bname, count] of counts) {
+      const br = byName.get(bname);
+      let email = '';
+      if (br && stored[String(br._id)]) email = stored[String(br._id)];
+      else if (br) {
+        const mgrs = await User.find({ role: 'branch_manager', $or: [{ managed_branch_ids: br._id }, { branch_id: br._id }] }).select('email').lean();
+        email = [...new Set(mgrs.map(m => m.email).filter(Boolean))].join(', ');
+      }
+      items.push({ branch: bname, payslip_count: count, email, has_pdf: havePdf.has(bname) });
+    }
+    items.sort((a, b) => a.branch.localeCompare(b.branch, 'he'));
+    res.json({ month: doc.year_month, items, distribution: doc.full_result?.distribution?.managers || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// GET /employees/:id/saved-payslips — list an employee's archived payslips.
+async function listSavedPayslips(req, res) {
+  try {
+    const list = await SavedPayslip.find({ employee_id: req.params.id })
+      .select('year_month branch sent_to sent_at page').sort({ year_month: -1 }).lean();
+    res.json({ payslips: list.map(p => ({
+      year_month: p.year_month, branch: p.branch, sent_to: p.sent_to, sent_at: p.sent_at,
+    })) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// GET /employees/:id/saved-payslips/:ym.pdf — download one archived payslip.
+async function downloadSavedPayslip(req, res) {
+  try {
+    const p = await SavedPayslip.findOne({ employee_id: req.params.id, year_month: req.params.ym }).lean();
+    if (!p || !p.data) return res.status(404).json({ error: 'תלוש לא נמצא' });
+    const emp = await Employee.findById(req.params.id).select('full_name').lean();
+    const bytes = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="payslip-${req.params.ym}.pdf"`);
+    res.send(bytes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// POST /employees/:id/saved-payslips/export { months: ['YYYY-MM', ...] } — merge
+// the selected archived payslips into a single PDF (chronological).
+async function exportSavedPayslips(req, res) {
+  try {
+    const months = Array.isArray(req.body?.months) ? req.body.months : [];
+    const q = { employee_id: req.params.id };
+    if (months.length) q.year_month = { $in: months };
+    const list = await SavedPayslip.find(q).sort({ year_month: 1 }).lean();
+    if (list.length === 0) return res.status(404).json({ error: 'אין תלושים שמורים לייצוא' });
+    const { PDFDocument } = require('pdf-lib');
+    const merged = await PDFDocument.create();
+    for (const p of list) {
+      if (!p.data) continue;
+      const bytes = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
+      try {
+        const src = await PDFDocument.load(bytes);
+        const pages = await merged.copyPages(src, src.getPageIndices());
+        pages.forEach(pg => merged.addPage(pg));
+      } catch (e) { /* skip a corrupt page */ }
+    }
+    const outBytes = Buffer.from(await merged.save());
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'inline; filename="payslips.pdf"');
+    res.send(outBytes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 module.exports = {
   parseTable,
   parsePayslips,
   getBranchManagerEmails,
   setBranchManagerEmails,
   distributionPreview,
+  managerDistributionPreview,
+  listSavedPayslips,
+  downloadSavedPayslip,
+  exportSavedPayslips,
   updateEmployeeEmails,
   sendPayslipsToEmployees,
   sendPayslipsToManagers,
