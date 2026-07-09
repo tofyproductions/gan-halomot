@@ -1760,11 +1760,14 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
 function ManagerDistributionDialog({ open, audit, onClose }) {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
-  const [sel, setSel] = useState({});
+  const [empSel, setEmpSel] = useState({});   // { [branch]: { [employee_id]: bool } }
+  const [expanded, setExpanded] = useState({}); // { [branch]: bool }
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
-  const [preview, setPreview] = useState(null); // { branch }
+  const [preview, setPreview] = useState(null); // { title, pdfEndpoint, pdfQuery, hoursQuery }
+
+  const matched = (it) => (it.employees || []).filter(e => e.employee_id && e.has_page);
 
   const load = () => {
     if (!audit?._id) return;
@@ -1774,8 +1777,8 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
         const its = res.data.items || [];
         setItems(its);
         const s = {};
-        its.forEach(it => { if (it.email && it.has_pdf) s[it.branch] = true; });
-        setSel(s);
+        its.forEach(it => { s[it.branch] = {}; matched(it).forEach(e => { s[it.branch][e.employee_id] = true; }); });
+        setEmpSel(s);
         setLog(res.data.distribution || null);
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
@@ -1783,20 +1786,29 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   };
   useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, audit?._id]);
 
-  const sendable = items.filter(it => it.email && it.has_pdf).map(it => it.branch);
-  const selectedBranches = sendable.filter(b => sel[b]);
-  const allChecked = sendable.length > 0 && selectedBranches.length === sendable.length;
-  const someChecked = selectedBranches.length > 0 && !allChecked;
+  const selCount = (branch) => Object.values(empSel[branch] || {}).filter(Boolean).length;
+  const toggleEmp = (branch, id) => setEmpSel(s => ({ ...s, [branch]: { ...s[branch], [id]: !s[branch]?.[id] } }));
+  const toggleBranch = (it, v) => setEmpSel(s => { const b = {}; matched(it).forEach(e => { b[e.employee_id] = v; }); return { ...s, [it.branch]: b }; });
+  const totalSelected = items.reduce((n, it) => n + selCount(it.branch), 0);
+
+  const previewBranch = (it) => setPreview({ title: it.branch, pdfEndpoint: 'branch-pdf', pdfQuery: { branch: it.branch }, hoursQuery: { scope: 'branch', branch: it.branch } });
+  const previewEmp = (it, e) => setPreview({ title: `${e.name} · ${it.branch}`, pdfEndpoint: 'payslip-page', pdfQuery: { branch: it.branch, page: e.page }, hoursQuery: { scope: 'employee', employee_id: e.employee_id } });
 
   const send = async (all) => {
-    const branches = all ? [] : selectedBranches;
-    if (!all && branches.length === 0) { toast.error('בחר/י לפחות סניף אחד'); return; }
-    const who = all ? 'לכל הסניפים' : `ל-${branches.length} סניפים נבחרים`;
-    if (!window.confirm(`לשלוח ${who} את כל תלושי הסניף${includeHours ? ' + דוח שעות מרוכז' : ''}?`)) return;
+    const branches = []; const branch_employees = {};
+    items.forEach(it => {
+      if (!it.email || !it.has_pdf) return;
+      if (all) { branches.push(it.branch); return; } // whole branch PDF (incl. unmatched)
+      const ids = matched(it).filter(e => empSel[it.branch]?.[e.employee_id]).map(e => e.employee_id);
+      if (ids.length) { branches.push(it.branch); branch_employees[it.branch] = ids; }
+    });
+    if (branches.length === 0) { toast.error(all ? 'אין סניפים לשליחה' : 'בחר/י לפחות עובד אחד'); return; }
+    const who = all ? `לכל הסניפים (${branches.length}) — כל העובדים` : `ל-${branches.length} סניפים · ${totalSelected} עובדים נבחרים`;
+    if (!window.confirm(`לשלוח ${who} את התלושים${includeHours ? ' + דוח שעות' : ''}?`)) return;
     setBusy(true);
     try {
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-managers`,
-        { ...(all ? {} : { branches }), include_hours: includeHours });
+        { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours });
       toast.success(`השליחה למנהלים החלה — ${res.data.count} סניפים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
@@ -1806,40 +1818,67 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
 
   return (
     <>
-    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth PaperProps={{ sx: { height: '90vh' } }}>
       <DialogTitle sx={{ fontWeight: 700 }}>שליחת תלושים למנהלי סניפים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="caption" color="text.secondary">
-          כל מנהל/ת סניף מקבל/ת מייל עם <b>כל תלושי הסניף</b> (PDF מרוכז){includeHours ? ' ודוח שעות מרוכז לעובדי הסניף' : ''}. בחר/י אילו סניפים לשלוח.
+          כל מנהל/ת סניף מקבל/ת את תלושי עובדי הסניף{includeHours ? ' + דוח שעות' : ''}. פתח/י סניף כדי לראות את העובדים, לצפות בכל תלוש+דוח, ולהוסיף/להסיר עובדים מהשליחה.
         </Typography>
         {loading ? <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box> : (
-          <Table size="small" sx={{ mt: 1.5 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox"><Checkbox size="small" checked={allChecked} indeterminate={someChecked} onChange={e => { const v = e.target.checked; const s = {}; sendable.forEach(b => { s[b] = v; }); setSel(s); }} /></TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">תלושים</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>מייל מנהל/ת</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">תצוגה</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {items.map((it, i) => (
-                <TableRow key={i} sx={{ bgcolor: !it.email ? '#fef2f2' : !it.has_pdf ? '#fffbeb' : undefined }}>
-                  <TableCell padding="checkbox"><Checkbox size="small" disabled={!it.email || !it.has_pdf} checked={!!sel[it.branch]} onChange={() => setSel(s => ({ ...s, [it.branch]: !s[it.branch] }))} /></TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>{it.branch}</TableCell>
-                  <TableCell align="center">{it.payslip_count}</TableCell>
-                  <TableCell dir="ltr">{it.email || <Chip size="small" color="error" label="אין מייל" />}</TableCell>
-                  <TableCell align="center">
-                    {it.has_pdf ? (
-                      <Button size="small" variant="text" onClick={() => setPreview({ branch: it.branch })} sx={{ minWidth: 0, fontSize: 11 }}>תצוגה</Button>
-                    ) : <Chip size="small" color="error" label="חסר" />}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {items.length === 0 && <TableRow><TableCell colSpan={5} align="center" sx={{ py: 2, color: 'text.secondary' }}>אין סניפים.</TableCell></TableRow>}
-            </TableBody>
-          </Table>
+          <Stack spacing={1} sx={{ mt: 1.5 }}>
+            {items.map((it, i) => {
+              const emps = matched(it);
+              const sc = selCount(it.branch);
+              const allSel = emps.length > 0 && sc === emps.length;
+              const someSel = sc > 0 && !allSel;
+              const disabled = !it.email || !it.has_pdf;
+              return (
+                <Paper key={i} variant="outlined" sx={{ borderColor: disabled ? 'error.light' : 'divider' }}>
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 1 }}>
+                    <Checkbox size="small" disabled={disabled} checked={allSel} indeterminate={someSel} onChange={e => toggleBranch(it, e.target.checked)} />
+                    <IconButton size="small" onClick={() => setExpanded(x => ({ ...x, [it.branch]: !x[it.branch] }))}>
+                      {expanded[it.branch] ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                    </IconButton>
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography sx={{ fontWeight: 700 }}>{it.branch}
+                        <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>{sc}/{emps.length} עובדים</Typography>
+                      </Typography>
+                      <Typography variant="caption" color={it.email ? 'text.secondary' : 'error.main'} dir="ltr" sx={{ display: 'block' }}>
+                        {it.email || 'אין מייל מנהל/ת'}
+                      </Typography>
+                    </Box>
+                    {it.has_pdf
+                      ? <Button size="small" variant="text" onClick={() => previewBranch(it)} sx={{ fontSize: 11 }}>תצוגת סניף</Button>
+                      : <Chip size="small" color="error" label="אין קובץ" />}
+                  </Stack>
+                  <Collapse in={!!expanded[it.branch]}>
+                    <Table size="small" sx={{ bgcolor: 'grey.50' }}>
+                      <TableBody>
+                        {emps.length === 0 && <TableRow><TableCell colSpan={4} align="center" sx={{ color: 'text.secondary', py: 1 }}>אין עובדים מותאמים בקובץ.</TableCell></TableRow>}
+                        {emps.map((e, j) => (
+                          <TableRow key={j}>
+                            <TableCell padding="checkbox"><Checkbox size="small" checked={!!empSel[it.branch]?.[e.employee_id]} onChange={() => toggleEmp(it.branch, e.employee_id)} /></TableCell>
+                            <TableCell sx={{ fontWeight: 600 }}>{e.name}</TableCell>
+                            <TableCell dir="ltr"><Typography variant="caption">{e.israeli_id}</Typography></TableCell>
+                            <TableCell align="center"><Button size="small" variant="text" onClick={() => previewEmp(it, e)} sx={{ minWidth: 0, fontSize: 11 }}>תצוגה</Button></TableCell>
+                          </TableRow>
+                        ))}
+                        {(it.employees || []).filter(e => !e.matched || !e.has_page).map((e, j) => (
+                          <TableRow key={`u${j}`} sx={{ bgcolor: '#fef2f2' }}>
+                            <TableCell padding="checkbox" />
+                            <TableCell sx={{ fontWeight: 600 }}>{e.name}</TableCell>
+                            <TableCell dir="ltr"><Typography variant="caption">{e.israeli_id}</Typography></TableCell>
+                            <TableCell align="center"><Chip size="small" color="warning" variant="outlined" label={e.has_page ? 'לא הותאם' : 'אין עמוד'} sx={{ height: 16, fontSize: 10 }} /></TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </Collapse>
+                </Paper>
+              );
+            })}
+            {items.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', py: 2 }}>אין סניפים.</Typography>}
+          </Stack>
         )}
         {log && (
           <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
@@ -1864,20 +1903,20 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
       <DialogActions sx={{ flexWrap: 'wrap' }}>
         <FormControlLabel sx={{ ml: 0 }}
           control={<Switch size="small" checked={includeHours} onChange={e => setIncludeHours(e.target.checked)} />}
-          label={<Typography variant="caption">צרף דוח שעות מרוכז</Typography>} />
+          label={<Typography variant="caption">צרף דוח שעות</Typography>} />
         <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
         <Box sx={{ flex: 1 }} />
-        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח לנבחרים ({selectedBranches.length})</Button>
-        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח לכולם</Button>
+        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח נבחרים ({totalSelected})</Button>
+        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח הכל</Button>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
     </Dialog>
     <SendContentPreview
       open={!!preview} onClose={() => setPreview(null)} auditId={audit?._id}
-      title={preview?.branch || ''}
-      pdfEndpoint="branch-pdf"
-      pdfQuery={preview ? { branch: preview.branch } : {}}
-      hoursQuery={preview ? { scope: 'branch', branch: preview.branch } : {}}
+      title={preview?.title || ''}
+      pdfEndpoint={preview?.pdfEndpoint || 'branch-pdf'}
+      pdfQuery={preview?.pdfQuery || {}}
+      hoursQuery={preview?.hoursQuery || {}}
     />
     </>
   );
