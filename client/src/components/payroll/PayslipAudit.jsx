@@ -1564,21 +1564,26 @@ function SendContentPreview({ open, onClose, auditId, title, pdfEndpoint, pdfQue
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [loadingHours, setLoadingHours] = useState(false);
   const [err, setErr] = useState(null);
+  const urlRef = useRef(null);
+  const revoke = () => { if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null; } };
   useEffect(() => {
-    if (!open || !auditId) return;
+    // Reset everything whenever the dialog is closed or has no target, so a
+    // re-open never shows a stale/revoked blob URL.
+    if (!open || !auditId) { revoke(); setPdfUrl(null); setHtml(''); setErr(null); return; }
+    let cancelled = false;
     setTab('payslip'); setErr(null);
-    let url;
-    setLoadingPdf(true); setPdfUrl(null);
+    revoke(); setPdfUrl(null); setLoadingPdf(true);
     api.get(`/payroll/payslip-audit/history/${auditId}/${pdfEndpoint}`, { params: pdfQuery, responseType: 'blob' })
-      .then(res => { url = URL.createObjectURL(res.data); setPdfUrl(url); })
-      .catch(e => setErr('התלוש אינו זמין לתצוגה'))
-      .finally(() => setLoadingPdf(false));
+      .then(res => { if (cancelled) return; const u = URL.createObjectURL(res.data); urlRef.current = u; setPdfUrl(u); })
+      .catch(() => { if (!cancelled) setErr('התלוש אינו זמין לתצוגה'); })
+      .finally(() => { if (!cancelled) setLoadingPdf(false); });
     setLoadingHours(true); setHtml('');
     api.get(`/payroll/payslip-audit/history/${auditId}/hours-preview`, { params: hoursQuery, responseType: 'text' })
-      .then(res => setHtml(res.data)).catch(() => {}).finally(() => setLoadingHours(false));
-    return () => { if (url) URL.revokeObjectURL(url); };
+      .then(res => { if (!cancelled) setHtml(res.data); }).catch(() => {}).finally(() => { if (!cancelled) setLoadingHours(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line
-  }, [open, auditId, JSON.stringify(pdfQuery), JSON.stringify(hoursQuery)]);
+  }, [open, auditId, JSON.stringify(pdfQuery), JSON.stringify(hoursQuery), pdfEndpoint]);
+  useEffect(() => revoke, []); // revoke on unmount
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '92vh' } }}>
       <DialogTitle sx={{ fontWeight: 700, pb: 0 }}>
