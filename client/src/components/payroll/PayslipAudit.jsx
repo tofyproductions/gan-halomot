@@ -1744,8 +1744,7 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
         <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
         <Box sx={{ flex: 1 }} />
         <Button onClick={saveEmails} disabled={busy || loading}>שמור מיילים</Button>
-        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח לנבחרים ({selectedIds.length})</Button>
-        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח לכולם</Button>
+        <Button variant="contained" onClick={() => send(false)} disabled={busy || loading || selectedIds.length === 0}>שלח לנבחרים ({selectedIds.length})</Button>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
     </Dialog>
@@ -1914,8 +1913,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
           label={<Typography variant="caption">צרף דוח שעות</Typography>} />
         <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
         <Box sx={{ flex: 1 }} />
-        <Button variant="outlined" onClick={() => send(false)} disabled={busy || loading}>שלח נבחרים ({totalSelected})</Button>
-        <Button variant="contained" onClick={() => send(true)} disabled={busy || loading}>שלח הכל</Button>
+        <Button variant="contained" onClick={() => send(false)} disabled={busy || loading || totalSelected === 0}>שלח לנבחרים ({totalSelected})</Button>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
     </Dialog>
