@@ -2869,7 +2869,11 @@ export default function PayslipAudit() {
                                     ) : (
                                       <Button size="small" variant="contained" color="success" onClick={(e) => { e.stopPropagation(); openApproveDialog(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>אשר סבב</Button>
                                     )}
-                                    <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); changeAuditMonth(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="תיקון חודש הביקורת (למשל תלושי יוני שהועלו ביולי)">שנה חודש</Button>
+                                    <Chip size="small" variant="outlined" color="primary"
+                                      label={`חודש נבדק: ${h.year_month || 'לא הוגדר'}`}
+                                      onClick={(e) => { e.stopPropagation(); changeAuditMonth(h); }}
+                                      sx={{ height: 20, fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+                                      title="לחץ/י לשינוי החודש הנבדק (למשל תלושי יוני שהועלו ביולי)" />
                                     <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); deleteFromHistory(h._id); }} title="מחק">
                                       <DeleteIcon fontSize="small" />
                                     </IconButton>
