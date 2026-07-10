@@ -2339,6 +2339,23 @@ export default function PayslipAudit() {
     }
   };
 
+  // Correct the month an audit belongs to (e.g. June payslips uploaded in July).
+  const changeAuditMonth = async (h) => {
+    const cur = h.year_month || '';
+    const input = window.prompt('חודש הביקורת (YYYY-MM) — לדוגמה 2026-06:', cur);
+    if (!input) return;
+    const ym = input.trim();
+    if (!/^\d{4}-\d{2}$/.test(ym)) { toast.error('פורמט לא תקין. השתמש/י ב-YYYY-MM'); return; }
+    if (ym === cur) return;
+    try {
+      await api.patch(`/payroll/payslip-audit/history/${h._id}/month`, { year_month: ym });
+      setHistory((prev) => prev.map((x) => (x._id === h._id ? { ...x, year_month: ym } : x)));
+      toast.success(`חודש הביקורת עודכן ל-${ym}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בעדכון החודש');
+    }
+  };
+
   // Phase 3: approve/unapprove a saved audit. Approving prompts for optional
   // corrected payslip PDFs (one per branch) and stamps the record with the
   // approving manager + timestamp. Future audits can reference this state.
@@ -2852,6 +2869,7 @@ export default function PayslipAudit() {
                                     ) : (
                                       <Button size="small" variant="contained" color="success" onClick={(e) => { e.stopPropagation(); openApproveDialog(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>אשר סבב</Button>
                                     )}
+                                    <Button size="small" variant="text" onClick={(e) => { e.stopPropagation(); changeAuditMonth(h); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="תיקון חודש הביקורת (למשל תלושי יוני שהועלו ביולי)">שנה חודש</Button>
                                     <IconButton size="small" color="error" onClick={(e) => { e.stopPropagation(); deleteFromHistory(h._id); }} title="מחק">
                                       <DeleteIcon fontSize="small" />
                                     </IconButton>

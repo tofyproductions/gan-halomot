@@ -220,6 +220,11 @@ router.post(
   requireRole('system_admin', 'accountant'),
   audit.sendPayslipsToEmployees,
 );
+router.patch(
+  '/payslip-audit/history/:id/month',
+  requireRole('system_admin', 'accountant'),
+  audit.updateAuditMonth,
+);
 router.get(
   '/payslip-audit/history/:id/manager-preview',
   requireRole('system_admin', 'accountant'),

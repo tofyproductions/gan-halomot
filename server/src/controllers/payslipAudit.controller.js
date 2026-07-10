@@ -1600,6 +1600,21 @@ async function distributionPreview(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// PATCH /payslip-audit/history/:id/month { year_month } — correct the month an
+// audit belongs to (e.g. June payslips uploaded in July). Everything that reads
+// the month (hours reports, saved payslips, distribution) follows.
+async function updateAuditMonth(req, res) {
+  try {
+    const ym = String(req.body?.year_month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(ym)) return res.status(400).json({ error: 'חודש לא תקין (YYYY-MM)' });
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    doc.year_month = ym;
+    await doc.save();
+    res.json({ ok: true, year_month: ym });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 // PUT /payslip-audit/employees/emails { updates: [{ employee_id, email }] } —
 // persist each employee's email so it's reused on future sends.
 async function updateEmployeeEmails(req, res) {
@@ -1755,6 +1770,7 @@ module.exports = {
   setBranchManagerEmails,
   distributionPreview,
   managerDistributionPreview,
+  updateAuditMonth,
   hoursReportPreview,
   branchPdfPreview,
   listSavedPayslips,
