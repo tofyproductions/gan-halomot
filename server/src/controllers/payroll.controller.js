@@ -852,7 +852,9 @@ function renderHoursReportDoc(reports) {
     const [yy, mm] = (report.month || '').split('-');
     const monthLabel = `${mm}/${yy}`;
     const pa = report.partial_absence;
-    const hasCommit = !!pa;   // תקן only — hourly staff have no commitment columns
+    // Commitment columns (מחויב/חוסר/תוספת) are תקן-only. Hourly staff are paid
+    // per hour worked even if a schedule exists, so never show them.
+    const hasCommit = !!pa && report.employee?.salary_type === 'global';
     const totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
     // Tally the absence/leave rows actually shown so the bottom summary matches.
     const tally = { sick: 0, vacation: 0, miluim: 0, holiday: 0, absence: 0 };
@@ -923,9 +925,6 @@ function renderHoursReportDoc(reports) {
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
         ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>
-    <div style="margin-top:8px;font-size:10pt;font-weight:700;border:1.5px solid #111;padding:6px 12px;background:#f8fafc">
-      סיכום שעות: שעות רגילות <b>${fmt(totals.regular)}</b> · 125% <b>${fmt(totals.ot125)}</b> · 150% <b>${fmt(totals.ot150)}</b> · סה״כ שעות <b>${fmt(totals.total)}</b> · ימי עבודה <b>${totals.days}</b>
-    </div>
     ${hasCommit ? `<div class="legend">
       <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
       <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
