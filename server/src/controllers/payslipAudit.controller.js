@@ -1514,12 +1514,52 @@ async function sendPayslipsToManagers(req, res) {
       const stored = await readBranchManagerEmails();
       const pdfCache = new Map();
       const out = [];
+
+      // Specific email → ONE consolidated bundle of ALL selected employees, sent
+      // only to that address (not per-branch, not to managers).
+      if (toOverride) {
+        try {
+          const seen = new Set(); const chosen = [];
+          for (const key of branchKeys) {
+            const g = groups.get(key);
+            const sel = branchSel.get(norm(g.name));
+            for (const e of g.employees) {
+              if (!e.employee_id || !e.has_page || (sel && !sel.has(e.employee_id)) || seen.has(e.employee_id)) continue;
+              seen.add(e.employee_id); chosen.push(e);
+            }
+          }
+          if (chosen.length === 0) { out.push({ branch: toOverride, status: 'no_selection' }); }
+          else {
+            const bySource = new Map();
+            for (const e of chosen) { if (!bySource.has(e.source_branch)) bySource.set(e.source_branch, []); bySource.get(e.source_branch).push(e.page); }
+            const merged = await PDFDocument.create();
+            for (const [src, pages] of bySource) {
+              if (!pdfCache.has(src)) pdfCache.set(src, await loadBranchPdf(doc._id, src));
+              const bytes = pdfCache.get(src); if (!bytes) continue;
+              const srcDoc = await PDFDocument.load(bytes);
+              const total = srcDoc.getPageCount();
+              const idx = [...new Set(pages)].filter(p => p >= 1 && p <= total).map(p => p - 1);
+              (await merged.copyPages(srcDoc, idx)).forEach(pg => merged.addPage(pg));
+            }
+            const pdfBuf = Buffer.from(await merged.save());
+            const attachments = [];
+            if (includeHours) attachments.push({ name: `דוח-שעות-${month}`, html: await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' }) });
+            const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים ${chosen.length} תלושי שכר${includeHours ? ' + דוחות שעות' : ''} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+            await dispatchEmail({ to: [toOverride], subject: `תלושי שכר — ${month}`, html: intro,
+              fileAttachments: [{ filename: `תלושים-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }], attachments });
+            out.push({ branch: toOverride, emails: [toOverride], status: 'sent' });
+          }
+        } catch (e) { out.push({ branch: toOverride, status: 'error', error: e.message }); }
+        await saveDistributionLog(doc._id, 'managers', { at: new Date(), by: userId, results: out });
+        return;
+      }
+
       for (const key of branchKeys) {
         const g = groups.get(key);
         const label = g.br ? g.br.name : g.name;
         try {
           if (!g.br && !g.isOffice) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
-          const emails = toOverride ? [toOverride] : await managerBranchEmails(g, stored);
+          const emails = await managerBranchEmails(g, stored);
           if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
           const sel = branchSel.get(norm(g.name));
           const chosen = g.employees.filter(e => e.employee_id && e.has_page && (!sel || sel.has(e.employee_id)));
@@ -1835,11 +1875,20 @@ async function sendHoursToEmployees(req, res) {
     res.json({ ok: true, queued: true, count: ids.length });
     void (async () => {
       const { buildRichHoursHtml } = require('./payroll.controller');
+      // Specific email → ONE bundle with all selected reports, to that address only.
+      if (toOverride) {
+        try {
+          const html = await buildRichHoursHtml(ids, month, { role: 'system_admin' });
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${ids.length} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, attachments: [{ name: `דוחות-שעות-${month}`, html }] });
+        } catch (e) { console.error('send hours bundle failed:', e.message); }
+        return;
+      }
       for (const id of ids) {
         try {
           const emp = await Employee.findById(id).populate('user_id', 'email').lean();
           if (!emp) continue;
-          const email = toOverride || (emp.email && emp.email.trim()) || emp.user_id?.email;
+          const email = (emp.email && emp.email.trim()) || emp.user_id?.email;
           if (!email) continue;
           const html = await buildRichHoursHtml([emp._id], month, { role: 'system_admin' });
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
@@ -1872,11 +1921,30 @@ async function sendHoursToManagers(req, res) {
     void (async () => {
       const { buildRichHoursHtml } = require('./payroll.controller');
       const stored = await readBranchManagerEmails();
+
+      // Specific email → ONE consolidated hours report of ALL selected employees.
+      if (toOverride) {
+        try {
+          const seen = new Set();
+          for (const key of branchKeys) {
+            const g = groups.get(key);
+            const sel = branchSel.get(norm(g.name));
+            g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id))).forEach(e => seen.add(e.employee_id));
+          }
+          if (seen.size) {
+            const html = await buildRichHoursHtml([...seen], month, { role: 'system_admin' });
+            const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${seen.size} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+            await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, attachments: [{ name: `דוחות-שעות-${month}`, html }] });
+          }
+        } catch (e) { console.error('send hours to specific email failed:', e.message); }
+        return;
+      }
+
       for (const key of branchKeys) {
         const g = groups.get(key);
         const label = g.br ? g.br.name : g.name;
         try {
-          const emails = toOverride ? [toOverride] : await managerBranchEmails(g, stored);
+          const emails = await managerBranchEmails(g, stored);
           if (emails.length === 0) continue;
           const sel = branchSel.get(norm(g.name));
           const chosen = g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id)));
