@@ -1837,6 +1837,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
               const allSel = emps.length > 0 && sc === emps.length;
               const someSel = sc > 0 && !allSel;
               const disabled = !it.email || !it.has_pdf;
+              const unmatched = (it.employees || []).filter(e => !e.employee_id).length;
               return (
                 <Paper key={i} variant="outlined" sx={{ borderColor: disabled ? 'error.light' : 'divider' }}>
                   <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 1 }}>
@@ -1847,6 +1848,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography sx={{ fontWeight: 700 }}>{it.branch}
                         <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>{sc}/{emps.length} עובדים</Typography>
+                        {unmatched > 0 && <Chip size="small" color="warning" label={`${unmatched} לא מותאמים`} sx={{ height: 16, fontSize: 10, mr: 0.5 }} />}
                       </Typography>
                       <Typography variant="caption" color={it.email ? 'text.secondary' : 'error.main'} dir="ltr" sx={{ display: 'block' }}>
                         {it.email || 'אין מייל מנהל/ת'}
