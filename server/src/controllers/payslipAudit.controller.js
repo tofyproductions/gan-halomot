@@ -1442,9 +1442,12 @@ async function buildManagerBranchGroups(doc) {
   groups.set(OFFICE_KEY, { name: OFFICE_NAME, br: null, isOffice: true, employees: [], hasPdfSource: false });
   const office = groups.get(OFFICE_KEY);
   for (const r of results) {
+    const page = r.payslip?.page_index || null;
+    // Only actual payslip PAGES are distributable. Skip salary-table rows that
+    // have no payslip in the PDF (they'd otherwise show as false "לא מותאם").
+    if (!page) continue;
     const sourceBranch = norm(r.__source_branch || r.table_row?.branch || '');
     const iid = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
-    const page = r.payslip?.page_index || null;
     const emp = iid ? await Employee.findOne({ israeli_id: iid }).select('_id full_name branch_id').lean() : null;
     const entry = {
       employee_id: emp ? String(emp._id) : null,
