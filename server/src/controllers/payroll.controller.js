@@ -913,15 +913,28 @@ function renderHoursReportDoc(reports) {
     const emp = report.employee || {};
     // Bottom summary counts the leave rows actually shown in the table.
     const leaveItems = [['ימי מחלה', tally.sick], ['ימי היעדרות', tally.absence], ['ימי חופשה', tally.vacation], ['דמי חגים (ימים)', tally.holiday], ['מילואים', tally.miluim]];
-    return `<div class="doc-head">
-      <div class="title-row"><div class="title">דוח שעות חודשי</div><div>תאריך הפקה: ${todayStr}</div></div>
-      <div class="row"><div class="lbl">שם החברה:</div><div>גן החלומות</div></div>
-      <div class="row"><div class="lbl">חודש:</div><div>${monthLabel}</div></div>
-      <div class="row"><div class="lbl">שם העובד:</div><div>${emp.full_name || '—'}</div></div>
-      <div class="row"><div class="lbl">ת״ז:</div><div dir="ltr">${emp.israeli_id || '—'}</div></div>
-      <div class="row"><div class="lbl">סניף:</div><div>${emp.branch_name || '—'}</div></div>
-      <div class="row"><div class="lbl">תפקיד:</div><div>${emp.position || '—'}</div></div>
-    </div>
+    // Table/inline layout (NOT grid/flex) — the email→PDF converter (GAS) only
+    // renders tables reliably, so the emailed PDF matches this in-browser preview.
+    const hcell = (l, v, ltr) => `<td style="padding:3px 10px;font-weight:700;width:15%;white-space:nowrap;border:1px solid #ddd">${l}:</td><td style="padding:3px 10px;width:35%;border:1px solid #ddd"${ltr ? ' dir="ltr"' : ''}>${v}</td>`;
+    const money = (n, sign) => (n > 0 ? sign + '₪' + Math.round(n).toLocaleString('he-IL') : '₪0');
+    const generalRows = [['ימי עבודה', totals.days], ['סה״כ שעות', fmt(totals.total)], ['שעות רגילות', fmt(totals.regular)], ['125% (יומי)', fmt(totals.ot125)], ['150% (יומי)', fmt(totals.ot150)]];
+    const box2 = hasCommit
+      ? ['חוסר וקיזוז שכר', [['שעות התחייבות', fmt(pa.committed_hours || 0)], ['שעות בפועל', fmt(pa.worked_hours || 0)], ['חוסר (ברוטו)', fmt(totals.shortfall)], ['שעות שקוזזו בפועל', fmt(pa.deduct_hours || 0), '#b91c1c'], ['סכום קיזוז', money(pa.deduction, '−'), '#b91c1c'], ...(pa.made_up ? [['↺ החוסר הושלם בימים אחרים — ללא קיזוז', '', '#1d4ed8']] : [])]]
+      : ['סטטיסטיקה', [['ממוצע שעות יומי', fmt(avgHours)], ['ימים עם חסר החתמה', report.totals?.incomplete_days || 0]]];
+    const box3 = hasCommit
+      ? ['תוספת שכר (מעבר להתחייבות)', [['שעות מעבר להתחייבות', fmt(pa.extra_hours || 0)], ['שעות שאושרו לתשלום', fmt(pa.extra_approved_hours || 0), '#15803d'], ['תוספת ששולמה', money(pa.extra_pay, '+'), '#15803d']]]
+      : ['הערות', [['חישוב 125%/150% לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%)', '']]];
+    const box4 = ['מחלה · היעדרות · חופשה · מילואים', leaveItems.map(([l, v]) => [l, (v === 0 || v == null || v === '') ? '—' : v])];
+    const boxCell = ([title, rows]) => `<td style="border:1px solid #999;vertical-align:top;padding:0">
+      <div style="font-weight:800;background:#f3f4f6;text-align:center;padding:4px 6px;border-bottom:1px solid #999;font-size:9pt">${title}</div>
+      ${rows.map(([l, v, c]) => `<div style="padding:2px 8px;font-size:8.5pt;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${(v === '' || v == null) ? l : `${l}: <b>${v}</b>`}</div>`).join('')}</td>`;
+    const legendItems = [['#fef2f2', 'חוסר שמקזז שכר'], ['#eff6ff', 'חוסר מאושר / הושלם בימים אחרים'], ['#f0fdf4', 'תוספת שאושרה ושולמה'], ['#faf5ff', 'תוספת ממתינה לאישור'], ['#fffbeb', 'החתמה חסרה']];
+    return `<table style="width:100%;border:1.5px solid #111;border-collapse:collapse;margin-bottom:8px;font-size:10pt">
+      <tr><td colspan="4" style="border-bottom:1px solid #ccc;padding:6px 10px;font-size:14pt;font-weight:800">דוח שעות חודשי <span style="font-size:9pt;font-weight:400;color:#555"> · תאריך הפקה: ${todayStr}</span></td></tr>
+      <tr>${hcell('שם החברה', 'גן החלומות')}${hcell('חודש', monthLabel)}</tr>
+      <tr>${hcell('שם העובד', emp.full_name || '—')}${hcell('ת״ז', emp.israeli_id || '—', true)}</tr>
+      <tr>${hcell('סניף', emp.branch_name || '—')}${hcell('תפקיד', emp.position || '—')}</tr>
+    </table>
     <table class="daily"><thead><tr>
       <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th>${hasCommit ? '<th>מחויב</th>' : ''}
       <th>125% (יומי)</th><th>150% (יומי)</th>${hasCommit ? '<th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th><th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>' : ''}<th>הערות</th></tr></thead>
@@ -930,41 +943,17 @@ function renderHoursReportDoc(reports) {
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
         ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>
-    ${hasCommit ? `<div class="legend">
-      <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
-      <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
-      <div class="item"><span class="sw" style="background:#f0fdf4"></span> תוספת שאושרה ושולמה</div>
-      <div class="item"><span class="sw" style="background:#faf5ff"></span> תוספת הממתינה לאישור (לא שולמה)</div>
-      <div class="item"><span class="sw" style="background:#fffbeb"></span> החתמה חסרה</div></div>` : ''}
-    <div class="summary-grid">
-      <div class="box"><div class="box-title">כללי</div>
-        <div class="row"><span>ימי עבודה</span><span class="v">${totals.days}</span></div>
-        <div class="row"><span>סה״כ שעות</span><span class="v">${fmt(totals.total)}</span></div>
-        <div class="row"><span>שעות רגילות</span><span class="v">${fmt(totals.regular)}</span></div>
-        <div class="row"><span>125% (יומי)</span><span class="v">${fmt(totals.ot125)}</span></div>
-        <div class="row"><span>150% (יומי)</span><span class="v">${fmt(totals.ot150)}</span></div></div>
-      ${hasCommit ? `<div class="box"><div class="box-title">חוסר וקיזוז שכר</div>
-        <div class="row"><span>שעות התחייבות</span><span class="v">${fmt(pa.committed_hours || 0)}</span></div>
-        <div class="row"><span>שעות בפועל</span><span class="v">${fmt(pa.worked_hours || 0)}</span></div>
-        <div class="row"><span>חוסר (ברוטו)</span><span class="v">${fmt(totals.shortfall)}</span></div>
-        <div class="row"><span>שעות שקוזזו בפועל</span><span class="v" style="color:#b91c1c">${fmt(pa.deduct_hours || 0)}</span></div>
-        <div class="row"><span>סכום קיזוז</span><span class="v" style="color:#b91c1c">${pa.deduction > 0 ? '−₪' + Math.round(pa.deduction).toLocaleString('he-IL') : '₪0'}</span></div>
-        ${pa.made_up ? '<div class="row"><span style="color:#1d4ed8;font-size:8pt">↺ החוסר הושלם בימים אחרים — ללא קיזוז</span><span></span></div>' : ''}</div>
-      <div class="box"><div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
-        <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
-        <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
-        <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div></div>`
-      : `<div class="box"><div class="box-title">סטטיסטיקה</div>
-        <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
-        <div class="row"><span>ימים עם חסר החתמה</span><span class="v">${report.totals?.incomplete_days || 0}</span></div>
-        <div class="row"><span style="font-size:8pt;color:#777">עובד שעתי / ללא התחייבות מוגדרת</span><span></span></div></div>
-      <div class="box"><div class="box-title">הערות</div>
-        <div style="padding:6px 10px;font-size:8pt;color:#555;line-height:1.4">
-          חישוב 125%/150% הוא לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%).</div></div>`}
-      <div class="box"><div class="box-title">מחלה · היעדרות · חופשה · מילואים</div>
-        ${leaveItems.map(([l, v]) => `<div class="row"><span>${l}</span><span class="v">${(v === 0 || v == null || v === '') ? '—' : v}</span></div>`).join('')}</div>
-    </div>
-    <div class="signatures"><div class="sig">חתימת העובד</div><div class="sig">חתימת המנהל</div></div>`;
+    ${hasCommit ? `<div style="margin-top:8px;font-size:8pt;line-height:1.9">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:6px;white-space:nowrap">${t}</span>`).join('')}</div>` : ''}
+    <table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:6px;margin-top:10px">
+      <colgroup><col style="width:33.33%"><col style="width:33.33%"><col style="width:33.33%"></colgroup>
+      <tr>${boxCell(['כללי', generalRows])}${boxCell(box2)}${boxCell(box3)}</tr>
+      <tr>${boxCell(box4)}<td></td><td></td></tr>
+    </table>
+    <table style="width:100%;margin-top:24px"><tr>
+      <td style="border-top:1px solid #111;text-align:center;padding-top:4px;width:45%;font-size:9pt;color:#555">חתימת העובד</td>
+      <td style="width:10%"></td>
+      <td style="border-top:1px solid #111;text-align:center;padding-top:4px;width:45%;font-size:9pt;color:#555">חתימת המנהל</td>
+    </tr></table>`;
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
