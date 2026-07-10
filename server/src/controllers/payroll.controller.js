@@ -569,7 +569,7 @@ async function attendanceByMonth(req, res, next) {
 // Shared computation for one employee's monthly hours report (the authoritative
 // shape the client + all PDF/email renderers consume). Returns null if the
 // employee or month is invalid. `user` is used only for the salary-month lookup.
-async function computeHoursReportData(employeeId, month, user) {
+async function computeHoursReportData(employeeId, month, user, opts = {}) {
     const emp = await Employee.findById(employeeId)
       .populate('branch_id', 'name')
       .lean();
@@ -630,7 +630,12 @@ async function computeHoursReportData(employeeId, month, user) {
     try {
       const { fetchMonthData } = require('./payrollMonth.controller');
       const branchId = String(emp.branch_id?._id || emp.branch_id || '');
-      const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, user);
+      // fetchMonthData computes the WHOLE branch — expensive. When rendering many
+      // employees (branch/office hours report), reuse one result per branch via
+      // opts.mdCache instead of recomputing per employee.
+      let md;
+      if (opts.mdCache && opts.mdCache.has(branchId)) md = opts.mdCache.get(branchId);
+      else { md = await fetchMonthData({ month: ymPrefix, branch: branchId }, user); if (opts.mdCache) opts.mdCache.set(branchId, md); }
       const row = (md?.rows || []).find(r => String(r.employee_id) === String(emp._id));
       partial = row?.partial_absence || null;
       manualAbsenceEntries = row?.manual?.absence_entries || [];
@@ -968,10 +973,20 @@ function renderHoursReportDoc(reports) {
 
 // Build the rich hours-report HTML for a list of employee ids in a month.
 async function buildRichHoursHtml(employeeIds, month, user) {
-  const reports = [];
-  for (const id of employeeIds) {
-    try { const r = await computeHoursReportData(id, month, user); if (r) reports.push(r); } catch (e) { /* skip */ }
-  }
+  const { fetchMonthData } = require('./payrollMonth.controller');
+  const mr = monthRange(month);
+  const ymPrefix = mr ? `${mr.year}-${String(mr.month).padStart(2, '0')}` : month;
+  // Pre-warm the expensive per-branch salary computation ONCE per branch, in
+  // parallel — this is the bottleneck (fetchMonthData computes a whole branch).
+  const emps = await Employee.find({ _id: { $in: employeeIds } }).select('branch_id').lean();
+  const branchIds = [...new Set(emps.map(e => String(e.branch_id?._id || e.branch_id || '')).filter(Boolean))];
+  const mdCache = new Map();
+  await Promise.all(branchIds.map(async bid => {
+    try { mdCache.set(bid, await fetchMonthData({ month: ymPrefix, branch: bid }, user)); } catch (e) { /* skip branch */ }
+  }));
+  // Then each employee's report reuses the cache — light + parallel.
+  const reports = (await Promise.all(employeeIds.map(id =>
+    computeHoursReportData(id, month, user, { mdCache }).catch(() => null)))).filter(Boolean);
   return renderHoursReportDoc(reports);
 }
 

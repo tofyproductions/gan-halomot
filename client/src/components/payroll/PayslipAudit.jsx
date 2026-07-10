@@ -1573,12 +1573,13 @@ function SendContentPreview({ open, onClose, auditId, title, pdfEndpoint, pdfQue
     let cancelled = false;
     setTab('payslip'); setErr(null);
     revoke(); setPdfUrl(null); setLoadingPdf(true);
-    api.get(`/payroll/payslip-audit/history/${auditId}/${pdfEndpoint}`, { params: pdfQuery, responseType: 'blob' })
+    api.get(`/payroll/payslip-audit/history/${auditId}/${pdfEndpoint}`, { params: pdfQuery, responseType: 'blob', timeout: 120000 })
       .then(res => { if (cancelled) return; const u = URL.createObjectURL(res.data); urlRef.current = u; setPdfUrl(u); })
       .catch(() => { if (!cancelled) setErr('התלוש אינו זמין לתצוגה'); })
       .finally(() => { if (!cancelled) setLoadingPdf(false); });
     setLoadingHours(true); setHtml('');
-    api.get(`/payroll/payslip-audit/history/${auditId}/hours-preview`, { params: hoursQuery, responseType: 'text' })
+    // Branch/office hours reports can take a while (whole-branch salary compute).
+    api.get(`/payroll/payslip-audit/history/${auditId}/hours-preview`, { params: hoursQuery, responseType: 'text', timeout: 180000 })
       .then(res => { if (!cancelled) setHtml(res.data); }).catch(() => {}).finally(() => { if (!cancelled) setLoadingHours(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line
