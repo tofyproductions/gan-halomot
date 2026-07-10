@@ -1499,6 +1499,7 @@ async function sendPayslipsToManagers(req, res) {
       if (branchKeys.length === 0) return res.status(400).json({ error: 'לא נבחרו סניפים תקפים' });
     }
     const includeHours = req.body?.include_hours !== false;
+    const toOverride = String(req.body?.to || '').trim(); // send all to one specific address
     const rawSel = (req.body?.branch_employees && typeof req.body.branch_employees === 'object') ? req.body.branch_employees : {};
     const branchSel = new Map();
     for (const [b, ids] of Object.entries(rawSel)) {
@@ -1518,7 +1519,7 @@ async function sendPayslipsToManagers(req, res) {
         const label = g.br ? g.br.name : g.name;
         try {
           if (!g.br && !g.isOffice) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
-          const emails = await managerBranchEmails(g, stored);
+          const emails = toOverride ? [toOverride] : await managerBranchEmails(g, stored);
           if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
           const sel = branchSel.get(norm(g.name));
           const chosen = g.employees.filter(e => e.employee_id && e.has_page && (!sel || sel.has(e.employee_id)));
@@ -1755,11 +1756,158 @@ async function exportSavedPayslips(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+// ─── Monthly hours-report distribution (not audit-based) ────────────────────
+// Group all active employees by real branch + an office master group. Each
+// employee carries the email their report would go to.
+async function buildHoursBranchGroups(month, user) {
+  const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+  const allBranches = await Branch.find({}).select('_id name').lean();
+  const byId = new Map(allBranches.map(b => [String(b._id), b]));
+  const employees = await Employee.find({ is_active: true })
+    .populate('user_id', 'email').select('full_name israeli_id email branch_id user_id salary_type')
+    .sort({ full_name: 1 }).lean();
+  const groups = new Map();
+  groups.set(OFFICE_KEY, { name: OFFICE_NAME, br: null, isOffice: true, employees: [] });
+  const office = groups.get(OFFICE_KEY);
+  for (const e of employees) {
+    const email = (e.email && e.email.trim()) || e.user_id?.email || '';
+    const entry = { employee_id: String(e._id), name: e.full_name, israeli_id: e.israeli_id || '', email, matched: true, has_page: true };
+    office.employees.push(entry);
+    const br = byId.get(String(e.branch_id));
+    if (br) {
+      const key = norm(br.name);
+      if (!groups.has(key)) groups.set(key, { name: br.name, br, employees: [] });
+      groups.get(key).employees.push(entry);
+    }
+  }
+  return groups;
+}
+
+// GET /payroll/hours-distribution/preview?month=YYYY-MM — branches (office first)
+// with their employees + emails, for the send UI.
+async function hoursDistributionPreview(req, res) {
+  try {
+    const month = String(req.query.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'חודש לא תקין' });
+    const stored = await readBranchManagerEmails();
+    const groups = await buildHoursBranchGroups(month, req.user);
+    const items = [];
+    for (const [, g] of groups) {
+      const email = (await managerBranchEmails(g, stored)).join(', ');
+      items.push({ branch: g.name, employees: g.employees, email, is_office: !!g.isOffice, has_pdf: true });
+    }
+    items.sort((a, b) => (b.is_office - a.is_office) || a.branch.localeCompare(b.branch, 'he'));
+    res.json({ month, items });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// GET /payroll/hours-distribution/preview-html?month=&scope=employee|branch&employee_id=|branch=
+async function hoursDistributionPreviewHtml(req, res) {
+  try {
+    const { buildRichHoursHtml } = require('./payroll.controller');
+    const month = String(req.query.month || '').trim();
+    let ids = [];
+    if (req.query.scope === 'employee') {
+      if (!req.query.employee_id) return res.status(404).send('עובד לא נמצא');
+      ids = [String(req.query.employee_id)];
+    } else {
+      const groups = await buildHoursBranchGroups(month, req.user);
+      const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
+      let g = null;
+      for (const [, gg] of groups) { if (gg.name.replace(/\s+/g, ' ').trim() === bname) { g = gg; break; } }
+      if (!g) return res.status(404).send('סניף לא נמצא');
+      ids = g.employees.map(e => e.employee_id);
+    }
+    const html = await buildRichHoursHtml(ids, month, req.user || { role: 'system_admin' });
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (err) { res.status(500).send(err.message); }
+}
+
+// POST /payroll/hours-distribution/send-employees { month, employee_ids, to? }
+// Each employee gets their own rich hours report (or all to `to` if given).
+async function sendHoursToEmployees(req, res) {
+  try {
+    const month = String(req.body?.month || '').trim();
+    const ids = Array.isArray(req.body?.employee_ids) ? req.body.employee_ids.map(String) : [];
+    const toOverride = String(req.body?.to || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month) || ids.length === 0) return res.status(400).json({ error: 'חסר חודש או עובדים' });
+    res.json({ ok: true, queued: true, count: ids.length });
+    void (async () => {
+      const { buildRichHoursHtml } = require('./payroll.controller');
+      for (const id of ids) {
+        try {
+          const emp = await Employee.findById(id).populate('user_id', 'email').lean();
+          if (!emp) continue;
+          const email = toOverride || (emp.email && emp.email.trim()) || emp.user_id?.email;
+          if (!email) continue;
+          const html = await buildRichHoursHtml([emp._id], month, { role: 'system_admin' });
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, attachments: [{ name: `דוח-שעות-${emp.full_name}-${month}`, html }] });
+        } catch (e) { console.error('send hours to employee failed:', e.message); }
+      }
+    })();
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+// POST /payroll/hours-distribution/send-managers { month, branches?, branch_employees?, to? }
+// Each branch manager (or the office) gets a consolidated rich hours report of
+// the selected employees. `to` overrides all recipients with one address.
+async function sendHoursToManagers(req, res) {
+  try {
+    const month = String(req.body?.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'חודש לא תקין' });
+    const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+    const groups = await buildHoursBranchGroups(month, req.user);
+    let branchKeys = [...groups.keys()];
+    if (Array.isArray(req.body?.branches) && req.body.branches.length) {
+      const sel = new Set(req.body.branches.map(norm));
+      branchKeys = branchKeys.filter(k => sel.has(norm(groups.get(k).name)));
+    }
+    const rawSel = (req.body?.branch_employees && typeof req.body.branch_employees === 'object') ? req.body.branch_employees : {};
+    const branchSel = new Map();
+    for (const [b, ids] of Object.entries(rawSel)) if (Array.isArray(ids)) branchSel.set(norm(b), new Set(ids.map(String)));
+    const toOverride = String(req.body?.to || '').trim();
+    res.json({ ok: true, queued: true, count: branchKeys.length });
+    void (async () => {
+      const { buildRichHoursHtml } = require('./payroll.controller');
+      const stored = await readBranchManagerEmails();
+      for (const key of branchKeys) {
+        const g = groups.get(key);
+        const label = g.br ? g.br.name : g.name;
+        try {
+          const emails = toOverride ? [toOverride] : await managerBranchEmails(g, stored);
+          if (emails.length === 0) continue;
+          const sel = branchSel.get(norm(g.name));
+          const chosen = g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id)));
+          if (chosen.length === 0) continue;
+          const html = await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' });
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורף דוח שעות מרוכז של ${g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, attachments: [{ name: `דוח-שעות-${label}-${month}`, html }] });
+        } catch (e) { console.error('send hours to manager failed:', label, e.message); }
+      }
+    })();
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 module.exports = {
   parseTable,
   parsePayslips,
   getBranchManagerEmails,
   setBranchManagerEmails,
+  hoursDistributionPreview,
+  hoursDistributionPreviewHtml,
+  sendHoursToEmployees,
+  sendHoursToManagers,
+  distributionPreview,
+  managerDistributionPreview,
+  updateAuditMonth,
+  hoursReportPreview,
+  branchPdfPreview,
+  listSavedPayslips,
+  downloadSavedPayslip,
+  exportSavedPayslips,
+  updateEmployeeEmails,
   distributionPreview,
   managerDistributionPreview,
   updateAuditMonth,

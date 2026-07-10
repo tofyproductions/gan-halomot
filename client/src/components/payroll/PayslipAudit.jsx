@@ -1771,8 +1771,10 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
   const [preview, setPreview] = useState(null); // { title, pdfEndpoint, pdfQuery, hoursQuery }
+  const [specificEmail, setSpecificEmail] = useState(''); // override: send all to one address
 
   const matched = (it) => (it.employees || []).filter(e => e.employee_id && e.has_page);
+  const managerEmails = [...new Set(items.flatMap(it => (it.email || '').split(',').map(s => s.trim()).filter(Boolean)))];
 
   const load = () => {
     if (!audit?._id) return;
@@ -1800,21 +1802,22 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   const previewEmp = (it, e) => setPreview({ title: `${e.name} · ${it.branch}`, pdfEndpoint: 'payslip-page', pdfQuery: { branch: e.source_branch || it.branch, page: e.page }, hoursQuery: { scope: 'employee', employee_id: e.employee_id } });
 
   const send = async (all) => {
+    const to = specificEmail.trim();
     const branches = []; const branch_employees = {};
     items.forEach(it => {
-      if (!it.email || !it.has_pdf) return;
+      if ((!it.email && !to) || !it.has_pdf) return; // needs a manager email unless a specific address is given
       if (all) { branches.push(it.branch); return; } // whole branch PDF (incl. unmatched)
       const ids = matched(it).filter(e => empSel[it.branch]?.[e.employee_id]).map(e => e.employee_id);
       if (ids.length) { branches.push(it.branch); branch_employees[it.branch] = ids; }
     });
     if (branches.length === 0) { toast.error(all ? 'אין סניפים לשליחה' : 'בחר/י לפחות עובד אחד'); return; }
-    const who = all ? `לכל הסניפים (${branches.length}) — כל העובדים` : `ל-${branches.length} סניפים · ${totalSelected} עובדים נבחרים`;
+    const who = to ? `לכתובת ${to}` : `למנהלי ${branches.length} סניפים · ${totalSelected} עובדים`;
     if (!window.confirm(`לשלוח ${who} את התלושים${includeHours ? ' + דוח שעות' : ''}?`)) return;
     setBusy(true);
     try {
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-managers`,
-        { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours });
-      toast.success(`השליחה למנהלים החלה — ${res.data.count} סניפים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
+        { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours, ...(to ? { to } : {}) });
+      toast.success(`השליחה החלה — ${res.data.count} סניפים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -1911,6 +1914,9 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
         <FormControlLabel sx={{ ml: 0 }}
           control={<Switch size="small" checked={includeHours} onChange={e => setIncludeHours(e.target.checked)} />}
           label={<Typography variant="caption">צרף דוח שעות</Typography>} />
+        <Autocomplete freeSolo options={managerEmails} value={specificEmail}
+          onInputChange={(_, v) => setSpecificEmail(v)} sx={{ minWidth: 220 }}
+          renderInput={(p) => <TextField {...p} size="small" label="מייל ספציפי (אופציונלי)" dir="ltr" />} />
         <Button onClick={load} disabled={busy || loading}>רענון לוג</Button>
         <Box sx={{ flex: 1 }} />
         <Button variant="contained" onClick={() => send(false)} disabled={busy || loading || totalSelected === 0}>שלח לנבחרים ({totalSelected})</Button>

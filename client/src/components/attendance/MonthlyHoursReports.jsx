@@ -8,6 +8,7 @@ import SendIcon from '@mui/icons-material/Send';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import HoursDistributionDialog from './HoursDistributionDialog';
 
 const DOW = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
 function dowHe(ymd) {
@@ -36,6 +37,7 @@ export default function MonthlyHoursReports({ open, onClose, month, branch, bran
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState([]);
   const [sending, setSending] = useState(false);
+  const [distOpen, setDistOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -159,6 +161,7 @@ export default function MonthlyHoursReports({ open, onClose, month, branch, bran
   };
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth dir="rtl">
       <DialogTitle sx={{ fontWeight: 800 }}>דוחות שעות חודשיים — {month}</DialogTitle>
       <DialogContent dividers>
@@ -205,15 +208,17 @@ export default function MonthlyHoursReports({ open, onClose, month, branch, bran
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
         <Button
-          color="success" startIcon={<SendIcon />} onClick={sendToManagers}
-          disabled={loading || sending || groups.length === 0}
+          variant="contained" color="success" startIcon={<SendIcon />} onClick={() => setDistOpen(true)}
+          disabled={loading || groups.length === 0}
         >
-          {sending ? 'שולח…' : 'שלח למנהלי הסניפים'}
+          שליחת דוחות (עובדים / מנהלים / משרד)
         </Button>
-        <Button variant="contained" startIcon={<PrintIcon />} onClick={printAll} disabled={loading || groups.length === 0}>
+        <Button variant="outlined" startIcon={<PrintIcon />} onClick={printAll} disabled={loading || groups.length === 0}>
           הדפס / שמור הכל
         </Button>
       </DialogActions>
     </Dialog>
+    <HoursDistributionDialog open={distOpen} onClose={() => setDistOpen(false)} month={month} />
+    </>
   );
 }
