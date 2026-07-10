@@ -1797,7 +1797,7 @@ function ManagerDistributionDialog({ open, audit, onClose }) {
   const totalSelected = items.reduce((n, it) => n + selCount(it.branch), 0);
 
   const previewBranch = (it) => setPreview({ title: it.branch, pdfEndpoint: 'branch-pdf', pdfQuery: { branch: it.branch }, hoursQuery: { scope: 'branch', branch: it.branch } });
-  const previewEmp = (it, e) => setPreview({ title: `${e.name} · ${it.branch}`, pdfEndpoint: 'payslip-page', pdfQuery: { branch: it.branch, page: e.page }, hoursQuery: { scope: 'employee', employee_id: e.employee_id } });
+  const previewEmp = (it, e) => setPreview({ title: `${e.name} · ${it.branch}`, pdfEndpoint: 'payslip-page', pdfQuery: { branch: e.source_branch || it.branch, page: e.page }, hoursQuery: { scope: 'employee', employee_id: e.employee_id } });
 
   const send = async (all) => {
     const branches = []; const branch_employees = {};
