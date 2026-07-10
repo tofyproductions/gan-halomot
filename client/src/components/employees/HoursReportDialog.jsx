@@ -97,24 +97,28 @@ export default function HoursReportDialog({ open, employee, onClose }) {
     const [yy, mm] = month.split('-');
     const monthLabel = `${mm}/${yy}`;
     const pa = report.partial_absence;       // null = hourly / no commitment
-    const hasCommit = !!pa;
+    const hasCommit = !!pa;                   // תקן only — hourly has no commitment columns
     let totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
+    const tally = { sick: 0, vacation: 0, miluim: 0, holiday: 0, absence: 0 };
+    const colCount = hasCommit ? 11 : 8;
     const EXTRA_KIND = { overage: 'מעבר להתחייבות', offday: 'עבודה ביום חופש' };
     const tbodyHtml = report.days.map(d => {
       // Absence / leave day — no punch. Render a full row with the note, and do
       // NOT count it toward worked-day totals (return before the tallies below).
       if (d.is_absence) {
+        if (tally[d.leave_type] != null) tally[d.leave_type]++;
         const dn = dayOfWeekHebrew(d.date);
         // Hard (unexcused) absence → red tint; approved absence / leave → amber.
         const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
+        const commitCell = hasCommit ? '<td class="num mute">—</td>' : '';
+        const shExCells = hasCommit ? '<td class="num mute">—</td><td class="num mute">—</td>' : '';
         return `
         <tr class="${cls}">
           <td class="date">${formatDate(d.date)} ${dn}</td>
           <td class="branch">—</td>
           <td>—</td><td>—</td>
-          <td class="num mute">—</td><td class="num mute">—</td>
-          <td class="num mute">—</td><td class="num mute">—</td>
-          <td class="num mute">—</td><td class="num mute">—</td>
+          <td class="num mute">—</td>${commitCell}
+          <td class="num mute">—</td><td class="num mute">—</td>${shExCells}
           <td class="note">${d.note || 'היעדרות'}</td>
         </tr>`;
       }
@@ -149,28 +153,27 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       else if (d.incomplete) rowClass = 'incomplete';
       const noteParts = [];
       if (d.incomplete) noteParts.push('חסרה החתמה');
-      if (sh > 0) {
+      if (hasCommit && sh > 0) {
         if (d.shortfall_status === 'deducted') noteParts.push(`חוסר מקוזז${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
         else if (d.shortfall_status === 'excused') noteParts.push(`חוסר מאושר (ללא קיזוז)${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
         else noteParts.push('חוסר הושלם בימים אחרים');
       }
-      if (ex > 0) {
+      if (hasCommit && ex > 0) {
         const k = EXTRA_KIND[d.extra_kind] || 'שעות נוספות';
         noteParts.push(`${k}${d.extra_approved ? ' — שולמה תוספת' : ' — ממתין לאישור'}${d.extra_reason ? ' (' + d.extra_reason + ')' : ''}`);
       }
       const note = noteParts.join(' • ');
+      const commitCell = hasCommit ? `<td class="num ${committed != null ? '' : 'mute'}">${committed != null ? fmt(committed) : '—'}</td>` : '';
+      const shExCells = hasCommit ? `<td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td>` : '';
       return `
         <tr ${rowClass ? `class="${rowClass}"` : ''}>
           <td class="date">${formatDate(d.date)} ${dayName}</td>
           <td class="branch">${d.branch_label || '—'}</td>
           <td>${d.first_in || '—'}</td>
           <td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
-          <td class="num">${fmt(d.total_hours || 0)}</td>
-          <td class="num ${hasCommit && committed != null ? '' : 'mute'}">${hasCommit && committed != null ? fmt(committed) : '—'}</td>
+          <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}
           <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
-          <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>
-          <td class="num ${shClass}">${shTxt}</td>
-          <td class="num ${exClass}">${exTxt}</td>
+          <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>${shExCells}
           <td class="note">${note}</td>
         </tr>`;
     }).join('');
@@ -252,28 +255,29 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       <th>שעת כניסה</th>
       <th>שעת יציאה</th>
       <th>סה״כ שעות</th>
-      <th>מחויב</th>
+      ${hasCommit ? '<th>מחויב</th>' : ''}
       <th>125% (יומי)</th>
       <th>150% (יומי)</th>
-      <th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th>
-      <th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>
+      ${hasCommit ? '<th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th><th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>' : ''}
       <th>הערות</th>
     </tr>
   </thead>
-  <tbody>${tbodyHtml || `<tr><td colspan="11" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
+  <tbody>${tbodyHtml || `<tr><td colspan="${colCount}" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
   <tfoot>
     <tr>
       <td class="label" colspan="4">סה״כ</td>
       <td>${fmt(totals.total)}</td>
-      <td>${hasCommit ? fmt(totals.committed) : '—'}</td>
+      ${hasCommit ? `<td>${fmt(totals.committed)}</td>` : ''}
       <td>${fmt(totals.ot125)}</td>
       <td>${fmt(totals.ot150)}</td>
-      <td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td>
-      <td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>
+      ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}
       <td></td>
     </tr>
   </tfoot>
 </table>
+<div style="margin-top:8px;font-size:10pt;font-weight:700;border:1.5px solid #111;padding:6px 12px;background:#f8fafc">
+  סיכום שעות: שעות רגילות <b>${fmt(totals.regular)}</b> · 125% <b>${fmt(totals.ot125)}</b> · 150% <b>${fmt(totals.ot150)}</b> · סה״כ שעות <b>${fmt(totals.total)}</b> · ימי עבודה <b>${totals.days}</b>
+</div>
 ${hasCommit ? `<div class="legend">
   <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
   <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
@@ -304,7 +308,6 @@ ${hasCommit ? `<div class="legend">
     <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
     <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
     <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
-    <div class="row"><span style="font-size:8pt;color:#777">תוספת משולמת בערך שעה × 1 (שטוח)</span><span></span></div>
   </div>` : `<div class="box">
     <div class="box-title">סטטיסטיקה</div>
     <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
@@ -319,13 +322,13 @@ ${hasCommit ? `<div class="legend">
     </div>
   </div>`}
   ${(() => {
-    const ls = report.leave_summary || {};
+    // Count the leave/absence rows actually shown in the table above.
     const items = [
-      ['ימי מחלה', ls.sick_days],
-      ['ימי היעדרות', ls.absence_days],
-      ['ימי חופשה', ls.vacation_days],
-      ['דמי חגים (ימים)', ls.holiday_days],
-      ['מילואים', ls.miluim],
+      ['ימי מחלה', tally.sick],
+      ['ימי היעדרות', tally.absence],
+      ['ימי חופשה', tally.vacation],
+      ['דמי חגים (ימים)', tally.holiday],
+      ['מילואים', tally.miluim],
     ];
     return `<div class="box">
       <div class="box-title">מחלה · היעדרות · חופשה · מילואים</div>

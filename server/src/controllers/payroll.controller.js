@@ -852,14 +852,19 @@ function renderHoursReportDoc(reports) {
     const [yy, mm] = (report.month || '').split('-');
     const monthLabel = `${mm}/${yy}`;
     const pa = report.partial_absence;
-    const hasCommit = !!pa;
+    const hasCommit = !!pa;   // תקן only — hourly staff have no commitment columns
     const totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
+    // Tally the absence/leave rows actually shown so the bottom summary matches.
+    const tally = { sick: 0, vacation: 0, miluim: 0, holiday: 0, absence: 0 };
+    const colCount = hasCommit ? 11 : 8;
     const tbodyHtml = (report.days || []).map(d => {
       if (d.is_absence) {
+        if (tally[d.leave_type] != null) tally[d.leave_type]++;
         const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
+        const commitCell = hasCommit ? '<td class="num mute">—</td>' : '';
+        const shExCells = hasCommit ? '<td class="num mute">—</td><td class="num mute">—</td>' : '';
         return `<tr class="${cls}"><td class="date">${fdate(d.date)} ${dow(d.date)}</td><td class="branch">—</td><td>—</td><td>—</td>
-          <td class="num mute">—</td><td class="num mute">—</td><td class="num mute">—</td><td class="num mute">—</td>
-          <td class="num mute">—</td><td class="num mute">—</td><td class="note">${d.note || 'היעדרות'}</td></tr>`;
+          <td class="num mute">—</td>${commitCell}<td class="num mute">—</td><td class="num mute">—</td>${shExCells}<td class="note">${d.note || 'היעדרות'}</td></tr>`;
       }
       const { regular, ot125, ot150 } = split(d.total_hours);
       totals.regular += regular; totals.ot125 += ot125; totals.ot150 += ot150;
@@ -880,27 +885,27 @@ function renderHoursReportDoc(reports) {
       else if (d.incomplete) rowClass = 'incomplete';
       const noteParts = [];
       if (d.incomplete) noteParts.push('חסרה החתמה');
-      if (sh > 0) {
+      if (hasCommit && sh > 0) {
         if (d.shortfall_status === 'deducted') noteParts.push(`חוסר מקוזז${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
         else if (d.shortfall_status === 'excused') noteParts.push(`חוסר מאושר (ללא קיזוז)${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
         else noteParts.push('חוסר הושלם בימים אחרים');
       }
-      if (ex > 0) {
+      if (hasCommit && ex > 0) {
         const k = EXTRA_KIND[d.extra_kind] || 'שעות נוספות';
         noteParts.push(`${k}${d.extra_approved ? ' — שולמה תוספת' : ' — ממתין לאישור'}${d.extra_reason ? ' (' + d.extra_reason + ')' : ''}`);
       }
+      const commitCell = hasCommit ? `<td class="num ${committed != null ? '' : 'mute'}">${committed != null ? fmt(committed) : '—'}</td>` : '';
+      const shExCells = hasCommit ? `<td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td>` : '';
       return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${fdate(d.date)} ${dow(d.date)}</td>
         <td class="branch">${d.branch_label || '—'}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
-        <td class="num">${fmt(d.total_hours || 0)}</td>
-        <td class="num ${hasCommit && committed != null ? '' : 'mute'}">${hasCommit && committed != null ? fmt(committed) : '—'}</td>
+        <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}
         <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
-        <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>
-        <td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td><td class="note">${noteParts.join(' • ')}</td></tr>`;
+        <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>${shExCells}<td class="note">${noteParts.join(' • ')}</td></tr>`;
     }).join('');
     const avgHours = totals.days ? (totals.total / totals.days) : 0;
     const emp = report.employee || {};
-    const ls = report.leave_summary || {};
-    const leaveItems = [['ימי מחלה', ls.sick_days], ['ימי היעדרות', ls.absence_days], ['ימי חופשה', ls.vacation_days], ['דמי חגים (ימים)', ls.holiday_days], ['מילואים', ls.miluim]];
+    // Bottom summary counts the leave rows actually shown in the table.
+    const leaveItems = [['ימי מחלה', tally.sick], ['ימי היעדרות', tally.absence], ['ימי חופשה', tally.vacation], ['דמי חגים (ימים)', tally.holiday], ['מילואים', tally.miluim]];
     return `<div class="doc-head">
       <div class="title-row"><div class="title">דוח שעות חודשי</div><div>תאריך הפקה: ${todayStr}</div></div>
       <div class="row"><div class="lbl">שם החברה:</div><div>גן החלומות</div></div>
@@ -911,15 +916,16 @@ function renderHoursReportDoc(reports) {
       <div class="row"><div class="lbl">תפקיד:</div><div>${emp.position || '—'}</div></div>
     </div>
     <table class="daily"><thead><tr>
-      <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th><th>מחויב</th>
-      <th>125% (יומי)</th><th>150% (יומי)</th><th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th>
-      <th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th><th>הערות</th></tr></thead>
-      <tbody>${tbodyHtml || '<tr><td colspan="11" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>'}</tbody>
-      <tfoot><tr><td class="label" colspan="4">סה״כ</td><td>${fmt(totals.total)}</td><td>${hasCommit ? fmt(totals.committed) : '—'}</td>
+      <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th>${hasCommit ? '<th>מחויב</th>' : ''}
+      <th>125% (יומי)</th><th>150% (יומי)</th>${hasCommit ? '<th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th><th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>' : ''}<th>הערות</th></tr></thead>
+      <tbody>${tbodyHtml || `<tr><td colspan="${colCount}" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
+      <tfoot><tr><td class="label" colspan="4">סה״כ</td><td>${fmt(totals.total)}</td>${hasCommit ? `<td>${fmt(totals.committed)}</td>` : ''}
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
-        <td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td>
-        <td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td><td></td></tr></tfoot>
+        ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>
+    <div style="margin-top:8px;font-size:10pt;font-weight:700;border:1.5px solid #111;padding:6px 12px;background:#f8fafc">
+      סיכום שעות: שעות רגילות <b>${fmt(totals.regular)}</b> · 125% <b>${fmt(totals.ot125)}</b> · 150% <b>${fmt(totals.ot150)}</b> · סה״כ שעות <b>${fmt(totals.total)}</b> · ימי עבודה <b>${totals.days}</b>
+    </div>
     ${hasCommit ? `<div class="legend">
       <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
       <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
@@ -943,8 +949,7 @@ function renderHoursReportDoc(reports) {
       <div class="box"><div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
         <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
         <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
-        <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
-        <div class="row"><span style="font-size:8pt;color:#777">תוספת משולמת בערך שעה × 1 (שטוח)</span><span></span></div></div>`
+        <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div></div>`
       : `<div class="box"><div class="box-title">סטטיסטיקה</div>
         <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
         <div class="row"><span>ימים עם חסר החתמה</span><span class="v">${report.totals?.incomplete_days || 0}</span></div>
