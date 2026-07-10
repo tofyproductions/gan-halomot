@@ -566,15 +566,16 @@ async function attendanceByMonth(req, res, next) {
  * GET /api/payroll/employees/:id/hours-report?month=YYYY-MM
  * Detailed per-day breakdown for a single employee (used by the "דוח שעות" modal).
  */
-async function hoursReport(req, res, next) {
-  try {
-    const { month } = req.query;
-    const emp = await Employee.findById(req.params.id)
+// Shared computation for one employee's monthly hours report (the authoritative
+// shape the client + all PDF/email renderers consume). Returns null if the
+// employee or month is invalid. `user` is used only for the salary-month lookup.
+async function computeHoursReportData(employeeId, month, user) {
+    const emp = await Employee.findById(employeeId)
       .populate('branch_id', 'name')
       .lean();
-    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!emp) return null;
     const range = monthRange(month);
-    if (!range) return res.status(400).json({ error: 'month must be YYYY-MM' });
+    if (!range) return null;
 
     // Cross-branch: pull punches by employee_id only (any branch). Salary
     // is computed at home-branch rate but every hour worked counts.
@@ -629,7 +630,7 @@ async function hoursReport(req, res, next) {
     try {
       const { fetchMonthData } = require('./payrollMonth.controller');
       const branchId = String(emp.branch_id?._id || emp.branch_id || '');
-      const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, req.user);
+      const md = await fetchMonthData({ month: ymPrefix, branch: branchId }, user);
       const row = (md?.rows || []).find(r => String(r.employee_id) === String(emp._id));
       partial = row?.partial_absence || null;
       manualAbsenceEntries = row?.manual?.absence_entries || [];
@@ -742,7 +743,7 @@ async function hoursReport(req, res, next) {
       }
     } catch (e) { /* non-fatal: report still renders without absence rows */ }
 
-    res.json({
+    return {
       month: ymPrefix,
       employee: {
         id: String(emp._id),
@@ -775,8 +776,199 @@ async function hoursReport(req, res, next) {
         total_hours: Math.round((monthMinutes / 60) * 100) / 100,
         incomplete_days: dayRows.filter(d => d.incomplete).length,
       },
-    });
+    };
+}
+
+async function hoursReport(req, res, next) {
+  try {
+    const data = await computeHoursReportData(req.params.id, req.query.month, req.user);
+    if (!data) return res.status(404).json({ error: 'עובד לא נמצא או חודש לא תקין' });
+    res.json(data);
   } catch (err) { next(err); }
+}
+
+// ── Rich hours-report HTML — a server-side clone of the client's
+// HoursReportDialog "ייצא PDF" output, so the report emailed/attached in the
+// distribution flow looks EXACTLY like the one produced from the system. Takes
+// one or more computeHoursReportData() objects (one A4 page per employee). ──
+const HOURS_REPORT_CSS = `
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
+  .emp-page { padding: 0 0 6px; }
+  .doc-head { border: 1.5px solid #111; padding: 8px 12px; margin-bottom: 8px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 10pt; }
+  .doc-head .row { display: flex; gap: 6px; }
+  .doc-head .row .lbl { font-weight: 700; }
+  .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
+  .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
+  table.daily { width: 100%; border-collapse: collapse; font-size: 9pt; }
+  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 4px 6px; font-weight: 800; font-size: 8.5pt; text-align: center; }
+  table.daily tbody td { border: 1px solid #ccc; padding: 3px 6px; text-align: center; }
+  table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
+  table.daily tbody td.num { font-variant-numeric: tabular-nums; }
+  table.daily tbody td.note { font-size: 8pt; color: #555; text-align: right; }
+  table.daily tbody tr.incomplete td { background: #fffbeb !important; }
+  table.daily tbody tr.incomplete td.note { color: #92400e; font-weight: 700; }
+  table.daily tbody tr.r-ded td   { background: #fef2f2 !important; }
+  table.daily tbody tr.r-extra td { background: #f0fdf4 !important; }
+  table.daily tbody tr.r-exc td   { background: #eff6ff !important; }
+  table.daily tbody tr.r-pend td  { background: #faf5ff !important; }
+  table.daily td.ot { color: #92400e; font-weight: 700; }
+  table.daily td.ot2 { color: #b91c1c; font-weight: 700; }
+  table.daily td.miss-ded { color: #b91c1c; font-weight: 800; }
+  table.daily td.miss-exc { color: #92400e; font-weight: 700; }
+  table.daily td.miss-mu  { color: #1d4ed8; font-weight: 700; }
+  table.daily td.extra-ok   { color: #15803d; font-weight: 800; }
+  table.daily td.extra-pend { color: #7e22ce; font-weight: 700; }
+  table.daily td.mute { color: #d1d5db; }
+  .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 8pt; }
+  .legend .item { display: flex; align-items: center; gap: 4px; }
+  .legend .sw { width: 11px; height: 11px; border: 1px solid #999; border-radius: 2px; display: inline-block; }
+  table.daily tbody tr { page-break-inside: avoid; }
+  table.daily tfoot td { border: 1.5px solid #111; padding: 4px 6px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
+  table.daily tfoot td.label { text-align: right; }
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .summary-grid .box { border: 1px solid #999; padding: 0; font-size: 9pt; }
+  .summary-grid .box .box-title { font-weight: 800; padding: 4px 10px; text-align: center; background: #f3f4f6 !important; border-bottom: 1px solid #999; }
+  .summary-grid .box .row { display: flex; justify-content: space-between; padding: 2px 10px; }
+  .summary-grid .box .row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 9pt; }
+  .signatures .sig { border-top: 1px solid #111; padding-top: 4px; text-align: center; color: #555; }
+`;
+
+function renderHoursReportDoc(reports) {
+  const HD = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
+  const dow = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-').map(Number); return 'יום ' + HD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]; };
+  const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '');
+  const fdate = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  const split = (t) => { t = Number(t) || 0; return { regular: Math.min(t, 8), ot125: Math.max(0, Math.min(t, 10) - 8), ot150: Math.max(0, t - 10) }; };
+  const EXTRA_KIND = { overage: 'מעבר להתחייבות', offday: 'עבודה ביום חופש' };
+  const now = new Date();
+  const todayStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+
+  const empPage = (report) => {
+    const [yy, mm] = (report.month || '').split('-');
+    const monthLabel = `${mm}/${yy}`;
+    const pa = report.partial_absence;
+    const hasCommit = !!pa;
+    const totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
+    const tbodyHtml = (report.days || []).map(d => {
+      if (d.is_absence) {
+        const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
+        return `<tr class="${cls}"><td class="date">${fdate(d.date)} ${dow(d.date)}</td><td class="branch">—</td><td>—</td><td>—</td>
+          <td class="num mute">—</td><td class="num mute">—</td><td class="num mute">—</td><td class="num mute">—</td>
+          <td class="num mute">—</td><td class="num mute">—</td><td class="note">${d.note || 'היעדרות'}</td></tr>`;
+      }
+      const { regular, ot125, ot150 } = split(d.total_hours);
+      totals.regular += regular; totals.ot125 += ot125; totals.ot150 += ot150;
+      totals.total += Number(d.total_hours) || 0; totals.days += 1;
+      const committed = d.committed_hours;
+      if (committed != null) totals.committed += Number(committed) || 0;
+      const sh = Number(d.shortfall_hours) || 0, ex = Number(d.extra_hours) || 0;
+      totals.shortfall += sh; totals.extra += ex;
+      const shClass = sh <= 0 ? 'mute' : d.shortfall_status === 'deducted' ? 'miss-ded' : d.shortfall_status === 'excused' ? 'miss-exc' : 'miss-mu';
+      const exClass = ex <= 0 ? 'mute' : (d.extra_approved ? 'extra-ok' : 'extra-pend');
+      const shTxt = sh <= 0 ? '—' : d.shortfall_status === 'deducted' ? `−${fmt(sh)}` : d.shortfall_status === 'excused' ? `${fmt(sh)} ✓` : `${fmt(sh)} ↺`;
+      const exTxt = ex <= 0 ? '—' : (d.extra_approved ? `+${fmt(ex)} ✓` : `+${fmt(ex)} ⏳`);
+      let rowClass = '';
+      if (sh > 0 && d.shortfall_status === 'deducted') rowClass = 'r-ded';
+      else if (ex > 0 && d.extra_approved) rowClass = 'r-extra';
+      else if (sh > 0) rowClass = 'r-exc';
+      else if (ex > 0) rowClass = 'r-pend';
+      else if (d.incomplete) rowClass = 'incomplete';
+      const noteParts = [];
+      if (d.incomplete) noteParts.push('חסרה החתמה');
+      if (sh > 0) {
+        if (d.shortfall_status === 'deducted') noteParts.push(`חוסר מקוזז${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
+        else if (d.shortfall_status === 'excused') noteParts.push(`חוסר מאושר (ללא קיזוז)${d.shortfall_reason ? ' — ' + d.shortfall_reason : ''}`);
+        else noteParts.push('חוסר הושלם בימים אחרים');
+      }
+      if (ex > 0) {
+        const k = EXTRA_KIND[d.extra_kind] || 'שעות נוספות';
+        noteParts.push(`${k}${d.extra_approved ? ' — שולמה תוספת' : ' — ממתין לאישור'}${d.extra_reason ? ' (' + d.extra_reason + ')' : ''}`);
+      }
+      return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${fdate(d.date)} ${dow(d.date)}</td>
+        <td class="branch">${d.branch_label || '—'}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
+        <td class="num">${fmt(d.total_hours || 0)}</td>
+        <td class="num ${hasCommit && committed != null ? '' : 'mute'}">${hasCommit && committed != null ? fmt(committed) : '—'}</td>
+        <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
+        <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>
+        <td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td><td class="note">${noteParts.join(' • ')}</td></tr>`;
+    }).join('');
+    const avgHours = totals.days ? (totals.total / totals.days) : 0;
+    const emp = report.employee || {};
+    const ls = report.leave_summary || {};
+    const leaveItems = [['ימי מחלה', ls.sick_days], ['ימי היעדרות', ls.absence_days], ['ימי חופשה', ls.vacation_days], ['דמי חגים (ימים)', ls.holiday_days], ['מילואים', ls.miluim]];
+    return `<div class="doc-head">
+      <div class="title-row"><div class="title">דוח שעות חודשי</div><div>תאריך הפקה: ${todayStr}</div></div>
+      <div class="row"><div class="lbl">שם החברה:</div><div>גן החלומות</div></div>
+      <div class="row"><div class="lbl">חודש:</div><div>${monthLabel}</div></div>
+      <div class="row"><div class="lbl">שם העובד:</div><div>${emp.full_name || '—'}</div></div>
+      <div class="row"><div class="lbl">ת״ז:</div><div dir="ltr">${emp.israeli_id || '—'}</div></div>
+      <div class="row"><div class="lbl">סניף:</div><div>${emp.branch_name || '—'}</div></div>
+      <div class="row"><div class="lbl">תפקיד:</div><div>${emp.position || '—'}</div></div>
+    </div>
+    <table class="daily"><thead><tr>
+      <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th><th>מחויב</th>
+      <th>125% (יומי)</th><th>150% (יומי)</th><th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th>
+      <th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th><th>הערות</th></tr></thead>
+      <tbody>${tbodyHtml || '<tr><td colspan="11" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>'}</tbody>
+      <tfoot><tr><td class="label" colspan="4">סה״כ</td><td>${fmt(totals.total)}</td><td>${hasCommit ? fmt(totals.committed) : '—'}</td>
+        <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
+        <td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td>
+        <td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td><td></td></tr></tfoot>
+    </table>
+    ${hasCommit ? `<div class="legend">
+      <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
+      <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
+      <div class="item"><span class="sw" style="background:#f0fdf4"></span> תוספת שאושרה ושולמה</div>
+      <div class="item"><span class="sw" style="background:#faf5ff"></span> תוספת הממתינה לאישור (לא שולמה)</div>
+      <div class="item"><span class="sw" style="background:#fffbeb"></span> החתמה חסרה</div></div>` : ''}
+    <div class="summary-grid">
+      <div class="box"><div class="box-title">כללי</div>
+        <div class="row"><span>ימי עבודה</span><span class="v">${totals.days}</span></div>
+        <div class="row"><span>סה״כ שעות</span><span class="v">${fmt(totals.total)}</span></div>
+        <div class="row"><span>שעות רגילות</span><span class="v">${fmt(totals.regular)}</span></div>
+        <div class="row"><span>125% (יומי)</span><span class="v">${fmt(totals.ot125)}</span></div>
+        <div class="row"><span>150% (יומי)</span><span class="v">${fmt(totals.ot150)}</span></div></div>
+      ${hasCommit ? `<div class="box"><div class="box-title">חוסר וקיזוז שכר</div>
+        <div class="row"><span>שעות התחייבות</span><span class="v">${fmt(pa.committed_hours || 0)}</span></div>
+        <div class="row"><span>שעות בפועל</span><span class="v">${fmt(pa.worked_hours || 0)}</span></div>
+        <div class="row"><span>חוסר (ברוטו)</span><span class="v">${fmt(totals.shortfall)}</span></div>
+        <div class="row"><span>שעות שקוזזו בפועל</span><span class="v" style="color:#b91c1c">${fmt(pa.deduct_hours || 0)}</span></div>
+        <div class="row"><span>סכום קיזוז</span><span class="v" style="color:#b91c1c">${pa.deduction > 0 ? '−₪' + Math.round(pa.deduction).toLocaleString('he-IL') : '₪0'}</span></div>
+        ${pa.made_up ? '<div class="row"><span style="color:#1d4ed8;font-size:8pt">↺ החוסר הושלם בימים אחרים — ללא קיזוז</span><span></span></div>' : ''}</div>
+      <div class="box"><div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
+        <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
+        <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
+        <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
+        <div class="row"><span style="font-size:8pt;color:#777">תוספת משולמת בערך שעה × 1 (שטוח)</span><span></span></div></div>`
+      : `<div class="box"><div class="box-title">סטטיסטיקה</div>
+        <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
+        <div class="row"><span>ימים עם חסר החתמה</span><span class="v">${report.totals?.incomplete_days || 0}</span></div>
+        <div class="row"><span style="font-size:8pt;color:#777">עובד שעתי / ללא התחייבות מוגדרת</span><span></span></div></div>
+      <div class="box"><div class="box-title">הערות</div>
+        <div style="padding:6px 10px;font-size:8pt;color:#555;line-height:1.4">
+          חישוב 125%/150% הוא לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%).</div></div>`}
+      <div class="box"><div class="box-title">מחלה · היעדרות · חופשה · מילואים</div>
+        ${leaveItems.map(([l, v]) => `<div class="row"><span>${l}</span><span class="v">${(v === 0 || v == null || v === '') ? '—' : v}</span></div>`).join('')}</div>
+    </div>
+    <div class="signatures"><div class="sig">חתימת העובד</div><div class="sig">חתימת המנהל</div></div>`;
+  };
+
+  return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
+<body>${reports.map((r, i) => `<div class="emp-page"${i > 0 ? ' style="page-break-before:always"' : ''}>${empPage(r)}</div>`).join('')}</body></html>`;
+}
+
+// Build the rich hours-report HTML for a list of employee ids in a month.
+async function buildRichHoursHtml(employeeIds, month, user) {
+  const reports = [];
+  for (const id of employeeIds) {
+    try { const r = await computeHoursReportData(id, month, user); if (r) reports.push(r); } catch (e) { /* skip */ }
+  }
+  return renderHoursReportDoc(reports);
 }
 
 /**
@@ -1710,5 +1902,8 @@ module.exports = {
   // Reused by the payslip-distribution flow (payslipAudit.controller):
   buildHoursReportHtml,
   buildHoursReportsForEmployees,
+  computeHoursReportData,
+  renderHoursReportDoc,
+  buildRichHoursHtml,
   monthRange,
 };

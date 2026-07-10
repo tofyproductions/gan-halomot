@@ -1362,8 +1362,7 @@ async function sendPayslipsToEmployees(req, res) {
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
     void (async () => {
-      const { monthRange, buildHoursReportsForEmployees, buildHoursReportHtml } = require('./payroll.controller');
-      const range = monthRange(month);
+      const { buildRichHoursHtml } = require('./payroll.controller');
       const pdfCache = new Map();
       const out = [];
       for (const r of results) {
@@ -1385,8 +1384,7 @@ async function sendPayslipsToEmployees(req, res) {
           if (!pageBuf) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
           const attachments = [];
           if (includeHours) {
-            const reports = await buildHoursReportsForEmployees([emp], range, month);
-            const hoursHtml = buildHoursReportHtml(emp.full_name, month, reports);
+            const hoursHtml = await buildRichHoursHtml([emp._id], month, { role: 'system_admin' });
             attachments.push({ name: `דוח-שעות-${emp.full_name}-${month}`, html: hoursHtml });
           }
           const introBody = includeHours
@@ -1507,9 +1505,8 @@ async function sendPayslipsToManagers(req, res) {
     res.json({ ok: true, queued: true, count: branchKeys.length });
 
     void (async () => {
-      const { monthRange, buildHoursReportsForEmployees, buildHoursReportHtml } = require('./payroll.controller');
+      const { buildRichHoursHtml } = require('./payroll.controller');
       const { PDFDocument } = require('pdf-lib');
-      const range = monthRange(month);
       const stored = await readBranchManagerEmails();
       const pdfCache = new Map();
       const out = [];
@@ -1541,9 +1538,8 @@ async function sendPayslipsToManagers(req, res) {
           const pdfBuf = Buffer.from(await merged.save());
           const attachments = [];
           if (includeHours) {
-            const emps = await Employee.find({ _id: { $in: chosen.map(e => e.employee_id) } }).sort({ full_name: 1 }).lean();
-            const reports = await buildHoursReportsForEmployees(emps, range, month);
-            attachments.push({ name: `דוח-שעות-${label}-${month}`, html: buildHoursReportHtml(label, month, reports) });
+            const hoursHtml = await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' });
+            attachments.push({ name: `דוח-שעות-${label}-${month}`, html: hoursHtml });
           }
           const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;
           const introBody = includeHours
@@ -1638,9 +1634,8 @@ async function hoursReportPreview(req, res) {
     const doc = await PayslipAuditRecord.findById(req.params.id).lean();
     if (!doc) return res.status(404).send('ביקורת לא נמצאה');
     const month = doc.year_month;
-    const { monthRange, buildHoursReportsForEmployees, buildHoursReportHtml } = require('./payroll.controller');
-    const range = monthRange(month);
-    let title = ''; let employees = [];
+    const { buildRichHoursHtml } = require('./payroll.controller');
+    let ids = [];
     if (req.query.scope === 'branch') {
       // Hours for exactly the employees in this branch's audit bundle (matches
       // the payslip PDF + the actual send) — NOT the full is_active roster.
@@ -1649,19 +1644,13 @@ async function hoursReportPreview(req, res) {
       let g = null;
       for (const [, gg] of groups) { if (gg.name.replace(/\s+/g, ' ').trim() === bname) { g = gg; break; } }
       if (!g) return res.status(404).send('סניף לא נמצא');
-      title = g.name;
-      const ids = [...new Set(g.employees.filter(e => e.employee_id).map(e => String(e.employee_id)))];
-      const found = await Employee.find({ _id: { $in: ids } }).lean();
-      const byId = new Map(found.map(e => [String(e._id), e]));
-      employees = ids.map(id => byId.get(id)).filter(Boolean); // preserve audit order
+      ids = [...new Set(g.employees.filter(e => e.employee_id).map(e => String(e.employee_id)))];
     } else {
-      const emp = await Employee.findById(req.query.employee_id).lean();
-      if (!emp) return res.status(404).send('עובד לא נמצא');
-      title = emp.full_name;
-      employees = [emp];
+      if (!req.query.employee_id) return res.status(404).send('עובד לא נמצא');
+      ids = [String(req.query.employee_id)];
     }
-    const reports = await buildHoursReportsForEmployees(employees, range, month);
-    const html = buildHoursReportHtml(title, month, reports);
+    // Same rich format as the system's "ייצא PDF" hours report.
+    const html = await buildRichHoursHtml(ids, month, req.user || { role: 'system_admin' });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   } catch (err) { res.status(500).send(err.message); }
