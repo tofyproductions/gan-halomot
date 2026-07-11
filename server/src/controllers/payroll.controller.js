@@ -808,12 +808,14 @@ const HOURS_REPORT_CSS = `
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
     border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
   .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
-  table.daily { width: 100%; border-collapse: collapse; font-size: 9pt; }
-  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 4px 6px; font-weight: 800; font-size: 8.5pt; text-align: center; }
-  table.daily tbody td { border: 1px solid #ccc; padding: 3px 6px; text-align: center; }
+  .emp-page { page-break-after: always; }
+  .emp-page:last-child { page-break-after: auto; }
+  table.daily { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 2px 4px; font-weight: 800; font-size: 7pt; text-align: center; line-height: 1.1; }
+  table.daily tbody td { border: 1px solid #ccc; padding: 1px 4px; text-align: center; line-height: 1.15; }
   table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
-  table.daily tbody td.note { font-size: 8pt; color: #555; text-align: right; }
+  table.daily tbody td.note { font-size: 6.5pt; color: #555; text-align: right; }
   table.daily tbody tr.incomplete td { background: #fffbeb !important; }
   table.daily tbody tr.incomplete td.note { color: #92400e; font-weight: 700; }
   table.daily tbody tr.r-ded td   { background: #fef2f2 !important; }
@@ -832,7 +834,7 @@ const HOURS_REPORT_CSS = `
   .legend .item { display: flex; align-items: center; gap: 4px; }
   .legend .sw { width: 11px; height: 11px; border: 1px solid #999; border-radius: 2px; display: inline-block; }
   table.daily tbody tr { page-break-inside: avoid; }
-  table.daily tfoot td { border: 1.5px solid #111; padding: 4px 6px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
+  table.daily tfoot td { border: 1.5px solid #111; padding: 2px 4px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
   table.daily tfoot td.label { text-align: right; }
   .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
   .summary-grid .box { border: 1px solid #999; padding: 0; font-size: 9pt; }
@@ -915,7 +917,7 @@ function renderHoursReportDoc(reports) {
     const leaveItems = [['ימי מחלה', tally.sick], ['ימי היעדרות', tally.absence], ['ימי חופשה', tally.vacation], ['דמי חגים (ימים)', tally.holiday], ['מילואים', tally.miluim]];
     // Table/inline layout (NOT grid/flex) — the email→PDF converter (GAS) only
     // renders tables reliably, so the emailed PDF matches this in-browser preview.
-    const hcell = (l, v, ltr) => `<td style="padding:3px 10px;font-weight:700;width:15%;white-space:nowrap;border:1px solid #ddd">${l}:</td><td style="padding:3px 10px;width:35%;border:1px solid #ddd"${ltr ? ' dir="ltr"' : ''}>${v}</td>`;
+    const hcell = (l, v, ltr) => `<td style="padding:1.5px 8px;font-weight:700;width:15%;white-space:nowrap;border:1px solid #ddd">${l}:</td><td style="padding:1.5px 8px;width:35%;border:1px solid #ddd"${ltr ? ' dir="ltr"' : ''}>${v}</td>`;
     const money = (n, sign) => (n > 0 ? sign + '₪' + Math.round(n).toLocaleString('he-IL') : '₪0');
     const generalRows = [['ימי עבודה', totals.days], ['סה״כ שעות', fmt(totals.total)], ['שעות רגילות', fmt(totals.regular)], ['125% (יומי)', fmt(totals.ot125)], ['150% (יומי)', fmt(totals.ot150)]];
     const box2 = hasCommit
@@ -926,11 +928,11 @@ function renderHoursReportDoc(reports) {
       : ['הערות', [['חישוב 125%/150% לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%)', '']]];
     const box4 = ['מחלה · היעדרות · חופשה · מילואים', leaveItems.map(([l, v]) => [l, (v === 0 || v == null || v === '') ? '—' : v])];
     const boxCell = ([title, rows]) => `<td style="border:1px solid #999;vertical-align:top;padding:0">
-      <div style="font-weight:800;background:#f3f4f6;text-align:center;padding:4px 6px;border-bottom:1px solid #999;font-size:9pt">${title}</div>
-      ${rows.map(([l, v, c]) => `<div style="padding:2px 8px;font-size:8.5pt;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${(v === '' || v == null) ? l : `${l}: <b>${v}</b>`}</div>`).join('')}</td>`;
+      <div style="font-weight:800;background:#f3f4f6;text-align:center;padding:2px 6px;border-bottom:1px solid #999;font-size:8pt">${title}</div>
+      ${rows.map(([l, v, c]) => `<div style="padding:1px 6px;font-size:7.5pt;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${(v === '' || v == null) ? l : `${l}: <b>${v}</b>`}</div>`).join('')}</td>`;
     const legendItems = [['#fef2f2', 'חוסר שמקזז שכר'], ['#eff6ff', 'חוסר מאושר / הושלם בימים אחרים'], ['#f0fdf4', 'תוספת שאושרה ושולמה'], ['#faf5ff', 'תוספת ממתינה לאישור'], ['#fffbeb', 'החתמה חסרה']];
-    return `<table style="width:100%;border:1.5px solid #111;border-collapse:collapse;margin-bottom:8px;font-size:10pt">
-      <tr><td colspan="4" style="border-bottom:1px solid #ccc;padding:6px 10px;font-size:14pt;font-weight:800">דוח שעות חודשי <span style="font-size:9pt;font-weight:400;color:#555"> · תאריך הפקה: ${todayStr}</span></td></tr>
+    return `<table style="width:100%;border:1.5px solid #111;border-collapse:collapse;margin-bottom:6px;font-size:8.5pt">
+      <tr><td colspan="4" style="border-bottom:1px solid #ccc;padding:3px 10px;font-size:12pt;font-weight:800">דוח שעות חודשי <span style="font-size:8pt;font-weight:400;color:#555"> · תאריך הפקה: ${todayStr}</span></td></tr>
       <tr>${hcell('שם החברה', 'גן החלומות')}${hcell('חודש', monthLabel)}</tr>
       <tr>${hcell('שם העובד', emp.full_name || '—')}${hcell('ת״ז', emp.israeli_id || '—', true)}</tr>
       <tr>${hcell('סניף', emp.branch_name || '—')}${hcell('תפקיד', emp.position || '—')}</tr>
@@ -943,16 +945,16 @@ function renderHoursReportDoc(reports) {
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
         ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>
-    ${hasCommit ? `<div style="margin-top:8px;font-size:8pt;line-height:1.9">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:6px;white-space:nowrap">${t}</span>`).join('')}</div>` : ''}
-    <table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:6px;margin-top:10px">
+    ${hasCommit ? `<div style="margin-top:4px;font-size:7pt;line-height:1.5">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:5px;white-space:nowrap">${t}</span>`).join('')}</div>` : ''}
+    <table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px;margin-top:6px">
       <colgroup><col style="width:33.33%"><col style="width:33.33%"><col style="width:33.33%"></colgroup>
       <tr>${boxCell(['כללי', generalRows])}${boxCell(box2)}${boxCell(box3)}</tr>
       <tr>${boxCell(box4)}<td></td><td></td></tr>
     </table>
-    <table style="width:100%;margin-top:24px"><tr>
-      <td style="border-top:1px solid #111;text-align:center;padding-top:4px;width:45%;font-size:9pt;color:#555">חתימת העובד</td>
+    <table style="width:100%;margin-top:12px"><tr>
+      <td style="border-top:1px solid #111;text-align:center;padding-top:3px;width:45%;font-size:8.5pt;color:#555">חתימת העובד</td>
       <td style="width:10%"></td>
-      <td style="border-top:1px solid #111;text-align:center;padding-top:4px;width:45%;font-size:9pt;color:#555">חתימת המנהל</td>
+      <td style="border-top:1px solid #111;text-align:center;padding-top:3px;width:45%;font-size:8.5pt;color:#555">חתימת המנהל</td>
     </tr></table>`;
   };
 
