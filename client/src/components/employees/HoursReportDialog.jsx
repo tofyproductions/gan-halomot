@@ -30,6 +30,8 @@ function splitDailyHours(totalHours) {
   return { regular, ot125, ot150 };
 }
 function fmt(n) { return (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, ''); }
+// Short branch for the per-day cell (segment after " - ") so long names fit one line.
+function shortBranch(label) { return (label || '—').split(' + ').map(s => { const p = s.split(' - '); return p[p.length - 1].trim(); }).join(' + '); }
 
 /**
  * Show the monthly punch breakdown for a single employee. Each day row lists
@@ -170,7 +172,7 @@ export default function HoursReportDialog({ open, employee, onClose }) {
       return `
         <tr ${rowClass ? `class="${rowClass}"` : ''}>
           <td class="date">${formatDate(d.date)} ${dayName}</td>
-          <td class="branch">${d.branch_label || '—'}</td>
+          <td class="branch">${shortBranch(d.branch_label)}</td>
           <td>${d.first_in || '—'}</td>
           <td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
           <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}

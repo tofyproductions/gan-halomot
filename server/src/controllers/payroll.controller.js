@@ -849,6 +849,10 @@ function renderHoursReportDoc(reports) {
   const dow = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-').map(Number); return 'יום ' + HD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]; };
   const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '');
   const fdate = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+  // Short branch for the per-day cell — the segment after " - " (e.g.
+  // "כפר סבא - משה דיין" → "משה דיין"), so it fits one line. Full name stays in
+  // the header. Handles cross-branch days ("A + B").
+  const shortBranch = (label) => (label || '—').split(' + ').map(s => { const p = s.split(' - '); return p[p.length - 1].trim(); }).join(' + ');
   const split = (t) => { t = Number(t) || 0; return { regular: Math.min(t, 8), ot125: Math.max(0, Math.min(t, 10) - 8), ot150: Math.max(0, t - 10) }; };
   const EXTRA_KIND = { overage: 'מעבר להתחייבות', offday: 'עבודה ביום חופש' };
   const now = new Date();
@@ -905,7 +909,7 @@ function renderHoursReportDoc(reports) {
       const commitCell = hasCommit ? `<td class="num ${committed != null ? '' : 'mute'}">${committed != null ? fmt(committed) : '—'}</td>` : '';
       const shExCells = hasCommit ? `<td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td>` : '';
       return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${fdate(d.date)} ${dow(d.date)}</td>
-        <td class="branch">${d.branch_label || '—'}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
+        <td class="branch">${shortBranch(d.branch_label)}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
         <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}
         <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
         <td class="num ${ot150 > 0 ? 'ot2' : 'mute'}">${ot150 > 0 ? fmt(ot150) : '—'}</td>${shExCells}<td class="note">${noteParts.join(' • ')}</td></tr>`;
