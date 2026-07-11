@@ -808,12 +808,11 @@ const HOURS_REPORT_CSS = `
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
     border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
   .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
-  .emp-page { page-break-after: always; }
-  .emp-page:last-child { page-break-after: auto; }
   table.daily { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
   table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 2px 4px; font-weight: 800; font-size: 7pt; text-align: center; line-height: 1.1; }
   table.daily tbody td { border: 1px solid #ccc; padding: 1px 4px; text-align: center; line-height: 1.15; }
   table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
+  table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 6.5pt; color: #555; text-align: right; }
   table.daily tbody tr.incomplete td { background: #fffbeb !important; }

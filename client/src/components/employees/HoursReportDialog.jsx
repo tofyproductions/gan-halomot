@@ -201,6 +201,7 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 4px 6px; font-weight: 800; font-size: 8.5pt; text-align: center; }
   table.daily tbody td { border: 1px solid #ccc; padding: 3px 6px; text-align: center; }
   table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
+  table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 8pt; color: #555; text-align: right; }
   table.daily tbody tr.incomplete td { background: #fffbeb !important; }
