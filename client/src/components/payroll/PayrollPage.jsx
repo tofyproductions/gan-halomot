@@ -8,8 +8,10 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import LegendToggleIcon from '@mui/icons-material/LegendToggle';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import RuleFolderIcon from '@mui/icons-material/RuleFolder';
+import SendIcon from '@mui/icons-material/Send';
 import PayrollMonthTable from './PayrollMonthTable';
 import PayslipAudit from './PayslipAudit';
+import Distribution from './Distribution';
 import SalaryTable from './SalaryTable';
 import SalaryRequests from '../employees/SalaryRequests';
 import PayrollSettings from './PayrollSettings';
@@ -30,6 +32,7 @@ const TABS = [
   { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'change-requests', label: 'בקשות שינוי', icon: <RuleFolderIcon fontSize="small" />, component: PayrollChangeRequests, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'accountant', 'branch_manager'] },
+  { id: 'distribution', label: 'הפצת תלושים ודוחות', icon: <SendIcon fontSize="small" />, component: Distribution, roles: ['system_admin', 'accountant'] },
   { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },
   { id: 'settings',    label: 'הגדרות',      icon: <SettingsIcon fontSize="small" />, component: PayrollSettings, roles: ['system_admin'] },
 ];

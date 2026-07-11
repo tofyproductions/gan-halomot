@@ -1498,7 +1498,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
 
 /* Edit the stored per-branch manager email — the address the consolidated
    payslip bundle is sent to for each branch. */
-function BranchManagerEmailsDialog({ open, onClose }) {
+export function BranchManagerEmailsDialog({ open, onClose }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1612,7 +1612,7 @@ function SendContentPreview({ open, onClose, auditId, title, pdfEndpoint, pdfQue
 
 /* Distribute payslips to employees: review the ת"ז match per payslip, edit +
    save each employee's email, pick who to send to (or all), and see the log. */
-function PayslipDistributionDialog({ open, audit, onClose }) {
+export function PayslipDistributionDialog({ open, audit, onClose }) {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState({});
@@ -1762,7 +1762,7 @@ function PayslipDistributionDialog({ open, audit, onClose }) {
 /* Distribute the consolidated per-branch payslip bundle to each branch manager.
    Preview which branches will be sent, their manager email + payslip count, pick
    which branches, toggle the hours report, then send. */
-function ManagerDistributionDialog({ open, audit, onClose }) {
+export function ManagerDistributionDialog({ open, audit, onClose }) {
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [empSel, setEmpSel] = useState({});   // { [branch]: { [employee_id]: bool } }
@@ -2869,8 +2869,7 @@ export default function PayslipAudit() {
                                   <Stack direction="row" spacing={0.5} justifyContent="center">
                                     {h.approved ? (
                                       <>
-                                        <Button size="small" variant="contained" color="secondary" onClick={(e) => { e.stopPropagation(); setMgrDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 1: תצוגה מקדימה + שליחה מרוכזת לכל מנהל/ת סניף">1· למנהלים</Button>
-                                        <Button size="small" variant="contained" color="primary" onClick={(e) => { e.stopPropagation(); setDistDialog({ open: true, audit: h }); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }} title="שלב 2: תצוגה מקדימה + הפצה לעובדים (בחירה, אימות ת&quot;ז, עריכת מיילים)">2· לעובדים</Button>
+                                        <Chip size="small" color="success" variant="outlined" label="להפצה: לשונית 'הפצת תלושים ודוחות'" sx={{ height: 20, fontSize: 9.5 }} />
                                         <Button size="small" variant="outlined" onClick={(e) => { e.stopPropagation(); unapproveAudit(h._id); }} sx={{ fontSize: 10, py: 0, minWidth: 0 }}>בטל אישור</Button>
                                       </>
                                     ) : (
