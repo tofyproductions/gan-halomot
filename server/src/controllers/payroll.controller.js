@@ -808,7 +808,7 @@ const HOURS_REPORT_CSS = `
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
     border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
   .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
-  table.daily { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+  table.daily { width: 100%; border-collapse: collapse; font-size: 7.5pt; table-layout: fixed; }
   table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 2px 4px; font-weight: 800; font-size: 7pt; text-align: center; line-height: 1.1; }
   table.daily tbody td { border: 1px solid #ccc; padding: 1px 4px; text-align: center; line-height: 1.15; }
   table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
@@ -936,7 +936,9 @@ function renderHoursReportDoc(reports) {
       <tr>${hcell('שם העובד', emp.full_name || '—')}${hcell('ת״ז', emp.israeli_id || '—', true)}</tr>
       <tr>${hcell('סניף', emp.branch_name || '—')}${hcell('תפקיד', emp.position || '—')}</tr>
     </table>
-    <table class="daily"><thead><tr>
+    <table class="daily">${hasCommit
+      ? '<colgroup><col style="width:10%"><col style="width:15%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:17%"></colgroup>'
+      : '<colgroup><col style="width:13%"><col style="width:19%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:23%"></colgroup>'}<thead><tr>
       <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th>${hasCommit ? '<th>מחויב</th>' : ''}
       <th>125% (יומי)</th><th>150% (יומי)</th>${hasCommit ? '<th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th><th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>' : ''}<th>הערות</th></tr></thead>
       <tbody>${tbodyHtml || `<tr><td colspan="${colCount}" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
