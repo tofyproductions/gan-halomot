@@ -1447,13 +1447,13 @@ async function sendPayslipsToEmployees(req, res) {
           if (!bytes) { out.push({ name: emp.full_name, status: 'no_pdf' }); continue; }
           const pageBuf = await extractPage(bytes, page);
           if (!pageBuf) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
-          const fileAttachments = [{ filename: `תלוש-${emp.full_name}-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }];
+          const fileAttachments = [{ filename: `payslip-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
             const pre = hoursPdfByEmp.get(String(emp._id));
-            if (pre) fileAttachments.push({ filename: `דוח-שעות-${emp.full_name}-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
+            if (pre) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
             else {
-              const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `דוח-שעות-${emp.full_name}-${month}`);
+              const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
               if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
             }
           }
@@ -1640,10 +1640,10 @@ async function sendPayslipsToManagers(req, res) {
               (await merged.copyPages(srcDoc, idx)).forEach(pg => merged.addPage(pg));
             }
             const pdfBuf = Buffer.from(await merged.save());
-            const fileAttachments = [{ filename: `תלושים-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
+            const fileAttachments = [{ filename: `payslips-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
             const attachments = [];
             if (includeHours) {
-              const att = await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `דוח-שעות-${month}`);
+              const att = await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `hours-reports-${month}`);
               if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
             }
             const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים ${chosen.length} תלושי שכר${includeHours ? ' + דוחות שעות' : ''} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
@@ -1732,17 +1732,17 @@ async function sendPayslipsToManagers(req, res) {
           }
           if (merged.getPageCount() === 0) { out.push({ branch: g.name, status: 'no_pdf' }); continue; }
           const pdfBuf = Buffer.from(await merged.save());
-          const fileAttachments = [{ filename: `תלושים-${label}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
+          const fileAttachments = [{ filename: `payslips-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
             const ids = chosen.map(e => e.employee_id);
             let hoursPdf = null;
             try { hoursPdf = await getHoursPdf(ids); } catch (e) { console.error('hours PDF for', label, e.message); }
-            if (hoursPdf) fileAttachments.push({ filename: `דוח-שעות-${label}-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
+            if (hoursPdf) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
             else {
               // Batch render missed this group — GAS HTML conversion fallback
               // (server-side, no local Chromium in the send loop).
-              attachments.push({ name: `דוח-שעות-${label}-${month}`, html: await buildRichHoursHtml(ids, month, { role: 'system_admin' }) });
+              attachments.push({ name: `hours-report-${month}`, html: await buildRichHoursHtml(ids, month, { role: 'system_admin' }) });
             }
           }
           const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;
@@ -2046,7 +2046,7 @@ async function sendHoursToEmployees(req, res) {
       if (toOverride) {
         try {
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${ids.length} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(ids, month, { role: 'system_admin' }, `דוחות-שעות-${month}`)) });
+          await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(ids, month, { role: 'system_admin' }, `hours-reports-${month}`)) });
         } catch (e) { console.error('send hours bundle failed:', e.message); }
         return;
       }
@@ -2057,7 +2057,7 @@ async function sendHoursToEmployees(req, res) {
           const email = (emp.email && emp.email.trim()) || emp.user_id?.email;
           if (!email) continue;
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `דוח-שעות-${emp.full_name}-${month}`)) });
+          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`)) });
         } catch (e) { console.error('send hours to employee failed:', e.message); }
       }
     })();
@@ -2098,7 +2098,7 @@ async function sendHoursToManagers(req, res) {
           }
           if (seen.size) {
             const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${seen.size} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-            await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([...seen], month, { role: 'system_admin' }, `דוחות-שעות-${month}`)) });
+            await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([...seen], month, { role: 'system_admin' }, `hours-reports-${month}`)) });
           }
         } catch (e) { console.error('send hours to specific email failed:', e.message); }
         return;
@@ -2114,7 +2114,7 @@ async function sendHoursToManagers(req, res) {
           const chosen = g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id)));
           if (chosen.length === 0) continue;
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורף דוח שעות מרוכז של ${g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, ...(await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `דוח-שעות-${label}-${month}`)) });
+          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, ...(await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `hours-report-${month}`)) });
         } catch (e) { console.error('send hours to manager failed:', label, e.message); }
       }
     })();

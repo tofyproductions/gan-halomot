@@ -1298,7 +1298,9 @@ async function sendHoursReportsToManagers(req, res, next) {
           to: emails,
           subject: `דוח שעות חודשי — ${br.name} — ${ymPrefix}`,
           html: intro + html,
-          attachments: [{ name: `דוח שעות ${br.name} ${ymPrefix}`, html }],
+          // ASCII filename — Gmail RFC-2047-encodes Hebrew attachment names and
+          // some mail clients fail to decode them (gibberish name, no .pdf).
+          attachments: [{ name: `hours-report-${ymPrefix}`, html }],
         });
         results.push({ branch: br.name, status: 'sent', managers: emails, employees: employees.length });
       } catch (e) {
