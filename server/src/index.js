@@ -27,6 +27,19 @@ app.get('/api/health', (req, res) => {
     commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null });
 });
 
+// Diagnostic: can Chromium render a PDF here? (verifies the emailed-report PDF
+// path works on this instance without sending an email).
+app.get('/api/pdf-selftest', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const { htmlToPdf } = require('./services/htmlPdf');
+    const pdf = await htmlToPdf('<!doctype html><html><body style="font-family:Arial"><h1>PDF OK</h1></body></html>');
+    res.json({ ok: true, bytes: pdf.length, ms: Date.now() - t0 });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, ms: Date.now() - t0 });
+  }
+});
+
 // API routes
 app.use('/api', routes);
 
