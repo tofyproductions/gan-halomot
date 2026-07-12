@@ -1039,8 +1039,10 @@ async function renderHoursPdfForEmployees(employeeIds, month, user) {
   const { PDFDocument } = require('pdf-lib');
   const reports = await computeReportsParallel(employeeIds, month, user);
   if (reports.length === 0) return null;
-  // One document per employee (physically one page each) in one browser pass.
-  const pdfs = await htmlToPdfBatch(reports.map(r => renderHoursReportDoc([r])));
+  // Chunked documents (fixed-height boxes, one page per employee) in one browser pass.
+  const htmls = [];
+  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) htmls.push(renderHoursReportDoc(reports.slice(i, i + HOURS_PDF_CHUNK)));
+  const pdfs = await htmlToPdfBatch(htmls);
   const merged = await PDFDocument.create();
   for (const buf of pdfs) {
     const src = await PDFDocument.load(buf);
@@ -1052,15 +1054,20 @@ async function renderHoursPdfForEmployees(employeeIds, month, user) {
   return Buffer.from(await merged.save());
 }
 
-// HTML documents for a set of employees — ONE DOCUMENT PER EMPLOYEE, so each
-// renders to physically exactly one PDF page (a single fixed-height clipped
-// box can't bleed into a second page, and there is no cross-employee
-// fragmentation for the browser to get wrong — Render's Chromium 131 ignored
-// break-after on scaled content). Callers batch all documents into ONE
-// Chromium session (htmlToPdfBatch) to keep the 512MB tier alive.
+// HTML documents for a set of employees, in chunks of a few employees each.
+// Every employee sits in a fixed-height clipped box (285mm < the 287mm page
+// content) with break-after:page — a box can never bleed into the next page,
+// and the un-zoomed break-after is honored by Render's Chromium (verified via
+// /api/pdf-pagetest; the earlier bleed was specific to CSS zoom, replaced by
+// transform). Chunking keeps the document count low: 75 single-employee
+// documents crept Chromium+Node past the 512MB tier, ~10 chunk documents in
+// one recycled browser session stay well inside it.
+const HOURS_PDF_CHUNK = 8;
 async function buildHoursChunkHtmls(employeeIds, month, user) {
   const reports = await computeReportsParallel(employeeIds, month, user);
-  return reports.map(r => renderHoursReportDoc([r]));
+  const htmls = [];
+  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) htmls.push(renderHoursReportDoc(reports.slice(i, i + HOURS_PDF_CHUNK)));
+  return htmls;
 }
 
 // Per-employee hours PDFs in ONE browser pass — for sends where every employee
