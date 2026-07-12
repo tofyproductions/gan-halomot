@@ -1331,6 +1331,19 @@ async function setBranchManagerEmails(req, res) {
 }
 
 // Persist a send log onto the audit record so the client can show what happened.
+// A "real" employee email — synthetic app-login addresses (<ת"ז>@gan-halomot.local
+// and the like) are NOT inboxes; falling back to them silently sent payslips
+// into the void. Returns null when the employee has no genuine address.
+function realEmployeeEmail(emp) {
+  for (const cand of [emp?.email, emp?.user_id?.email]) {
+    const e = String(cand || '').trim();
+    if (!e) continue;
+    if (/@gan-halomot\.local$/i.test(e) || /@ganhalomot\.co\.il$/i.test(e)) continue;
+    return e;
+  }
+  return null;
+}
+
 async function saveDistributionLog(auditId, key, payload) {
   try {
     const doc = await PayslipAuditRecord.findById(auditId);
@@ -1443,7 +1456,7 @@ async function sendPayslipsToEmployees(req, res) {
           const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
           if (!emp) { out.push({ name: dispName, status: 'no_match' }); continue; }
           if (selectedIds && !selectedIds.has(String(emp._id))) continue; // not selected for this send
-          const email = toOverride || (emp.email && emp.email.trim()) || emp.user_id?.email || null;
+          const email = toOverride || realEmployeeEmail(emp);
           if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
           if (!page || !branch) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
           if (!pdfCache.has(branch)) pdfCache.set(branch, await loadBranchPdf(doc._id, branch));
@@ -1796,7 +1809,7 @@ async function distributionPreview(req, res) {
       const branch = (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim();
       const page = r.payslip?.page_index || null;
       const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
-      const email = emp ? ((emp.email && emp.email.trim()) || emp.user_id?.email || '') : '';
+      const email = emp ? (realEmployeeEmail(emp) || '') : '';
       items.push({
         payslip_name: payslipName,
         payslip_id: israeliId,
@@ -1984,7 +1997,7 @@ async function buildHoursBranchGroups(month, user) {
   groups.set(OFFICE_KEY, { name: OFFICE_NAME, br: null, isOffice: true, employees: [] });
   const office = groups.get(OFFICE_KEY);
   for (const e of employees) {
-    const email = (e.email && e.email.trim()) || e.user_id?.email || '';
+    const email = realEmployeeEmail(e) || '';
     const entry = { employee_id: String(e._id), name: e.full_name, israeli_id: e.israeli_id || '', email, matched: true, has_page: true };
     office.employees.push(entry);
     const br = byId.get(String(e.branch_id));
@@ -2061,7 +2074,7 @@ async function sendHoursToEmployees(req, res) {
         try {
           const emp = await Employee.findById(id).populate('user_id', 'email').lean();
           if (!emp) continue;
-          const email = (emp.email && emp.email.trim()) || emp.user_id?.email;
+          const email = realEmployeeEmail(emp);
           if (!email) continue;
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`)) });
