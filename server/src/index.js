@@ -1,3 +1,20 @@
+// Guarantee a real global.gc regardless of how the host launches us (Render
+// ignores render.yaml's startCommand for this service, and NODE_OPTIONS
+// disallows --expose-gc): re-exec ourselves once with the flag. Without a real
+// GC, V8 never returns a distribution job's heap to the OS on the 512MB tier
+// (measured RSS stuck at 371MB after one big render) and the next Chromium
+// launch OOM-kills the instance.
+if (!global.gc && !process.env.GC_REEXEC) {
+  const { spawn } = require('child_process');
+  const child = spawn(process.execPath, ['--expose-gc', __filename], {
+    stdio: 'inherit',
+    env: { ...process.env, GC_REEXEC: '1' },
+  });
+  ['SIGTERM', 'SIGINT'].forEach(sig => process.on(sig, () => { try { child.kill(sig); } catch (e) { /* ignore */ } }));
+  child.on('exit', (code, sig) => process.exit(code != null ? code : (sig ? 1 : 0)));
+  return;
+}
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
