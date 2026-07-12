@@ -227,7 +227,7 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   table.daily tbody tr { page-break-inside: avoid; }
   table.daily tfoot td { border: 1.5px solid #111; padding: 4px 6px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
   table.daily tfoot td.label { text-align: right; }
-  .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
   .summary-grid .box { border: 1px solid #999; padding: 0; font-size: 9pt; }
   .summary-grid .box .box-title { font-weight: 800; padding: 4px 10px; text-align: center; background: #f3f4f6 !important; border-bottom: 1px solid #999; }
   .summary-grid .box .row { display: flex; justify-content: space-between; padding: 2px 10px; }
@@ -304,27 +304,15 @@ ${hasCommit ? `<div class="legend">
     <div class="row"><span>שעות שקוזזו בפועל</span><span class="v" style="color:#b91c1c">${fmt(pa.deduct_hours || 0)}</span></div>
     <div class="row"><span>סכום קיזוז</span><span class="v" style="color:#b91c1c">${pa.deduction > 0 ? '−₪' + Math.round(pa.deduction).toLocaleString('he-IL') : '₪0'}</span></div>
     ${pa.made_up ? '<div class="row"><span style="color:#1d4ed8;font-size:8pt">↺ החוסר הושלם בימים אחרים — ללא קיזוז</span><span></span></div>' : ''}
-  </div>
-  <div class="box">
-    <div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
-    <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
-    <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
-    <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
   </div>` : `<div class="box">
     <div class="box-title">סטטיסטיקה</div>
     <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
     <div class="row"><span>ימים עם חסר החתמה</span><span class="v">${report.totals.incomplete_days || 0}</span></div>
-    <div class="row"><span style="font-size:8pt;color:#777">עובד שעתי / ללא התחייבות מוגדרת — אין חישוב חוסר/תוספת מול תקן</span><span></span></div>
-  </div>
-  <div class="box">
-    <div class="box-title">הערות</div>
-    <div style="padding:6px 10px;font-size:8pt;color:#555;line-height:1.4">
-      ${report.totals.incomplete_days > 0 ? '⚠ יש ' + report.totals.incomplete_days + ' ימים עם החתמה לא תקינה (חסרה כניסה או יציאה).<br>' : ''}
-      חישוב 125%/150% הוא לפי כמות השעות ביום (8&ndash;10h ≡ 125%, מעל 10h ≡ 150%).
-    </div>
+    <div class="row"><span style="font-size:8pt;color:#777">עובד שעתי / ללא התחייבות מוגדרת</span><span></span></div>
   </div>`}
   ${(() => {
-    // Count the leave/absence rows actually shown in the table above.
+    // Leave summary — counted from the table rows. Placed between the 2nd and 3rd
+    // boxes so all four fit one row (saves vertical space).
     const items = [
       ['ימי מחלה', tally.sick],
       ['ימי היעדרות', tally.absence],
@@ -337,6 +325,17 @@ ${hasCommit ? `<div class="legend">
       ${items.map(([l, v]) => `<div class="row"><span>${l}</span><span class="v">${(v === 0 || v == null || v === '') ? '—' : v}</span></div>`).join('')}
     </div>`;
   })()}
+  ${hasCommit ? `<div class="box">
+    <div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
+    <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
+    <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
+    <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
+  </div>` : `<div class="box">
+    <div class="box-title">הערות</div>
+    <div style="padding:6px 10px;font-size:8pt;color:#555;line-height:1.4">
+      חישוב 125%/150% הוא לפי כמות השעות ביום (8&ndash;10h ≡ 125%, מעל 10h ≡ 150%).
+    </div>
+  </div>`}
 </div>
 <div class="signatures">
   <div class="sig">חתימת העובד</div>

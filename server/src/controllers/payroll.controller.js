@@ -956,9 +956,8 @@ function renderHoursReportDoc(reports) {
     </table>
     ${hasCommit ? `<div style="margin-top:4px;font-size:7pt;line-height:1.5">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:5px;white-space:nowrap">${t}</span>`).join('')}</div>` : ''}
     <table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px;margin-top:6px">
-      <colgroup><col style="width:33.33%"><col style="width:33.33%"><col style="width:33.33%"></colgroup>
-      <tr>${boxCell(['כללי', generalRows])}${boxCell(box2)}${boxCell(box3)}</tr>
-      <tr>${boxCell(box4)}<td></td><td></td></tr>
+      <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
+      <tr>${boxCell(['כללי', generalRows])}${boxCell(box2)}${boxCell(box4)}${boxCell(box3)}</tr>
     </table>
     <table style="width:100%;margin-top:12px"><tr>
       <td style="border-top:1px solid #111;text-align:center;padding-top:3px;width:45%;font-size:8.5pt;color:#555">חתימת העובד</td>
