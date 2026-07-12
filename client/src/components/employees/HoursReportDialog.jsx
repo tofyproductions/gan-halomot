@@ -192,17 +192,17 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
-  .doc-head { border: 1.5px solid #111; padding: 8px 12px; margin-bottom: 8px;
+  .doc-head { border: 1px solid #64748b; padding: 8px 12px; margin-bottom: 8px;
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 10pt; }
   .doc-head .row { display: flex; gap: 6px; }
-  .doc-head .row .lbl { font-weight: 700; }
+  .doc-head .row .lbl { font-weight: 600; color: #374151; }
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
-    border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
-  .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
+    border-bottom: 1px solid #e2e5e9; padding-bottom: 4px; margin-bottom: 2px; }
+  .doc-head .title-row .title { font-size: 13pt; font-weight: 700; color: #1f2937; }
   table.daily { width: 100%; border-collapse: collapse; font-size: 9pt; }
-  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 4px 6px; font-weight: 800; font-size: 8.5pt; text-align: center; }
-  table.daily tbody td { border: 1px solid #ccc; padding: 3px 6px; text-align: center; }
-  table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
+  table.daily thead th { background: #f6f7f9 !important; border: 1px solid #c4cad3; padding: 4px 6px; font-weight: 700; font-size: 8.5pt; text-align: center; color: #374151; }
+  table.daily tbody td { border: 1px solid #e2e5e9; padding: 3px 6px; text-align: center; }
+  table.daily tbody td.date { text-align: right; font-weight: 500; white-space: nowrap; color: #374151; }
   table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 8pt; color: #555; text-align: right; }
@@ -213,27 +213,31 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   table.daily tbody tr.r-extra td { background: #f0fdf4 !important; }  /* תוספת ששולמה */
   table.daily tbody tr.r-exc td   { background: #eff6ff !important; }  /* חוסר מאושר / הושלם */
   table.daily tbody tr.r-pend td  { background: #faf5ff !important; }  /* תוספת ממתינה */
-  table.daily td.ot { color: #92400e; font-weight: 700; }
-  table.daily td.ot2 { color: #b91c1c; font-weight: 700; }
-  table.daily td.miss-ded { color: #b91c1c; font-weight: 800; }     /* חוסר מקוזז */
-  table.daily td.miss-exc { color: #92400e; font-weight: 700; }     /* חוסר מאושר */
-  table.daily td.miss-mu  { color: #1d4ed8; font-weight: 700; }     /* חוסר שהושלם */
-  table.daily td.extra-ok   { color: #15803d; font-weight: 800; }   /* תוספת ששולמה */
-  table.daily td.extra-pend { color: #7e22ce; font-weight: 700; }   /* תוספת ממתינה */
+  table.daily td.ot { color: #92400e; font-weight: 600; }
+  table.daily td.ot2 { color: #b91c1c; font-weight: 600; }
+  table.daily td.miss-ded { color: #b91c1c; font-weight: 700; }     /* חוסר מקוזז */
+  table.daily td.miss-exc { color: #92400e; font-weight: 600; }     /* חוסר מאושר */
+  table.daily td.miss-mu  { color: #1d4ed8; font-weight: 600; }     /* חוסר שהושלם */
+  table.daily td.extra-ok   { color: #15803d; font-weight: 700; }   /* תוספת ששולמה */
+  table.daily td.extra-pend { color: #7e22ce; font-weight: 600; }   /* תוספת ממתינה */
   table.daily td.mute { color: #d1d5db; }
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 8pt; }
   .legend .item { display: flex; align-items: center; gap: 4px; }
   .legend .sw { width: 11px; height: 11px; border: 1px solid #999; border-radius: 2px; display: inline-block; }
   table.daily tbody tr { page-break-inside: avoid; }
-  table.daily tfoot td { border: 1.5px solid #111; padding: 4px 6px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
+  table.daily tfoot td { border: 1px solid #94a3b8; padding: 4px 6px; background: #f1f3f5 !important; font-weight: 700; text-align: center; }
   table.daily tfoot td.label { text-align: right; }
-  .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
-  .summary-grid .box { border: 1.2px solid #111; padding: 0; font-size: 9pt; }
-  .summary-grid .box .box-title { font-weight: 800; padding: 4px 10px; text-align: center; background: #f3f4f6 !important; border-bottom: 1.2px solid #111; }
+  .summary-grid { display: grid; grid-template-columns: ${hasCommit ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'}; gap: 8px; margin-top: 12px; }
+  .summary-grid .box { border: 1px solid #64748b; padding: 0; font-size: 9pt; }
+  .summary-grid .box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: #f6f7f9 !important; border-bottom: 1px solid #64748b; }
   .summary-grid .box .row { display: flex; justify-content: space-between; padding: 2px 10px; }
-  .summary-grid .box .row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .summary-grid .box .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .notes-box { border: 1px solid #64748b; margin-top: 8px; font-size: 9pt; }
+  .notes-box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: #f6f7f9 !important; border-bottom: 1px solid #64748b; }
+  .notes-box .line { height: 26px; border-bottom: 1px solid #e5e7eb; }
+  .notes-box .line:last-child { border-bottom: none; }
   .signatures { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 9pt; }
-  .signatures .sig { border-top: 1px solid #111; padding-top: 4px; text-align: center; color: #555; }
+  .signatures .sig { border-top: 1px solid #555; padding-top: 4px; text-align: center; color: #555; }
   .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); border: none; font-size: 14px; z-index: 9999; }
   @media print { .no-print { display: none !important; } }
 </style>
@@ -330,12 +334,12 @@ ${hasCommit ? `<div class="legend">
     <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
     <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
     <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
-  </div>` : `<div class="box">
-    <div class="box-title">הערות</div>
-    <div style="padding:6px 10px;font-size:8pt;color:#555;line-height:1.4">
-      חישוב 125%/150% הוא לפי כמות השעות ביום (8&ndash;10h ≡ 125%, מעל 10h ≡ 150%).
-    </div>
-  </div>`}
+  </div>` : ''}
+</div>
+<div class="notes-box">
+  <div class="box-title">הערות</div>
+  <div class="line"></div>
+  <div class="line"></div>
 </div>
 <div class="signatures">
   <div class="sig">חתימת העובד</div>
