@@ -1572,16 +1572,16 @@ async function sendPayslipsToManagers(req, res) {
     res.json({ ok: true, queued: true, count: branchKeys.length });
 
     runDistributionJob(doc._id, 'managers', userId, async () => {
-      const { hoursReportEmailAttachments, renderHoursPdfForEmployees } = require('./payroll.controller');
+      const { hoursReportEmailAttachments, buildRichHoursHtml } = require('./payroll.controller');
       const { PDFDocument } = require('pdf-lib');
       const stored = await readBranchManagerEmails();
       const pdfCache = new Map();
       const out = [];
 
-      // Per-job hours-PDF cache (key: sorted employee ids). The office copy is
-      // the UNION of the branches — merging the already-rendered branch PDFs
-      // instead of re-rendering all ~75 employees in one go both halves the
-      // work and avoids the memory spike that OOM-killed the 512MB instance.
+      // Per-job hours-PDF cache (key: sorted employee ids), filled by the
+      // single-pass render below. The office copy is the UNION of the branches
+      // — merged from the cached branch PDFs, never re-rendered. Cache-only on
+      // purpose: the send loop must NOT launch Chromium (see phase 2).
       const hoursCache = new Map();
       const hoursKeyOf = ids => ids.map(String).sort().join(',');
       const getHoursPdf = async (ids) => {
@@ -1601,9 +1601,7 @@ async function sendPayslipsToManagers(req, res) {
             return outBuf;
           }
         }
-        const pdf = await renderHoursPdfForEmployees(ids, month, { role: 'system_admin' });
-        if (pdf) hoursCache.set(key, pdf);
-        return pdf;
+        return null;
       };
 
       // Specific email → ONE consolidated bundle of ALL selected employees, sent
@@ -1647,19 +1645,68 @@ async function sendPayslipsToManagers(req, res) {
         return out;
       }
 
-      // Office last: by then every branch's hours PDF is cached, so the office
-      // union copy is a cheap merge instead of the heaviest render of the job.
+      // ── Phase 1: resolve every group's recipients + chosen employees (no
+      // heavy work), so all rendering can be batched into ONE Chromium pass.
+      // Office last: its union copy merges from the branch PDFs.
       const orderedKeys = [...branchKeys].sort((a, b) => (groups.get(a)?.isOffice ? 1 : 0) - (groups.get(b)?.isOffice ? 1 : 0));
+      const plan = [];
       for (const key of orderedKeys) {
         const g = groups.get(key);
-        const label = g.br ? g.br.name : g.name;
+        if (!g.br && !g.isOffice) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
+        const emails = await managerBranchEmails(g, stored);
+        if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
+        const sel = branchSel.get(norm(g.name));
+        const chosen = g.employees.filter(e => e.employee_id && e.has_page && (!sel || sel.has(e.employee_id)));
+        if (chosen.length === 0) { out.push({ branch: g.name, status: 'no_selection' }); continue; }
+        plan.push({ g, label: g.br ? g.br.name : g.name, emails, chosen });
+      }
+
+      // ── Phase 2: render ALL hours PDFs in a SINGLE Chromium session. A
+      // second browser launch later in the job — on top of an already-grown
+      // heap — is exactly what OOM-killed the 512MB instance after branch #1.
+      // Office copies whose set equals the union of the branches are merged
+      // from the branch PDFs (no render at all); any other set renders here.
+      if (includeHours && plan.length) {
         try {
-          if (!g.br && !g.isOffice) { out.push({ branch: g.name, status: 'no_branch' }); continue; }
-          const emails = await managerBranchEmails(g, stored);
-          if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
-          const sel = branchSel.get(norm(g.name));
-          const chosen = g.employees.filter(e => e.employee_id && e.has_page && (!sel || sel.has(e.employee_id)));
-          if (chosen.length === 0) { out.push({ branch: g.name, status: 'no_selection' }); continue; }
+          const { buildHoursChunkHtmls } = require('./payroll.controller');
+          const nonOffice = plan.filter(p => !p.g.isOffice);
+          const union = new Set(nonOffice.flatMap(p => p.chosen.map(e => String(e.employee_id))));
+          const renderTargets = plan.filter(p => {
+            if (!p.g.isOffice) return true;
+            const ids = p.chosen.map(e => String(e.employee_id));
+            return !(ids.length === union.size && ids.every(x => union.has(x)));
+          });
+          const metas = []; const chunkHtmls = [];
+          for (const p of renderTargets) {
+            const htmls = await buildHoursChunkHtmls(p.chosen.map(e => e.employee_id), month, { role: 'system_admin' });
+            metas.push({ p, start: chunkHtmls.length, count: htmls.length });
+            chunkHtmls.push(...htmls);
+          }
+          require('../services/htmlPdf').tryGc();
+          const pdfs = chunkHtmls.length ? await require('../services/htmlPdf').htmlToPdfBatch(chunkHtmls) : [];
+          for (const m of metas) {
+            const slice = pdfs.slice(m.start, m.start + m.count);
+            if (!slice.length) continue;
+            let buf = slice[0];
+            if (slice.length > 1) {
+              const merged = await PDFDocument.create();
+              for (const b of slice) {
+                const src = await PDFDocument.load(b);
+                (await merged.copyPages(src, src.getPageIndices())).forEach(pg => merged.addPage(pg));
+              }
+              buf = Buffer.from(await merged.save());
+            }
+            hoursCache.set(hoursKeyOf(m.p.chosen.map(e => e.employee_id)), buf);
+          }
+        } catch (e) { console.error('hours batch render failed (HTML fallback in loop):', e.message); }
+        require('../services/htmlPdf').tryGc();
+      }
+
+      // ── Phase 3: build payslip bundles + send. No Chromium from here on —
+      // hours PDFs come from the cache (office = union merge); if one is
+      // missing, fall back to the GAS HTML conversion (no browser needed).
+      for (const { g, label, emails, chosen } of plan) {
+        try {
           // Extract each chosen employee's page from whichever stored PDF holds it.
           const bySource = new Map();
           for (const e of chosen) { if (!bySource.has(e.source_branch)) bySource.set(e.source_branch, []); bySource.get(e.source_branch).push(e.page); }
@@ -1684,8 +1731,9 @@ async function sendPayslipsToManagers(req, res) {
             try { hoursPdf = await getHoursPdf(ids); } catch (e) { console.error('hours PDF for', label, e.message); }
             if (hoursPdf) fileAttachments.push({ filename: `דוח-שעות-${label}-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
             else {
-              const att = await hoursReportEmailAttachments(ids, month, { role: 'system_admin' }, `דוח-שעות-${label}-${month}`);
-              if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+              // Batch render missed this group — GAS HTML conversion fallback
+              // (server-side, no local Chromium in the send loop).
+              attachments.push({ name: `דוח-שעות-${label}-${month}`, html: await buildRichHoursHtml(ids, month, { role: 'system_admin' }) });
             }
           }
           const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;

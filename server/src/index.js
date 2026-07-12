@@ -32,7 +32,8 @@ if (env.NODE_ENV !== 'test') {
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', db: 'mongodb',
     commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null,
-    uptime_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024) });
+    uptime_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    gc: !!global.gc });
 });
 
 // Diagnostic: can Chromium render a PDF here? (verifies the emailed-report PDF

@@ -1038,6 +1038,17 @@ async function renderHoursPdfForEmployees(employeeIds, month, user) {
   return Buffer.from(await merged.save());
 }
 
+// Chunk HTML documents for a set of employees — lets a caller batch SEVERAL
+// branches' reports into ONE Chromium session (htmlToPdfBatch) instead of a
+// launch per branch: on the 512MB tier a second launch on top of an
+// already-grown heap is what OOM-killed multi-branch sends.
+async function buildHoursChunkHtmls(employeeIds, month, user) {
+  const reports = await computeReportsParallel(employeeIds, month, user);
+  const htmls = [];
+  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) htmls.push(renderHoursReportDoc(reports.slice(i, i + HOURS_PDF_CHUNK)));
+  return htmls;
+}
+
 // Per-employee hours PDFs in ONE browser pass — for sends where every employee
 // gets their own report attached. A browser launch per employee costs minutes
 // across a big send; here all documents render page-by-page in one Chromium.
@@ -2023,5 +2034,6 @@ module.exports = {
   hoursReportEmailAttachments,
   renderHoursPdfForEmployees,
   renderHoursPdfPerEmployee,
+  buildHoursChunkHtmls,
   monthRange,
 };
