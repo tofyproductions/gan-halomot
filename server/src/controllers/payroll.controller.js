@@ -930,9 +930,13 @@ function renderHoursReportDoc(reports) {
       ? ['תוספת שכר (מעבר להתחייבות)', [['שעות מעבר להתחייבות', fmt(pa.extra_hours || 0)], ['שעות שאושרו לתשלום', fmt(pa.extra_approved_hours || 0), '#15803d'], ['תוספת ששולמה', money(pa.extra_pay, '+'), '#15803d']]]
       : ['הערות', [['חישוב 125%/150% לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%)', '']]];
     const box4 = ['מחלה · היעדרות · חופשה · מילואים', leaveItems.map(([l, v]) => [l, (v === 0 || v == null || v === '') ? '—' : v])];
-    const boxCell = ([title, rows]) => `<td style="border:1px solid #999;vertical-align:top;padding:0">
-      <div style="font-weight:800;background:#f3f4f6;text-align:center;padding:2px 6px;border-bottom:1px solid #999;font-size:8pt">${title}</div>
-      ${rows.map(([l, v, c]) => `<div style="padding:1px 6px;font-size:7.5pt;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${(v === '' || v == null) ? l : `${l}: <b>${v}</b>`}</div>`).join('')}</td>`;
+    const boxCell = ([title, rows]) => `<td style="vertical-align:top;padding:0">
+      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #999;border-collapse:collapse;font-size:7.5pt">
+        <tr><td colspan="2" style="font-weight:800;background:#f3f4f6;text-align:center;padding:2px 6px;border-bottom:1px solid #999;font-size:8pt">${title}</td></tr>
+        ${rows.map(([l, v, c]) => (v === '' || v == null)
+          ? `<tr><td colspan="2" align="right" style="padding:1px 6px;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${l}</td></tr>`
+          : `<tr><td align="right" style="padding:1px 6px;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${l}</td><td align="left" style="padding:1px 6px;border-bottom:1px solid #eee;font-weight:700${c ? `;color:${c}` : ''}">${v}</td></tr>`).join('')}
+      </table></td>`;
     const legendItems = [['#fef2f2', 'חוסר שמקזז שכר'], ['#eff6ff', 'חוסר מאושר / הושלם בימים אחרים'], ['#f0fdf4', 'תוספת שאושרה ושולמה'], ['#faf5ff', 'תוספת ממתינה לאישור'], ['#fffbeb', 'החתמה חסרה']];
     return `<table style="width:100%;border:1.5px solid #111;border-collapse:collapse;margin-bottom:6px;font-size:8.5pt">
       <tr><td colspan="4" style="border-bottom:1px solid #ccc;padding:3px 10px;font-size:12pt;font-weight:800">דוח שעות חודשי <span style="font-size:8pt;font-weight:400;color:#555"> · תאריך הפקה: ${todayStr}</span></td></tr>
