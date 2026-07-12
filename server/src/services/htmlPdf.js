@@ -33,21 +33,30 @@ if (!_gc) {
 }
 function tryGc() { try { if (_gc) _gc(); } catch (e) { /* ignore */ } }
 
-// Render several full HTML documents to PDF Buffers in ONE browser (one page
-// at a time, closed after each — bounded memory). Explicit timeouts everywhere:
-// a hung render must FAIL (so the caller logs it and falls back) rather than
-// hang the queue forever.
+// Render several full HTML documents to PDF Buffers, one page at a time
+// (closed after each). Chromium accumulates memory across renders even with
+// pages closed (single-process build) — ~25 documents held, 75 OOM-killed the
+// 512MB instance — so the browser itself is recycled every RECYCLE_EVERY
+// documents (relaunch is fast once /tmp holds the extracted binary). Explicit
+// timeouts everywhere: a hung render must FAIL (so the caller logs it and
+// falls back) rather than hang the queue forever.
+const RECYCLE_EVERY = 20;
 async function runBatch(htmls) {
   let browser;
+  const out = [];
   try {
-    browser = await getBrowser();
-    const out = [];
-    for (const html of htmls) {
+    for (let i = 0; i < htmls.length; i++) {
+      if (!browser) browser = await getBrowser();
       const page = await browser.newPage();
       try {
-        await page.setContent(html, { waitUntil: 'load', timeout: 60000 });
+        await page.setContent(htmls[i], { waitUntil: 'load', timeout: 60000 });
         out.push(Buffer.from(await page.pdf({ printBackground: true, format: 'A4', margin: PDF_MARGIN, timeout: 120000 })));
       } finally { try { await page.close(); } catch (e) { /* ignore */ } }
+      if ((i + 1) % RECYCLE_EVERY === 0 && i + 1 < htmls.length) {
+        try { await browser.close(); } catch (e) { /* ignore */ }
+        browser = null;
+        tryGc();
+      }
     }
     return out;
   } finally {
