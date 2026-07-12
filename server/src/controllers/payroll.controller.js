@@ -797,7 +797,7 @@ async function hoursReport(req, res, next) {
 // distribution flow looks EXACTLY like the one produced from the system. Takes
 // one or more computeHoursReportData() objects (one A4 page per employee). ──
 const HOURS_REPORT_CSS = `
-  @page { size: A4 portrait; margin: 12mm; }
+  @page { size: A4 portrait; margin: 8mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
   .emp-page { padding: 0 0 6px; }
@@ -808,9 +808,9 @@ const HOURS_REPORT_CSS = `
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
     border-bottom: 1px solid #ccc; padding-bottom: 4px; margin-bottom: 2px; }
   .doc-head .title-row .title { font-size: 14pt; font-weight: 800; }
-  table.daily { width: 100%; border-collapse: collapse; font-size: 7.5pt; table-layout: fixed; }
-  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 2px 4px; font-weight: 800; font-size: 7pt; text-align: center; line-height: 1.1; }
-  table.daily tbody td { border: 1px solid #ccc; padding: 1px 4px; text-align: center; line-height: 1.15; }
+  table.daily { width: 100%; border-collapse: collapse; font-size: 7pt; table-layout: fixed; }
+  table.daily thead th { background: #f3f4f6 !important; border: 1px solid #999; padding: 1px 3px; font-weight: 800; font-size: 6.5pt; text-align: center; line-height: 1.05; }
+  table.daily tbody td { border: 1px solid #ccc; padding: 0.5px 3px; text-align: center; line-height: 1.05; }
   table.daily tbody td.date { text-align: right; font-weight: 700; white-space: nowrap; }
   table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
@@ -968,7 +968,7 @@ function renderHoursReportDoc(reports) {
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
-<body>${reports.map((r, i) => `<div class="emp-page"${i > 0 ? ' style="page-break-before:always"' : ''}>${empPage(r)}</div>`).join('')}</body></html>`;
+<body>${reports.map((r, i) => `${i > 0 ? '<div style="page-break-before:always;break-before:page">&nbsp;</div>' : ''}<div class="emp-page" style="page-break-inside:avoid;break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
 }
 
 // Build the rich hours-report HTML for a list of employee ids in a month.
