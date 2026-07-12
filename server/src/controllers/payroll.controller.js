@@ -967,29 +967,24 @@ function renderHoursReportDoc(reports) {
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
-<body>${reports.map((r, i) => `<div class="emp-page" style="${i > 0 ? 'page-break-before:always;break-before:page;' : ''}page-break-inside:avoid;break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
+<body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
 }
 
-// Build the rich hours-report HTML for a list of employee ids in a month.
-// Render each employee's report to its OWN PDF and merge — guarantees a clean
-// page break per employee regardless of the Chromium build's CSS page-break
-// support. Returns a merged PDF Buffer, or null if nothing rendered.
+// Render a rich hours-report PDF for a list of employee ids in a month. All
+// employees go into ONE combined HTML rendered in a SINGLE Chromium pass (one
+// browser, one page) — low memory (survives the 512MB tier for a whole branch)
+// and fast. Each employee carries `break-after:page`, so Chromium 131 (same
+// print engine locally and on @sparticuz) starts every employee on a fresh
+// page. Returns a PDF Buffer, or null if nothing rendered.
 async function renderHoursPdfForEmployees(employeeIds, month, user) {
-  const { htmlToPdfBatch } = require('../services/htmlPdf');
-  const { PDFDocument } = require('pdf-lib');
+  const { htmlToPdf } = require('../services/htmlPdf');
   const mdCache = new Map();
-  const htmls = [];
+  const reports = [];
   for (const id of employeeIds) {
-    try { const r = await computeHoursReportData(id, month, user, { mdCache }); if (r) htmls.push(renderHoursReportDoc([r])); } catch (e) { /* skip */ }
+    try { const r = await computeHoursReportData(id, month, user, { mdCache }); if (r) reports.push(r); } catch (e) { /* skip */ }
   }
-  if (htmls.length === 0) return null;
-  const pdfs = await htmlToPdfBatch(htmls);
-  const merged = await PDFDocument.create();
-  for (const buf of pdfs) {
-    try { const src = await PDFDocument.load(buf); (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p)); } catch (e) { /* skip */ }
-  }
-  if (merged.getPageCount() === 0) return null;
-  return Buffer.from(await merged.save());
+  if (reports.length === 0) return null;
+  return await htmlToPdf(renderHoursReportDoc(reports));
 }
 
 // Build the email attachment for a rich hours report. Prefer a real

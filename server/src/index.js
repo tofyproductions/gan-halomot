@@ -40,6 +40,25 @@ app.get('/api/pdf-selftest', async (req, res) => {
   }
 });
 
+// Diagnostic: does this Chromium honor CSS page breaks? Renders N full-height
+// blocks separated by break-after:page and reports the resulting page count —
+// if pages === N the single-render hours report separates employees correctly.
+app.get('/api/pdf-pagetest', async (req, res) => {
+  const t0 = Date.now();
+  const n = Math.min(Math.max(parseInt(req.query.n, 10) || 3, 1), 10);
+  try {
+    const { htmlToPdf } = require('./services/htmlPdf');
+    const { PDFDocument } = require('pdf-lib');
+    const blocks = Array.from({ length: n }, (_, i) =>
+      `<div style="${i < n - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid"><h1>עמוד ${i + 1}</h1></div>`).join('');
+    const pdf = await htmlToPdf(`<!doctype html><html dir="rtl"><head><style>@page{size:A4;margin:5mm}</style></head><body>${blocks}</body></html>`);
+    const pages = (await PDFDocument.load(pdf)).getPageCount();
+    res.json({ ok: true, blocks: n, pages, breaksHonored: pages === n, bytes: pdf.length, ms: Date.now() - t0 });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, ms: Date.now() - t0 });
+  }
+});
+
 // API routes
 app.use('/api', routes);
 
