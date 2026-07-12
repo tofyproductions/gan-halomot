@@ -1477,7 +1477,7 @@ async function sendPayslipsToEmployees(req, res) {
           out.push({ name: dispName, status: 'error', error: e.message });
         }
         // Progress trail every few employees so the UI shows where the job stands.
-        if (++sinceLog >= 5) { sinceLog = 0; await saveDistributionLog(doc._id, 'employees', { at: new Date(), by: userId, running: true, results: out }); }
+        if (++sinceLog >= 5) { sinceLog = 0; await saveDistributionLog(doc._id, 'employees', { at: new Date(), by: userId, running: true, results: out }); require('../services/htmlPdf').tryGc(); }
       }
       return out;
     });
@@ -1707,6 +1707,10 @@ async function sendPayslipsToManagers(req, res) {
         // Progress trail: update the running log after every branch so the UI
         // shows exactly where the job stands (and where it died, if it dies).
         await saveDistributionLog(doc._id, 'managers', { at: new Date(), by: userId, running: true, results: out });
+        // Return the branch's render memory to the OS before the next
+        // Chromium launch — accumulated heap + Chromium together OOM'd the
+        // 512MB instance mid-job.
+        require('../services/htmlPdf').tryGc();
       }
       return out;
     });

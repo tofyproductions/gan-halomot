@@ -21,6 +21,18 @@ async function getBrowser() {
 
 const PDF_MARGIN = { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' };
 
+// Force a V8 GC when possible so freed render buffers return to the OS before
+// the next Chromium launch — on the 512MB tier the two peaks must not overlap.
+// Works with --expose-gc, and falls back to the v8-flag trick without it.
+let _gc = global.gc || null;
+if (!_gc) {
+  try {
+    require('v8').setFlagsFromString('--expose_gc');
+    _gc = require('vm').runInNewContext('gc');
+  } catch (e) { _gc = null; }
+}
+function tryGc() { try { if (_gc) _gc(); } catch (e) { /* ignore */ } }
+
 // Render several full HTML documents to PDF Buffers in ONE browser (one page
 // at a time, closed after each — bounded memory). Explicit timeouts everywhere:
 // a hung render must FAIL (so the caller logs it and falls back) rather than
@@ -40,6 +52,7 @@ async function runBatch(htmls) {
     return out;
   } finally {
     if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }
+    tryGc();
   }
 }
 
@@ -59,4 +72,4 @@ async function htmlToPdf(html) {
   return pdf;
 }
 
-module.exports = { htmlToPdf, htmlToPdfBatch };
+module.exports = { htmlToPdf, htmlToPdfBatch, tryGc };

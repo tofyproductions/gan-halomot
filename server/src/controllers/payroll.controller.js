@@ -800,7 +800,10 @@ const HOURS_REPORT_CSS = `
   @page { size: A4 portrait; margin: 5mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
-  .emp-page { padding: 0 0 6px; }
+  /* Fixed print-content width (A4 210mm − 2×5mm margins) so on-screen layout
+     during rendering matches the printed page exactly — the fit script's
+     measurements are then true print measurements. */
+  .emp-page { padding: 0 0 6px; width: 200mm; margin: 0 auto; }
   .doc-head { border: 1.5px solid #111; padding: 8px 12px; margin-bottom: 8px;
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 10pt; }
   .doc-head .row { display: flex; gap: 6px; }
@@ -954,7 +957,7 @@ function renderHoursReportDoc(reports) {
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
         ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>
-    ${hasCommit ? `<div style="margin-top:4px;font-size:7pt;line-height:1.5">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:5px;white-space:nowrap">${t}</span>`).join('')}</div>` : ''}
+    ${hasCommit ? `<div style="margin-top:4px;font-size:7pt;line-height:1.5">${legendItems.map(([bg, t]) => `<span style="background:${bg};border:1px solid #ccc;padding:1px 5px;border-radius:2px;margin-left:5px;white-space:nowrap">${t}</span>`).join(' ')}</div>` : ''}
     <table style="width:100%;table-layout:fixed;border-collapse:separate;border-spacing:5px;margin-top:6px">
       <colgroup><col style="width:25%"><col style="width:25%"><col style="width:25%"><col style="width:25%"></colgroup>
       <tr>${boxCell(['כללי', generalRows])}${boxCell(box2)}${boxCell(box4)}${boxCell(box3)}</tr>
@@ -967,7 +970,29 @@ function renderHoursReportDoc(reports) {
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
-<body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
+<body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid">${empPage(r)}</div>`).join('')}
+<script>
+/* Fit each employee to a FULL A4 page: scale the content (CSS zoom) so it
+   fills the printable height — sparse months grow (capped ×1.5), dense months
+   shrink to fit — guaranteeing exactly one elegant page per employee. Width is
+   compensated (200mm / zoom) so the rendered width stays the printable width.
+   Runs in Chromium before page.pdf(); the GAS HTML fallback ignores it. */
+(function () {
+  var AVAIL = 1084; /* px: 297mm−10mm at 96dpi — keep in sync with @page/PDF margins */
+  document.querySelectorAll('.emp-page').forEach(function (el) {
+    for (var i = 0; i < 4; i++) {
+      var z = parseFloat(el.style.zoom) || 1;
+      var h = el.getBoundingClientRect().height; /* rendered (zoomed) height */
+      if (!h) return;
+      var nz = z * ((AVAIL * 0.97) / h);
+      nz = Math.max(0.5, Math.min(2, nz));
+      if (Math.abs(nz - z) < 0.02) break;
+      el.style.zoom = nz;
+      el.style.width = (200 / nz) + 'mm'; /* rendered width stays 200mm */
+    }
+  });
+})();
+</script></body></html>`;
 }
 
 // Render a rich hours-report PDF for a list of employee ids in a month.

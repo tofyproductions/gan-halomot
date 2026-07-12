@@ -5,7 +5,9 @@ services:
     region: frankfurt
     plan: free
     buildCommand: cd server && npm install && cd ../client && npm install && npm run build
-    startCommand: cd server && node src/index.js
+    # --expose-gc: distribution jobs force a GC between branches so V8 returns
+    # memory before the next Chromium launch (512MB tier headroom).
+    startCommand: cd server && node --expose-gc --max-old-space-size=256 src/index.js
     envVars:
       - key: NODE_ENV
         value: production
