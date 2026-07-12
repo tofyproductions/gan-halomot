@@ -80,23 +80,43 @@ async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttach
     // (requires the Apps Script to support the `files` field; ignored otherwise).
     files: fileAttachments || [],
   };
-  const res = await fetch(env.GAS_EMAIL_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    redirect: 'follow',
-  });
-  const responseText = await res.text();
-  let parsed = null;
-  try { parsed = JSON.parse(responseText); } catch { parsed = { raw: responseText }; }
-  if (!res.ok || parsed?.ok === false) {
-    const err = new Error(parsed?.error || `GAS ${res.status}`);
-    err.code = parsed?.code || `HTTP_${res.status}`;
-    err.responseCode = res.status;
-    err.detail = parsed;
-    throw err;
+  const payload = JSON.stringify(body);
+  // Transient "fetch failed" (socket hang up / TLS reset) hits large multi-MB
+  // POSTs to the GAS web app now and then — retry a couple of times with a
+  // per-attempt timeout, and surface undici's real cause when it finally fails.
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90000);
+    try {
+      const res = await fetch(env.GAS_EMAIL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        redirect: 'follow',
+        signal: ctrl.signal,
+      });
+      const responseText = await res.text();
+      let parsed = null;
+      try { parsed = JSON.parse(responseText); } catch { parsed = { raw: responseText }; }
+      if (!res.ok || parsed?.ok === false) {
+        const err = new Error(parsed?.error || `GAS ${res.status}`);
+        err.code = parsed?.code || `HTTP_${res.status}`;
+        err.responseCode = res.status;
+        err.detail = parsed;
+        throw err; // GAS-level rejection — do not retry (deterministic)
+      }
+      return { messageId: parsed?.messageId || `gas-${Date.now()}`, provider: 'gas' };
+    } catch (e) {
+      // Only network/timeout errors are worth retrying; a GAS-level rejection
+      // (has .responseCode) is deterministic, so rethrow immediately.
+      if (e.responseCode) throw e;
+      const cause = e.cause?.code || e.cause?.message || e.cause || e.name;
+      lastErr = new Error(`${e.message}${cause ? ` (${cause})` : ''} [attempt ${attempt}/3, ${(payload.length / 1024 / 1024).toFixed(1)}MB]`);
+      if (attempt < 3) { const wait = attempt * 3000; await new Promise(r => setTimeout(r, wait)); }
+    } finally { clearTimeout(timer); }
   }
-  return { messageId: parsed?.messageId || `gas-${Date.now()}`, provider: 'gas' };
+  throw lastErr;
 }
 
 /**
