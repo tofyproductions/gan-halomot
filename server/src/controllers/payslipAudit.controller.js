@@ -1362,7 +1362,7 @@ async function sendPayslipsToEmployees(req, res) {
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
     void (async () => {
-      const { buildRichHoursHtml } = require('./payroll.controller');
+      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       const pdfCache = new Map();
       const out = [];
       for (const r of results) {
@@ -1382,10 +1382,12 @@ async function sendPayslipsToEmployees(req, res) {
           if (!bytes) { out.push({ name: emp.full_name, status: 'no_pdf' }); continue; }
           const pageBuf = await extractPage(bytes, page);
           if (!pageBuf) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
+          const fileAttachments = [{ filename: `תלוש-${emp.full_name}-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
             const hoursHtml = await buildRichHoursHtml([emp._id], month, { role: 'system_admin' });
-            attachments.push({ name: `דוח-שעות-${emp.full_name}-${month}`, html: hoursHtml });
+            const att = await hoursReportEmailAttachments(hoursHtml, `דוח-שעות-${emp.full_name}-${month}`);
+            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
           }
           const introBody = includeHours
             ? `<p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p>`
@@ -1395,7 +1397,7 @@ async function sendPayslipsToEmployees(req, res) {
             to: email,
             subject: includeHours ? `תלוש שכר ודוח שעות — ${month}` : `תלוש שכר — ${month}`,
             html: intro,
-            fileAttachments: [{ filename: `תלוש-${emp.full_name}-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }],
+            fileAttachments,
             attachments,
           });
           // Archive the payslip to the employee's file + mark the month paid.
@@ -1509,7 +1511,7 @@ async function sendPayslipsToManagers(req, res) {
     res.json({ ok: true, queued: true, count: branchKeys.length });
 
     void (async () => {
-      const { buildRichHoursHtml } = require('./payroll.controller');
+      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       const { PDFDocument } = require('pdf-lib');
       const stored = await readBranchManagerEmails();
       const pdfCache = new Map();
@@ -1542,11 +1544,14 @@ async function sendPayslipsToManagers(req, res) {
               (await merged.copyPages(srcDoc, idx)).forEach(pg => merged.addPage(pg));
             }
             const pdfBuf = Buffer.from(await merged.save());
+            const fileAttachments = [{ filename: `תלושים-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
             const attachments = [];
-            if (includeHours) attachments.push({ name: `דוח-שעות-${month}`, html: await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' }) });
+            if (includeHours) {
+              const att = await hoursReportEmailAttachments(await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' }), `דוח-שעות-${month}`);
+              if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            }
             const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים ${chosen.length} תלושי שכר${includeHours ? ' + דוחות שעות' : ''} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-            await dispatchEmail({ to: [toOverride], subject: `תלושי שכר — ${month}`, html: intro,
-              fileAttachments: [{ filename: `תלושים-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }], attachments });
+            await dispatchEmail({ to: [toOverride], subject: `תלושי שכר — ${month}`, html: intro, fileAttachments, attachments });
             out.push({ branch: toOverride, emails: [toOverride], status: 'sent' });
           }
         } catch (e) { out.push({ branch: toOverride, status: 'error', error: e.message }); }
@@ -1580,10 +1585,12 @@ async function sendPayslipsToManagers(req, res) {
           }
           if (merged.getPageCount() === 0) { out.push({ branch: g.name, status: 'no_pdf' }); continue; }
           const pdfBuf = Buffer.from(await merged.save());
+          const fileAttachments = [{ filename: `תלושים-${label}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
             const hoursHtml = await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' });
-            attachments.push({ name: `דוח-שעות-${label}-${month}`, html: hoursHtml });
+            const att = await hoursReportEmailAttachments(hoursHtml, `דוח-שעות-${label}-${month}`);
+            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
           }
           const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;
           const introBody = includeHours
@@ -1594,7 +1601,7 @@ async function sendPayslipsToManagers(req, res) {
             to: emails,
             subject: includeHours ? `תלושי שכר ודוח שעות — ${label} — ${month}` : `תלושי שכר — ${label} — ${month}`,
             html: intro,
-            fileAttachments: [{ filename: `תלושים-${label}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }],
+            fileAttachments,
             attachments,
           });
           out.push({ branch: label, emails, status: 'sent' });
@@ -1874,13 +1881,13 @@ async function sendHoursToEmployees(req, res) {
     if (!/^\d{4}-\d{2}$/.test(month) || ids.length === 0) return res.status(400).json({ error: 'חסר חודש או עובדים' });
     res.json({ ok: true, queued: true, count: ids.length });
     void (async () => {
-      const { buildRichHoursHtml } = require('./payroll.controller');
+      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       // Specific email → ONE bundle with all selected reports, to that address only.
       if (toOverride) {
         try {
           const html = await buildRichHoursHtml(ids, month, { role: 'system_admin' });
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${ids.length} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, attachments: [{ name: `דוחות-שעות-${month}`, html }] });
+          await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(html, `דוחות-שעות-${month}`)) });
         } catch (e) { console.error('send hours bundle failed:', e.message); }
         return;
       }
@@ -1892,7 +1899,7 @@ async function sendHoursToEmployees(req, res) {
           if (!email) continue;
           const html = await buildRichHoursHtml([emp._id], month, { role: 'system_admin' });
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, attachments: [{ name: `דוח-שעות-${emp.full_name}-${month}`, html }] });
+          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(html, `דוח-שעות-${emp.full_name}-${month}`)) });
         } catch (e) { console.error('send hours to employee failed:', e.message); }
       }
     })();
@@ -1919,7 +1926,7 @@ async function sendHoursToManagers(req, res) {
     const toOverride = String(req.body?.to || '').trim();
     res.json({ ok: true, queued: true, count: branchKeys.length });
     void (async () => {
-      const { buildRichHoursHtml } = require('./payroll.controller');
+      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       const stored = await readBranchManagerEmails();
 
       // Specific email → ONE consolidated hours report of ALL selected employees.
@@ -1934,7 +1941,7 @@ async function sendHoursToManagers(req, res) {
           if (seen.size) {
             const html = await buildRichHoursHtml([...seen], month, { role: 'system_admin' });
             const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${seen.size} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-            await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, attachments: [{ name: `דוחות-שעות-${month}`, html }] });
+            await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(html, `דוחות-שעות-${month}`)) });
           }
         } catch (e) { console.error('send hours to specific email failed:', e.message); }
         return;
@@ -1951,7 +1958,7 @@ async function sendHoursToManagers(req, res) {
           if (chosen.length === 0) continue;
           const html = await buildRichHoursHtml(chosen.map(e => e.employee_id), month, { role: 'system_admin' });
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורף דוח שעות מרוכז של ${g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, attachments: [{ name: `דוח-שעות-${label}-${month}`, html }] });
+          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, ...(await hoursReportEmailAttachments(html, `דוח-שעות-${label}-${month}`)) });
         } catch (e) { console.error('send hours to manager failed:', label, e.message); }
       }
     })();

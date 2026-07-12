@@ -797,7 +797,7 @@ async function hoursReport(req, res, next) {
 // distribution flow looks EXACTLY like the one produced from the system. Takes
 // one or more computeHoursReportData() objects (one A4 page per employee). ──
 const HOURS_REPORT_CSS = `
-  @page { size: A4 portrait; margin: 8mm; }
+  @page { size: A4 portrait; margin: 5mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
   .emp-page { padding: 0 0 6px; }
@@ -972,6 +972,21 @@ function renderHoursReportDoc(reports) {
 }
 
 // Build the rich hours-report HTML for a list of employee ids in a month.
+// Build the email attachment for a rich hours-report HTML. Prefer a real
+// server-rendered PDF (pixel-perfect, proper page breaks); fall back to the
+// GAS-converted HTML attachment if Chromium can't render (e.g. low memory).
+// Returns an object to spread into dispatchEmail: { fileAttachments } | { attachments }.
+async function hoursReportEmailAttachments(html, baseName) {
+  try {
+    const { htmlToPdf } = require('../services/htmlPdf');
+    const pdf = await htmlToPdf(html);
+    return { fileAttachments: [{ filename: `${baseName}.pdf`, contentBase64: pdf.toString('base64'), contentType: 'application/pdf' }] };
+  } catch (e) {
+    console.error('hours PDF render failed → HTML fallback:', e.message);
+    return { attachments: [{ name: baseName, html }] };
+  }
+}
+
 async function buildRichHoursHtml(employeeIds, month, user) {
   const { fetchMonthData } = require('./payrollMonth.controller');
   const mr = monthRange(month);
@@ -1924,5 +1939,6 @@ module.exports = {
   computeHoursReportData,
   renderHoursReportDoc,
   buildRichHoursHtml,
+  hoursReportEmailAttachments,
   monthRange,
 };
