@@ -1613,6 +1613,7 @@ function SendContentPreview({ open, onClose, auditId, title, pdfEndpoint, pdfQue
 /* Distribute payslips to employees: review the ת"ז match per payslip, edit +
    save each employee's email, pick who to send to (or all), and see the log. */
 export function PayslipDistributionDialog({ open, audit, onClose }) {
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState({});
@@ -1677,12 +1678,19 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
     const ids = all ? [] : selectedIds;
     if (!all && ids.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
     const who = all ? 'לכל העובדים המותאמים' : `ל-${ids.length} עובדים נבחרים`;
-    if (!window.confirm(`לשלוח ${who} את התלוש${includeHours ? ' + דוח השעות' : ''}?\nהפעולה מסמנת את חודש השכר כאושר+שולם ושומרת עותק בתיק כל עובד.`)) return;
+    // In-app confirm — window.confirm can be silently suppressed by the browser
+    // ("prevent additional dialogs"), making the button appear dead.
+    if (!(await confirm({
+      title: 'שליחת תלושים לעובדים',
+      message: `לשלוח ${who} את התלוש${includeHours ? ' + דוח השעות' : ''}? הפעולה מסמנת את חודש השכר כאושר+שולם ושומרת עותק בתיק כל עובד.`,
+      confirm_label: 'שלח',
+    }))) return;
     setBusy(true);
     await persistEmails();
     try {
+      // Generous timeout: a sleeping free-tier instance takes >30s to wake.
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-employees`,
-        { ...(all ? {} : { employee_ids: ids }), include_hours: includeHours });
+        { ...(all ? {} : { employee_ids: ids }), include_hours: includeHours }, { timeout: 120000 });
       sentAtRef.current = Date.now(); setPolling(true);
       toast.success(`השליחה החלה — ${res.data.count} עובדים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת מספר דקות).`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
@@ -1788,6 +1796,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
    Preview which branches will be sent, their manager email + payslip count, pick
    which branches, toggle the hours report, then send. */
 export function ManagerDistributionDialog({ open, audit, onClose }) {
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [empSel, setEmpSel] = useState({});   // { [branch]: { [employee_id]: bool } }
@@ -1860,11 +1869,18 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
     });
     if (branches.length === 0) { toast.error(all ? 'אין סניפים לשליחה' : 'בחר/י לפחות עובד אחד'); return; }
     const who = to ? `לכתובת ${to}` : `למנהלי ${branches.length} סניפים · ${totalSelected} עובדים`;
-    if (!window.confirm(`לשלוח ${who} את התלושים${includeHours ? ' + דוח שעות' : ''}?`)) return;
+    // In-app confirm — window.confirm can be silently suppressed by the browser
+    // ("prevent additional dialogs"), making the button appear dead.
+    if (!(await confirm({
+      title: 'שליחת תלושים למנהלים',
+      message: `לשלוח ${who} את התלושים${includeHours ? ' + דוח שעות' : ''}?`,
+      confirm_label: 'שלח',
+    }))) return;
     setBusy(true);
     try {
+      // Generous timeout: a sleeping free-tier instance takes >30s to wake.
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-managers`,
-        { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours, ...(to ? { to } : {}) });
+        { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours, ...(to ? { to } : {}) }, { timeout: 120000 });
       sentAtRef.current = Date.now(); setPolling(true);
       toast.success(`השליחה החלה — ${res.data.count} סניפים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת 1-3 דק').`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }

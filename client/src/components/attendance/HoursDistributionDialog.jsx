@@ -8,6 +8,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /* Nested preview of the exact hours-report HTML that will be sent. */
 function HoursPreview({ open, onClose, title, month, scope, employeeId, branch }) {
@@ -43,6 +44,7 @@ function HoursPreview({ open, onClose, title, month, scope, employeeId, branch }
  * known manager addresses.
  */
 export default function HoursDistributionDialog({ open, onClose, month }) {
+  const confirm = useConfirm();
   const [tab, setTab] = useState('managers');   // 'managers' | 'employees'
   const [loading, setLoading] = useState(false);
   const [items, setItems] = useState([]);
@@ -92,11 +94,11 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
     if (branches.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
     const to = specificEmail.trim();
     const who = to ? `לכתובת ${to}` : 'למנהלי הסניפים / משרד';
-    if (!window.confirm(`לשלוח דוחות שעות מרוכזים (${month}) ${who}?`)) return;
+    if (!(await confirm({ title: 'שליחת דוחות שעות', message: `לשלוח דוחות שעות מרוכזים (${month}) ${who}?`, confirm_label: 'שלח' }))) return;
     setBusy(true);
     try {
-      const res = await api.post('/payroll/hours-distribution/send-managers', { month, branches, branch_employees, ...(to ? { to } : {}) });
-      toast.success(`השליחה החלה — ${res.data.count} יעדים.`, { autoClose: 6000 });
+      const res = await api.post('/payroll/hours-distribution/send-managers', { month, branches, branch_employees, ...(to ? { to } : {}) }, { timeout: 120000 });
+      toast.success(`השליחה החלה — ${res.data.count} יעדים. הכנת PDF אורכת 1-3 דק'.`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -110,11 +112,11 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
     if (selectedIds.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
     const to = specificEmail.trim();
     const who = to ? `לכתובת ${to}` : 'לכל עובד/ת למייל שלו/ה';
-    if (!window.confirm(`לשלוח דוח שעות (${month}) ל-${selectedIds.length} עובדים — ${who}?`)) return;
+    if (!(await confirm({ title: 'שליחת דוחות שעות לעובדים', message: `לשלוח דוח שעות (${month}) ל-${selectedIds.length} עובדים — ${who}?`, confirm_label: 'שלח' }))) return;
     setBusy(true);
     try {
-      const res = await api.post('/payroll/hours-distribution/send-employees', { month, employee_ids: selectedIds, ...(to ? { to } : {}) });
-      toast.success(`השליחה החלה — ${res.data.count} עובדים.`, { autoClose: 6000 });
+      const res = await api.post('/payroll/hours-distribution/send-employees', { month, employee_ids: selectedIds, ...(to ? { to } : {}) }, { timeout: 120000 });
+      toast.success(`השליחה החלה — ${res.data.count} עובדים. הכנת PDF אורכת מספר דקות.`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
