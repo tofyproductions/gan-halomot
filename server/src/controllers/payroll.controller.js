@@ -967,7 +967,7 @@ function renderHoursReportDoc(reports) {
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
-<body>${reports.map((r, i) => `${i > 0 ? '<div style="page-break-before:always;break-before:page">&nbsp;</div>' : ''}<div class="emp-page" style="page-break-inside:avoid;break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
+<body>${reports.map((r, i) => `<div class="emp-page" style="${i > 0 ? 'page-break-before:always;break-before:page;' : ''}page-break-inside:avoid;break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
 }
 
 // Build the rich hours-report HTML for a list of employee ids in a month.

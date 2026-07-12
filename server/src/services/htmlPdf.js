@@ -33,7 +33,7 @@ async function htmlToPdf(html) {
     browser = await getBrowser();
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load', timeout: 30000 });
-    const pdf = await page.pdf({ printBackground: true, preferCSSPageSize: true, format: 'A4' });
+    const pdf = await page.pdf({ printBackground: true, format: 'A4', margin: { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' } });
     return Buffer.from(pdf);
   } finally {
     if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }
