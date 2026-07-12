@@ -800,10 +800,14 @@ const HOURS_REPORT_CSS = `
   @page { size: A4 portrait; margin: 5mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
-  /* Fixed print-content width (A4 210mm − 2×5mm margins) so on-screen layout
-     during rendering matches the printed page exactly — the fit script's
-     measurements are then true print measurements. */
-  .emp-page { padding: 0 0 6px; width: 200mm; margin: 0 auto; }
+  /* Each employee lives in a fixed A4-content-sized box (210−2×5mm wide,
+     just under 297−2×5mm tall, overflow clipped). The PDF path renders ONE
+     employee per document, so a document is physically exactly one page —
+     no cross-employee bleed regardless of the browser's page-break support.
+     The inner .fit is scaled (transform — reliable in print, unlike zoom,
+     which broke fragmentation on Render's Chromium 131) to fill the box. */
+  .emp-page { width: 200mm; height: 285mm; overflow: hidden; margin: 0 auto; padding: 0; }
+  .emp-page .fit { width: 200mm; transform-origin: top right; }
   .doc-head { border: 1.5px solid #111; padding: 8px 12px; margin-bottom: 8px;
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 10pt; }
   .doc-head .row { display: flex; gap: 6px; }
@@ -970,26 +974,29 @@ function renderHoursReportDoc(reports) {
   };
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><style>${HOURS_REPORT_CSS}</style></head>
-<body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid">${empPage(r)}</div>`).join('')}
+<body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid"><div class="fit">${empPage(r)}</div></div>`).join('')}
 <script>
-/* Fit each employee to a FULL A4 page: scale the content (CSS zoom) so it
-   fills the printable height — sparse months grow (capped ×1.5), dense months
-   shrink to fit — guaranteeing exactly one elegant page per employee. Width is
-   compensated (200mm / zoom) so the rendered width stays the printable width.
-   Runs in Chromium before page.pdf(); the GAS HTML fallback ignores it. */
+/* Fill the fixed page box: measure the content's natural (unscaled) height,
+   pick scale z so it spans ~98% of the box (sparse months grow, capped ×2;
+   dense months shrink to fit), widen the layout to 200mm/z so the SCALED
+   width stays the printable 200mm, and apply transform:scale(z). transform
+   does not affect layout, so offsetHeight measurements stay clean; iterate
+   because the width change re-wraps lines. Runs in Chromium before
+   page.pdf(); the GAS HTML fallback ignores scripts and box heights. */
 (function () {
-  var AVAIL = 1084; /* px: 297mm−10mm at 96dpi — keep in sync with @page/PDF margins */
-  document.querySelectorAll('.emp-page').forEach(function (el) {
+  var TARGET = 1060; /* px: ~285mm box at 96dpi × 0.985 safety */
+  document.querySelectorAll('.emp-page .fit').forEach(function (fit) {
+    var z = 1;
     for (var i = 0; i < 4; i++) {
-      var z = parseFloat(el.style.zoom) || 1;
-      var h = el.getBoundingClientRect().height; /* rendered (zoomed) height */
+      var h = fit.offsetHeight; /* layout height — unaffected by transform */
       if (!h) return;
-      var nz = z * ((AVAIL * 0.97) / h);
-      nz = Math.max(0.5, Math.min(2, nz));
-      if (Math.abs(nz - z) < 0.02) break;
-      el.style.zoom = nz;
-      el.style.width = (200 / nz) + 'mm'; /* rendered width stays 200mm */
+      var nz = Math.max(0.5, Math.min(2, z * (TARGET / (h * z))));
+      if (Math.abs(nz - z) < 0.02) { z = nz; break; }
+      z = nz;
+      fit.style.width = (200 / z) + 'mm';
     }
+    fit.style.width = (200 / z) + 'mm';
+    fit.style.transform = 'scale(' + z + ')';
   });
 })();
 </script></body></html>`;
@@ -1020,33 +1027,33 @@ async function computeReportsParallel(employeeIds, month, user) {
     computeHoursReportData(id, month, user, { mdCache }).catch(() => null)))).filter(Boolean);
 }
 
-const HOURS_PDF_CHUNK = 8;
 async function renderHoursPdfForEmployees(employeeIds, month, user) {
   const { htmlToPdfBatch } = require('../services/htmlPdf');
   const { PDFDocument } = require('pdf-lib');
   const reports = await computeReportsParallel(employeeIds, month, user);
   if (reports.length === 0) return null;
-  const chunks = [];
-  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) chunks.push(reports.slice(i, i + HOURS_PDF_CHUNK));
-  const pdfs = await htmlToPdfBatch(chunks.map(c => renderHoursReportDoc(c)));
-  if (pdfs.length === 1) return pdfs[0];
+  // One document per employee (physically one page each) in one browser pass.
+  const pdfs = await htmlToPdfBatch(reports.map(r => renderHoursReportDoc([r])));
   const merged = await PDFDocument.create();
   for (const buf of pdfs) {
     const src = await PDFDocument.load(buf);
     (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p));
   }
+  if (merged.getPageCount() !== reports.length) {
+    console.error(`hours PDF page/employee mismatch: ${merged.getPageCount()} pages for ${reports.length} employees`);
+  }
   return Buffer.from(await merged.save());
 }
 
-// Chunk HTML documents for a set of employees — lets a caller batch SEVERAL
-// branches' reports into ONE Chromium session (htmlToPdfBatch) instead of a
-// launch per branch: on the 512MB tier a second launch on top of an
-// already-grown heap is what OOM-killed multi-branch sends.
+// HTML documents for a set of employees — ONE DOCUMENT PER EMPLOYEE, so each
+// renders to physically exactly one PDF page (a single fixed-height clipped
+// box can't bleed into a second page, and there is no cross-employee
+// fragmentation for the browser to get wrong — Render's Chromium 131 ignored
+// break-after on scaled content). Callers batch all documents into ONE
+// Chromium session (htmlToPdfBatch) to keep the 512MB tier alive.
 async function buildHoursChunkHtmls(employeeIds, month, user) {
   const reports = await computeReportsParallel(employeeIds, month, user);
-  const htmls = [];
-  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) htmls.push(renderHoursReportDoc(reports.slice(i, i + HOURS_PDF_CHUNK)));
-  return htmls;
+  return reports.map(r => renderHoursReportDoc([r]));
 }
 
 // Per-employee hours PDFs in ONE browser pass — for sends where every employee
