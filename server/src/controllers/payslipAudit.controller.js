@@ -1380,6 +1380,15 @@ function runDistributionJob(auditId, key, userId, job) {
       console.error(`distribution ${key} fatal:`, e);
       await saveDistributionLog(auditId, key, { at: new Date(), by: userId, results: [{ branch: '—', name: '—', status: 'error', error: `תקלה כללית: ${e.message}` }] });
     }
+    // Memory hygiene on the 512MB tier: V8 doesn't return a heavy job's heap
+    // to the OS (no --expose-gc available), so a SECOND job would start near
+    // the ceiling and get OOM-killed. The job is done and its log saved —
+    // recycle the process while idle; Render restarts it fresh in ~15s.
+    const rssMb = process.memoryUsage().rss / 1024 / 1024;
+    if (rssMb > 300) {
+      console.error(`recycling instance after ${key} distribution (rss ${Math.round(rssMb)}MB)`);
+      setTimeout(() => process.exit(0), 3000);
+    }
   })();
 }
 
