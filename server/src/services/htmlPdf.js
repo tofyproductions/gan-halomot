@@ -21,24 +21,37 @@ async function getBrowser() {
   });
 }
 
-// Render a full HTML document to an A4 PDF Buffer. Uses the document's own
-// @page/print CSS (preferCSSPageSize) so margins + page breaks come from the HTML.
-async function htmlToPdf(html) {
-  // Serialize launches — one Chromium at a time keeps peak memory low.
+const PDF_MARGIN = { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' };
+
+// Render several full HTML documents to PDF Buffers in ONE browser (one page at
+// a time — bounded memory). Rendering each employee separately and merging the
+// PDFs downstream guarantees a clean page break between them regardless of the
+// Chromium build's CSS page-break support.
+async function htmlToPdfBatch(htmls) {
   while (_launching) { try { await _launching; } catch (e) { /* ignore */ } }
   let resolve;
   _launching = new Promise(r => { resolve = r; });
   let browser;
   try {
     browser = await getBrowser();
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'load', timeout: 30000 });
-    const pdf = await page.pdf({ printBackground: true, format: 'A4', margin: { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' } });
-    return Buffer.from(pdf);
+    const out = [];
+    for (const html of htmls) {
+      const page = await browser.newPage();
+      try {
+        await page.setContent(html, { waitUntil: 'load', timeout: 30000 });
+        out.push(Buffer.from(await page.pdf({ printBackground: true, format: 'A4', margin: PDF_MARGIN })));
+      } finally { try { await page.close(); } catch (e) { /* ignore */ } }
+    }
+    return out;
   } finally {
     if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }
     resolve(); _launching = null;
   }
 }
 
-module.exports = { htmlToPdf };
+async function htmlToPdf(html) {
+  const [pdf] = await htmlToPdfBatch([html]);
+  return pdf;
+}
+
+module.exports = { htmlToPdf, htmlToPdfBatch };

@@ -228,8 +228,8 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   table.daily tfoot td { border: 1.5px solid #111; padding: 4px 6px; background: #e5e7eb !important; font-weight: 800; text-align: center; }
   table.daily tfoot td.label { text-align: right; }
   .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
-  .summary-grid .box { border: 1px solid #999; padding: 0; font-size: 9pt; }
-  .summary-grid .box .box-title { font-weight: 800; padding: 4px 10px; text-align: center; background: #f3f4f6 !important; border-bottom: 1px solid #999; }
+  .summary-grid .box { border: 1.2px solid #111; padding: 0; font-size: 9pt; }
+  .summary-grid .box .box-title { font-weight: 800; padding: 4px 10px; text-align: center; background: #f3f4f6 !important; border-bottom: 1.2px solid #111; }
   .summary-grid .box .row { display: flex; justify-content: space-between; padding: 2px 10px; }
   .summary-grid .box .row .v { font-weight: 700; font-variant-numeric: tabular-nums; }
   .signatures { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 9pt; }

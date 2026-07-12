@@ -931,8 +931,8 @@ function renderHoursReportDoc(reports) {
       : ['הערות', [['חישוב 125%/150% לפי כמות השעות ביום (8–10h ≡ 125%, מעל 10h ≡ 150%)', '']]];
     const box4 = ['מחלה · היעדרות · חופשה · מילואים', leaveItems.map(([l, v]) => [l, (v === 0 || v == null || v === '') ? '—' : v])];
     const boxCell = ([title, rows]) => `<td style="vertical-align:top;padding:0">
-      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1px solid #999;border-collapse:collapse;font-size:7.5pt">
-        <tr><td colspan="2" style="font-weight:800;background:#f3f4f6;text-align:center;padding:2px 6px;border-bottom:1px solid #999;font-size:8pt">${title}</td></tr>
+      <table width="100%" border="0" cellspacing="0" cellpadding="0" style="border:1.2px solid #111;border-collapse:collapse;font-size:7.5pt">
+        <tr><td colspan="2" style="font-weight:800;background:#f3f4f6;text-align:center;padding:2px 6px;border-bottom:1.2px solid #111;font-size:8pt">${title}</td></tr>
         ${rows.map(([l, v, c]) => (v === '' || v == null)
           ? `<tr><td colspan="2" align="right" style="padding:1px 6px;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${l}</td></tr>`
           : `<tr><td align="right" style="padding:1px 6px;border-bottom:1px solid #eee${c ? `;color:${c}` : ''}">${l}</td><td align="left" style="padding:1px 6px;border-bottom:1px solid #eee;font-weight:700${c ? `;color:${c}` : ''}">${v}</td></tr>`).join('')}
@@ -971,17 +971,39 @@ function renderHoursReportDoc(reports) {
 }
 
 // Build the rich hours-report HTML for a list of employee ids in a month.
-// Build the email attachment for a rich hours-report HTML. Prefer a real
-// server-rendered PDF (pixel-perfect, proper page breaks); fall back to the
+// Render each employee's report to its OWN PDF and merge — guarantees a clean
+// page break per employee regardless of the Chromium build's CSS page-break
+// support. Returns a merged PDF Buffer, or null if nothing rendered.
+async function renderHoursPdfForEmployees(employeeIds, month, user) {
+  const { htmlToPdfBatch } = require('../services/htmlPdf');
+  const { PDFDocument } = require('pdf-lib');
+  const mdCache = new Map();
+  const htmls = [];
+  for (const id of employeeIds) {
+    try { const r = await computeHoursReportData(id, month, user, { mdCache }); if (r) htmls.push(renderHoursReportDoc([r])); } catch (e) { /* skip */ }
+  }
+  if (htmls.length === 0) return null;
+  const pdfs = await htmlToPdfBatch(htmls);
+  const merged = await PDFDocument.create();
+  for (const buf of pdfs) {
+    try { const src = await PDFDocument.load(buf); (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p)); } catch (e) { /* skip */ }
+  }
+  if (merged.getPageCount() === 0) return null;
+  return Buffer.from(await merged.save());
+}
+
+// Build the email attachment for a rich hours report. Prefer a real
+// server-rendered PDF (pixel-perfect, one page per employee); fall back to the
 // GAS-converted HTML attachment if Chromium can't render (e.g. low memory).
 // Returns an object to spread into dispatchEmail: { fileAttachments } | { attachments }.
-async function hoursReportEmailAttachments(html, baseName) {
+async function hoursReportEmailAttachments(employeeIds, month, user, baseName) {
   try {
-    const { htmlToPdf } = require('../services/htmlPdf');
-    const pdf = await htmlToPdf(html);
+    const pdf = await renderHoursPdfForEmployees(employeeIds, month, user);
+    if (!pdf) throw new Error('no pages rendered');
     return { fileAttachments: [{ filename: `${baseName}.pdf`, contentBase64: pdf.toString('base64'), contentType: 'application/pdf' }] };
   } catch (e) {
     console.error('hours PDF render failed → HTML fallback:', e.message);
+    const html = await buildRichHoursHtml(employeeIds, month, user);
     return { attachments: [{ name: baseName, html }] };
   }
 }
