@@ -110,6 +110,10 @@ connectDB().then(() => {
   app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
 
+    // A distribution job that died with the old process (OOM/deploy restart)
+    // must not show "running" forever — close it out with an error entry.
+    require('./controllers/payslipAudit.controller').finalizeStaleDistributionLogs();
+
     // Auto-sync from Google Sheets every hour
     const { syncFromSheets } = require('./controllers/sync.controller');
     const runSync = () => {

@@ -1343,6 +1343,28 @@ async function saveDistributionLog(auditId, key, payload) {
   } catch (e) { console.error('saveDistributionLog failed:', e.message); }
 }
 
+// On boot, close out distribution logs left in "running" state — the process
+// died mid-job (OOM/restart) and would otherwise show "בתהליך..." forever.
+// Partial results (the per-branch progress trail) are preserved.
+async function finalizeStaleDistributionLogs() {
+  try {
+    const keys = ['managers', 'employees'];
+    const or = keys.map(k => ({ [`full_result.distribution.${k}.running`]: true }));
+    const docs = await PayslipAuditRecord.find({ $or: or }).select('_id full_result.distribution').lean();
+    for (const d of docs) {
+      for (const k of keys) {
+        const entry = d.full_result?.distribution?.[k];
+        if (!entry?.running) continue;
+        await PayslipAuditRecord.updateOne({ _id: d._id }, {
+          $set: { [`full_result.distribution.${k}.running`]: false },
+          $push: { [`full_result.distribution.${k}.results`]: { branch: '—', name: '—', status: 'error', error: 'השליחה נקטעה — השרת אותחל באמצע. מה שסומן "נשלח" נשלח; נסה/י שוב עבור השאר.' } },
+        });
+        console.error(`finalized stale ${k} distribution log on audit ${d._id}`);
+      }
+    }
+  } catch (e) { console.error('finalizeStaleDistributionLogs:', e.message); }
+}
+
 // Run a background distribution job with a durable trail: an immediate
 // "running" entry makes every accepted send visible in the log right away, and
 // a fatal error (thrown outside the per-item try/catch, or the process's last
@@ -1380,9 +1402,25 @@ async function sendPayslipsToEmployees(req, res) {
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
     runDistributionJob(doc._id, 'employees', userId, async () => {
-      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
+      const { hoursReportEmailAttachments, renderHoursPdfPerEmployee } = require('./payroll.controller');
       const pdfCache = new Map();
       const out = [];
+      // Pre-render every selected employee's hours PDF in ONE browser pass —
+      // a Chromium launch per employee costs minutes across a big send.
+      let hoursPdfByEmp = new Map();
+      if (includeHours) {
+        try {
+          const ids = [];
+          for (const r of results) {
+            const iid = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
+            if (!iid) continue;
+            const emp = await Employee.findOne({ israeli_id: iid }).select('_id').lean();
+            if (emp && (!selectedIds || selectedIds.has(String(emp._id)))) ids.push(emp._id);
+          }
+          if (ids.length) hoursPdfByEmp = await renderHoursPdfPerEmployee(ids, month, { role: 'system_admin' });
+        } catch (e) { console.error('hours pre-render failed (per-employee fallback):', e.message); }
+      }
+      let sinceLog = 0;
       for (const r of results) {
         const dispName = r.payslip?.employee_name || r.table_row?.employee_name || 'עובד';
         const israeliId = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
@@ -1403,8 +1441,12 @@ async function sendPayslipsToEmployees(req, res) {
           const fileAttachments = [{ filename: `תלוש-${emp.full_name}-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
-            const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `דוח-שעות-${emp.full_name}-${month}`);
-            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            const pre = hoursPdfByEmp.get(String(emp._id));
+            if (pre) fileAttachments.push({ filename: `דוח-שעות-${emp.full_name}-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
+            else {
+              const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `דוח-שעות-${emp.full_name}-${month}`);
+              if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            }
           }
           const introBody = includeHours
             ? `<p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p>`
@@ -1434,6 +1476,8 @@ async function sendPayslipsToEmployees(req, res) {
         } catch (e) {
           out.push({ name: dispName, status: 'error', error: e.message });
         }
+        // Progress trail every few employees so the UI shows where the job stands.
+        if (++sinceLog >= 5) { sinceLog = 0; await saveDistributionLog(doc._id, 'employees', { at: new Date(), by: userId, running: true, results: out }); }
       }
       return out;
     });
@@ -1528,11 +1572,39 @@ async function sendPayslipsToManagers(req, res) {
     res.json({ ok: true, queued: true, count: branchKeys.length });
 
     runDistributionJob(doc._id, 'managers', userId, async () => {
-      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
+      const { hoursReportEmailAttachments, renderHoursPdfForEmployees } = require('./payroll.controller');
       const { PDFDocument } = require('pdf-lib');
       const stored = await readBranchManagerEmails();
       const pdfCache = new Map();
       const out = [];
+
+      // Per-job hours-PDF cache (key: sorted employee ids). The office copy is
+      // the UNION of the branches — merging the already-rendered branch PDFs
+      // instead of re-rendering all ~75 employees in one go both halves the
+      // work and avoids the memory spike that OOM-killed the 512MB instance.
+      const hoursCache = new Map();
+      const hoursKeyOf = ids => ids.map(String).sort().join(',');
+      const getHoursPdf = async (ids) => {
+        const key = hoursKeyOf(ids);
+        if (hoursCache.has(key)) return hoursCache.get(key);
+        if (hoursCache.size > 0) {
+          const target = new Set(key.split(','));
+          const union = new Set([...hoursCache.keys()].flatMap(k => k.split(',')));
+          if (target.size === union.size && [...target].every(x => union.has(x))) {
+            const merged = await PDFDocument.create();
+            for (const buf of hoursCache.values()) {
+              const src = await PDFDocument.load(buf);
+              (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p));
+            }
+            const outBuf = Buffer.from(await merged.save());
+            hoursCache.set(key, outBuf);
+            return outBuf;
+          }
+        }
+        const pdf = await renderHoursPdfForEmployees(ids, month, { role: 'system_admin' });
+        if (pdf) hoursCache.set(key, pdf);
+        return pdf;
+      };
 
       // Specific email → ONE consolidated bundle of ALL selected employees, sent
       // only to that address (not per-branch, not to managers).
@@ -1575,7 +1647,10 @@ async function sendPayslipsToManagers(req, res) {
         return out;
       }
 
-      for (const key of branchKeys) {
+      // Office last: by then every branch's hours PDF is cached, so the office
+      // union copy is a cheap merge instead of the heaviest render of the job.
+      const orderedKeys = [...branchKeys].sort((a, b) => (groups.get(a)?.isOffice ? 1 : 0) - (groups.get(b)?.isOffice ? 1 : 0));
+      for (const key of orderedKeys) {
         const g = groups.get(key);
         const label = g.br ? g.br.name : g.name;
         try {
@@ -1604,8 +1679,14 @@ async function sendPayslipsToManagers(req, res) {
           const fileAttachments = [{ filename: `תלושים-${label}-${month}.pdf`, contentBase64: pdfBuf.toString('base64'), contentType: 'application/pdf' }];
           const attachments = [];
           if (includeHours) {
-            const att = await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `דוח-שעות-${label}-${month}`);
-            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            const ids = chosen.map(e => e.employee_id);
+            let hoursPdf = null;
+            try { hoursPdf = await getHoursPdf(ids); } catch (e) { console.error('hours PDF for', label, e.message); }
+            if (hoursPdf) fileAttachments.push({ filename: `דוח-שעות-${label}-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
+            else {
+              const att = await hoursReportEmailAttachments(ids, month, { role: 'system_admin' }, `דוח-שעות-${label}-${month}`);
+              if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            }
           }
           const scopeTxt = g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`;
           const introBody = includeHours
@@ -1623,6 +1704,9 @@ async function sendPayslipsToManagers(req, res) {
         } catch (e) {
           out.push({ branch: g.name, status: 'error', error: e.message });
         }
+        // Progress trail: update the running log after every branch so the UI
+        // shows exactly where the job stands (and where it died, if it dies).
+        await saveDistributionLog(doc._id, 'managers', { at: new Date(), by: userId, running: true, results: out });
       }
       return out;
     });
@@ -2005,6 +2089,7 @@ module.exports = {
   updateEmployeeEmails,
   sendPayslipsToEmployees,
   sendPayslipsToManagers,
+  finalizeStaleDistributionLogs,
   runAudit,
   runAuditMulti,
   runAuditSystem,

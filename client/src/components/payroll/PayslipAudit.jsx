@@ -1629,7 +1629,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   useEffect(() => {
     if (!open || !polling || !audit?._id) return undefined;
     const t = setInterval(async () => {
-      if (Date.now() - sentAtRef.current > 15 * 60 * 1000) { setPolling(false); return; }
+      if (Date.now() - sentAtRef.current > 30 * 60 * 1000) { setPolling(false); return; }
       try {
         const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/distribution-preview`);
         const lg = res.data.distribution?.employees || null;
@@ -1814,7 +1814,7 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
   useEffect(() => {
     if (!open || !polling || !audit?._id) return undefined;
     const t = setInterval(async () => {
-      if (Date.now() - sentAtRef.current > 10 * 60 * 1000) { setPolling(false); return; }
+      if (Date.now() - sentAtRef.current > 30 * 60 * 1000) { setPolling(false); return; }
       try {
         const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/manager-preview`);
         const lg = res.data.distribution || null;

@@ -978,15 +978,28 @@ function renderHoursReportDoc(reports) {
 // and the process gets OOM-killed mid-job (which is why sends used to vanish
 // without a log); small chunks keep the peak bounded. Chunk PDFs are merged
 // with pdf-lib. Returns a PDF Buffer, or null if nothing rendered.
+// Pre-warm the expensive per-branch salary computation ONCE per branch, in
+// parallel, then compute all employees in parallel off the cache — a
+// sequential per-employee loop takes minutes for a large branch.
+async function computeReportsParallel(employeeIds, month, user) {
+  const { fetchMonthData } = require('./payrollMonth.controller');
+  const mr = monthRange(month);
+  const ymPrefix = mr ? `${mr.year}-${String(mr.month).padStart(2, '0')}` : month;
+  const emps = await Employee.find({ _id: { $in: employeeIds } }).select('branch_id').lean();
+  const branchIds = [...new Set(emps.map(e => String(e.branch_id?._id || e.branch_id || '')).filter(Boolean))];
+  const mdCache = new Map();
+  await Promise.all(branchIds.map(async bid => {
+    try { mdCache.set(bid, await fetchMonthData({ month: ymPrefix, branch: bid }, user)); } catch (e) { /* skip branch */ }
+  }));
+  return (await Promise.all(employeeIds.map(id =>
+    computeHoursReportData(id, month, user, { mdCache }).catch(() => null)))).filter(Boolean);
+}
+
 const HOURS_PDF_CHUNK = 8;
 async function renderHoursPdfForEmployees(employeeIds, month, user) {
   const { htmlToPdfBatch } = require('../services/htmlPdf');
   const { PDFDocument } = require('pdf-lib');
-  const mdCache = new Map();
-  const reports = [];
-  for (const id of employeeIds) {
-    try { const r = await computeHoursReportData(id, month, user, { mdCache }); if (r) reports.push(r); } catch (e) { /* skip */ }
-  }
+  const reports = await computeReportsParallel(employeeIds, month, user);
   if (reports.length === 0) return null;
   const chunks = [];
   for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) chunks.push(reports.slice(i, i + HOURS_PDF_CHUNK));
@@ -998,6 +1011,20 @@ async function renderHoursPdfForEmployees(employeeIds, month, user) {
     (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p));
   }
   return Buffer.from(await merged.save());
+}
+
+// Per-employee hours PDFs in ONE browser pass — for sends where every employee
+// gets their own report attached. A browser launch per employee costs minutes
+// across a big send; here all documents render page-by-page in one Chromium.
+// Returns Map<employeeIdString, Buffer>.
+async function renderHoursPdfPerEmployee(employeeIds, month, user) {
+  const { htmlToPdfBatch } = require('../services/htmlPdf');
+  const reports = await computeReportsParallel(employeeIds, month, user);
+  if (reports.length === 0) return new Map();
+  const pdfs = await htmlToPdfBatch(reports.map(r => renderHoursReportDoc([r])));
+  const map = new Map();
+  reports.forEach((r, i) => { if (r.employee?.id && pdfs[i]) map.set(String(r.employee.id), pdfs[i]); });
+  return map;
 }
 
 // Build the email attachment for a rich hours report. Prefer a real
@@ -1970,5 +1997,6 @@ module.exports = {
   buildRichHoursHtml,
   hoursReportEmailAttachments,
   renderHoursPdfForEmployees,
+  renderHoursPdfPerEmployee,
   monthRange,
 };
