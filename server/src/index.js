@@ -8,6 +8,13 @@ const { connectDB } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
+// On modern Node an unhandled promise rejection TERMINATES the process — a
+// background distribution job failing outside its try/catch would crash the
+// whole server mid-send (and lose the in-memory job with no log). Log and keep
+// serving instead.
+process.on('unhandledRejection', (err) => { console.error('UNHANDLED REJECTION:', err); });
+process.on('uncaughtException', (err) => { console.error('UNCAUGHT EXCEPTION:', err); });
+
 const app = express();
 
 // Security & parsing
@@ -24,7 +31,8 @@ if (env.NODE_ENV !== 'test') {
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0', db: 'mongodb',
-    commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null });
+    commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null,
+    uptime_s: Math.round(process.uptime()), rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024) });
 });
 
 // Diagnostic: can Chromium render a PDF here? (verifies the emailed-report PDF
@@ -35,6 +43,29 @@ app.get('/api/pdf-selftest', async (req, res) => {
     const { htmlToPdf } = require('./services/htmlPdf');
     const pdf = await htmlToPdf('<!doctype html><html><body style="font-family:Arial"><h1>PDF OK</h1></body></html>');
     res.json({ ok: true, bytes: pdf.length, ms: Date.now() - t0 });
+  } catch (e) {
+    res.json({ ok: false, error: e.message, ms: Date.now() - t0 });
+  }
+});
+
+// Diagnostic: render a REAL multi-employee hours report on this instance and
+// report page count + memory — reproduces the exact production send workload
+// (the piece that used to OOM) without sending any email.
+app.get('/api/pdf-loadtest', async (req, res) => {
+  const t0 = Date.now();
+  try {
+    const month = String(req.query.month || '').trim();
+    const n = Math.min(Math.max(parseInt(req.query.n, 10) || 10, 1), 40);
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM' });
+    const { Employee } = require('./models');
+    const { renderHoursPdfForEmployees } = require('./controllers/payroll.controller');
+    const emps = await Employee.find({ is_active: { $ne: false } }).limit(n).select('_id').lean();
+    const rss0 = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    const pdf = await renderHoursPdfForEmployees(emps.map(e => e._id), month, { role: 'system_admin' });
+    const { PDFDocument } = require('pdf-lib');
+    const pages = pdf ? (await PDFDocument.load(pdf)).getPageCount() : 0;
+    res.json({ ok: true, employees: emps.length, pages, bytes: pdf?.length || 0, ms: Date.now() - t0,
+      rss_before_mb: rss0, rss_after_mb: Math.round(process.memoryUsage().rss / 1024 / 1024) });
   } catch (e) {
     res.json({ ok: false, error: e.message, ms: Date.now() - t0 });
   }

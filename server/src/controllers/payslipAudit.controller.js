@@ -1343,6 +1343,24 @@ async function saveDistributionLog(auditId, key, payload) {
   } catch (e) { console.error('saveDistributionLog failed:', e.message); }
 }
 
+// Run a background distribution job with a durable trail: an immediate
+// "running" entry makes every accepted send visible in the log right away, and
+// a fatal error (thrown outside the per-item try/catch, or the process's last
+// words before an OOM kill would leave nothing) is logged instead of the job
+// silently vanishing — "clicked and nothing happened" becomes diagnosable.
+function runDistributionJob(auditId, key, userId, job) {
+  void (async () => {
+    try {
+      await saveDistributionLog(auditId, key, { at: new Date(), by: userId, running: true, results: [] });
+      const results = await job();
+      await saveDistributionLog(auditId, key, { at: new Date(), by: userId, results: results || [] });
+    } catch (e) {
+      console.error(`distribution ${key} fatal:`, e);
+      await saveDistributionLog(auditId, key, { at: new Date(), by: userId, results: [{ branch: '—', name: '—', status: 'error', error: `תקלה כללית: ${e.message}` }] });
+    }
+  })();
+}
+
 // POST /payslip-audit/history/:id/send-employees — each matched employee gets
 // their own payslip page + their hours report. Runs in the background (many
 // emails + PDF work exceed the 30s HTTP timeout); the log is saved on the record.
@@ -1361,7 +1379,7 @@ async function sendPayslipsToEmployees(req, res) {
     const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
-    void (async () => {
+    runDistributionJob(doc._id, 'employees', userId, async () => {
       const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       const pdfCache = new Map();
       const out = [];
@@ -1417,8 +1435,8 @@ async function sendPayslipsToEmployees(req, res) {
           out.push({ name: dispName, status: 'error', error: e.message });
         }
       }
-      await saveDistributionLog(doc._id, 'employees', { at: new Date(), by: userId, results: out });
-    })();
+      return out;
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
@@ -1509,7 +1527,7 @@ async function sendPayslipsToManagers(req, res) {
     const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: branchKeys.length });
 
-    void (async () => {
+    runDistributionJob(doc._id, 'managers', userId, async () => {
       const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
       const { PDFDocument } = require('pdf-lib');
       const stored = await readBranchManagerEmails();
@@ -1554,8 +1572,7 @@ async function sendPayslipsToManagers(req, res) {
             out.push({ branch: toOverride, emails: [toOverride], status: 'sent' });
           }
         } catch (e) { out.push({ branch: toOverride, status: 'error', error: e.message }); }
-        await saveDistributionLog(doc._id, 'managers', { at: new Date(), by: userId, results: out });
-        return;
+        return out;
       }
 
       for (const key of branchKeys) {
@@ -1607,8 +1624,8 @@ async function sendPayslipsToManagers(req, res) {
           out.push({ branch: g.name, status: 'error', error: e.message });
         }
       }
-      await saveDistributionLog(doc._id, 'managers', { at: new Date(), by: userId, results: out });
-    })();
+      return out;
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 

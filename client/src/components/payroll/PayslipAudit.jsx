@@ -1620,6 +1620,29 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
   const [preview, setPreview] = useState(null); // { it } — the row being previewed
+  const [polling, setPolling] = useState(false);
+  const sentAtRef = useRef(0);
+
+  // After a send is accepted, poll ONLY the log (don't touch items/selection)
+  // until the background job finishes.
+  useEffect(() => {
+    if (!open || !polling || !audit?._id) return undefined;
+    const t = setInterval(async () => {
+      if (Date.now() - sentAtRef.current > 15 * 60 * 1000) { setPolling(false); return; }
+      try {
+        const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/distribution-preview`);
+        const lg = res.data.distribution?.employees || null;
+        setLog(lg);
+        if (lg?.at && new Date(lg.at).getTime() >= sentAtRef.current && !lg.running) {
+          setPolling(false);
+          const errs = (lg.results || []).filter(r => r.status === 'error').length;
+          if (errs) toast.error(`השליחה הסתיימה עם ${errs} שגיאות — ראה/י לוג`);
+          else toast.success('השליחה הושלמה ✓');
+        }
+      } catch { /* keep polling */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [open, polling, audit?._id]);
 
   const load = () => {
     if (!audit?._id) return;
@@ -1660,7 +1683,8 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
     try {
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-employees`,
         { ...(all ? {} : { employee_ids: ids }), include_hours: includeHours });
-      toast.success(`השליחה החלה — ${res.data.count} עובדים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
+      sentAtRef.current = Date.now(); setPolling(true);
+      toast.success(`השליחה החלה — ${res.data.count} עובדים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת מספר דקות).`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -1720,6 +1744,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
               <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
               <Box sx={{ flex: 1 }} />
+              {(log.running || polling) && <Chip size="small" color="warning" icon={<CircularProgress size={12} color="inherit" />} label="שליחה בתהליך..." />}
               {Object.entries(logCounts).map(([st, n]) => (
                 <Chip key={st} size="small" color={st === 'sent' ? 'success' : st === 'error' ? 'error' : 'default'} label={`${DIST_STATUS_HE[st] || st}: ${n}`} />
               ))}
@@ -1727,7 +1752,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
             <Box sx={{ maxHeight: 130, overflowY: 'auto' }}>
               {(log.results || []).map((r, i) => (
                 <Typography key={i} variant="caption" sx={{ display: 'block', color: r.status === 'sent' ? 'success.dark' : r.status === 'error' ? 'error.main' : 'text.secondary' }}>
-                  {r.name} — {DIST_STATUS_HE[r.status] || r.status}{r.email ? ` · ${r.email}` : ''}
+                  {r.name} — {DIST_STATUS_HE[r.status] || r.status}{r.email ? ` · ${r.email}` : ''}{r.error ? ` — ${r.error}` : ''}
                 </Typography>
               ))}
             </Box>
@@ -1772,6 +1797,29 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
   const [includeHours, setIncludeHours] = useState(true);
   const [preview, setPreview] = useState(null); // { title, pdfEndpoint, pdfQuery, hoursQuery }
   const [specificEmail, setSpecificEmail] = useState(''); // override: send all to one address
+  const [polling, setPolling] = useState(false);
+  const sentAtRef = useRef(0);
+
+  // After a send is accepted, poll ONLY the log (don't touch items/selection)
+  // until the job finishes — the user shouldn't have to click "רענון לוג".
+  useEffect(() => {
+    if (!open || !polling || !audit?._id) return undefined;
+    const t = setInterval(async () => {
+      if (Date.now() - sentAtRef.current > 10 * 60 * 1000) { setPolling(false); return; }
+      try {
+        const res = await api.get(`/payroll/payslip-audit/history/${audit._id}/manager-preview`);
+        const lg = res.data.distribution || null;
+        setLog(lg);
+        if (lg?.at && new Date(lg.at).getTime() >= sentAtRef.current && !lg.running) {
+          setPolling(false);
+          const errs = (lg.results || []).filter(r => r.status === 'error').length;
+          if (errs) toast.error(`השליחה הסתיימה עם ${errs} שגיאות — ראה/י לוג`);
+          else toast.success('השליחה הושלמה ✓');
+        }
+      } catch { /* keep polling */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [open, polling, audit?._id]);
 
   const matched = (it) => (it.employees || []).filter(e => e.employee_id && e.has_page);
   const managerEmails = [...new Set(items.flatMap(it => (it.email || '').split(',').map(s => s.trim()).filter(Boolean)))];
@@ -1817,7 +1865,8 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
     try {
       const res = await api.post(`/payroll/payslip-audit/history/${audit._id}/send-managers`,
         { branches, ...(all ? {} : { branch_employees }), include_hours: includeHours, ...(to ? { to } : {}) });
-      toast.success(`השליחה החלה — ${res.data.count} סניפים. לחצ/י "רענון לוג" בעוד כדקה.`, { autoClose: 6000 });
+      sentAtRef.current = Date.now(); setPolling(true);
+      toast.success(`השליחה החלה — ${res.data.count} סניפים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת 1-3 דק').`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -1896,6 +1945,7 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
               <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
               <Box sx={{ flex: 1 }} />
+              {(log.running || polling) && <Chip size="small" color="warning" icon={<CircularProgress size={12} color="inherit" />} label="שליחה בתהליך..." />}
               {Object.entries(logCounts).map(([st, n]) => (
                 <Chip key={st} size="small" color={st === 'sent' ? 'success' : st === 'error' ? 'error' : 'default'} label={`${DIST_STATUS_HE[st] || st}: ${n}`} />
               ))}
@@ -1903,7 +1953,7 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
             <Box sx={{ maxHeight: 130, overflowY: 'auto' }}>
               {(log.results || []).map((r, i) => (
                 <Typography key={i} variant="caption" sx={{ display: 'block', color: r.status === 'sent' ? 'success.dark' : r.status === 'error' ? 'error.main' : 'text.secondary' }}>
-                  {r.branch} — {DIST_STATUS_HE[r.status] || r.status}{r.emails ? ` · ${[].concat(r.emails).join(', ')}` : ''}
+                  {r.branch} — {DIST_STATUS_HE[r.status] || r.status}{r.emails ? ` · ${[].concat(r.emails).join(', ')}` : ''}{r.error ? ` — ${r.error}` : ''}
                 </Typography>
               ))}
             </Box>

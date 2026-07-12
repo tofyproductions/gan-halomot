@@ -8,8 +8,6 @@
  * every caller wraps this in a try/catch and falls back to the HTML attachment
  * if Chromium can't launch (e.g. not enough RAM), so a send never fails.
  */
-let _launching = null;
-
 async function getBrowser() {
   const chromium = require('@sparticuz/chromium');
   const puppeteer = require('puppeteer-core');
@@ -23,14 +21,11 @@ async function getBrowser() {
 
 const PDF_MARGIN = { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' };
 
-// Render several full HTML documents to PDF Buffers in ONE browser (one page at
-// a time — bounded memory). Rendering each employee separately and merging the
-// PDFs downstream guarantees a clean page break between them regardless of the
-// Chromium build's CSS page-break support.
-async function htmlToPdfBatch(htmls) {
-  while (_launching) { try { await _launching; } catch (e) { /* ignore */ } }
-  let resolve;
-  _launching = new Promise(r => { resolve = r; });
+// Render several full HTML documents to PDF Buffers in ONE browser (one page
+// at a time, closed after each — bounded memory). Explicit timeouts everywhere:
+// a hung render must FAIL (so the caller logs it and falls back) rather than
+// hang the queue forever.
+async function runBatch(htmls) {
   let browser;
   try {
     browser = await getBrowser();
@@ -38,15 +33,25 @@ async function htmlToPdfBatch(htmls) {
     for (const html of htmls) {
       const page = await browser.newPage();
       try {
-        await page.setContent(html, { waitUntil: 'load', timeout: 30000 });
-        out.push(Buffer.from(await page.pdf({ printBackground: true, format: 'A4', margin: PDF_MARGIN })));
+        await page.setContent(html, { waitUntil: 'load', timeout: 60000 });
+        out.push(Buffer.from(await page.pdf({ printBackground: true, format: 'A4', margin: PDF_MARGIN, timeout: 120000 })));
       } finally { try { await page.close(); } catch (e) { /* ignore */ } }
     }
     return out;
   } finally {
     if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }
-    resolve(); _launching = null;
   }
+}
+
+// Strictly serialize batches: two concurrent sends must never launch two
+// Chromiums (each is a few hundred MB — a second one OOMs the 512MB tier). A
+// promise chain (instead of a while-await flag) has no race: every caller
+// queues behind the previous batch, and a failed batch doesn't break the chain.
+let _queue = Promise.resolve();
+function htmlToPdfBatch(htmls) {
+  const next = _queue.then(() => runBatch(htmls));
+  _queue = next.then(() => undefined, () => undefined); // keep the chain alive after a failure
+  return next;
 }
 
 async function htmlToPdf(html) {

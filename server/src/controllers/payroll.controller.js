@@ -970,21 +970,34 @@ function renderHoursReportDoc(reports) {
 <body>${reports.map((r, i) => `<div class="emp-page" style="${i < reports.length - 1 ? 'break-after:page;page-break-after:always;' : ''}break-inside:avoid;page-break-inside:avoid">${empPage(r)}</div>`).join('')}</body></html>`;
 }
 
-// Render a rich hours-report PDF for a list of employee ids in a month. All
-// employees go into ONE combined HTML rendered in a SINGLE Chromium pass (one
-// browser, one page) — low memory (survives the 512MB tier for a whole branch)
-// and fast. Each employee carries `break-after:page`, so Chromium 131 (same
-// print engine locally and on @sparticuz) starts every employee on a fresh
-// page. Returns a PDF Buffer, or null if nothing rendered.
+// Render a rich hours-report PDF for a list of employee ids in a month.
+// Employees are rendered in CHUNKS: each chunk is one combined HTML (employees
+// separated by break-after:page — Chromium 131 honors it, verified live via
+// /api/pdf-pagetest), and one browser renders all chunks page-by-page. A whole
+// 25-employee branch in a single document spikes Chromium past the 512MB tier
+// and the process gets OOM-killed mid-job (which is why sends used to vanish
+// without a log); small chunks keep the peak bounded. Chunk PDFs are merged
+// with pdf-lib. Returns a PDF Buffer, or null if nothing rendered.
+const HOURS_PDF_CHUNK = 8;
 async function renderHoursPdfForEmployees(employeeIds, month, user) {
-  const { htmlToPdf } = require('../services/htmlPdf');
+  const { htmlToPdfBatch } = require('../services/htmlPdf');
+  const { PDFDocument } = require('pdf-lib');
   const mdCache = new Map();
   const reports = [];
   for (const id of employeeIds) {
     try { const r = await computeHoursReportData(id, month, user, { mdCache }); if (r) reports.push(r); } catch (e) { /* skip */ }
   }
   if (reports.length === 0) return null;
-  return await htmlToPdf(renderHoursReportDoc(reports));
+  const chunks = [];
+  for (let i = 0; i < reports.length; i += HOURS_PDF_CHUNK) chunks.push(reports.slice(i, i + HOURS_PDF_CHUNK));
+  const pdfs = await htmlToPdfBatch(chunks.map(c => renderHoursReportDoc(c)));
+  if (pdfs.length === 1) return pdfs[0];
+  const merged = await PDFDocument.create();
+  for (const buf of pdfs) {
+    const src = await PDFDocument.load(buf);
+    (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p));
+  }
+  return Buffer.from(await merged.save());
 }
 
 // Build the email attachment for a rich hours report. Prefer a real
@@ -1956,5 +1969,6 @@ module.exports = {
   renderHoursReportDoc,
   buildRichHoursHtml,
   hoursReportEmailAttachments,
+  renderHoursPdfForEmployees,
   monthRange,
 };
