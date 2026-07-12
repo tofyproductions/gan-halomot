@@ -1407,6 +1407,10 @@ async function sendPayslipsToEmployees(req, res) {
     const selectedIds = (Array.isArray(req.body?.employee_ids) && req.body.employee_ids.length)
       ? new Set(req.body.employee_ids.map(String)) : null;
     const includeHours = req.body?.include_hours !== false; // default: attach hours report
+    // Test mode: `to` reroutes EVERY employee's email to one address and skips
+    // the side effects (no archiving, no marking the month paid) — for
+    // verifying content/matching before a real send.
+    const toOverride = String(req.body?.to || '').trim();
     const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
@@ -1439,7 +1443,7 @@ async function sendPayslipsToEmployees(req, res) {
           const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
           if (!emp) { out.push({ name: dispName, status: 'no_match' }); continue; }
           if (selectedIds && !selectedIds.has(String(emp._id))) continue; // not selected for this send
-          const email = (emp.email && emp.email.trim()) || emp.user_id?.email || null;
+          const email = toOverride || (emp.email && emp.email.trim()) || emp.user_id?.email || null;
           if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
           if (!page || !branch) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
           if (!pdfCache.has(branch)) pdfCache.set(branch, await loadBranchPdf(doc._id, branch));
@@ -1463,24 +1467,27 @@ async function sendPayslipsToEmployees(req, res) {
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({
             to: email,
-            subject: includeHours ? `תלוש שכר ודוח שעות — ${month}` : `תלוש שכר — ${month}`,
+            subject: `${includeHours ? 'תלוש שכר ודוח שעות' : 'תלוש שכר'} — ${month}${toOverride ? ` — ${emp.full_name} (בדיקה)` : ''}`,
             html: intro,
             fileAttachments,
             attachments,
           });
-          // Archive the payslip to the employee's file + mark the month paid.
-          try {
-            await SavedPayslip.findOneAndUpdate(
-              { employee_id: emp._id, year_month: month },
-              { employee_id: emp._id, israeli_id: emp.israeli_id || israeliId, year_month: month, branch,
-                data: pageBuf, audit_id: doc._id, page, sent_to: email, sent_at: new Date(), sent_by: userId },
-              { upsert: true },
-            );
-            await PayrollMonth.findOneAndUpdate(
-              { employee_id: emp._id, month },
-              { payslip_paid: true, payslip_paid_at: new Date(), payslip_sent_to: email },
-            );
-          } catch (se) { console.error('archive payslip failed:', emp.full_name, se.message); }
+          // Archive the payslip to the employee's file + mark the month paid —
+          // but NOT in test mode (`to` override).
+          if (!toOverride) {
+            try {
+              await SavedPayslip.findOneAndUpdate(
+                { employee_id: emp._id, year_month: month },
+                { employee_id: emp._id, israeli_id: emp.israeli_id || israeliId, year_month: month, branch,
+                  data: pageBuf, audit_id: doc._id, page, sent_to: email, sent_at: new Date(), sent_by: userId },
+                { upsert: true },
+              );
+              await PayrollMonth.findOneAndUpdate(
+                { employee_id: emp._id, month },
+                { payslip_paid: true, payslip_paid_at: new Date(), payslip_sent_to: email },
+              );
+            } catch (se) { console.error('archive payslip failed:', emp.full_name, se.message); }
+          }
           out.push({ name: emp.full_name, email, status: 'sent' });
         } catch (e) {
           out.push({ name: dispName, status: 'error', error: e.message });
