@@ -40,7 +40,7 @@ function tryGc() { try { if (_gc) _gc(); } catch (e) { /* ignore */ } }
 // documents (relaunch is fast once /tmp holds the extracted binary). Explicit
 // timeouts everywhere: a hung render must FAIL (so the caller logs it and
 // falls back) rather than hang the queue forever.
-const RECYCLE_EVERY = 20;
+const RECYCLE_EVERY = 15;
 async function runBatch(htmls) {
   let browser;
   const out = [];

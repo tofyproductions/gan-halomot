@@ -73,7 +73,7 @@ app.get('/api/pdf-loadtest', async (req, res) => {
   const t0 = Date.now();
   try {
     const month = String(req.query.month || '').trim();
-    const n = Math.min(Math.max(parseInt(req.query.n, 10) || 10, 1), 40);
+    const n = Math.min(Math.max(parseInt(req.query.n, 10) || 10, 1), 80);
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM' });
     const { Employee } = require('./models');
     const { renderHoursPdfForEmployees } = require('./controllers/payroll.controller');
