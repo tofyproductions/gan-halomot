@@ -123,6 +123,64 @@ class Clock {
       return result;
     });
   }
+
+  /**
+   * READ-ONLY. Return the enrolled fingerprint templates for a single user,
+   * matched by `userId` (= Israeli ID) on this device. Each template blob is
+   * base64-encoded so it can be shipped to the server and later written to a
+   * different branch's device (see the `import_template` command). This does
+   * NOT modify the device in any way.
+   *
+   * ZK protocol: read the fingerprint-template data table via the same
+   * chunked mechanism `getUsers()` uses (`readWithBuffer`), but with a request
+   * descriptor selecting the FINGERTMP table instead of the USER table. The
+   * descriptor is pack('<bhii', 1, command, fct, ext):
+   *   - USER  table (getUsers): command=CMD_USERTEMP_RRQ(9), fct=FCT_USER(5)
+   *     → bytes 01 09 00 05 00 00 00 00 00 00 00   (== REQUEST_DATA.GET_USERS)
+   *   - FINGERTMP table (here): command=CMD_DB_RRQ(7),      fct=FCT_FINGERTMP(2)
+   *     → bytes 01 07 00 02 00 00 00 00 00 00 00
+   * The returned buffer is a 4-byte total-size header followed by variable
+   * length records: size(uint16) uid(uint16) fid(int8) valid(int8) then the
+   * template payload of (size-6) bytes. (Constants verified against pyzk.)
+   *
+   * @param {string} userId - Israeli ID (device userId)
+   * @returns {{found:boolean, reason?:string, user?:object, templates?:Array}}
+   */
+  async getUserTemplates(userId) {
+    return this._withConnection(async (zk) => {
+      // 1. Map userId (Israeli ID) → the device's internal uid.
+      const ures = await zk.getUsers();
+      const users = Array.isArray(ures) ? ures : (ures && ures.data) || [];
+      const match = users.find(u => String(u.userId) === String(userId));
+      if (!match) return { found: false, reason: 'user_not_on_device' };
+      const uid = match.uid;
+
+      // 2. Read the whole fingerprint-template table and keep only this uid's.
+      if (zk.socket) { try { await zk.freeData(); } catch (e) { /* noop */ } }
+      const REQ = Buffer.from([0x01, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+      const res = await zk.readWithBuffer(REQ);
+      if (zk.socket) { try { await zk.freeData(); } catch (e) { /* noop */ } }
+
+      const templates = [];
+      if (res && res.data instanceof Buffer && res.data.length >= 4) {
+        let td = res.data.subarray(4); // skip the 4-byte total-size header
+        while (td.length >= 6) {
+          const recSize = td.readUInt16LE(0);
+          if (recSize < 6 || recSize > td.length) break; // corrupt / end of table
+          const recUid = td.readUInt16LE(2);
+          const fid = td.readInt8(4);
+          const valid = td.readInt8(5);
+          const tpl = Buffer.from(td.subarray(6, recSize));
+          if (recUid === uid && tpl.length > 0) {
+            templates.push({ fid, valid, size: tpl.length, b64: tpl.toString('base64') });
+          }
+          td = td.subarray(recSize);
+        }
+      }
+      log.info(`getUserTemplates userId=${userId} uid=${uid} fingers=${templates.length}`);
+      return { found: true, user: { uid, userId: match.userId, name: match.name }, templates };
+    });
+  }
 }
 
 module.exports = { Clock };

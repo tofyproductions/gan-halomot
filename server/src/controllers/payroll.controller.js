@@ -1442,6 +1442,64 @@ async function enrollEmployeeToClock(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /api/payroll/employees/:id/export-template
+ * Body: { branch_id }  — the SOURCE branch whose clock already has the
+ * employee's fingerprint enrolled. Queues a READ-ONLY `export_template`
+ * command to that branch's agent, which reads the templates off the device
+ * and reports them back on the command result. Poll
+ * GET /api/payroll/clock-commands/:command_id for the outcome. This writes to
+ * NO device — it is the safe first half of cross-branch fingerprint copy.
+ */
+async function exportEmployeeTemplate(req, res, next) {
+  try {
+    const { branch_id } = req.body || {};
+    if (!branch_id) return res.status(400).json({ error: 'branch_id (סניף מקור) נדרש' });
+    const emp = await Employee.findById(req.params.id).select('full_name israeli_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!emp.israeli_id) return res.status(400).json({ error: 'לעובד/ת אין ת"ז' });
+    const branch = await Branch.findById(branch_id).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף מקור לא נמצא' });
+    const cmd = await AgentCommand.create({
+      branch_id,
+      type: 'export_template',
+      payload: { israeli_id: emp.israeli_id },
+      status: 'pending',
+      created_by: req.user?.id || null,
+    });
+    res.json({ ok: true, command_id: String(cmd._id), branch_name: branch.name, israeli_id: emp.israeli_id, full_name: emp.full_name });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/clock-commands/:id
+ * Poll the status/result of a queued AgentCommand so the UI can wait for a
+ * Pi agent to finish. The heavy `templates[].b64` blobs are stripped — only a
+ * light per-finger summary (fid/valid/size) is returned to the browser.
+ */
+async function getClockCommand(req, res, next) {
+  try {
+    const cmd = await AgentCommand.findById(req.params.id)
+      .select('type status result last_error created_at completed_at branch_id')
+      .lean();
+    if (!cmd) return res.status(404).json({ error: 'פקודה לא נמצאה' });
+    let result = cmd.result ? { ...cmd.result } : null;
+    if (result && Array.isArray(result.templates)) {
+      result.templates = result.templates.map(t => ({ fid: t.fid, valid: t.valid, size: t.size }));
+    }
+    res.json({
+      ok: true,
+      command_id: String(cmd._id),
+      type: cmd.type,
+      status: cmd.status,
+      result,
+      last_error: cmd.last_error || '',
+      created_at: cmd.created_at,
+      completed_at: cmd.completed_at,
+    });
+  } catch (err) { next(err); }
+}
+
 // --- Manual punch editing (for forgotten punches / corrections) ----------
 
 /**
@@ -2061,6 +2119,8 @@ module.exports = {
   listClockUsers,
   assignIsraeliIds,
   enrollEmployeeToClock,
+  exportEmployeeTemplate,
+  getClockCommand,
   salaryForEmployee,
   salarySummary,
   createManualPunches,

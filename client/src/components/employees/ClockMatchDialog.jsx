@@ -42,6 +42,11 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   // Enroll an existing employee (already set up elsewhere) onto THIS branch's clock.
   const [enrollEmp, setEnrollEmp] = useState('');
   const [enrolling, setEnrolling] = useState(false);
+  // Cross-branch fingerprint copy — stage 1 (safe): verify we can READ the
+  // employee's fingerprint template off the source branch's clock.
+  const [sourceBranch, setSourceBranch] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [templateResult, setTemplateResult] = useState(null);
 
   useEffect(() => {
     if (!open || !effectiveBranch) return;
@@ -101,6 +106,46 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
       toast.error(err.response?.data?.error || 'שגיאה בשיוך לשעון');
     } finally {
       setEnrolling(false);
+    }
+  };
+
+  // Source-branch options for the fingerprint-read test: any branch other than
+  // the one we're enrolling into (the target).
+  const sourceBranchOptions = useMemo(
+    () => (branches || []).filter(b => String(b._id || b.id) !== String(effectiveBranch)),
+    [branches, effectiveBranch]
+  );
+
+  const TPL_ERR_HE = {
+    user_not_on_device: 'העובד/ת לא רשומ/ה בשעון של סניף המקור שנבחר.',
+  };
+
+  const verifyTemplate = async () => {
+    if (!enrollEmp || !sourceBranch) return;
+    setVerifying(true);
+    setTemplateResult(null);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      const { data } = await api.post(`/payroll/employees/${enrollEmp}/export-template`, { branch_id: sourceBranch });
+      const cmdId = data.command_id;
+      let final = null;
+      // The Pi polls for commands every ~15s; give it up to ~40s to answer.
+      for (let i = 0; i < 20; i++) {
+        await sleep(2000);
+        const { data: st } = await api.get(`/payroll/clock-commands/${cmdId}`);
+        if (st.status === 'confirmed' || st.status === 'failed') { final = st; break; }
+      }
+      if (!final) {
+        setTemplateResult({ status: 'timeout' });
+      } else if (final.status === 'failed') {
+        setTemplateResult({ status: 'failed', error: final.last_error });
+      } else {
+        setTemplateResult({ status: 'confirmed', ...(final.result || {}) });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בבדיקת חילוץ הטביעה');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -217,6 +262,46 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
                   {enrolling ? 'שולח…' : 'הוסף לשעון'}
                 </Button>
               </Stack>
+
+              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                  🔍 בדיקת חילוץ טביעה (שלב בטוח — קריאה בלבד)
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  בחר/י קודם עובד/ת למעלה, ואז את סניף <b>המקור</b> שבו טביעת האצבע כבר קיימת, ולחץ/י "בדוק חילוץ".
+                  זה רק קורא את הטביעה מהמכשיר — לא כותב לשום מכשיר.
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <Select size="small" fullWidth value={sourceBranch} onChange={e => setSourceBranch(e.target.value)} displayEmpty>
+                    <MenuItem value=""><em>— סניף מקור —</em></MenuItem>
+                    {sourceBranchOptions.map(b => (
+                      <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+                    ))}
+                  </Select>
+                  <Button variant="text" onClick={verifyTemplate} disabled={!enrollEmp || !sourceBranch || verifying} sx={{ whiteSpace: 'nowrap' }}>
+                    {verifying ? 'בודק…' : 'בדוק חילוץ'}
+                  </Button>
+                </Stack>
+                {templateResult && (
+                  <Box sx={{ mt: 1 }}>
+                    {templateResult.status === 'confirmed' && templateResult.finger_count > 0 && (
+                      <Alert severity="success" sx={{ py: 0.5 }}>
+                        ✅ חולצו {templateResult.finger_count} טביעות (אצבעות: {(templateResult.templates || []).map(t => t.fid).join(', ')}).
+                        החילוץ עובד — אפשר להתקדם לשלב הכתיבה.
+                      </Alert>
+                    )}
+                    {templateResult.status === 'confirmed' && !templateResult.finger_count && (
+                      <Alert severity="warning" sx={{ py: 0.5 }}>העובד/ת קיים/ת בשעון המקור, אך אין לו/ה טביעות אצבע רשומות שם.</Alert>
+                    )}
+                    {templateResult.status === 'failed' && (
+                      <Alert severity="error" sx={{ py: 0.5 }}>{TPL_ERR_HE[templateResult.error] || templateResult.error || 'החילוץ נכשל'}</Alert>
+                    )}
+                    {templateResult.status === 'timeout' && (
+                      <Alert severity="info" sx={{ py: 0.5 }}>הפקודה נשלחה — ה-Pi של סניף המקור עדיין לא ענה. ודא/י שה-agent פועל ונסה/י שוב.</Alert>
+                    )}
+                  </Box>
+                )}
+              </Box>
             </Box>
 
             <Box>

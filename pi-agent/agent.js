@@ -357,6 +357,31 @@ async function pollCommands() {
           log.info(`delete_user OK: uid=${uid}`);
           await server.commandResult(cmd.id, 'confirmed', { result: { uid } });
 
+        } else if (cmd.type === 'export_template') {
+          // READ-ONLY: extract a user's fingerprint templates from THIS device
+          // (matched by Israeli ID) so the server can later import them onto
+          // another branch's clock. Does not modify the device.
+          const { israeli_id } = cmd.payload || {};
+          if (!israeli_id) {
+            await server.commandResult(cmd.id, 'failed', { error: 'missing israeli_id in payload' });
+            continue;
+          }
+          const r = await clock.getUserTemplates(israeli_id);
+          if (!r.found) {
+            await server.commandResult(cmd.id, 'failed', { error: r.reason || 'user_not_on_device', israeli_id });
+            continue;
+          }
+          log.info(`export_template OK: userId=${israeli_id} uid=${r.user.uid} fingers=${r.templates.length}`);
+          await server.commandResult(cmd.id, 'confirmed', {
+            result: {
+              israeli_id,
+              uid: r.user.uid,
+              name: r.user.name,
+              finger_count: r.templates.length,
+              templates: r.templates,
+            },
+          });
+
         } else if (cmd.type === 'sync_time') {
           // Future: await clock.setTime(new Date());
           await server.commandResult(cmd.id, 'failed', { error: 'sync_time not yet implemented' });
