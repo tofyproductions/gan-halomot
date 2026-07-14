@@ -39,6 +39,9 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   const [saving, setSaving] = useState(false);
   // selections: { [clock_user_id_key]: employee_id }
   const [selections, setSelections] = useState({});
+  // Enroll an existing employee (already set up elsewhere) onto THIS branch's clock.
+  const [enrollEmp, setEnrollEmp] = useState('');
+  const [enrolling, setEnrolling] = useState(false);
 
   useEffect(() => {
     if (!open || !effectiveBranch) return;
@@ -76,6 +79,29 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
 
   const selectEmployee = (clockUserKey, employeeId) => {
     setSelections(prev => ({ ...prev, [clockUserKey]: employeeId }));
+  };
+
+  // Employees WITH a ת"ז who are NOT already on this branch's clock — candidates
+  // to register on the device (e.g. a cross-branch worker set up elsewhere).
+  const addableEmployees = useMemo(() => {
+    const onClock = new Set(clockUsers.map(u => String(u.user_id)));
+    return employees
+      .filter(e => e.israeli_id && !onClock.has(String(e.israeli_id)))
+      .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'he'));
+  }, [employees, clockUsers]);
+
+  const enroll = async () => {
+    if (!enrollEmp || !effectiveBranch) return;
+    setEnrolling(true);
+    try {
+      const res = await api.post(`/payroll/employees/${enrollEmp}/enroll-clock`, { branch_id: effectiveBranch });
+      toast.success(`נשלחה פקודה לשעון — ${res.data.full_name} (ת"ז ${res.data.israeli_id}) יתווסף. יש להחתים את טביעת האצבע פעם אחת במכשיר.`, { autoClose: 8000 });
+      setEnrollEmp('');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשיוך לשעון');
+    } finally {
+      setEnrolling(false);
+    }
   };
 
   const selectionCount = Object.values(selections).filter(Boolean).length;
@@ -173,6 +199,25 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
                 </Stack>
               </Box>
             )}
+
+            <Box sx={{ p: 1.5, border: '1px dashed', borderColor: 'primary.light', borderRadius: 2, bgcolor: 'primary.50' }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>הוספת עובד/ת קיים/ת לשעון סניף זה</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                עובד/ת שכבר קיים/ת במערכת (עם ת"ז) ועובד/ת גם כאן — בחר/י ולחץ/י "הוסף לשעון". נשלחת פקודה למכשיר לרשום את ת"ז + השם.
+                את <b>טביעת האצבע</b> יש להחתים פעם אחת במכשיר (לא ניתן להעתיק אוטומטית בין סניפים).
+              </Typography>
+              <Stack direction="row" spacing={1}>
+                <Select size="small" fullWidth value={enrollEmp} onChange={e => setEnrollEmp(e.target.value)} displayEmpty>
+                  <MenuItem value=""><em>— בחר/י עובד/ת —</em></MenuItem>
+                  {addableEmployees.map(e => (
+                    <MenuItem key={e._id || e.id} value={String(e._id || e.id)}>{e.full_name} · {e.israeli_id}</MenuItem>
+                  ))}
+                </Select>
+                <Button variant="outlined" onClick={enroll} disabled={!enrollEmp || enrolling} sx={{ whiteSpace: 'nowrap' }}>
+                  {enrolling ? 'שולח…' : 'הוסף לשעון'}
+                </Button>
+              </Stack>
+            </Box>
 
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>

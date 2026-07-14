@@ -1411,6 +1411,37 @@ async function assignIsraeliIds(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /api/payroll/employees/:id/enroll-clock  { branch_id }
+ *
+ * Register an EXISTING employee on another branch's physical clock, so a
+ * cross-branch worker (already set up at her home branch) shows up at the new
+ * branch too. Queues an `add_user` command for that branch's Pi agent, which
+ * adds her ת"ז + name to the device. Her punches there then auto-link by ת"ז.
+ *
+ * NOTE: this registers the user id + name only — the fingerprint TEMPLATE is not
+ * copied between devices (agent limitation), so she still enrolls her finger
+ * once on the new device (or the clock accepts ID/card).
+ */
+async function enrollEmployeeToClock(req, res, next) {
+  try {
+    const { branch_id } = req.body || {};
+    if (!branch_id) return res.status(400).json({ error: 'branch_id נדרש' });
+    const emp = await Employee.findById(req.params.id).select('full_name israeli_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!emp.israeli_id) return res.status(400).json({ error: 'לעובד/ת אין ת"ז — לא ניתן לשייך לשעון' });
+    const branch = await Branch.findById(branch_id).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
+    const cmd = await AgentCommand.create({
+      branch_id,
+      type: 'add_user',
+      payload: { israeli_id: emp.israeli_id, name: emp.full_name || '' },
+      status: 'pending',
+    });
+    res.json({ ok: true, command_id: String(cmd._id), branch_name: branch.name, israeli_id: emp.israeli_id, full_name: emp.full_name });
+  } catch (err) { next(err); }
+}
+
 // --- Manual punch editing (for forgotten punches / corrections) ----------
 
 /**
@@ -2029,6 +2060,7 @@ module.exports = {
   sendHoursReportsToManagers,
   listClockUsers,
   assignIsraeliIds,
+  enrollEmployeeToClock,
   salaryForEmployee,
   salarySummary,
   createManualPunches,

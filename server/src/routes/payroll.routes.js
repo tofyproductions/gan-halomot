@@ -35,6 +35,7 @@ router.post('/hours-distribution/send-managers',    requireRole('system_admin', 
 // Clock users (matching UI)
 router.get('/clock-users',                     c.listClockUsers);
 router.post('/clock-users/assign',             requireRole('system_admin', 'branch_manager'), c.assignIsraeliIds);
+router.post('/employees/:id/enroll-clock',     requireRole('system_admin', 'branch_manager'), c.enrollEmployeeToClock);
 
 // Salary calculation
 router.get('/employees/:id/salary',            c.salaryForEmployee);
