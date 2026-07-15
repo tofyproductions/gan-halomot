@@ -156,10 +156,13 @@ class Clock {
       const uid = match.uid;
 
       // 2. Read the whole fingerprint-template table and keep only this uid's.
-      if (zk.socket) { try { await zk.freeData(); } catch (e) { /* noop */ } }
+      // readWithBuffer/freeData live on the transport layer (ztcp/zudp), not
+      // on the Zkteco wrapper itself.
+      const transport = zk.connectionType === 'udp' ? zk.zudp : zk.ztcp;
+      if (transport.socket) { try { await transport.freeData(); } catch (e) { /* noop */ } }
       const REQ = Buffer.from([0x01, 0x07, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-      const res = await zk.readWithBuffer(REQ);
-      if (zk.socket) { try { await zk.freeData(); } catch (e) { /* noop */ } }
+      const res = await transport.readWithBuffer(REQ);
+      if (transport.socket) { try { await transport.freeData(); } catch (e) { /* noop */ } }
 
       const templates = [];
       if (res && res.data instanceof Buffer && res.data.length >= 4) {
