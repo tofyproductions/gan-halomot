@@ -306,6 +306,7 @@ async function updateEmployee(req, res, next) {
       'sick_pay_policy', 'sick_balance_opening', 'sick_daily_value_override',
       'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'work_days',
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
+      'is_pregnant', 'due_date', 'gave_birth_date', 'on_pregnancy_bedrest',
     ];
     for (const f of fields) {
       if (req.body[f] !== undefined) emp[f] = req.body[f];

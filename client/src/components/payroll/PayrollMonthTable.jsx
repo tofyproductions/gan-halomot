@@ -35,6 +35,7 @@ import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
 import EmployeeDocsDialog from './EmployeeDocsDialog';
+import PregnancyDetailDialog from './PregnancyDetailDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -831,6 +832,7 @@ export default function PayrollMonthTable() {
   const [presets, setPresets] = useState([]);
   const [notes, setNotes] = useState({ open: false, row: null });
   const [docsDlg, setDocsDlg] = useState({ open: false, row: null });
+  const [pregnancyDlg, setPregnancyDlg] = useState({ open: false, row: null });
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
@@ -2107,6 +2109,37 @@ export default function PayrollMonthTable() {
                             }}
                           />
                         </Box>
+                        {r.pregnancy && (
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4, mb: 0.4 }}>
+                            {r.pregnancy.is_pregnant && (
+                              <Chip
+                                size="small" clickable
+                                label="🤰 בהריון · מעקב 40ש׳"
+                                onClick={(e) => { e.stopPropagation(); setPregnancyDlg({ open: true, row: r }); }}
+                                sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
+                                  color: '#9d174d', bgcolor: '#fce7f3', border: '1px solid #fbcfe8',
+                                  '&:hover': { bgcolor: '#fbcfe8' } }}
+                              />
+                            )}
+                            {r.pregnancy.on_pregnancy_bedrest && (
+                              <Chip size="small" label="🛏️ שמירת הריון"
+                                sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
+                                  color: '#9a3412', bgcolor: '#ffedd5', border: '1px solid #fed7aa' }} />
+                            )}
+                            {r.pregnancy.on_maternity_leave && (
+                              <Chip size="small" label="🍼 חופשת לידה"
+                                sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
+                                  color: '#5b21b6', bgcolor: '#ede9fe', border: '1px solid #ddd6fe' }} />
+                            )}
+                            {r.pregnancy.protected && (
+                              <Tooltip title="תקופה מוגנת (§9 חוק עבודת נשים): אסור לפגוע בשכר/היקף חד-צדדית בלי היתר מהממונה במשרד העבודה">
+                                <Chip size="small" label="🛡️ תקופה מוגנת"
+                                  sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
+                                    color: '#991b1b', bgcolor: '#fee2e2', border: '1px solid #fecaca' }} />
+                              </Tooltip>
+                            )}
+                          </Box>
+                        )}
                         {r.commitment?.committed_hours != null && (
                           <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
                         )}
@@ -2201,6 +2234,14 @@ export default function PayrollMonthTable() {
         row={docsDlg.row}
         month={month}
         onClose={() => setDocsDlg({ open: false, row: null })}
+      />
+      <PregnancyDetailDialog
+        open={pregnancyDlg.open}
+        row={pregnancyDlg.row}
+        canManager={isManager || isAdmin}
+        canAccounting={isAccountant || isAdmin}
+        onClose={() => setPregnancyDlg({ open: false, row: null })}
+        onSaved={fetchData}
       />
       <AbsenceDialog
         open={absence.open}

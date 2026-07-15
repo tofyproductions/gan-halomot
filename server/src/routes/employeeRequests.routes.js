@@ -17,6 +17,7 @@ router.post('/sync-sick', requireRole('system_admin', 'branch_manager', 'account
 router.get('/vacation-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listVacationForMonth);
 router.get('/sick-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listSickForMonth);
 router.get('/pending-for-employee', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingForEmployee);
+router.get('/pregnancy-exam', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPregnancyExam);
 router.get('/:id/medical-file', requireRole('system_admin', 'branch_manager', 'accountant'), c.getMedicalFile);
 router.put('/:id/status', requireRole('system_admin', 'branch_manager', 'accountant'), c.updateRequestStatus);
 router.put('/:id/admin', requireRole('system_admin', 'branch_manager', 'accountant'), c.editAdminRequest);

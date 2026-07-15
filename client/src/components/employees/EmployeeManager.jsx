@@ -190,6 +190,13 @@ export default function EmployeeManager() {
         work_days: Array.isArray(emp.work_days) ? emp.work_days : [0, 1, 2, 3, 4],
         is_active: emp.is_active !== false,
         notes: emp.notes || '',
+        is_pregnant: !!emp.is_pregnant,
+        due_date: emp.due_date ? new Date(emp.due_date).toISOString().slice(0, 10) : '',
+        gave_birth_date: emp.gave_birth_date ? new Date(emp.gave_birth_date).toISOString().slice(0, 10) : '',
+        on_pregnancy_bedrest: !!emp.on_pregnancy_bedrest,
+        on_maternity_leave: !!emp.on_maternity_leave,
+        maternity_leave_from: emp.maternity_leave_from ? new Date(emp.maternity_leave_from).toISOString().slice(0, 10) : '',
+        maternity_leave_to: emp.maternity_leave_to ? new Date(emp.maternity_leave_to).toISOString().slice(0, 10) : '',
         id: emp._id || emp.id,
         branch_rates: (emp.branch_rates || []).map(br => ({
           branch_id: String(br.branch_id?._id || br.branch_id),
@@ -239,6 +246,14 @@ export default function EmployeeManager() {
       work_days: Array.isArray(data.work_days) ? [...data.work_days].sort((a, b) => a - b) : [0, 1, 2, 3, 4],
       is_active: data.is_active !== false,
       notes: data.notes || '',
+      // Pregnancy / maternity status (display + alerts only, no auto pay effect).
+      is_pregnant: !!data.is_pregnant,
+      due_date: data.due_date || null,
+      gave_birth_date: data.gave_birth_date || null,
+      on_pregnancy_bedrest: !!data.on_pregnancy_bedrest,
+      on_maternity_leave: !!data.on_maternity_leave,
+      maternity_leave_from: data.maternity_leave_from || null,
+      maternity_leave_to: data.maternity_leave_to || null,
     };
     // Only include amuta_distribution in the payload if we can actually
     // modify it safely (existing distribution, or genuinely empty).
@@ -634,6 +649,63 @@ export default function EmployeeManager() {
               control={<Switch checked={dialog.data.is_active !== false} onChange={e => updateField('is_active', e.target.checked)} />}
               label={dialog.data.is_active !== false ? 'עובד פעיל' : 'עובד לא פעיל (לא יופיע בהחתמות)'}
             />
+
+            <Divider />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'secondary.main' }}>הריון ולידה</Typography>
+            <FormControlLabel
+              control={<Switch color="secondary" checked={!!dialog.data.is_pregnant} onChange={e => updateField('is_pregnant', e.target.checked)} />}
+              label="עובדת בהריון 🤰"
+            />
+            {dialog.data.is_pregnant && (
+              <Stack spacing={2} sx={{ pr: 2, borderRight: '3px solid', borderColor: 'secondary.light' }}>
+                <TextField
+                  label="צפי לידה" type="date" size="small"
+                  value={dialog.data.due_date || ''} onChange={e => updateField('due_date', e.target.value)}
+                  InputLabelProps={{ shrink: true }} sx={{ maxWidth: 240 }}
+                  helperText="קובע את חלון ספירת 40 שעות הבדיקות"
+                />
+                <FormControlLabel
+                  control={<Switch color="secondary" checked={!!dialog.data.on_pregnancy_bedrest} onChange={e => updateField('on_pregnancy_bedrest', e.target.checked)} />}
+                  label="בשמירת הריון (ממומן ע״י ביטוח לאומי — לא מנכה ממאזן המחלה)"
+                />
+                <Button
+                  variant="outlined" color="secondary" size="small" sx={{ alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    updateField('gave_birth_date', today);
+                    updateField('is_pregnant', false);
+                    updateField('on_pregnancy_bedrest', false);
+                    updateField('on_maternity_leave', true);
+                    if (!dialog.data.maternity_leave_from) updateField('maternity_leave_from', today);
+                  }}
+                >
+                  🍼 עדכני שילדה (פותח חופשת לידה)
+                </Button>
+              </Stack>
+            )}
+            <FormControlLabel
+              control={<Switch color="secondary" checked={!!dialog.data.on_maternity_leave} onChange={e => updateField('on_maternity_leave', e.target.checked)} />}
+              label="בחופשת לידה"
+            />
+            {dialog.data.on_maternity_leave && (
+              <Stack direction="row" spacing={2} sx={{ pr: 2, borderRight: '3px solid', borderColor: 'secondary.light' }}>
+                <TextField
+                  label="מתאריך" type="date" size="small"
+                  value={dialog.data.maternity_leave_from || ''} onChange={e => updateField('maternity_leave_from', e.target.value)}
+                  InputLabelProps={{ shrink: true }} fullWidth
+                />
+                <TextField
+                  label="עד תאריך" type="date" size="small"
+                  value={dialog.data.maternity_leave_to || ''} onChange={e => updateField('maternity_leave_to', e.target.value)}
+                  InputLabelProps={{ shrink: true }} fullWidth
+                />
+              </Stack>
+            )}
+            {dialog.data.gave_birth_date && (
+              <Typography variant="caption" color="text.secondary">
+                תאריך לידה מעודכן: {dialog.data.gave_birth_date}
+              </Typography>
+            )}
 
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>שכר</Typography>

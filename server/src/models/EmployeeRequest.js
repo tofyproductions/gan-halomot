@@ -9,12 +9,18 @@ const employeeRequestSchema = new mongoose.Schema({
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   type: {
     type: String,
-    enum: ['vacation', 'sick'],
+    // 'pregnancy_exam' = היעדרות לבדיקות הריון (§7 חוק עבודת נשים): hour-granular,
+    // paid at full wage, drawn against the per-pregnancy 40h (or 20h) pool. Carries
+    // an optional medical certificate in medical_file_data like a sick note.
+    enum: ['vacation', 'sick', 'pregnancy_exam'],
     required: true,
   },
-  from_date: { type: String, required: true }, // YYYY-MM-DD
+  from_date: { type: String, required: true }, // YYYY-MM-DD (for pregnancy_exam = the exam date)
   to_date: { type: String, default: null },
   reason: { type: String, default: null },
+  // pregnancy_exam only: hours drawn on this exam date (e.g. 2.5). Ignored for
+  // other types. The running 40h cap is enforced when computing the balance.
+  exam_hours: { type: Number, default: null },
   // Approval chain (accountant is final):
   //   employee submits → 'pending_manager' → manager → 'pending_accountant'
   //   → accountant/admin → 'approved' (only then applied to payroll).

@@ -200,6 +200,15 @@ const employeeSchema = new mongoose.Schema({
   on_maternity_leave: { type: Boolean, default: false },
   maternity_leave_from: { type: Date, default: null },
   maternity_leave_to: { type: Date, default: null },
+  // Pregnancy tracking. Drives the accountant-facing badge (protected period +
+  // 40h exam-hours balance) — DISPLAY/ALERT ONLY, never auto-computes pay.
+  // See חוק עבודת נשים: 40h exam hours, protected period (≥6mo seniority),
+  // maternity leave, שמירת הריון. The pregnancy_exam EmployeeRequests carry the
+  // actual hour draws; these fields are the status + dates.
+  is_pregnant: { type: Boolean, default: false },
+  due_date: { type: Date, default: null },
+  gave_birth_date: { type: Date, default: null },
+  on_pregnancy_bedrest: { type: Boolean, default: false }, // שמירת הריון (NII-funded)
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 // Useful compound indexes

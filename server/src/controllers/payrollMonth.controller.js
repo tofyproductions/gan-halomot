@@ -781,6 +781,24 @@ async function getMonth(req, res, next) {
         permanent_note: emp.permanent_note || '',
         is_active: emp.is_active !== false,
         inactive_reason: emp.inactive_reason || '',
+        // Pregnancy status for the accountant-facing badge (display/alert only —
+        // no pay effect). `protected` = pregnant with ≥6 months seniority, when
+        // §9 חוק עבודת נשים bars unilateral pay/scope cuts without a permit.
+        pregnancy: (() => {
+          const seniorityMonths = emp.start_date
+            ? (monthEnd.getFullYear() - new Date(emp.start_date).getFullYear()) * 12
+              + (monthEnd.getMonth() - new Date(emp.start_date).getMonth())
+            : null;
+          const active = !!emp.is_pregnant || !!emp.on_maternity_leave || !!emp.on_pregnancy_bedrest;
+          return active ? {
+            is_pregnant: !!emp.is_pregnant,
+            on_maternity_leave: !!emp.on_maternity_leave,
+            on_pregnancy_bedrest: !!emp.on_pregnancy_bedrest,
+            due_date: emp.due_date || null,
+            gave_birth_date: emp.gave_birth_date || null,
+            protected: !!emp.is_pregnant && seniorityMonths != null && seniorityMonths >= 6,
+          } : null;
+        })(),
         salary_type: emp.salary_type,
         salary_is_net: !!emp.salary_is_net,
         // Travel config so UI can show "16₪/day" inline
@@ -2291,6 +2309,36 @@ async function setAccountantContacts(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// GET pregnancy-exam config: the 40h proration mode + the full-time week used
+// for linear proration. DISPLAY-side config only (never auto-computes pay).
+async function getPregnancySettings(req, res, next) {
+  try {
+    const modeDoc = await Setting.findOne({ key: 'pregnancy_exam_proration_mode' }).lean();
+    const ftDoc = await Setting.findOne({ key: 'full_time_weekly_hours' }).lean();
+    res.json({
+      proration_mode: modeDoc?.value === 'statutory' ? 'statutory' : 'linear',
+      full_time_weekly_hours: Number(ftDoc?.value) > 0 ? Number(ftDoc.value) : 42,
+    });
+  } catch (err) { next(err); }
+}
+
+// PUT pregnancy-exam config.
+async function setPregnancySettings(req, res, next) {
+  try {
+    if (req.body?.proration_mode !== undefined) {
+      const mode = req.body.proration_mode === 'statutory' ? 'statutory' : 'linear';
+      await Setting.findOneAndUpdate({ key: 'pregnancy_exam_proration_mode' }, { value: mode }, { upsert: true });
+    }
+    if (req.body?.full_time_weekly_hours !== undefined) {
+      const h = Number(req.body.full_time_weekly_hours);
+      if (h > 0 && h <= 100) {
+        await Setting.findOneAndUpdate({ key: 'full_time_weekly_hours' }, { value: h }, { upsert: true });
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 // Build the accountant PDF HTML WITHOUT sending — drives the preview dialog.
 // Returns the rendered cards + the default recipients + supporting-file count.
 async function previewAccountant(req, res, next) {
@@ -2452,6 +2500,8 @@ module.exports = {
   previewAccountant,
   getAccountantContacts,
   setAccountantContacts,
+  getPregnancySettings,
+  setPregnancySettings,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

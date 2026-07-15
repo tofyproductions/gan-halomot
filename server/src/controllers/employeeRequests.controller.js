@@ -1,6 +1,7 @@
 const { EmployeeRequest, Employee, PayrollMonth, EmployeeCommitment } = require('../models');
 const { scanSickNote } = require('../services/sickNoteScan');
 const { workingWeekdays } = require('../services/commitmentAnalysis');
+const { computeBalance } = require('../services/pregnancyExam');
 
 /**
  * Count working days from `from` to `to` inclusive (YYYY-MM-DD).
@@ -361,9 +362,12 @@ async function listPendingForEmployee(req, res, next) {
  */
 async function createAdminRequest(req, res, next) {
   try {
-    const { employee_id, type, from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day } = req.body;
+    const { employee_id, type, from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day, exam_hours } = req.body;
     if (!employee_id || !type || !from_date) {
       return res.status(400).json({ error: 'עובד, סוג ותאריך התחלה נדרשים' });
+    }
+    if (type === 'pregnancy_exam' && !(Number(exam_hours) > 0)) {
+      return res.status(400).json({ error: 'יש להזין מספר שעות היעדרות לבדיקה' });
     }
     const emp = await Employee.findById(employee_id).select('user_id branch_id').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
@@ -385,6 +389,7 @@ async function createAdminRequest(req, res, next) {
       medical_file_data: medical_file_data || null,
       medical_file_name: medical_file_name || null,
       pay_from_first_day: !!pay_from_first_day,
+      exam_hours: type === 'pregnancy_exam' ? Number(exam_hours) : null,
       status,
       manager_reviewed_by: req.user.id,
       manager_reviewed_at: new Date(),
@@ -442,13 +447,14 @@ async function editAdminRequest(req, res, next) {
   try {
     const request = await EmployeeRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
-    const { from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day } = req.body;
+    const { from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day, exam_hours } = req.body;
 
     const oldMonth = request.from_date.slice(0, 7);
     if (from_date) request.from_date = from_date;
     if (to_date !== undefined) request.to_date = to_date || request.from_date;
     if (reason !== undefined) request.reason = reason || null;
     if (pay_from_first_day !== undefined) request.pay_from_first_day = !!pay_from_first_day;
+    if (exam_hours !== undefined && request.type === 'pregnancy_exam') request.exam_hours = Number(exam_hours) || 0;
     if (medical_file_data) { request.medical_file_data = medical_file_data; request.medical_file_name = medical_file_name || request.medical_file_name; }
     await request.save();
 
@@ -513,6 +519,23 @@ async function scanMedical(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * GET /api/employee-requests/pregnancy-exam?employee_id=X
+ * Full exam-hours balance (entitlement, used, remaining, per-exam list) for the
+ * pregnancy-tracking dialog. DISPLAY ONLY — no payroll effect.
+ */
+async function listPregnancyExam(req, res, next) {
+  try {
+    const { employee_id } = req.query;
+    if (!employee_id) return res.status(400).json({ error: 'employee_id required' });
+    const emp = await Employee.findById(employee_id)
+      .select('user_id due_date is_pregnant full_name').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    const balance = await computeBalance(emp);
+    res.json({ employee_id: String(emp._id), full_name: emp.full_name, is_pregnant: !!emp.is_pregnant, ...balance });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   getMyRequests,
   createRequest,
@@ -522,6 +545,7 @@ module.exports = {
   listVacationForMonth,
   listSickForMonth,
   listPendingForEmployee,
+  listPregnancyExam,
   createAdminRequest,
   editAdminRequest,
   deleteRequest,

@@ -225,9 +225,64 @@ function AmutaBranchMapping() {
   );
 }
 
+/**
+ * PregnancyExamSettings — how the statutory 40h pregnancy-exam entitlement is
+ * prorated for part-time employees. Display-side config only (never auto pay).
+ */
+function PregnancyExamSettings() {
+  const [mode, setMode] = useState('linear');
+  const [fullWeek, setFullWeek] = useState(42);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    api.get('/payroll-month/pregnancy-settings')
+      .then(res => {
+        setMode(res.data.proration_mode || 'linear');
+        setFullWeek(res.data.full_time_weekly_hours || 42);
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = () => {
+    setSaving(true);
+    api.put('/payroll-month/pregnancy-settings', { proration_mode: mode, full_time_weekly_hours: Number(fullWeek) || 42 })
+      .then(() => toast.success('הגדרות ההריון נשמרו'))
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+      <Typography variant="h6" sx={{ fontWeight: 700, mb: 0.5 }}>שעות בדיקות הריון (40 שעות)</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        אופן חישוב הזכאות לעובדת במשרה חלקית. מעקב בלבד — אינו משפיע על חישוב השכר.
+      </Typography>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }}>
+        <Select size="small" value={mode} onChange={e => setMode(e.target.value)} sx={{ minWidth: 260 }}>
+          <MenuItem value="linear">לינארי — 40 × היקף משרה (מומלץ)</MenuItem>
+          <MenuItem value="statutory">דו-שכבתי סטטוטורי — &gt;4ש׳/יום=40, ≤4=20</MenuItem>
+        </Select>
+        <TextField
+          size="small" label="שבוע משרה מלאה (שעות)" type="number"
+          value={fullWeek} onChange={e => setFullWeek(e.target.value)}
+          inputProps={{ min: 1, max: 100 }} sx={{ width: 190 }}
+          helperText="לחישוב היקף המשרה (לינארי)"
+        />
+        <Button variant="contained" startIcon={<SaveIcon />} disabled={saving} onClick={save}>
+          {saving ? 'שומר…' : 'שמור'}
+        </Button>
+      </Stack>
+      <Alert severity="info" sx={{ mt: 2, py: 0.5 }}>
+        הכלל הסטטוטורי מעורפל למשרה חלקית — מומלץ לינארי, ולהתייעץ עם רו״ח/עו״ד.
+      </Alert>
+    </Paper>
+  );
+}
+
 export default function PayrollSettings() {
   return (
     <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <PregnancyExamSettings />
       <PresetOptionsManager />
       <AmutaBranchMapping />
     </Box>
