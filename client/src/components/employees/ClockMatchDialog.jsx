@@ -47,6 +47,9 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   const [sourceBranch, setSourceBranch] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [templateResult, setTemplateResult] = useState(null);
+  // Stage 2: write the extracted templates onto THIS branch's clock.
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   useEffect(() => {
     if (!open || !effectiveBranch) return;
@@ -124,6 +127,7 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
     if (!enrollEmp || !sourceBranch) return;
     setVerifying(true);
     setTemplateResult(null);
+    setImportResult(null);
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     try {
       const { data } = await api.post(`/payroll/employees/${enrollEmp}/export-template`, { branch_id: sourceBranch });
@@ -140,12 +144,48 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
       } else if (final.status === 'failed') {
         setTemplateResult({ status: 'failed', error: final.last_error });
       } else {
-        setTemplateResult({ status: 'confirmed', ...(final.result || {}) });
+        setTemplateResult({ status: 'confirmed', export_command_id: cmdId, ...(final.result || {}) });
       }
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בבדיקת חילוץ הטביעה');
     } finally {
       setVerifying(false);
+    }
+  };
+
+  // Stage 2: queue the WRITE of the just-extracted templates onto the clock
+  // of the branch this dialog is enrolling into. The server takes the blobs
+  // from the completed export command — nothing sensitive passes through here.
+  const importTemplate = async () => {
+    if (!enrollEmp || !effectiveBranch || !templateResult?.export_command_id) return;
+    const srcName = (branches || []).find(b => String(b._id || b.id) === String(sourceBranch))?.name || 'המקור';
+    if (!window.confirm(`לכתוב את טביעת האצבע לשעון של ${branchName || 'הסניף הזה'}?\n(המקור: ${srcName}. הפעולה כותבת למכשיר חי.)`)) return;
+    setImporting(true);
+    setImportResult(null);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      const { data } = await api.post(`/payroll/employees/${enrollEmp}/import-template`, {
+        target_branch_id: effectiveBranch,
+        export_command_id: templateResult.export_command_id,
+      });
+      const cmdId = data.command_id;
+      let final = null;
+      for (let i = 0; i < 20; i++) {
+        await sleep(2000);
+        const { data: st } = await api.get(`/payroll/clock-commands/${cmdId}`);
+        if (st.status === 'confirmed' || st.status === 'failed') { final = st; break; }
+      }
+      if (!final) {
+        setImportResult({ status: 'timeout' });
+      } else if (final.status === 'failed') {
+        setImportResult({ status: 'failed', error: final.last_error });
+      } else {
+        setImportResult({ status: 'confirmed', ...(final.result || {}) });
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בכתיבת הטביעה לשעון');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -287,7 +327,32 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
                     {templateResult.status === 'confirmed' && templateResult.finger_count > 0 && (
                       <Alert severity="success" sx={{ py: 0.5 }}>
                         ✅ חולצו {templateResult.finger_count} טביעות (אצבעות: {(templateResult.templates || []).map(t => t.fid).join(', ')}).
-                        החילוץ עובד — אפשר להתקדם לשלב הכתיבה.
+                        {!importResult && (
+                          <Button
+                            size="small" variant="contained" color="warning" onClick={importTemplate}
+                            disabled={importing} sx={{ mt: 1, display: 'block' }}
+                          >
+                            {importing ? 'כותב לשעון…' : '✍️ העתק את הטביעה לשעון של הסניף הזה'}
+                          </Button>
+                        )}
+                      </Alert>
+                    )}
+                    {importResult?.status === 'confirmed' && (
+                      <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>
+                        🎉 הטביעה נכתבה לשעון ואומתה בקריאה חוזרת ({importResult.verified_fingers} אצבעות במכשיר).
+                        העובד/ת יכול/ה להחתים כאן החל מעכשיו.
+                      </Alert>
+                    )}
+                    {importResult?.status === 'failed' && (
+                      <Alert severity="error" sx={{ py: 0.5, mt: 1 }}>
+                        {importResult.error === 'user_not_on_device'
+                          ? 'העובד/ת עדיין לא רשומ/ה בשעון של הסניף הזה — לחץ/י קודם "הוסף לשעון" והמתן/י כחצי דקה.'
+                          : (importResult.error || 'הכתיבה לשעון נכשלה')}
+                      </Alert>
+                    )}
+                    {importResult?.status === 'timeout' && (
+                      <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>
+                        פקודת הכתיבה נשלחה — ה-Pi של הסניף הזה עדיין לא ענה. אפשר לבדוק שוב בעוד רגע.
                       </Alert>
                     )}
                     {templateResult.status === 'confirmed' && !templateResult.finger_count && (

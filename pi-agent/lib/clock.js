@@ -184,6 +184,106 @@ class Clock {
       return { found: true, user: { uid, userId: match.userId, name: match.name }, templates };
     });
   }
+
+  /**
+   * WRITE. Enroll fingerprint templates for an EXISTING device user, matched
+   * by `userId` (= Israeli ID). The user must already be registered on the
+   * device (via `setUser` / the add_user command) — we refuse to create one
+   * here so a typo'd ID can't silently mint a ghost user.
+   *
+   * ZK protocol (mirrors pyzk's HR_save_usertemplates, verified against
+   * https://github.com/fananimi/pyzk):
+   *   packet = head(12B: uint32 lens of upack/table/fpack)
+   *          + upack (73B user record, pack '<BHB8s24sIB7sx24s')
+   *          + table (8B per finger: pack '<bHbI' → 2, uid, 0x10+fid, offset)
+   *          + fpack (per finger: uint16 size + raw template bytes)
+   *   upload: FREE_DATA → PREPARE_DATA(size) → DATA chunks of 1024
+   *           → CMD 110 (_CMD_SAVE_USERTEMPS, arg pack '<IHH' 12,0,8)
+   *           → REFRESHDATA.
+   * Every step must be ACKed with CMD_ACK_OK (2000) or we abort.
+   *
+   * @param {string} userId - Israeli ID (device userId)
+   * @param {Array<{fid:number, b64:string}>} templates
+   * @param {string} [name] - display name to (re)write on the user record
+   * @returns {{ok:boolean, reason?:string, uid?:number, fingers?:number}}
+   */
+  async setUserTemplates(userId, templates, name = '') {
+    return this._withConnection(async (zk) => {
+      const transport = zk.connectionType === 'udp' ? zk.zudp : zk.ztcp;
+      const CMD_ACK_OK = 2000, CMD_PREPARE_DATA = 1500, CMD_DATA = 1501;
+      const CMD_SAVE_USERTEMPS = 110, CMD_REFRESHDATA = 1013;
+      const ackOf = (reply) => (reply && reply.length >= 2 ? reply.readUInt16LE(0) : -1);
+
+      // 1. The user must already exist on the device.
+      const ures = await zk.getUsers();
+      const users = Array.isArray(ures) ? ures : (ures && ures.data) || [];
+      const match = users.find(u => String(u.userId) === String(userId));
+      if (!match) return { ok: false, reason: 'user_not_on_device' };
+      const uid = match.uid;
+
+      // 2. 73-byte user record. Field layout per pyzk repack73; we preserve
+      // the device's existing role/password/card and only refresh the name.
+      const upack = Buffer.alloc(73);
+      upack.writeUInt8(2, 0);
+      upack.writeUInt16LE(uid, 1);
+      upack.writeUInt8(match.role || 0, 3);
+      Buffer.from(String(match.password || ''), 'utf8').copy(upack, 4, 0, 8);
+      Buffer.from(String(name || match.name || ''), 'utf8').copy(upack, 12, 0, 24);
+      upack.writeUInt32LE(match.cardno || 0, 36);
+      upack.writeUInt8(1, 40);
+      // 41..47 group-id string (unused on our devices → zeros), 48 pad
+      Buffer.from(String(match.userId), 'ascii').copy(upack, 49, 0, 24);
+
+      // 3. Finger table + packed templates, offsets counted over fpack.
+      const list = [...templates].sort((a, b) => a.fid - b.fid);
+      const tableParts = [], fpackParts = [];
+      let tstart = 0;
+      for (const t of list) {
+        const tpl = Buffer.from(t.b64, 'base64');
+        const rec = Buffer.alloc(2 + tpl.length);
+        rec.writeUInt16LE(tpl.length, 0);
+        tpl.copy(rec, 2);
+        const te = Buffer.alloc(8);
+        te.writeUInt8(2, 0);
+        te.writeUInt16LE(uid, 1);
+        te.writeUInt8(0x10 + t.fid, 3);
+        te.writeUInt32LE(tstart, 4);
+        tableParts.push(te);
+        fpackParts.push(rec);
+        tstart += rec.length;
+      }
+      const table = Buffer.concat(tableParts);
+      const fpack = Buffer.concat(fpackParts);
+      const head = Buffer.alloc(12);
+      head.writeUInt32LE(upack.length, 0);
+      head.writeUInt32LE(table.length, 4);
+      head.writeUInt32LE(fpack.length, 8);
+      const packet = Buffer.concat([head, upack, table, fpack]);
+
+      // 4. Upload + commit. Abort loudly on any non-ACK so a half-written
+      // state is impossible (the device only applies on CMD_SAVE_USERTEMPS).
+      try { await transport.freeData(); } catch (e) { /* noop */ }
+      const sizeBuf = Buffer.alloc(4);
+      sizeBuf.writeUInt32LE(packet.length, 0);
+      let reply = await transport.executeCmd(CMD_PREPARE_DATA, sizeBuf);
+      if (ackOf(reply) !== CMD_ACK_OK) throw new Error(`PREPARE_DATA rejected (code ${ackOf(reply)})`);
+      const MAX_CHUNK = 1024;
+      for (let off = 0; off < packet.length; off += MAX_CHUNK) {
+        reply = await transport.executeCmd(CMD_DATA, packet.subarray(off, Math.min(off + MAX_CHUNK, packet.length)));
+        if (ackOf(reply) !== CMD_ACK_OK) throw new Error(`DATA chunk @${off} rejected (code ${ackOf(reply)})`);
+      }
+      const saveArg = Buffer.alloc(8);
+      saveArg.writeUInt32LE(12, 0);
+      saveArg.writeUInt16LE(0, 4);
+      saveArg.writeUInt16LE(8, 6);
+      reply = await transport.executeCmd(CMD_SAVE_USERTEMPS, saveArg);
+      if (ackOf(reply) !== CMD_ACK_OK) throw new Error(`SAVE_USERTEMPS rejected (code ${ackOf(reply)})`);
+      try { await transport.executeCmd(CMD_REFRESHDATA, ''); } catch (e) { /* device applies anyway */ }
+
+      log.info(`setUserTemplates userId=${userId} uid=${uid} fingers=${list.length} bytes=${packet.length}`);
+      return { ok: true, uid, fingers: list.length };
+    });
+  }
 }
 
 module.exports = { Clock };

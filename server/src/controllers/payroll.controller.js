@@ -1472,6 +1472,62 @@ async function exportEmployeeTemplate(req, res, next) {
 }
 
 /**
+ * POST /api/payroll/employees/:id/import-template
+ * Body: { target_branch_id, export_command_id }
+ *
+ * Second half of the cross-branch fingerprint copy: queues an
+ * `import_template` (WRITE) command to the TARGET branch's agent. The
+ * template blobs are taken server-side from a completed `export_template`
+ * command (`export_command_id`) — the browser never carries them, and we
+ * refuse blobs that weren't produced by an export for this same employee.
+ */
+async function importEmployeeTemplate(req, res, next) {
+  try {
+    const { target_branch_id, export_command_id } = req.body || {};
+    if (!target_branch_id || !export_command_id) {
+      return res.status(400).json({ error: 'target_branch_id ו-export_command_id נדרשים' });
+    }
+    const emp = await Employee.findById(req.params.id).select('full_name israeli_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!emp.israeli_id) return res.status(400).json({ error: 'לעובד/ת אין ת"ז' });
+    const branch = await Branch.findById(target_branch_id).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף יעד לא נמצא' });
+    const exp = await AgentCommand.findById(export_command_id).lean();
+    if (!exp || exp.type !== 'export_template') {
+      return res.status(400).json({ error: 'פקודת החילוץ לא נמצאה' });
+    }
+    if (exp.status !== 'confirmed' || !Array.isArray(exp.result?.templates) || exp.result.templates.length === 0) {
+      return res.status(400).json({ error: 'פקודת החילוץ לא הסתיימה בהצלחה או שאין בה טביעות' });
+    }
+    if (String(exp.result.israeli_id) !== String(emp.israeli_id)) {
+      return res.status(400).json({ error: 'הטביעות שחולצו אינן של העובד/ת הזה/זו' });
+    }
+    if (String(exp.branch_id) === String(target_branch_id)) {
+      return res.status(400).json({ error: 'סניף היעד זהה לסניף המקור' });
+    }
+    const cmd = await AgentCommand.create({
+      branch_id: target_branch_id,
+      type: 'import_template',
+      payload: {
+        israeli_id: emp.israeli_id,
+        name: emp.full_name || '',
+        templates: exp.result.templates,
+      },
+      status: 'pending',
+      created_by: req.user?.id || null,
+    });
+    res.json({
+      ok: true,
+      command_id: String(cmd._id),
+      branch_name: branch.name,
+      israeli_id: emp.israeli_id,
+      full_name: emp.full_name,
+      finger_count: exp.result.templates.length,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
  * GET /api/payroll/clock-commands/:id
  * Poll the status/result of a queued AgentCommand so the UI can wait for a
  * Pi agent to finish. The heavy `templates[].b64` blobs are stripped — only a
@@ -2120,6 +2176,7 @@ module.exports = {
   assignIsraeliIds,
   enrollEmployeeToClock,
   exportEmployeeTemplate,
+  importEmployeeTemplate,
   getClockCommand,
   salaryForEmployee,
   salarySummary,

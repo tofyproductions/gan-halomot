@@ -382,6 +382,41 @@ async function pollCommands() {
             },
           });
 
+        } else if (cmd.type === 'import_template') {
+          // WRITE: enroll fingerprint templates onto THIS device for an
+          // existing user (matched by Israeli ID). The user must already be
+          // registered on the device (add_user / "הוסף לשעון" first).
+          const { israeli_id, name = '', templates } = cmd.payload || {};
+          if (!israeli_id || !Array.isArray(templates) || templates.length === 0) {
+            await server.commandResult(cmd.id, 'failed', { error: 'missing israeli_id / templates in payload' });
+            continue;
+          }
+          if (templates.length > 10) {
+            await server.commandResult(cmd.id, 'failed', { error: `too many templates (${templates.length})` });
+            continue;
+          }
+          const invalid = templates.find(t => {
+            if (typeof t.fid !== 'number' || t.fid < 0 || t.fid > 9 || typeof t.b64 !== 'string' || !t.b64) return true;
+            const len = Buffer.from(t.b64, 'base64').length;
+            return len < 50 || len > 4096; // sane bounds for a ZK finger template
+          });
+          if (invalid) {
+            await server.commandResult(cmd.id, 'failed', { error: 'invalid template blob in payload' });
+            continue;
+          }
+          const w = await clock.setUserTemplates(israeli_id, templates, name);
+          if (!w.ok) {
+            await server.commandResult(cmd.id, 'failed', { error: w.reason || 'write_failed', israeli_id });
+            continue;
+          }
+          // Read back and verify the device really stored the fingers.
+          const check = await clock.getUserTemplates(israeli_id);
+          const verified = check.found ? check.templates.length : 0;
+          log.info(`import_template OK: userId=${israeli_id} uid=${w.uid} written=${w.fingers} verified=${verified}`);
+          await server.commandResult(cmd.id, 'confirmed', {
+            result: { israeli_id, uid: w.uid, written: w.fingers, verified_fingers: verified },
+          });
+
         } else if (cmd.type === 'sync_time') {
           // Future: await clock.setTime(new Date());
           await server.commandResult(cmd.id, 'failed', { error: 'sync_time not yet implemented' });
