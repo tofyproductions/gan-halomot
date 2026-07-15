@@ -10,6 +10,7 @@ router.get('/', c.list);
 router.post('/', c.create);
 router.get('/:id/file', c.getFile);
 router.put('/:id', c.update);
+router.post('/:id/acknowledge', c.acknowledge);
 router.delete('/:id', c.remove);
 
 module.exports = router;

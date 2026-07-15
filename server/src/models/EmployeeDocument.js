@@ -16,6 +16,11 @@ const employeeDocumentSchema = new mongoose.Schema({
   file_name: { type: String, default: '' },       // original filename
   file_mimetype: { type: String, default: 'application/octet-stream' },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Until the accountant marks it seen, the file shows as "ממתין בקבצים" in the
+  // salary table's notes column so uploads aren't missed.
+  acknowledged: { type: Boolean, default: false },
+  acknowledged_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  acknowledged_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 employeeDocumentSchema.index({ employee_id: 1, created_at: -1 });

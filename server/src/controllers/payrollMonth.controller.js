@@ -313,6 +313,19 @@ async function getMonth(req, res, next) {
       punchesByEmp.get(k).push(p);
     }
 
+    // Uploaded documents still awaiting the accountant's acknowledgement — shown
+    // as "📎 … ממתין בקבצים" in each employee's notes cell so uploads aren't missed.
+    const pendingDocs = await EmployeeDocument.find({
+      employee_id: { $in: employees.map(e => e._id) },
+      acknowledged: { $ne: true },
+    }).select('employee_id name file_name created_at').sort({ created_at: -1 }).lean();
+    const pendingDocsByEmp = new Map();
+    for (const d of pendingDocs) {
+      const k = String(d.employee_id);
+      if (!pendingDocsByEmp.has(k)) pendingDocsByEmp.set(k, []);
+      pendingDocsByEmp.get(k).push({ id: String(d._id), name: d.name || d.file_name || 'קובץ' });
+    }
+
     // Pull any existing PayrollMonth rows for these employees
     const existing = await PayrollMonth.find({
       employee_id: { $in: employees.map(e => e._id) },
@@ -781,6 +794,8 @@ async function getMonth(req, res, next) {
         permanent_note: emp.permanent_note || '',
         is_active: emp.is_active !== false,
         inactive_reason: emp.inactive_reason || '',
+        // Uploaded files awaiting the accountant's acknowledgement.
+        pending_docs: pendingDocsByEmp.get(String(emp._id)) || [],
         // Pregnancy status for the accountant-facing badge (display/alert only —
         // no pay effect). `protected` = pregnant with ≥6 months seniority, when
         // §9 חוק עבודת נשים bars unilateral pay/scope cuts without a permit.

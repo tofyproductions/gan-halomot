@@ -2140,6 +2140,20 @@ export default function PayrollMonthTable() {
                             )}
                           </Box>
                         )}
+                        {Array.isArray(r.pending_docs) && r.pending_docs.length > 0 && (
+                          <Box
+                            onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
+                            sx={{ mb: 0.4, p: '4px 6px', borderRadius: 1, cursor: 'pointer',
+                              bgcolor: '#fffbeb', border: '1px solid #fde68a',
+                              '&:hover': { bgcolor: '#fef3c7' } }}
+                          >
+                            {r.pending_docs.map(d => (
+                              <Box key={d.id} sx={{ color: '#92400e', fontWeight: 700, fontSize: '0.64rem' }}>
+                                📎 קובץ "{d.name}" ממתין בקבצים
+                              </Box>
+                            ))}
+                          </Box>
+                        )}
                         {r.commitment?.committed_hours != null && (
                           <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
                         )}
@@ -2234,6 +2248,7 @@ export default function PayrollMonthTable() {
         row={docsDlg.row}
         month={month}
         onClose={() => setDocsDlg({ open: false, row: null })}
+        onSaved={fetchData}
       />
       <PregnancyDetailDialog
         open={pregnancyDlg.open}

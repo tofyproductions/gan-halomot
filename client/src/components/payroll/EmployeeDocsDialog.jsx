@@ -8,6 +8,8 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import DeleteIcon from '@mui/icons-material/Delete';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import UndoIcon from '@mui/icons-material/Undo';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
@@ -38,7 +40,7 @@ const fmtDate = (d) => { try { return new Date(d).toLocaleDateString('he-IL'); }
  * a detail note for the accountant (רו"ח). Opened from the salary table's notes
  * column.
  */
-export default function EmployeeDocsDialog({ open, row, month, onClose }) {
+export default function EmployeeDocsDialog({ open, row, month, onClose, onSaved }) {
   const confirm = useConfirm();
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -87,9 +89,17 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
       file_name: file.name,
       file_mimetype: file.mimetype,
     })
-      .then(() => { toast.success('המסמך נוסף'); setName(''); setDescription(''); setFile(null); load(); })
+      .then(() => { toast.success('המסמך נוסף'); setName(''); setDescription(''); setFile(null); load(); onSaved && onSaved(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
       .finally(() => setSaving(false));
+  };
+
+  // Mark an uploaded doc as seen (or re-flag it as pending) so it stops/starts
+  // showing as "ממתין בקבצים" in the salary table's notes column.
+  const setAck = (d, acknowledged) => {
+    api.post(`/employee-documents/${d.id}/acknowledge`, { acknowledged })
+      .then(() => { toast.success(acknowledged ? 'סומן כנצפה' : 'הוחזר לממתין'); load(); onSaved && onSaved(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
   const viewDoc = async (d) => {
@@ -110,7 +120,7 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
   const del = async (d) => {
     if (!(await confirm({ title: 'מחיקת מסמך', message: `למחוק את "${d.name}"?`, danger: true }))) return;
     api.delete(`/employee-documents/${d.id}`)
-      .then(() => { toast.success('נמחק'); load(); })
+      .then(() => { toast.success('נמחק'); load(); onSaved && onSaved(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
@@ -145,6 +155,9 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
                       {d.source === 'request' && (
                         <Chip size="small" color="error" variant="outlined" label="אישור מחלה" sx={{ ml: 0.5, height: 18, fontSize: '0.6rem' }} />
                       )}
+                      {d.source === 'document' && d.acknowledged === false && (
+                        <Chip size="small" color="warning" label="ממתין" sx={{ ml: 0.5, height: 18, fontSize: '0.6rem', fontWeight: 700 }} />
+                      )}
                       {d.name}
                       {d.month && <Chip size="small" label={d.month} sx={{ ml: 0.5 }} variant="outlined" />}
                     </TableCell>
@@ -154,6 +167,9 @@ export default function EmployeeDocsDialog({ open, row, month, onClose }) {
                     </TableCell>
                     <TableCell align="center">
                       <Tooltip title="צפה"><IconButton size="small" color="primary" onClick={() => viewDoc(d)}><VisibilityIcon fontSize="small" /></IconButton></Tooltip>
+                      {d.source === 'document' && (d.acknowledged === false
+                        ? <Tooltip title="סמן כנצפה (יוריד את ההתראה בהערות)"><IconButton size="small" color="success" onClick={() => setAck(d, true)}><CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
+                        : <Tooltip title="החזר לממתין"><IconButton size="small" onClick={() => setAck(d, false)}><UndoIcon fontSize="small" /></IconButton></Tooltip>)}
                       {d.source === 'request'
                         ? <Tooltip title="אישור מחלה — מנוהל בלשונית מחלה"><span><IconButton size="small" disabled><DeleteIcon fontSize="small" /></IconButton></span></Tooltip>
                         : <Tooltip title="מחק"><IconButton size="small" color="error" onClick={() => del(d)}><DeleteIcon fontSize="small" /></IconButton></Tooltip>}

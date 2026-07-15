@@ -29,6 +29,7 @@ async function list(req, res, next) {
       month: d.month || null,
       created_at: d.created_at,
       created_by_name: d.created_by?.full_name || '',
+      acknowledged: !!d.acknowledged,
     }));
 
     // Merge in medical certificates from the employee's sick/vacation requests.
@@ -132,4 +133,25 @@ async function remove(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, create, getFile, update, remove };
+/**
+ * POST /api/employee-documents/:id/acknowledge  { acknowledged?: bool }
+ * Mark an uploaded document as seen by the accountant (default true) so it
+ * stops showing as "ממתין בקבצים" in the salary table. Pass acknowledged:false
+ * to re-flag it as pending.
+ */
+async function acknowledge(req, res, next) {
+  try {
+    const ack = req.body?.acknowledged !== false;
+    const doc = await EmployeeDocument.findByIdAndUpdate(
+      req.params.id,
+      ack
+        ? { acknowledged: true, acknowledged_by: req.user?.id || null, acknowledged_at: new Date() }
+        : { acknowledged: false, acknowledged_by: null, acknowledged_at: null },
+      { new: true },
+    ).lean();
+    if (!doc) return res.status(404).json({ error: 'מסמך לא נמצא' });
+    res.json({ ok: true, acknowledged: !!doc.acknowledged });
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, create, getFile, update, remove, acknowledge };
