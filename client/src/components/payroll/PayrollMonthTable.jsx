@@ -2536,6 +2536,12 @@ const ABSENCE_CATEGORIES = [
   { value: 'sick',     label: 'מחלה',              deduct: false },
   { value: 'vacation', label: 'חופשה',             deduct: false },
   { value: 'reserve',  label: 'מילואים',           deduct: false },
+  // Justified but employer-unpaid: she is paid pro-rata for the days she worked.
+  // Deducts like an unpaid day, but labelled so the accountant sees WHY.
+  { value: 'maternity',         label: 'חופשת לידה',        deduct: true },
+  // שמירת הריון — paid by ביטוח לאומי, not the employer, and it does NOT draw
+  // down her sick-day balance (hence its own category rather than 'sick').
+  { value: 'pregnancy_bedrest', label: 'שמירת הריון (ב״ל)', deduct: true },
 ];
 const absCat = (v) => ABSENCE_CATEGORIES.find(c => c.value === v) || ABSENCE_CATEGORIES[0];
 
@@ -2901,7 +2907,13 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
     const init = {};
     for (const a of (row.absence?.days || [])) {
       if (a.source !== 'unknown') continue;
-      init[a.date] = byDate[a.date] || { date: a.date, category: 'unpaid', note: '', manager_approved: false, accounting_approved: false };
+      // The server pre-selects a reason for days it can explain (maternity leave /
+      // שמירת הריון); anything else defaults to unpaid until the accountant sets it.
+      init[a.date] = byDate[a.date] || {
+        date: a.date,
+        category: a.suggested_category || 'unpaid',
+        note: '', manager_approved: false, accounting_approved: false,
+      };
     }
     setEntries(init);
     const o = {};

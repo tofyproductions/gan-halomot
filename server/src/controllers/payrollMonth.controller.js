@@ -16,7 +16,12 @@ const { computeSickPay, availableBalance, accruedBalance } = require('../service
 const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
-const DEDUCTIBLE_ABSENCE = new Set(['unpaid', 'other']);
+// 'maternity' (חופשת לידה) and 'pregnancy_bedrest' (שמירת הריון) are JUSTIFIED but
+// not employer-paid: she is paid pro-rata for the days she actually worked, and
+// ביטוח לאומי pays her separately. They deduct like an unpaid day but carry their
+// own label so the accountant sees the reason (and bedrest never touches the
+// sick-day balance, unlike 'sick').
+const DEDUCTIBLE_ABSENCE = new Set(['unpaid', 'other', 'maternity', 'pregnancy_bedrest']);
 
 // Expand a [from,to] range (YYYY-MM-DD strings or Date objects) into the set of
 // YYYY-MM-DD that fall within the given month — used to mark holiday / approved
@@ -472,10 +477,33 @@ async function getMonth(req, res, next) {
       // A committed day missed because the gan was closed (holiday) or for
       // approved leave is NOT an absence — it's vacation/leave, handled in those
       // columns. Only truly-unexplained missed days are absences.
+      // Maternity window: from the birth date (or the recorded leave start) until
+      // the leave end, if set — otherwise open-ended. Missed committed days inside
+      // it are justified maternity leave: still employer-unpaid (she is paid
+      // pro-rata for the days she worked), but flagged so the accountant sees the
+      // reason instead of a bare "unexplained absence".
+      const matStartRaw = emp.gave_birth_date || emp.maternity_leave_from;
+      const matStart = matStartRaw ? new Date(matStartRaw).toISOString().slice(0, 10) : null;
+      const matEnd = emp.maternity_leave_to ? new Date(emp.maternity_leave_to).toISOString().slice(0, 10) : null;
+      const inMaternityWindow = (ymd) => {
+        if (!matStart) return false;
+        if (!emp.on_maternity_leave && !emp.gave_birth_date) return false;
+        if (ymd < matStart) return false;
+        if (matEnd && ymd > matEnd) return false;
+        return true;
+      };
       const absenceDays = isTeken
         ? commitmentInfo.absent_dates
             .filter(d => !holidayDates.has(d) && !leaveDates.has(d))
-            .map(d => ({ date: d, source: 'unknown' }))
+            .map(d => ({
+              date: d,
+              source: 'unknown',
+              // Pre-selects the category in the absence dialog; the accountant
+              // still confirms — we never auto-decide pay.
+              suggested_category: inMaternityWindow(d)
+                ? 'maternity'
+                : (emp.on_pregnancy_bedrest ? 'pregnancy_bedrest' : null),
+            }))
         : [];
       // Default = DEDUCT (like היעדרות שעות). An unexplained absent day is deducted
       // at the daily rate; it is NOT deducted only when given a non-deductible
