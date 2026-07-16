@@ -1,10 +1,38 @@
-const { Discount } = require('../models');
+const mongoose = require('mongoose');
+const { Discount, Registration, Classroom } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
+
+/**
+ * Resolve the branch a discount belongs to. The cross-branch view sends the
+ * sentinel "all" (not an ObjectId), which used to blow up on cast — so when the
+ * given branch isn't a real id we derive it from the discount's target.
+ */
+async function resolveDiscountBranch({ branch_id, scope, registration_id, classroom_id }) {
+  if (branch_id && mongoose.isValidObjectId(branch_id)) return branch_id;
+  if (scope === 'child' && mongoose.isValidObjectId(registration_id)) {
+    const reg = await Registration.findById(registration_id).select('branch_id').lean();
+    if (reg?.branch_id) return reg.branch_id;
+  }
+  if (scope === 'classroom' && mongoose.isValidObjectId(classroom_id)) {
+    const room = await Classroom.findById(classroom_id).select('branch_id').lean();
+    if (room?.branch_id) return room.branch_id;
+  }
+  return null;
+}
 
 async function getAll(req, res, next) {
   try {
     const filter = { is_active: true, ...getBranchFilter(req) };
-    if (req.query.year) filter.academic_year = req.query.year;
+    // Year-scoped, but keep legacy rows that were saved without an academic_year
+    // visible so filtering doesn't make existing discounts disappear.
+    if (req.query.year) {
+      filter.$or = [
+        { academic_year: req.query.year },
+        { academic_year: '' },
+        { academic_year: null },
+        { academic_year: { $exists: false } },
+      ];
+    }
 
     const discounts = await Discount.find(filter)
       .populate('registration_id', 'child_name parent_name')
@@ -30,8 +58,20 @@ async function create(req, res, next) {
       return res.status(400).json({ error: 'scope, discount_type, value חובה' });
     }
 
-    const discount = await Discount.create({
+    const resolvedBranch = await resolveDiscountBranch({
       branch_id: branch_id || req.query.branch,
+      scope, registration_id, classroom_id,
+    });
+    if (!resolvedBranch) {
+      return res.status(400).json({
+        error: scope === 'branch'
+          ? 'יש לבחור סניף ספציפי (לא "כל הסניפים") להנחה לכל הגן'
+          : 'לא ניתן לקבוע את הסניף להנחה — בחר/י יעד תקין',
+      });
+    }
+
+    const discount = await Discount.create({
+      branch_id: resolvedBranch,
       scope, registration_id: registration_id || null,
       classroom_id: classroom_id || null,
       discount_type, value, month: month || null,

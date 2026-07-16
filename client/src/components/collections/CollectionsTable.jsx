@@ -59,6 +59,10 @@ export default function CollectionsTable() {
   // Child detail dialog
   const [selectedChild, setSelectedChild] = useState(null);
   const [discounts, setDiscounts] = useState([]);
+  // Which month's discounts to list. Defaults to the current calendar month so a
+  // one-off discount from another month doesn't clutter the view; all-year
+  // discounts (month=null) always show.
+  const [discountMonthFilter, setDiscountMonthFilter] = useState(() => new Date().getMonth() + 1);
   const [newDiscount, setNewDiscount] = useState({
     scope: 'child', registration_id: '', classroom_id: '',
     discount_type: 'percentage', value: '', month: '', reason: '',
@@ -74,15 +78,27 @@ export default function CollectionsTable() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // Discounts are scoped to the academic year in view; the server already
+  // supports ?year= — we just have to pass it.
   const fetchDiscounts = () => {
-    api.get('/discounts').then(res => setDiscounts(res.data.discounts || [])).catch(() => {});
+    api.get('/discounts', { params: { year: selectedYear } })
+      .then(res => setDiscounts(res.data.discounts || []))
+      .catch(() => {});
   };
+
+  // A discount is shown when it targets the chosen month, or applies all year.
+  const visibleDiscounts = discounts.filter(d =>
+    discountMonthFilter === 'all' || !d.month || Number(d.month) === Number(discountMonthFilter));
 
   const handleAddDiscount = async () => {
     try {
+      const sel = localStorage.getItem('selectedBranch');
       await api.post('/discounts', {
         ...newDiscount,
-        branch_id: localStorage.getItem('selectedBranch'),
+        // 'all' is the cross-branch sentinel, not a real branch — let the server
+        // derive the branch from the target (child / classroom) in that case.
+        branch_id: sel && sel !== 'all' ? sel : null,
+        academic_year: selectedYear,
         month: newDiscount.month ? parseInt(newDiscount.month) : null,
         value: parseFloat(newDiscount.value),
         registration_id: newDiscount.registration_id || null,
@@ -449,8 +465,22 @@ export default function CollectionsTable() {
           {/* Existing discounts */}
           {discounts.length > 0 && (
             <Box sx={{ mb: 3 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>הנחות פעילות:</Typography>
-              {discounts.map(d => (
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>הנחות פעילות:</Typography>
+                <Box sx={{ flex: 1 }} />
+                <TextField
+                  select size="small" label="הצג לחודש" value={discountMonthFilter}
+                  onChange={e => setDiscountMonthFilter(e.target.value)} sx={{ minWidth: 150 }}
+                >
+                  <MenuItem value="all">כל החודשים</MenuItem>
+                  {MONTH_LABELS.map((label, i) => (
+                    <MenuItem key={ACADEMIC_MONTHS[i]} value={ACADEMIC_MONTHS[i]}>{label}</MenuItem>
+                  ))}
+                </TextField>
+              </Stack>
+              {visibleDiscounts.length === 0 ? (
+                <Typography variant="caption" color="text.secondary">אין הנחות להצגה בחודש זה.</Typography>
+              ) : visibleDiscounts.map(d => (
                 <Chip key={d._id || d.id} sx={{ m: 0.5 }} onDelete={() => handleDeleteDiscount(d._id || d.id)}
                   label={`${d.scope === 'child' ? d.child_name : d.scope === 'classroom' ? d.classroom_name : 'כל הגן'}: ${d.discount_type === 'percentage' ? d.value + '%' : '₪' + d.value}${d.month ? ' (חודש ' + d.month + ')' : ' (כל השנה)'}${d.reason ? ' - ' + d.reason : ''}`}
                 />
