@@ -24,6 +24,7 @@ import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
 import ClassTrackingPage from './components/classes/ClassTrackingPage';
+import MaintenancePage from './components/maintenance/MaintenancePage';
 import MySalaryPreview from './components/employee-portal/MySalaryPreview';
 import MyPayslips from './components/employee-portal/MyPayslips';
 import MyDocuments from './components/employee-portal/MyDocuments';
@@ -87,6 +88,7 @@ function AppRoutes() {
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
         <Route path="classes" element={<ClassTrackingPage />} />
+        <Route path="maintenance" element={<MaintenancePage />} />
         {/* Employee portal */}
         <Route path="my-salary" element={<MySalaryPreview />} />
         <Route path="my-payslips" element={<MyPayslips />} />

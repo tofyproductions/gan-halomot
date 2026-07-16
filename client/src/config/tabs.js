@@ -32,12 +32,18 @@ export const TAB_GROUPS = [
   {
     label: 'תפעול',
     items: [
-      { id: 'orders',     label: 'הזמנות',     path: '/orders',     defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
-      { id: 'stock',      label: 'מעקב מלאי',  path: '/stock',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'cook'] },
-      { id: 'suppliers',  label: 'ספקים',      path: '/suppliers',  defaultRoles: ['system_admin', 'accountant'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
+    ],
+  },
+  {
+    label: 'אחזקה ולוגיסטיקה',
+    items: [
+      { id: 'orders',       label: 'הזמנות',     path: '/orders',       defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
+      { id: 'stock',        label: 'מעקב מלאי',  path: '/stock',        defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'cook'] },
+      { id: 'suppliers',    label: 'ספקים',      path: '/suppliers',    defaultRoles: ['system_admin', 'accountant'] },
+      { id: 'maintenance',  label: 'אחזקה',      path: '/maintenance',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
     ],
   },
   {

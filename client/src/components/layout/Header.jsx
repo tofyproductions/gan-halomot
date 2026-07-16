@@ -28,6 +28,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import HandymanIcon from '@mui/icons-material/Handyman';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
@@ -54,6 +55,7 @@ const ICON_BY_TAB = {
   suppliers: LocalShippingIcon,
   gantt: CalendarMonthIcon,
   classes: EventIcon,
+  maintenance: HandymanIcon,
   contacts: ContactsIcon,
   my_salary: AccountBalanceIcon,
   my_payslips: DescriptionIcon,

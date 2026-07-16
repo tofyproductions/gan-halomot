@@ -23,6 +23,8 @@ router.use('/employee-requests', require('./employeeRequests.routes'));
 router.use('/employee-documents', require('./employeeDocuments.routes'));
 // Class tracking (מעקב חוגים) — providers, programs, sessions + occurrence popup
 router.use('/classes', require('./classes.routes'));
+// Maintenance (אחזקה) — assets per branch with service cycles + fault reports
+router.use('/maintenance', require('./maintenance.routes'));
 
 // All other routes use optional auth (backward compatible - works without login too)
 router.use(optionalAuth);

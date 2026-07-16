@@ -43,6 +43,7 @@ const Setting = require('./Setting');
 const ClassProvider = require('./ClassProvider');
 const ClassProgram = require('./ClassProgram');
 const ClassSession = require('./ClassSession');
+const MaintenanceItem = require('./MaintenanceItem');
 
 module.exports = {
   User,
@@ -89,4 +90,5 @@ module.exports = {
   ClassProvider,
   ClassProgram,
   ClassSession,
+  MaintenanceItem,
 };
