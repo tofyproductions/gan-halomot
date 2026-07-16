@@ -10,7 +10,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import SaveIcon from '@mui/icons-material/Save';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import { TAB_GROUPS, ALL_TABS, isDefaultAllowed } from '../../config/tabs';
+import { TAB_GROUPS, ALL_TABS, isDefaultAllowed, roleHasTab } from '../../config/tabs';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
 
@@ -25,24 +25,26 @@ const ROLE_LABELS = {
 };
 
 // State per user-tab cell. We track only effective allowed (true/false).
-// On save we diff against role default to compute add/remove arrays.
-function computeOverrides(user, allowedMap) {
+// On save we diff against the ROLE-EFFECTIVE access (role default + role-wide
+// override) so a per-user override is only stored when it genuinely differs.
+function computeOverrides(user, allowedMap, roleTabs = {}) {
   const add = [];
   const remove = [];
   for (const tab of ALL_TABS) {
     const allowed = !!allowedMap[tab.id];
-    const def = isDefaultAllowed(user, tab);
+    const def = roleHasTab(user.role, tab.id, roleTabs);
     if (allowed && !def) add.push(tab.id);
     if (!allowed && def) remove.push(tab.id);
   }
   return { add, remove };
 }
 
-function effectiveMap(user) {
+// Effective per-user access. Mirrors hasTabAccess precedence:
+// per-user override > role-wide override > role default.
+function effectiveMap(user, roleTabs = {}) {
   const m = {};
   for (const tab of ALL_TABS) {
-    const def = isDefaultAllowed(user, tab);
-    let allowed = def;
+    let allowed = roleHasTab(user.role, tab.id, roleTabs); // default + role-wide
     if ((user.tab_overrides_add || []).includes(tab.id)) allowed = true;
     if ((user.tab_overrides_remove || []).includes(tab.id)) allowed = false;
     m[tab.id] = allowed;
@@ -133,18 +135,25 @@ export default function PermissionsManager() {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [roleDialog, setRoleDialog] = useState({ open: false, user: null });
+  // Role-wide overrides: { role: { add: [], remove: [] } }
+  const [roleTabs, setRoleTabs] = useState({});
+  const [roleTabsDirty, setRoleTabsDirty] = useState(false);
+  const [savingRoleTabs, setSavingRoleTabs] = useState(false);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
     try {
-      const [usersRes, branchesRes] = await Promise.all([
+      const [usersRes, branchesRes, roleTabsRes] = await Promise.all([
         api.get('/admin/users'),
         api.get('/branches'),
+        api.get('/admin/role-tabs'),
       ]);
       setUsers(usersRes.data.users || []);
       setBranches(branchesRes.data.branches || []);
+      setRoleTabs(roleTabsRes.data.role_tabs || {});
+      setRoleTabsDirty(false);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בטעינת משתמשים');
     } finally {
@@ -155,19 +164,19 @@ export default function PermissionsManager() {
   function getCellValue(user, tabId) {
     const userEdits = edits[user._id];
     if (userEdits && tabId in userEdits) return userEdits[tabId];
-    return effectiveMap(user)[tabId];
+    return effectiveMap(user, roleTabs)[tabId];
   }
 
   function isCellOverride(user, tabId) {
     const value = getCellValue(user, tabId);
-    const def = isDefaultAllowed(user, ALL_TABS.find(t => t.id === tabId));
+    const def = roleHasTab(user.role, tabId, roleTabs);
     return value !== def;
   }
 
   function isUserDirty(user) {
     const userEdits = edits[user._id];
     if (!userEdits) return false;
-    const eff = effectiveMap(user);
+    const eff = effectiveMap(user, roleTabs);
     return Object.entries(userEdits).some(([k, v]) => eff[k] !== v);
   }
 
@@ -175,7 +184,7 @@ export default function PermissionsManager() {
     setEdits(prev => {
       const userEdits = { ...(prev[userId] || {}) };
       const user = users.find(u => u._id === userId);
-      const current = (tabId in userEdits) ? userEdits[tabId] : effectiveMap(user)[tabId];
+      const current = (tabId in userEdits) ? userEdits[tabId] : effectiveMap(user, roleTabs)[tabId];
       userEdits[tabId] = !current;
       return { ...prev, [userId]: userEdits };
     });
@@ -200,10 +209,10 @@ export default function PermissionsManager() {
   }
 
   async function saveUser(user) {
-    const eff = effectiveMap(user);
+    const eff = effectiveMap(user, roleTabs);
     const userEdits = edits[user._id] || {};
     const merged = { ...eff, ...userEdits };
-    const { add, remove } = computeOverrides(user, merged);
+    const { add, remove } = computeOverrides(user, merged, roleTabs);
     setSaving(s => ({ ...s, [user._id]: true }));
     try {
       const res = await api.patch(`/admin/users/${user._id}/tabs`, { add, remove });
@@ -241,20 +250,60 @@ export default function PermissionsManager() {
     return out;
   }, []);
 
+  // --- Role-wide tab overrides (bulk per role) -----------------------------
+  // Toggling a tab for a role writes an add/remove entry against the role's
+  // hardcoded default, so it applies to every user of that role at once.
+  function toggleRoleTab(role, tabId) {
+    setRoleTabs(prev => {
+      const entry = { add: [...(prev[role]?.add || [])], remove: [...(prev[role]?.remove || [])] };
+      const tab = ALL_TABS.find(t => t.id === tabId);
+      const isDefault = isDefaultAllowed({ role }, tab);
+      const currentlyOn = roleHasTab(role, tabId, prev);
+      // Clear any existing override for this tab, then set the opposite of now.
+      entry.add = entry.add.filter(t => t !== tabId);
+      entry.remove = entry.remove.filter(t => t !== tabId);
+      const want = !currentlyOn;
+      if (want !== isDefault) (want ? entry.add : entry.remove).push(tabId);
+      return { ...prev, [role]: entry };
+    });
+    setRoleTabsDirty(true);
+  }
+
+  async function saveRoleTabs() {
+    setSavingRoleTabs(true);
+    try {
+      await api.put('/admin/role-tabs', { role_tabs: roleTabs });
+      setRoleTabsDirty(false);
+      toast.success('הרשאות התפקידים נשמרו — חלות על כל בעלי התפקיד');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    } finally {
+      setSavingRoleTabs(false);
+    }
+  }
+
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
   }
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 } }}>
-      {/* Role defaults reference */}
+      {/* Role-wide permissions — one click applies to EVERY user of that role */}
       <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 3, bgcolor: '#fafbff' }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>תבניות תפקידים</Typography>
-          <Chip label="ברירות מחדל" size="small" color="primary" variant="outlined" />
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>הרשאות לפי תפקיד</Typography>
+          <Chip label="חל על כל בעלי התפקיד" size="small" color="primary" variant="outlined" />
+          <Box sx={{ flex: 1 }} />
+          <Button
+            variant="contained" size="small" startIcon={<SaveIcon />}
+            disabled={!roleTabsDirty || savingRoleTabs} onClick={saveRoleTabs}
+          >
+            {savingRoleTabs ? 'שומר…' : 'שמור הרשאות תפקיד'}
+          </Button>
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          כל תפקיד מקבל את הטאבים הבאים כברירת מחדל. ניתן לשנות פר משתמש בטבלה למטה (סימון V/X = override סגול).
+          לחיצה על טאב מוסיפה/מסירה אותו לכל בעלי התפקיד במכה אחת. מלא = יש גישה, מתאר = אין.
+          שינוי פר-משתמש (בטבלה למטה) גובר על הגדרת התפקיד.
         </Typography>
         <Stack spacing={1}>
           {Object.entries(ROLE_LABELS).map(([role, label]) => (
@@ -266,11 +315,25 @@ export default function PermissionsManager() {
                 sx={{ minWidth: 110, fontWeight: 700 }}
               />
               <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
-                {roleDefaults[role].length === 0 ? (
-                  <Typography variant="caption" color="text.disabled">— אין טאבים —</Typography>
-                ) : roleDefaults[role].map(t => (
-                  <Chip key={t.id} size="small" variant="outlined" label={t.label} sx={{ height: 22, fontSize: '0.7rem' }} />
-                ))}
+                {ALL_TABS.map(t => {
+                  const on = roleHasTab(role, t.id, roleTabs);
+                  const overridden = ((roleTabs[role]?.add || []).includes(t.id))
+                    || ((roleTabs[role]?.remove || []).includes(t.id));
+                  return (
+                    <Chip
+                      key={t.id} size="small" clickable
+                      label={t.label}
+                      onClick={() => toggleRoleTab(role, t.id)}
+                      color={on ? 'primary' : 'default'}
+                      variant={on ? 'filled' : 'outlined'}
+                      sx={{
+                        height: 22, fontSize: '0.7rem',
+                        opacity: on ? 1 : 0.5,
+                        border: overridden ? '2px solid #a78bfa' : undefined,
+                      }}
+                    />
+                  );
+                })}
               </Stack>
             </Stack>
           ))}

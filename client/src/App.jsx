@@ -3,6 +3,8 @@ import Layout from './components/layout/Layout';
 import LoginPage from './components/layout/LoginPage';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import Dashboard from './components/dashboard/Dashboard';
+import { useAuth } from './hooks/useAuth';
+import { hasTabAccess } from './config/tabs';
 import RegistrationWizard from './components/registration/RegistrationWizard';
 import ParentOnboarding from './components/registration/ParentOnboarding';
 import RegistrationTracker from './components/registration/RegistrationTracker';
@@ -51,7 +53,7 @@ function AppRoutes() {
           <Layout />
         </ProtectedRoute>
       }>
-        <Route index element={<Dashboard />} />
+        <Route index element={<HomeRoute />} />
         <Route path="registrations" element={<RegistrationTracker />} />
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
@@ -108,6 +110,19 @@ function AppRoutes() {
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
+}
+
+/**
+ * The landing page depends on the role: management sees the branch dashboard
+ * (child counts, KPIs); regular staff have no business there, so they land in
+ * their own area instead.
+ */
+function HomeRoute() {
+  const { user } = useAuth();
+  if (user && !hasTabAccess(user, 'dashboard')) {
+    return <Navigate to="/my-salary" replace />;
+  }
+  return <Dashboard />;
 }
 
 export default function App() {

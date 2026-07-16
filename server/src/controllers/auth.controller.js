@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { User } = require('../models');
+const { User, Setting } = require('../models');
 const env = require('../config/env');
+
 const {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -9,13 +10,30 @@ const {
   verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
 
+/**
+ * Tab overrides applied to EVERY user of a role (edited once in the admin
+ * permissions screen — "add X to all branch managers"). Precedence when the
+ * client resolves access: per-user override > role override > role default.
+ */
+async function roleTabOverrides(role) {
+  try {
+    const doc = await Setting.findOne({ key: 'role_tab_overrides' }).lean();
+    const map = doc?.value || {};
+    const entry = map[role] || {};
+    return {
+      add: Array.isArray(entry.add) ? entry.add : [],
+      remove: Array.isArray(entry.remove) ? entry.remove : [],
+    };
+  } catch { return { add: [], remove: [] }; }
+}
+
 const RP_NAME = 'גן החלומות';
 const RP_ID = env.NODE_ENV === 'production' ? 'gan-halomot.onrender.com' : 'localhost';
 const ORIGIN = env.NODE_ENV === 'production'
   ? 'https://gan-halomot.onrender.com'
   : 'http://localhost:5173';
 
-function makeToken(user, rememberMe) {
+function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }) {
   // Resolve managed_branch_ids: explicit value first, single-branch managers
   // fall back to [branch_id] so they don't need separate configuration.
   let managed = (user.managed_branch_ids || []).map(b => b?._id || b).filter(Boolean);
@@ -33,6 +51,8 @@ function makeToken(user, rememberMe) {
     position: user.position,
     tab_overrides_add: user.tab_overrides_add || [],
     tab_overrides_remove: user.tab_overrides_remove || [],
+    role_tab_add: roleTabs.add || [],
+    role_tab_remove: roleTabs.remove || [],
     password_set: !!user.password_set,
   };
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
@@ -78,7 +98,7 @@ async function login(req, res, next) {
       });
     }
 
-    const result = makeToken(user, rememberMe);
+    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role));
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     result.password_prompt = true; // no password chosen yet → nag on the client
     res.json(result);
@@ -102,7 +122,7 @@ async function loginWithPassword(req, res, next) {
     if (!ok) {
       return res.status(401).json({ error: 'סיסמה שגויה' });
     }
-    const result = makeToken(user, rememberMe);
+    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role));
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     res.json(result);
   } catch (error) {
@@ -144,12 +164,15 @@ async function me(req, res, next) {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
+    const roleTabs = await roleTabOverrides(user.role);
     res.json({
       user: {
         ...user.toObject(),
         id: user._id,
         branch_name: user.branch_id?.name || null,
         hasWebauthn: (user.webauthn_credentials || []).length > 0,
+        role_tab_add: roleTabs.add,
+        role_tab_remove: roleTabs.remove,
       },
     });
   } catch (error) {
@@ -293,7 +316,7 @@ async function webauthnAuthVerify(req, res, next) {
     user.webauthn_challenge = null;
     await user.save();
 
-    const result = makeToken(user, true); // biometric = always remember
+    const result = makeToken(user, true, await roleTabOverrides(user.role)); // biometric = always remember
     res.json(result);
   } catch (error) {
     next(error);

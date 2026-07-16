@@ -1,5 +1,37 @@
 const bcrypt = require('bcryptjs');
-const { User } = require('../models');
+const { User, Setting } = require('../models');
+
+const ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'];
+
+/**
+ * GET /api/admin/role-tabs
+ * Tab overrides that apply to EVERY user of a role, so an admin can grant/revoke
+ * a tab for a whole role in one action instead of user-by-user.
+ * Shape: { [role]: { add: [tabId], remove: [tabId] } }
+ */
+async function getRoleTabs(req, res, next) {
+  try {
+    const doc = await Setting.findOne({ key: 'role_tab_overrides' }).lean();
+    res.json({ role_tabs: doc?.value || {} });
+  } catch (err) { next(err); }
+}
+
+/** PUT /api/admin/role-tabs  body: { [role]: { add: [], remove: [] } } */
+async function setRoleTabs(req, res, next) {
+  try {
+    const body = req.body?.role_tabs || {};
+    const clean = {};
+    for (const role of ROLES) {
+      const entry = body[role];
+      if (!entry) continue;
+      const norm = (arr) => [...new Set((Array.isArray(arr) ? arr : [])
+        .filter(t => typeof t === 'string' && t.length > 0 && t.length < 64))];
+      clean[role] = { add: norm(entry.add), remove: norm(entry.remove) };
+    }
+    await Setting.findOneAndUpdate({ key: 'role_tab_overrides' }, { value: clean }, { upsert: true });
+    res.json({ ok: true, role_tabs: clean });
+  } catch (err) { next(err); }
+}
 
 async function listUsers(req, res, next) {
   try {
@@ -136,4 +168,7 @@ async function emailTest(req, res, next) {
   }
 }
 
-module.exports = { listUsers, updateUserTabs, updateUserRole, resetPassword, emailDiagnostic, emailTest };
+module.exports = {
+  listUsers, updateUserTabs, updateUserRole, resetPassword,
+  getRoleTabs, setRoleTabs, emailDiagnostic, emailTest,
+};

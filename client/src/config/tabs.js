@@ -12,7 +12,8 @@ export const TAB_GROUPS = [
   {
     label: 'ניהול',
     items: [
-      { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: null },
+      // Management overview (child counts, branch KPIs) — NOT for regular staff.
+      { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
@@ -67,11 +68,33 @@ export function isDefaultAllowed(user, tab) {
   return tab.defaultRoles.includes(user.role);
 }
 
+/**
+ * Access precedence (highest first):
+ *   1. per-user override   (tab_overrides_add / tab_overrides_remove)
+ *   2. role-wide override  (role_tab_add / role_tab_remove — set once by the
+ *      admin for a whole role, delivered on the user payload)
+ *   3. the role default from TAB_GROUPS
+ */
 export function hasTabAccess(user, tabId) {
   if (!user) return false;
   const tab = TAB_BY_ID[tabId];
   if (!tab) return false;
+  // 1. per-user
   if ((user.tab_overrides_remove || []).includes(tabId)) return false;
   if ((user.tab_overrides_add || []).includes(tabId)) return true;
+  // 2. role-wide
+  if ((user.role_tab_remove || []).includes(tabId)) return false;
+  if ((user.role_tab_add || []).includes(tabId)) return true;
+  // 3. default
   return isDefaultAllowed(user, tab);
+}
+
+/** Effective access for a ROLE (default + role-wide override) — admin UI helper. */
+export function roleHasTab(role, tabId, roleTabs = {}) {
+  const tab = TAB_BY_ID[tabId];
+  if (!tab) return false;
+  const entry = roleTabs[role] || {};
+  if ((entry.remove || []).includes(tabId)) return false;
+  if ((entry.add || []).includes(tabId)) return true;
+  return isDefaultAllowed({ role }, tab);
 }
