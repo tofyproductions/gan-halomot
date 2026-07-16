@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [hasBiometric, setHasBiometric] = useState(false);
   const [step, setStep] = useState('creds'); // 'creds' | 'password'
   const [password, setPassword] = useState('');
+  const [bioForStep2, setBioForStep2] = useState(false); // user has fingerprint set
 
   // Load saved credentials on mount
   useEffect(() => {
@@ -52,7 +53,14 @@ export default function LoginPage() {
     try {
       const result = await login(fullName, idNumber, rememberMe);
       // The user has a password set → move to the password step, no token yet.
+      // Offer biometric there (as a replacement for typing the password).
       if (result.needs_password) {
+        if (result.hasWebauthn && result.user_id) {
+          localStorage.setItem(SAVED_USER_ID_KEY, result.user_id);
+          setBioForStep2(true);
+        } else {
+          setBioForStep2(false);
+        }
         setStep('password');
         setLoading(false);
         return;
@@ -174,6 +182,18 @@ export default function LoginPage() {
                 <Button type="submit" variant="contained" size="large" fullWidth disabled={loading} startIcon={<LoginIcon />}>
                   {loading ? 'מתחבר...' : 'כניסה'}
                 </Button>
+                {bioForStep2 && (
+                  <>
+                    <Divider><Typography variant="caption" color="text.secondary">או</Typography></Divider>
+                    <Button
+                      variant="outlined" size="large" fullWidth disabled={loading}
+                      startIcon={<FingerprintIcon />} onClick={handleBiometricLogin}
+                      sx={{ borderColor: '#7c3aed', color: '#7c3aed', '&:hover': { borderColor: '#6d28d9', bgcolor: '#f5f3ff' } }}
+                    >
+                      כניסה עם טביעת אצבע
+                    </Button>
+                  </>
+                )}
                 <Button variant="text" size="small" onClick={() => { setStep('creds'); setPassword(''); setError(''); }}>
                   חזרה
                 </Button>
@@ -181,31 +201,6 @@ export default function LoginPage() {
             </Box>
           ) : (
           <>
-          {/* Biometric login button */}
-          {hasBiometric && (
-            <>
-              <Button
-                variant="outlined"
-                size="large"
-                fullWidth
-                disabled={loading}
-                startIcon={<FingerprintIcon />}
-                onClick={handleBiometricLogin}
-                sx={{
-                  mb: 2, py: 1.5,
-                  borderColor: '#7c3aed',
-                  color: '#7c3aed',
-                  '&:hover': { borderColor: '#6d28d9', bgcolor: '#f5f3ff' },
-                }}
-              >
-                כניסה עם טביעת אצבע
-              </Button>
-              <Divider sx={{ mb: 2 }}>
-                <Typography variant="caption" color="text.secondary">או</Typography>
-              </Divider>
-            </>
-          )}
-
           <Box component="form" onSubmit={handleSubmit}>
             <Stack spacing={2.5}>
               <TextField
@@ -214,11 +209,10 @@ export default function LoginPage() {
                 onChange={(e) => setFullName(e.target.value)}
                 fullWidth
                 required
-                autoFocus={!hasBiometric}
+                autoFocus
               />
               <TextField
                 label="תעודת זהות"
-                type="password"
                 value={idNumber}
                 onChange={(e) => setIdNumber(e.target.value)}
                 fullWidth

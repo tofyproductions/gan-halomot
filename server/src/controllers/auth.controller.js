@@ -67,8 +67,15 @@ async function login(req, res, next) {
     }
 
     if (user.password_set) {
-      // Require the password before issuing any token.
-      return res.json({ needs_password: true, full_name: user.full_name });
+      // Require the password (or biometric) before issuing any token. Return the
+      // user id + webauthn flag so the password screen can offer fingerprint as
+      // a replacement for typing the password.
+      return res.json({
+        needs_password: true,
+        full_name: user.full_name,
+        user_id: String(user._id),
+        hasWebauthn: (user.webauthn_credentials || []).length > 0,
+      });
     }
 
     const result = makeToken(user, rememberMe);
