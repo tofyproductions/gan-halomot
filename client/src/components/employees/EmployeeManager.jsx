@@ -22,6 +22,9 @@ import ConfirmDialog from '../shared/ConfirmDialog';
 import { formatCurrency } from '../../utils/hebrewYear';
 import HoursReportDialog from './HoursReportDialog';
 import ClockMatchDialog from './ClockMatchDialog';
+import EmployeeChangeRequests from './EmployeeChangeRequests';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
+import Badge from '@mui/material/Badge';
 
 const POSITIONS = ['גננת', 'מובילת כיתה', 'מטפלת', 'סייעת', 'מבשלת', 'מנהלת', 'אחר'];
 
@@ -136,6 +139,8 @@ export default function EmployeeManager() {
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
+  const [changeReqOpen, setChangeReqOpen] = useState(false);
+  const [pendingChanges, setPendingChanges] = useState(0);
   // Inline editing: { empId, field, value }
   const [inlineEdit, setInlineEdit] = useState(null);
   const [search, setSearch] = useState('');
@@ -156,6 +161,14 @@ export default function EmployeeManager() {
   }, [selectedBranch, showArchived]);
 
   useEffect(() => { fetchEmployees(); }, [fetchEmployees]);
+
+  // Count of employee-card edits waiting for the accountant (badge on the toolbar).
+  const fetchPendingChanges = useCallback(() => {
+    api.get('/payroll/employee-change-requests', { params: { status: 'pending' } })
+      .then(r => setPendingChanges((r.data.requests || []).length))
+      .catch(() => setPendingChanges(0));
+  }, []);
+  useEffect(() => { fetchPendingChanges(); }, [fetchPendingChanges]);
 
   const openAdd = () => setDialog({
     open: true,
@@ -284,8 +297,15 @@ export default function EmployeeManager() {
         await api.post('/payroll/employees', payload);
         toast.success('עובד נוסף');
       } else {
-        await api.put(`/payroll/employees/${data.id}`, payload);
-        toast.success('עובד עודכן');
+        const res = await api.put(`/payroll/employees/${data.id}`, payload);
+        // Branch-manager edits don't apply directly — they wait for the accountant.
+        if (res.data?.pending_approval) {
+          toast.info(`השינויים (${res.data.changes_count}) נשלחו לאישור הנהלת החשבונות`, { autoClose: 6000 });
+        } else if (res.data?.no_changes) {
+          toast.info('לא בוצעו שינויים');
+        } else {
+          toast.success('עובד עודכן');
+        }
       }
       closeDialog();
       fetchEmployees();
@@ -434,6 +454,14 @@ export default function EmployeeManager() {
           </Tooltip>
           {canManage && (
             <>
+              <Badge color="warning" badgeContent={pendingChanges} max={99}>
+                <Button
+                  variant="outlined" color="warning" startIcon={<FactCheckIcon />}
+                  onClick={() => setChangeReqOpen(true)}
+                >
+                  {isAdmin || isAccountant ? 'שינויים לאישור' : 'שינויים שהגשתי'}
+                </Button>
+              </Badge>
               <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
                 שיוך לשעון
               </Button>
@@ -924,6 +952,11 @@ export default function EmployeeManager() {
         branchName={selectedBranchName}
         onClose={() => setClockMatchOpen(false)}
         onSaved={fetchEmployees}
+      />
+      <EmployeeChangeRequests
+        open={changeReqOpen}
+        onClose={() => { setChangeReqOpen(false); fetchPendingChanges(); }}
+        onDecided={() => { fetchEmployees(); fetchPendingChanges(); }}
       />
     </Box>
   );

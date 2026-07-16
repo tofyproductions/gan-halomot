@@ -19,6 +19,23 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // Keep the profile fresh so permission changes an admin makes (role-wide or
+  // per-user) take effect without the user re-logging in: refetch on window
+  // focus and once a minute while the tab is open.
+  useEffect(() => {
+    if (!localStorage.getItem('token')) return;
+    let cancelled = false;
+    const refresh = () => {
+      if (document.hidden) return;
+      api.get('/auth/me')
+        .then(res => { if (!cancelled) setUser(res.data.user); })
+        .catch(() => { /* transient — keep the current session */ });
+    };
+    const id = setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', refresh); };
+  }, []);
+
   const applyAuth = (data) => {
     localStorage.setItem('token', data.token);
     setUser(data.user);

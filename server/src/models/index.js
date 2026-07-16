@@ -44,6 +44,7 @@ const ClassProvider = require('./ClassProvider');
 const ClassProgram = require('./ClassProgram');
 const ClassSession = require('./ClassSession');
 const MaintenanceItem = require('./MaintenanceItem');
+const EmployeeChangeRequest = require('./EmployeeChangeRequest');
 
 module.exports = {
   User,
@@ -91,4 +92,5 @@ module.exports = {
   ClassProgram,
   ClassSession,
   MaintenanceItem,
+  EmployeeChangeRequest,
 };

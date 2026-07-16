@@ -39,6 +39,9 @@ router.post('/employees/:id/enroll-clock',     requireRole('system_admin', 'bran
 // Cross-branch fingerprint copy — stage 1: READ-ONLY export from the source clock.
 router.post('/employees/:id/export-template',  requireRole('system_admin', 'branch_manager'), c.exportEmployeeTemplate);
 router.post('/employees/:id/import-template',  requireRole('system_admin', 'branch_manager'), c.importEmployeeTemplate);
+// Employee-card edits filed by branch managers, awaiting accountant approval
+router.get('/employee-change-requests',        requireRole('system_admin', 'accountant', 'branch_manager'), c.listEmployeeChangeRequests);
+router.post('/employee-change-requests/:id/decide', requireRole('system_admin', 'accountant'), c.decideEmployeeChangeRequest);
 router.get('/clock-commands/:id',              requireRole('system_admin', 'branch_manager'), c.getClockCommand);
 
 // Salary calculation

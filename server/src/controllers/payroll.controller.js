@@ -7,7 +7,7 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
@@ -290,6 +290,41 @@ async function createEmployee(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Hebrew labels for the change-approval diff view.
+const EMPLOYEE_FIELD_LABELS = {
+  full_name: 'שם מלא', israeli_id: 'ת"ז', employee_number: 'מספר עובד', is_freelancer: 'עצמאי',
+  branch_id: 'סניף', phone: 'טלפון', email: 'אימייל', address: 'כתובת', position: 'תפקיד',
+  start_date: 'תאריך תחילה', salary_type: 'סוג שכר', salary_is_net: 'נטו/ברוטו',
+  amuta_distribution: 'חלוקת עמותות', branch_rates: 'תעריפים לפי סניף', hourly_bonuses: 'תוספות שעתיות',
+  travel_mode: 'אופן נסיעות', travel_per_day: 'נסיעות ליום', travel_monthly_flat: 'נסיעות חודשי',
+  travel_override: 'דריסת נסיעות', travel_allowance: 'החזר נסיעות', meal_vouchers: 'תווי מזון',
+  recreation_annual: 'הבראה שנתית', bank_number: 'בנק', bank_branch: 'סניף בנק', bank_account: 'חשבון בנק',
+  pension_fund: 'קרן פנסיה', education_fund: 'קרן השתלמות', clock_aliases: 'כינויי שעון',
+  pension_exempt: 'פטור פנסיה', bituach_leumi_exempt: 'פטור ביטוח לאומי', has_army_reserve_form: 'טופס מילואים',
+  sick_pay_policy: 'מדיניות דמי מחלה', sick_balance_opening: 'יתרת מחלה פותחת',
+  sick_daily_value_override: 'ערך יום מחלה', loans: 'הלוואות', bonuses: 'בונוסים',
+  notes: 'הערות', permanent_note: 'הערה קבועה', is_active: 'פעיל', inactive_reason: 'סיבת אי-פעילות',
+  work_days: 'ימי עבודה', on_maternity_leave: 'חופשת לידה', maternity_leave_from: 'לידה מתאריך',
+  maternity_leave_to: 'לידה עד תאריך', is_pregnant: 'בהריון', due_date: 'צפי לידה',
+  gave_birth_date: 'תאריך לידה', on_pregnancy_bedrest: 'שמירת הריון',
+};
+
+// Compare/store values in a stable, JSON-friendly shape (Dates → YYYY-MM-DD,
+// ObjectIds → string) so the diff doesn't flag equal values as changed.
+function normalizeForDiff(v) {
+  if (v == null) return null;
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (Array.isArray(v)) return v.map(normalizeForDiff);
+  if (typeof v === 'object') {
+    if (v._bsontype === 'ObjectID' || v.constructor?.name === 'ObjectId') return String(v);
+    if (typeof v.toObject === 'function') return normalizeForDiff(v.toObject());
+    const out = {};
+    for (const k of Object.keys(v)) { if (k !== '_id' && k !== '$__' && k !== '$isNew') out[k] = normalizeForDiff(v[k]); }
+    return out;
+  }
+  return v;
+}
+
 async function updateEmployee(req, res, next) {
   try {
     const emp = await Employee.findById(req.params.id);
@@ -308,6 +343,42 @@ async function updateEmployee(req, res, next) {
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
       'is_pregnant', 'due_date', 'gave_birth_date', 'on_pregnancy_bedrest',
     ];
+    // Branch managers may not write the employee card directly — every field
+    // they change is captured as a pending request for the accountant/admin.
+    if (req.user?.role === 'branch_manager') {
+      const changes = [];
+      for (const f of fields) {
+        if (req.body[f] === undefined) continue;
+        const before = emp[f];
+        const after = req.body[f];
+        if (JSON.stringify(normalizeForDiff(before)) === JSON.stringify(normalizeForDiff(after))) continue;
+        changes.push({
+          field: f,
+          label: EMPLOYEE_FIELD_LABELS[f] || f,
+          before: normalizeForDiff(before),
+          after: normalizeForDiff(after),
+        });
+      }
+      if (changes.length === 0) {
+        return res.json({ employee: { ...emp.toObject(), id: emp._id }, no_changes: true });
+      }
+      const cr = await EmployeeChangeRequest.create({
+        employee_id: emp._id,
+        branch_id: emp.branch_id || null,
+        employee_name: emp.full_name || '',
+        changes,
+        status: 'pending',
+        requested_by: req.user?.id || null,
+        requested_by_name: req.user?.full_name || '',
+      });
+      return res.json({
+        pending_approval: true,
+        request_id: String(cr._id),
+        changes_count: changes.length,
+        message: 'השינויים נשלחו לאישור הנהלת החשבונות',
+      });
+    }
+
     for (const f of fields) {
       if (req.body[f] !== undefined) emp[f] = req.body[f];
     }
@@ -316,6 +387,74 @@ async function updateEmployee(req, res, next) {
     }
     await emp.save(); // triggers post-save hook for orphan punch re-linking
     res.json({ employee: { ...emp.toObject(), id: emp._id } });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/employee-change-requests?status=pending
+ * Pending employee-card edits awaiting accountant/admin approval. Branch
+ * managers see (read-only) the ones they filed for their own branches.
+ */
+async function listEmployeeChangeRequests(req, res, next) {
+  try {
+    const filter = { status: req.query.status || 'pending' };
+    const role = req.user?.role;
+    if (role !== 'system_admin' && role !== 'accountant') {
+      // A manager only sees their own branches' requests.
+      const managed = (req.user?.managed_branch_ids || []).map(String);
+      const fallback = req.user?.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length ? managed : fallback;
+      if (!allowed.length) return res.json({ requests: [] });
+      filter.branch_id = { $in: allowed };
+    }
+    const requests = await EmployeeChangeRequest.find(filter)
+      .populate('branch_id', 'name')
+      .sort({ created_at: -1 })
+      .lean();
+    res.json({
+      requests: requests.map(r => ({
+        ...r,
+        id: String(r._id),
+        branch_name: r.branch_id?.name || '',
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll/employee-change-requests/:id/decide  { approve: bool, note? }
+ * Accountant/admin applies or rejects a manager's employee-card edit. On
+ * approval the stored `after` values are written to the Employee.
+ */
+async function decideEmployeeChangeRequest(req, res, next) {
+  try {
+    const role = req.user?.role;
+    if (role !== 'system_admin' && role !== 'accountant') {
+      return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת יכולים לאשר' });
+    }
+    const cr = await EmployeeChangeRequest.findById(req.params.id);
+    if (!cr) return res.status(404).json({ error: 'בקשה לא נמצאה' });
+    if (cr.status !== 'pending') return res.status(400).json({ error: 'הבקשה כבר טופלה' });
+
+    const approve = req.body?.approve !== false;
+    if (approve) {
+      const emp = await Employee.findById(cr.employee_id);
+      if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+      for (const ch of cr.changes) {
+        if (ch.field === 'amuta_distribution') {
+          emp.amuta_distribution = await resolveAmutaDistribution(ch.after, emp.branch_id);
+        } else {
+          emp[ch.field] = ch.after;
+        }
+      }
+      await emp.save(); // post-save hook re-links orphan punches
+    }
+    cr.status = approve ? 'approved' : 'rejected';
+    cr.reviewed_by = req.user?.id || null;
+    cr.reviewed_at = new Date();
+    cr.review_note = req.body?.note || '';
+    await cr.save();
+    res.json({ ok: true, status: cr.status });
   } catch (err) { next(err); }
 }
 
@@ -2178,6 +2317,8 @@ module.exports = {
   enrollEmployeeToClock,
   exportEmployeeTemplate,
   importEmployeeTemplate,
+  listEmployeeChangeRequests,
+  decideEmployeeChangeRequest,
   getClockCommand,
   salaryForEmployee,
   salarySummary,
