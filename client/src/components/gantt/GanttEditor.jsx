@@ -85,6 +85,8 @@ export default function GanttEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [classroomName, setClassroomName] = useState('');
+  const [classroomCategory, setClassroomCategory] = useState('');
+  const [classSessions, setClassSessions] = useState([]); // read-only reflection from מעקב חוגים
   const [colorMenu, setColorMenu] = useState({ anchor: null, weekIdx: null, rowKey: null, dayIdx: null });
   const [showBank, setShowBank] = useState(false);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
@@ -101,9 +103,14 @@ export default function GanttEditor() {
       .finally(() => setLoading(false));
     api.get('/classrooms').then(res => {
       const cls = (res.data.classrooms || []).find(c => (c._id || c.id) === classroomId);
-      if (cls) setClassroomName(cls.name);
+      if (cls) { setClassroomName(cls.name); setClassroomCategory(cls.category || ''); }
     }).catch(() => {});
     api.get('/activities').then(res => setActivities(res.data.activities || [])).catch(() => {});
+    // Reflect class-tracking sessions for this branch+month onto the gantt days.
+    const ym = `${year}-${String(month).padStart(2, '0')}`;
+    api.get('/classes/sessions', { params: { branch: selectedBranch, month: ym } })
+      .then(res => setClassSessions(res.data.sessions || []))
+      .catch(() => setClassSessions([]));
   }, [classroomId, month, year, selectedBranch]);
 
   const isHoliday = (date) => {
@@ -111,6 +118,17 @@ export default function GanttEditor() {
     const d = new Date(date);
     return holidays.find(h => d >= new Date(h.start_date) && d <= new Date(h.end_date));
   };
+
+  // Read-only reflection of מעקב-חוגים sessions onto gantt days. A session shows
+  // on this classroom's gantt when its program category matches this classroom
+  // (or either side is unset = general). Purely informational; never saved.
+  const localYmd = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  const sessionsOnDate = (dd) => {
+    const ymd = localYmd(dd);
+    return classSessions.filter(s => s.date === ymd
+      && (!classroomCategory || !s.program_id?.classroom_category || s.program_id.classroom_category === classroomCategory));
+  };
+  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: '#f1f5f9' };
 
   // Cell helpers
   const getCell = (wk, rk, di) => gantt?.weeks?.[wk]?.cells?.find(c => c.row_key === rk && c.day_index === di);
@@ -323,6 +341,35 @@ export default function GanttEditor() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
+                    {/* Read-only class-tracking lane (מעקב חוגים reflection) */}
+                    {(() => {
+                      const dayCells = DAY_NAMES.map((_, di) => {
+                        const dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
+                        return { di, sessions: sessionsOnDate(dd) };
+                      });
+                      if (!dayCells.some(c => c.sessions.length)) return null;
+                      return (
+                        <TableRow>
+                          <TableCell sx={{ bgcolor: '#fdf2f8', fontWeight: 800, fontSize: '0.82rem', textAlign: 'center', borderLeft: '2px solid #fbcfe8', color: '#9d174d', p: 1 }}>חוגים</TableCell>
+                          {dayCells.map(({ di, sessions }) => (
+                            <TableCell key={di} sx={{ bgcolor: '#fdf2f8', border: '1px solid #fce7f3', p: 0.5, verticalAlign: 'top' }}>
+                              <Stack spacing={0.4}>
+                                {sessions.map(s => (
+                                  <Box key={s._id} sx={{
+                                    bgcolor: SESSION_TINT[s.status] || '#f1f5f9', borderRadius: 1, px: 0.6, py: 0.2,
+                                    fontSize: '0.68rem', fontWeight: 700, color: '#334155',
+                                    textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
+                                  }}>
+                                    {s.program_id?.name || 'חוג'}{s.time ? ` ${s.time}` : ''}
+                                    {s.status === 'postponed' && s.postponed_to_date ? ` → ${s.postponed_to_date.slice(5)}` : ''}
+                                  </Box>
+                                ))}
+                              </Stack>
+                            </TableCell>
+                          ))}
+                        </TableRow>
+                      );
+                    })()}
                     {rows.map((row, rowIdx) => (
                       <TableRow key={row.key}>
                         <TableCell sx={{ bgcolor: '#f1f5f9', fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>

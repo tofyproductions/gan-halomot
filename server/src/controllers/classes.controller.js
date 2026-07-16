@@ -112,7 +112,7 @@ async function listSessions(req, res, next) {
     if (req.query.branch && req.query.branch !== 'all') filter.branch_id = req.query.branch;
     if (req.query.month) filter.date = { $regex: `^${req.query.month}` };
     const sessions = await ClassSession.find(filter)
-      .populate('program_id', 'name instructor_name color default_rate provider_id')
+      .populate('program_id', 'name instructor_name color default_rate provider_id classroom_category')
       .sort({ date: 1, time: 1 }).lean();
     res.json({ sessions });
   } catch (err) { next(err); }
