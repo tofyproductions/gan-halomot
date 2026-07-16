@@ -53,6 +53,7 @@ const ICON_BY_TAB = {
   stock: Inventory2Icon,
   suppliers: LocalShippingIcon,
   gantt: CalendarMonthIcon,
+  classes: EventIcon,
   contacts: ContactsIcon,
   my_salary: AccountBalanceIcon,
   my_payslips: DescriptionIcon,

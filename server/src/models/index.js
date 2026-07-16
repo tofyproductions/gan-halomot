@@ -40,6 +40,9 @@ const PayrollChangeRequest = require('./PayrollChangeRequest');
 const BranchPricing = require('./BranchPricing');
 const EmployeeDocument = require('./EmployeeDocument');
 const Setting = require('./Setting');
+const ClassProvider = require('./ClassProvider');
+const ClassProgram = require('./ClassProgram');
+const ClassSession = require('./ClassSession');
 
 module.exports = {
   User,
@@ -83,4 +86,7 @@ module.exports = {
   BranchPricing,
   EmployeeDocument,
   Setting,
+  ClassProvider,
+  ClassProgram,
+  ClassSession,
 };

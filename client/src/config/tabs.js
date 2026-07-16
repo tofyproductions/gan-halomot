@@ -36,6 +36,7 @@ export const TAB_GROUPS = [
       { id: 'stock',      label: 'מעקב מלאי',  path: '/stock',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'cook'] },
       { id: 'suppliers',  label: 'ספקים',      path: '/suppliers',  defaultRoles: ['system_admin', 'accountant'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
+      { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },

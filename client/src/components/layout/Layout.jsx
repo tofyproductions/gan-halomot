@@ -2,6 +2,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
 import Header from './Header';
 import { useBranch } from '../../hooks/useBranch';
+import ClassPopupPoller from '../classes/ClassPopupPoller';
 
 // Routes that benefit from extra horizontal space — payroll/attendance tables
 // are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
@@ -72,6 +73,7 @@ export default function Layout() {
         <Header />
         <RouteAwareContainer />
       </Box>
+      <ClassPopupPoller />
     </Box>
   );
 }
