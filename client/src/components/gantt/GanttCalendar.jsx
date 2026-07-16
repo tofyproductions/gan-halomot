@@ -7,7 +7,7 @@ import {
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
-import { useAcademicYear } from '../../hooks/useAcademicYear';
+import { useAcademicYear, getHebrewYearFromStart } from '../../hooks/useAcademicYear';
 
 const MONTH_NAMES = {
   9: 'ספטמבר', 10: 'אוקטובר', 11: 'נובמבר', 12: 'דצמבר',
@@ -32,8 +32,15 @@ export default function GanttCalendar() {
   const [selectedClassroom, setSelectedClassroom] = useState('');
   const [archive, setArchive] = useState([]);
 
-  const academicYear = years.current.range;
-  const [y1, y2] = academicYear.split('-').map(Number);
+  // Academic-year picker: a few past years (history) through a couple ahead
+  // (future planning). Each option's value is the start calendar year.
+  const currentStart = years.current.value;
+  const yearOptions = [];
+  for (let s = currentStart + 2; s >= currentStart - 4; s--) {
+    yearOptions.push({ start: s, label: `${getHebrewYearFromStart(s)} (${s}-${s + 1})` });
+  }
+  const [y1, setY1] = useState(currentStart);
+  const y2 = y1 + 1;
 
   useEffect(() => {
     api.get('/classrooms').then(res => {
@@ -65,13 +72,22 @@ export default function GanttCalendar() {
     <Box dir="rtl">
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>תוכנית עבודה שנתית</Typography>
-        <TextField select size="small" value={selectedClassroom} label="כיתה"
-          onChange={e => setSelectedClassroom(e.target.value)} sx={{ minWidth: 180 }}
-        >
-          {classrooms.map(c => (
-            <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
-          ))}
-        </TextField>
+        <Stack direction="row" spacing={2}>
+          <TextField select size="small" value={y1} label="שנת לימודים"
+            onChange={e => setY1(Number(e.target.value))} sx={{ minWidth: 200 }}
+          >
+            {yearOptions.map(o => (
+              <MenuItem key={o.start} value={o.start}>{o.label}</MenuItem>
+            ))}
+          </TextField>
+          <TextField select size="small" value={selectedClassroom} label="כיתה"
+            onChange={e => setSelectedClassroom(e.target.value)} sx={{ minWidth: 180 }}
+          >
+            {classrooms.map(c => (
+              <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
+            ))}
+          </TextField>
+        </Stack>
       </Stack>
 
       {/* Legend */}

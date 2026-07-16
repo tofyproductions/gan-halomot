@@ -1,4 +1,5 @@
-const { GanttMonth, Holiday } = require('../models');
+const mongoose = require('mongoose');
+const { GanttMonth, Holiday, Classroom } = require('../models');
 
 const DEFAULT_ROWS = [
   { key: 'meeting', label: 'מפגש' },
@@ -22,7 +23,13 @@ async function get(req, res, next) {
 
     // If not found, return empty template with weeks
     if (!gantt) {
-      const branchId = branch || req.query.branch;
+      // Prefer an explicit valid branch; otherwise ('all'/missing) fall back to
+      // the classroom's own branch so a later save stores the correct branch_id.
+      let branchId = (branch && mongoose.isValidObjectId(branch)) ? branch : null;
+      if (!branchId && mongoose.isValidObjectId(classroom)) {
+        const room = await Classroom.findById(classroom).select('branch_id').lean();
+        branchId = room?.branch_id || null;
+      }
       gantt = {
         _id: null,
         branch_id: branchId,
@@ -37,15 +44,20 @@ async function get(req, res, next) {
       };
     }
 
-    // Get holidays for this month
+    // Get holidays for this month. Only query when we have a real branch id —
+    // an "all" / missing branch (e.g. the cross-branch view) is not an ObjectId
+    // and would throw a CastError, which previously 500'd the whole gantt load.
     const startOfMonth = new Date(parseInt(year), parseInt(month) - 1, 1);
     const endOfMonth = new Date(parseInt(year), parseInt(month), 0);
 
-    const holidays = await Holiday.find({
-      branch_id: gantt.branch_id,
-      start_date: { $lte: endOfMonth },
-      end_date: { $gte: startOfMonth },
-    }).lean();
+    let holidays = [];
+    if (gantt.branch_id && mongoose.isValidObjectId(gantt.branch_id)) {
+      holidays = await Holiday.find({
+        branch_id: gantt.branch_id,
+        start_date: { $lte: endOfMonth },
+        end_date: { $gte: startOfMonth },
+      }).lean();
+    }
 
     gantt.id = gantt._id;
     res.json({ gantt, holidays: holidays.map(h => ({ ...h, id: h._id })) });
