@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const { User } = require('../models');
 const env = require('../config/env');
 const {
@@ -32,34 +33,89 @@ function makeToken(user, rememberMe) {
     position: user.position,
     tab_overrides_add: user.tab_overrides_add || [],
     tab_overrides_remove: user.tab_overrides_remove || [],
+    password_set: !!user.password_set,
   };
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
   return { token, user: payload };
 }
 
+// Locate the login user by name + national id (the credentials pair).
+async function findLoginUser(full_name, id_number) {
+  const cleanedId = String(id_number || '').replace(/\D/g, '').trim();
+  const cleanedName = String(full_name || '').trim();
+  if (!cleanedId || !cleanedName) return null;
+  return User.findOne({
+    full_name: { $regex: new RegExp(`^${cleanedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    id_number: cleanedId,
+    is_active: true,
+  }).populate('branch_id', 'name');
+}
+
+// Step 1 of login: verify name + national id. If the user has chosen a login
+// password, we STOP here and tell the client to ask for it (no token issued).
+// If they haven't, we log them in as before but flag password_prompt so the
+// client nags them to set one.
 async function login(req, res, next) {
   try {
     const { full_name, id_number, rememberMe } = req.body;
     if (!full_name || !id_number) {
       return res.status(400).json({ error: 'שם ותעודת זהות נדרשים' });
     }
-
-    const cleanedId = id_number.replace(/\D/g, '').trim();
-    const cleanedName = full_name.trim();
-
-    const user = await User.findOne({
-      full_name: { $regex: new RegExp(`^${cleanedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-      id_number: cleanedId,
-      is_active: true,
-    }).populate('branch_id', 'name');
-
+    const user = await findLoginUser(full_name, id_number);
     if (!user) {
       return res.status(401).json({ error: 'שם או תעודת זהות שגויים' });
     }
 
+    if (user.password_set) {
+      // Require the password before issuing any token.
+      return res.json({ needs_password: true, full_name: user.full_name });
+    }
+
+    const result = makeToken(user, rememberMe);
+    result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
+    result.password_prompt = true; // no password chosen yet → nag on the client
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Step 2 of login (only when password_set): name + id + password.
+async function loginWithPassword(req, res, next) {
+  try {
+    const { full_name, id_number, password, rememberMe } = req.body;
+    if (!full_name || !id_number || !password) {
+      return res.status(400).json({ error: 'שם, תעודת זהות וסיסמה נדרשים' });
+    }
+    const user = await findLoginUser(full_name, id_number);
+    if (!user || !user.password_set) {
+      return res.status(401).json({ error: 'פרטי התחברות שגויים' });
+    }
+    const ok = await bcrypt.compare(String(password), user.password_hash || '');
+    if (!ok) {
+      return res.status(401).json({ error: 'סיסמה שגויה' });
+    }
     const result = makeToken(user, rememberMe);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Authenticated user sets/changes their own login password.
+async function setPassword(req, res, next) {
+  try {
+    const { password } = req.body;
+    if (!password || String(password).length < 4) {
+      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 4 תווים' });
+    }
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });
+    user.password_hash = await bcrypt.hash(String(password), 10);
+    user.password_set = true;
+    await user.save();
+    res.json({ ok: true, password_set: true });
   } catch (error) {
     next(error);
   }
@@ -238,7 +294,7 @@ async function webauthnAuthVerify(req, res, next) {
 }
 
 module.exports = {
-  login, logout, me,
+  login, loginWithPassword, setPassword, logout, me,
   webauthnRegisterOptions, webauthnRegisterVerify,
   webauthnAuthOptions, webauthnAuthVerify,
 };

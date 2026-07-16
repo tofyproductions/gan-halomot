@@ -3,6 +3,12 @@ const mongoose = require('mongoose');
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   password_hash: { type: String, required: true },
+  // Login-password gate: false until the user deliberately chooses a login
+  // password. While false, they can still log in with name+ID (backward compat)
+  // but are nagged to set one every login. Once true, a correct password is
+  // REQUIRED to log in. Admin "reset" flips this back to false (never reveals a
+  // plaintext password — bcrypt only).
+  password_set: { type: Boolean, default: false },
   full_name: { type: String, default: '' },
   role: {
     type: String,

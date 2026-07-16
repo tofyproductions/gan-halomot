@@ -19,14 +19,33 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const applyAuth = (data) => {
+    localStorage.setItem('token', data.token);
+    setUser(data.user);
+    if (data.user.branch_id) localStorage.setItem('selectedBranch', data.user.branch_id);
+  };
+
+  // Step 1. May return { needs_password: true } (no token) → caller must then
+  // call loginWithPassword. Otherwise it logs in and may carry password_prompt.
   const login = async (full_name, id_number, rememberMe = false) => {
     const res = await api.post('/auth/login', { full_name, id_number, rememberMe });
-    localStorage.setItem('token', res.data.token);
-    setUser(res.data.user);
-    if (res.data.user.branch_id) {
-      localStorage.setItem('selectedBranch', res.data.user.branch_id);
-    }
+    if (res.data.needs_password) return res.data;
+    applyAuth(res.data);
     return res.data;
+  };
+
+  // Step 2 (when the user has a password set).
+  const loginWithPassword = async (full_name, id_number, password, rememberMe = false) => {
+    const res = await api.post('/auth/login-password', { full_name, id_number, password, rememberMe });
+    applyAuth(res.data);
+    return res.data;
+  };
+
+  // User chooses/changes their own login password, then refresh the profile.
+  const setPassword = async (password) => {
+    await api.post('/auth/set-password', { password });
+    const me = await api.get('/auth/me');
+    setUser(me.data.user);
   };
 
   const logout = () => {
@@ -45,7 +64,7 @@ export function AuthProvider({ children }) {
   const canSeeAllBranches = isAdmin || isAccountant || (user?.managed_branch_ids?.length || 0) > 1;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
       {children}
     </AuthContext.Provider>
   );

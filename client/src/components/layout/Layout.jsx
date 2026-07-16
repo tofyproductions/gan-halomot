@@ -1,8 +1,11 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { Box } from '@mui/material';
+import { useState, useEffect } from 'react';
 import Header from './Header';
 import { useBranch } from '../../hooks/useBranch';
+import { useAuth } from '../../hooks/useAuth';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
+import SetPasswordDialog from '../shared/SetPasswordDialog';
 
 // Routes that benefit from extra horizontal space — payroll/attendance tables
 // are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
@@ -74,7 +77,28 @@ export default function Layout() {
         <RouteAwareContainer />
       </Box>
       <ClassPopupPoller />
+      <SetPasswordGate />
     </Box>
+  );
+}
+
+// Nags the user to choose a login password once per session while they have
+// none set (they may skip; it reappears next login). Dismissed-for-session is
+// tracked in sessionStorage so it doesn't pop on every route change.
+function SetPasswordGate() {
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (user && user.password_set === false && !sessionStorage.getItem('pw_nag_dismissed')) {
+      setOpen(true);
+    }
+  }, [user]);
+  if (!user || user.password_set !== false) return null;
+  return (
+    <SetPasswordDialog
+      open={open} allowSkip
+      onClose={(saved) => { if (!saved) sessionStorage.setItem('pw_nag_dismissed', '1'); setOpen(false); }}
+    />
   );
 }
 

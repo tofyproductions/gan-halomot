@@ -7,6 +7,7 @@ import {
   InputLabel, FormControl, OutlinedInput, ListItemText,
 } from '@mui/material';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import LockResetIcon from '@mui/icons-material/LockReset';
 import SaveIcon from '@mui/icons-material/Save';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { TAB_GROUPS, ALL_TABS, isDefaultAllowed } from '../../config/tabs';
@@ -186,6 +187,16 @@ export default function PermissionsManager() {
       delete next[userId];
       return next;
     });
+  }
+
+  async function resetPassword(user) {
+    if (!window.confirm(`לאפס את הסיסמה של ${user.full_name || user.email}?\nהעובד/ת יוכל/תוכל להיכנס עם שם+ת"ז ויתבקש/תתבקש לבחור סיסמה חדשה.`)) return;
+    try {
+      await api.post(`/admin/users/${user._id}/reset-password`, {});
+      toast.success('הסיסמה אופסה');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
   }
 
   async function saveUser(user) {
@@ -400,6 +411,11 @@ export default function PermissionsManager() {
                             <RestartAltIcon fontSize="small" />
                           </IconButton>
                         </span>
+                      </Tooltip>
+                      <Tooltip title="אפס סיסמה (העובד יבחר חדשה בכניסה הבאה)">
+                        <IconButton size="small" color="warning" onClick={() => resetPassword(user)}>
+                          <LockResetIcon fontSize="small" />
+                        </IconButton>
                       </Tooltip>
                     </Stack>
                   </TableCell>

@@ -3,8 +3,12 @@ const router = express.Router();
 const { authMiddleware } = require('../middleware/auth');
 const authController = require('../controllers/auth.controller');
 
-// POST /api/auth/login (public)
+// POST /api/auth/login (public) — step 1: name + id
 router.post('/login', authController.login);
+// POST /api/auth/login-password (public) — step 2: name + id + password
+router.post('/login-password', authController.loginWithPassword);
+// POST /api/auth/set-password (auth) — user chooses/changes their login password
+router.post('/set-password', authMiddleware, authController.setPassword);
 
 // POST /api/auth/logout (public)
 router.post('/logout', authController.logout);

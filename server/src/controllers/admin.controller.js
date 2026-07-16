@@ -1,3 +1,4 @@
+const bcrypt = require('bcryptjs');
 const { User } = require('../models');
 
 async function listUsers(req, res, next) {
@@ -59,6 +60,31 @@ async function updateUserTabs(req, res, next) {
   }
 }
 
+/**
+ * POST /api/admin/users/:id/reset-password
+ * Admin resets a user's login password. For security we NEVER reveal or set a
+ * plaintext password — we flip password_set back to false so the user can log
+ * in with name+ID again and is prompted to choose a new password. Optionally a
+ * temporary password can be provided to hand the employee.
+ */
+async function resetPassword(req, res, next) {
+  try {
+    const { temp_password } = req.body || {};
+    const update = { password_set: false };
+    if (temp_password && String(temp_password).length >= 4) {
+      // Give them a known temp password AND keep password_set=false so they are
+      // still nagged to replace it (temp works as the step-2 password meanwhile
+      // is NOT enforced since password_set=false → name+ID logs in). We simply
+      // store the hash so a later "set your own" flow has something to compare.
+      update.password_hash = await bcrypt.hash(String(temp_password), 10);
+    }
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true })
+      .select('full_name password_set');
+    if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });
+    res.json({ ok: true, full_name: user.full_name, password_set: user.password_set });
+  } catch (err) { next(err); }
+}
+
 async function emailDiagnostic(req, res, next) {
   const env = require('../config/env');
   const info = {
@@ -110,4 +136,4 @@ async function emailTest(req, res, next) {
   }
 }
 
-module.exports = { listUsers, updateUserTabs, updateUserRole, emailDiagnostic, emailTest };
+module.exports = { listUsers, updateUserTabs, updateUserRole, resetPassword, emailDiagnostic, emailTest };

@@ -15,13 +15,15 @@ const SAVED_USER_ID_KEY = 'gan_biometric_user_id';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, loginWithPassword } = useAuth();
   const [fullName, setFullName] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometric, setHasBiometric] = useState(false);
+  const [step, setStep] = useState('creds'); // 'creds' | 'password'
+  const [password, setPassword] = useState('');
 
   // Load saved credentials on mount
   useEffect(() => {
@@ -49,25 +51,41 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const result = await login(fullName, idNumber, rememberMe);
-
-      // Save or clear credentials
-      if (rememberMe) {
-        localStorage.setItem(SAVED_CREDS_KEY, JSON.stringify({ fullName, idNumber }));
-      } else {
-        localStorage.removeItem(SAVED_CREDS_KEY);
+      // The user has a password set → move to the password step, no token yet.
+      if (result.needs_password) {
+        setStep('password');
+        setLoading(false);
+        return;
       }
-
-      // Save user ID for biometric if they have it set up
-      if (result.hasWebauthn) {
-        localStorage.setItem(SAVED_USER_ID_KEY, result.user.id);
-      }
-
-      navigate('/');
+      finishLogin(result);
     } catch (err) {
       setError(err.response?.data?.error || 'שגיאה בהתחברות');
-    } finally {
       setLoading(false);
     }
+  };
+
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!password) { setError('יש להזין סיסמה'); return; }
+    setLoading(true);
+    try {
+      const result = await loginWithPassword(fullName, idNumber, password, rememberMe);
+      finishLogin(result);
+    } catch (err) {
+      setError(err.response?.data?.error || 'סיסמה שגויה');
+      setLoading(false);
+    }
+  };
+
+  const finishLogin = (result) => {
+    if (rememberMe) {
+      localStorage.setItem(SAVED_CREDS_KEY, JSON.stringify({ fullName, idNumber }));
+    } else {
+      localStorage.removeItem(SAVED_CREDS_KEY);
+    }
+    if (result.hasWebauthn) localStorage.setItem(SAVED_USER_ID_KEY, result.user.id);
+    navigate('/');
   };
 
   const handleBiometricLogin = async () => {
@@ -141,6 +159,28 @@ export default function LoginPage() {
             </Alert>
           )}
 
+          {/* Password step — the user has a login password set */}
+          {step === 'password' ? (
+            <Box component="form" onSubmit={handlePasswordSubmit}>
+              <Stack spacing={2.5}>
+                <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                  שלום {fullName} — הזן/י את הסיסמה שלך
+                </Typography>
+                <TextField
+                  label="סיסמה" type="password" value={password} autoFocus
+                  onChange={(e) => setPassword(e.target.value)} fullWidth required
+                  inputProps={{ dir: 'ltr' }}
+                />
+                <Button type="submit" variant="contained" size="large" fullWidth disabled={loading} startIcon={<LoginIcon />}>
+                  {loading ? 'מתחבר...' : 'כניסה'}
+                </Button>
+                <Button variant="text" size="small" onClick={() => { setStep('creds'); setPassword(''); setError(''); }}>
+                  חזרה
+                </Button>
+              </Stack>
+            </Box>
+          ) : (
+          <>
           {/* Biometric login button */}
           {hasBiometric && (
             <>
@@ -207,6 +247,8 @@ export default function LoginPage() {
               </Button>
             </Stack>
           </Box>
+          </>
+          )}
         </CardContent>
       </Card>
     </Box>
