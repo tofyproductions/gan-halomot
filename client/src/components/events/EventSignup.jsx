@@ -29,6 +29,14 @@ const fmtDate = (d) => {
   catch { return d; }
 };
 
+// Israeli phone validation: mobile (05X + 8 digits) or landline (0[2-489] + 7).
+// Accepts +972 / 972 prefixes and spaces/dashes.
+const normalizePhone = (p) => String(p || '').replace(/\D/g, '').replace(/^972/, '0');
+const isValidPhone = (p) => {
+  const s = normalizePhone(p);
+  return /^05\d{8}$/.test(s) || /^0[2-489]\d{7}$/.test(s);
+};
+
 export default function EventSignup() {
   const { token } = useParams();
   const claimantId = useRef(getClaimantId()).current;
@@ -39,6 +47,7 @@ export default function EventSignup() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');           // item name currently mutating
+  const [finished, setFinished] = useState(() => !!localStorage.getItem(`gan_ev_done_${token}`));
 
   const load = useCallback((ph) => {
     const params = { claimant_id: claimantId };
@@ -65,8 +74,12 @@ export default function EventSignup() {
     localStorage.setItem('gan_parent_phone', phone.trim());
   };
 
+  const finish = () => { persistIdentity(); localStorage.setItem(`gan_ev_done_${token}`, '1'); setFinished(true); window.scrollTo(0, 0); };
+  const editAgain = () => { localStorage.removeItem(`gan_ev_done_${token}`); setFinished(false); };
+
   const claim = async (itemName) => {
     if (!name.trim()) return toast.warn('נא להזין את שמך למעלה');
+    if (!isValidPhone(phone)) return toast.warn('נא להזין מספר טלפון תקין (למשל 0521234567)');
     persistIdentity();
     setBusy(itemName);
     try {
@@ -112,6 +125,36 @@ export default function EventSignup() {
   const myTotal = data.mine.length;
   const allowMultiple = data.allow_multiple;
   const canClaimMore = allowMultiple || myTotal === 0;
+  const phoneError = phone.trim() !== '' && !isValidPhone(phone);
+
+  // Thank-you screen — shown after the parent taps "סיום" (their picks are
+  // already saved; this just confirms). Editable via "עריכת הבחירה".
+  if (finished && myTotal > 0) {
+    const myItems = Object.entries(mineByName).map(([n, v]) => ({ name: n, count: v.count }));
+    return (
+      <Box dir="rtl" sx={{ maxWidth: 480, mx: 'auto', py: { xs: 5, sm: 7 }, px: 3, textAlign: 'center' }}>
+        <CheckCircleIcon sx={{ fontSize: 76, color: 'success.main' }} />
+        <Typography variant="h5" fontWeight={800} sx={{ mt: 1 }}>תודה, {name.trim()}! 🎉</Typography>
+        <Typography color="text.secondary" sx={{ mt: 1 }}>רשמנו שאת/ה מביא/ה ל{event.name}:</Typography>
+        <Paper sx={{ p: 2, borderRadius: 3, my: 2.5, textAlign: 'right', bgcolor: '#f6fdf8', border: '1px solid', borderColor: 'success.light' }}>
+          <Stack spacing={1}>
+            {myItems.map((it) => (
+              <Stack key={it.name} direction="row" spacing={1} alignItems="center">
+                <CheckCircleIcon fontSize="small" color="success" />
+                <Typography fontWeight={600}>{it.name}{it.count > 1 ? ` ×${it.count}` : ''}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Paper>
+        {(event.event_date || event.event_time) && (
+          <Typography variant="body2" color="text.secondary">
+            נתראה ב{fmtDate(event.event_date)}{event.event_time ? ` בשעה ${event.event_time}` : ''} 🎈
+          </Typography>
+        )}
+        <Button variant="text" onClick={editAgain} sx={{ mt: 3 }}>עריכת הבחירה</Button>
+      </Box>
+    );
+  }
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 560, mx: 'auto', py: { xs: 2, sm: 4 }, px: 2 }}>
@@ -134,10 +177,12 @@ export default function EventSignup() {
           <Typography variant="subtitle2" gutterBottom>הפרטים שלך</Typography>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
             <TextField size="small" label="השם שלי" value={name} onChange={(e) => setName(e.target.value)} fullWidth required />
-            <TextField size="small" label="טלפון" value={phone}
+            <TextField size="small" label="טלפון" value={phone} required
               onChange={(e) => setPhone(e.target.value)}
               onBlur={() => { persistIdentity(); load(); }}
-              helperText="מזהה אותך אם תיכנס/י ממכשיר אחר" fullWidth />
+              error={phoneError}
+              inputProps={{ inputMode: 'tel' }}
+              helperText={phoneError ? 'מספר טלפון לא תקין' : 'מזהה אותך אם תיכנס/י ממכשיר אחר'} fullWidth />
           </Stack>
         </Paper>
       )}
@@ -203,6 +248,14 @@ export default function EventSignup() {
           );
         })}
       </Stack>
+
+      {/* Finish → thank-you (picks are already saved; this confirms) */}
+      {!data.closed && myTotal > 0 && (
+        <Button fullWidth variant="contained" size="large" onClick={finish}
+          sx={{ mt: 2.5, py: 1.3, borderRadius: 3, fontWeight: 800, fontSize: '1rem' }}>
+          סיום ואישור הבחירה
+        </Button>
+      )}
 
       <Divider sx={{ my: 3 }} />
       <Typography variant="caption" color="text.secondary" display="block" textAlign="center">
