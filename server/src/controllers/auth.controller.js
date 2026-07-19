@@ -262,9 +262,15 @@ async function webauthnAuthOptions(req, res, next) {
       return res.status(404).json({ error: 'משתמש לא נמצא' });
     }
 
+    // transports:['internal'] tells the browser the credential lives on THIS
+    // device's built-in authenticator, so it prompts Touch ID / fingerprint
+    // directly instead of offering the cross-device "Passkeys & Security Keys"
+    // QR (hybrid) flow — even for an iCloud-synced platform passkey, which on
+    // macOS otherwise advertises the hybrid transport.
     const creds = (user.webauthn_credentials || []).map(c => ({
       id: c.credential_id,
       type: 'public-key',
+      transports: ['internal'],
     }));
 
     if (creds.length === 0) {
