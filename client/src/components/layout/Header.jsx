@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
-  AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Select, IconButton, Tooltip,
+  AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Menu, Select, IconButton, Tooltip,
   Chip, Divider, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
   ListSubheader, useMediaQuery, useTheme,
 } from '@mui/material';
@@ -30,6 +30,8 @@ import AssignmentIcon from '@mui/icons-material/Assignment';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
 import HandymanIcon from '@mui/icons-material/Handyman';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import CelebrationIcon from '@mui/icons-material/Celebration';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'react-toastify';
@@ -55,6 +57,7 @@ const ICON_BY_TAB = {
   suppliers: LocalShippingIcon,
   gantt: CalendarMonthIcon,
   classes: EventIcon,
+  events: CelebrationIcon,
   maintenance: HandymanIcon,
   contacts: ContactsIcon,
   my_salary: AccountBalanceIcon,
@@ -73,6 +76,7 @@ export default function Header() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [navMenu, setNavMenu] = useState(null); // { anchorEl, group } — open category dropdown
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
   // Selected gan marker colour — drives the branch switcher's own colour so
@@ -188,44 +192,55 @@ export default function Header() {
           )}
         </Stack>
 
-        {/* Center/Left: Nav Groups (desktop only) */}
-        <Stack direction="row" alignItems="center" spacing={0} sx={{ display: { xs: 'none', md: 'flex' } }}>
-          {TAB_GROUPS.map((group, gi) => {
+        {/* Center/Left: Nav category dropdowns (desktop only). One button per
+            group keeps the bar compact; the group opens a menu of its tabs. */}
+        <Stack direction="row" alignItems="center" spacing={0.3} sx={{ display: { xs: 'none', md: 'flex' } }}>
+          {TAB_GROUPS.map((group) => {
             const visibleItems = group.items.filter(item => hasTabAccess(user, item.id));
             if (visibleItems.length === 0) return null;
+            const groupActive = visibleItems.some(it => location.pathname === it.path);
+            const open = navMenu?.group === group.label;
             return (
-              <Stack key={group.label} direction="row" alignItems="center" spacing={0}>
-                {gi > 0 && (
-                  <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: '#e2e8f0' }} />
-                )}
-                {visibleItems.map(item => {
-                  const Icon = ICON_BY_TAB[item.id] || DashboardIcon;
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <Tooltip key={item.path} title={item.label}>
-                      <Button
-                        size="small"
-                        onClick={() => navigate(item.path)}
-                        startIcon={<Icon sx={{ fontSize: '1rem !important' }} />}
-                        sx={{
-                          color: isActive ? 'primary.dark' : 'text.secondary',
-                          bgcolor: isActive ? 'warning.light' : 'transparent',
-                          fontWeight: isActive ? 800 : 600,
-                          borderRadius: 2,
-                          px: 1.2, py: 0.5,
-                          mx: 0.2,
-                          fontSize: '0.78rem',
-                          minWidth: 'auto',
-                          '&:hover': { bgcolor: isActive ? 'warning.light' : '#f1f5f9' },
-                          '& .MuiButton-startIcon': { ml: 0.5, mr: 0 },
-                        }}
+              <Box key={group.label}>
+                <Button
+                  size="small"
+                  onClick={(e) => setNavMenu({ anchorEl: e.currentTarget, group: group.label })}
+                  endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '1.1rem !important' }} />}
+                  sx={{
+                    color: groupActive ? 'primary.dark' : 'text.secondary',
+                    bgcolor: groupActive ? 'warning.light' : 'transparent',
+                    fontWeight: groupActive ? 800 : 600,
+                    borderRadius: 2, px: 1.3, py: 0.5, mx: 0.1,
+                    fontSize: '0.82rem', minWidth: 'auto',
+                    '&:hover': { bgcolor: groupActive ? 'warning.light' : '#f1f5f9' },
+                    '& .MuiButton-endIcon': { ml: 0.3, mr: -0.3 },
+                  }}
+                >
+                  {group.label}
+                </Button>
+                <Menu
+                  anchorEl={navMenu?.anchorEl}
+                  open={!!open}
+                  onClose={() => setNavMenu(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  MenuListProps={{ dense: true }}
+                >
+                  {visibleItems.map(item => {
+                    const Icon = ICON_BY_TAB[item.id] || DashboardIcon;
+                    const isActive = location.pathname === item.path;
+                    return (
+                      <MenuItem key={item.path} selected={isActive}
+                        onClick={() => { navigate(item.path); setNavMenu(null); }}
+                        sx={{ gap: 1.2, fontSize: '0.85rem', fontWeight: isActive ? 700 : 500, minHeight: 40, minWidth: 170 }}
                       >
+                        <Icon sx={{ fontSize: '1.15rem', color: isActive ? 'primary.main' : 'text.secondary' }} />
                         {item.label}
-                      </Button>
-                    </Tooltip>
-                  );
-                })}
-              </Stack>
+                      </MenuItem>
+                    );
+                  })}
+                </Menu>
+              </Box>
             );
           })}
 

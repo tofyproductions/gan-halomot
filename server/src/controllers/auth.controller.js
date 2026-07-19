@@ -200,6 +200,11 @@ async function webauthnRegisterOptions(req, res, next) {
       attestationType: 'none',
       excludeCredentials: existingCreds,
       authenticatorSelection: {
+        // 'platform' = the device's BUILT-IN biometric (Touch ID / Windows Hello /
+        // Android fingerprint). Without it the browser also offers roaming/cross-
+        // device passkeys and shows the "Passkeys & Security Keys" QR dialog
+        // instead of the fingerprint prompt.
+        authenticatorAttachment: 'platform',
         residentKey: 'preferred',
         userVerification: 'preferred',
       },
