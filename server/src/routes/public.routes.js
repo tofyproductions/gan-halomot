@@ -26,4 +26,12 @@ router.post(
   publicController.uploadDocument
 );
 
+// --- Gan events (parent bring-list, no auth) ---
+// GET /api/public/event/:token?claimant_id=&phone=
+router.get('/event/:token', publicController.getEvent);
+// POST /api/public/event/:token/claim   { claimant_id, parent_name, parent_phone, item_name }
+router.post('/event/:token/claim', publicController.claimItem);
+// POST /api/public/event/:token/release { claimant_id, slot_id, parent_phone }
+router.post('/event/:token/release', publicController.releaseItem);
+
 module.exports = router;

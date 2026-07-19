@@ -25,6 +25,9 @@ router.use('/employee-documents', require('./employeeDocuments.routes'));
 router.use('/classes', require('./classes.routes'));
 // Maintenance (אחזקה) — assets per branch with service cycles + fault reports
 router.use('/maintenance', require('./maintenance.routes'));
+// Gan events (אירועים) — manager builds a bring-list, parents claim items via a
+// public link. Manager side here; the parent-facing side lives under /public.
+router.use('/gan-events', require('./ganEvents.routes'));
 
 // All other routes use optional auth (backward compatible - works without login too)
 router.use(optionalAuth);

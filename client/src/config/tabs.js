@@ -35,6 +35,7 @@ export const TAB_GROUPS = [
     items: [
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
+      { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },

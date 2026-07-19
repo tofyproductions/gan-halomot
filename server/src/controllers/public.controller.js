@@ -1,4 +1,4 @@
-const { Registration, Child, Document } = require('../models');
+const { Registration, Child, Document, GanEvent, Branch } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
 const fileStorage = require('../services/file-storage.service');
 const { sendAgreementEmail } = require('../services/email.service');
@@ -299,4 +299,148 @@ async function uploadDocument(req, res, next) {
   }
 }
 
-module.exports = { getRegistrationForm, submitSignature, storeSignedContract, uploadDocument };
+// ===================== Gan events (parent-facing) =====================
+// Parents have no login. They reach an event via its access_token link, see the
+// bring-list with remaining counts, and claim items first-come-first-served.
+// Other parents' identities are NOT exposed — only counts + the visitor's own
+// picks. Identity across visits: a browser-minted claimant_id (same device) or
+// a matching phone number (any device).
+
+const digits = (s) => String(s || '').replace(/\D/g, '');
+
+/** Public-safe view: event meta, grouped items with remaining counts, my picks. */
+function publicEventView(ev, { claimant_id, phone } = {}) {
+  const cid = claimant_id || null;
+  const ph = digits(phone);
+  const isMine = (it) =>
+    !!it.claimed_by_id &&
+    ((cid && it.claimed_by_id === cid) || (ph && digits(it.parent_phone) === ph));
+
+  const order = [];
+  const byName = new Map();
+  for (const it of ev.items) {
+    if (!byName.has(it.name)) { byName.set(it.name, { name: it.name, total: 0, remaining: 0 }); order.push(it.name); }
+    const g = byName.get(it.name);
+    g.total += 1;
+    if (!it.claimed_by_id) g.remaining += 1;
+  }
+  const items = order.map((n) => byName.get(n));
+  const mine = ev.items.filter(isMine).map((it) => ({ slot_id: String(it._id), name: it.name }));
+
+  return {
+    event: {
+      name: ev.name,
+      event_date: ev.event_date,
+      event_time: ev.event_time,
+      description: ev.description,
+      status: ev.status,
+      branch_name: ev.branch_id?.name || '',
+    },
+    items,
+    mine,
+    allow_multiple: !!ev.allow_multiple_per_parent,
+    closed: ev.status !== 'published',
+  };
+}
+
+// Does this claimant already hold a slot in the event (by device id or phone)?
+function alreadyClaimed(ev, claimant_id, phone) {
+  const ph = digits(phone);
+  return ev.items.some((it) => it.claimed_by_id && (
+    (claimant_id && it.claimed_by_id === claimant_id) || (ph && digits(it.parent_phone) === ph)
+  ));
+}
+
+async function getEvent(req, res, next) {
+  try {
+    const ev = await GanEvent.findOne({ access_token: req.params.token }).populate('branch_id', 'name');
+    if (!ev) return res.status(404).json({ error: 'האירוע לא נמצא או שהקישור אינו תקין' });
+    res.json(publicEventView(ev, { claimant_id: req.query.claimant_id, phone: req.query.phone }));
+  } catch (error) { next(error); }
+}
+
+async function claimItem(req, res, next) {
+  try {
+    const { token } = req.params;
+    const { claimant_id, parent_name, parent_phone, item_name } = req.body || {};
+    if (!claimant_id) return res.status(400).json({ error: 'מזהה משתמש חסר' });
+    if (!parent_name || !String(parent_name).trim()) return res.status(400).json({ error: 'יש להזין שם' });
+    if (!item_name) return res.status(400).json({ error: 'לא נבחר פריט' });
+
+    // One-item-per-parent limit (unless the manager allowed multiple). Checked
+    // before the atomic grab; the tiny race is benign (worst case one extra pick).
+    const existing = await GanEvent.findOne({ access_token: token }).populate('branch_id', 'name');
+    if (!existing) return res.status(404).json({ error: 'האירוע לא נמצא' });
+    if (!existing.allow_multiple_per_parent && alreadyClaimed(existing, claimant_id, parent_phone)) {
+      return res.status(409).json({ error: 'אפשר לבחור פריט אחד בלבד', view: publicEventView(existing, { claimant_id, phone: parent_phone }) });
+    }
+
+    // Atomic first-free-slot grab: the positional `$` targets the first slot of
+    // this name whose claimed_by_id is null. Two parents racing the last slot →
+    // exactly one update matches; the other gets null and a 409.
+    const updated = await GanEvent.findOneAndUpdate(
+      {
+        access_token: token,
+        status: 'published',
+        items: { $elemMatch: { name: item_name, claimed_by_id: null } },
+      },
+      {
+        $set: {
+          'items.$.claimed_by_id': claimant_id,
+          'items.$.parent_name': String(parent_name).trim(),
+          'items.$.parent_phone': String(parent_phone || '').trim(),
+          'items.$.claimed_at': new Date(),
+        },
+      },
+      { new: true }
+    ).populate('branch_id', 'name');
+
+    if (!updated) {
+      // Distinguish "gone" from "closed / bad token".
+      const ev = await GanEvent.findOne({ access_token: token }).populate('branch_id', 'name');
+      if (!ev) return res.status(404).json({ error: 'האירוע לא נמצא' });
+      if (ev.status !== 'published') return res.status(409).json({ error: 'האירוע נסגר לשריונים' });
+      return res.status(409).json({ error: 'הפריט הזה כבר נתפס — רענן ובחר פריט אחר' });
+    }
+    res.json(publicEventView(updated, { claimant_id, phone: parent_phone }));
+  } catch (error) { next(error); }
+}
+
+async function releaseItem(req, res, next) {
+  try {
+    const { token } = req.params;
+    const { claimant_id, slot_id, parent_phone } = req.body || {};
+    if (!slot_id) return res.status(400).json({ error: 'לא נבחר פריט' });
+
+    // Only the owner may release — match by claimant_id (same device) or phone.
+    const or = [];
+    if (claimant_id) or.push({ claimed_by_id: claimant_id });
+    if (digits(parent_phone)) or.push({ parent_phone: String(parent_phone).trim() });
+    if (!or.length) return res.status(400).json({ error: 'מזהה משתמש חסר' });
+
+    const updated = await GanEvent.findOneAndUpdate(
+      {
+        access_token: token,
+        status: 'published',
+        items: { $elemMatch: { _id: slot_id, $or: or } },
+      },
+      {
+        $set: {
+          'items.$.claimed_by_id': null,
+          'items.$.parent_name': '',
+          'items.$.parent_phone': '',
+          'items.$.claimed_at': null,
+        },
+      },
+      { new: true }
+    ).populate('branch_id', 'name');
+
+    if (!updated) return res.status(409).json({ error: 'לא ניתן לבטל את השריון' });
+    res.json(publicEventView(updated, { claimant_id, phone: parent_phone }));
+  } catch (error) { next(error); }
+}
+
+module.exports = {
+  getRegistrationForm, submitSignature, storeSignedContract, uploadDocument,
+  getEvent, claimItem, releaseItem,
+};

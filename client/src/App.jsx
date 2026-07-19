@@ -27,6 +27,8 @@ import GanttCalendar from './components/gantt/GanttCalendar';
 import GanttEditor from './components/gantt/GanttEditor';
 import ClassTrackingPage from './components/classes/ClassTrackingPage';
 import MaintenancePage from './components/maintenance/MaintenancePage';
+import EventsPage from './components/events/EventsPage';
+import EventSignup from './components/events/EventSignup';
 import MySalaryPreview from './components/employee-portal/MySalaryPreview';
 import MyPayslips from './components/employee-portal/MyPayslips';
 import MyDocuments from './components/employee-portal/MyDocuments';
@@ -43,15 +45,26 @@ import { ConfirmProvider } from './components/shared/ConfirmProvider';
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public routes */}
+      {/* Public routes — rendered STANDALONE, deliberately OUTSIDE the
+          management providers (Branch/WorkMonth/Confirm). A parent on /event/:token
+          therefore mounts none of the admin shell: no authenticated API calls
+          fire, nothing can redirect them to /login or the management app, and a
+          refresh just reloads the event page. */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register/:token" element={<ParentOnboarding />} />
+      <Route path="/event/:token" element={<EventSignup />} />
 
-      {/* Protected admin routes */}
+      {/* Protected admin routes — the management providers wrap ONLY this shell. */}
       <Route path="/" element={
-        <ProtectedRoute>
-          <Layout />
-        </ProtectedRoute>
+        <ConfirmProvider>
+          <BranchProvider>
+            <WorkMonthProvider>
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            </WorkMonthProvider>
+          </BranchProvider>
+        </ConfirmProvider>
       }>
         <Route index element={<HomeRoute />} />
         <Route path="registrations" element={<RegistrationTracker />} />
@@ -91,6 +104,11 @@ function AppRoutes() {
         <Route path="gantt/edit" element={<GanttEditor />} />
         <Route path="classes" element={<ClassTrackingPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />
+        <Route path="events" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+            <EventsPage />
+          </ProtectedRoute>
+        } />
         {/* Employee portal */}
         <Route path="my-salary" element={<MySalaryPreview />} />
         <Route path="my-payslips" element={<MyPayslips />} />
@@ -126,13 +144,5 @@ function HomeRoute() {
 }
 
 export default function App() {
-  return (
-    <ConfirmProvider>
-      <BranchProvider>
-        <WorkMonthProvider>
-          <AppRoutes />
-        </WorkMonthProvider>
-      </BranchProvider>
-    </ConfirmProvider>
-  );
+  return <AppRoutes />;
 }
