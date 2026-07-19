@@ -238,7 +238,11 @@ async function webauthnRegisterVerify(req, res, next) {
     const { credential } = verification.registrationInfo;
 
     user.webauthn_credentials.push({
-      credential_id: Buffer.from(credential.id).toString('base64url'),
+      // v13's registrationInfo.credential.id is ALREADY a Base64URLString.
+      // Re-encoding it (Buffer.from(id).toString('base64url')) double-encodes it,
+      // so the stored id never matches the real passkey → the browser reports
+      // "No passkeys available" at login. Store it as-is.
+      credential_id: credential.id,
       public_key: Buffer.from(credential.publicKey).toString('base64url'),
       counter: credential.counter,
       device_name: req.body.deviceName || 'מכשיר',
