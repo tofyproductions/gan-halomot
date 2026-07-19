@@ -48,6 +48,11 @@ export default function EventDetail({ open, groupId, branches = [], onClose, onC
 
   const applyEvent = (campaign) => { setEv(campaign); onChanged?.(); };
 
+  // Build the parent link from the CURRENT origin (not a server env var), so it
+  // always matches the domain the manager is on — e.g. onrender.com in prod,
+  // never a stale localhost. Falls back to the server-provided link if needed.
+  const linkFor = (b) => (b.access_token ? `${window.location.origin}/event/${b.access_token}` : b.link);
+
   const copyLink = async (link) => {
     try { await navigator.clipboard.writeText(link); toast.success('הקישור הועתק'); }
     catch { toast.info(link); }
@@ -175,8 +180,8 @@ export default function EventDetail({ open, groupId, branches = [], onClose, onC
                       <Stack spacing={1.5}>
                         {/* Link */}
                         <Stack direction="row" spacing={1} alignItems="center">
-                          <TextField size="small" value={b.link} fullWidth InputProps={{ readOnly: true }} label="קישור להורים" />
-                          <Tooltip title="העתק"><span><IconButton onClick={() => copyLink(b.link)} disabled={ev.status === 'draft'}><ContentCopyIcon /></IconButton></span></Tooltip>
+                          <TextField size="small" value={linkFor(b)} fullWidth InputProps={{ readOnly: true }} label="קישור להורים" />
+                          <Tooltip title="העתק"><span><IconButton onClick={() => copyLink(linkFor(b))} disabled={ev.status === 'draft'}><ContentCopyIcon /></IconButton></span></Tooltip>
                         </Stack>
 
                         {/* Claims */}
