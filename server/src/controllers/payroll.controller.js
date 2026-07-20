@@ -8,7 +8,7 @@
  */
 const mongoose = require('mongoose');
 const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest } = require('../models');
-const { calculateMonthlySalary } = require('../services/payrollCalc');
+const { calculateMonthlySalary, collapseToSpan } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const bcrypt = require('bcryptjs');
@@ -57,7 +57,11 @@ function monthRange(ym) {
  * #2=out, #3=in, #4=out, etc.
  */
 function summarizeDay(dayPunches) {
-  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const allSorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  // Bill the first→last span, not strict (0,1),(2,3) pairing — see collapseToSpan.
+  // Extra punches (clock double-reads, a manual punch added over a real one) would
+  // otherwise interleave and count only a tiny leftover interval.
+  const sorted = collapseToSpan(allSorted);
   const sessions = [];
   let totalMinutes = 0;
   for (let i = 0; i < sorted.length - 1; i += 2) {
@@ -77,12 +81,14 @@ function summarizeDay(dayPunches) {
     totalMinutes += mins;
   }
   const PENDING = new Set(['pending', 'pending_manager', 'pending_accountant']);
-  const has_pending = sorted.some(p => PENDING.has(p.approval_status));
-  const has_manual = sorted.some(p => p.timestamp_source === 'manual');
-  const incomplete = sorted.length % 2 === 1;
+  // pending/manual flags consider ALL punches, not just the collapsed span.
+  const has_pending = allSorted.some(p => PENDING.has(p.approval_status));
+  const has_manual = allSorted.some(p => p.timestamp_source === 'manual');
+  // Only a lone single punch is genuinely incomplete (no span to bill).
+  const incomplete = allSorted.length === 1;
   let trailingPunch = null;
   if (incomplete) {
-    const last = sorted[sorted.length - 1];
+    const last = allSorted[allSorted.length - 1];
     trailingPunch = {
       id: String(last._id),
       timestamp: last.timestamp,
@@ -91,7 +97,7 @@ function summarizeDay(dayPunches) {
     };
   }
   return {
-    punch_count: sorted.length,
+    punch_count: allSorted.length,
     sessions,
     trailing_punch: trailingPunch,
     incomplete,

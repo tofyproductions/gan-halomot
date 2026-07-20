@@ -34,8 +34,32 @@ function israelDateKey(date) {
  * worked minutes. Odd punch count → last one is a "trailing" punch we treat
  * as 0 minutes and flag the day as incomplete.
  */
+/**
+ * Collapse a day's punches to the pair we actually bill on: the FIRST and LAST
+ * punch of the day (the span).
+ *
+ * Why: the clock reports timestamps with no reliable in/out direction, and days
+ * routinely accumulate extra punches — a clock double-read, or a manual punch a
+ * manager added on top of an already-real one. The old strict (0,1),(2,3)…
+ * pairing then interleaved those extras (e.g. manual-in 07:00 paired with the
+ * real-in 07:23, and manual-out 13:30 with the real-out 13:33) and billed only
+ * the tiny leftover — 07:00–13:33 counted as 26 minutes instead of 6.5 hours.
+ *
+ * These are single-shift kindergarten workers: one arrival, one departure, no
+ * mid-day clock-out, and a data scan confirmed NO employee ever punches at two
+ * branches on the same day. So first→last is the correct worked span, and it
+ * can never under-count a real shift. (If split shifts across branches ever
+ * become real, this is the one place to revisit.)
+ */
+function collapseToSpan(sorted) {
+  if (sorted.length <= 2) return sorted;
+  return [sorted[0], sorted[sorted.length - 1]];
+}
+
 function pairDayMinutes(dayPunches) {
-  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const all = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const incomplete = all.length === 1; // a lone punch → no span to bill
+  const sorted = collapseToSpan(all);
   let total = 0;
   for (let i = 0; i + 1 < sorted.length; i += 2) {
     const inT = new Date(sorted[i].timestamp).getTime();
@@ -43,7 +67,6 @@ function pairDayMinutes(dayPunches) {
     const diff = Math.max(0, Math.round((outT - inT) / 60000));
     total += diff;
   }
-  const incomplete = sorted.length % 2 === 1;
   return { minutes: total, incomplete };
 }
 
@@ -140,7 +163,7 @@ function emptyAmutaBucket() {
  * Used for the per-branch column groups in the monthly payroll UI.
  */
 function splitDayIntoBranches(dayPunches) {
-  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const sorted = collapseToSpan([...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
   const perBranchMinutes = new Map();
   for (let i = 0; i + 1 < sorted.length; i += 2) {
     const inP = sorted[i];
@@ -156,7 +179,7 @@ function splitDayIntoBranches(dayPunches) {
 }
 
 function splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId) {
-  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const sorted = collapseToSpan([...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
   // Build sessions of (in,out) pairs and attribute the minutes to the in-punch's amuta
   const perAmutaMinutes = new Map(); // amutaIdStr → minutes
   for (let i = 0; i + 1 < sorted.length; i += 2) {
@@ -628,4 +651,4 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   };
 }
 
-module.exports = { calculateMonthlySalary };
+module.exports = { calculateMonthlySalary, collapseToSpan };
