@@ -29,6 +29,8 @@ import ClassTrackingPage from './components/classes/ClassTrackingPage';
 import MaintenancePage from './components/maintenance/MaintenancePage';
 import EventsPage from './components/events/EventsPage';
 import EventSignup from './components/events/EventSignup';
+import LeadForm from './components/leads/LeadForm';
+import LeadsPage from './components/leads/LeadsPage';
 import MySalaryPreview from './components/employee-portal/MySalaryPreview';
 import MyPayslips from './components/employee-portal/MyPayslips';
 import MyDocuments from './components/employee-portal/MyDocuments';
@@ -53,6 +55,9 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register/:token" element={<ParentOnboarding />} />
       <Route path="/event/:token" element={<EventSignup />} />
+      {/* Public new-parent inquiry (marketed link). Standalone, outside the shell. */}
+      <Route path="/lead" element={<LeadForm />} />
+      <Route path="/lead/:branchId" element={<LeadForm />} />
 
       {/* Protected admin routes — the management providers wrap ONLY this shell. */}
       <Route path="/" element={
@@ -107,6 +112,11 @@ function AppRoutes() {
         <Route path="events" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager']}>
             <EventsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="leads" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+            <LeadsPage />
           </ProtectedRoute>
         } />
         {/* Employee portal */}

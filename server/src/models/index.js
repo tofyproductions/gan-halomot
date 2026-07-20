@@ -46,6 +46,7 @@ const ClassSession = require('./ClassSession');
 const MaintenanceItem = require('./MaintenanceItem');
 const EmployeeChangeRequest = require('./EmployeeChangeRequest');
 const GanEvent = require('./GanEvent');
+const Lead = require('./Lead');
 
 module.exports = {
   User,
@@ -95,4 +96,5 @@ module.exports = {
   MaintenanceItem,
   EmployeeChangeRequest,
   GanEvent,
+  Lead,
 };

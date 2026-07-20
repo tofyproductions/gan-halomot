@@ -58,6 +58,7 @@ const ICON_BY_TAB = {
   gantt: CalendarMonthIcon,
   classes: EventIcon,
   events: CelebrationIcon,
+  leads: PersonAddIcon,
   maintenance: HandymanIcon,
   contacts: ContactsIcon,
   my_salary: AccountBalanceIcon,

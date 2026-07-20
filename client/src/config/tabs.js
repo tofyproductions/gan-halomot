@@ -14,6 +14,7 @@ export const TAB_GROUPS = [
     items: [
       // Management overview (child counts, branch KPIs) — NOT for regular staff.
       { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },

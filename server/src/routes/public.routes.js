@@ -34,4 +34,11 @@ router.post('/event/:token/claim', publicController.claimItem);
 // POST /api/public/event/:token/release { claimant_id, slot_id, parent_phone }
 router.post('/event/:token/release', publicController.releaseItem);
 
+// --- New-parent leads (public inquiry form, no auth) ---
+const leads = require('../controllers/leads.controller');
+// GET /api/public/lead-branches — branch list for the general form dropdown
+router.get('/lead-branches', leads.publicBranches);
+// POST /api/public/lead — submit an inquiry
+router.post('/lead', leads.publicSubmit);
+
 module.exports = router;
