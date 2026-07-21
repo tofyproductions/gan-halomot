@@ -33,6 +33,7 @@ router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accou
 // accountant/admin edit any field; branch_manager may set ONLY the manager
 // supplement-approval flag for their own branches (enforced in the controller).
 router.patch('/:employeeId',                  requireRole('system_admin', 'accountant', 'branch_manager'), c.upsertEntry);
+router.get('/:month/punch-issues',            requireRole('system_admin', 'accountant', 'branch_manager'), c.punchReviewStatus);
 router.get('/:month/punch-review-status',     requireRole('system_admin', 'accountant', 'branch_manager'), c.punchReviewStatus);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
 // Preview the accountant PDF (no send) — drives the preview dialog.

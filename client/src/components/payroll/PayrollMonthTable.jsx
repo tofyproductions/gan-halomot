@@ -4,7 +4,7 @@ import {
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
   Chip, Autocomplete, Dialog, DialogTitle, DialogContent, DialogActions, ToggleButton, ToggleButtonGroup,
   CircularProgress, RadioGroup, FormControlLabel, Radio, Checkbox, FormControl, FormLabel,
-  InputAdornment, Alert, Menu, Divider, ListItemText,
+  InputAdornment, Alert, Menu, Divider, ListItemText, Badge,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -37,6 +37,8 @@ import SickDetailDialog from './SickDetailDialog';
 import EmployeeDocsDialog from './EmployeeDocsDialog';
 import PregnancyDetailDialog from './PregnancyDetailDialog';
 import PunchReviewDialog from './PunchReviewDialog';
+import PunchIssuesDialog from './PunchIssuesDialog';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -837,12 +839,13 @@ export default function PayrollMonthTable() {
   const [punchDlg, setPunchDlg] = useState({ open: false, row: null });
   // Month-wide gate: the accountant send is blocked while ANY branch still has a
   // >2-punch day without a final decision.
-  const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, items: [] });
+  const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, duplicates_count: 0, missing_count: 0 });
+  const [issuesOpen, setIssuesOpen] = useState(false);
   useEffect(() => {
     if (!month) return;
-    api.get(`/payroll-month/${month}/punch-review-status`)
-      .then(r => setPunchGate(r.data || { blocked: false, count: 0, items: [] }))
-      .catch(() => setPunchGate({ blocked: false, count: 0, items: [] }));
+    api.get(`/payroll-month/${month}/punch-issues`)
+      .then(r => setPunchGate(r.data || { blocked: false, count: 0, duplicates_count: 0, missing_count: 0 }))
+      .catch(() => setPunchGate({ blocked: false, count: 0, duplicates_count: 0, missing_count: 0 }));
   }, [month, data]);
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
@@ -1644,8 +1647,15 @@ export default function PayrollMonthTable() {
             onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
           <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
+          <Badge color="error" badgeContent={(punchGate.duplicates_count || 0) + (punchGate.missing_count || 0)} max={99}>
+            <Button size="small" variant={punchGate.blocked ? 'contained' : 'outlined'}
+              color={punchGate.blocked ? 'error' : 'warning'} startIcon={<ReportProblemIcon />}
+              onClick={() => setIssuesOpen(true)} disabled={!data}>
+              בעיות בהחתמה
+            </Button>
+          </Badge>
           <Tooltip title={punchGate.blocked
-            ? `חסום: ${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים)`
+            ? `חסום: ${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — פתח/י "בעיות בהחתמה"`
             : 'שליחת טבלת השכר לרו״ח'}>
             <span>
               <Button size="small" variant="contained" color="primary"
@@ -2285,6 +2295,13 @@ export default function PayrollMonthTable() {
         month={month}
         onClose={() => setDocsDlg({ open: false, row: null })}
         onSaved={fetchData}
+      />
+      <PunchIssuesDialog
+        open={issuesOpen}
+        month={month}
+        canFix={isAccountant || isAdmin}
+        onClose={() => setIssuesOpen(false)}
+        onChanged={fetchData}
       />
       <PunchReviewDialog
         open={punchDlg.open}

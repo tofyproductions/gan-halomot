@@ -2576,14 +2576,15 @@ async function previewAccountant(req, res, next) {
  * before the month can leave the building. Scans ALL branches for the month
  * (not just the one on screen) and returns what is still unresolved.
  */
-async function unresolvedPunchDays(month) {
+async function punchIssues(month) {
   const from = new Date(`${month}-01T00:00:00Z`);
   const to = new Date(from); to.setUTCMonth(to.getUTCMonth() + 1);
   const punches = await Punch.find({
     timestamp: { $gte: new Date(from.getTime() - 2 * 864e5), $lt: new Date(to.getTime() + 2 * 864e5) },
     ignored: { $ne: true },
-  }).select('employee_id timestamp approval_status').lean();
-  const byDay = new Map();
+  }).select('employee_id timestamp approval_status timestamp_source created_at branch_id').lean();
+
+  const byDay = new Map(); // 'empId|date' → punches[]
   for (const p of punches) {
     if (!p.employee_id) continue;
     const s = p.approval_status || 'auto';
@@ -2591,33 +2592,76 @@ async function unresolvedPunchDays(month) {
     const d = ISR_DAY(p.timestamp);
     if (d.slice(0, 7) !== month) continue;
     const k = String(p.employee_id) + '|' + d;
-    byDay.set(k, (byDay.get(k) || 0) + 1);
+    if (!byDay.has(k)) byDay.set(k, []);
+    byDay.get(k).push(p);
   }
-  const flagged = [...byDay.entries()].filter(([, n]) => n > 2).map(([k]) => k);
-  if (flagged.length === 0) return [];
-  const resolved = new Set((await PunchResolution.find({
-    date: { $regex: `^${month}` },
-  }).select('employee_id date').lean()).map(r => String(r.employee_id) + '|' + r.date));
-  const pending = flagged.filter(k => !resolved.has(k));
-  if (pending.length === 0) return [];
-  const empIds = [...new Set(pending.map(k => k.split('|')[0]))];
+
+  const dupKeys = [], missKeys = [];
+  for (const [k, list] of byDay) {
+    if (list.length > 2) dupKeys.push(k);
+    else if (list.length === 1) missKeys.push(k); // a lone punch — the pair is incomplete
+  }
+  const resolved = new Set((await PunchResolution.find({ date: { $regex: `^${month}` } })
+    .select('employee_id date').lean()).map(r => String(r.employee_id) + '|' + r.date));
+  const pendingDup = dupKeys.filter(k => !resolved.has(k));
+
+  const empIds = [...new Set([...pendingDup, ...missKeys].map(k => k.split('|')[0]))];
   const emps = await Employee.find({ _id: { $in: empIds } })
     .select('full_name branch_id').populate('branch_id', 'name').lean();
-  const nameById = Object.fromEntries(emps.map(e => [String(e._id), e]));
-  return pending.map(k => {
+  const empById = Object.fromEntries(emps.map(e => [String(e._id), e]));
+  const meta = (k) => {
     const [empId, date] = k.split('|');
-    const e = nameById[empId] || {};
+    const e = empById[empId] || {};
     return { employee_id: empId, full_name: e.full_name || '', branch_name: e.branch_id?.name || '', date };
-  }).sort((a, b) => a.full_name.localeCompare(b.full_name, 'he') || a.date.localeCompare(b.date));
+  };
+  const byName = (a, b) => a.full_name.localeCompare(b.full_name, 'he') || a.date.localeCompare(b.date);
+
+  const duplicates = pendingDup.map(k => {
+    const list = byDay.get(k).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const suggestion = suggestPunchLabels(list);
+    const roleById = new Map(suggestion.labels.map(l => [l.punch_id, l.role]));
+    return {
+      ...meta(k),
+      punches: list.map(p => ({
+        id: String(p._id), hhmm: ISR_HHMM(p.timestamp),
+        is_manual: p.timestamp_source === 'manual',
+        suggested_role: roleById.get(String(p._id)) || 'ignore',
+      })),
+      suggestion_reason: suggestion.reason,
+    };
+  }).sort(byName);
+
+  const missing = missKeys.map(k => {
+    const p = byDay.get(k)[0];
+    return {
+      ...meta(k),
+      punch_hhmm: ISR_HHMM(p.timestamp),
+      is_manual: p.timestamp_source === 'manual',
+    };
+  }).sort(byName);
+
+  return { duplicates, missing };
 }
 
-/** GET /api/payroll-month/:month/punch-review-status — drives the send button. */
+/**
+ * GET /api/payroll-month/:month/punch-issues
+ * Everything wrong with the month's punches, across ALL branches, in one place:
+ * unresolved >2-punch days (which BLOCK the accountant send) and days with a
+ * single punch where the in/out pair never completed (shown to fix, not blocking).
+ */
 async function punchReviewStatus(req, res, next) {
   try {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
-    const items = await unresolvedPunchDays(month);
-    res.json({ blocked: items.length > 0, count: items.length, items });
+    const { duplicates, missing } = await punchIssues(month);
+    res.json({
+      blocked: duplicates.length > 0,
+      count: duplicates.length,
+      duplicates_count: duplicates.length,
+      missing_count: missing.length,
+      duplicates,
+      missing,
+    });
   } catch (err) { next(err); }
 }
 
@@ -2628,11 +2672,14 @@ async function sendToAccountant(req, res, next) {
     const branch = req.query.branch || 'all';
 
     // HARD GATE: no month leaves while any >2-punch day anywhere is unapproved.
-    const unresolved = await unresolvedPunchDays(month);
-    if (unresolved.length > 0) {
+    // The response carries the FULL fix-list (duplicates + missing punches) so
+    // the UI can show exactly what has to be sorted out.
+    const issues = await punchIssues(month);
+    if (issues.duplicates.length > 0) {
       return res.status(409).json({
-        error: `לא ניתן לשלוח לרו״ח — ${unresolved.length} ימים עם יותר מ-2 החתמות ממתינים לאישור הנה״ח (בכל הגנים).`,
-        unresolved_punch_days: unresolved,
+        error: `לא ניתן לשלוח לרו״ח — ${issues.duplicates.length} ימים עם יותר מ-2 החתמות ממתינים לאישור הנה״ח (בכל הגנים).`,
+        duplicates: issues.duplicates,
+        missing: issues.missing,
       });
     }
 
