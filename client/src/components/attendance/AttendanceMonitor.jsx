@@ -188,12 +188,15 @@ export default function AttendanceMonitor() {
           </TableCell>
         );
         // Cell colour by source/state:
+        //   RED    = more than 2 punches (duplicate/multi-session) awaiting the
+        //            accountant's decision — the loudest state, it blocks the send
         //   Purple = manual punch pending accounting approval (not yet in salary)
         //   Amber  = incomplete (missing a clock-out)
         //   Blue   = manual update entered by accounting (approved, counted)
         //   Green  = punched on the clock by the employee (complete)
         let bgColor, textColor;
-        if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
+        if (day.needs_review) { bgColor = '#fee2e2'; textColor = '#b91c1c'; }
+        else if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
         else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
         else if (day.has_manual) { bgColor = '#dbeafe'; textColor = '#1e40af'; }
         else { bgColor = '#d1fae5'; textColor = '#065f46'; }
@@ -205,6 +208,7 @@ export default function AttendanceMonitor() {
                 <div key={i}>{s.in_hhmm} → {s.out_hhmm} ({Math.round(s.minutes/60*100)/100}h)</div>
               ))}
               {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
+              {day.needs_review && <div style={{color:'#fca5a5',fontWeight:800}}>⚠️ החתמה כפולה ({day.punch_count} החתמות) — ממתין להחלטת הנה״ח</div>}
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
               {!day.has_pending && day.has_manual && <div style={{color:'#93c5fd'}}>✎ עודכן ידנית ע״י הנה״ח</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
@@ -537,6 +541,7 @@ export default function AttendanceMonitor() {
           { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני (הנה״ח)' },
           { c: '#fef3c7', t: '#92400e', label: 'חסרה יציאה' },
           { c: '#ede9fe', t: '#5b21b6', label: 'ידני — ממתין לאישור' },
+          { c: '#fee2e2', t: '#b91c1c', label: '⚠️ החתמה כפולה — להחלטת הנה״ח' },
         ].map(item => (
           <Stack key={item.label} direction="row" spacing={0.5} alignItems="center">
             <Box sx={{ width: 16, height: 14, borderRadius: 0.75, bgcolor: item.c, border: '1px solid', borderColor: 'rgba(0,0,0,0.15)' }} />

@@ -835,6 +835,15 @@ export default function PayrollMonthTable() {
   const [docsDlg, setDocsDlg] = useState({ open: false, row: null });
   const [pregnancyDlg, setPregnancyDlg] = useState({ open: false, row: null });
   const [punchDlg, setPunchDlg] = useState({ open: false, row: null });
+  // Month-wide gate: the accountant send is blocked while ANY branch still has a
+  // >2-punch day without a final decision.
+  const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, items: [] });
+  useEffect(() => {
+    if (!month) return;
+    api.get(`/payroll-month/${month}/punch-review-status`)
+      .then(r => setPunchGate(r.data || { blocked: false, count: 0, items: [] }))
+      .catch(() => setPunchGate({ blocked: false, count: 0, items: [] }));
+  }, [month, data]);
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
@@ -1635,9 +1644,18 @@ export default function PayrollMonthTable() {
             onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
           <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
-          <Button size="small" variant="contained" color="primary"
-            startIcon={<SendIcon />}
-            onClick={() => setAcctPreviewOpen(true)} disabled={!data || stagingMode}>שלח לרו״ח</Button>
+          <Tooltip title={punchGate.blocked
+            ? `חסום: ${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים)`
+            : 'שליחת טבלת השכר לרו״ח'}>
+            <span>
+              <Button size="small" variant="contained" color="primary"
+                startIcon={<SendIcon />}
+                onClick={() => setAcctPreviewOpen(true)}
+                disabled={!data || stagingMode || punchGate.blocked}>
+                שלח לרו״ח{punchGate.blocked ? ` (חסום — ${punchGate.count})` : ''}
+              </Button>
+            </span>
+          </Tooltip>
           <Tooltip title="הגדרת נמעני רו״ח"><span>
             <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
           </span></Tooltip>

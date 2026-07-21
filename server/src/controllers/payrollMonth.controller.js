@@ -11,6 +11,51 @@ const {
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Suggest how to label a >2-punch day, so the accountant usually just confirms.
+ *
+ * The key signal is WHEN EACH RECORD WAS CREATED (`created_at`), not the punch
+ * time. Two real scenarios:
+ *   • manual entered first, the Pi synced later → the manual was a stand-in for
+ *     a clock that hadn't reported yet; the real clock data supersedes it.
+ *   • the Pi punches already existed and a manual was added after → the
+ *     accountant saw the real data and deliberately corrected it; the manual wins.
+ * A day with no manual punches at all (a clock double-read) falls back to
+ * first=in / last=out with the middles ignored.
+ *
+ * Returns { labels:[{punch_id, role}], reason }. Advisory only — the accountant
+ * still approves.
+ */
+function suggestPunchLabels(sortedPunches) {
+  const manual = sortedPunches.filter(p => p.timestamp_source === 'manual');
+  const real = sortedPunches.filter(p => p.timestamp_source !== 'manual');
+  const created = (p) => new Date(p.created_at || p.timestamp).getTime();
+  const label = (keep, drop, reason) => {
+    const labels = [];
+    for (const p of drop) labels.push({ punch_id: String(p._id), role: 'ignore' });
+    keep.forEach((p, i) => labels.push({
+      punch_id: String(p._id),
+      role: i === 0 ? 'in' : i === keep.length - 1 ? 'out' : 'ignore',
+    }));
+    return { labels, reason };
+  };
+
+  if (manual.length && real.length) {
+    const lastManual = Math.max(...manual.map(created));
+    const lastReal = Math.max(...real.map(created));
+    if (lastReal > lastManual) {
+      return label(real, manual,
+        'ההחתמות מהשעון הגיעו אחרי העדכון הידני — הידני היה מילוי זמני, ולכן מוצע להתעלם ממנו ולהשתמש בהחתמות השעון.');
+    }
+    return label(manual, real,
+      'העדכון הידני נעשה אחרי שהחתמות השעון כבר היו במערכת — כלומר הנה״ח ראתה אותן ותיקנה במכוון, ולכן מוצע להשתמש בעדכון הידני.');
+  }
+  return label(sortedPunches, [],
+    manual.length
+      ? 'כל ההחתמות ידניות — מוצע הראשונה ככניסה והאחרונה כיציאה.'
+      : 'קריאה כפולה של השעון — מוצע הראשונה ככניסה והאחרונה כיציאה.');
+}
 const { analyzeCommitment, datesInMonth, workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
@@ -858,16 +903,19 @@ async function getMonth(req, res, next) {
           for (const [date, list] of [...byDate.entries()].sort()) {
             if (list.length <= 2) continue;
             const res = empResolutions.get(date);
+            const sortedList = list.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            const suggestion = suggestPunchLabels(sortedList);
+            const suggestedRole = new Map(suggestion.labels.map(l => [l.punch_id, l.role]));
             out.push({
               date,
-              punches: list
-                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
-                .map(p => ({
-                  id: String(p._id),
-                  hhmm: ISR_HHMM(p.timestamp),
-                  is_manual: p.timestamp_source === 'manual',
-                  role: res ? (res.labels || []).find(l => String(l.punch_id) === String(p._id))?.role || 'ignore' : null,
-                })),
+              punches: sortedList.map(p => ({
+                id: String(p._id),
+                hhmm: ISR_HHMM(p.timestamp),
+                is_manual: p.timestamp_source === 'manual',
+                role: res ? (res.labels || []).find(l => String(l.punch_id) === String(p._id))?.role || 'ignore' : null,
+                suggested_role: suggestedRole.get(String(p._id)) || 'ignore',
+              })),
+              suggestion_reason: suggestion.reason,
               status: res ? 'approved' : 'pending',
               minutes: res ? res.minutes : null,
             });
@@ -2523,11 +2571,70 @@ async function previewAccountant(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * Every day with more than two punches must carry a final accountant decision
+ * before the month can leave the building. Scans ALL branches for the month
+ * (not just the one on screen) and returns what is still unresolved.
+ */
+async function unresolvedPunchDays(month) {
+  const from = new Date(`${month}-01T00:00:00Z`);
+  const to = new Date(from); to.setUTCMonth(to.getUTCMonth() + 1);
+  const punches = await Punch.find({
+    timestamp: { $gte: new Date(from.getTime() - 2 * 864e5), $lt: new Date(to.getTime() + 2 * 864e5) },
+    ignored: { $ne: true },
+  }).select('employee_id timestamp approval_status').lean();
+  const byDay = new Map();
+  for (const p of punches) {
+    if (!p.employee_id) continue;
+    const s = p.approval_status || 'auto';
+    if (s !== 'auto' && s !== 'approved') continue;
+    const d = ISR_DAY(p.timestamp);
+    if (d.slice(0, 7) !== month) continue;
+    const k = String(p.employee_id) + '|' + d;
+    byDay.set(k, (byDay.get(k) || 0) + 1);
+  }
+  const flagged = [...byDay.entries()].filter(([, n]) => n > 2).map(([k]) => k);
+  if (flagged.length === 0) return [];
+  const resolved = new Set((await PunchResolution.find({
+    date: { $regex: `^${month}` },
+  }).select('employee_id date').lean()).map(r => String(r.employee_id) + '|' + r.date));
+  const pending = flagged.filter(k => !resolved.has(k));
+  if (pending.length === 0) return [];
+  const empIds = [...new Set(pending.map(k => k.split('|')[0]))];
+  const emps = await Employee.find({ _id: { $in: empIds } })
+    .select('full_name branch_id').populate('branch_id', 'name').lean();
+  const nameById = Object.fromEntries(emps.map(e => [String(e._id), e]));
+  return pending.map(k => {
+    const [empId, date] = k.split('|');
+    const e = nameById[empId] || {};
+    return { employee_id: empId, full_name: e.full_name || '', branch_name: e.branch_id?.name || '', date };
+  }).sort((a, b) => a.full_name.localeCompare(b.full_name, 'he') || a.date.localeCompare(b.date));
+}
+
+/** GET /api/payroll-month/:month/punch-review-status — drives the send button. */
+async function punchReviewStatus(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const items = await unresolvedPunchDays(month);
+    res.json({ blocked: items.length > 0, count: items.length, items });
+  } catch (err) { next(err); }
+}
+
 async function sendToAccountant(req, res, next) {
   try {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const branch = req.query.branch || 'all';
+
+    // HARD GATE: no month leaves while any >2-punch day anywhere is unapproved.
+    const unresolved = await unresolvedPunchDays(month);
+    if (unresolved.length > 0) {
+      return res.status(409).json({
+        error: `לא ניתן לשלוח לרו״ח — ${unresolved.length} ימים עם יותר מ-2 החתמות ממתינים לאישור הנה״ח (בכל הגנים).`,
+        unresolved_punch_days: unresolved,
+      });
+    }
 
     // Recipients: the saved contact list, OR an explicit per-send selection from
     // the preview dialog (one-off — does NOT overwrite the saved defaults; edit
@@ -2661,6 +2768,7 @@ module.exports = {
   setPregnancySettings,
   resolvePunchDay,
   unresolvePunchDay,
+  punchReviewStatus,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

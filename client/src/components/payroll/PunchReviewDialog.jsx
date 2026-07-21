@@ -46,7 +46,8 @@ export default function PunchReviewDialog({ open, row, canApprove, onClose, onSa
         // Approved days show their stored labels; pending days get a sensible
         // first-guess (first=in, last=out, middles ignored) that the accountant
         // adjusts — nothing is applied until they approve.
-        init[p.id] = p.role || (i === 0 ? 'in' : i === d.punches.length - 1 ? 'out' : 'ignore');
+        init[p.id] = p.role || p.suggested_role
+          || (i === 0 ? 'in' : i === d.punches.length - 1 ? 'out' : 'ignore');
       });
     }
     setRoles(init);
@@ -104,6 +105,11 @@ export default function PunchReviewDialog({ open, row, canApprove, onClose, onSa
                     <Box sx={{ flex: 1 }} />
                     <Typography sx={{ fontWeight: 700 }}>לתשלום: {asHours(mins)}</Typography>
                   </Stack>
+                  {day.suggestion_reason && !approved && (
+                    <Alert severity="info" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
+                      💡 {day.suggestion_reason}
+                    </Alert>
+                  )}
                   <Stack spacing={1}>
                     {day.punches.map(p => (
                       <Stack key={p.id} direction="row" alignItems="center" spacing={1}>

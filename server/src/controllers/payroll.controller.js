@@ -663,10 +663,22 @@ async function attendanceByMonth(req, res, next) {
       bucket.away_days[dayKey].at_branches.add(branchById.get(String(p.branch_id)) || 'אחר');
     }
 
+    // Accountant decisions for >2-punch days, so the grid shows approved days as
+    // settled instead of flagging them red forever.
+    const attResDocs = await PunchResolution.find({ date: { $regex: `^${ymPrefix}` } })
+      .select('employee_id date labels status minutes').lean();
+    const attRes = new Map();
+    for (const r of attResDocs) {
+      const k = String(r.employee_id);
+      if (!attRes.has(k)) attRes.set(k, new Map());
+      attRes.get(k).set(r.date, r);
+    }
+
     const finalize = (bucket) => {
       const summarized = {};
+      const empRes = bucket.employee_id ? (attRes.get(String(bucket.employee_id)) || new Map()) : new Map();
       for (const [dayKey, dayPunches] of Object.entries(bucket.days)) {
-        const s = summarizeDay(dayPunches);
+        const s = summarizeDay(dayPunches, empRes.get(dayKey));
         summarized[dayKey] = s;
         bucket.month_total_hours += s.total_hours;
         if (s.incomplete) bucket.incomplete_days++;
@@ -678,7 +690,7 @@ async function attendanceByMonth(req, res, next) {
       if (bucket.away_days) {
         const awaySummarized = {};
         for (const [dayKey, info] of Object.entries(bucket.away_days)) {
-          const s = summarizeDay(info.punches);
+          const s = summarizeDay(info.punches, empRes.get(dayKey));
           s.at_branches = [...info.at_branches];
           awaySummarized[dayKey] = s;
           bucket.away_total_hours += s.total_hours;
