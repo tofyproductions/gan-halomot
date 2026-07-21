@@ -56,18 +56,46 @@ function collapseToSpan(sorted) {
   return [sorted[0], sorted[sorted.length - 1]];
 }
 
-function pairDayMinutes(dayPunches) {
-  const all = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  const incomplete = all.length === 1; // a lone punch → no span to bill
-  const sorted = collapseToSpan(all);
-  let total = 0;
-  for (let i = 0; i + 1 < sorted.length; i += 2) {
-    const inT = new Date(sorted[i].timestamp).getTime();
-    const outT = new Date(sorted[i + 1].timestamp).getTime();
-    const diff = Math.max(0, Math.round((outT - inT) / 60000));
-    total += diff;
+/**
+ * Decide which punches to actually bill for a day, returning an ordered list
+ * that downstream code pairs strictly (0,1),(2,3),… :
+ *
+ *   - ≤2 punches            → the punches as-is (in,out).
+ *   - >2 punches, RESOLVED  → the accountant's decision: each punch labelled
+ *     in / out / ignore. We walk chronologically and emit [in,out] pairs
+ *     (an 'in' held until the next 'out'), so real multi-session days
+ *     (in-out-in-out) bill the in→out intervals and NOT the out→in gaps.
+ *   - >2 punches, UNRESOLVED → provisional span [first,last], flagged for review
+ *     elsewhere. Never under-counts while it waits for approval.
+ *
+ * `resolution` = { status:'approved', labels:[{punch_id, role:'in'|'out'|'ignore'}] }
+ */
+function billableDayPunches(dayPunches, resolution) {
+  const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  if (sorted.length <= 2) return sorted;
+  if (resolution && resolution.status === 'approved' && Array.isArray(resolution.labels)) {
+    const roleById = new Map(resolution.labels.map(l => [String(l.punch_id), l.role]));
+    const out = [];
+    let pendingIn = null;
+    for (const p of sorted) {
+      const role = roleById.get(String(p._id));
+      if (role === 'in') pendingIn = p;
+      else if (role === 'out' && pendingIn) { out.push(pendingIn, p); pendingIn = null; }
+      // 'ignore' / unlabeled / an 'out' with no open 'in' → dropped
+    }
+    return out; // strict pairing of this list gives Σ(in→out)
   }
-  return { minutes: total, incomplete };
+  return collapseToSpan(sorted); // provisional
+}
+
+function pairDayMinutes(billable) {
+  let total = 0;
+  for (let i = 0; i + 1 < billable.length; i += 2) {
+    const inT = new Date(billable[i].timestamp).getTime();
+    const outT = new Date(billable[i + 1].timestamp).getTime();
+    total += Math.max(0, Math.round((outT - inT) / 60000));
+  }
+  return { minutes: total };
 }
 
 /**
@@ -162,8 +190,7 @@ function emptyAmutaBucket() {
  * Same as splitDayIntoAmutas but bucketed by branch_id of the in-punch.
  * Used for the per-branch column groups in the monthly payroll UI.
  */
-function splitDayIntoBranches(dayPunches) {
-  const sorted = collapseToSpan([...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+function splitDayIntoBranches(sorted) {
   const perBranchMinutes = new Map();
   for (let i = 0; i + 1 < sorted.length; i += 2) {
     const inP = sorted[i];
@@ -178,8 +205,8 @@ function splitDayIntoBranches(dayPunches) {
   return perBranchMinutes;
 }
 
-function splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId) {
-  const sorted = collapseToSpan([...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp)));
+function splitDayIntoAmutas(sorted, branchAmutaMap, fallbackAmutaId) {
+  // `sorted` is the already-billable ordered list (see billableDayPunches).
   // Build sessions of (in,out) pairs and attribute the minutes to the in-punch's amuta
   const perAmutaMinutes = new Map(); // amutaIdStr → minutes
   for (let i = 0; i + 1 < sorted.length; i += 2) {
@@ -259,23 +286,28 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   let totalMinutes = 0;
   let regMinutes = 0, ot125Minutes = 0, ot150Minutes = 0;
   let incompleteDays = 0;
+  const resolutions = opts.resolutions instanceof Map ? opts.resolutions : new Map();
   for (const [date, dayPunches] of [...byDay.entries()].sort()) {
-    const pair = pairDayMinutes(dayPunches);
+    // One billable list per day (resolved labels, or provisional span for
+    // unresolved >2-punch days); all attribution pairs it strictly.
+    const billable = billableDayPunches(dayPunches, resolutions.get(date));
+    const pair = pairDayMinutes(billable);
     const split = splitDayOvertime(pair.minutes);
+    const incomplete = dayPunches.length === 1; // lone punch → nothing to bill
     totalMinutes += pair.minutes;
     regMinutes += split.reg;
     ot125Minutes += split.ot125;
     ot150Minutes += split.ot150;
-    if (pair.incomplete) incompleteDays++;
-    days.push({ date, minutes: pair.minutes, incomplete: pair.incomplete, ...split });
+    if (incomplete) incompleteDays++;
+    days.push({ date, minutes: pair.minutes, incomplete, ...split });
 
     // Per-amuta + per-branch attribution: each in-punch contributes minutes
     // to its own branch's bucket and to that branch's amuta bucket.
-    const dayAmutaMinutes = splitDayIntoAmutas(dayPunches, branchAmutaMap, fallbackAmutaId);
+    const dayAmutaMinutes = splitDayIntoAmutas(billable, branchAmutaMap, fallbackAmutaId);
     const dayTotal = pair.minutes;
 
     // Compute per-branch minute share within this day too.
-    const dayBranchMinutes = splitDayIntoBranches(dayPunches);
+    const dayBranchMinutes = splitDayIntoBranches(billable);
 
     if (dayTotal > 0) {
       for (const [amutaId, minutes] of dayAmutaMinutes) {
@@ -651,4 +683,4 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   };
 }
 
-module.exports = { calculateMonthlySalary, collapseToSpan };
+module.exports = { calculateMonthlySalary, collapseToSpan, billableDayPunches };

@@ -7,8 +7,8 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest } = require('../models');
-const { calculateMonthlySalary, collapseToSpan } = require('../services/payrollCalc');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution } = require('../models');
+const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const bcrypt = require('bcryptjs');
@@ -56,12 +56,13 @@ function monthRange(ym) {
  * code is unreliable on TANDEM4 PRO. We just chronologically pair: #1=in,
  * #2=out, #3=in, #4=out, etc.
  */
-function summarizeDay(dayPunches) {
+function summarizeDay(dayPunches, resolution) {
   const allSorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  // Bill the first→last span, not strict (0,1),(2,3) pairing — see collapseToSpan.
-  // Extra punches (clock double-reads, a manual punch added over a real one) would
-  // otherwise interleave and count only a tiny leftover interval.
-  const sorted = collapseToSpan(allSorted);
+  // Same billing rule as the salary calc: ≤2 punches pair normally; a >2-punch
+  // day uses the accountant's approved in/out labels when it has been resolved,
+  // otherwise the provisional first→last span (flagged for review elsewhere).
+  const sorted = billableDayPunches(allSorted, resolution);
+  const needsReview = allSorted.length > 2 && !(resolution && resolution.status === 'approved');
   const sessions = [];
   let totalMinutes = 0;
   for (let i = 0; i < sorted.length - 1; i += 2) {
@@ -97,6 +98,7 @@ function summarizeDay(dayPunches) {
     };
   }
   return {
+    needs_review: needsReview,
     punch_count: allSorted.length,
     sessions,
     trailing_punch: trailingPunch,
@@ -743,8 +745,14 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
       const k = israelDateKey(new Date(p.timestamp));
       (days[k] ||= []).push(p);
     }
+    // Accountant decisions for this employee's >2-punch days, so the report bills
+    // exactly what the salary does.
+    const resDocs = await PunchResolution.find({
+      employee_id: emp._id, date: { $regex: `^${ymPrefix}` },
+    }).lean();
+    const resByDate = new Map(resDocs.map(r => [r.date, r]));
     const dayRows = Object.keys(days).sort().map(k => {
-      const summary = summarizeDay(days[k]);
+      const summary = summarizeDay(days[k], resByDate.get(k));
       // Tag each session with the branch where its first punch happened, and
       // mark the day with the set of non-home branches the employee visited.
       const branchesVisited = new Set();

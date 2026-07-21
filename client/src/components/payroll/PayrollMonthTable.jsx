@@ -36,6 +36,7 @@ import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
 import EmployeeDocsDialog from './EmployeeDocsDialog';
 import PregnancyDetailDialog from './PregnancyDetailDialog';
+import PunchReviewDialog from './PunchReviewDialog';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -833,6 +834,7 @@ export default function PayrollMonthTable() {
   const [notes, setNotes] = useState({ open: false, row: null });
   const [docsDlg, setDocsDlg] = useState({ open: false, row: null });
   const [pregnancyDlg, setPregnancyDlg] = useState({ open: false, row: null });
+  const [punchDlg, setPunchDlg] = useState({ open: false, row: null });
   const [addCol, setAddCol] = useState(false);
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
@@ -2140,6 +2142,22 @@ export default function PayrollMonthTable() {
                             )}
                           </Box>
                         )}
+                        {Array.isArray(r.punch_review) && r.punch_review.length > 0 && (() => {
+                          const pending = r.punch_review.filter(d => d.status !== 'approved').length;
+                          return (
+                            <Box
+                              onClick={(e) => { e.stopPropagation(); setPunchDlg({ open: true, row: r }); }}
+                              sx={{ mb: 0.4, p: '4px 6px', borderRadius: 1, cursor: 'pointer',
+                                bgcolor: pending ? '#fef2f2' : '#f0fdf4',
+                                border: `1px solid ${pending ? '#fecaca' : '#bbf7d0'}`,
+                                '&:hover': { filter: 'brightness(0.97)' } }}
+                            >
+                              <Box sx={{ color: pending ? '#b91c1c' : '#15803d', fontWeight: 800, fontSize: '0.64rem' }}>
+                                {pending ? `\u26A0\uFE0F ${pending} ימים עם יותר מ-2 החתמות — לאישור` : '\u2714\uFE0F החתמות אושרו'}
+                              </Box>
+                            </Box>
+                          );
+                        })()}
                         {Array.isArray(r.pending_docs) && r.pending_docs.length > 0 && (
                           <Box
                             onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
@@ -2248,6 +2266,13 @@ export default function PayrollMonthTable() {
         row={docsDlg.row}
         month={month}
         onClose={() => setDocsDlg({ open: false, row: null })}
+        onSaved={fetchData}
+      />
+      <PunchReviewDialog
+        open={punchDlg.open}
+        row={punchDlg.row}
+        canApprove={isAccountant || isAdmin}
+        onClose={() => setPunchDlg({ open: false, row: null })}
         onSaved={fetchData}
       />
       <PregnancyDetailDialog

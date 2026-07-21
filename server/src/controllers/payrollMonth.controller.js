@@ -6,9 +6,11 @@
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
-  PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting,
+  PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 const { analyzeCommitment, datesInMonth, workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
@@ -318,6 +320,19 @@ async function getMonth(req, res, next) {
       punchesByEmp.get(k).push(p);
     }
 
+    // Accountant decisions for days with >2 punches. Keyed employee → date →
+    // resolution; a day without one stays provisional (span) and is flagged.
+    const resolutionDocs = await PunchResolution.find({
+      employee_id: { $in: employees.map(e => e._id) },
+      date: { $regex: `^${month}` },
+    }).lean();
+    const resByEmp = new Map();
+    for (const r of resolutionDocs) {
+      const k = String(r.employee_id);
+      if (!resByEmp.has(k)) resByEmp.set(k, new Map());
+      resByEmp.get(k).set(r.date, r);
+    }
+
     // Uploaded documents still awaiting the accountant's acknowledgement — shown
     // as "📎 … ממתין בקבצים" in each employee's notes cell so uploads aren't missed.
     const pendingDocs = await EmployeeDocument.find({
@@ -523,8 +538,10 @@ async function getMonth(req, res, next) {
       // Extra hours above commitment are now paid via the partial-absence /
       // extra-hours mechanism (partial_extra_entries, flat × hourly value).
       const payExcessSupplement = false;
+      const empResolutions = resByEmp.get(String(emp._id)) || new Map();
       let breakdown = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
+        resolutions: empResolutions,
         include_salary_completion: existingManual.include_salary_completion !== false,
         pay_excess_supplement: payExcessSupplement,
         absence_deduction: absenceDeduction,
@@ -824,6 +841,39 @@ async function getMonth(req, res, next) {
         inactive_reason: emp.inactive_reason || '',
         // Uploaded files awaiting the accountant's acknowledgement.
         pending_docs: pendingDocsByEmp.get(String(emp._id)) || [],
+        // Days with MORE THAN TWO punches — every one needs an accountant/admin
+        // decision on how to pair them. Unresolved days are billed provisionally
+        // (first→last span) and flagged red until approved.
+        punch_review: (() => {
+          const byDate = new Map();
+          for (const p of empPunches) {
+            const s = p.approval_status || 'auto';
+            if (s !== 'auto' && s !== 'approved') continue;
+            const d = ISR_DAY(p.timestamp);
+            if (d.slice(0, 7) !== month) continue;
+            if (!byDate.has(d)) byDate.set(d, []);
+            byDate.get(d).push(p);
+          }
+          const out = [];
+          for (const [date, list] of [...byDate.entries()].sort()) {
+            if (list.length <= 2) continue;
+            const res = empResolutions.get(date);
+            out.push({
+              date,
+              punches: list
+                .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+                .map(p => ({
+                  id: String(p._id),
+                  hhmm: ISR_HHMM(p.timestamp),
+                  is_manual: p.timestamp_source === 'manual',
+                  role: res ? (res.labels || []).find(l => String(l.punch_id) === String(p._id))?.role || 'ignore' : null,
+                })),
+              status: res ? 'approved' : 'pending',
+              minutes: res ? res.minutes : null,
+            });
+          }
+          return out;
+        })(),
         // Pregnancy status for the accountant-facing badge (display/alert only —
         // no pay effect). `protected` = pregnant with ≥6 months seniority, when
         // §9 חוק עבודת נשים bars unilateral pay/scope cuts without a permit.
@@ -2352,6 +2402,70 @@ async function setAccountantContacts(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /api/payroll-month/punch-resolutions
+ * Body: { employee_id, date, labels:[{punch_id, role:'in'|'out'|'ignore'}], note? }
+ * The accountant/admin decides how a >2-punch day is paired. Billing walks the
+ * labels chronologically and pays Σ(in→out) — never the out→in gaps — so a real
+ * in-out-in-out day is handled correctly, as is a duplicate-punch day.
+ */
+async function resolvePunchDay(req, res, next) {
+  try {
+    const role = req.user?.role;
+    if (role !== 'system_admin' && role !== 'accountant') {
+      return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת יכולים לאשר החתמות' });
+    }
+    const { employee_id, date, labels, note } = req.body || {};
+    if (!employee_id || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !Array.isArray(labels)) {
+      return res.status(400).json({ error: 'employee_id, date (YYYY-MM-DD) ו-labels נדרשים' });
+    }
+    const clean = labels
+      .filter(l => l && l.punch_id && ['in', 'out', 'ignore'].includes(l.role))
+      .map(l => ({ punch_id: l.punch_id, role: l.role }));
+
+    // Compute the billed minutes from the labels (same walk the salary uses).
+    const punches = await Punch.find({ _id: { $in: clean.map(l => l.punch_id) } })
+      .select('timestamp branch_id').lean();
+    const byId = new Map(punches.map(p => [String(p._id), p]));
+    const ordered = clean
+      .map(l => ({ ...l, p: byId.get(String(l.punch_id)) }))
+      .filter(x => x.p)
+      .sort((a, b) => new Date(a.p.timestamp) - new Date(b.p.timestamp));
+    let minutes = 0, openIn = null;
+    for (const x of ordered) {
+      if (x.role === 'in') openIn = x.p;
+      else if (x.role === 'out' && openIn) {
+        minutes += Math.max(0, Math.round((new Date(x.p.timestamp) - new Date(openIn.timestamp)) / 60000));
+        openIn = null;
+      }
+    }
+    const branch_id = ordered[0]?.p?.branch_id || null;
+    const doc = await PunchResolution.findOneAndUpdate(
+      { employee_id, date },
+      {
+        employee_id, date, branch_id, status: 'approved', labels: clean, minutes,
+        note: note || '', resolved_by: req.user?.id || null, resolved_at: new Date(),
+      },
+      { upsert: true, new: true },
+    ).lean();
+    res.json({ ok: true, minutes, resolution: doc });
+  } catch (err) { next(err); }
+}
+
+/** DELETE /api/payroll-month/punch-resolutions?employee_id=&date= — reopen a day. */
+async function unresolvePunchDay(req, res, next) {
+  try {
+    const role = req.user?.role;
+    if (role !== 'system_admin' && role !== 'accountant') {
+      return res.status(403).json({ error: 'אין הרשאה' });
+    }
+    const { employee_id, date } = req.query;
+    if (!employee_id || !date) return res.status(400).json({ error: 'employee_id ו-date נדרשים' });
+    await PunchResolution.deleteOne({ employee_id, date });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 // GET pregnancy-exam config: the 40h proration mode + the full-time week used
 // for linear proration. DISPLAY-side config only (never auto-computes pay).
 async function getPregnancySettings(req, res, next) {
@@ -2545,6 +2659,8 @@ module.exports = {
   setAccountantContacts,
   getPregnancySettings,
   setPregnancySettings,
+  resolvePunchDay,
+  unresolvePunchDay,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

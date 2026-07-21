@@ -47,6 +47,7 @@ const MaintenanceItem = require('./MaintenanceItem');
 const EmployeeChangeRequest = require('./EmployeeChangeRequest');
 const GanEvent = require('./GanEvent');
 const Lead = require('./Lead');
+const PunchResolution = require('./PunchResolution');
 
 module.exports = {
   User,
@@ -97,4 +98,5 @@ module.exports = {
   EmployeeChangeRequest,
   GanEvent,
   Lead,
+  PunchResolution,
 };

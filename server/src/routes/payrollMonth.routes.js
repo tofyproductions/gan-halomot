@@ -20,6 +20,8 @@ router.get('/',                               c.getMonth);
 // Literal paths — declared before the /:param routes below.
 router.get('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.getAccountantContacts);
 router.put('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.setAccountantContacts);
+router.post('/punch-resolutions',              requireRole('system_admin', 'accountant'), c.resolvePunchDay);
+router.delete('/punch-resolutions',            requireRole('system_admin', 'accountant'), c.unresolvePunchDay);
 router.get('/pregnancy-settings',             requireRole('system_admin', 'accountant', 'branch_manager'), c.getPregnancySettings);
 router.put('/pregnancy-settings',             requireRole('system_admin', 'accountant'), c.setPregnancySettings);
 
