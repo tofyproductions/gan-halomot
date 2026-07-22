@@ -16,6 +16,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { BusyButton, FilePickButton } from '../shared/UploadControls';
 
 const CATEGORIES = ['מזגן', 'מקרר', 'רמקול', 'מכשיר', 'מלאי', 'אחר'];
 const CATEGORY_ICON = { 'מזגן': '❄️', 'מקרר': '🧊', 'רמקול': '🔊', 'מכשיר': '📱', 'מלאי': '📦', 'אחר': '🔧' };
@@ -94,20 +95,19 @@ function FaultsDialog({ open, item, onClose, onSaved }) {
   const confirm = useConfirm();
   const [desc, setDesc] = useState('');
   const [file, setFile] = useState(null);
+  const [saving, setSaving] = useState(false);
   const faults = item?.faults || [];
   useEffect(() => { if (open) { setDesc(''); setFile(null); } }, [open]);
   if (!item) return null;
 
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setFile({ name: f.name, data: reader.result.split(',')[1] });
-    reader.readAsDataURL(f);
-  };
+  const onPickFile = (picked) => setFile({ name: picked.name, data: picked.data });
   const addFault = () => {
     if (!desc.trim()) return toast.error('תיאור התקלה נדרש');
+    setSaving(true);
     api.post(`/maintenance/${item._id}/faults`, { description: desc, photo_data: file?.data || null, photo_name: file?.name || '' })
-      .then(() => { toast.success('התקלה נפתחה'); setDesc(''); setFile(null); onSaved(); }).catch(e => toast.error(e.response?.data?.error || 'שגיאה'));
+      .then(() => { toast.success('התקלה נפתחה'); setDesc(''); setFile(null); onSaved(); })
+      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
+      .finally(() => setSaving(false));
   };
   const resolve = (f, status) => api.put(`/maintenance/${item._id}/faults/${f._id}`, { status }).then(() => onSaved()).catch(() => {});
   const del = async (f) => { if (!(await confirm({ title: 'מחיקת תקלה', message: 'למחוק?' }))) return; api.delete(`/maintenance/${item._id}/faults/${f._id}`).then(() => onSaved()).catch(() => {}); };
@@ -148,12 +148,12 @@ function FaultsDialog({ open, item, onClose, onSaved }) {
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>פתיחת תקלה</Typography>
           <TextField size="small" label="תיאור התקלה" value={desc} onChange={e => setDesc(e.target.value)} multiline minRows={2} fullWidth />
           <Stack direction="row" spacing={1} alignItems="center">
-            <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />}>צרף תמונה
-              <input type="file" hidden accept="image/*" onChange={onPickFile} />
-            </Button>
+            <FilePickButton hasFile={!!file} label="צרף תמונה" replaceLabel="החלף תמונה"
+              accept="image/*" onPick={onPickFile} onError={msg => toast.error(msg)} />
             {file && <Chip size="small" label={file.name} onDelete={() => setFile(null)} />}
             <Box sx={{ flex: 1 }} />
-            <Button variant="contained" color="warning" onClick={addFault}>פתח תקלה</Button>
+            <BusyButton variant="contained" color="warning" onClick={addFault} loading={saving}
+              loadingText={file ? 'מעלה תמונה…' : 'פותח…'}>פתח תקלה</BusyButton>
           </Stack>
         </Stack>
       </DialogContent>

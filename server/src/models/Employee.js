@@ -91,6 +91,34 @@ const hourlyBonusSchema = new mongoose.Schema({
   reason: { type: String, default: '' },     // e.g. "בונוס אישי - הרצליה"
 }, { _id: false });
 
+/**
+ * Standing weekly hours for an employee who does NOT clock in (office staff, a
+ * manager, someone at a site without a clock). The system materializes her
+ * punches from this schedule day by day, up to today — never in advance, so the
+ * hours report always reflects work actually done rather than a forecast.
+ *
+ * `exceptions` is how a single arbitrary day gets different hours or is skipped
+ * entirely; it always beats the weekly pattern. Deleting a generated punch from
+ * the attendance grid writes an `off` exception, so the day is not resurrected
+ * on the next pass.
+ *
+ * A real clock punch on a scheduled day is never overwritten — that day is left
+ * alone and raised as a conflict in "בעיות בהחתמה" for a human to decide.
+ */
+const fixedScheduleDaySchema = new mongoose.Schema({
+  weekday: { type: Number, required: true, min: 0, max: 6 }, // 0=Sunday … 6=Saturday
+  in: { type: String, required: true },   // 'HH:mm' Israel-local
+  out: { type: String, required: true },  // 'HH:mm' Israel-local
+}, { _id: false });
+
+const fixedScheduleExceptionSchema = new mongoose.Schema({
+  date: { type: String, required: true },        // 'YYYY-MM-DD'
+  off: { type: Boolean, default: false },        // did not work that day at all
+  in: { type: String, default: '' },             // override hours (ignored when off)
+  out: { type: String, default: '' },
+  note: { type: String, default: '' },
+}, { _id: false });
+
 const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
@@ -156,6 +184,18 @@ const employeeSchema = new mongoose.Schema({
   travel_allowance: { type: Number, default: 0 },
   meal_vouchers: { type: Number, default: 0 },              // סיבוס
   recreation_annual: { type: Number, default: 0 },          // הבראה (annual)
+
+  // Standing weekly hours for employees who don't clock in — see the schema
+  // comment above. Disabled by default: everyone punches unless told otherwise.
+  fixed_schedule: {
+    enabled: { type: Boolean, default: false },
+    days: { type: [fixedScheduleDaySchema], default: [] },
+    exceptions: { type: [fixedScheduleExceptionSchema], default: [] },
+    // Don't generate anything before this date (e.g. the day the arrangement
+    // started). Null = from the employee's start_date, or from the month shown.
+    start_date: { type: String, default: null }, // 'YYYY-MM-DD'
+    note: { type: String, default: '' },
+  },
 
   // Weekly working days (0=Sun … 6=Sat). Used to count sick/absence days:
   // only weekdays in this set count, and Saturday is always off. Default is

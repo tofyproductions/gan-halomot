@@ -5,7 +5,6 @@ import {
   TableHead, TableBody, TableRow, TableCell, IconButton, Tooltip, LinearProgress,
 } from '@mui/material';
 import PregnantWomanIcon from '@mui/icons-material/PregnantWoman';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
@@ -13,6 +12,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { BusyButton, FilePickButton } from '../shared/UploadControls';
 
 function mimeFromName(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -79,13 +79,7 @@ export default function PregnancyDetailDialog({ open, row, canManager, canAccoun
 
   if (!row) return null;
 
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => setFile({ name: f.name, data: reader.result.split(',')[1] });
-    reader.readAsDataURL(f);
-  };
+  const onPickFile = (picked) => setFile({ name: picked.name, data: picked.data });
 
   const viewCert = async (id) => {
     try {
@@ -204,15 +198,14 @@ export default function PregnancyDetailDialog({ open, row, canManager, canAccoun
                   />
                 </Stack>
                 <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
-                  <Button component="label" size="small" variant="outlined" startIcon={<UploadFileIcon />}>
-                    צרף אישור
-                    <input type="file" hidden accept="image/*,application/pdf" onChange={onPickFile} />
-                  </Button>
+                  <FilePickButton hasFile={!!file} label="צרף אישור" replaceLabel="החלף אישור"
+                    accept="image/*,application/pdf" onPick={onPickFile} onError={msg => toast.error(msg)} />
                   {file && <Chip size="small" label={file.name} onDelete={() => setFile(null)} />}
                   <Box sx={{ flex: 1 }} />
-                  <Button variant="contained" color="secondary" size="small" disabled={saving} onClick={addExam}>
-                    {saving ? 'שומר…' : 'רשום שעות'}
-                  </Button>
+                  <BusyButton variant="contained" color="secondary" size="small" loading={saving}
+                    loadingText={file ? 'מעלה אישור…' : 'שומר…'} onClick={addExam}>
+                    רשום שעות
+                  </BusyButton>
                 </Stack>
               </Box>
             )}

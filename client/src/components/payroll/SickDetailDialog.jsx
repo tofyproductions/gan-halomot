@@ -6,7 +6,6 @@ import {
   MenuItem, FormControlLabel, Checkbox,
 } from '@mui/material';
 import HealingIcon from '@mui/icons-material/Healing';
-import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
@@ -17,6 +16,7 @@ import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { BusyButton, FilePickButton, UploadingBar } from '../shared/UploadControls';
 
 function mimeFromName(name = '') {
   const ext = name.split('.').pop()?.toLowerCase();
@@ -154,13 +154,9 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
   });
   const previewById = new Map(preview.rows.map(r => [String(r.id), r]));
 
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+  const onPickFile = (picked) => {
     setScanResult(null);
-    const reader = new FileReader();
-    reader.onload = () => setFile({ name: f.name, data: reader.result.split(',')[1] });
-    reader.readAsDataURL(f);
+    setFile({ name: picked.name, data: picked.data });
   };
 
   // Send the uploaded certificate to Claude vision; pre-fill the date range and
@@ -524,10 +520,8 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
               value={draft.reason} onChange={e => setDraft({ ...draft, reason: e.target.value })} sx={{ flex: 1, minWidth: 140 }} />
           </Stack>
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} size="small">
-              {file ? 'החלף אישור' : 'העלה אישור מחלה'}
-              <input type="file" hidden accept="image/*,application/pdf" onChange={onPickFile} />
-            </Button>
+            <FilePickButton hasFile={!!file} label="העלה אישור מחלה" replaceLabel="החלף אישור"
+              accept="image/*,application/pdf" onPick={onPickFile} onError={msg => toast.error(msg)} />
             {file && <Chip label={file.name} size="small" onDelete={() => { setFile(null); setScanResult(null); }} />}
             {file && (
               <Button
@@ -545,6 +539,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
               label={<Typography variant="body2">שלם מהיום הראשון</Typography>}
             />
           </Stack>
+          <UploadingBar show={saving && !!file} />
           {scanResult?.detected && (
             <Alert severity={scanResult.detected.is_sick_note === false ? 'warning' : 'info'} sx={{ py: 0.5 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
@@ -569,10 +564,11 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
       </DialogContent>
       <DialogActions>
         {editingId && <Button onClick={resetForm}>בטל עריכה</Button>}
-        <Button onClick={onClose}>סגור</Button>
-        <Button variant="contained" color="error" onClick={addSick} disabled={saving || !draft.from_date}>
+        <Button onClick={onClose} disabled={saving}>סגור</Button>
+        <BusyButton variant="contained" color="error" onClick={addSick} loading={saving}
+          loadingText={file ? 'מעלה אישור…' : 'שומר…'} disabled={!draft.from_date}>
           {editingId ? 'עדכן מחלה' : 'רשום מחלה'}
-        </Button>
+        </BusyButton>
       </DialogActions>
     </Dialog>
   );

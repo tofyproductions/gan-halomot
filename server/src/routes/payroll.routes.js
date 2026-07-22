@@ -52,6 +52,15 @@ router.get('/salary-summary',                  c.salarySummary);
 router.post('/manual-punches',                 requireRole('system_admin', 'branch_manager', 'accountant'), c.createManualPunches);
 router.delete('/punches/:id',                  requireRole('system_admin', 'branch_manager', 'accountant'), c.deletePunch);
 
+// Fixed hours (שעות קבועות) — employees paid on a standing weekly schedule
+// instead of clocking in. Managers may view/set for their own branches.
+router.get('/fixed-schedules',                                 requireRole('system_admin', 'accountant', 'branch_manager'), c.listFixedSchedules);
+router.put('/fixed-schedules',                                 requireRole('system_admin', 'accountant'), c.setFixedSchedules);
+router.post('/fixed-schedules/materialize',                    requireRole('system_admin', 'accountant'), c.materializeFixedSchedules);
+router.delete('/fixed-schedules/:employeeId',                  requireRole('system_admin', 'accountant'), c.clearFixedSchedule);
+router.post('/fixed-schedules/:employeeId/exception',          requireRole('system_admin', 'accountant', 'branch_manager'), c.setFixedScheduleException);
+router.delete('/fixed-schedules/:employeeId/exception/:date',  requireRole('system_admin', 'accountant', 'branch_manager'), c.removeFixedScheduleException);
+
 // Employee commitments (weekly schedules)
 const commitments = require('../controllers/commitments.controller');
 router.get('/commitments',                     commitments.list);

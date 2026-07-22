@@ -35,6 +35,10 @@ router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accou
 router.patch('/:employeeId',                  requireRole('system_admin', 'accountant', 'branch_manager'), c.upsertEntry);
 router.get('/:month/punch-issues',            requireRole('system_admin', 'accountant', 'branch_manager'), c.punchReviewStatus);
 router.get('/:month/punch-review-status',     requireRole('system_admin', 'accountant', 'branch_manager'), c.punchReviewStatus);
+// Nudge a branch's manager(s) to complete their staff's missing punches.
+router.post('/:month/punch-issues/remind',    requireRole('system_admin', 'accountant'), c.remindBranchManager);
+// Decide a day where a fixed-hours employee also clocked in.
+router.post('/:month/punch-issues/fixed-conflict', requireRole('system_admin', 'accountant'), c.resolveFixedConflict);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
 // Preview the accountant PDF (no send) — drives the preview dialog.
 router.get('/:month/accountant-preview',      requireRole('system_admin', 'accountant'), c.previewAccountant);

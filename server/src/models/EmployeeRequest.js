@@ -43,6 +43,13 @@ const employeeRequestSchema = new mongoose.Schema({
   // statutory day-1=0 / days-2-3=50% brackets). Used for the "שלם מהיום הראשון"
   // button. Employee-level policy='full' has the same effect for all certs.
   pay_from_first_day: { type: Boolean, default: false },
+  // Mirrors EmployeeDocument.acknowledged: until the accountant marks the
+  // attached certificate seen, it is listed as "📎 … ממתין בקבצים" in the salary
+  // table's notes cell. Certificates and uploaded documents are the same thing
+  // to the accountant, so both must surface there.
+  cert_acknowledged: { type: Boolean, default: false },
+  cert_acknowledged_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  cert_acknowledged_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 employeeRequestSchema.index({ user_id: 1, type: 1 });

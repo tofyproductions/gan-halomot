@@ -23,9 +23,12 @@ const punchSchema = new mongoose.Schema({
   device_user_id: { type: Number, default: null },  // internal uid on clock (1..N)
 
   timestamp: { type: Date, required: true, index: true },
+  // 'fixed_schedule' = generated from Employee.fixed_schedule for a worker who
+  // does not clock in. Real in every other respect (counted, editable, visible
+  // in the grid) but regenerable, so the generator can tell its own rows apart.
   timestamp_source: {
     type: String,
-    enum: ['device', 'agent_received_at', 'manual'],
+    enum: ['device', 'agent_received_at', 'manual', 'fixed_schedule'],
     default: 'agent_received_at',
   },
   // For manual punches: who created it + optional free-text reason.

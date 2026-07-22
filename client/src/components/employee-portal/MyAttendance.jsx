@@ -15,10 +15,21 @@ import api from '../../api/client';
  * after they approve does it count toward the employee's salary.
  */
 
-function ReportMissingPunchDialog({ open, onClose, onSubmit }) {
+function ReportMissingPunchDialog({ open, prefill, onClose, onSubmit }) {
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({ date: today, in_time: '', out_time: '', note: '' });
-  useEffect(() => { if (open) setForm({ date: today, in_time: '', out_time: '', note: '' }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open]);
+  // Opened from a specific incomplete day: start on that date with the time the
+  // clock already recorded filled in, so only the missing half is left to type.
+  useEffect(() => {
+    if (!open) return;
+    setForm({
+      date: prefill?.date || today,
+      in_time: prefill?.in_time || '',
+      out_time: prefill?.out_time || '',
+      note: '',
+    });
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [open, prefill]);
 
   const save = () => {
     if (!form.date) return toast.error('יש לבחור תאריך');
@@ -62,6 +73,7 @@ export default function MyAttendance() {
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
+  const [prefill, setPrefill] = useState(null);
   const [month] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -79,16 +91,23 @@ export default function MyAttendance() {
 
   const submitReport = (form) => {
     api.post('/payroll/punch-requests', form)
-      .then(() => { toast.success('הדיווח נשלח למנהל'); setReportOpen(false); load(); })
+      .then(() => { toast.success('הדיווח נשלח למנהל'); setReportOpen(false); setPrefill(null); load(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
+
+  const completeDay = (p) => {
+    setPrefill({ date: p.iso_date, in_time: p.in_time || '', out_time: p.out_time || '' });
+    setReportOpen(true);
+  };
+
+  const incomplete = punches.filter(p => p.incomplete);
 
   return (
     <Box dir="rtl" sx={{ p: 3, maxWidth: 900, mx: 'auto' }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 3 }}>
         <AccessTimeIcon color="primary" />
         <Typography variant="h5" sx={{ fontWeight: 800, flex: 1 }}>מעקב ההחתמות שלי</Typography>
-        <Button variant="contained" startIcon={<EditNoteIcon />} onClick={() => setReportOpen(true)}>
+        <Button variant="contained" startIcon={<EditNoteIcon />} onClick={() => { setPrefill(null); setReportOpen(true); }}>
           דווח החתמה שנשכחה
         </Button>
       </Stack>
@@ -96,6 +115,25 @@ export default function MyAttendance() {
       <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 600 }}>
         חודש נוכחי: {month}
       </Typography>
+
+      {incomplete.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            יש {incomplete.length} ימים שבהם חסרה החתמה
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+            השלימי את השעה החסרה — הדיווח יעבור לאישור מנהל/ת הסניף ומשם להנהלת החשבונות.
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {incomplete.map(p => (
+              <Button key={p.date} size="small" variant="outlined" color="warning"
+                onClick={() => completeDay(p)}>
+                {p.date} · {p.in_time || p.out_time} → השלם
+              </Button>
+            ))}
+          </Stack>
+        </Alert>
+      )}
 
       {loading ? (
         <Typography color="text.secondary">טוען...</Typography>
@@ -122,9 +160,15 @@ export default function MyAttendance() {
                   <TableCell>{p.branch && <Chip label={p.branch} size="small" variant="outlined" />}</TableCell>
                   <TableCell>
                     {p.pending_approval ? (
-                      <Chip label="ממתין לאישור מנהל" size="small" color="warning" />
+                      <Chip
+                        label={p.approval_stage === 'accountant' ? 'ממתין לאישור הנה״ח' : 'ממתין לאישור מנהל'}
+                        size="small"
+                        color={p.approval_stage === 'accountant' ? 'info' : 'warning'}
+                      />
+                    ) : p.incomplete ? (
+                      <Chip label="חסרה החתמה" size="small" color="warning" onClick={() => completeDay(p)} />
                     ) : (
-                      <Chip label={p.out_time ? 'שלם' : 'חסר יציאה'} size="small" color={p.out_time ? 'success' : 'warning'} />
+                      <Chip label="שלם" size="small" color="success" />
                     )}
                   </TableCell>
                 </TableRow>
@@ -140,7 +184,8 @@ export default function MyAttendance() {
 
       <ReportMissingPunchDialog
         open={reportOpen}
-        onClose={() => setReportOpen(false)}
+        prefill={prefill}
+        onClose={() => { setReportOpen(false); setPrefill(null); }}
         onSubmit={submitReport}
       />
     </Box>

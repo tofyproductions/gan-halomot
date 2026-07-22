@@ -11,6 +11,7 @@ const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, 
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
+const fixedSchedule = require('../services/fixedSchedule');
 const bcrypt = require('bcryptjs');
 
 // --- helpers --------------------------------------------------------------
@@ -85,6 +86,9 @@ function summarizeDay(dayPunches, resolution) {
   // pending/manual flags consider ALL punches, not just the collapsed span.
   const has_pending = allSorted.some(p => PENDING.has(p.approval_status));
   const has_manual = allSorted.some(p => p.timestamp_source === 'manual');
+  // Generated from a standing weekly schedule (employee doesn't clock in) —
+  // marked separately so the grid never passes it off as a real clock reading.
+  const has_fixed_schedule = allSorted.some(p => p.timestamp_source === 'fixed_schedule');
   // Only a lone single punch is genuinely incomplete (no span to bill).
   const incomplete = allSorted.length === 1;
   let trailingPunch = null;
@@ -105,6 +109,7 @@ function summarizeDay(dayPunches, resolution) {
     incomplete,
     has_pending,
     has_manual,
+    has_fixed_schedule,
     total_minutes: totalMinutes,
     total_hours: Math.round((totalMinutes / 60) * 100) / 100,
     first_in: sorted.length ? israelTimeHHMM(new Date(sorted[0].timestamp)) : null,
@@ -533,6 +538,14 @@ async function attendanceByMonth(req, res, next) {
       if (!allowed.includes(String(branch))) {
         return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
       }
+    }
+
+    // Keep fixed-hours employees current before reading the grid, so their days
+    // appear here the same as anyone else's (bounded by today, idempotent).
+    try {
+      await fixedSchedule.materializeMonth(month, { branchIds: [branch], userId: req.user?.id || null });
+    } catch (e) {
+      console.error('[attendance] fixed-schedule fill failed:', e.message);
     }
 
     // First batch — employees + branch list (don't depend on each other).
@@ -1888,8 +1901,198 @@ async function deletePunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Deleting a generated fixed-schedule punch means "she didn't work that
+    // day". Record it as an exception, otherwise the next materialization pass
+    // would simply put the day back.
+    const wasGenerated = p.timestamp_source === 'fixed_schedule';
+    const empId = p.employee_id;
+    const date = fixedSchedule.ISR_DAY(p.timestamp);
     await p.deleteOne();
-    res.json({ ok: true, id: req.params.id });
+    if (wasGenerated && empId) {
+      // Drop the day's other generated punch (in/out come as a pair) and mark
+      // the date off so it stays deleted.
+      const dayFrom = fixedSchedule.ilDateTime(date, '00:00');
+      const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+      await Punch.deleteMany({
+        employee_id: empId,
+        timestamp_source: 'fixed_schedule',
+        timestamp: { $gte: dayFrom, $lt: dayTo },
+      });
+      await fixedSchedule.markDayOff(empId, date);
+    }
+    res.json({ ok: true, id: req.params.id, fixed_schedule_day_off: wasGenerated ? date : null });
+  } catch (err) { next(err); }
+}
+
+// --- Fixed hours (שעות קבועות) — employees who don't clock in -------------
+
+/**
+ * GET /api/payroll/fixed-schedules
+ * Everyone who currently has a standing weekly schedule, plus the picker list
+ * of employees who could be given one.
+ */
+async function listFixedSchedules(req, res, next) {
+  try {
+    const branchFilter = {};
+    const role = req.user?.role;
+    if (role === 'branch_manager') {
+      const managed = (req.user?.managed_branch_ids || []).map(String);
+      const scope = managed.length ? managed : (req.user?.branch_id ? [String(req.user.branch_id)] : []);
+      if (scope.length) branchFilter.branch_id = { $in: scope };
+    }
+    const employees = await Employee.find({ ...branchFilter, is_active: true })
+      .select('full_name branch_id position fixed_schedule')
+      .populate('branch_id', 'name')
+      .sort({ full_name: 1 })
+      .lean();
+
+    res.json({
+      employees: employees.map(e => ({
+        id: String(e._id),
+        full_name: e.full_name,
+        position: e.position || '',
+        branch_id: e.branch_id?._id ? String(e.branch_id._id) : null,
+        branch_name: e.branch_id?.name || '',
+        fixed_schedule: e.fixed_schedule?.enabled
+          ? {
+            enabled: true,
+            days: e.fixed_schedule.days || [],
+            exceptions: e.fixed_schedule.exceptions || [],
+            start_date: e.fixed_schedule.start_date || null,
+            note: e.fixed_schedule.note || '',
+          }
+          : null,
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * PUT /api/payroll/fixed-schedules
+ * Body: { employee_ids: [], schedule: { days:[{weekday,in,out}], start_date?, note? } }
+ * Applies one weekly schedule to a set of employees. Existing per-date
+ * exceptions are preserved — the weekly pattern is what's being set here.
+ */
+async function setFixedSchedules(req, res, next) {
+  try {
+    const { employee_ids, schedule } = req.body || {};
+    if (!Array.isArray(employee_ids) || employee_ids.length === 0) {
+      return res.status(400).json({ error: 'לא נבחרו עובדים' });
+    }
+    const days = (schedule?.days || [])
+      .filter(d => Number.isInteger(Number(d.weekday)) && HHMM.test(d.in || '') && HHMM.test(d.out || ''))
+      .map(d => ({ weekday: Number(d.weekday), in: d.in, out: d.out }));
+    if (days.length === 0) return res.status(400).json({ error: 'יש להגדיר לפחות יום אחד עם שעת כניסה ויציאה' });
+    for (const d of days) {
+      if (d.out <= d.in) return res.status(400).json({ error: 'שעת היציאה חייבת להיות אחרי שעת הכניסה' });
+    }
+
+    const employees = await Employee.find({ _id: { $in: employee_ids } });
+    for (const emp of employees) {
+      emp.fixed_schedule = {
+        enabled: true,
+        days,
+        exceptions: emp.fixed_schedule?.exceptions || [],
+        start_date: schedule?.start_date || emp.fixed_schedule?.start_date || null,
+        note: schedule?.note ?? (emp.fixed_schedule?.note || ''),
+      };
+      await emp.save();
+    }
+
+    // Fill the current month straight away so the change is visible.
+    const month = fixedSchedule.todayIsrael().slice(0, 7);
+    const result = await fixedSchedule.materializeMonth(month, {
+      employeeIds: employees.map(e => e._id),
+      userId: req.user?.id || null,
+    });
+    res.json({ ok: true, updated: employees.length, punches_created: result.created, conflicts: result.conflicts });
+  } catch (err) { next(err); }
+}
+
+/**
+ * DELETE /api/payroll/fixed-schedules/:employeeId
+ * Stop generating for this employee. Already-generated punches are kept —
+ * they are hours she actually worked; delete them from the grid if not.
+ */
+async function clearFixedSchedule(req, res, next) {
+  try {
+    const emp = await Employee.findById(req.params.employeeId);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    emp.fixed_schedule = { ...(emp.fixed_schedule?.toObject?.() || emp.fixed_schedule || {}), enabled: false };
+    await emp.save();
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll/fixed-schedules/:employeeId/exception
+ * Body: { date, off?, in?, out?, note? } — one arbitrary day gets different
+ * hours (or none). Regenerates that day so the change lands immediately.
+ */
+async function setFixedScheduleException(req, res, next) {
+  try {
+    const { date, off = false, in: inTime = '', out: outTime = '', note = '' } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return res.status(400).json({ error: 'תאריך נדרש (YYYY-MM-DD)' });
+    if (!off && (!HHMM.test(inTime) || !HHMM.test(outTime))) {
+      return res.status(400).json({ error: 'הזן שעת כניסה ויציאה, או סמן "לא עבדה"' });
+    }
+    if (!off && outTime <= inTime) return res.status(400).json({ error: 'שעת היציאה חייבת להיות אחרי שעת הכניסה' });
+
+    const emp = await Employee.findById(req.params.employeeId);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!emp.fixed_schedule?.enabled) return res.status(400).json({ error: 'לעובדת זו אין שעות קבועות' });
+
+    const list = emp.fixed_schedule.exceptions || [];
+    const idx = list.findIndex(e => e.date === date);
+    const entry = { date, off: !!off, in: off ? '' : inTime, out: off ? '' : outTime, note };
+    if (idx >= 0) list[idx] = entry; else list.push(entry);
+    emp.fixed_schedule.exceptions = list;
+    await emp.save();
+
+    // Clear that day's generated punches so the new hours take effect. Real
+    // clock punches are left untouched.
+    const dayFrom = fixedSchedule.ilDateTime(date, '00:00');
+    const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+    await Punch.deleteMany({
+      employee_id: emp._id,
+      timestamp_source: 'fixed_schedule',
+      timestamp: { $gte: dayFrom, $lt: dayTo },
+    });
+    const result = await fixedSchedule.materializeMonth(date.slice(0, 7), {
+      employeeIds: [emp._id], userId: req.user?.id || null,
+    });
+    res.json({ ok: true, punches_created: result.created });
+  } catch (err) { next(err); }
+}
+
+/** DELETE /api/payroll/fixed-schedules/:employeeId/exception/:date */
+async function removeFixedScheduleException(req, res, next) {
+  try {
+    const { employeeId, date } = req.params;
+    const emp = await Employee.findById(employeeId);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    emp.fixed_schedule.exceptions = (emp.fixed_schedule?.exceptions || []).filter(e => e.date !== date);
+    await emp.save();
+    const result = await fixedSchedule.materializeMonth(date.slice(0, 7), {
+      employeeIds: [emp._id], userId: req.user?.id || null,
+    });
+    res.json({ ok: true, punches_created: result.created });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll/fixed-schedules/materialize  { month }
+ * Manual "fill now" — the same pass that runs on every payroll load, exposed
+ * for a month the accountant wants to backfill.
+ */
+async function materializeFixedSchedules(req, res, next) {
+  try {
+    const month = req.body?.month || fixedSchedule.todayIsrael().slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const result = await fixedSchedule.materializeMonth(month, { userId: req.user?.id || null });
+    res.json({ ok: true, month, punches_created: result.created, conflicts: result.conflicts });
   } catch (err) { next(err); }
 }
 
@@ -2290,14 +2493,29 @@ async function myPunches(req, res, next) {
     for (const br of branches) branchMap[String(br._id)] = br.name;
 
     // Group into days with branch info + pending-approval marker
+    const PENDING_STATES = new Set(['pending', 'pending_manager', 'pending_accountant']);
     const dayMap = {};
     for (const p of rawPunches) {
       const d = new Date(p.timestamp);
       const dateStr = d.toLocaleDateString('he-IL', { timeZone: IL_TZ });
-      if (!dayMap[dateStr]) dayMap[dateStr] = { times: [], branch: branchMap[String(p.branch_id)] || '', pending: false };
+      if (!dayMap[dateStr]) {
+        dayMap[dateStr] = {
+          times: [], branch: branchMap[String(p.branch_id)] || '', pending: false,
+          // ISO form of the same day — the client needs it to pre-fill a
+          // "complete my missing punch" report for that exact date.
+          iso: israelDateKey(d),
+          stage: null,
+        };
+      }
       dayMap[dateStr].times.push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
       dayMap[dateStr].branch = branchMap[String(p.branch_id)] || '';
-      if (p.approval_status === 'pending') dayMap[dateStr].pending = true;
+      // Employee-reported punches arrive as 'pending_manager' and are then moved
+      // to 'pending_accountant' — matching only the legacy 'pending' meant a
+      // self-reported punch never showed as awaiting approval.
+      if (PENDING_STATES.has(p.approval_status)) {
+        dayMap[dateStr].pending = true;
+        dayMap[dateStr].stage = p.approval_status === 'pending_accountant' ? 'accountant' : 'manager';
+      }
     }
 
     const punches = Object.entries(dayMap).map(([date, data]) => {
@@ -2310,10 +2528,23 @@ async function myPunches(req, res, next) {
         hours = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60;
         hours = Math.round(hours * 100) / 100;
       }
-      return { date, in_time: inTime, out_time: outTime, hours: hours ? `${hours}` : null, branch: data.branch, pending_approval: data.pending };
+      return {
+        date, iso_date: data.iso,
+        in_time: inTime, out_time: outTime,
+        hours: hours ? `${hours}` : null,
+        branch: data.branch,
+        pending_approval: data.pending,
+        approval_stage: data.stage,
+        // A lone punch — the pair never completed, so this is exactly the day
+        // the employee needs to report. Surfaced so she doesn't have to notice.
+        incomplete: data.times.length === 1,
+      };
     });
 
-    res.json({ punches, month, employee_name: emp.full_name });
+    res.json({
+      punches, month, employee_name: emp.full_name,
+      missing_count: punches.filter(p => p.incomplete).length,
+    });
   } catch (err) { next(err); }
 }
 
@@ -2356,6 +2587,12 @@ module.exports = {
   rejectPunch,
   editPunch,
   deletePunch,
+  listFixedSchedules,
+  setFixedSchedules,
+  clearFixedSchedule,
+  setFixedScheduleException,
+  removeFixedScheduleException,
+  materializeFixedSchedules,
   mySalaryPreview,
   myPunches,
   myPayslips,
