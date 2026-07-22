@@ -38,7 +38,9 @@ import EmployeeDocsDialog from './EmployeeDocsDialog';
 import PregnancyDetailDialog from './PregnancyDetailDialog';
 import PunchReviewDialog from './PunchReviewDialog';
 import PunchIssuesDialog from './PunchIssuesDialog';
+import FixedSchedulesDialog from './FixedSchedulesDialog';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
@@ -841,6 +843,7 @@ export default function PayrollMonthTable() {
   // >2-punch day without a final decision.
   const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, duplicates_count: 0, missing_count: 0 });
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [fixedSchedOpen, setFixedSchedOpen] = useState(false);
   useEffect(() => {
     if (!month) return;
     api.get(`/payroll-month/${month}/punch-issues`)
@@ -1642,6 +1645,10 @@ export default function PayrollMonthTable() {
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
+          <Tooltip title="עובדים שמקבלים שעות קבועות ללא החתמה בשעון">
+            <Button startIcon={<ScheduleIcon />} size="small" onClick={() => setFixedSchedOpen(true)}
+              variant="outlined" color="secondary" disabled={stagingMode}>שעות קבועות</Button>
+          </Tooltip>
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
@@ -2128,12 +2135,13 @@ export default function PayrollMonthTable() {
                           <Chip
                             size="small" clickable
                             icon={<AttachFileIcon sx={{ fontSize: 14 }} />}
-                            label="קבצים"
+                            label={r.docs_total > 0 ? `קבצים · ${r.docs_total}` : 'קבצים'}
                             onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
                             sx={{
                               height: 22, borderRadius: 1.5, fontSize: '0.64rem', fontWeight: 600,
-                              color: 'primary.main', bgcolor: '#eef2ff',
-                              border: '1px solid #c7d2fe',
+                              color: r.docs_total > 0 ? '#1e40af' : 'primary.main',
+                              bgcolor: r.docs_total > 0 ? '#dbeafe' : '#eef2ff',
+                              border: `1px solid ${r.docs_total > 0 ? '#93c5fd' : '#c7d2fe'}`,
                               '& .MuiChip-icon': { color: 'primary.main', ml: '6px', mr: '-2px' },
                               '&:hover': { bgcolor: '#e0e7ff' },
                             }}
@@ -2195,7 +2203,7 @@ export default function PayrollMonthTable() {
                           >
                             {r.pending_docs.map(d => (
                               <Box key={d.id} sx={{ color: '#92400e', fontWeight: 700, fontSize: '0.64rem' }}>
-                                📎 קובץ "{d.name}" ממתין בקבצים
+                                📎 {d.source === 'request' ? d.name : `קובץ "${d.name}"`} ממתין בקבצים
                               </Box>
                             ))}
                           </Box>
@@ -2296,10 +2304,16 @@ export default function PayrollMonthTable() {
         onClose={() => setDocsDlg({ open: false, row: null })}
         onSaved={fetchData}
       />
+      <FixedSchedulesDialog
+        open={fixedSchedOpen}
+        onClose={() => setFixedSchedOpen(false)}
+        onChanged={fetchData}
+      />
       <PunchIssuesDialog
         open={issuesOpen}
         month={month}
         canFix={isAccountant || isAdmin}
+        canRemind={isAccountant || isAdmin}
         onClose={() => setIssuesOpen(false)}
         onChanged={fetchData}
       />

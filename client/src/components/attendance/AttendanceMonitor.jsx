@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Box, Typography, Stack, TextField, Paper, Table, TableBody, TableCell,
   TableHead, TableRow, TableContainer, Chip, Alert, Button, Tooltip, IconButton,
-  InputAdornment,
+  InputAdornment, Badge,
 } from '@mui/material';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -20,6 +20,9 @@ import MonthlyHoursReports from './MonthlyHoursReports';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PendingPunchApprovals from './PendingPunchApprovals';
 import DayPunchesDialog from './DayPunchesDialog';
+import PunchIssuesDialog from '../payroll/PunchIssuesDialog';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import { useAuth } from '../../hooks/useAuth';
 
 /**
  * Monthly attendance monitor. Columns: employee, day-by-day hours, monthly total.
@@ -51,12 +54,20 @@ function formatHours(h) {
 
 export default function AttendanceMonitor() {
   const { selectedBranch, selectedBranchName, isAllBranches, branches } = useBranch();
+  const { isAdmin, isAccountant, isManager } = useAuth();
+  // Managers fix their own staff's days; accounting reviews and approves.
+  const canFixIssues = isAdmin || isAccountant || isManager;
   const [month, setMonth] = useState(currentYearMonth());
   const [data, setData] = useState(null);            // single-branch payload
   const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   const [reportsOpen, setReportsOpen] = useState(false);
+  // Completing missing punches is the branch manager's job, so the same issues
+  // screen the accountant uses is reachable from here — scoped server-side to
+  // the branches this user manages.
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [issuesCount, setIssuesCount] = useState(0);
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
@@ -94,6 +105,15 @@ export default function AttendanceMonitor() {
   }, [selectedBranch, isAllBranches, branches, month]);
 
   useEffect(() => { fetchAttendance(); }, [fetchAttendance]);
+
+  // Badge count for the issues button — the server scopes this to the branches
+  // the user manages, so a manager sees only what is theirs to fix.
+  const fetchIssuesCount = useCallback(() => {
+    api.get(`/payroll-month/${month}/punch-issues`)
+      .then(r => setIssuesCount((r.data.duplicates_count || 0) + (r.data.missing_count || 0) + (r.data.conflicts_count || 0)))
+      .catch(() => setIssuesCount(0));
+  }, [month]);
+  useEffect(() => { fetchIssuesCount(); }, [fetchIssuesCount]);
 
   const days = useMemo(() => {
     const n = daysInMonth(month);
@@ -193,12 +213,14 @@ export default function AttendanceMonitor() {
         //   Purple = manual punch pending accounting approval (not yet in salary)
         //   Amber  = incomplete (missing a clock-out)
         //   Blue   = manual update entered by accounting (approved, counted)
+        //   Teal   = generated from the employee's fixed weekly hours (no clock)
         //   Green  = punched on the clock by the employee (complete)
         let bgColor, textColor;
         if (day.needs_review) { bgColor = '#fee2e2'; textColor = '#b91c1c'; }
         else if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
         else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
         else if (day.has_manual) { bgColor = '#dbeafe'; textColor = '#1e40af'; }
+        else if (day.has_fixed_schedule) { bgColor = '#ccfbf1'; textColor = '#0f766e'; }
         else { bgColor = '#d1fae5'; textColor = '#065f46'; }
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
@@ -211,6 +233,7 @@ export default function AttendanceMonitor() {
               {day.needs_review && <div style={{color:'#fca5a5',fontWeight:800}}>⚠️ החתמה כפולה ({day.punch_count} החתמות) — ממתין להחלטת הנה״ח</div>}
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
               {!day.has_pending && day.has_manual && <div style={{color:'#93c5fd'}}>✎ עודכן ידנית ע״י הנה״ח</div>}
+              {day.has_fixed_schedule && <div style={{color:'#5eead4'}}>⏱ שעות קבועות — ללא החתמה בשעון</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>
@@ -523,6 +546,17 @@ export default function AttendanceMonitor() {
           >
             {exporting ? 'מייצא…' : 'ייצא PDF'}
           </Button>
+          <Badge color="error" badgeContent={issuesCount} max={99}>
+            <Button
+              size="small"
+              variant={issuesCount ? 'contained' : 'outlined'}
+              color="warning"
+              startIcon={<ReportProblemIcon />}
+              onClick={() => setIssuesOpen(true)}
+            >
+              בעיות בהחתמה
+            </Button>
+          </Badge>
           <Button
             size="small"
             variant="contained"
@@ -539,6 +573,7 @@ export default function AttendanceMonitor() {
         {[
           { c: '#d1fae5', t: '#065f46', label: 'החתמת שעון' },
           { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני (הנה״ח)' },
+          { c: '#ccfbf1', t: '#0f766e', label: '⏱ שעות קבועות' },
           { c: '#fef3c7', t: '#92400e', label: 'חסרה יציאה' },
           { c: '#ede9fe', t: '#5b21b6', label: 'ידני — ממתין לאישור' },
           { c: '#fee2e2', t: '#b91c1c', label: '⚠️ החתמה כפולה — להחלטת הנה״ח' },
@@ -677,6 +712,15 @@ export default function AttendanceMonitor() {
         </Table>
       </TableContainer>
 
+
+      <PunchIssuesDialog
+        open={issuesOpen}
+        month={month}
+        canFix={canFixIssues}
+        canRemind={isAccountant || isAdmin}
+        onClose={() => setIssuesOpen(false)}
+        onChanged={() => { fetchAttendance(); fetchIssuesCount(); }}
+      />
 
       <HoursReportDialog
         open={hoursDialog.open}

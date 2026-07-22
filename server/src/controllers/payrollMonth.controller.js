@@ -7,8 +7,15 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
+  User,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
+const {
+  materializeMonth: materializeFixedSchedule,
+  conflictsForMonth: fixedScheduleConflicts,
+  markDayOff: markFixedScheduleDayOff,
+  ilDateTime: ilDateTimeOf,
+} = require('../services/fixedSchedule');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -302,6 +309,16 @@ async function getMonth(req, res, next) {
     }
     const branchIds = branches.map(b => b._id);
 
+    // Fill in any missing fixed-hours punches for employees who don't clock in.
+    // Idempotent and bounded by today, so running it on every load simply keeps
+    // the month current without ever inventing future hours. A failure here must
+    // not take the salary table down with it.
+    try {
+      await materializeFixedSchedule(month, { branchIds, userId: req.user?.id || null });
+    } catch (e) {
+      console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
+    }
+
     // Date window for the month (used for punches + inactive-relevance).
     const { from, to } = parseMonthRange(month);
 
@@ -378,18 +395,54 @@ async function getMonth(req, res, next) {
       resByEmp.get(k).set(r.date, r);
     }
 
-    // Uploaded documents still awaiting the accountant's acknowledgement — shown
-    // as "📎 … ממתין בקבצים" in each employee's notes cell so uploads aren't missed.
-    const pendingDocs = await EmployeeDocument.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      acknowledged: { $ne: true },
-    }).select('employee_id name file_name created_at').sort({ created_at: -1 }).lean();
+    // Attached files still awaiting the accountant's acknowledgement — shown as
+    // "📎 … ממתין בקבצים" in each employee's notes cell so files aren't missed.
+    // BOTH sources count: documents uploaded from the notes column AND the
+    // medical certificates carried by sick / vacation / pregnancy-exam requests.
+    // The certificate is the more common case, so leaving it out made attached
+    // files look captionless in the table.
+    const empIdList = employees.map(e => e._id);
+    const userIdList = employees.map(e => e.user_id).filter(Boolean);
+    // Fetched unfiltered by acknowledgement so the same read also yields the
+    // total file count behind each row's "קבצים" chip (metadata only — the
+    // base64 payloads are never selected).
+    const [allDocs, allCerts] = await Promise.all([
+      EmployeeDocument.find({ employee_id: { $in: empIdList } })
+        .select('employee_id name file_name created_at acknowledged').sort({ created_at: -1 }).lean(),
+      EmployeeRequest.find({
+        $or: [
+          { employee_id: { $in: empIdList } },
+          ...(userIdList.length ? [{ user_id: { $in: userIdList } }] : []),
+        ],
+        medical_file_data: { $ne: null },
+      }).select('employee_id user_id type from_date to_date medical_file_name created_at cert_acknowledged')
+        .sort({ created_at: -1 }).lean(),
+    ]);
+    const pendingDocs = allDocs.filter(d => d.acknowledged !== true);
+    const pendingCerts = allCerts.filter(c => c.cert_acknowledged !== true);
+    // Certificates filed through a login carry user_id only — map back to the employee.
+    const empByUserId = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
+    const CERT_LABEL = { sick: 'אישור מחלה', vacation: 'אישור חופשה', pregnancy_exam: 'אישור בדיקת הריון' };
     const pendingDocsByEmp = new Map();
+    const push = (empKey, entry) => {
+      if (!empKey) return;
+      if (!pendingDocsByEmp.has(empKey)) pendingDocsByEmp.set(empKey, []);
+      pendingDocsByEmp.get(empKey).push(entry);
+    };
     for (const d of pendingDocs) {
-      const k = String(d.employee_id);
-      if (!pendingDocsByEmp.has(k)) pendingDocsByEmp.set(k, []);
-      pendingDocsByEmp.get(k).push({ id: String(d._id), name: d.name || d.file_name || 'קובץ' });
+      push(String(d.employee_id), { id: String(d._id), source: 'document', name: d.name || d.file_name || 'קובץ' });
     }
+    for (const c of pendingCerts) {
+      const empKey = c.employee_id ? String(c.employee_id) : empByUserId.get(String(c.user_id));
+      const span = c.to_date && c.to_date !== c.from_date ? `${c.from_date}–${c.to_date}` : c.from_date;
+      push(empKey, { id: String(c._id), source: 'request', name: `${CERT_LABEL[c.type] || 'אישור'} ${span}` });
+    }
+    // Total attached files per employee — drives the count on the "קבצים" chip
+    // so a row always shows that files exist, acknowledged or not.
+    const docsTotalByEmp = new Map();
+    const bump = (k) => { if (k) docsTotalByEmp.set(k, (docsTotalByEmp.get(k) || 0) + 1); };
+    for (const d of allDocs) bump(String(d.employee_id));
+    for (const c of allCerts) bump(c.employee_id ? String(c.employee_id) : empByUserId.get(String(c.user_id)));
 
     // Pull any existing PayrollMonth rows for these employees
     const existing = await PayrollMonth.find({
@@ -886,6 +939,7 @@ async function getMonth(req, res, next) {
         inactive_reason: emp.inactive_reason || '',
         // Uploaded files awaiting the accountant's acknowledgement.
         pending_docs: pendingDocsByEmp.get(String(emp._id)) || [],
+        docs_total: docsTotalByEmp.get(String(emp._id)) || 0,
         // Days with MORE THAN TWO punches — every one needs an accountant/admin
         // decision on how to pair them. Unresolved days are billed provisionally
         // (first→last span) and flagged red until approved.
@@ -2612,7 +2666,15 @@ async function punchIssues(month) {
   const meta = (k) => {
     const [empId, date] = k.split('|');
     const e = empById[empId] || {};
-    return { employee_id: empId, full_name: e.full_name || '', branch_name: e.branch_id?.name || '', date };
+    return {
+      employee_id: empId,
+      full_name: e.full_name || '',
+      // branch_id is what the UI groups by and what a reminder is addressed to;
+      // the name alone can't identify the manager to notify.
+      branch_id: e.branch_id?._id ? String(e.branch_id._id) : null,
+      branch_name: e.branch_id?.name || '',
+      date,
+    };
   };
   const byName = (a, b) => a.full_name.localeCompare(b.full_name, 'he') || a.date.localeCompare(b.date);
 
@@ -2644,6 +2706,97 @@ async function punchIssues(month) {
 }
 
 /**
+ * Branches this user is responsible for, or null for "everything" (accountant /
+ * system_admin). A branch manager must only ever see — and be able to fix — the
+ * punch problems of their own staff.
+ */
+function branchScopeOf(req) {
+  const role = req.user?.role;
+  if (role === 'system_admin' || role === 'accountant') return null;
+  const managed = (req.user?.managed_branch_ids || []).map(String);
+  const fallback = req.user?.branch_id ? [String(req.user.branch_id)] : [];
+  return managed.length ? managed : fallback;
+}
+
+/** Keep only the issues belonging to `scope` (null = keep everything). */
+function scopeIssues(list, scope) {
+  if (!scope) return list;
+  const allowed = new Set(scope.map(String));
+  return list.filter(i => i.branch_id && allowed.has(String(i.branch_id)));
+}
+
+/**
+ * Most logins carry a synthetic placeholder address (<ת"ז>@gan-halomot.local),
+ * not an inbox. Mailing those silently drops the message while reporting
+ * success, so they must never count as a reachable address.
+ */
+const isRealEmail = (e) => !!e && e.includes('@')
+  && !/@gan-halomot\.local$/i.test(e) && !/@ganhalomot\.co\.il$/i.test(e);
+
+/** Israeli mobile → intl for wa.me (0501234567 → 972501234567). */
+const waNumber = (phone = '') => {
+  const digits = String(phone).replace(/\D/g, '');
+  if (digits.startsWith('972')) return digits;
+  if (digits.startsWith('0')) return `972${digits.slice(1)}`;
+  return digits;
+};
+
+/**
+ * The manager(s) responsible for a branch — an explicit managed_branch_ids
+ * entry, or a single-branch manager whose home branch is this one.
+ *
+ * A manager's phone usually lives on her Employee card rather than her login,
+ * and without a number the WhatsApp reminder is dead, so we fall back to it.
+ */
+async function branchManagers(branchIds) {
+  const ids = (Array.isArray(branchIds) ? branchIds : [branchIds]).filter(Boolean);
+  if (!ids.length) return new Map();
+  const users = await User.find({
+    role: 'branch_manager',
+    is_active: { $ne: false },
+    $or: [{ managed_branch_ids: { $in: ids } }, { branch_id: { $in: ids } }],
+  }).select('full_name email phone managed_branch_ids branch_id').lean();
+  if (!users.length) return new Map();
+
+  const empDocs = await Employee.find({ user_id: { $in: users.map(u => u._id) } })
+    .select('user_id phone').lean();
+  const phoneByUser = new Map(empDocs.filter(e => e.phone).map(e => [String(e.user_id), e.phone]));
+
+  const byBranch = new Map(ids.map(id => [String(id), []]));
+  for (const u of users) {
+    const covers = (u.managed_branch_ids || []).map(String);
+    if (!covers.length && u.branch_id) covers.push(String(u.branch_id));
+    for (const bid of covers) {
+      if (!byBranch.has(bid)) continue;
+      byBranch.get(bid).push({
+        id: String(u._id),
+        name: u.full_name,
+        email: isRealEmail(u.email) ? u.email : '',
+        phone: u.phone || phoneByUser.get(String(u._id)) || '',
+      });
+    }
+  }
+  return byBranch;
+}
+
+/** The Hebrew nudge sent to a branch manager (also reused as the WhatsApp text). */
+function buildReminderText(branchName, month, missing, duplicates) {
+  const missLines = [...missing]
+    .sort((a, b) => a.date.localeCompare(b.date) || a.full_name.localeCompare(b.full_name, 'he'))
+    .map(m => `• ${m.date} — ${m.full_name} (החתמה יחידה ${m.punch_hhmm})`);
+  const dupLines = [...duplicates]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(d => `• ${d.date} — ${d.full_name} (${d.punches.length} החתמות באותו יום)`);
+  return [
+    `שלום, נדרשת השלמת החתמות בסניף ${branchName} לחודש ${month}.`,
+    '',
+    ...(missing.length ? [`ימים עם החתמה חסרה (${missing.length}):`, ...missLines, ''] : []),
+    ...(duplicates.length ? [`ימים עם החתמה כפולה הממתינים לבדיקה (${duplicates.length}):`, ...dupLines, ''] : []),
+    'נא להיכנס למערכת → החתמות → להשלים את השעות החסרות. לאחר ההשלמה הן יגיעו לאישור הנהלת החשבונות.',
+  ].join('\n');
+}
+
+/**
  * GET /api/payroll-month/:month/punch-issues
  * Everything wrong with the month's punches, across ALL branches, in one place:
  * unresolved >2-punch days (which BLOCK the accountant send) and days with a
@@ -2653,14 +2806,177 @@ async function punchReviewStatus(req, res, next) {
   try {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
-    const { duplicates, missing } = await punchIssues(month);
+    const scope = branchScopeOf(req);
+    const [{ duplicates, missing }, conflictsRaw] = await Promise.all([
+      punchIssues(month),
+      // A fixed-hours employee who also clocked in that day: no hours were
+      // generated for her, and someone has to say which reading counts.
+      fixedScheduleConflicts(month, { branchIds: scope }).catch(() => []),
+    ]);
+
+    // The blocking gate is a NETWORK-WIDE fact — the accountant cannot send the
+    // month while anything anywhere is unresolved — so it is counted before
+    // scoping. The lists themselves are scoped to what this user may act on.
+    const blockedCount = duplicates.length;
+    const scopedDuplicates = scopeIssues(duplicates, scope);
+    const scopedMissing = scopeIssues(missing, scope);
+    const conflicts = scopeIssues(conflictsRaw, scope);
+
+    // Branch directory for the per-branch tabs. Each entry carries its own
+    // counts, its manager(s), and a ready WhatsApp link — so switching to a
+    // branch tab immediately shows who is responsible and how to nudge them,
+    // with no extra request and no need to press "send" first.
+    const branchIds = [...new Set(
+      [...scopedDuplicates, ...scopedMissing, ...conflicts].map(i => i.branch_id).filter(Boolean),
+    )];
+    const [branchDocs, managersByBranch] = await Promise.all([
+      branchIds.length ? Branch.find({ _id: { $in: branchIds } }).select('name').lean() : [],
+      branchManagers(branchIds),
+    ]);
+    const branches = branchDocs.map(bd => {
+      const id = String(bd._id);
+      const mine = (l) => l.filter(i => String(i.branch_id) === id);
+      const bMissing = mine(scopedMissing);
+      const bDups = mine(scopedDuplicates);
+      const text = buildReminderText(bd.name, month, bMissing, bDups);
+      return {
+        id,
+        name: bd.name,
+        duplicates_count: bDups.length,
+        missing_count: bMissing.length,
+        conflicts_count: mine(conflicts).length,
+        reminder_text: text,
+        managers: (managersByBranch.get(id) || []).map(m => ({
+          ...m,
+          whatsapp_url: m.phone ? `https://wa.me/${waNumber(m.phone)}?text=${encodeURIComponent(text)}` : null,
+        })),
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name, 'he'));
+
     res.json({
-      blocked: duplicates.length > 0,
-      count: duplicates.length,
-      duplicates_count: duplicates.length,
-      missing_count: missing.length,
-      duplicates,
-      missing,
+      blocked: blockedCount > 0,
+      count: blockedCount,
+      // What this user can see (a manager sees only their own branches).
+      duplicates_count: scopedDuplicates.length,
+      missing_count: scopedMissing.length,
+      conflicts_count: conflicts.length,
+      // Network-wide totals, so a manager understands why the send is blocked
+      // even when their own branch is clean.
+      network_duplicates_count: duplicates.length,
+      network_missing_count: missing.length,
+      scoped: !!scope,
+      duplicates: scopedDuplicates,
+      missing: scopedMissing,
+      conflicts,
+      branches,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/:month/punch-issues/fixed-conflict
+ * Body: { employee_id, date, decision: 'clock' | 'fixed' }
+ *
+ * Resolves a day where a fixed-hours employee also clocked in.
+ *   'clock' — the real reading wins; the day is marked as an exception so no
+ *             fixed hours are ever generated for it.
+ *   'fixed' — the standing hours win; the clock punches are marked ignored
+ *             (kept for audit, excluded from pay) and the hours are generated.
+ */
+async function resolveFixedConflict(req, res, next) {
+  try {
+    const { employee_id, date, decision } = req.body || {};
+    if (!employee_id || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) {
+      return res.status(400).json({ error: 'employee_id ותאריך נדרשים' });
+    }
+    if (decision !== 'clock' && decision !== 'fixed') {
+      return res.status(400).json({ error: 'decision חייב להיות clock או fixed' });
+    }
+
+    const dayFrom = ilDateTimeOf(date, '00:00');
+    const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+
+    if (decision === 'clock') {
+      await markFixedScheduleDayOff(employee_id, date, 'הוחלט לפי החתמת השעון');
+      return res.json({ ok: true, decision });
+    }
+
+    await Punch.updateMany(
+      {
+        employee_id,
+        timestamp: { $gte: dayFrom, $lt: dayTo },
+        timestamp_source: { $ne: 'fixed_schedule' },
+      },
+      { $set: { ignored: true, ignored_reason: `הוחלט לשלם לפי שעות קבועות (${date})` } },
+    );
+    const result = await materializeFixedSchedule(date.slice(0, 7), {
+      employeeIds: [employee_id], userId: req.user?.id || null,
+    });
+    res.json({ ok: true, decision, punches_created: result.created });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/:month/punch-issues/remind
+ * Body: { branch_id, kind?: 'missing'|'duplicates'|'all' }
+ *
+ * Filling in a missing punch is the BRANCH MANAGER's job — they know whether
+ * the employee was actually there. This nudges them by email and hands back a
+ * ready-made WhatsApp message per manager, so accounting chases rather than
+ * invents hours.
+ */
+async function remindBranchManager(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const branchId = req.body?.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'branch_id נדרש' });
+
+    const branch = await Branch.findById(branchId).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
+
+    const { duplicates, missing } = await punchIssues(month);
+    const branchMissing = missing.filter(m => String(m.branch_id) === String(branchId));
+    const branchDups = duplicates.filter(d => String(d.branch_id) === String(branchId));
+    if (branchMissing.length === 0 && branchDups.length === 0) {
+      return res.status(400).json({ error: 'אין בעיות פתוחות בסניף זה' });
+    }
+
+    const managers = (await branchManagers([branchId])).get(String(branchId)) || [];
+    const summary = buildReminderText(branch.name, month, branchMissing, branchDups);
+    const emails = managers.map(m => m.email).filter(Boolean);
+    let emailed = 0;
+    if (emails.length) {
+      try {
+        await dispatchEmail({
+          to: emails,
+          subject: `השלמת החתמות — ${branch.name} — ${month}`,
+          text: summary,
+          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${
+            summary.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          }</div>`,
+        });
+        emailed = emails.length;
+      } catch (e) {
+        console.error('[punch-issues] reminder email failed:', e.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      branch_name: branch.name,
+      missing_count: branchMissing.length,
+      duplicates_count: branchDups.length,
+      emailed,
+      message: summary,
+      managers: managers.map(m => ({
+        name: m.name,
+        email: m.email,
+        phone: m.phone,
+        whatsapp_url: m.phone
+          ? `https://wa.me/${waNumber(m.phone)}?text=${encodeURIComponent(summary)}`
+          : null,
+      })),
     });
   } catch (err) { next(err); }
 }
@@ -2816,6 +3132,8 @@ module.exports = {
   resolvePunchDay,
   unresolvePunchDay,
   punchReviewStatus,
+  remindBranchManager,
+  resolveFixedConflict,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,
