@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
   TextField, InputAdornment, Button, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions, Divider,
+  Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
@@ -43,6 +43,9 @@ export default function RegistrationTracker() {
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
+  // Which upload is in flight — drives the spinner so a slow upload never looks
+  // like a frozen button.
+  const [uploading, setUploading] = useState('');
 
   const apiBase = '';
 
@@ -74,19 +77,21 @@ export default function RegistrationTracker() {
     fd.append('file', file);
     fd.append('doc_type', docType);
     fd.append('registration_id', docsDialog.reg._id || docsDialog.reg.id);
+    setUploading('doc');
     try {
       await api.post('/documents/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('מסמך הועלה');
       refreshDocs();
     } catch {
       toast.error('שגיאה בהעלאה');
-    }
+    } finally { setUploading(''); }
   };
 
   const handleFinalizeManual = async (file) => {
     if (!docsDialog.reg) return;
     const fd = new FormData();
     if (file) fd.append('contract_file', file);
+    setUploading(file ? 'contract' : 'finalize');
     try {
       await api.post(
         `/registrations/${docsDialog.reg._id || docsDialog.reg.id}/finalize-manual`,
@@ -98,7 +103,7 @@ export default function RegistrationTracker() {
       await refreshDocs();
     } catch {
       toast.error('שגיאה בסיום ידני');
-    }
+    } finally { setUploading(''); }
   };
 
   const downloadContract = async (regId) => {
@@ -491,10 +496,11 @@ export default function RegistrationTracker() {
                 component="label"
                 size="small"
                 variant="outlined"
-                startIcon={<UploadFileIcon />}
+                disabled={!!uploading}
+                startIcon={uploading === 'contract' ? <CircularProgress size={14} /> : <UploadFileIcon />}
                 sx={{ mb: 1 }}
               >
-                העלה חוזה ידני וסמן כהושלם
+                {uploading === 'contract' ? 'מעלה חוזה…' : 'העלה חוזה ידני וסמן כהושלם'}
                 <input
                   type="file"
                   accept="application/pdf,image/*"
@@ -508,6 +514,8 @@ export default function RegistrationTracker() {
               <Button
                 size="small"
                 variant="text"
+                disabled={!!uploading}
+                startIcon={uploading === 'finalize' ? <CircularProgress size={14} /> : null}
                 sx={{ display: 'block', mb: 2 }}
                 onClick={() => handleFinalizeManual(null)}
               >
@@ -612,9 +620,10 @@ export default function RegistrationTracker() {
               component="label"
               size="small"
               variant="contained"
-              startIcon={<UploadFileIcon />}
+              disabled={!!uploading}
+              startIcon={uploading === 'doc' ? <CircularProgress size={14} color="inherit" /> : <UploadFileIcon />}
             >
-              העלאה
+              {uploading === 'doc' ? 'מעלה…' : 'העלאה'}
               <input
                 type="file"
                 accept="application/pdf,image/*"

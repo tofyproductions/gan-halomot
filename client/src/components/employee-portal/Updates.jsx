@@ -9,6 +9,7 @@ import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import { useAuth } from '../../hooks/useAuth';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
+import { BusyButton, FilePickButton, UploadingBar } from '../shared/UploadControls';
 
 const STATUS_MAP = {
   pending: { label: 'ממתין', color: 'warning' },
@@ -24,6 +25,7 @@ export default function Updates() {
   const [sickDialog, setSickDialog] = useState(false);
   const [form, setForm] = useState({ from_date: '', to_date: '', reason: '' });
   const [medicalFile, setMedicalFile] = useState(null);
+  const [sending, setSending] = useState(false);
 
   const fetchRequests = () => {
     api.get('/employee-requests/my')
@@ -35,6 +37,7 @@ export default function Updates() {
   useEffect(() => { fetchRequests(); }, []);
 
   const handleSubmitVacation = async () => {
+    setSending(true);
     try {
       await api.post('/employee-requests', {
         type: 'vacation',
@@ -47,6 +50,7 @@ export default function Updates() {
       setForm({ from_date: '', to_date: '', reason: '' });
       fetchRequests();
     } catch { toast.error('שגיאה בשליחה'); }
+    finally { setSending(false); }
   };
 
   const handleSubmitSick = async () => {
@@ -58,6 +62,7 @@ export default function Updates() {
       toast.error('יש למלא תאריכים');
       return;
     }
+    setSending(true);
     try {
       const payload = {
         type: 'sick',
@@ -74,17 +79,10 @@ export default function Updates() {
       setMedicalFile(null);
       fetchRequests();
     } catch { toast.error('שגיאה בשליחה'); }
+    finally { setSending(false); }
   };
 
-  const handleMedicalFile = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setMedicalFile({ name: file.name, data: reader.result.split(',')[1] });
-    };
-    reader.readAsDataURL(file);
-  };
+  const handleMedicalFile = (picked) => setMedicalFile({ name: picked.name, data: picked.data });
 
   const vacationRequests = requests.filter(r => r.type === 'vacation');
   const sickRequests = requests.filter(r => r.type === 'sick');
@@ -186,8 +184,9 @@ export default function Updates() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setVacationDialog(false)}>ביטול</Button>
-          <Button variant="contained" onClick={handleSubmitVacation} disabled={!form.from_date || !form.to_date}>שלח בקשה</Button>
+          <Button onClick={() => setVacationDialog(false)} disabled={sending}>ביטול</Button>
+          <BusyButton variant="contained" onClick={handleSubmitVacation} loading={sending}
+            disabled={!form.from_date || !form.to_date}>שלח בקשה</BusyButton>
         </DialogActions>
       </Dialog>
 
@@ -202,29 +201,31 @@ export default function Updates() {
               value={form.to_date} onChange={e => setForm(p => ({ ...p, to_date: e.target.value }))} />
             <TextField label="הערות" multiline minRows={2} placeholder="אופציונלי"
               value={form.reason} onChange={e => setForm(p => ({ ...p, reason: e.target.value }))} />
-            <Button
-              component="label"
+            <FilePickButton
               variant={medicalFile ? 'outlined' : 'contained'}
               color={medicalFile ? 'success' : 'warning'}
-              size="small"
-            >
-              {medicalFile ? `✓ צורף: ${medicalFile.name}` : 'צרף אישור רפואי (PDF / תמונה) — חובה'}
-              <input type="file" hidden accept=".pdf,.jpg,.jpeg,.png" onChange={handleMedicalFile} />
-            </Button>
+              accept=".pdf,.jpg,.jpeg,.png"
+              hasFile={!!medicalFile}
+              label="צרף אישור רפואי (PDF / תמונה) — חובה"
+              replaceLabel={medicalFile ? `✓ צורף: ${medicalFile.name}` : 'החלף אישור'}
+              onPick={handleMedicalFile}
+              onError={msg => toast.error(msg)}
+            />
             {!medicalFile && (
               <Typography variant="caption" color="error" sx={{ pl: 1 }}>
                 דיווח מחלה לא יישלח ללא אישור רפואי
               </Typography>
             )}
+            <UploadingBar show={sending} text="שולח את הדיווח והאישור… אין צורך לרענן את הדף" />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setSickDialog(false)}>ביטול</Button>
-          <Button
+          <Button onClick={() => setSickDialog(false)} disabled={sending}>ביטול</Button>
+          <BusyButton
             variant="contained" color="error"
-            onClick={handleSubmitSick}
+            onClick={handleSubmitSick} loading={sending} loadingText="מעלה אישור ושולח…"
             disabled={!form.from_date || !form.to_date || !medicalFile}
-          >שלח דיווח</Button>
+          >שלח דיווח</BusyButton>
         </DialogActions>
       </Dialog>
     </Box>
