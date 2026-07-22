@@ -40,7 +40,7 @@ async function list(req, res, next) {
     const reqFilter = { ...ownerMatch, medical_file_data: { $ne: null } };
     if (month) reqFilter.from_date = { $regex: `^${month}` };
     const reqs = await EmployeeRequest.find(reqFilter)
-      .select('type from_date to_date reason medical_file_name status created_at')
+      .select('type from_date to_date reason medical_file_name status created_at cert_acknowledged')
       .sort({ from_date: -1 })
       .lean();
     const TYPE_HE = { sick: 'אישור מחלה', vacation: 'אישור חופשה' };
@@ -56,6 +56,7 @@ async function list(req, res, next) {
       created_by_name: '',
       request_type: r.type,
       status: r.status,
+      acknowledged: !!r.cert_acknowledged,
     }));
 
     const documents = [...uploaded, ...certs].sort(
@@ -134,14 +135,28 @@ async function remove(req, res, next) {
 }
 
 /**
- * POST /api/employee-documents/:id/acknowledge  { acknowledged?: bool }
- * Mark an uploaded document as seen by the accountant (default true) so it
- * stops showing as "ממתין בקבצים" in the salary table. Pass acknowledged:false
- * to re-flag it as pending.
+ * POST /api/employee-documents/:id/acknowledge  { acknowledged?: bool, source?: 'document'|'request' }
+ * Mark an attached file as seen by the accountant (default true) so it stops
+ * showing as "ממתין בקבצים" in the salary table. Pass acknowledged:false to
+ * re-flag it as pending. `source:'request'` targets a sick/vacation certificate
+ * (the id is then the EmployeeRequest's) rather than an uploaded document.
  */
 async function acknowledge(req, res, next) {
   try {
     const ack = req.body?.acknowledged !== false;
+
+    if (req.body?.source === 'request') {
+      const r = await EmployeeRequest.findByIdAndUpdate(
+        req.params.id,
+        ack
+          ? { cert_acknowledged: true, cert_acknowledged_by: req.user?.id || null, cert_acknowledged_at: new Date() }
+          : { cert_acknowledged: false, cert_acknowledged_by: null, cert_acknowledged_at: null },
+        { new: true },
+      ).lean();
+      if (!r) return res.status(404).json({ error: 'אישור לא נמצא' });
+      return res.json({ ok: true, acknowledged: !!r.cert_acknowledged });
+    }
+
     const doc = await EmployeeDocument.findByIdAndUpdate(
       req.params.id,
       ack
