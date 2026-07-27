@@ -12,6 +12,7 @@ const { calculateMonthlySalary, billableDayPunches } = require('../services/payr
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const fixedSchedule = require('../services/fixedSchedule');
+const fingerprintSync = require('../services/fingerprintSync');
 const bcrypt = require('bcryptjs');
 
 // --- helpers --------------------------------------------------------------
@@ -392,6 +393,11 @@ async function updateEmployee(req, res, next) {
       });
     }
 
+    // Branches she could clock in at BEFORE the edit — a branch added here
+    // (a new row in "תעריפים פר-סניף") means her finger has to reach that
+    // branch's clock too, or she simply can't punch there.
+    const branchesBefore = fingerprintSync.employeeBranchIds(emp).join(',');
+
     for (const f of fields) {
       if (req.body[f] !== undefined) emp[f] = req.body[f];
     }
@@ -399,6 +405,14 @@ async function updateEmployee(req, res, next) {
       emp.amuta_distribution = await resolveAmutaDistribution(req.body.amuta_distribution, emp.branch_id);
     }
     await emp.save(); // triggers post-save hook for orphan punch re-linking
+
+    if (fingerprintSync.employeeBranchIds(emp).join(',') !== branchesBefore) {
+      // Fire-and-forget: queueing clock commands must not slow down (or fail)
+      // saving the employee card.
+      fingerprintSync.syncEmployee(emp._id, { createdBy: req.user?.id || null })
+        .catch(e => console.error('[fingerprint] sync after employee update failed:', e.message));
+    }
+
     res.json({ employee: { ...emp.toObject(), id: emp._id } });
   } catch (err) { next(err); }
 }
@@ -1707,6 +1721,48 @@ async function importEmployeeTemplate(req, res, next) {
 }
 
 /**
+ * POST /api/payroll/employees/:id/sync-fingerprint   { force? }
+ *
+ * "Send this employee's fingerprint to every branch she works at." Uses the
+ * server-side copy when we have one; otherwise queues a read-only capture from
+ * the most likely branch and completes the fan-out by itself once it arrives
+ * (see services/fingerprintSync). Safe to press repeatedly — work already
+ * queued is never duplicated.
+ */
+async function syncEmployeeFingerprint(req, res, next) {
+  try {
+    const result = await fingerprintSync.syncEmployee(req.params.id, {
+      createdBy: req.user?.id || null,
+      force: !!req.body?.force,
+    });
+    const HE = {
+      employee_not_found: 'עובד לא נמצא',
+      no_israeli_id: 'לעובד/ת אין ת"ז — לא ניתן לסנכרן טביעה',
+      no_clock_branches: 'לעובד/ת אין סניפים עם שעון נוכחות',
+      no_source_left: 'לא נמצאה טביעה באף אחד מהסניפים — יש להחתים אצבע פעם אחת במכשיר',
+      capture_requested: 'נשלחה בקשת קריאת טביעה מהשעון — ההעתקה לשאר הסניפים תתבצע אוטומטית',
+      push_queued: 'הטביעה נשלחת לשעונים של שאר הסניפים',
+      up_to_date: 'הטביעה כבר קיימת בכל הסניפים הרלוונטיים',
+    };
+    if (result.status === 'employee_not_found') return res.status(404).json({ error: HE.employee_not_found });
+    if (result.status === 'no_israeli_id') return res.status(400).json({ error: HE.no_israeli_id });
+    res.json({ ok: true, ...result, message: HE[result.status] || result.status });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/employees/:id/fingerprint-status
+ * Where the employee's finger currently is, branch by branch. Blob-free.
+ */
+async function employeeFingerprintStatus(req, res, next) {
+  try {
+    const status = await fingerprintSync.statusFor(req.params.id);
+    if (!status) return res.status(404).json({ error: 'עובד לא נמצא' });
+    res.json({ ok: true, ...status });
+  } catch (err) { next(err); }
+}
+
+/**
  * GET /api/payroll/clock-commands/:id
  * Poll the status/result of a queued AgentCommand so the UI can wait for a
  * Pi agent to finish. The heavy `templates[].b64` blobs are stripped — only a
@@ -1747,7 +1803,7 @@ async function getClockCommand(req, res, next) {
  * are tagged `timestamp_source: 'manual'` and carry the user who created
  * them for audit.
  */
-async function createManualPunches(req, res, next) {
+async function createManualPunches(req, res, next, opts = {}) {
   try {
     const { employee_id, date, in_time, out_time, note = '' } = req.body || {};
     if (!employee_id || !date) {
@@ -1770,7 +1826,10 @@ async function createManualPunches(req, res, next) {
     //   - accountant / system_admin → approved immediately (final authority)
     //   - branch_manager            → pending_accountant (manager is the source)
     //   - employee (self-service)   → pending_manager
-    const role = req.user?.role;
+    // `opts.selfReport` marks the employee-portal path: whatever role the user
+    // holds elsewhere, here she is an employee reporting her own punch, so it
+    // always starts at the bottom of the approval chain.
+    const role = opts.selfReport ? 'employee' : req.user?.role;
     const isFinal = role === 'system_admin' || role === 'accountant';
     const isManager = role === 'branch_manager';
     const approvalStatus = isFinal ? 'approved' : (isManager ? 'pending_accountant' : 'pending_manager');
@@ -2099,26 +2158,73 @@ async function materializeFixedSchedules(req, res, next) {
 // --- Self-service manual-punch request (employee → manager approval) ----
 
 /**
+ * The Employee record behind the logged-in user. The explicit `user_id` link is
+ * authoritative; ת"ז (including clock aliases) and finally the full name are
+ * fallbacks, because plenty of employee cards predate the login link. Every
+ * self-service endpoint resolves the same way — otherwise an employee can see
+ * her punches but gets "אין רשומת עובד מקושרת" when she tries to report one.
+ */
+async function resolveSelfEmployee(req) {
+  if (req.user?.id) {
+    const byLink = await Employee.findOne({ user_id: req.user.id, is_active: true }).lean();
+    if (byLink) return byLink;
+  }
+  const idNumber = fingerprintSync.normalizeId(req.user?.id_number || '');
+  if (idNumber) {
+    const byId = await Employee.findOne({
+      is_active: true,
+      $or: [{ israeli_id: idNumber }, { clock_aliases: idNumber }],
+    }).lean();
+    if (byId) return byId;
+  }
+  const name = (req.user?.full_name || '').trim();
+  if (name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const byName = await Employee.findOne({
+      is_active: true,
+      full_name: { $regex: new RegExp(`^${escaped}$`, 'i') },
+    }).lean();
+    if (byName) return byName;
+  }
+  return null;
+}
+
+/** Branches the employee may attribute her own punches to, with names. */
+async function selfBranchOptions(emp) {
+  const ids = fingerprintSync.employeeBranchIds(emp);
+  if (!ids.length) return [];
+  const branches = await Branch.find({ _id: { $in: ids } }).select('name').lean();
+  const byId = Object.fromEntries(branches.map(b => [String(b._id), b.name]));
+  return ids.filter(id => byId[id]).map(id => ({ branch_id: id, name: byId[id] }));
+}
+
+/**
  * POST /api/payroll/punch-requests
- * Body: { date, in_time, out_time, note }
+ * Body: { date, in_time, out_time, note, branch_id? }
  *
  * Used by employees through the self-service portal to report a missing
  * punch. Resolves employee_id from the authenticated user, sets the
  * punch's approval_status to 'pending', and surfaces it to the branch
  * manager via /api/payroll/punches/pending.
+ *
+ * `branch_id` matters for a cross-branch worker: a forgotten punch at קפלן must
+ * be billed to קפלן's rate and land in קפלן's bucket, not at her home branch.
+ * Only a branch she actually works at is accepted — the body is user input.
  */
 async function createPunchRequest(req, res, next) {
   try {
-    // Resolve the employee record for the logged-in user
-    const emp = await Employee.findOne({ user_id: req.user.id, is_active: true }).lean();
+    const emp = await resolveSelfEmployee(req);
     if (!emp) return res.status(404).json({ error: 'אין רשומת עובד מקושרת למשתמש' });
     req.body.employee_id = String(emp._id);
-    // Force pending: even if the user has elevated role, when calling this
-    // endpoint they are acting as an employee submitting a report.
-    const originalRole = req.user.role;
-    req.user.role = 'teacher'; // sentinel to force 'pending' branch in createManualPunches
-    await createManualPunches(req, res, next);
-    req.user.role = originalRole;
+
+    const allowed = fingerprintSync.employeeBranchIds(emp);
+    const wanted = req.body.branch_id ? String(req.body.branch_id) : '';
+    if (wanted && !allowed.includes(wanted)) {
+      return res.status(400).json({ error: 'לא ניתן לדווח החתמה על סניף שאינך עובד/ת בו' });
+    }
+    req.body.branch_id = wanted || String(emp.branch_id);
+
+    await createManualPunches(req, res, next, { selfReport: true });
   } catch (err) { next(err); }
 }
 
@@ -2468,12 +2574,14 @@ async function myPunches(req, res, next) {
     const month = req.query.month;
     if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
 
-    const emp = await Employee.findOne({ israeli_id: req.user.id_number || '', is_active: true }).lean()
-      || await Employee.findOne({ full_name: { $regex: new RegExp(`^${(req.user.full_name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, is_active: true }).lean();
+    const emp = await resolveSelfEmployee(req);
 
     if (!emp) {
-      return res.json({ punches: [] });
+      return res.json({ punches: [], branches: [] });
     }
+
+    // Branches she may report a forgotten punch for (home + per-branch rates).
+    const branchOptions = await selfBranchOptions(emp);
 
     const [y, m] = month.split('-').map(Number);
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
@@ -2500,7 +2608,7 @@ async function myPunches(req, res, next) {
       const dateStr = d.toLocaleDateString('he-IL', { timeZone: IL_TZ });
       if (!dayMap[dateStr]) {
         dayMap[dateStr] = {
-          times: [], branch: branchMap[String(p.branch_id)] || '', pending: false,
+          times: [], branch: branchMap[String(p.branch_id)] || '', branch_id: String(p.branch_id), pending: false,
           // ISO form of the same day — the client needs it to pre-fill a
           // "complete my missing punch" report for that exact date.
           iso: israelDateKey(d),
@@ -2509,6 +2617,7 @@ async function myPunches(req, res, next) {
       }
       dayMap[dateStr].times.push(d.toLocaleTimeString('he-IL', { timeZone: IL_TZ, hour: '2-digit', minute: '2-digit' }));
       dayMap[dateStr].branch = branchMap[String(p.branch_id)] || '';
+      dayMap[dateStr].branch_id = String(p.branch_id);
       // Employee-reported punches arrive as 'pending_manager' and are then moved
       // to 'pending_accountant' — matching only the legacy 'pending' meant a
       // self-reported punch never showed as awaiting approval.
@@ -2533,6 +2642,7 @@ async function myPunches(req, res, next) {
         in_time: inTime, out_time: outTime,
         hours: hours ? `${hours}` : null,
         branch: data.branch,
+        branch_id: data.branch_id,
         pending_approval: data.pending,
         approval_stage: data.stage,
         // A lone punch — the pair never completed, so this is exactly the day
@@ -2543,6 +2653,10 @@ async function myPunches(req, res, next) {
 
     res.json({
       punches, month, employee_name: emp.full_name,
+      // Multi-branch worker: the portal shows a branch picker in the
+      // "forgotten punch" form so the hours land on the right branch.
+      branches: branchOptions,
+      home_branch_id: String(emp.branch_id || ''),
       missing_count: punches.filter(p => p.incomplete).length,
     });
   } catch (err) { next(err); }
@@ -2574,6 +2688,8 @@ module.exports = {
   enrollEmployeeToClock,
   exportEmployeeTemplate,
   importEmployeeTemplate,
+  syncEmployeeFingerprint,
+  employeeFingerprintStatus,
   listEmployeeChangeRequests,
   decideEmployeeChangeRequest,
   getClockCommand,

@@ -337,15 +337,25 @@ async function pollCommands() {
             await server.commandResult(cmd.id, 'failed', { error: 'missing israeli_id in payload' });
             continue;
           }
-          // Find next available UID by checking existing users
           const users = await clock.getUsers();
-          const usedUids = users.map(u => u.uid || 0);
-          let uid = 1;
-          while (usedUids.includes(uid)) uid++;
+          // Already on this device? Reuse HER uid. The server now enqueues
+          // add_user before every fingerprint push (so import_template never
+          // hits `user_not_on_device`), and allocating a fresh uid each time
+          // would mint a second device user with the same ת"ז — the finger
+          // would land on one record and the punches on the other.
+          const existing = users.find(u => String(u.userId) === String(israeli_id));
+          let uid;
+          if (existing) {
+            uid = existing.uid;
+          } else {
+            const usedUids = users.map(u => u.uid || 0);
+            uid = 1;
+            while (usedUids.includes(uid)) uid++;
+          }
           // Use israeli_id as the device userId
           await clock.setUser(uid, israeli_id, name || '', password || '', privilege, cardno);
-          log.info(`add_user OK: uid=${uid} userId=${israeli_id} name=${name}`);
-          await server.commandResult(cmd.id, 'confirmed', { result: { uid, israeli_id, name } });
+          log.info(`add_user OK: uid=${uid} userId=${israeli_id} name=${name}${existing ? ' (existing)' : ''}`);
+          await server.commandResult(cmd.id, 'confirmed', { result: { uid, israeli_id, name, existing: !!existing } });
 
         } else if (cmd.type === 'delete_user') {
           const { uid } = cmd.payload || {};

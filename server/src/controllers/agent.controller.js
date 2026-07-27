@@ -311,6 +311,14 @@ async function commandResult(req, res, next) {
     if (status === 'failed') cmd.last_error = String(error || '').slice(0, 500);
     await cmd.save();
 
+    // Fingerprint bookkeeping: a confirmed export gets stored server-side and
+    // immediately fanned out to the employee's other branches; an import result
+    // closes that branch's row. Awaited so the fan-out is queued before the
+    // agent's next poll — it never throws.
+    if (cmd.type === 'export_template' || cmd.type === 'import_template') {
+      await require('../services/fingerprintSync').handleCommandConfirmed(cmd);
+    }
+
     res.json({ ok: true });
   } catch (err) {
     next(err);

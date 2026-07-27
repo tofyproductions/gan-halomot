@@ -155,6 +155,14 @@ connectDB().then(() => {
     const { checkStaleAgents } = require('./controllers/agent.controller');
     setTimeout(checkStaleAgents, 90000);           // first check after 90s
     setInterval(checkStaleAgents, 60 * 60 * 1000); // then hourly
+
+    // Fingerprint mirroring: a cross-branch employee must be able to put her
+    // finger on ANY of her branches' clocks. The sweep captures her template
+    // once and pushes it to every branch she works at (no-op when nothing is
+    // missing — work already queued is never queued twice).
+    const fingerprintSync = require('./services/fingerprintSync');
+    setTimeout(() => fingerprintSync.sweep(), 3 * 60 * 1000);       // first pass after 3 min
+    setInterval(() => fingerprintSync.sweep(), 6 * 60 * 60 * 1000); // then every 6h
   });
 });
 

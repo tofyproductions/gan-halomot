@@ -39,6 +39,10 @@ router.post('/employees/:id/enroll-clock',     requireRole('system_admin', 'bran
 // Cross-branch fingerprint copy — stage 1: READ-ONLY export from the source clock.
 router.post('/employees/:id/export-template',  requireRole('system_admin', 'branch_manager'), c.exportEmployeeTemplate);
 router.post('/employees/:id/import-template',  requireRole('system_admin', 'branch_manager'), c.importEmployeeTemplate);
+// One press: capture the finger (if we don't hold it yet) and mirror it to every
+// branch the employee works at, so a cross-branch worker can punch anywhere.
+router.post('/employees/:id/sync-fingerprint', requireRole('system_admin', 'branch_manager', 'accountant'), c.syncEmployeeFingerprint);
+router.get('/employees/:id/fingerprint-status', requireRole('system_admin', 'branch_manager', 'accountant'), c.employeeFingerprintStatus);
 // Employee-card edits filed by branch managers, awaiting accountant approval
 router.get('/employee-change-requests',        requireRole('system_admin', 'accountant', 'branch_manager'), c.listEmployeeChangeRequests);
 router.post('/employee-change-requests/:id/decide', requireRole('system_admin', 'accountant'), c.decideEmployeeChangeRequest);

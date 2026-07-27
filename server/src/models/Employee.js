@@ -119,6 +119,41 @@ const fixedScheduleExceptionSchema = new mongoose.Schema({
   note: { type: String, default: '' },
 }, { _id: false });
 
+/**
+ * A single finger read off a ZKTeco device. `b64` is the raw device template
+ * blob (base64) exactly as the clock returned it — it is written back verbatim
+ * to another device of the same family. Biometric data: never returned to the
+ * browser (see the `select: false` on the field below).
+ */
+const fingerTemplateSchema = new mongoose.Schema({
+  fid: { type: Number, required: true },   // finger index 0–9
+  valid: { type: Number, default: 1 },
+  size: { type: Number, default: 0 },
+  b64: { type: String, required: true },
+}, { _id: false });
+
+/**
+ * Where this employee's fingerprint currently lives. `captured_*` describe the
+ * copy we hold; `synced_branches` is the per-branch write log, so the sweeper
+ * knows which clocks still need the finger and the UI can show "מסונכרן".
+ */
+const syncedBranchSchema = new mongoose.Schema({
+  branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
+  synced_at: { type: Date, default: null },      // set when the agent confirmed the write
+  command_id: { type: mongoose.Schema.Types.ObjectId, ref: 'AgentCommand', default: null },
+  finger_count: { type: Number, default: 0 },
+  status: { type: String, enum: ['queued', 'ok', 'failed'], default: 'queued' },
+  error: { type: String, default: '' },
+}, { _id: false });
+
+const fingerprintSchema = new mongoose.Schema({
+  templates: { type: [fingerTemplateSchema], default: [] },
+  finger_count: { type: Number, default: 0 },
+  captured_at: { type: Date, default: null },
+  captured_branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
+  synced_branches: { type: [syncedBranchSchema], default: [] },
+}, { _id: false });
+
 const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
@@ -127,6 +162,16 @@ const employeeSchema = new mongoose.Schema({
   // ת"ז (typo/digit-shift). Punches with these IDs are matched to this employee
   // too, so they don't come in as "unidentified". Stored normalized to 9 digits.
   clock_aliases: { type: [String], default: [], index: true },
+  // Fingerprint templates read off a clock, kept server-side so a cross-branch
+  // worker can be pushed onto EVERY branch she works at without enrolling her
+  // finger again on each device (and so a wiped/replaced device can be
+  // refilled). `select: false` — the blobs never leave the server by accident:
+  // any query that needs them must ask with .select('+fingerprint').
+  fingerprint: {
+    type: fingerprintSchema,
+    default: null,
+    select: false,
+  },
   // Payslip employee number assigned by the accountant's payroll software. Lets
   // the accountant locate each employee by the same number shown on the תלוש.
   employee_number: { type: String, default: '', trim: true },

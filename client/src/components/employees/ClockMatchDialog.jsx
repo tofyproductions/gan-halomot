@@ -50,6 +50,10 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
   // Stage 2: write the extracted templates onto THIS branch's clock.
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  // One-press mirroring of the finger to every branch the employee works at.
+  const [syncEmp, setSyncEmp] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   useEffect(() => {
     if (!open || !effectiveBranch) return;
@@ -109,6 +113,32 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
       toast.error(err.response?.data?.error || 'שגיאה בשיוך לשעון');
     } finally {
       setEnrolling(false);
+    }
+  };
+
+  // Mirror the employee's fingerprint to every branch she works at (home branch
+  // + her per-branch rates). The server captures the finger from a clock that
+  // already has it when it doesn't hold a copy yet, then pushes it onward on
+  // its own — nothing here needs to know which branch is the source.
+  // Anyone with a ת"ז can be synced — including workers already on this clock.
+  const syncableEmployees = useMemo(
+    () => employees.filter(e => e.israeli_id)
+      .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'he')),
+    [employees]
+  );
+
+  const syncFingerprint = async () => {
+    if (!syncEmp) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const { data } = await api.post(`/payroll/employees/${syncEmp}/sync-fingerprint`, {});
+      setSyncResult(data);
+      toast.success(data.message || 'הסנכרון הופעל', { autoClose: 8000 });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בסנכרון הטביעה');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -289,7 +319,7 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>הוספת עובד/ת קיים/ת לשעון סניף זה</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 עובד/ת שכבר קיים/ת במערכת (עם ת"ז) ועובד/ת גם כאן — בחר/י ולחץ/י "הוסף לשעון". נשלחת פקודה למכשיר לרשום את ת"ז + השם.
-                את <b>טביעת האצבע</b> יש להחתים פעם אחת במכשיר (לא ניתן להעתיק אוטומטית בין סניפים).
+                את <b>טביעת האצבע</b> אפשר להעתיק לכל הסניפים בלחיצה אחת — "סנכרן טביעה לכל הסניפים".
               </Typography>
               <Stack direction="row" spacing={1}>
                 <Select size="small" fullWidth value={enrollEmp} onChange={e => setEnrollEmp(e.target.value)} displayEmpty>
@@ -302,6 +332,45 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
                   {enrolling ? 'שולח…' : 'הוסף לשעון'}
                 </Button>
               </Stack>
+
+              <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                  🫆 סנכרון טביעת אצבע לכל הסניפים של העובד/ת
+                </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                  מעתיק את הטביעה לכל הסניפים שבהם העובד/ת עובד/ת (הסניף הראשי + הסניפים שבתעריפים פר-סניף).
+                  אם עדיין אין לנו עותק של הטביעה — נשלחת קודם קריאה מהשעון שבו היא כן קיימת, וההעתקה נמשכת לבד.
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  {/* Own picker: a cross-branch worker is usually ALREADY on this
+                      clock, so the "add to clock" list above wouldn't show her. */}
+                  <Select size="small" fullWidth value={syncEmp} onChange={e => { setSyncEmp(e.target.value); setSyncResult(null); }} displayEmpty>
+                    <MenuItem value=""><em>— בחר/י עובד/ת —</em></MenuItem>
+                    {syncableEmployees.map(e => (
+                      <MenuItem key={e._id || e.id} value={String(e._id || e.id)}>{e.full_name} · {e.israeli_id}</MenuItem>
+                    ))}
+                  </Select>
+                  <Button variant="outlined" color="secondary" onClick={syncFingerprint}
+                    disabled={!syncEmp || syncing} sx={{ whiteSpace: 'nowrap' }}>
+                    {syncing ? 'מסנכרן…' : '🫆 סנכרן טביעה'}
+                  </Button>
+                </Stack>
+                {syncResult && (
+                  <Alert severity={syncResult.status === 'no_source_left' ? 'warning' : 'info'} sx={{ py: 0.5, mt: 1 }}>
+                    {syncResult.message}
+                    {syncResult.queued?.length > 0 && (
+                      <Box sx={{ mt: 0.5, fontSize: '0.75rem' }}>
+                        נשלחו פקודות לסניפים: {syncResult.queued.map(q => q.branch_name).join(', ')} — לוקח עד כדקה.
+                      </Box>
+                    )}
+                    {syncResult.branches?.length > 0 && (
+                      <Box sx={{ mt: 0.5, fontSize: '0.75rem', opacity: 0.8 }}>
+                        סניפים רלוונטיים: {syncResult.branches.join(', ')}
+                      </Box>
+                    )}
+                  </Alert>
+                )}
+              </Box>
 
               <Box sx={{ mt: 1.5, pt: 1.5, borderTop: '1px dashed', borderColor: 'divider' }}>
                 <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>

@@ -3,6 +3,7 @@ import {
   Box, Typography, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Chip, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Alert,
+  MenuItem,
 } from '@mui/material';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EditNoteIcon from '@mui/icons-material/EditNote';
@@ -15,25 +16,33 @@ import api from '../../api/client';
  * after they approve does it count toward the employee's salary.
  */
 
-function ReportMissingPunchDialog({ open, prefill, onClose, onSubmit }) {
+function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClose, onSubmit }) {
   const today = new Date().toISOString().slice(0, 10);
-  const [form, setForm] = useState({ date: today, in_time: '', out_time: '', note: '' });
+  const [form, setForm] = useState({ date: today, in_time: '', out_time: '', note: '', branch_id: '' });
+  // Someone who works at more than one branch has to say WHERE the forgotten
+  // shift happened — the hours are paid at that branch's rate.
+  const multiBranch = (branches || []).length > 1;
   // Opened from a specific incomplete day: start on that date with the time the
   // clock already recorded filled in, so only the missing half is left to type.
   useEffect(() => {
     if (!open) return;
+    const known = (branches || []).map(b => b.branch_id);
+    const fallback = known.includes(homeBranchId) ? homeBranchId : (known[0] || '');
     setForm({
       date: prefill?.date || today,
       in_time: prefill?.in_time || '',
       out_time: prefill?.out_time || '',
       note: '',
+      // Completing a day that already has one punch: keep that day's branch.
+      branch_id: (prefill?.branch_id && known.includes(prefill.branch_id)) ? prefill.branch_id : fallback,
     });
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [open, prefill]);
+  }, [open, prefill, branches, homeBranchId]);
 
   const save = () => {
     if (!form.date) return toast.error('יש לבחור תאריך');
     if (!form.in_time && !form.out_time) return toast.error('יש למלא שעת כניסה או יציאה לפחות');
+    if (multiBranch && !form.branch_id) return toast.error('יש לבחור את הסניף שבו עבדת');
     onSubmit(form);
   };
 
@@ -48,6 +57,17 @@ function ReportMissingPunchDialog({ open, prefill, onClose, onSubmit }) {
           <TextField label="תאריך" type="date" value={form.date}
             onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
             InputLabelProps={{ shrink: true }} fullWidth />
+          {multiBranch && (
+            <TextField
+              select label="סניף שבו עבדת" value={form.branch_id}
+              onChange={e => setForm(f => ({ ...f, branch_id: e.target.value }))}
+              helperText="השעות ייזקפו לסניף שנבחר" fullWidth
+            >
+              {(branches || []).map(b => (
+                <MenuItem key={b.branch_id} value={b.branch_id}>{b.name}</MenuItem>
+              ))}
+            </TextField>
+          )}
           <Stack direction="row" spacing={2}>
             <TextField label="שעת כניסה" type="time" value={form.in_time}
               onChange={e => setForm(f => ({ ...f, in_time: e.target.value }))}
@@ -71,6 +91,8 @@ function ReportMissingPunchDialog({ open, prefill, onClose, onSubmit }) {
 
 export default function MyAttendance() {
   const [punches, setPunches] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [homeBranchId, setHomeBranchId] = useState('');
   const [loading, setLoading] = useState(true);
   const [reportOpen, setReportOpen] = useState(false);
   const [prefill, setPrefill] = useState(null);
@@ -82,8 +104,12 @@ export default function MyAttendance() {
   const load = useCallback(() => {
     setLoading(true);
     api.get(`/payroll/my-punches?month=${month}`)
-      .then(res => setPunches(res.data.punches || []))
-      .catch(() => setPunches([]))
+      .then(res => {
+        setPunches(res.data.punches || []);
+        setBranches(res.data.branches || []);
+        setHomeBranchId(res.data.home_branch_id || '');
+      })
+      .catch(() => { setPunches([]); setBranches([]); })
       .finally(() => setLoading(false));
   }, [month]);
 
@@ -96,7 +122,10 @@ export default function MyAttendance() {
   };
 
   const completeDay = (p) => {
-    setPrefill({ date: p.iso_date, in_time: p.in_time || '', out_time: p.out_time || '' });
+    setPrefill({
+      date: p.iso_date, in_time: p.in_time || '', out_time: p.out_time || '',
+      branch_id: p.branch_id || '',
+    });
     setReportOpen(true);
   };
 
@@ -185,6 +214,8 @@ export default function MyAttendance() {
       <ReportMissingPunchDialog
         open={reportOpen}
         prefill={prefill}
+        branches={branches}
+        homeBranchId={homeBranchId}
         onClose={() => { setReportOpen(false); setPrefill(null); }}
         onSubmit={submitReport}
       />
