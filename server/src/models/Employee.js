@@ -140,6 +140,7 @@ const fingerTemplateSchema = new mongoose.Schema({
 const syncedBranchSchema = new mongoose.Schema({
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true },
   synced_at: { type: Date, default: null },      // set when the agent confirmed the write
+  attempted_at: { type: Date, default: null },   // last time a write was queued (drives retry backoff)
   command_id: { type: mongoose.Schema.Types.ObjectId, ref: 'AgentCommand', default: null },
   finger_count: { type: Number, default: 0 },
   status: { type: String, enum: ['queued', 'ok', 'failed'], default: 'queued' },

@@ -27,6 +27,10 @@ const { Employee, Branch, AgentCommand } = require('../models');
 // Don't re-try a source branch that had no finger for this employee more often
 // than this — a worker with no fingerprint anywhere must not poll forever.
 const CAPTURE_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+// How long to wait before re-queueing a write that the target agent rejected.
+const FAILED_RETRY_MS = 12 * 60 * 60 * 1000;      // 12 hours
+// A queued write whose result never came back is retried after this long.
+const QUEUED_STALE_MS = 2 * 60 * 60 * 1000;       // 2 hours
 
 function normalizeId(id) {
   const digits = String(id || '').replace(/\D/g, '');
@@ -82,6 +86,29 @@ async function ensureEnrolled(branchId, emp, createdBy = null) {
   const israeliId = normalizeId(emp.israeli_id);
   if (!israeliId) return null;
   if (await alreadyQueued(branchId, 'add_user', israeliId)) return null;
+
+  // Already registered on that device — don't add her again. Re-adding is
+  // wasteful, and an older agent would allocate a FRESH uid for the same ת"ז,
+  // splitting the device record in two. The exception is a device that has
+  // since been wiped or swapped, which shows up as an import complaining the
+  // user isn't there.
+  const added = await AgentCommand.findOne({
+    branch_id: branchId,
+    type: 'add_user',
+    status: 'confirmed',
+    'payload.israeli_id': israeliId,
+  }).sort({ created_at: -1 }).select('created_at').lean();
+  if (added) {
+    const gone = await AgentCommand.findOne({
+      branch_id: branchId,
+      type: 'import_template',
+      status: 'failed',
+      'payload.israeli_id': israeliId,
+      created_at: { $gt: added.created_at },
+      last_error: /user_not_on_device/,
+    }).select('_id').lean();
+    if (!gone) return null;
+  }
   return AgentCommand.create({
     branch_id: branchId,
     type: 'add_user',
@@ -110,7 +137,9 @@ async function pushTemplatesTo(branchId, emp, createdBy = null) {
     status: 'pending',
     created_by: createdBy,
   });
-  await markBranchSync(emp._id, branchId, { status: 'queued', command_id: cmd._id, finger_count: templates.length });
+  await markBranchSync(emp._id, branchId, {
+    status: 'queued', command_id: cmd._id, finger_count: templates.length, attempted_at: new Date(),
+  });
   return cmd;
 }
 
@@ -205,8 +234,20 @@ async function syncEmployee(employeeId, { createdBy = null, force = false } = {}
     if (force) return true;
     const row = synced[String(b._id)];
     if (!row) return true;
-    if (row.status === 'failed') return true;
-    if (row.status === 'queued') return false;                      // already on its way
+    if (row.status === 'failed') {
+      // Back off after a failed write. A branch whose Pi runs an agent too old
+      // for `import_template` would otherwise be re-queued on every sweep,
+      // forever — the fix there is deploying the agent, not retrying faster.
+      const last = row.attempted_at ? new Date(row.attempted_at).getTime() : 0;
+      return Date.now() - last > FAILED_RETRY_MS;
+    }
+    if (row.status === 'queued') {
+      // Normally still on its way. But a command whose result never came back
+      // (agent down, server restarted mid-flight) must not pin the branch as
+      // "in progress" forever — after a while, try again.
+      const last = row.attempted_at ? new Date(row.attempted_at).getTime() : 0;
+      return Date.now() - last > QUEUED_STALE_MS;
+    }
     return !row.synced_at || new Date(row.synced_at).getTime() < capturedAt; // stale copy
   });
 
