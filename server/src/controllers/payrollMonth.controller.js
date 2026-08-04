@@ -7,7 +7,7 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
-  User,
+  User, PunchEntryTask,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
@@ -2829,16 +2829,23 @@ async function punchReviewStatus(req, res, next) {
     const branchIds = [...new Set(
       [...scopedDuplicates, ...scopedMissing, ...conflicts].map(i => i.branch_id).filter(Boolean),
     )];
-    const [branchDocs, managersByBranch] = await Promise.all([
+    const [branchDocs, managersByBranch, entryTasks] = await Promise.all([
       branchIds.length ? Branch.find({ _id: { $in: branchIds } }).select('name').lean() : [],
       branchManagers(branchIds),
+      // Whether this branch was already told to fill its own gaps — and whether
+      // the manager ever opened it. Without this the accountant re-sends blind.
+      branchIds.length
+        ? PunchEntryTask.find({ branch_id: { $in: branchIds }, month, status: 'open' }).lean()
+        : [],
     ]);
+    const taskByBranch = new Map(entryTasks.map(t => [String(t.branch_id), t]));
     const branches = branchDocs.map(bd => {
       const id = String(bd._id);
       const mine = (l) => l.filter(i => String(i.branch_id) === id);
       const bMissing = mine(scopedMissing);
       const bDups = mine(scopedDuplicates);
       const text = buildReminderText(bd.name, month, bMissing, bDups);
+      const task = taskByBranch.get(id);
       return {
         id,
         name: bd.name,
@@ -2846,6 +2853,15 @@ async function punchReviewStatus(req, res, next) {
         missing_count: bMissing.length,
         conflicts_count: mine(conflicts).length,
         reminder_text: text,
+        entry_task: task ? {
+          id: String(task._id),
+          assigned_at: task.assigned_at,
+          reminder_count: task.reminder_count,
+          missing_count_at_assign: task.missing_count_at_assign,
+          first_seen_at: task.first_seen_at,
+          last_seen_at: task.last_seen_at,
+          seen_count: task.seen_count,
+        } : null,
         managers: (managersByBranch.get(id) || []).map(m => ({
           ...m,
           whatsapp_url: m.phone ? `https://wa.me/${waNumber(m.phone)}?text=${encodeURIComponent(text)}` : null,
@@ -2978,6 +2994,211 @@ async function remindBranchManager(req, res, next) {
           : null,
       })),
     });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/:month/punch-issues/assign
+ * Body: { branch_id }
+ *
+ * Same nudge as `remind`, but it LEAVES A STANDING TASK: the manager meets it
+ * on their next login (PunchEntryTaskGate) and accounting can see whether it
+ * was opened. Re-assigning an open task refreshes its snapshot and bumps
+ * `reminder_count` rather than piling up duplicate rows.
+ */
+async function assignPunchEntry(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const branchId = req.body?.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'branch_id נדרש' });
+
+    const branch = await Branch.findById(branchId).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
+
+    const { duplicates, missing } = await punchIssues(month);
+    const branchMissing = missing.filter(m => String(m.branch_id) === String(branchId));
+    const branchDups = duplicates.filter(d => String(d.branch_id) === String(branchId));
+    if (branchMissing.length === 0 && branchDups.length === 0) {
+      return res.status(400).json({ error: 'אין בעיות פתוחות בסניף זה' });
+    }
+
+    const managers = (await branchManagers([branchId])).get(String(branchId)) || [];
+    // A task nobody can open is worse than no task: it would sit "open" forever
+    // and look handled. Say so instead.
+    if (managers.length === 0) {
+      return res.status(400).json({ error: `לא מוגדר מנהל לסניף ${branch.name} — אי אפשר להקצות משימה` });
+    }
+
+    const summary = `${buildReminderText(branch.name, month, branchMissing, branchDups)}\n\nנפתחה עבורך משימה במערכת — היא תופיע בכניסה הבאה שלך לאפליקציה.`;
+    const emails = managers.map(m => m.email).filter(Boolean);
+    let emailed = 0;
+    if (emails.length) {
+      try {
+        await dispatchEmail({
+          to: emails,
+          subject: `נדרשת השלמת החתמות — ${branch.name} — ${month}`,
+          text: summary,
+          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${
+            summary.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          }</div>`,
+        });
+        emailed = emails.length;
+      } catch (e) {
+        console.error('[punch-issues] assign email failed:', e.message);
+      }
+    }
+
+    const snapshot = branchMissing.map(m => ({
+      employee_id: m.employee_id, full_name: m.full_name, date: m.date, punch_hhmm: m.punch_hhmm,
+    }));
+    const existing = await PunchEntryTask.findOne({ branch_id: branchId, month, status: 'open' });
+    let task;
+    if (existing) {
+      existing.missing_snapshot = snapshot;
+      existing.missing_count_at_assign = branchMissing.length;
+      existing.duplicates_count_at_assign = branchDups.length;
+      existing.manager_user_ids = managers.map(m => m.id);
+      existing.assigned_by = req.user?.id || req.user?._id || null;
+      existing.assigned_at = new Date();
+      existing.reminder_count = (existing.reminder_count || 1) + 1;
+      existing.emailed = emailed;
+      task = await existing.save();
+    } else {
+      task = await PunchEntryTask.create({
+        branch_id: branchId,
+        month,
+        missing_snapshot: snapshot,
+        missing_count_at_assign: branchMissing.length,
+        duplicates_count_at_assign: branchDups.length,
+        manager_user_ids: managers.map(m => m.id),
+        assigned_by: req.user?.id || req.user?._id || null,
+        emailed,
+      });
+    }
+
+    res.json({
+      ok: true,
+      branch_name: branch.name,
+      missing_count: branchMissing.length,
+      duplicates_count: branchDups.length,
+      emailed,
+      resent: !!existing,
+      reminder_count: task.reminder_count,
+      message: summary,
+      task_id: String(task._id),
+      managers: managers.map(m => ({
+        name: m.name,
+        email: m.email,
+        phone: m.phone,
+        whatsapp_url: m.phone
+          ? `https://wa.me/${waNumber(m.phone)}?text=${encodeURIComponent(summary)}`
+          : null,
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll-month/punch-entry-tasks/mine
+ *
+ * The open assignments for the branches THIS user manages, each with the days
+ * that are still missing right now — recomputed, never the frozen snapshot, so
+ * a day the employee completed herself from האזור שלי disappears from the list
+ * and a task whose branch is now clean closes itself.
+ *
+ * Reading the list is the read receipt: it stamps first/last seen.
+ */
+async function myPunchEntryTasks(req, res, next) {
+  try {
+    const scope = branchScopeOf(req);
+    // Accounting is the sender, never the assignee — an unscoped user has none.
+    if (!scope || scope.length === 0) return res.json({ tasks: [] });
+
+    const open = await PunchEntryTask.find({ branch_id: { $in: scope }, status: 'open' })
+      .sort({ assigned_at: 1 }).lean();
+    if (open.length === 0) return res.json({ tasks: [] });
+
+    const userId = req.user?.id || req.user?._id || null;
+    const months = [...new Set(open.map(t => t.month))];
+    const issuesByMonth = new Map();
+    for (const m of months) issuesByMonth.set(m, await punchIssues(m));
+
+    const branchDocs = await Branch.find({ _id: { $in: open.map(t => t.branch_id) } }).select('name').lean();
+    const branchName = (id) => (branchDocs.find(b => String(b._id) === String(id)) || {}).name || '';
+
+    const tasks = [];
+    for (const t of open) {
+      const { missing, duplicates } = issuesByMonth.get(t.month);
+      const stillMissing = missing.filter(m => String(m.branch_id) === String(t.branch_id));
+      const stillDups = duplicates.filter(d => String(d.branch_id) === String(t.branch_id));
+
+      // Nothing left to do → close it without asking anyone.
+      if (stillMissing.length === 0 && stillDups.length === 0) {
+        await PunchEntryTask.updateOne({ _id: t._id }, {
+          $set: { status: 'done', completed_at: new Date(), auto_completed: true },
+        });
+        continue;
+      }
+
+      await PunchEntryTask.updateOne({ _id: t._id }, {
+        $set: { last_seen_at: new Date(), ...(t.first_seen_at ? {} : { first_seen_at: new Date() }) },
+        $inc: { seen_count: 1 },
+        ...(userId ? { $addToSet: { seen_by: userId } } : {}),
+      });
+
+      tasks.push({
+        id: String(t._id),
+        month: t.month,
+        branch_id: String(t.branch_id),
+        branch_name: branchName(t.branch_id),
+        assigned_at: t.assigned_at,
+        reminder_count: t.reminder_count,
+        missing: stillMissing.map(m => ({
+          employee_id: m.employee_id, full_name: m.full_name, date: m.date, punch_hhmm: m.punch_hhmm,
+        })),
+        duplicates_count: stillDups.length,
+      });
+    }
+
+    res.json({ tasks });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/punch-entry-tasks/:id/done
+ * Body: { note? }
+ *
+ * The manager declaring the branch handled. While days are still open a note is
+ * REQUIRED — some lone punches can never be "completed" (the employee wasn't
+ * there at all), and accounting needs to be told which, not left guessing.
+ */
+async function completePunchEntryTask(req, res, next) {
+  try {
+    const task = await PunchEntryTask.findById(req.params.id);
+    if (!task || task.status !== 'open') return res.status(404).json({ error: 'משימה לא נמצאה' });
+
+    const scope = branchScopeOf(req);
+    if (scope && !scope.map(String).includes(String(task.branch_id))) {
+      return res.status(403).json({ error: 'המשימה אינה של סניף שבאחריותך' });
+    }
+
+    const { missing } = await punchIssues(task.month);
+    const left = missing.filter(m => String(m.branch_id) === String(task.branch_id)).length;
+    const note = (req.body?.note || '').trim();
+    if (left > 0 && !note) {
+      return res.status(400).json({
+        error: `נותרו ${left} ימים ללא השלמה — יש לכתוב הערה שמסבירה למה (למשל: העובדת לא עבדה באותו יום)`,
+        remaining: left,
+      });
+    }
+
+    task.status = 'done';
+    task.completed_at = new Date();
+    task.completed_by = req.user?.id || req.user?._id || null;
+    task.completed_note = note;
+    await task.save();
+    res.json({ ok: true, remaining: left });
   } catch (err) { next(err); }
 }
 
@@ -3133,6 +3354,9 @@ module.exports = {
   unresolvePunchDay,
   punchReviewStatus,
   remindBranchManager,
+  assignPunchEntry,
+  myPunchEntryTasks,
+  completePunchEntryTask,
   resolveFixedConflict,
   upsertEntry,
   createChangeRequest,
