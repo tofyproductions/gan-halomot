@@ -9,6 +9,7 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { BusyButton } from '../shared/UploadControls';
@@ -135,6 +136,23 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
 
+  /**
+   * Unlike "תזכורת", this leaves a standing task: the manager meets it on their
+   * next login and we can see whether they opened it. Reloading afterwards is
+   * what surfaces the "נשלח / נצפה" state on the branch row.
+   */
+  const assign = (b) => withBusy(`assign|${b.id}`,
+    api.post(`/payroll-month/${month}/punch-issues/assign`, { branch_id: b.id })
+      .then(r => {
+        setReminders(prev => ({ ...prev, [b.id]: r.data }));
+        toast.success(
+          `${r.data.resent ? 'המשימה נשלחה שוב' : 'נשלחה משימה'} למנהל/ת ${r.data.branch_name}`
+          + (r.data.emailed ? ` (+מייל ל-${r.data.emailed})` : ' — ללא מייל, אין כתובת אמיתית'),
+        );
+        load();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
+
   const branches = data.branches || [];
   const inBranch = (list) => (branch === ALL ? list : list.filter(i => String(i.branch_id) === branch));
   const dups = inBranch(data.duplicates || []);
@@ -145,6 +163,94 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   const copyText = (text) => navigator.clipboard.writeText(text)
     .then(() => toast.success('ההודעה הועתקה'))
     .catch(() => toast.error('ההעתקה נכשלה'));
+
+  const shortDate = (s) => (s ? new Date(s).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '');
+
+  /** Sent / seen state of the branch's standing entry task — or nothing yet. */
+  const TaskChip = ({ b }) => {
+    const t = b.entry_task;
+    if (!t) return null;
+    return (
+      <Chip
+        size="small"
+        color={t.seen_count ? 'success' : 'info'}
+        variant={t.seen_count ? 'filled' : 'outlined'}
+        sx={{ fontSize: '0.66rem', fontWeight: 700 }}
+        label={t.seen_count
+          ? `המשימה נצפתה ${shortDate(t.last_seen_at)}`
+          : `נשלחה ${shortDate(t.assigned_at)} · טרם נפתחה`}
+      />
+    );
+  };
+
+  /** One manager: name + a WhatsApp link carrying the ready reminder text. */
+  const ManagerChips = ({ m }) => (
+    <Stack direction="row" spacing={0.5} alignItems="center">
+      <Chip size="small" label={m.name} sx={{ fontSize: '0.68rem', fontWeight: 700 }} />
+      {m.whatsapp_url ? (
+        <Chip size="small" clickable icon={<WhatsAppIcon sx={{ fontSize: 15 }} />} label="וואטסאפ"
+          component={Link} href={m.whatsapp_url} target="_blank" rel="noopener"
+          sx={{ fontSize: '0.68rem', bgcolor: '#dcfce7', color: '#166534', '& .MuiChip-icon': { color: '#25D366' } }} />
+      ) : (
+        <Chip size="small" variant="outlined" color="warning" label="אין טלפון"
+          title="הוסף/י טלפון בכרטיס העובד/ת של המנהל/ת כדי לאפשר וואטסאפ" sx={{ fontSize: '0.66rem' }} />
+      )}
+    </Stack>
+  );
+
+  /**
+   * The חוסרים tab's action list: every branch that still owes hours, who owns
+   * it, one WhatsApp per manager, and the button that hands the work over for
+   * real — an assignment the manager meets on their next login, not just a mail.
+   */
+  const AssignmentBoard = () => {
+    const rows = (branches || [])
+      .filter(b => b.missing_count > 0 && (branch === ALL || b.id === branch));
+    if (rows.length === 0) return null;
+    return (
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: 2, bgcolor: '#f8fafc' }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
+          העברה למנהלי הסניפים
+        </Typography>
+        <Stack spacing={1}>
+          {rows.map(b => (
+            <Paper key={b.id} variant="outlined" sx={{ p: 1.1, borderRadius: 2 }}>
+              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                <Typography sx={{ fontWeight: 800, minWidth: 140 }}>{b.name}</Typography>
+                <Chip size="small" color="warning" label={`${b.missing_count} חוסרים`} />
+                {(b.managers || []).length === 0
+                  ? <Typography variant="caption" color="error" sx={{ fontWeight: 700 }}>
+                      לא מוגדר מנהל לסניף — אי אפשר להקצות
+                    </Typography>
+                  : (b.managers || []).map(m => <ManagerChips key={m.id} m={m} />)}
+                <TaskChip b={b} />
+                <Box sx={{ flex: 1 }} />
+                <Chip size="small" clickable icon={<ContentCopyIcon sx={{ fontSize: 14 }} />} label="העתק הודעה"
+                  onClick={() => copyText(reminders[b.id]?.message || b.reminder_text)} sx={{ fontSize: '0.68rem' }} />
+                <BusyButton size="small" variant="contained" color="error"
+                  startIcon={<AssignmentTurnedInIcon />}
+                  loading={!!busy[`assign|${b.id}`]} loadingText="שולח…"
+                  disabled={(b.managers || []).length === 0}
+                  onClick={() => assign(b)}>
+                  {b.entry_task ? 'שלח שוב להזנה' : 'שלח למנהל הסניף להזנה'}
+                </BusyButton>
+              </Stack>
+              {b.entry_task && (
+                <Typography variant="caption" color="text.secondary">
+                  נשלחה {shortDate(b.entry_task.assigned_at)}
+                  {b.entry_task.reminder_count > 1 && ` (${b.entry_task.reminder_count} פעמים)`}
+                  {b.entry_task.seen_count
+                    ? ` · נפתחה ע״י המנהל/ת ${b.entry_task.seen_count} פעמים, אחרונה ${shortDate(b.entry_task.last_seen_at)}`
+                    : ' · המנהל/ת עדיין לא פתח/ה אותה'}
+                  . המשימה תיסגר מעצמה כשלא יישארו ימים חסרים.
+                </Typography>
+              )}
+            </Paper>
+          ))}
+        </Stack>
+      </Paper>
+    );
+  };
 
   /**
    * Who owns this branch's fixes, pinned above the lists once a branch tab is
@@ -166,14 +272,24 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
           <Box sx={{ flex: 1 }} />
           {canRemind && (
             <>
+              <TaskChip b={activeBranch} />
               <Chip size="small" clickable icon={<ContentCopyIcon sx={{ fontSize: 14 }} />} label="העתק הודעה"
                 onClick={() => copyText(rem?.message || activeBranch.reminder_text)} sx={{ fontSize: '0.68rem' }} />
-              <BusyButton size="small" variant="contained" color="primary"
+              <BusyButton size="small" variant="outlined" color="primary"
                 startIcon={<NotificationsActiveIcon />}
                 loading={!!busy[`remind|${activeBranch.id}`]} loadingText="שולח…"
                 disabled={activeBranch.duplicates_count + activeBranch.missing_count === 0}
                 onClick={() => remind(activeBranch)}>
-                שלח תזכורת למנהל
+                תזכורת בלבד
+              </BusyButton>
+              {/* The one that actually hands the work over. */}
+              <BusyButton size="small" variant="contained" color="error"
+                startIcon={<AssignmentTurnedInIcon />}
+                loading={!!busy[`assign|${activeBranch.id}`]} loadingText="שולח…"
+                disabled={(activeBranch.managers || []).length === 0
+                  || activeBranch.duplicates_count + activeBranch.missing_count === 0}
+                onClick={() => assign(activeBranch)}>
+                {activeBranch.entry_task ? 'שלח שוב להזנה' : 'שלח למנהל הסניף להזנה'}
               </BusyButton>
             </>
           )}
@@ -188,14 +304,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
           )}
           {mgrs.map(m => (
             <Stack key={m.id} direction="row" spacing={0.5} alignItems="center">
-              <Chip size="small" label={m.name} sx={{ fontSize: '0.68rem', fontWeight: 700 }} />
-              {m.whatsapp_url ? (
-                <Chip size="small" clickable icon={<WhatsAppIcon sx={{ fontSize: 15 }} />} label="וואטסאפ"
-                  component={Link} href={m.whatsapp_url} target="_blank" rel="noopener"
-                  sx={{ fontSize: '0.68rem', bgcolor: '#dcfce7', color: '#166534', '& .MuiChip-icon': { color: '#25D366' } }} />
-              ) : (
-                <Chip size="small" variant="outlined" label="אין טלפון" sx={{ fontSize: '0.66rem' }} />
-              )}
+              <ManagerChips m={m} />
               <Chip size="small" variant="outlined" sx={{ fontSize: '0.66rem' }}
                 label={m.email || 'אין מייל'} color={m.email ? 'default' : 'warning'} />
             </Stack>
@@ -242,7 +351,8 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
             </Alert>
             {canRemind && miss.length > 0 && (
               <Alert severity="info" sx={{ mb: 2 }}>
-                השלמת החתמות חסרות היא באחריות מנהל/ת הסניף — שלח/י תזכורת לכל סניף, והאישור הסופי יגיע אלייך.
+                השלמת החתמות חסרות היא באחריות מנהל/ת הסניף. "שלח למנהל הסניף להזנה" פותח לו/ה משימה
+                שתקפוץ בכניסה הבאה לאפליקציה ולא תיעלם עד שתטופל — והאישור הסופי יגיע אלייך.
                 להזנה ישירה במקרה חריג, הפעל/י את "הזן בעצמי".
               </Alert>
             )}
@@ -342,6 +452,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
 
             {tab === 1 && (
               <>
+                {canRemind && <AssignmentBoard />}
                 {canRemind && (
                   <FormControlLabel
                     sx={{ mb: 1 }}

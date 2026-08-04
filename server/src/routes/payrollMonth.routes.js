@@ -20,6 +20,10 @@ router.get('/',                               c.getMonth);
 // Literal paths — declared before the /:param routes below.
 router.get('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.getAccountantContacts);
 router.put('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.setAccountantContacts);
+// Standing "fill in your branch's missing punches" assignments. `mine` is what
+// the branch manager's login gate polls; completing is theirs to do.
+router.get('/punch-entry-tasks/mine',         c.myPunchEntryTasks);
+router.post('/punch-entry-tasks/:id/done',    requireRole('system_admin', 'accountant', 'branch_manager'), c.completePunchEntryTask);
 router.post('/punch-resolutions',              requireRole('system_admin', 'accountant'), c.resolvePunchDay);
 router.delete('/punch-resolutions',            requireRole('system_admin', 'accountant'), c.unresolvePunchDay);
 router.get('/pregnancy-settings',             requireRole('system_admin', 'accountant', 'branch_manager'), c.getPregnancySettings);
@@ -37,6 +41,8 @@ router.get('/:month/punch-issues',            requireRole('system_admin', 'accou
 router.get('/:month/punch-review-status',     requireRole('system_admin', 'accountant', 'branch_manager'), c.punchReviewStatus);
 // Nudge a branch's manager(s) to complete their staff's missing punches.
 router.post('/:month/punch-issues/remind',    requireRole('system_admin', 'accountant'), c.remindBranchManager);
+// Same nudge, but it leaves a task the manager must face on their next login.
+router.post('/:month/punch-issues/assign',    requireRole('system_admin', 'accountant'), c.assignPunchEntry);
 // Decide a day where a fixed-hours employee also clocked in.
 router.post('/:month/punch-issues/fixed-conflict', requireRole('system_admin', 'accountant'), c.resolveFixedConflict);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
