@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Stack, Typography,
   Chip, CircularProgress, Table, TableHead, TableBody, TableRow, TableCell, Checkbox,
@@ -54,6 +54,9 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
   const [sel, setSel] = useState({});           // employees mode: { [id]: bool }
   const [specificEmail, setSpecificEmail] = useState('');
   const [preview, setPreview] = useState(null);
+  const [logs, setLogs] = useState({});          // { managers, employees }
+  const [polling, setPolling] = useState(false);
+  const sentAtRef = useRef(0);
 
   const officeItem = items.find(it => it.is_office);
   const allEmployees = officeItem?.employees || [];
@@ -70,11 +73,34 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
         const s = {};
         (its.find(x => x.is_office)?.employees || []).forEach(e => { s[e.employee_id] = true; });
         setSel(s);
+        setLogs(res.data.distribution || {});
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
       .finally(() => setLoading(false));
   };
   useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, month]);
+
+  // After a send is accepted, poll ONLY the log (selections stay intact) until
+  // the background job finishes — no manual refresh needed.
+  useEffect(() => {
+    if (!open || !polling) return undefined;
+    const t = setInterval(async () => {
+      if (Date.now() - sentAtRef.current > 30 * 60 * 1000) { setPolling(false); return; }
+      try {
+        const res = await api.get('/payroll/hours-distribution/preview', { params: { month } });
+        const dist = res.data.distribution || {};
+        setLogs(dist);
+        const lg = dist[tab];
+        if (lg?.at && new Date(lg.at).getTime() >= sentAtRef.current && !lg.running) {
+          setPolling(false);
+          const errs = (lg.results || []).filter(r => r.status === 'error').length;
+          if (errs) toast.error(`השליחה הסתיימה עם ${errs} שגיאות — ראה/י לוג`);
+          else toast.success('השליחה הושלמה ✓');
+        }
+      } catch { /* keep polling */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [open, polling, month, tab]);
 
   // Known manager emails for the quick-pick.
   const managerEmails = [...new Set(items.flatMap(it => (it.email || '').split(',').map(s => s.trim()).filter(Boolean)))];
@@ -98,7 +124,8 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
     setBusy(true);
     try {
       const res = await api.post('/payroll/hours-distribution/send-managers', { month, branches, branch_employees, ...(to ? { to } : {}) }, { timeout: 120000 });
-      toast.success(`השליחה החלה — ${res.data.count} יעדים. הכנת PDF אורכת 1-3 דק'.`, { autoClose: 8000 });
+      sentAtRef.current = Date.now(); setPolling(true);
+      toast.success(`השליחה החלה — ${res.data.count} יעדים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת מספר דקות).`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -116,7 +143,8 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
     setBusy(true);
     try {
       const res = await api.post('/payroll/hours-distribution/send-employees', { month, employee_ids: selectedIds, ...(to ? { to } : {}) }, { timeout: 120000 });
-      toast.success(`השליחה החלה — ${res.data.count} עובדים. הכנת PDF אורכת מספר דקות.`, { autoClose: 8000 });
+      sentAtRef.current = Date.now(); setPolling(true);
+      toast.success(`השליחה החלה — ${res.data.count} עובדים. הלוג מתעדכן אוטומטית (הכנת PDF אורכת מספר דקות).`, { autoClose: 8000 });
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בשליחה'); }
     finally { setBusy(false); }
   };
@@ -209,6 +237,32 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
             </Table>
           </Box>
         )}
+        {(() => {
+          const lg = logs[tab];
+          if (!lg) return null;
+          const counts = (lg.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
+          const HE = { sent: 'נשלח', error: 'שגיאה', no_email: 'אין מייל', no_manager: 'אין מנהל', no_selection: 'אין בחירה', no_match: 'לא הותאם' };
+          return (
+            <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
+                <Typography variant="caption" color="text.secondary">{lg.at ? new Date(lg.at).toLocaleString('he-IL') : ''}</Typography>
+                <Box sx={{ flex: 1 }} />
+                {(lg.running || polling) && <Chip size="small" color="warning" icon={<CircularProgress size={12} color="inherit" />} label="שליחה בתהליך..." />}
+                {Object.entries(counts).map(([st, n]) => (
+                  <Chip key={st} size="small" color={st === 'sent' ? 'success' : st === 'error' ? 'error' : 'default'} label={`${HE[st] || st}: ${n}`} />
+                ))}
+              </Stack>
+              <Box sx={{ maxHeight: 120, overflowY: 'auto' }}>
+                {(lg.results || []).map((r, i) => (
+                  <Typography key={i} variant="caption" sx={{ display: 'block', color: r.status === 'sent' ? 'success.dark' : r.status === 'error' ? 'error.main' : 'text.secondary' }}>
+                    {r.branch || r.name} — {HE[r.status] || r.status}{r.email ? ` · ${r.email}` : ''}{r.emails ? ` · ${[].concat(r.emails).join(', ')}` : ''}{r.error ? ` — ${r.error}` : ''}
+                  </Typography>
+                ))}
+              </Box>
+            </Box>
+          );
+        })()}
       </DialogContent>
       <DialogActions sx={{ flexWrap: 'wrap', gap: 1 }}>
         {emailField}

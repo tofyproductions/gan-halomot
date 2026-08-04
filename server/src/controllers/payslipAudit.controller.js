@@ -1375,7 +1375,46 @@ async function finalizeStaleDistributionLogs() {
         console.error(`finalized stale ${k} distribution log on audit ${d._id}`);
       }
     }
+    // Same for the month-based hours-distribution logs.
+    const { HoursDistributionLog } = require('../models');
+    const stale = await HoursDistributionLog.find({ running: true }).lean();
+    for (const s of stale) {
+      await HoursDistributionLog.updateOne({ _id: s._id }, {
+        $set: { running: false },
+        $push: { results: { branch: '—', name: '—', status: 'error', error: 'השליחה נקטעה — השרת אותחל באמצע. מה שסומן "נשלח" נשלח; נסה/י שוב עבור השאר.' } },
+      });
+      console.error(`finalized stale hours ${s.kind} log for ${s.month}`);
+    }
   } catch (e) { console.error('finalizeStaleDistributionLogs:', e.message); }
+}
+
+// ── Month-based log for the HOURS distribution (no audit doc to hang it on) ──
+async function saveHoursLog(month, kind, payload) {
+  try {
+    const { HoursDistributionLog } = require('../models');
+    await HoursDistributionLog.findOneAndUpdate({ month, kind }, { month, kind, ...payload }, { upsert: true });
+  } catch (e) { console.error('saveHoursLog failed:', e.message); }
+}
+
+// Hours-distribution twin of runDistributionJob: durable "running" entry on
+// accept, fatal-error entry instead of a silent death, and the post-job
+// memory recycle for the 512MB tier.
+function runHoursJob(month, kind, userId, job) {
+  void (async () => {
+    try {
+      await saveHoursLog(month, kind, { at: new Date(), by: userId, running: true, results: [] });
+      const results = await job();
+      await saveHoursLog(month, kind, { at: new Date(), by: userId, running: false, results: results || [] });
+    } catch (e) {
+      console.error(`hours distribution ${kind} fatal:`, e);
+      await saveHoursLog(month, kind, { at: new Date(), by: userId, running: false, results: [{ branch: '—', name: '—', status: 'error', error: `תקלה כללית: ${e.message}` }] });
+    }
+    const rssMb = process.memoryUsage().rss / 1024 / 1024;
+    if (rssMb > 300) {
+      console.error(`recycling instance after hours ${kind} distribution (rss ${Math.round(rssMb)}MB)`);
+      setTimeout(() => process.exit(0), 3000);
+    }
+  })();
 }
 
 // Run a background distribution job with a durable trail: an immediate
@@ -2024,7 +2063,11 @@ async function hoursDistributionPreview(req, res) {
       items.push({ branch: g.name, employees: g.employees, email, is_office: !!g.isOffice, has_pdf: true });
     }
     items.sort((a, b) => (b.is_office - a.is_office) || a.branch.localeCompare(b.branch, 'he'));
-    res.json({ month, items });
+    const { HoursDistributionLog } = require('../models');
+    const logs = await HoursDistributionLog.find({ month }).lean();
+    const distribution = {};
+    for (const l of logs) distribution[l.kind] = { at: l.at, running: l.running, results: l.results || [] };
+    res.json({ month, items, distribution });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
@@ -2059,28 +2102,47 @@ async function sendHoursToEmployees(req, res) {
     const ids = Array.isArray(req.body?.employee_ids) ? req.body.employee_ids.map(String) : [];
     const toOverride = String(req.body?.to || '').trim();
     if (!/^\d{4}-\d{2}$/.test(month) || ids.length === 0) return res.status(400).json({ error: 'חסר חודש או עובדים' });
+    const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: ids.length });
-    void (async () => {
-      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
+    runHoursJob(month, 'employees', userId, async () => {
+      const { hoursReportEmailAttachments, renderHoursPdfPerEmployee } = require('./payroll.controller');
+      const out = [];
       // Specific email → ONE bundle with all selected reports, to that address only.
       if (toOverride) {
         try {
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${ids.length} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments(ids, month, { role: 'system_admin' }, `hours-reports-${month}`)) });
-        } catch (e) { console.error('send hours bundle failed:', e.message); }
-        return;
+          out.push({ name: toOverride, email: toOverride, status: 'sent' });
+        } catch (e) { out.push({ name: toOverride, status: 'error', error: e.message }); }
+        return out;
       }
+      // Pre-render every employee's report in ONE browser pass — a Chromium
+      // launch per employee took minutes and crept the tier into OOM.
+      let pdfByEmp = new Map();
+      try { pdfByEmp = await renderHoursPdfPerEmployee(ids, month, { role: 'system_admin' }); }
+      catch (e) { console.error('hours pre-render failed (per-employee fallback):', e.message); }
+      let sinceLog = 0;
       for (const id of ids) {
         try {
           const emp = await Employee.findById(id).populate('user_id', 'email').lean();
-          if (!emp) continue;
+          if (!emp) { out.push({ name: String(id), status: 'no_match' }); continue; }
           const email = realEmployeeEmail(emp);
-          if (!email) continue;
+          if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
+          const fileAttachments = []; const attachments = [];
+          const pre = pdfByEmp.get(String(emp._id));
+          if (pre) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
+          else {
+            const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
+            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+          }
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`)) });
-        } catch (e) { console.error('send hours to employee failed:', e.message); }
+          await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, fileAttachments, attachments });
+          out.push({ name: emp.full_name, email, status: 'sent' });
+        } catch (e) { out.push({ name: String(id), status: 'error', error: e.message }); }
+        if (++sinceLog >= 5) { sinceLog = 0; await saveHoursLog(month, 'employees', { at: new Date(), by: userId, running: true, results: out }); require('../services/htmlPdf').tryGc(); }
       }
-    })();
+      return out;
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
@@ -2102,10 +2164,13 @@ async function sendHoursToManagers(req, res) {
     const branchSel = new Map();
     for (const [b, ids] of Object.entries(rawSel)) if (Array.isArray(ids)) branchSel.set(norm(b), new Set(ids.map(String)));
     const toOverride = String(req.body?.to || '').trim();
+    const userId = req.user?.id || null;
     res.json({ ok: true, queued: true, count: branchKeys.length });
-    void (async () => {
-      const { buildRichHoursHtml, hoursReportEmailAttachments } = require('./payroll.controller');
+    runHoursJob(month, 'managers', userId, async () => {
+      const { buildRichHoursHtml, hoursReportEmailAttachments, buildHoursChunkHtmls } = require('./payroll.controller');
+      const { PDFDocument } = require('pdf-lib');
       const stored = await readBranchManagerEmails();
+      const out = [];
 
       // Specific email → ONE consolidated hours report of ALL selected employees.
       if (toOverride) {
@@ -2116,28 +2181,105 @@ async function sendHoursToManagers(req, res) {
             const sel = branchSel.get(norm(g.name));
             g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id))).forEach(e => seen.add(e.employee_id));
           }
-          if (seen.size) {
+          if (!seen.size) { out.push({ branch: toOverride, status: 'no_selection' }); }
+          else {
             const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורפים דוחות שעות של ${seen.size} עובדים לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
             await dispatchEmail({ to: [toOverride], subject: `דוחות שעות — ${month}`, html: intro, ...(await hoursReportEmailAttachments([...seen], month, { role: 'system_admin' }, `hours-reports-${month}`)) });
+            out.push({ branch: toOverride, emails: [toOverride], status: 'sent' });
           }
-        } catch (e) { console.error('send hours to specific email failed:', e.message); }
-        return;
+        } catch (e) { out.push({ branch: toOverride, status: 'error', error: e.message }); }
+        return out;
       }
 
-      for (const key of branchKeys) {
+      // ── Phase 1: resolve recipients + selections (office last — its PDF is
+      // merged from the branch PDFs instead of re-rendering everyone). ──
+      const orderedKeys = [...branchKeys].sort((a, b) => (groups.get(a)?.isOffice ? 1 : 0) - (groups.get(b)?.isOffice ? 1 : 0));
+      const plan = [];
+      for (const key of orderedKeys) {
         const g = groups.get(key);
         const label = g.br ? g.br.name : g.name;
-        try {
-          const emails = await managerBranchEmails(g, stored);
-          if (emails.length === 0) continue;
-          const sel = branchSel.get(norm(g.name));
-          const chosen = g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id)));
-          if (chosen.length === 0) continue;
-          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורף דוח שעות מרוכז של ${g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, ...(await hoursReportEmailAttachments(chosen.map(e => e.employee_id), month, { role: 'system_admin' }, `hours-report-${month}`)) });
-        } catch (e) { console.error('send hours to manager failed:', label, e.message); }
+        const emails = await managerBranchEmails(g, stored);
+        if (emails.length === 0) { out.push({ branch: g.name, status: 'no_manager' }); continue; }
+        const sel = branchSel.get(norm(g.name));
+        const chosen = g.employees.filter(e => e.employee_id && (!sel || sel.has(e.employee_id)));
+        if (chosen.length === 0) { out.push({ branch: g.name, status: 'no_selection' }); continue; }
+        plan.push({ g, label, emails, chosen });
       }
-    })();
+
+      // ── Phase 2: render ALL hours PDFs in a SINGLE Chromium session — a
+      // second browser launch on a grown heap is what OOM-killed the payslip
+      // sends on the 512MB tier (same architecture as sendPayslipsToManagers).
+      const hoursCache = new Map();
+      const keyOf = ids => ids.map(String).sort().join(',');
+      if (plan.length) {
+        try {
+          const nonOffice = plan.filter(p => !p.g.isOffice);
+          const union = new Set(nonOffice.flatMap(p => p.chosen.map(e => String(e.employee_id))));
+          const renderTargets = plan.filter(p => {
+            if (!p.g.isOffice) return true;
+            const ids = p.chosen.map(e => String(e.employee_id));
+            return !(ids.length === union.size && ids.every(x => union.has(x)));
+          });
+          const metas = []; const chunkHtmls = [];
+          for (const p of renderTargets) {
+            const htmls = await buildHoursChunkHtmls(p.chosen.map(e => e.employee_id), month, { role: 'system_admin' });
+            metas.push({ p, start: chunkHtmls.length, count: htmls.length });
+            chunkHtmls.push(...htmls);
+          }
+          require('../services/htmlPdf').tryGc();
+          const pdfs = chunkHtmls.length ? await require('../services/htmlPdf').htmlToPdfBatch(chunkHtmls) : [];
+          for (const m of metas) {
+            const slice = pdfs.slice(m.start, m.start + m.count).filter(Boolean);
+            if (!slice.length) continue;
+            let buf = slice[0];
+            if (slice.length > 1) {
+              const merged = await PDFDocument.create();
+              for (const b of slice) {
+                const src = await PDFDocument.load(b);
+                (await merged.copyPages(src, src.getPageIndices())).forEach(pg => merged.addPage(pg));
+              }
+              buf = Buffer.from(await merged.save());
+            }
+            hoursCache.set(keyOf(m.p.chosen.map(e => e.employee_id)), buf);
+          }
+          // Office = union of the branches → merge their cached PDFs.
+          for (const p of plan.filter(x => x.g.isOffice)) {
+            const key = keyOf(p.chosen.map(e => e.employee_id));
+            if (hoursCache.has(key) || hoursCache.size === 0) continue;
+            const target = new Set(key.split(','));
+            const have = new Set([...hoursCache.keys()].flatMap(k => k.split(',')));
+            if (target.size === have.size && [...target].every(x => have.has(x))) {
+              const merged = await PDFDocument.create();
+              for (const buf of hoursCache.values()) {
+                const src = await PDFDocument.load(buf);
+                (await merged.copyPages(src, src.getPageIndices())).forEach(pg => merged.addPage(pg));
+              }
+              hoursCache.set(key, Buffer.from(await merged.save()));
+            }
+          }
+        } catch (e) { console.error('hours batch render failed (HTML fallback in loop):', e.message); }
+        require('../services/htmlPdf').tryGc();
+      }
+
+      // ── Phase 3: send loop — no Chromium from here on. ──
+      for (const { g, label, emails, chosen } of plan) {
+        try {
+          const ids = chosen.map(e => e.employee_id);
+          const fileAttachments = []; const attachments = [];
+          const pdf = hoursCache.get(keyOf(ids));
+          if (pdf) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: pdf.toString('base64'), contentType: 'application/pdf' });
+          else attachments.push({ name: `hours-report-${month}`, html: await buildRichHoursHtml(ids, month, { role: 'system_admin' }) });
+          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p><p>מצורף דוח שעות מרוכז של ${g.isOffice ? 'כל הסניפים' : `סניף <b>${label}</b>`} לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
+          await dispatchEmail({ to: emails, subject: `דוח שעות — ${label} — ${month}`, html: intro, fileAttachments, attachments });
+          out.push({ branch: label, emails, status: 'sent' });
+        } catch (e) {
+          out.push({ branch: g.name, status: 'error', error: e.message });
+        }
+        await saveHoursLog(month, 'managers', { at: new Date(), by: userId, running: true, results: out });
+        require('../services/htmlPdf').tryGc();
+      }
+      return out;
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
