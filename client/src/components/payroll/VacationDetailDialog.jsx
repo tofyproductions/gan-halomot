@@ -196,16 +196,22 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
             </Alert>
           )}
 
-          {usedDays > 0 && (
+          {(usedDays > 0 || (row.vacation_days_auto?.total_days || 0) > 0) && (
             <>
               <Divider />
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>תשלום ימי החופשה</Typography>
+              {row.salary_type === 'global' ? (
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  עובד/ת בשכר גלובלי — ימי החופשה יורדים מהיתרה אך אינם מוסיפים תשלום; אין צורך באישור תשלום.
+                </Alert>
+              ) : (
               <Alert severity={payConfirmed ? 'success' : 'warning'} sx={{ borderRadius: 2 }}>
                 {payConfirmed
                   ? 'הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול — כך יופיע בכרטיס לרו״ח.'
                   : 'ברירת מחדל: בכרטיס לרו״ח מופיעה הערה קבועה — לשלם רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש.'}
               </Alert>
-              {(isAdmin || isAccountant) && (
+              )}
+              {row.salary_type !== 'global' && (isAdmin || isAccountant) && (
                 <FormControlLabel
                   control={<Switch checked={payConfirmed} onChange={async (e) => {
                     const v = e.target.checked;
