@@ -2,12 +2,13 @@ import { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Stack,
   Typography, Chip, TextField, Divider, Alert, CircularProgress, Table,
-  TableHead, TableBody, TableRow, TableCell,
+  TableHead, TableBody, TableRow, TableCell, Switch, FormControlLabel,
 } from '@mui/material';
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { useAuth } from '../../hooks/useAuth';
 
 /**
  * Shows the vacation balance for an employee in a given month:
@@ -20,14 +21,17 @@ import { useConfirm } from '../shared/ConfirmProvider';
  */
 export default function VacationDetailDialog({ open, row, month, onClose, onSaved }) {
   const confirm = useConfirm();
+  const { isAdmin, isAccountant } = useAuth();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [manualDays, setManualDays] = useState(0);
   const [addingDays, setAddingDays] = useState('');
+  const [payConfirmed, setPayConfirmed] = useState(false);
 
   useEffect(() => {
     if (!open || !row) return;
     setManualDays(Number(row.manual.vacation_days) || 0);
+    setPayConfirmed(!!row.manual.vacation_pay_confirmed);
     setLoading(true);
     api.get('/employee-requests/vacation-for-month', { params: { employee_id: row.employee_id, month } })
       .then(res => setRequests(res.data.requests || []))
@@ -190,6 +194,35 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
             <Alert severity="info">
               סך הבקשות: {requestedDays} ימים. ניצול חודשי בטבלת השכר: {usedDays}. ההפרש נובע מעדכון ידני.
             </Alert>
+          )}
+
+          {usedDays > 0 && (
+            <>
+              <Divider />
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>תשלום ימי החופשה</Typography>
+              <Alert severity={payConfirmed ? 'success' : 'warning'} sx={{ borderRadius: 2 }}>
+                {payConfirmed
+                  ? 'הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול — כך יופיע בכרטיס לרו״ח.'
+                  : 'ברירת מחדל: בכרטיס לרו״ח מופיעה הערה קבועה — לשלם רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש.'}
+              </Alert>
+              {(isAdmin || isAccountant) && (
+                <FormControlLabel
+                  control={<Switch checked={payConfirmed} onChange={async (e) => {
+                    const v = e.target.checked;
+                    if (v && !(await confirm({
+                      title: 'תשלום חופשה ללא יתרה',
+                      message: 'לאשר תשלום ימי החופשה גם אם לא נותרו לעובד/ת ימים לניצול? האישור יופיע בכרטיס לרו״ח.',
+                      confirm_label: 'אשר תשלום',
+                    }))) return;
+                    setPayConfirmed(v);
+                    api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_pay_confirmed: v } }, { params: { month } })
+                      .then(() => { onSaved && onSaved(); toast.success(v ? 'אושר תשלום גם ללא יתרה' : 'האישור בוטל — חזרה להערה הקבועה'); })
+                      .catch(err => { setPayConfirmed(!v); toast.error(err.response?.data?.error || 'שגיאה'); });
+                  }} />}
+                  label={<Typography variant="body2" sx={{ fontWeight: 600 }}>אישור הנה״ח: שלם גם ללא יתרת ימים</Typography>}
+                />
+              )}
+            </>
           )}
 
           <Divider />

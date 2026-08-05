@@ -1266,6 +1266,7 @@ async function upsertEntry(req, res, next) {
       'travel_override', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
+      'vacation_pay_confirmed',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
       'absence_offset_entries',
     ];
@@ -1321,6 +1322,11 @@ async function upsertEntry(req, res, next) {
       }
       if (k === 'supplement_accounting_approved' && !canSetAccountingApproval) {
         return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר את חלק ההנה״ח' });
+      }
+      // Paying vacation without remaining balance is a deliberate accounting
+      // decision — no one else may flip it.
+      if (k === 'vacation_pay_confirmed' && !canSetAccountingApproval) {
+        return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר תשלום חופשה ללא יתרה' });
       }
       setObj[`manual.${k}`] = body[k];
     }
@@ -2423,6 +2429,13 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('', '')}
       </tr>` : ''}
       ${branchDetailRow}
+      ${(vac && !isGlobal) ? (r.manual?.vacation_pay_confirmed
+        ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
+            <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח: </span>
+            <span style="font-size:12px;color:#111827;font-weight:700">הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול.</span></td></tr>`
+        : `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
+            <span style="font-size:10.5px;color:#92400e;font-weight:800">חופשה: </span>
+            <span style="font-size:12px;color:#111827;font-weight:700">לתשלום רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש — אין יתרה, אין תשלום.</span></td></tr>`) : ''}
       ${notes ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:6px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">הערות: </span>
           <span style="font-size:13px;color:#111827;font-weight:800">${notes}</span></td></tr>` : ''}

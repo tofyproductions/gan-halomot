@@ -30,6 +30,12 @@ const payrollMonthSchema = new mongoose.Schema({
     vacation_days:   { type: Number, default: 0 },      // ימי חופשה
     holiday_pay:     { type: Number, default: 0 },      // דמי חגים
 
+    // Vacation pay is contingent on the employee having remaining vacation
+    // balance in her payslip — the accountant cards carry a standing note to
+    // pay only if days remain. Accounting can deliberately approve paying
+    // even without balance; that flips the note. Accountant/admin only.
+    vacation_pay_confirmed: { type: Boolean, default: false },
+
     // Advance deduction directive — references a saved preset OR free text.
     // The action attached to the preset determines what payroll should do.
     advance_deduction_preset_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PayrollPresetOption', default: null },
