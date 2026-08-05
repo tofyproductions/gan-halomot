@@ -326,7 +326,12 @@ async function getMonth(req, res, next) {
     // they had activity this month (punches or a payroll record), so a just-
     // deactivated employee stays visible with their reason — without listing
     // everyone who ever left.
-    const activeEmps = await Employee.find({ branch_id: { $in: branchIds }, is_active: true })
+    // Unpaid role-holders (receives_salary:false) are deliberately absent from
+    // the whole table — not a zero row. There is nothing to compute for them,
+    // and a name sitting in the salary screen is an invitation to pay it.
+    const activeEmps = await Employee.find({
+      branch_id: { $in: branchIds }, is_active: true, receives_salary: { $ne: false },
+    })
       .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
     const punchEmpIds = await Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } });
     const pmEmpIds = await PayrollMonth.distinct('employee_id', { month });
@@ -343,7 +348,7 @@ async function getMonth(req, res, next) {
     // reactivated or removed — OR if they simply had activity this month. Old
     // soft-deleted staff (no reason, no activity) stay hidden.
     const inactiveEmps = await Employee.find({
-      branch_id: { $in: branchIds }, is_active: false,
+      branch_id: { $in: branchIds }, is_active: false, receives_salary: { $ne: false },
       $or: [
         { inactive_reason: { $nin: [null, ''] } },
         ...(relevantInactive.length ? [{ _id: { $in: relevantInactive } }] : []),
@@ -2661,8 +2666,12 @@ async function punchIssues(month) {
 
   const empIds = [...new Set([...pendingDup, ...missKeys].map(k => k.split('|')[0]))];
   const emps = await Employee.find({ _id: { $in: empIds } })
-    .select('full_name branch_id').populate('branch_id', 'name').lean();
+    .select('full_name branch_id receives_salary').populate('branch_id', 'name').lean();
   const empById = Object.fromEntries(emps.map(e => [String(e._id), e]));
+  // An unpaid role-holder is not chased for punches: nothing is billed from
+  // them, so a lone punch is not a problem anyone has to solve. Her punches are
+  // still kept and still visible in the attendance grid.
+  const isPaid = (k) => empById[k.split('|')[0]]?.receives_salary !== false;
   const meta = (k) => {
     const [empId, date] = k.split('|');
     const e = empById[empId] || {};
@@ -2678,7 +2687,7 @@ async function punchIssues(month) {
   };
   const byName = (a, b) => a.full_name.localeCompare(b.full_name, 'he') || a.date.localeCompare(b.date);
 
-  const duplicates = pendingDup.map(k => {
+  const duplicates = pendingDup.filter(isPaid).map(k => {
     const list = byDay.get(k).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     const suggestion = suggestPunchLabels(list);
     const roleById = new Map(suggestion.labels.map(l => [l.punch_id, l.role]));
@@ -2693,7 +2702,7 @@ async function punchIssues(month) {
     };
   }).sort(byName);
 
-  const missing = missKeys.map(k => {
+  const missing = missKeys.filter(isPaid).map(k => {
     const p = byDay.get(k)[0];
     return {
       ...meta(k),

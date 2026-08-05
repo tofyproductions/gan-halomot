@@ -54,6 +54,10 @@ const EMPTY_FORM = {
   bituach_leumi_exempt: false,
   work_days: [0, 1, 2, 3, 4],
   is_active: true,
+  // Paid by default. Turning this off makes the person a role-holder only:
+  // on the org chart, on the clock, able to manage a branch — but absent from
+  // the salary table and the accountant export until it is turned back on.
+  receives_salary: true,
   notes: '',
 };
 
@@ -202,6 +206,7 @@ export default function EmployeeManager() {
         bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
         work_days: Array.isArray(emp.work_days) ? emp.work_days : [0, 1, 2, 3, 4],
         is_active: emp.is_active !== false,
+        receives_salary: emp.receives_salary !== false,
         notes: emp.notes || '',
         is_pregnant: !!emp.is_pregnant,
         due_date: emp.due_date ? new Date(emp.due_date).toISOString().slice(0, 10) : '',
@@ -258,6 +263,7 @@ export default function EmployeeManager() {
       bituach_leumi_exempt: data.bituach_leumi_exempt,
       work_days: Array.isArray(data.work_days) ? [...data.work_days].sort((a, b) => a - b) : [0, 1, 2, 3, 4],
       is_active: data.is_active !== false,
+      receives_salary: data.receives_salary !== false,
       notes: data.notes || '',
       // Pregnancy / maternity status (display + alerts only, no auto pay effect).
       is_pregnant: !!data.is_pregnant,
@@ -499,14 +505,23 @@ export default function EmployeeManager() {
               const renderEmp = (emp) => {
                 const empId = emp._id || emp.id;
                 const rate = emp._display_rate;
-                const rateLabel = emp.salary_type === 'global'
-                  ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
-                  : (rate ? `₪${rate}/שעה` : '—');
+                const unpaidRole = emp.receives_salary === false;
+                const rateLabel = unpaidRole
+                  ? 'ללא שכר'
+                  : emp.salary_type === 'global'
+                    ? (rate ? `${formatCurrency(rate)}/חודש` : '—')
+                    : (rate ? `₪${rate}/שעה` : '—');
                 return (
                   <TableRow key={empId} hover sx={!emp.is_active ? { bgcolor: 'rgba(0,0,0,0.04)', opacity: 0.75 } : undefined}>
                     <TableCell sx={{ fontWeight: 600 }}>
                       {emp.full_name}
                       {!emp.is_active && <Chip label="ארכיון" size="small" sx={{ ml: 1, height: 18, fontSize: '0.65rem' }} />}
+                      {unpaidRole && (
+                        <Tooltip title="בעל/ת תפקיד ללא שכר — לא מופיע/ה בטבלת השכר, בייצוא לרו״ח או בבעיות בהחתמה">
+                          <Chip label="ללא שכר" size="small" color="warning" variant="outlined"
+                            sx={{ ml: 1, height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+                        </Tooltip>
+                      )}
                     </TableCell>
                     <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
                       {emp.israeli_id || '—'}
@@ -678,6 +693,19 @@ export default function EmployeeManager() {
               label={dialog.data.is_active !== false ? 'עובד פעיל' : 'עובד לא פעיל (לא יופיע בהחתמות)'}
             />
 
+            {/* A role-holder who draws nothing — on the org chart and on the
+                clock, but never in the salary table. Reversible at any time. */}
+            <FormControlLabel
+              control={
+                <Switch
+                  color="warning"
+                  checked={dialog.data.receives_salary === false}
+                  onChange={e => updateField('receives_salary', !e.target.checked)}
+                />
+              }
+              label="בעל/ת תפקיד ללא שכר (לא מקבל/ת שכר מהמערכת)"
+            />
+
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'secondary.main' }}>הריון ולידה</Typography>
             <FormControlLabel
@@ -735,6 +763,30 @@ export default function EmployeeManager() {
               </Typography>
             )}
 
+            {dialog.data.receives_salary === false && (
+              <Alert severity="info" sx={{ mt: 1 }}>
+                בעל/ת תפקיד ללא שכר — לא יופיע/תופיע בטבלת השכר, בייצוא לרו״ח או בבעיות בהחתמה.
+                אפשר להחתים בשעון לצורכי נוכחות. כדי להתחיל לשלם, כבה/י את המתג ומלא/י תעריף —
+                התשלום יתחיל מאותו חודש, ללא צורך בהקמה מחדש.
+              </Alert>
+            )}
+
+            {/* Everything below is money. For an unpaid role-holder it is
+                disabled rather than removed, so the values she WILL be paid by
+                are visible in advance and survive the switch being flipped. */}
+            <Box
+              component="fieldset"
+              disabled={dialog.data.receives_salary === false}
+              sx={{
+                border: 0, p: 0, m: 0, minWidth: 0,
+                display: 'flex', flexDirection: 'column', gap: 2,
+                opacity: dialog.data.receives_salary === false ? 0.45 : 1,
+                // A disabled fieldset natively disables real inputs, but MUI's
+                // Select is a div — it would still open. Kill pointer events so
+                // the whole money block is genuinely inert, not just greyed.
+                pointerEvents: dialog.data.receives_salary === false ? 'none' : 'auto',
+              }}
+            >
             <Divider />
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>שכר</Typography>
             <Stack direction="row" spacing={2}>
@@ -922,6 +974,7 @@ export default function EmployeeManager() {
                 InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
               />
             </Stack>
+            </Box>
 
             <Divider />
             <TextField label="הערות" multiline rows={3} value={dialog.data.notes}

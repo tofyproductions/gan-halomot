@@ -307,6 +307,7 @@ async function createEmployee(req, res, next) {
 // Hebrew labels for the change-approval diff view.
 const EMPLOYEE_FIELD_LABELS = {
   full_name: 'שם מלא', israeli_id: 'ת"ז', employee_number: 'מספר עובד', is_freelancer: 'עצמאי',
+  receives_salary: 'מקבל/ת שכר',
   branch_id: 'סניף', phone: 'טלפון', email: 'אימייל', address: 'כתובת', position: 'תפקיד',
   start_date: 'תאריך תחילה', salary_type: 'סוג שכר', salary_is_net: 'נטו/ברוטו',
   amuta_distribution: 'חלוקת עמותות', branch_rates: 'תעריפים לפי סניף', hourly_bonuses: 'תוספות שעתיות',
@@ -345,7 +346,8 @@ async function updateEmployee(req, res, next) {
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
 
     const fields = [
-      'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'branch_id', 'phone', 'email', 'address',
+      'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
+      'branch_id', 'phone', 'email', 'address',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
       'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',
@@ -398,9 +400,14 @@ async function updateEmployee(req, res, next) {
     // branch's clock too, or she simply can't punch there.
     const branchesBefore = fingerprintSync.employeeBranchIds(emp).join(',');
 
+    // Turning pay ON for a role-holder who was unpaid: stamp when it started,
+    // so later it is clear the earlier months were unpaid by design.
+    const startsGettingPaid = req.body.receives_salary === true && emp.receives_salary === false;
+
     for (const f of fields) {
       if (req.body[f] !== undefined) emp[f] = req.body[f];
     }
+    if (startsGettingPaid && !emp.salary_started_at) emp.salary_started_at = new Date();
     if (req.body.amuta_distribution !== undefined) {
       emp.amuta_distribution = await resolveAmutaDistribution(req.body.amuta_distribution, emp.branch_id);
     }
