@@ -180,6 +180,23 @@ const employeeSchema = new mongoose.Schema({
   // Shown in the salary table but excluded from the accountant PDF/Excel export
   // and from the payslip audit (there is no payslip for her).
   is_freelancer: { type: Boolean, default: false },
+  /**
+   * A role-holder the system does NOT pay — an owner-manager who draws nothing,
+   * a volunteer, someone on the org chart for responsibility rather than wages.
+   *
+   * She is a full employee in every other respect: a branch, a role, a login,
+   * an enrollment on the clock, and she can be a branch manager with tasks and
+   * approvals. She is simply absent from the salary table, the accountant
+   * export, and the missing-punch chase — so she can never be paid by accident
+   * and never inflates a month's totals.
+   *
+   * Reversible with one switch and NO data migration: turn it back on, give her
+   * a rate, and she is payable from that month. `salary_started_at` records
+   * when that happened, so it is clear that earlier months were unpaid by
+   * design rather than by omission.
+   */
+  receives_salary: { type: Boolean, default: true },
+  salary_started_at: { type: Date, default: null },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
   user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }, // optional login link
 

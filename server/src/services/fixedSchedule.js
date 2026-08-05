@@ -98,7 +98,9 @@ function plannedHoursFor(schedule, dateStr) {
 
 /** Employees with an active fixed schedule, optionally narrowed to branches. */
 async function scheduledEmployees({ branchIds = null, employeeIds = null } = {}) {
-  const filter = { 'fixed_schedule.enabled': true };
+  // Never materialize hours for someone the system does not pay — the hours
+  // would only ever be looked at to compute a salary that isn't coming.
+  const filter = { 'fixed_schedule.enabled': true, receives_salary: { $ne: false } };
   if (branchIds) filter.branch_id = { $in: branchIds };
   if (employeeIds) filter._id = { $in: employeeIds };
   return Employee.find(filter).select('full_name israeli_id branch_id start_date fixed_schedule').lean();
