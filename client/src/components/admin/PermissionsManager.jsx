@@ -128,6 +128,9 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
 
 export default function PermissionsManager() {
   const [users, setUsers] = useState([]);
+  // Active employees with no login at all — they can't appear in the table
+  // below, so they get their own callout instead of vanishing silently.
+  const [unlinked, setUnlinked] = useState([]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({});
@@ -151,6 +154,7 @@ export default function PermissionsManager() {
         api.get('/admin/role-tabs'),
       ]);
       setUsers(usersRes.data.users || []);
+      setUnlinked(usersRes.data.unlinked_employees || []);
       setBranches(branchesRes.data.branches || []);
       setRoleTabs(roleTabsRes.data.role_tabs || {});
       setRoleTabsDirty(false);
@@ -339,6 +343,28 @@ export default function PermissionsManager() {
           ))}
         </Stack>
       </Paper>
+
+      {unlinked.length > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+            {unlinked.length} עובדים פעילים ללא משתמש — הם לא מופיעים בטבלה ולא יכולים להתחבר.
+          </Typography>
+          <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
+            משתמש נוצר אוטומטית מכרטיס העובד לפי הת"ז. עובד ללא ת"ז — יש להשלים אותה בכרטיס, והמשתמש ייווצר בשמירה.
+          </Typography>
+          <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+            {unlinked.map(e => (
+              <Chip
+                key={e.id} size="small"
+                label={`${e.full_name}${e.position ? ` · ${e.position}` : ''}${e.branch_name ? ` · ${e.branch_name}` : ''}`}
+                color={e.has_israeli_id ? 'default' : 'warning'}
+                variant="outlined"
+                title={e.has_israeli_id ? 'יש ת"ז — שמירת כרטיס העובד תיצור משתמש' : 'חסרה ת"ז — אי אפשר ליצור משתמש'}
+              />
+            ))}
+          </Stack>
+        </Alert>
+      )}
 
       <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2, flexWrap: 'wrap' }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>ניהול הרשאות לפי טאב</Typography>

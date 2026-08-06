@@ -1,5 +1,5 @@
 const bcrypt = require('bcryptjs');
-const { User, Setting } = require('../models');
+const { User, Setting, Employee } = require('../models');
 
 const ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'];
 
@@ -40,7 +40,26 @@ async function listUsers(req, res, next) {
       .populate('branch_id', 'name')
       .populate('managed_branch_ids', 'name')
       .sort({ full_name: 1 });
-    res.json({ users });
+
+    // Active staff who have no login at all. They cannot appear in this table
+    // (it lists Users), so without calling them out the page silently pretends
+    // they don't exist — which is how a branch manager can be set up in the
+    // employee card and never show up here.
+    const unlinked = (await Employee.find({ is_active: true, $or: [{ user_id: null }, { user_id: { $exists: false } }] })
+      .select('full_name position israeli_id branch_id')
+      .populate('branch_id', 'name')
+      .sort({ full_name: 1 })
+      .lean())
+      .map(e => ({
+        id: String(e._id),
+        full_name: e.full_name,
+        position: e.position || '',
+        branch_name: e.branch_id?.name || '',
+        // No ת"ז means we can't mint a login for her — it's the account key.
+        has_israeli_id: String(e.israeli_id || '').replace(/\D/g, '').length >= 7,
+      }));
+
+    res.json({ users, unlinked_employees: unlinked });
   } catch (err) {
     next(err);
   }

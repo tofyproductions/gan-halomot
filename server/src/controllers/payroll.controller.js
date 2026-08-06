@@ -13,7 +13,7 @@ const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const fixedSchedule = require('../services/fixedSchedule');
 const fingerprintSync = require('../services/fingerprintSync');
-const bcrypt = require('bcryptjs');
+const userSync = require('../services/userSync');
 
 // --- helpers --------------------------------------------------------------
 
@@ -247,33 +247,16 @@ async function createEmployee(req, res, next) {
     payload.amuta_distribution = await resolveAmutaDistribution(payload.amuta_distribution, payload.branch_id);
     const emp = await Employee.create(payload);
 
-    // Auto-create User account if employee has israeli_id
+    // Give her a login, with the role her job title implies (userSync owns the
+    // position→role mapping and the linking rules).
     let createdUser = null;
-    const normalizedId = (emp.israeli_id || '').replace(/\D/g, '').padStart(9, '0');
-    if (normalizedId.length === 9 && normalizedId !== '000000000') {
-      const existingUser = await User.findOne({ id_number: normalizedId });
-      if (!existingUser) {
-        try {
-          const hash = await bcrypt.hash(normalizedId, 10);
-          createdUser = await User.create({
-            email: `${normalizedId}@gan-halomot.local`,
-            password_hash: hash,
-            full_name: emp.full_name,
-            id_number: normalizedId,
-            role: 'teacher',
-            branch_id: emp.branch_id,
-            position: emp.position || '',
-            is_active: true,
-          });
-          emp.user_id = createdUser._id;
-          await emp.save();
-        } catch (userErr) {
-          console.error(`Auto-create user failed for ${emp.full_name}:`, userErr.message);
-        }
-      } else {
-        // Link existing user
-        emp.user_id = existingUser._id;
-        await emp.save();
+    const normalizedId = userSync.normalizeIsraeliId(emp.israeli_id);
+    if (normalizedId) {
+      try {
+        const synced = await userSync.syncEmployeeUser(emp, { isNew: true });
+        if (synced.created) createdUser = synced.user;
+      } catch (userErr) {
+        console.error(`Auto-create user failed for ${emp.full_name}:`, userErr.message);
       }
 
       // Auto-queue add_user command to ALL branches with clocks
@@ -399,6 +382,9 @@ async function updateEmployee(req, res, next) {
     // (a new row in "תעריפים פר-סניף") means her finger has to reach that
     // branch's clock too, or she simply can't punch there.
     const branchesBefore = fingerprintSync.employeeBranchIds(emp).join(',');
+    // Job title before the edit — a real change is what licenses userSync to
+    // push a new role onto her login (see the service's comment).
+    const positionBefore = emp.position || '';
 
     // Turning pay ON for a role-holder who was unpaid: stamp when it started,
     // so later it is clear the earlier months were unpaid by design.
@@ -412,6 +398,14 @@ async function updateEmployee(req, res, next) {
       emp.amuta_distribution = await resolveAmutaDistribution(req.body.amuta_distribution, emp.branch_id);
     }
     await emp.save(); // triggers post-save hook for orphan punch re-linking
+
+    // Keep the login in step: create it if the ת"ז only arrived now, and mirror
+    // name / branch / title / active. Never blocks saving the employee card.
+    try {
+      await userSync.syncEmployeeUser(emp, { positionChanged: (emp.position || '') !== positionBefore });
+    } catch (e) {
+      console.error('[userSync] employee update sync failed:', e.message);
+    }
 
     if (fingerprintSync.employeeBranchIds(emp).join(',') !== branchesBefore) {
       // Fire-and-forget: queueing clock commands must not slow down (or fail)
@@ -474,6 +468,7 @@ async function decideEmployeeChangeRequest(req, res, next) {
     if (approve) {
       const emp = await Employee.findById(cr.employee_id);
       if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+      const positionBefore = emp.position || '';
       for (const ch of cr.changes) {
         if (ch.field === 'amuta_distribution') {
           emp.amuta_distribution = await resolveAmutaDistribution(ch.after, emp.branch_id);
@@ -482,6 +477,12 @@ async function decideEmployeeChangeRequest(req, res, next) {
         }
       }
       await emp.save(); // post-save hook re-links orphan punches
+      // A manager's approved edit reaches the login the same way a direct one does.
+      try {
+        await userSync.syncEmployeeUser(emp, { positionChanged: (emp.position || '') !== positionBefore });
+      } catch (e) {
+        console.error('[userSync] change-request sync failed:', e.message);
+      }
     }
     cr.status = approve ? 'approved' : 'rejected';
     cr.reviewed_by = req.user?.id || null;
