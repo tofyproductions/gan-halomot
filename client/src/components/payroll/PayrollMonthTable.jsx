@@ -2095,6 +2095,14 @@ export default function PayrollMonthTable() {
                                 ₪{Math.round(Number(r.sick_info.pay)).toLocaleString('he-IL')}
                               </Typography>
                             )}
+                            {/* Suppressed rather than paid twice — say so, and
+                                say how much, instead of showing a blank. */}
+                            {r.sick_info?.covered_by_teken && Number(r.sick_info?.pay_if_not_covered) > 0 && (
+                              <Tooltip arrow title={`השלמת השכר כבר שילמה את הימים האלה. תשלום דמי מחלה נפרד (₪${Math.round(Number(r.sick_info.pay_if_not_covered)).toLocaleString('he-IL')}) היה כפל תשלום, ולכן לא נוסף. הימים יורדים ממאזן המחלה.`}>
+                                <Chip size="small" color="info" variant="outlined" label="בשכר התקן"
+                                  sx={{ height: 14, fontSize: '0.53rem', '& .MuiChip-label': { px: 0.5 } }} />
+                              </Tooltip>
+                            )}
                           </Stack>
                         ) : (
                           <Typography variant="body2" color="text.secondary">—</Typography>
