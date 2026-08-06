@@ -30,7 +30,25 @@ import EmployeeChangeRequests from './EmployeeChangeRequests';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import Badge from '@mui/material/Badge';
 
-const POSITIONS = ['גננת', 'מובילת כיתה', 'מטפלת', 'סייעת', 'מבשלת', 'מנהלת', 'אחר'];
+// Job titles carry gender in Hebrew, so the list follows the employee's own.
+// Pairs, not two lists, so switching gender can translate the title already on
+// the card instead of blanking a select whose value is no longer an option.
+const POSITION_PAIRS = [
+  { f: 'גננת', m: 'גנן' },
+  { f: 'מובילת כיתה', m: 'מוביל כיתה' },
+  { f: 'מטפלת', m: 'מטפל' },
+  { f: 'סייעת', m: 'סייע' },
+  { f: 'מבשלת', m: 'טבח' },
+  { f: 'מנהלת', m: 'מנהל' },
+  { f: 'אחר', m: 'אחר' },
+];
+const positionsFor = (gender) => POSITION_PAIRS.map(p => (gender === 'male' ? p.m : p.f));
+/** The same title in the other gender, or the value untouched if unrecognised. */
+const translatePosition = (value, gender) => {
+  const pair = POSITION_PAIRS.find(p => p.f === value || p.m === value);
+  if (!pair) return value;
+  return gender === 'male' ? pair.m : pair.f;
+};
 
 const EMPTY_FORM = {
   full_name: '',
@@ -38,6 +56,9 @@ const EMPTY_FORM = {
   branch_id: '',
   phone: '',
   email: '',
+  // Almost the entire staff is female; a new card starts there and is changed
+  // for the exceptions, rather than leaving every new hire ungendered.
+  gender: 'female',
   position: '',
   start_date: '',
   salary_type: 'hourly',
@@ -207,6 +228,7 @@ export default function EmployeeManager() {
         branch_id: emp.branch_id || '',
         phone: emp.phone || '',
         email: emp.email || '',
+        gender: emp.gender || '',
         position: emp.position || '',
         start_date: emp.start_date ? new Date(emp.start_date).toISOString().slice(0, 10) : '',
         salary_type: emp.salary_type || 'hourly',
@@ -264,6 +286,7 @@ export default function EmployeeManager() {
       branch_id: data.branch_id,
       phone: data.phone || '',
       email: data.email || '',
+      gender: data.gender || '',
       position: data.position || '',
       start_date: data.start_date || null,
       salary_type: data.salary_type,
@@ -695,8 +718,16 @@ export default function EmployeeManager() {
               {/* Drives the wording of every generated document. Left unset the
                   letters stay feminine, which is how the office's own templates
                   are written — a name is not a reliable way to infer this. */}
-              <TextField label="מין" select value={dialog.data.gender || ''} onChange={e => updateField('gender', e.target.value)} fullWidth
-                helperText="קובע לשון פנייה במסמכים"
+              <TextField label="מין" select value={dialog.data.gender || ''}
+                onChange={e => {
+                  const g = e.target.value;
+                  setDialog(d => ({
+                    ...d,
+                    data: { ...d.data, gender: g, position: translatePosition(d.data.position, g) },
+                  }));
+                }}
+                fullWidth
+                helperText="קובע לשון פנייה ושם התפקיד"
               >
                 <MenuItem value="">לא הוגדר (נקבה כברירת מחדל)</MenuItem>
                 <MenuItem value="female">נקבה</MenuItem>
@@ -706,7 +737,13 @@ export default function EmployeeManager() {
             <Stack direction="row" spacing={2}>
               <TextField label="תפקיד" select value={dialog.data.position || ''} onChange={e => updateField('position', e.target.value)} fullWidth>
                 <MenuItem value="">—</MenuItem>
-                {POSITIONS.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                {positionsFor(dialog.data.gender).map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
+                {/* A title already on the card that isn't in the gendered list
+                    (legacy free text) must stay selectable, or saving would
+                    silently wipe it. */}
+                {dialog.data.position && !positionsFor(dialog.data.gender).includes(dialog.data.position) && (
+                  <MenuItem value={dialog.data.position}>{dialog.data.position}</MenuItem>
+                )}
               </TextField>
               <TextField label="תאריך התחלה" type="date" value={dialog.data.start_date || ''} onChange={e => updateField('start_date', e.target.value)} fullWidth InputLabelProps={{ shrink: true }} />
             </Stack>

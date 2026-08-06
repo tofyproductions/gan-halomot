@@ -129,9 +129,22 @@ const DEFAULT_JOB_DEFINITION = [
   'עבודת צוות ושיתוף פעולה מלא עם צוות הכיתה וצוות הגן.',
 ];
 
+// A male employee's title is the masculine form ("סייע", "גנן", "טבח"), which
+// no longer contains the feminine key — so match on the stem rather than on
+// the exact word, or every man would fall through to the generic annex.
+const JOB_KEY_PATTERNS = [
+  [/מנהל/, 'מנהלת'],
+  [/מובילת? כיתה/, 'מובילת כיתה'],
+  [/מטפל/, 'מטפלת'],
+  [/סייע/, 'סייעת'],
+  [/מבשל|טבח/, 'מבשלת'],
+  [/גננ|גנן/, 'גננת'],
+];
+
 function jobDefinitionFor(position) {
-  const key = Object.keys(JOB_DEFINITIONS).find(k => String(position || '').includes(k));
-  return (key ? JOB_DEFINITIONS[key] : DEFAULT_JOB_DEFINITION).join('\n');
+  const p = String(position || '');
+  const hit = JOB_KEY_PATTERNS.find(([re]) => re.test(p));
+  return (hit ? JOB_DEFINITIONS[hit[1]] : DEFAULT_JOB_DEFINITION).join('\n');
 }
 
 const GENERAL_INSTRUCTIONS = [
