@@ -49,13 +49,30 @@ async function launch() {
     process.env.CHROME_PATH,
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+    // Arc is Chromium underneath and drives fine — it is what is actually
+    // installed on this Mac.
+    '/Applications/Arc.app/Contents/MacOS/Arc',
   ].filter(Boolean);
-  const executablePath = candidates.find(p => fs.existsSync(p))
-    || await require('@sparticuz/chromium').executablePath();
+  const executablePath = candidates.find(p => fs.existsSync(p));
+  if (!executablePath) {
+    // The bundled @sparticuz build is a headless shell — fine for the server's
+    // PDF rendering, useless for a login you have to watch and sometimes
+    // finish by hand.
+    throw new Error(
+      'לא נמצא דפדפן מבוסס Chromium להרצת הגילוי.\n'
+      + 'התקינו Google Chrome, או הריצו עם CHROME_PATH=/path/to/browser.',
+    );
+  }
+  console.log(`דפדפן: ${executablePath}`);
   return puppeteer.launch({
     headless: HEADLESS,
     executablePath,
     defaultViewport: null,
+    // A throwaway profile: the run never touches your real browser session,
+    // and closing it leaves no logged-in Cibus session lying around.
+    userDataDir: path.join(require('os').tmpdir(), 'cibus-discover-profile'),
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   });
 }
@@ -81,6 +98,23 @@ async function launch() {
       console.log(`  ← ${res.status()} ${res.request().method()} ${url.slice(0, 110)}${n !== '' ? `  [${n} rows]` : ''}`);
     } catch { /* not our problem — keep recording */ }
   });
+
+  // The monthly report is very likely behind an "export" button rather than a
+  // JSON list. Record every request that looks like one — its URL and method
+  // are what the importer would call — and let the file land in the capture
+  // folder so we can see the exact format the parser will receive.
+  const downloads = [];
+  page.on('request', (req) => {
+    const u = req.url();
+    if (/export|download|report|excel|xls|csv/i.test(u) && !/\.(js|css|png|svg|woff2?)(\?|$)/i.test(u)) {
+      downloads.push({ method: req.method(), url: u, postData: req.postData() || null });
+      console.log(`  ⭳ ${req.method()} ${u.slice(0, 130)}`);
+    }
+  });
+  try {
+    const client = await page.createCDPSession();
+    await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: OUT });
+  } catch { /* older builds — a download just goes to the default folder */ }
 
   const shot = (name) => page.screenshot({ path: path.join(OUT, `page-${name}.png`), fullPage: true }).catch(() => {});
 
@@ -128,8 +162,12 @@ async function launch() {
         : Array.isArray(c.body?.items) ? c.body.items.length : 0;
       return `[${i}] ${c.method} ${c.status}  ${c.url}\n     rows=${rows}  keys=${keys}`;
     }).join('\n');
-    fs.writeFileSync(path.join(OUT, 'summary.txt'), summary || '(לא נתפסו קריאות JSON)');
-    console.log(`\nנשמרו ${captured.length} קריאות ל-${OUT}`);
+    const dl = downloads.length
+      ? '\n\n=== קריאות שנראות כמו ייצוא/הורדה ===\n'
+        + downloads.map((d, i) => `[D${i}] ${d.method} ${d.url}${d.postData ? `\n      body: ${d.postData.slice(0, 500)}` : ''}`).join('\n')
+      : '\n\n(לא נתפסו קריאות ייצוא/הורדה)';
+    fs.writeFileSync(path.join(OUT, 'summary.txt'), (summary || '(לא נתפסו קריאות JSON)') + dl);
+    console.log(`\nנשמרו ${captured.length} קריאות JSON ו-${downloads.length} קריאות ייצוא ל-${OUT}`);
     console.log('הקובץ להסתכל בו ראשון: cibus-capture/summary.txt');
     await browser.close();
   }
