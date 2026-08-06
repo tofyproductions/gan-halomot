@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { optionalAuth } = require('../middleware/auth');
+const { authMiddleware } = require('../middleware/auth');
 
 // Public routes (no auth required)
 router.use('/auth', require('./auth.routes'));
@@ -31,8 +31,16 @@ router.use('/gan-events', require('./ganEvents.routes'));
 // Leads (פניות הורים) — manager side; the public inquiry form lives under /public.
 router.use('/leads', require('./leads.routes'));
 
-// All other routes use optional auth (backward compatible - works without login too)
-router.use(optionalAuth);
+// Everything below requires a logged-in user.
+//
+// This was `optionalAuth` — "backward compatible, works without login too" —
+// which in practice meant the whole application was readable AND writable by
+// anyone with the URL: an unauthenticated GET /api/collections returned every
+// child's name, their parent's name and the family's fees. The only genuinely
+// anonymous surfaces are /api/public (parent + employee token links),
+// /api/auth, /api/utils and /api/agent (Pi agents, own shared-secret header),
+// and all four are mounted ABOVE this line.
+router.use(authMiddleware);
 router.use('/branches', require('./branch.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
