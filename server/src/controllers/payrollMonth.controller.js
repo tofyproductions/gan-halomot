@@ -866,28 +866,37 @@ async function getMonth(req, res, next) {
         balanceAvailable: sickAvail, // null → uncapped (computeSickPay treats as Infinity)
         policyFull: emp.sick_pay_policy === 'full',
       });
-      // A תקן employee's salary completion has ALREADY paid these days.
-      //
-      // The completion tops her up to the full agreed salary whatever the
-      // shortfall was — including a shortfall caused by being sick. Adding
-      // דמי מחלה on top then pays the same days twice: קרן בן שבת worked 40 of
-      // 149 committed hours, was topped up by ₪8,017 to her full ₪11,000, and
-      // was then paid a further ₪5,000 in sick pay for the days that top-up
-      // already covered.
-      //
-      // Vacation has always behaved correctly here (vacationPay is computed for
-      // hourly employees only, and the תקן row says "בשכר התקן"); sick was the
-      // one that stacked. So it now follows the same rule: while the completion
-      // is on, the sick days are recorded and drawn from her balance but are
-      // not paid again. Turning the completion off makes sick pay real money
-      // again, because then nothing else covered those days.
-      const tekenCompletion = breakdown.components?.teken_breakdown || {};
-      const sickCoveredByTeken = isTeken
-        && tekenCompletion.include_completion !== false
-        && (tekenCompletion.completion || 0) > 0;
-      const sickPayComputed = sickCalc.total_amount;
-      const sickPay = sickCoveredByTeken ? 0 : sickPayComputed;
+      const sickPay = sickCalc.total_amount;
       if (sickPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + sickPay;
+
+      // --- דמי מחלה come FIRST, the completion fills what is left ----------
+      //
+      // For a תקן employee the completion tops her up to the full agreed salary
+      // whatever caused the shortfall — including being sick. Paying sick pay
+      // on top of that paid the same days twice: קרן בן שבת worked 40 of 149
+      // committed hours, was topped up ₪8,017 to her full ₪11,000, and was then
+      // paid a further ₪5,000 for the days that top-up had already covered.
+      //
+      // Suppressing the sick pay would fix the total but is the wrong way
+      // round: דמי מחלה are statutory and must be PAID, and they have to appear
+      // on the payslip as דמי מחלה — that is the employee's record of having
+      // used them. So sick pay stands, and the completion is reduced by it. The
+      // total lands on the same agreed salary; only the composition is right.
+      //
+      // If the statutory sick pay is larger than the gap the completion was
+      // filling, the completion goes to zero and she is paid the excess: the
+      // law wins over the top-up, which is what "ימי המחלה חזקים על ההשלמה"
+      // means.
+      const tb = breakdown.components?.teken_breakdown;
+      let completionOffset = 0;
+      if (isTeken && tb && tb.include_completion !== false && sickPay > 0 && (tb.completion || 0) > 0) {
+        completionOffset = Math.min(tb.completion, sickPay);
+        tb.completion = Math.round((tb.completion - completionOffset) * 100) / 100;
+        tb.completion_reduced_by_sick = Math.round(completionOffset * 100) / 100;
+        breakdown.components.base_salary =
+          Math.round((Number(breakdown.components.base_salary || 0) - completionOffset) * 100) / 100;
+        breakdown.estimated_total = Math.round((breakdown.estimated_total - completionOffset) * 100) / 100;
+      }
 
       // --- Partial-day absence (היעדרות שעות) ------------------------------
       // Days the employee worked but fell > 1h short of their committed hours.
@@ -1283,11 +1292,9 @@ async function getMonth(req, res, next) {
           days_uncovered: sickCalc.total_days_uncovered,
           paid_days: sickCalc.total_paid_days,
           pay: sickPay,
-          // What it WOULD have been, and why it isn't — so the accountant can
-          // see the number that was suppressed instead of wondering where the
-          // sick pay went.
-          covered_by_teken: sickCoveredByTeken,
-          pay_if_not_covered: Math.round(sickPayComputed * 100) / 100,
+          // How much of the salary completion this sick pay replaced — the
+          // accountant needs to see that the two are linked, not additive.
+          completion_offset: Math.round(completionOffset * 100) / 100,
           certs: sickCalc.results,   // per-cert: work_days, covered_days, paid_days, paid_amount, full_from_day_1
         },
         status: row?.status || 'draft',
@@ -2475,9 +2482,9 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('', '')}
       </tr>` : ''}
       ${branchDetailRow}
-      ${(isGlobal && r.sick_info?.covered_by_teken && r.sick_info?.pay_if_not_covered > 0) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
+      ${(isGlobal && r.sick_info?.completion_offset > 0) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">מחלה (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה — <u>ללא תשלום דמי מחלה נפרד</u>. השלמת השכר כבר השלימה את המשכורת המלאה עבור הימים האלה (${f(r.sick_info.pay_if_not_covered)} היו כפל תשלום), ולכן יש לנכות אותם ממאזן המחלה בלבד.</span></td></tr>` : ''}
+          <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה שולמו כדמי מחלה (${f(r.sick_info.pay)}), <u>והשלמת השכר הופחתה באותו סכום</u> (${f(r.sick_info.completion_offset)}) — כדי שלא ישולם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא. יש לנכות את הימים ממאזן המחלה.</span></td></tr>` : ''}
       ${(vac && isGlobal) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">חופשה (תקן): </span>
           <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.</span></td></tr>` : ''}
