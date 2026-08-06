@@ -10,6 +10,7 @@ const { Employee, Branch, EmploymentContract, ContractAnnex, User } = require('.
 const tpl = require('../services/employmentContract');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
+const letterhead = require('../services/letterhead');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -144,7 +145,7 @@ async function preview(req, res, next) {
     const { emp, branch, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
     const ctx = tpl.buildContext(emp, { branch, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
-    res.json({ html: tpl.render(ctx), context: ctx });
+    res.json({ html: letterhead.inject(tpl.render(ctx)), context: ctx });
   } catch (err) { next(err); }
 }
 
@@ -344,15 +345,15 @@ async function file(req, res, next) {
  * on at read time so the signed copy can never disagree with what was signed.
  */
 function withSignature(doc) {
-  if (!doc.signature_data) return doc.html;
-  return tpl.render(doc.fields || {}, {
+  if (!doc.signature_data) return letterhead.inject(doc.html);
+  return letterhead.inject(tpl.render(doc.fields || {}, {
     signature: {
       data_url: doc.signature_data,
       signed_at: doc.signed_at,
       signer_name: doc.signer_name,
       ip: doc.signed_ip,
     },
-  });
+  }));
 }
 
 // --- standing annexes (נספח ג' — ונשמרתם) --------------------------------

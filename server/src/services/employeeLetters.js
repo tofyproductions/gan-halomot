@@ -14,6 +14,8 @@
  * readable exactly as it was even if these templates change later.
  */
 
+const letterhead = require('./letterhead');
+
 const HEB_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 const HEB_WEEKDAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
@@ -203,9 +205,10 @@ const PREVIEW_JS = `
 `;
 
 function page(title, inner, { preview = false } = {}) {
+  // The logo itself is substituted on the way out — see services/letterhead.js.
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"/>
-<title>${esc(title)}</title><style>${PAGE_CSS}${preview ? PREVIEW_CSS : ''}</style></head>
-<body>${inner}</body>${preview ? `<script>${PREVIEW_JS}</script>` : ''}</html>`;
+<title>${esc(title)}</title><style>${PAGE_CSS}${letterhead.CSS}${preview ? PREVIEW_CSS : ''}</style></head>
+<body>${letterhead.SLOT}${inner}</body>${preview ? `<script>${PREVIEW_JS}</script>` : ''}</html>`;
 }
 
 const signature = (ctx) => `

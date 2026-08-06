@@ -17,6 +17,8 @@
  * text can be overridden per contract.
  */
 
+const letterhead = require('./letterhead');
+
 const IL_TZ = 'Asia/Jerusalem';
 
 const longDate = (d) => {
@@ -203,8 +205,8 @@ function render(c, { signature = null } = {}) {
     : `<div class="signline">העובדת</div>`;
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"/>
-<title>הסכם העסקה — ${esc(c.employee_name)}</title><style>${CSS}</style></head><body>
-
+<title>הסכם העסקה — ${esc(c.employee_name)}</title><style>${CSS}${letterhead.CSS}</style></head><body>
+${letterhead.SLOT}
 <h1>${global ? 'הסכם העסקה – גלובלי בהתחייבות לשעות עבודה חודשיות' : 'הסכם העסקה - שעתי'}</h1>
 <div class="sub">שנחתם ב${val(c.signed_place || 'כפר סבא', 80)}, ביום ${val(signed.day, 34)} בחודש ${val(signed.month, 34)} בשנת ${val(signed.year, 48)}</div>
 

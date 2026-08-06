@@ -10,6 +10,7 @@
 const { Employee, Branch, EmployeeLetter, User } = require('../models');
 const letters = require('../services/employeeLetters');
 const { htmlToPdf } = require('../services/htmlPdf');
+const letterhead = require('../services/letterhead');
 
 /** Branch ids this user may act on, or null for "everything". */
 function branchScopeOf(req) {
@@ -117,7 +118,7 @@ async function preview(req, res, next) {
         ...(overrides || {}),
       },
     });
-    res.json({ html: letters.renderLetter(type, ctx, { preview: true }), context: ctx });
+    res.json({ html: letterhead.inject(letters.renderLetter(type, ctx, { preview: true })), context: ctx });
   } catch (err) { next(err); }
 }
 
@@ -223,15 +224,16 @@ async function pdf(req, res, next) {
       return res.status(403).json({ error: 'אין הרשאה למסמך זה' });
     }
     const name = `${doc.title} - ${doc.snapshot?.full_name || ''}`.trim().replace(/[/\\?%*:|"<>]/g, '-');
+    const html = letterhead.inject(doc.html);
     try {
-      const buf = await htmlToPdf(doc.html);
+      const buf = await htmlToPdf(html);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(name)}.pdf`);
       return res.send(buf);
     } catch (e) {
       console.error('[employeeLetters] PDF render failed, serving HTML:', e.message);
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return res.send(doc.html);
+      return res.send(html);
     }
   } catch (err) { next(err); }
 }
