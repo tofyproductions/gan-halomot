@@ -220,10 +220,18 @@ function committedDayOverages(commitment, workedDays, excludeSet, graceH = 1) {
  *   - Saturdays (never count — not a work day anyway)
  *   - The employee's weekly off-day (per EmployeeCommitment)
  *   - The last day of a half-day holiday counts as 0.5
+ *   - A day the gan was CLOSED on paper but she actually came in and worked
  *
- * Returns { total, details: [{date, name, value}] } so the UI can show why.
+ * That last one is the point of `workedDates`. A closure she worked through is
+ * not a vacation day: she is paid for the hours she actually did, and the day
+ * must NOT be drawn from her balance — otherwise she pays for the closure twice,
+ * once by working it and once by losing the day. Those days come back in
+ * `worked_on_holiday` so the month still shows that she worked a day the
+ * calendar says the gan was shut.
+ *
+ * Returns { total, details: [{date, name, value}], worked_on_holiday: [...] }.
  */
-function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates) {
+function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates, workedDates) {
   // Only days she was supposed to WORK count as paid vacation. With a commitment
   // that means a required weekday; a closure on her off-day / a non-work weekday
   // gives no vacation pay.
@@ -233,7 +241,8 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
     for (const d of commitment.days) if (!d.is_off) requiredWeekdays.add(d.day);
   }
   const statutory = statutoryDates instanceof Set ? statutoryDates : new Set(statutoryDates || []);
-  const result = { total: 0, details: [] };
+  const worked = workedDates instanceof Set ? workedDates : new Set(workedDates || []);
+  const result = { total: 0, details: [], worked_on_holiday: [] };
   for (const h of holidays) {
     const start = new Date(h.start_date);
     const end = new Date(h.end_date);
@@ -247,6 +256,12 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
       if (hasCommitment && !requiredWeekdays.has(wd)) continue;
       // Statutory-holiday days are paid via דמי חגים, not vacation — skip them.
       if (statutory.has(ymd)) continue;
+      // She came in on a day the gan was listed as closed: pay the hours, keep
+      // the vacation day, and flag it.
+      if (worked.has(ymd)) {
+        result.worked_on_holiday.push({ date: ymd, name: h.name });
+        continue;
+      }
       const isLastDay = ymd === endYmd;
       const value = (h.is_half_day && isLastDay) ? 0.5 : 1;
       result.total += value;
@@ -689,8 +704,13 @@ async function getMonth(req, res, next) {
       // Kindergarten closures → vacation days — EXCLUDING statutory-holiday days
       // (those are paid via דמי חגים, not vacation).
       const kgHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
+      // Days she actually clocked in this month — a closure she worked through
+      // must not also be billed to her vacation balance.
+      const workedDates = new Set((punchesByEmp.get(String(emp._id)) || [])
+        .filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'))
+        .map(p => ISR_DAY(p.timestamp)));
       const vacationAutoInfo = computeKindergartenVacationDays(
-        kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates,
+        kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates, workedDates,
       );
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
@@ -1170,6 +1190,10 @@ async function getMonth(req, res, next) {
           total_days: vacationAutoInfo.total,
           details: vacationAutoInfo.details,
           source: 'kindergarten_holidays',
+          // Closures she worked through: paid as ordinary hours, NOT drawn from
+          // her balance, and surfaced so the month shows she came in on a day
+          // the gan was listed as shut.
+          worked_on_holiday: vacationAutoInfo.worked_on_holiday,
         },
         vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
         vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance

@@ -2392,9 +2392,28 @@ function VacationCell({ row }) {
   const remaining = balance != null ? Math.round((balance - days) * 10) / 10 : null;
   const isGlobal = row.salary_type === 'global';
   const pay = row.vacation_pay || 0;
-  if (!days && balance == null) return <Typography variant="body2" color="text.secondary">—</Typography>;
+  // Closures she worked through: not drawn from her balance, but the month
+  // should still say she came in on a day the gan was listed as shut.
+  const workedOnHoliday = row.vacation_days_auto?.worked_on_holiday || [];
+  const workedChip = workedOnHoliday.length > 0 && (
+    <Tooltip
+      arrow
+      title={`עבדה בפועל ביום שמוגדר כחופשת גן — לא ירד יום מהצבירה, השכר משולם על השעות: ${
+        workedOnHoliday.map(w => `${w.date} (${w.name})`).join(', ')}`}
+    >
+      <Chip
+        size="small" color="info" variant="filled"
+        label={`עבדה בחופש ${workedOnHoliday.length}`}
+        sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }}
+      />
+    </Tooltip>
+  );
+  if (!days && balance == null) {
+    return workedChip || <Typography variant="body2" color="text.secondary">—</Typography>;
+  }
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
+      {workedChip}
       {days > 0 && <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days} ימים</Typography>}
       {manualVal === 0 && auto > 0 && (
         <Chip size="small" color="warning" variant="filled" label={`מלוח ${auto}`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
