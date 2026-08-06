@@ -10,6 +10,9 @@ const { Employee, Branch, EmploymentContract, ContractAnnex, User } = require('.
 const tpl = require('../services/employmentContract');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const SIGN_LINK_DAYS = 30;
 
@@ -399,15 +402,43 @@ async function uploadAnnex(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/** GET /api/employment-contracts/annexes/:id/file — also reachable publicly
- *  from the signing page, so the employee can read it before signing. */
+/**
+ * GET /api/employment-contracts/annexes/:id/file — also reachable publicly
+ * from the signing page, so the employee can read it before signing.
+ *
+ * The annex parts are ~3MB each and never change. Reading one out of Mongo
+ * costs a 4MB base64 string plus a 3MB Buffer, and a signer opens all four in
+ * a row — 28MB of churn per signature on a 512MB instance that already runs
+ * Chromium. So each part is materialised to the OS temp dir on first read and
+ * streamed from there afterwards: constant memory, and the cache dies with the
+ * instance (which is fine — it rebuilds itself on the next read).
+ */
+const ANNEX_CACHE_DIR = path.join(os.tmpdir(), 'gan-annexes');
+
 async function annexFile(req, res, next) {
   try {
-    const doc = await ContractAnnex.findById(req.params.id).lean();
-    if (!doc) return res.status(404).json({ error: 'נספח לא נמצא' });
-    res.setHeader('Content-Type', doc.mime_type || 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.file_name)}`);
-    res.send(Buffer.from(doc.file_data, 'base64'));
+    const id = String(req.params.id || '');
+    if (!/^[a-f0-9]{24}$/i.test(id)) return res.status(404).json({ error: 'נספח לא נמצא' });
+
+    const meta = await ContractAnnex.findById(id).select('-file_data').lean();
+    if (!meta) return res.status(404).json({ error: 'נספח לא נמצא' });
+
+    const cached = path.join(ANNEX_CACHE_DIR, `${id}.bin`);
+    if (!fs.existsSync(cached)) {
+      const doc = await ContractAnnex.findById(id).select('file_data').lean();
+      if (!doc?.file_data) return res.status(404).json({ error: 'נספח לא נמצא' });
+      fs.mkdirSync(ANNEX_CACHE_DIR, { recursive: true });
+      // Write via a temp name and rename, so two concurrent readers can never
+      // serve a half-written file.
+      const tmp = `${cached}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, Buffer.from(doc.file_data, 'base64'));
+      fs.renameSync(tmp, cached);
+    }
+
+    res.setHeader('Content-Type', meta.mime_type || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(meta.file_name)}`);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    fs.createReadStream(cached).pipe(res);
   } catch (err) { next(err); }
 }
 

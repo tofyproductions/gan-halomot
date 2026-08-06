@@ -2700,10 +2700,20 @@ async function punchIssues(month) {
     byDay.get(k).push(p);
   }
 
-  const dupKeys = [], missKeys = [];
+  const dupKeys = [], missKeys = [], crossKeys = [];
   for (const [k, list] of byDay) {
     if (list.length > 2) dupKeys.push(k);
     else if (list.length === 1) missKeys.push(k); // a lone punch — the pair is incomplete
+    else if (list.length === 2) {
+      // Clocked in at one branch and out at another. The day looks complete, so
+      // nothing else flags it — but the whole session is billed to the IN
+      // punch's branch (payrollCalc.splitDayIntoBranches), and branches have
+      // different rates and different amutot. She should have clocked out of
+      // the first branch and into the second; until the day is split, part of
+      // it is paid at the wrong rate and booked to the wrong legal entity.
+      const [a, b] = list;
+      if (a.branch_id && b.branch_id && String(a.branch_id) !== String(b.branch_id)) crossKeys.push(k);
+    }
   }
   // A branch manager's proposal does NOT clear the day — it still shows and
   // still blocks the send — but it comes back with the day so accounting can
@@ -2717,8 +2727,11 @@ async function punchIssues(month) {
     .filter(r => r.status === 'pending')
     .map(r => [String(r.employee_id) + '|' + r.date, r]));
   const pendingDup = dupKeys.filter(k => !resolved.has(k));
+  // A cross-branch day is cleared the same way as any other: once it carries an
+  // approved resolution, a human has said how it should be billed.
+  const pendingCross = crossKeys.filter(k => !resolved.has(k));
 
-  const empIds = [...new Set([...pendingDup, ...missKeys].map(k => k.split('|')[0]))];
+  const empIds = [...new Set([...pendingDup, ...missKeys, ...pendingCross].map(k => k.split('|')[0]))];
   const emps = await Employee.find({ _id: { $in: empIds } })
     .select('full_name branch_id receives_salary').populate('branch_id', 'name').lean();
   const empById = Object.fromEntries(emps.map(e => [String(e._id), e]));
@@ -2766,6 +2779,34 @@ async function punchIssues(month) {
     };
   }).sort(byName);
 
+  // Branch names for both ends of a cross-branch day — the manager has to see
+  // which two branches are involved to know where the transfer happened.
+  const crossBranchIds = [...new Set(pendingCross.flatMap(k =>
+    (byDay.get(k) || []).map(p => p.branch_id).filter(Boolean).map(String)))];
+  const branchNameById = new Map((crossBranchIds.length
+    ? await Branch.find({ _id: { $in: crossBranchIds } }).select('name').lean()
+    : []).map(b => [String(b._id), b.name]));
+
+  const cross_branch = pendingCross.filter(isPaid).map(k => {
+    const list = byDay.get(k).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const [inP, outP] = list;
+    return {
+      ...meta(k),
+      // meta() reports her HOME branch; the day itself happened across these two.
+      in_branch_id: String(inP.branch_id),
+      in_branch_name: branchNameById.get(String(inP.branch_id)) || '',
+      in_hhmm: ISR_HHMM(inP.timestamp),
+      out_branch_id: String(outP.branch_id),
+      out_branch_name: branchNameById.get(String(outP.branch_id)) || '',
+      out_hhmm: ISR_HHMM(outP.timestamp),
+      minutes: Math.max(0, Math.round((new Date(outP.timestamp) - new Date(inP.timestamp)) / 60000)),
+      pending_resolution: proposalByKey.has(k) ? {
+        by: proposalByKey.get(k).proposed_by_name || '',
+        at: proposalByKey.get(k).proposed_at,
+      } : null,
+    };
+  }).sort(byName);
+
   const missing = missKeys.filter(isPaid).map(k => {
     const p = byDay.get(k)[0];
     return {
@@ -2775,7 +2816,7 @@ async function punchIssues(month) {
     };
   }).sort(byName);
 
-  return { duplicates, missing };
+  return { duplicates, missing, cross_branch };
 }
 
 /**
