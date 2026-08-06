@@ -447,7 +447,7 @@ async function editAdminRequest(req, res, next) {
   try {
     const request = await EmployeeRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ error: 'בקשה לא נמצאה' });
-    const { from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day, exam_hours } = req.body;
+    const { from_date, to_date, reason, medical_file_data, medical_file_name, pay_from_first_day, exam_hours, medical_file_clear } = req.body;
 
     const oldMonth = request.from_date.slice(0, 7);
     if (from_date) request.from_date = from_date;
@@ -455,7 +455,16 @@ async function editAdminRequest(req, res, next) {
     if (reason !== undefined) request.reason = reason || null;
     if (pay_from_first_day !== undefined) request.pay_from_first_day = !!pay_from_first_day;
     if (exam_hours !== undefined && request.type === 'pregnancy_exam') request.exam_hours = Number(exam_hours) || 0;
-    if (medical_file_data) { request.medical_file_data = medical_file_data; request.medical_file_name = medical_file_name || request.medical_file_name; }
+    // A missing medical_file_data means "don't touch the file" — an edit that
+    // only changes the hours must never drop a certificate. Removing one is a
+    // separate, explicit instruction.
+    if (medical_file_data) {
+      request.medical_file_data = medical_file_data;
+      request.medical_file_name = medical_file_name || request.medical_file_name;
+    } else if (medical_file_clear) {
+      request.medical_file_data = null;
+      request.medical_file_name = null;
+    }
     await request.save();
 
     // Recompute the affected month(s) — covers the case where the edit moved the

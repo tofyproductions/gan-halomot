@@ -118,6 +118,34 @@ export default function PregnancyDetailDialog({ open, row, canManager, canAccoun
       .finally(() => setSaving(false));
   };
 
+  /**
+   * Attach or replace ONE row's certificate.
+   *
+   * Every exam is its own approval with its own certificate — the picker at the
+   * top belongs to the row being added and can only ever carry one file, so
+   * without this the rows already in the table had no way to get theirs. The
+   * server leaves the file untouched unless a new one is sent, so this can
+   * never disturb the other rows.
+   */
+  const attachCert = (id, picked) => {
+    if (!picked?.data) return;
+    setSaving(true);
+    api.put(`/employee-requests/${id}/admin`, {
+      medical_file_data: picked.data,
+      medical_file_name: picked.name,
+    })
+      .then(() => { toast.success('האישור צורף לשורה'); load(); onSaved && onSaved(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בצירוף האישור'))
+      .finally(() => setSaving(false));
+  };
+
+  const removeCert = async (id) => {
+    if (!(await confirm({ title: 'הסרת אישור', message: 'להסיר את האישור מהשורה? רישום השעות יישאר.' }))) return;
+    api.put(`/employee-requests/${id}/admin`, { medical_file_clear: true })
+      .then(() => { toast.success('האישור הוסר'); load(); onSaved && onSaved(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
+
   const decide = (id, status) => {
     api.put(`/employee-requests/${id}/status`, { status })
       .then(() => { toast.success(status === 'approved' ? 'אושר' : 'נדחה'); onSaved && onSaved(); load(); })
@@ -234,11 +262,32 @@ export default function PregnancyDetailDialog({ open, row, canManager, canAccoun
                         <TableCell align="center" sx={{ fontWeight: 700 }}>{r.hours}</TableCell>
                         <TableCell>{r.reason || '—'}</TableCell>
                         <TableCell align="center">
-                          {r.has_file ? (
-                            <Tooltip title={r.file_name || 'צפה באישור'}>
-                              <IconButton size="small" onClick={() => viewCert(r.id)}><VisibilityIcon fontSize="small" /></IconButton>
-                            </Tooltip>
-                          ) : <Typography variant="caption" color="text.disabled">אין</Typography>}
+                          <Stack direction="row" spacing={0.25} justifyContent="center" alignItems="center">
+                            {r.has_file && (
+                              <Tooltip title={r.file_name || 'צפה באישור'}>
+                                <IconButton size="small" onClick={() => viewCert(r.id)}><VisibilityIcon fontSize="small" /></IconButton>
+                              </Tooltip>
+                            )}
+                            <FilePickButton
+                              size="small"
+                              variant={r.has_file ? 'text' : 'outlined'}
+                              color={r.has_file ? 'inherit' : 'warning'}
+                              hasFile={r.has_file}
+                              label="צרף"
+                              replaceLabel="החלף"
+                              disabled={saving}
+                              onPick={(picked) => attachCert(r.id, picked)}
+                              onError={(m) => toast.error(m)}
+                              sx={{ minWidth: 0, px: 0.8, fontSize: '0.7rem' }}
+                            />
+                            {r.has_file && (
+                              <Tooltip title="הסר אישור">
+                                <IconButton size="small" onClick={() => removeCert(r.id)}>
+                                  <DeleteIcon fontSize="small" sx={{ fontSize: 15, opacity: 0.6 }} />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Stack>
                         </TableCell>
                         <TableCell align="center">
                           <Chip size="small" color={STATUS_COLOR[r.status] || 'default'} label={STATUS_LABEL[r.status] || r.status} />
