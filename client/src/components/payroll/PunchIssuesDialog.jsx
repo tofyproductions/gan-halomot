@@ -264,10 +264,16 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: 2, bgcolor: '#eff6ff', borderColor: '#bfdbfe' }}>
         <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
           <Typography sx={{ fontWeight: 800 }}>{activeBranch.name}</Typography>
-          <Chip size="small" color="error" label={`${activeBranch.duplicates_count} כפילויות`} />
-          <Chip size="small" color="warning" label={`${activeBranch.missing_count} חוסרים`} />
-          {activeBranch.conflicts_count > 0 && (
-            <Chip size="small" color="secondary" label={`${activeBranch.conflicts_count} שעות קבועות`} />
+          {activeBranch.duplicates_count + activeBranch.missing_count + activeBranch.conflicts_count === 0 ? (
+            <Chip size="small" color="success" label="אין בעיות בסניף זה החודש" />
+          ) : (
+            <>
+              <Chip size="small" color="error" label={`${activeBranch.duplicates_count} כפילויות`} />
+              <Chip size="small" color="warning" label={`${activeBranch.missing_count} חוסרים`} />
+              {activeBranch.conflicts_count > 0 && (
+                <Chip size="small" color="secondary" label={`${activeBranch.conflicts_count} שעות קבועות`} />
+              )}
+            </>
           )}
           <Box sx={{ flex: 1 }} />
           {canRemind && (
@@ -384,8 +390,14 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                             {b.missing_count}
                           </Box>
                         )}
+                        {/* A clean branch says so out loud. Dropping it from the
+                            strip would read as "you can't see this branch". */}
+                        {b.duplicates_count + b.missing_count + b.conflicts_count === 0 && (
+                          <Box component="span" sx={{ color: '#16a34a', fontSize: '0.8rem', fontWeight: 800 }}>✓</Box>
+                        )}
                       </Stack>
                     }
+                    sx={{ opacity: b.duplicates_count + b.missing_count + b.conflicts_count === 0 ? 0.6 : 1 }}
                   />
                 ))}
               </Tabs>

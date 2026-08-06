@@ -2848,11 +2848,16 @@ async function punchReviewStatus(req, res, next) {
     // counts, its manager(s), and a ready WhatsApp link — so switching to a
     // branch tab immediately shows who is responsible and how to nudge them,
     // with no extra request and no need to press "send" first.
-    const branchIds = [...new Set(
-      [...scopedDuplicates, ...scopedMissing, ...conflicts].map(i => i.branch_id).filter(Boolean),
-    )];
+    //
+    // EVERY branch in scope gets a tab, including the clean ones. Listing only
+    // the branches that happen to have problems makes "this branch is fine"
+    // and "this branch is hidden from you" look identical — an admin comparing
+    // two months reads the shorter tab strip as lost access rather than as a
+    // clean branch.
+    const branchDocsAll = await Branch.find(scope ? { _id: { $in: scope } } : {}).select('name').lean();
+    const branchIds = branchDocsAll.map(b => String(b._id));
     const [branchDocs, managersByBranch, entryTasks] = await Promise.all([
-      branchIds.length ? Branch.find({ _id: { $in: branchIds } }).select('name').lean() : [],
+      branchDocsAll,
       branchManagers(branchIds),
       // Whether this branch was already told to fill its own gaps — and whether
       // the manager ever opened it. Without this the accountant re-sends blind.
