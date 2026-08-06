@@ -44,6 +44,7 @@ const EmployeeLetter = require('./EmployeeLetter');
 const EmploymentContract = require('./EmploymentContract');
 const ContractAnnex = require('./ContractAnnex');
 const SpecialDay = require('./SpecialDay');
+const CibusSync = require('./CibusSync');
 const EmployeeDocument = require('./EmployeeDocument');
 const Setting = require('./Setting');
 const ClassProvider = require('./ClassProvider');
@@ -102,6 +103,7 @@ module.exports = {
   EmploymentContract,
   ContractAnnex,
   SpecialDay,
+  CibusSync,
   EmployeeDocument,
   Setting,
   ClassProvider,

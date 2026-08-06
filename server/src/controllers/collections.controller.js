@@ -77,26 +77,29 @@ async function getAll(req, res, next) {
      * The camp cell for one child, or null when her branch has no camp.
      *
      * The charge is flat — never prorated like a monthly fee — because the camp
-     * is a fixed-price product, not a month of care. What DOES remove it is not
-     * being enrolled while it runs: a child who left before the camp started,
-     * or who starts after it ended, is not billed for it.
+     * is a fixed-price product, not a month of care. Only a child who left the
+     * gan mid-year is skipped by default, and even she stays editable.
      */
     function buildCampCell(reg, existing) {
       const camp = campByBranch.get(String(reg.branch_id));
       if (!camp) return null;
 
-      const regStart = reg.start_date ? new Date(reg.start_date) : null;
-      const regEnd = reg.end_date ? new Date(reg.end_date) : null;
-      const outOfRange = (camp.end_date && regStart && regStart > new Date(camp.end_date))
-        || (camp.start_date && regEnd && regEnd < new Date(camp.start_date));
+      // Deliberately NOT gated on the camp dates falling inside the child's
+      // registration. The school year runs Sept–July and the camp is in August,
+      // *after* it — so comparing the two excluded every child in the branch,
+      // which is exactly what happened: the whole column showed ₪0 and no cell
+      // could be opened. What actually decides is whether she left early, and
+      // the exit month already records that.
+      const exitM = collectionByReg[String(reg._id)]?.exit_month ?? null;
+      const leftEarly = exitM != null && exitM !== 7 && exitM !== 8;
 
       const hasOverride = existing.fee_override != null;
       const base = camp.amount || 0;
-      const expected = hasOverride ? existing.fee_override : (outOfRange ? 0 : base);
+      const expected = hasOverride ? existing.fee_override : (leftEarly ? 0 : base);
 
       let receiptNumber = existing.receipt_number || null;
       if (!receiptNumber) receiptNumber = findSiblingMonthReceipt(reg, CAMP_MONTH);
-      let paymentStatus = existing.payment_status || (outOfRange ? 'pending' : 'expected');
+      let paymentStatus = existing.payment_status || 'expected';
       if (receiptNumber) paymentStatus = 'paid';
 
       return {
@@ -109,12 +112,15 @@ async function getAll(req, res, next) {
         payment_status: paymentStatus,
         payment_date: existing.payment_date || null,
         is_prorated: false,
-        // Reuses the greyed-out "outside this child's enrolment" cell styling.
-        is_before_start: !!outOfRange,
+        // Never greyed out. A greyed cell is a cell the table refuses to open,
+        // and a receipt has to be enterable for any child — including one who
+        // left in March and came back just for the camp.
+        is_before_start: false,
+        left_early: !!leftEarly,
         notes: existing.notes || null,
         has_fee_override: hasOverride,
         fee_override_reason: existing.fee_override_reason || null,
-        original_expected: hasOverride ? (outOfRange ? 0 : base) : null,
+        original_expected: hasOverride ? (leftEarly ? 0 : base) : null,
       };
     }
 

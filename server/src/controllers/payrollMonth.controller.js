@@ -65,7 +65,7 @@ function suggestPunchLabels(sortedPunches) {
 }
 const { analyzeCommitment, datesInMonth, workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
-const { parseCibusReport } = require('../services/payslipAudit/cibusParser');
+const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
 const { dispatchEmail } = require('../services/email.service');
 
@@ -2027,86 +2027,23 @@ async function importCibus(req, res, next) {
     if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
     if (!req.file) return res.status(400).json({ error: 'נדרש קובץ סיבוס' });
 
-    let report;
-    try {
-      report = parseCibusReport(req.file.buffer, req.file.originalname);
-    } catch (err) {
-      return res.status(400).json({ error: err.message || 'שגיאה בקריאת קובץ סיבוס' });
-    }
-
-    // Enforce per-user branch scope on the employee lookup
+    // Enforce per-user branch scope on the employee lookup.
     const role = req.user?.role;
-    const branchScope = {};
+    const branchFilter = {};
     if (role && role !== 'system_admin' && role !== 'accountant') {
       const managed = (req.user.managed_branch_ids || []).map(String);
       const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
-      const allowed = managed.length > 0 ? managed : fallback;
-      branchScope.branch_id = { $in: allowed };
+      branchFilter.branch_id = { $in: managed.length > 0 ? managed : fallback };
     }
 
-    const allEmployees = await Employee.find({ is_active: true, ...branchScope })
-      .select('_id full_name israeli_id branch_id')
-      .lean();
-    const byId = new Map(allEmployees.filter(e => e.israeli_id).map(e => [e.israeli_id, e]));
-    const normalizeName = (s) => (s || '').replace(/[()‘’“”"'.,]/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-    const normalized = allEmployees.map(e => ({ emp: e, tokens: normalizeName(e.full_name).split(' ').filter(Boolean) }));
-
-    const matched = [];
-    const unmatched = [];
-    let totalAmount = 0;
-
-    for (const row of report.rows || []) {
-      let emp = row.id ? byId.get(row.id) : null;
-      if (!emp && row.name) {
-        const target = normalizeName(row.name).split(' ').filter(Boolean);
-        if (target.length > 0) {
-          let best = null;
-          let bestScore = 0;
-          for (const cand of normalized) {
-            let common = 0;
-            for (const t of target) if (cand.tokens.includes(t)) common++;
-            const required = target.length === 1 ? 1 : 2;
-            if (common >= required && common > bestScore) {
-              best = cand.emp;
-              bestScore = common;
-            }
-          }
-          emp = best;
-        }
-      }
-      const amount = Number(row.amount) || 0;
-      totalAmount += amount;
-      if (!emp) {
-        unmatched.push({ name: row.name, id: row.id, amount });
-        continue;
-      }
-      await PayrollMonth.findOneAndUpdate(
-        { employee_id: emp._id, month },
-        {
-          $set: {
-            'manual.cibus': { kind: 'number', amount, text: '' },
-          },
-          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
-        },
-        { upsert: true },
-      );
-      matched.push({
-        employee_id: String(emp._id),
-        employee_name: emp.full_name,
-        israeli_id: emp.israeli_id,
-        amount,
-      });
+    let result;
+    try {
+      // Same code path as the scheduled mailbox import — see services/cibusImport.js.
+      result = await applyCibusReport(req.file.buffer, req.file.originalname, month, { branchFilter });
+    } catch (err) {
+      return res.status(400).json({ error: err.message || 'שגיאה בקריאת קובץ סיבוס' });
     }
-
-    res.json({
-      matched_count: matched.length,
-      unmatched_count: unmatched.length,
-      total_amount: Math.round(totalAmount * 100) / 100,
-      matched,
-      unmatched,
-      detected_columns: report.detected_columns,
-      warning: report.warning || null,
-    });
+    res.json(result);
   } catch (err) { next(err); }
 }
 
