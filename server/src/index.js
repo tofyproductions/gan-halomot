@@ -163,6 +163,15 @@ connectDB().then(() => {
     const fingerprintSync = require('./services/fingerprintSync');
     setTimeout(() => fingerprintSync.sweep(), 3 * 60 * 1000);       // first pass after 3 min
     setInterval(() => fingerprintSync.sweep(), 6 * 60 * 60 * 1000); // then every 6h
+
+    // Cibus: pull the scheduled monthly report out of the mailbox. The tick is
+    // cheap and self-limiting — it does nothing before the configured day and
+    // nothing once the month has already landed — so hourly is fine and means
+    // a late email is picked up the same day it arrives.
+    const cibusSyncJob = require('./services/cibusSyncJob');
+    const runCibus = () => cibusSyncJob.tick().catch(e => console.error('[cibus] tick failed:', e.message));
+    setTimeout(runCibus, 90 * 1000);
+    setInterval(runCibus, 60 * 60 * 1000);
   });
 });
 

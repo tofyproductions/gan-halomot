@@ -24,6 +24,7 @@ import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import CelebrationIcon from '@mui/icons-material/Celebration';
+import AutorenewIcon from '@mui/icons-material/Autorenew';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import api from '../../api/client';
@@ -40,6 +41,7 @@ import PregnancyDetailDialog from './PregnancyDetailDialog';
 import PunchReviewDialog from './PunchReviewDialog';
 import PunchIssuesDialog from './PunchIssuesDialog';
 import SpecialDaysDialog from './SpecialDaysDialog';
+import CibusSyncDialog from './CibusSyncDialog';
 import FixedSchedulesDialog from './FixedSchedulesDialog';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -859,6 +861,7 @@ export default function PayrollMonthTable() {
   const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, duplicates_count: 0, missing_count: 0 });
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [specialDaysOpen, setSpecialDaysOpen] = useState(false);
+  const [cibusSyncOpen, setCibusSyncOpen] = useState(false);
   const [fixedSchedOpen, setFixedSchedOpen] = useState(false);
   useEffect(() => {
     if (!month) return;
@@ -1658,6 +1661,7 @@ export default function PayrollMonthTable() {
           </Typography>
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
           <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
+          <Button startIcon={<AutorenewIcon />} size="small" onClick={() => setCibusSyncOpen(true)} variant="outlined" sx={{ color: '#0f766e', borderColor: '#5eead4' }}>סיבוס אוטומטי</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
           <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: '#7c3aed', borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
@@ -2324,6 +2328,12 @@ export default function PayrollMonthTable() {
       <FixedSchedulesDialog
         open={fixedSchedOpen}
         onClose={() => setFixedSchedOpen(false)}
+        onChanged={fetchData}
+      />
+      <CibusSyncDialog
+        open={cibusSyncOpen}
+        month={month}
+        onClose={() => setCibusSyncOpen(false)}
         onChanged={fetchData}
       />
       <SpecialDaysDialog
