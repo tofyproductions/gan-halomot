@@ -9,6 +9,8 @@ import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import GavelIcon from '@mui/icons-material/Gavel';
+import EmploymentContractDialog, { CONTRACT_STATUS } from './EmploymentContractDialog';
 import LinkIcon from '@mui/icons-material/Link';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
@@ -142,6 +144,16 @@ export default function EmployeeManager() {
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
+  // Employment contract — status per employee, and the per-employee dialog.
+  const [contractDialog, setContractDialog] = useState({ open: false, employee: null });
+  const [contractStatuses, setContractStatuses] = useState({});
+  const fetchContractStatuses = useCallback(() => {
+    api.get('/employment-contracts/status')
+      .then(res => setContractStatuses(res.data.statuses || {}))
+      .catch(() => {});
+  }, []);
+  useEffect(() => { fetchContractStatuses(); }, [fetchContractStatuses]);
+
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
   const [changeReqOpen, setChangeReqOpen] = useState(false);
   const [pendingChanges, setPendingChanges] = useState(0);
@@ -561,6 +573,25 @@ export default function EmployeeManager() {
                           <Tooltip title="דוח שעות">
                             <IconButton size="small" onClick={() => setHoursDialog({ open: true, employee: emp })}>
                               <ScheduleIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={(() => {
+                            const st = contractStatuses[String(empId)]?.status;
+                            return st ? `הסכם העסקה — ${CONTRACT_STATUS[st]?.label || st}` : 'הסכם העסקה — לא הונפק';
+                          })()}>
+                            <IconButton
+                              size="small"
+                              color={(() => {
+                                const st = contractStatuses[String(empId)]?.status;
+                                if (st === 'approved') return 'success';
+                                if (st === 'signed' || st === 'uploaded') return 'warning';
+                                if (st === 'sent') return 'info';
+                                if (st === 'waived') return 'default';
+                                return 'error';
+                              })()}
+                              onClick={() => setContractDialog({ open: true, employee: emp })}
+                            >
+                              <GavelIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
                           <Tooltip title="ערוך">
@@ -997,6 +1028,14 @@ export default function EmployeeManager() {
         open={hoursDialog.open}
         employee={hoursDialog.employee}
         onClose={() => setHoursDialog({ open: false, employee: null })}
+      />
+
+      <EmploymentContractDialog
+        open={contractDialog.open}
+        employee={contractDialog.employee}
+        role={isAdmin ? 'system_admin' : isAccountant ? 'accountant' : 'branch_manager'}
+        onClose={() => setContractDialog({ open: false, employee: null })}
+        onChanged={fetchContractStatuses}
       />
 
       <ClockMatchDialog

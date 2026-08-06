@@ -1,0 +1,122 @@
+import { useState, useEffect, useRef } from 'react';
+import { useParams } from 'react-router-dom';
+import {
+  Box, Paper, Typography, Button, Stack, TextField, Alert, CircularProgress, Divider,
+} from '@mui/material';
+import SignatureCanvas from 'react-signature-canvas';
+import axios from 'axios';
+import { toast } from 'react-toastify';
+
+/**
+ * The employee's signing page — opened from a link on her phone, no login.
+ *
+ * She reads the actual contract (the same HTML that will be the signed PDF,
+ * not a summary), then proves she is the right person with the last four
+ * digits of her ת"ז before signing. A forwarded link on its own cannot sign.
+ */
+const publicApi = axios.create({ baseURL: '/api/public', timeout: 30000 });
+
+export default function ContractSigning() {
+  const { token } = useParams();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [idLast4, setIdLast4] = useState('');
+  const [name, setName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
+  const sigRef = useRef(null);
+
+  useEffect(() => {
+    publicApi.get(`/contract/${token}`)
+      .then(res => {
+        setData(res.data);
+        setName(res.data.employee_name || '');
+        if (res.data.already_signed) setDone(true);
+      })
+      .catch(e => setErr(e.response?.data?.error || 'שגיאה בטעינת ההסכם'))
+      .finally(() => setLoading(false));
+  }, [token]);
+
+  const submit = async () => {
+    if (!sigRef.current || sigRef.current.isEmpty()) return toast.error('נא לחתום במסגרת');
+    if (String(idLast4).trim().length !== 4) return toast.error('נא להזין 4 ספרות אחרונות של ת״ז');
+    setSaving(true);
+    try {
+      await publicApi.post(`/contract/${token}/sign`, {
+        signature: sigRef.current.toDataURL('image/png'),
+        signer_name: name,
+        id_last4: String(idLast4).trim(),
+      });
+      setDone(true);
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'שגיאה בשמירת החתימה');
+    } finally { setSaving(false); }
+  };
+
+  if (loading) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', p: 6 }}><CircularProgress /></Box>;
+  }
+  if (err) {
+    return <Box dir="rtl" sx={{ p: 3, maxWidth: 620, mx: 'auto' }}><Alert severity="error">{err}</Alert></Box>;
+  }
+
+  return (
+    <Box dir="rtl" sx={{ p: { xs: 1.5, sm: 3 }, maxWidth: 900, mx: 'auto' }}>
+      <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>הסכם העסקה — גן החלומות</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {data.employee_name}
+      </Typography>
+
+      {done ? (
+        <Alert severity="success" sx={{ mb: 2 }}>
+          ההסכם נחתם בהצלחה ונשלח להנהלת החשבונות לאישור. אפשר לסגור את הדף.
+        </Alert>
+      ) : (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          יש לקרוא את ההסכם במלואו, ולאחר מכן לחתום בתחתית העמוד.
+        </Alert>
+      )}
+
+      {/* The real contract, scrollable — not a summary. */}
+      <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden', mb: 2 }}>
+        <Box
+          component="iframe" title="הסכם העסקה" srcDoc={data.html}
+          sx={{ width: '100%', height: { xs: 460, sm: 620 }, border: 0, bgcolor: '#fff' }}
+        />
+      </Paper>
+
+      {!done && (
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+          <Typography sx={{ fontWeight: 800, mb: 1.5 }}>חתימה</Typography>
+          <Stack spacing={2}>
+            <TextField
+              size="small" label="שם מלא" value={name} onChange={(e) => setName(e.target.value)} fullWidth
+            />
+            <TextField
+              size="small" label="4 ספרות אחרונות של ת״ז" value={idLast4}
+              onChange={(e) => setIdLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+              inputProps={{ inputMode: 'numeric', maxLength: 4 }}
+              helperText="לאימות זהות — הספרות חייבות להתאים לת״ז שבמערכת"
+              sx={{ maxWidth: 260 }}
+            />
+            <Divider />
+            <Box>
+              <Typography variant="caption" color="text.secondary">חתמו כאן:</Typography>
+              <Box sx={{ border: '2px dashed #cbd5e1', borderRadius: 2, mt: 0.5, bgcolor: '#fff', touchAction: 'none' }}>
+                <SignatureCanvas
+                  ref={sigRef} penColor="#111"
+                  canvasProps={{ style: { width: '100%', height: 190, display: 'block' } }}
+                />
+              </Box>
+              <Button size="small" sx={{ mt: 0.5 }} onClick={() => sigRef.current?.clear()}>נקה חתימה</Button>
+            </Box>
+            <Button variant="contained" size="large" disabled={saving} onClick={submit}>
+              {saving ? 'שומר…' : 'אני מאשר/ת וחותם/ת על ההסכם'}
+            </Button>
+          </Stack>
+        </Paper>
+      )}
+    </Box>
+  );
+}

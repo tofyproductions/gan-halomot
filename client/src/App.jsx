@@ -38,6 +38,7 @@ import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import EmployeeLetters from './components/employees/EmployeeLetters';
+import ContractSigning from './components/employees/ContractSigning';
 import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
@@ -56,6 +57,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register/:token" element={<ParentOnboarding />} />
       <Route path="/event/:token" element={<EventSignup />} />
+      <Route path="/sign-contract/:token" element={<ContractSigning />} />
       {/* Public new-parent inquiry (marketed link). Standalone, outside the shell. */}
       <Route path="/lead" element={<LeadForm />} />
       <Route path="/lead/:branchId" element={<LeadForm />} />

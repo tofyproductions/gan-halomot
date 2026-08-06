@@ -53,6 +53,7 @@ router.use('/discounts', require('./discount.routes'));
 router.use('/branch-pricing', require('./branchPricing.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/employee-letters', require('./employeeLetters.routes'));
+router.use('/employment-contracts', require('./employmentContracts.routes'));
 router.use('/stock', require('./stock.routes'));
 
 // Sync endpoint

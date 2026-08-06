@@ -26,6 +26,12 @@ router.post(
   publicController.uploadDocument
 );
 
+// --- Employment contract signing (employee's phone, token only) ---
+// GET /api/public/contract/:token
+router.get('/contract/:token', require('../controllers/employmentContracts.controller').publicGet);
+// POST /api/public/contract/:token/sign
+router.post('/contract/:token/sign', require('../controllers/employmentContracts.controller').publicSign);
+
 // --- Gan events (parent bring-list, no auth) ---
 // GET /api/public/event/:token?claimant_id=&phone=
 router.get('/event/:token', publicController.getEvent);
