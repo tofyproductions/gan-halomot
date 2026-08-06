@@ -47,6 +47,9 @@ router.post('/:month/punch-issues/remind',    requireRole('system_admin', 'accou
 router.post('/:month/punch-issues/assign',    requireRole('system_admin', 'accountant'), c.assignPunchEntry);
 // Decide a day where a fixed-hours employee also clocked in.
 router.post('/:month/punch-issues/fixed-conflict', requireRole('system_admin', 'accountant'), c.resolveFixedConflict);
+// Split a day she opened at one branch and closed at another. Branch managers
+// may propose it; the controller stores theirs as pending (models/PunchResolution).
+router.post('/:month/punch-issues/split-branch', requireRole('system_admin', 'accountant', 'branch_manager'), c.splitCrossBranchDay);
 router.post('/:month/finalize',               requireRole('system_admin', 'accountant'), c.finalizeMonth);
 // Preview the accountant PDF (no send) — drives the preview dialog.
 router.get('/:month/accountant-preview',      requireRole('system_admin', 'accountant'), c.previewAccountant);

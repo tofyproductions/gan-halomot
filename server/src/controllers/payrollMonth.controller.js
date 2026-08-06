@@ -2921,7 +2921,7 @@ async function punchReviewStatus(req, res, next) {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const scope = branchScopeOf(req);
-    const [{ duplicates, missing }, conflictsRaw] = await Promise.all([
+    const [{ duplicates, missing, cross_branch: crossRaw }, conflictsRaw] = await Promise.all([
       punchIssues(month),
       // A fixed-hours employee who also clocked in that day: no hours were
       // generated for her, and someone has to say which reading counts.
@@ -2935,6 +2935,11 @@ async function punchReviewStatus(req, res, next) {
     const scopedDuplicates = scopeIssues(duplicates, scope);
     const scopedMissing = scopeIssues(missing, scope);
     const conflicts = scopeIssues(conflictsRaw, scope);
+    // A cross-branch day belongs to BOTH branches, so a manager who owns
+    // either end must see it — scoping on her home branch alone would hide the
+    // days where she is the receiving branch.
+    const crossBranch = (crossRaw || []).filter(i => !scope || scope.map(String)
+      .some(b => b === String(i.in_branch_id) || b === String(i.out_branch_id)));
 
     // Branch directory for the per-branch tabs. Each entry carries its own
     // counts, its manager(s), and a ready WhatsApp link — so switching to a
@@ -2963,6 +2968,8 @@ async function punchReviewStatus(req, res, next) {
       const mine = (l) => l.filter(i => String(i.branch_id) === id);
       const bMissing = mine(scopedMissing);
       const bDups = mine(scopedDuplicates);
+      const bCross = crossBranch.filter(i =>
+        String(i.in_branch_id) === id || String(i.out_branch_id) === id);
       const text = buildReminderText(bd.name, month, bMissing, bDups);
       const task = taskByBranch.get(id);
       return {
@@ -2971,6 +2978,7 @@ async function punchReviewStatus(req, res, next) {
         duplicates_count: bDups.length,
         missing_count: bMissing.length,
         conflicts_count: mine(conflicts).length,
+        cross_branch_count: bCross.length,
         reminder_text: text,
         entry_task: task ? {
           id: String(task._id),
@@ -2995,6 +3003,7 @@ async function punchReviewStatus(req, res, next) {
       duplicates_count: scopedDuplicates.length,
       missing_count: scopedMissing.length,
       conflicts_count: conflicts.length,
+      cross_branch_count: crossBranch.length,
       // Network-wide totals, so a manager understands why the send is blocked
       // even when their own branch is clean.
       network_duplicates_count: duplicates.length,
@@ -3003,6 +3012,7 @@ async function punchReviewStatus(req, res, next) {
       duplicates: scopedDuplicates,
       missing: scopedMissing,
       conflicts,
+      cross_branch: crossBranch,
       branches,
     });
   } catch (err) { next(err); }
@@ -3048,6 +3058,120 @@ async function resolveFixedConflict(req, res, next) {
       employeeIds: [employee_id], userId: req.user?.id || null,
     });
     res.json({ ok: true, decision, punches_created: result.created });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/:month/punch-issues/split-branch
+ * { employee_id, date, transfer_time }
+ *
+ * She clocked in at one branch and out at another without closing the first.
+ * The fix is the pair she should have punched: an OUT at the first branch and
+ * an IN at the second, both at the moment she moved. That turns one mis-billed
+ * session into two correctly-priced ones — the rates and the amuta follow the
+ * in-punch's branch, so until the day is split the second branch's hours are
+ * paid at the first branch's rate and booked to the wrong legal entity.
+ *
+ * Same two-stage rule as labelling a multi-punch day: a branch manager
+ * proposes, accounting confirms.
+ */
+async function splitCrossBranchDay(req, res, next) {
+  try {
+    const role = req.user?.role;
+    const isApprover = role === 'system_admin' || role === 'accountant';
+    if (!isApprover && role !== 'branch_manager') {
+      return res.status(403).json({ error: 'אין הרשאה' });
+    }
+    const { employee_id, date, transfer_time } = req.body || {};
+    if (!employee_id || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+      return res.status(400).json({ error: 'employee_id ותאריך נדרשים' });
+    }
+    if (!/^\d{2}:\d{2}$/.test(String(transfer_time || ''))) {
+      return res.status(400).json({ error: 'יש להזין שעת מעבר בפורמט HH:mm' });
+    }
+
+    const dayFrom = ilDateTimeOf(date, '00:00');
+    const dayTo = new Date(dayFrom.getTime() + 36 * 3600 * 1000);
+    const list = (await Punch.find({
+      employee_id, timestamp: { $gte: dayFrom, $lt: dayTo }, ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean())
+      .filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'));
+
+    if (list.length !== 2) {
+      return res.status(409).json({ error: 'היום כבר אינו יום דו-סניפי פשוט — יש לטפל בו כיום עם כפילויות' });
+    }
+    const [inP, outP] = list;
+    if (String(inP.branch_id) === String(outP.branch_id)) {
+      return res.status(409).json({ error: 'שתי ההחתמות באותו סניף — אין מה לפצל' });
+    }
+
+    const transferAt = ilDateTimeOf(date, transfer_time);
+    if (transferAt <= new Date(inP.timestamp) || transferAt >= new Date(outP.timestamp)) {
+      return res.status(400).json({ error: 'שעת המעבר חייבת להיות בין הכניסה ליציאה' });
+    }
+
+    const emp = await Employee.findById(employee_id).select('israeli_id branch_id').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    // A manager's entry is not pay until accounting signs off — the same chain
+    // manual punches already use.
+    const approvalStatus = isApprover ? 'approved' : 'pending_accountant';
+    const baseSn = -Date.now();
+    const note = `פיצול יום דו-סניפי (${date}) — מעבר בין סניפים בשעה ${transfer_time}`;
+    // The OUT lands one second before the IN. Both are "the moment she moved",
+    // but giving them the same instant leaves their order to chance — and every
+    // reader that sorts a day chronologically (the grid, the salary walk) would
+    // then be free to read it as in→in→out→out.
+    const mk = (branchId, state, i, at) => Punch.create({
+      branch_id: branchId,
+      employee_id,
+      israeli_id: emp.israeli_id || '',
+      device_user_sn: baseSn - i,
+      timestamp: at,
+      timestamp_source: 'manual',
+      state,
+      verify_mode: 0,
+      received_at: new Date(),
+      agent_version: 'manual-entry',
+      manual_note: note,
+      created_by: req.user?.id || null,
+      approval_status: approvalStatus,
+      approval_decided_by: isApprover ? (req.user?.id || null) : null,
+      approval_decided_at: isApprover ? new Date() : null,
+      manager_approved_by: req.user?.id || null,
+      manager_approved_at: new Date(),
+    });
+    // OUT of the branch she came from, IN to the branch she moved to.
+    const outOfFirst = await mk(inP.branch_id, 1, 0, transferAt);
+    const intoSecond = await mk(outP.branch_id, 0, 1, new Date(transferAt.getTime() + 1000));
+
+    // The day now has four punches, which would otherwise resurface as a
+    // ">2 punches" problem. Record the intended reading so it doesn't.
+    const labels = [
+      { punch_id: inP._id, role: 'in' },
+      { punch_id: outOfFirst._id, role: 'out' },
+      { punch_id: intoSecond._id, role: 'in' },
+      { punch_id: outP._id, role: 'out' },
+    ];
+    const minutes = Math.max(0, Math.round((new Date(outP.timestamp) - new Date(inP.timestamp)) / 60000));
+    await PunchResolution.findOneAndUpdate(
+      { employee_id, date },
+      {
+        employee_id, date, branch_id: inP.branch_id, labels, minutes, note,
+        ...(isApprover
+          ? { status: 'approved', resolved_by: req.user?.id || null, resolved_at: new Date() }
+          : {
+              status: 'pending',
+              proposed_by: req.user?.id || null,
+              proposed_by_name: req.user?.full_name || '',
+              proposed_at: new Date(),
+              resolved_by: null, resolved_at: null,
+            }),
+      },
+      { upsert: true, new: true },
+    );
+
+    res.json({ ok: true, status: isApprover ? 'approved' : 'pending', minutes });
   } catch (err) { next(err); }
 }
 
@@ -3477,6 +3601,7 @@ module.exports = {
   myPunchEntryTasks,
   completePunchEntryTask,
   resolveFixedConflict,
+  splitCrossBranchDay,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,

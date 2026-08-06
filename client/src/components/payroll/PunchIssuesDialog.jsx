@@ -62,6 +62,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   const [fill, setFill] = useState({}); // key → {in, out}
   const [selfEntry, setSelfEntry] = useState(false); // accountant's fallback
   const [reminders, setReminders] = useState({});    // branch_id → send result
+  const [transfer, setTransfer] = useState({});      // day key → HH:mm typed by the manager
   const [branch, setBranch] = useState(ALL);         // which branch tab is open
 
   const load = useCallback(() => {
@@ -72,7 +73,8 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
         const d = r.data || {};
         setData({
           duplicates: d.duplicates || [], missing: d.missing || [],
-          conflicts: d.conflicts || [], branches: d.branches || [], scoped: d.scoped,
+          conflicts: d.conflicts || [], cross_branch: d.cross_branch || [],
+          branches: d.branches || [], scoped: d.scoped,
         });
         const init = {};
         for (const day of d.duplicates || []) {
@@ -80,7 +82,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
         }
         setRoles(init);
       })
-      .catch(() => setData({ duplicates: [], missing: [], conflicts: [], branches: [] }))
+      .catch(() => setData({ duplicates: [], missing: [], conflicts: [], cross_branch: [], branches: [] }))
       .finally(() => setLoading(false));
   }, [month]);
   useEffect(() => { if (open) { load(); setReminders({}); setBranch(ALL); } }, [open, load]);
@@ -105,6 +107,23 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
         load(); onChanged && onChanged();
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
+
+  /** Split a day opened at one branch and closed at another. */
+  const splitBranchDay = (day) => {
+    const k = keyOf(day);
+    const t = (transfer[k] || '').trim();
+    if (!/^\d{2}:\d{2}$/.test(t)) return toast.error('הזן/י שעת מעבר בין הסניפים');
+    return withBusy(k, api.post(`/payroll-month/${month}/punch-issues/split-branch`, {
+      employee_id: day.employee_id, date: day.date, transfer_time: t,
+    })
+      .then(r => {
+        toast.success(r.data?.status === 'pending'
+          ? `${day.full_name} · ${day.date} — נשלח לאישור הנהלת החשבונות`
+          : `${day.full_name} · ${day.date} פוצל`);
+        load(); onChanged && onChanged();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
+  };
 
   const addMissing = (item) => {
     const k = keyOf(item);
@@ -163,6 +182,9 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   const dups = inBranch(data.duplicates || []);
   const miss = inBranch(data.missing || []);
   const conflicts = inBranch(data.conflicts || []);
+  // A cross-branch day belongs to both ends, so the branch tab matches either.
+  const crossDays = (data.cross_branch || []).filter(i => branch === ALL
+    || String(i.in_branch_id) === branch || String(i.out_branch_id) === branch);
   const activeBranch = branches.find(b => b.id === branch) || null;
 
   const copyText = (text) => navigator.clipboard.writeText(text)
@@ -414,6 +436,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
               <Tab label={<Badge color="error" badgeContent={dups.length}><Box sx={{ pl: 1.5 }}>כפילויות</Box></Badge>} />
               <Tab label={<Badge color="warning" badgeContent={miss.length}><Box sx={{ pl: 1.5 }}>חוסרים</Box></Badge>} />
               <Tab label={<Badge color="secondary" badgeContent={conflicts.length}><Box sx={{ pl: 1.5 }}>שעות קבועות</Box></Badge>} />
+              <Tab label={<Badge color="error" badgeContent={crossDays.length}><Box sx={{ pl: 1.5 }}>מעבר בין סניפים</Box></Badge>} />
             </Tabs>
 
             {tab === 0 && (
@@ -552,6 +575,55 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                             onClick={() => resolveConflict(item, 'clock')}>שלם לפי השעון</BusyButton>
                           <BusyButton size="small" variant="outlined" color="secondary" loading={!!busy[k]}
                             onClick={() => resolveConflict(item, 'fixed')}>שלם לפי השעות הקבועות</BusyButton>
+                        </Stack>
+                      )}
+                    </Paper>
+                  );
+                }}
+              />
+            )}
+
+            {tab === 3 && (
+              <IssueList
+                items={crossDays}
+                empty="אין ימים שנפתחו בסניף אחד ונסגרו באחר."
+                render={(item) => {
+                  const k = keyOf(item);
+                  return (
+                    <Paper key={k} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#fef2f2', borderColor: '#fecaca' }}>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }}>
+                        <Typography sx={{ fontWeight: 800 }}>{item.full_name}</Typography>
+                        <Chip size="small" color="error" label={item.date} />
+                        <Box sx={{ flex: 1 }} />
+                        <Typography sx={{ fontWeight: 700 }}>{asHours(item.minutes)}</Typography>
+                      </Stack>
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, flexWrap: 'wrap' }}>
+                        <Chip size="small" color="success" label={`כניסה ${item.in_hhmm} · ${item.in_branch_name}`} />
+                        <Typography sx={{ opacity: 0.6 }}>→</Typography>
+                        <Chip size="small" color="error" label={`יציאה ${item.out_hhmm} · ${item.out_branch_name}`} />
+                      </Stack>
+                      <Alert severity="warning" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
+                        לא נסגרה החתמה ב{item.in_branch_name} ולא נפתחה ב{item.out_branch_name}. כל היום נזקף כרגע
+                        ל{item.in_branch_name} — ולסניפים יש תעריפים ועמותות שונים. הזינו את שעת המעבר בפועל
+                        והמערכת תפצל ליציאה מ{item.in_branch_name} וכניסה ל{item.out_branch_name}.
+                      </Alert>
+                      {item.pending_resolution && (
+                        <Alert severity="info" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
+                          ⏳ נשלח כבר לאישור {item.pending_resolution.by ? `על ידי ${item.pending_resolution.by}` : ''}.
+                        </Alert>
+                      )}
+                      {canFix && (
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <TextField
+                            size="small" type="time" label="שעת המעבר" InputLabelProps={{ shrink: true }}
+                            sx={{ width: 150 }}
+                            value={transfer[k] || ''}
+                            onChange={(e) => setTransfer(t => ({ ...t, [k]: e.target.value }))}
+                          />
+                          <BusyButton size="small" variant="contained" color="error" loading={!!busy[k]}
+                            onClick={() => splitBranchDay(item)}>
+                            {canRemind ? 'פצל את היום' : 'שלח לאישור הנה״ח'}
+                          </BusyButton>
                         </Stack>
                       )}
                     </Paper>
