@@ -403,6 +403,7 @@ function buildContext(employee, { branch, overrides = {} } = {}) {
     phone: employee.phone || '',
     email: employee.email || '',
     position: employee.position || '',
+    gender: employee.gender || '',
     branch_name: branch?.name || '',
     start_date: longDate(employee.start_date),
     signed_on: new Date(),

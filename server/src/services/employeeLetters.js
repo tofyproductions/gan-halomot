@@ -347,7 +347,11 @@ function buildContext(employee, { branch, issuer, overrides = {} } = {}) {
   const now = new Date();
   const salaryType = employee.salary_type === 'global' ? 'global' : 'hourly';
   const notice = noticePeriod(employee.start_date, { salaryType });
-  const female = overrides.female !== undefined ? !!overrides.female : true;
+  // The employee card is the source of truth; an unset gender keeps the
+  // feminine default the office's own templates are written in.
+  const female = overrides.female !== undefined
+    ? !!overrides.female
+    : (employee.gender ? employee.gender === 'female' : true);
   const firstName = String(employee.full_name || '').trim().split(/\s+/)[0] || '';
 
   const base = {

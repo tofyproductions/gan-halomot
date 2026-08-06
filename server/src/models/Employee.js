@@ -205,6 +205,13 @@ const employeeSchema = new mongoose.Schema({
   email: { type: String, default: '' },
   address: { type: String, default: '' },
 
+  // How to address her/him in generated documents. The office's letter
+  // templates are written in the feminine because almost the whole staff is
+  // female, so an unset value keeps that default rather than degrading to a
+  // clumsy "עובד/ת" everywhere — but a male employee must be addressable, and
+  // guessing from a first name is exactly the kind of guess that gets it wrong.
+  gender: { type: String, enum: ['female', 'male', ''], default: '' },
+
   // Role
   position: { type: String, default: '' },                  // e.g. גננת / סייעת / מנהלת
   start_date: { type: Date, default: null },

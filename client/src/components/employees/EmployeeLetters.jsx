@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box, Paper, Typography, Stack, Button, TextField, MenuItem, Chip, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, Divider, IconButton,
   Table, TableHead, TableBody, TableRow, TableCell, Tooltip, LinearProgress,
+  Autocomplete,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import GavelIcon from '@mui/icons-material/Gavel';
@@ -49,7 +51,10 @@ const DOC_TYPES = [
 const todayISO = () => new Date().toISOString().slice(0, 10);
 
 export default function EmployeeLetters() {
+  // Opened from the employees screen with ?employee=<id> — preselect that person.
+  const [params, setParams] = useSearchParams();
   const [employees, setEmployees] = useState([]);
+  const [branchFilter, setBranchFilter] = useState('');
   const [loading, setLoading] = useState(true);
   const [empId, setEmpId] = useState('');
   const [ctx, setCtx] = useState(null);
@@ -61,10 +66,33 @@ export default function EmployeeLetters() {
 
   useEffect(() => {
     api.get('/payroll/employees', { params: { active: true } })
-      .then(res => setEmployees((res.data.employees || []).filter(e => e.is_active !== false)))
+      .then(res => {
+        const list = (res.data.employees || []).filter(e => e.is_active !== false);
+        setEmployees(list);
+        const wanted = params.get('employee');
+        if (wanted && list.some(e => String(e.id || e._id) === wanted)) setEmpId(wanted);
+      })
       .catch(() => toast.error('שגיאה בטעינת עובדים'))
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const branchNames = useMemo(
+    () => [...new Set(employees.map(e => e.branch_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'he')),
+    [employees],
+  );
+  const visibleEmployees = useMemo(
+    () => (branchFilter ? employees.filter(e => e.branch_name === branchFilter) : employees),
+    [employees, branchFilter],
+  );
+  const selectedEmployee = employees.find(e => String(e.id || e._id) === String(empId)) || null;
+
+  const pickEmployee = (id) => {
+    setEmpId(id || '');
+    setForm(null); setPreviewHtml('');
+    // Keep the URL honest, so the page can be reloaded or shared as-is.
+    if (id) setParams({ employee: id }, { replace: true }); else setParams({}, { replace: true });
+  };
 
   const loadHistory = useCallback((id) => {
     api.get('/employee-letters', { params: id ? { employee_id: id } : {} })
@@ -179,17 +207,33 @@ export default function EmployeeLetters() {
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2.5 }}>
-        <TextField
-          select fullWidth size="small" label="בחר/י עובד/ת"
-          value={empId} onChange={(e) => { setEmpId(e.target.value); setForm(null); setPreviewHtml(''); }}
-          sx={{ maxWidth: 420 }}
-        >
-          {employees.map(e => (
-            <MenuItem key={e.id || e._id} value={e.id || e._id}>
-              {e.full_name}{e.position ? ` · ${e.position}` : ''}{e.branch_name ? ` · ${e.branch_name}` : ''}
-            </MenuItem>
-          ))}
-        </TextField>
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems="flex-start">
+          <TextField
+            select size="small" label="סניף" sx={{ minWidth: 210 }}
+            value={branchFilter}
+            onChange={(e) => {
+              setBranchFilter(e.target.value);
+              // Selecting a branch that doesn't hold the current employee would
+              // leave a picker showing someone who isn't in the list.
+              if (e.target.value && selectedEmployee && selectedEmployee.branch_name !== e.target.value) pickEmployee('');
+            }}
+          >
+            <MenuItem value="">כל הסניפים</MenuItem>
+            {branchNames.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
+          </TextField>
+          {/* 80+ names in a plain dropdown is a scroll hunt — type to filter. */}
+          <Autocomplete
+            size="small" sx={{ minWidth: 340, flex: 1, maxWidth: 520 }}
+            options={visibleEmployees}
+            groupBy={(o) => o.branch_name || 'ללא סניף'}
+            getOptionLabel={(o) => `${o.full_name}${o.position ? ` · ${o.position}` : ''}`}
+            isOptionEqualToValue={(o, v) => String(o.id || o._id) === String(v.id || v._id)}
+            value={selectedEmployee}
+            onChange={(_e, v) => pickEmployee(v ? String(v.id || v._id) : '')}
+            noOptionsText="לא נמצא/ה עובד/ת"
+            renderInput={(p) => <TextField {...p} label="חיפוש עובד/ת לפי שם" placeholder="הקלד/י שם…" />}
+          />
+        </Stack>
 
         {ctx && (
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
@@ -293,6 +337,9 @@ export default function EmployeeLetters() {
                 <TextField
                   select size="small" label="פנייה" value={form?.values.female ? 'f' : 'm'}
                   onChange={(e) => setVal('female', e.target.value === 'f')}
+                  helperText={selectedEmployee?.gender
+                    ? 'נקבע לפי המין בכרטיס העובד/ת'
+                    : 'לא הוגדר מין בכרטיס — ברירת מחדל נקבה'}
                 >
                   <MenuItem value="f">לשון נקבה</MenuItem>
                   <MenuItem value="m">לשון זכר</MenuItem>

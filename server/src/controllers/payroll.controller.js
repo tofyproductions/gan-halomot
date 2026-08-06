@@ -291,7 +291,7 @@ async function createEmployee(req, res, next) {
 const EMPLOYEE_FIELD_LABELS = {
   full_name: 'שם מלא', israeli_id: 'ת"ז', employee_number: 'מספר עובד', is_freelancer: 'עצמאי',
   receives_salary: 'מקבל/ת שכר',
-  branch_id: 'סניף', phone: 'טלפון', email: 'אימייל', address: 'כתובת', position: 'תפקיד',
+  branch_id: 'סניף', phone: 'טלפון', email: 'אימייל', address: 'כתובת', gender: 'מין', position: 'תפקיד',
   start_date: 'תאריך תחילה', salary_type: 'סוג שכר', salary_is_net: 'נטו/ברוטו',
   amuta_distribution: 'חלוקת עמותות', branch_rates: 'תעריפים לפי סניף', hourly_bonuses: 'תוספות שעתיות',
   travel_mode: 'אופן נסיעות', travel_per_day: 'נסיעות ליום', travel_monthly_flat: 'נסיעות חודשי',
@@ -330,7 +330,7 @@ async function updateEmployee(req, res, next) {
 
     const fields = [
       'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
-      'branch_id', 'phone', 'email', 'address',
+      'branch_id', 'phone', 'email', 'address', 'gender',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
       'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',

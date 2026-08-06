@@ -10,6 +10,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import GavelIcon from '@mui/icons-material/Gavel';
+import DescriptionIcon from '@mui/icons-material/Description';
+import { useNavigate } from 'react-router-dom';
 import EmploymentContractDialog, { CONTRACT_STATUS } from './EmploymentContractDialog';
 import LinkIcon from '@mui/icons-material/Link';
 import SearchIcon from '@mui/icons-material/Search';
@@ -135,6 +137,7 @@ function mergePrimaryAmuta(existing, form) {
 
 export default function EmployeeManager() {
   const { isAdmin, isManager, isAccountant } = useAuth();
+  const navigate = useNavigate();
   // Accountant (הנה"ח) manages employees with the same add/edit rights as a
   // manager — only the visible tab set differs (handled by tab access config).
   const canManage = isManager || isAccountant;
@@ -594,6 +597,12 @@ export default function EmployeeManager() {
                               <GavelIcon fontSize="small" />
                             </IconButton>
                           </Tooltip>
+                          <Tooltip title="הנפקת מסמכים (שימוע / פיטורין / אישור העסקה)">
+                            <IconButton size="small" sx={{ color: '#b45309' }}
+                              onClick={() => navigate(`/employee-letters?employee=${empId}`)}>
+                              <DescriptionIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="ערוך">
                             <IconButton size="small" onClick={() => openEdit(emp)}>
                               <EditIcon fontSize="small" />
@@ -683,6 +692,16 @@ export default function EmployeeManager() {
             <Stack direction="row" spacing={2}>
               <TextField label="טלפון" value={dialog.data.phone || ''} onChange={e => updateField('phone', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
               <TextField label="אימייל" value={dialog.data.email || ''} onChange={e => updateField('email', e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
+              {/* Drives the wording of every generated document. Left unset the
+                  letters stay feminine, which is how the office's own templates
+                  are written — a name is not a reliable way to infer this. */}
+              <TextField label="מין" select value={dialog.data.gender || ''} onChange={e => updateField('gender', e.target.value)} fullWidth
+                helperText="קובע לשון פנייה במסמכים"
+              >
+                <MenuItem value="">לא הוגדר (נקבה כברירת מחדל)</MenuItem>
+                <MenuItem value="female">נקבה</MenuItem>
+                <MenuItem value="male">זכר</MenuItem>
+              </TextField>
             </Stack>
             <Stack direction="row" spacing={2}>
               <TextField label="תפקיד" select value={dialog.data.position || ''} onChange={e => updateField('position', e.target.value)} fullWidth>
