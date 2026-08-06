@@ -2314,6 +2314,14 @@ const acctMarker = (name) => ACCT_GAN_MARKERS.find(g => g.match.some(m => (name 
 
 // One print-ready PDF for the accountant: a card per employee with every field
 // needed to build a payslip, grouped by branch with matching gan colours.
+/** "יום חופשה אחד" / "חצי יום חופשה" / "3 ימי חופשה" — the note is read by a
+ *  person, and "1 ימי חופשה" reads as a bug in the report. */
+function vacDaysText(n) {
+  if (n === 0.5) return 'חצי יום חופשה';
+  if (n === 1) return 'יום חופשה אחד';
+  return `${n} ימי חופשה`;
+}
+
 function buildAccountantHtml(month, rows, branchNameById = new Map()) {
   const f = (n) => '₪' + Math.round(Number(n) || 0).toLocaleString('he-IL');
   const n1 = (n) => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('he-IL');
@@ -2505,6 +2513,9 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('', '')}
       </tr>` : ''}
       ${branchDetailRow}
+      ${(vac && isGlobal) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
+          <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">חופשה (תקן): </span>
+          <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.</span></td></tr>` : ''}
       ${(vac && !isGlobal) ? (r.manual?.vacation_pay_confirmed
         ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
             <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח: </span>
