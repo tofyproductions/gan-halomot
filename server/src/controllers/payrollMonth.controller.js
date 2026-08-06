@@ -389,9 +389,11 @@ async function getMonth(req, res, next) {
 
     // Accountant decisions for days with >2 punches. Keyed employee → date →
     // resolution; a day without one stays provisional (span) and is flagged.
+    // Only APPROVED ones bill — a branch manager's proposal is not pay.
     const resolutionDocs = await PunchResolution.find({
       employee_id: { $in: employees.map(e => e._id) },
       date: { $regex: `^${month}` },
+      status: 'approved',
     }).lean();
     const resByEmp = new Map();
     for (const r of resolutionDocs) {
@@ -2532,8 +2534,12 @@ async function setAccountantContacts(req, res, next) {
 async function resolvePunchDay(req, res, next) {
   try {
     const role = req.user?.role;
-    if (role !== 'system_admin' && role !== 'accountant') {
-      return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת יכולים לאשר החתמות' });
+    // The branch manager is the one who was there — she labels the day. Her
+    // decision is a proposal (`pending`) that bills nothing until accounting
+    // confirms it; accounting and admins approve outright.
+    const isApprover = role === 'system_admin' || role === 'accountant';
+    if (!isApprover && role !== 'branch_manager') {
+      return res.status(403).json({ error: 'אין הרשאה לאשר החתמות' });
     }
     const { employee_id, date, labels, note } = req.body || {};
     if (!employee_id || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !Array.isArray(labels)) {
@@ -2560,15 +2566,41 @@ async function resolvePunchDay(req, res, next) {
       }
     }
     const branch_id = ordered[0]?.p?.branch_id || null;
+
+    // A manager may only label her own branches' days — the day's branch comes
+    // from the punches themselves, so this can't be spoofed from the request.
+    if (!isApprover) {
+      const scope = branchScopeOf(req) || [];
+      if (!branch_id || !scope.map(String).includes(String(branch_id))) {
+        return res.status(403).json({ error: 'אפשר לאשר רק ימים של הסניפים שבאחריותך' });
+      }
+      // Re-labelling a day accounting already approved would silently reopen
+      // settled pay; that reversal is accounting's call.
+      const existing = await PunchResolution.findOne({ employee_id, date }).select('status').lean();
+      if (existing?.status === 'approved') {
+        return res.status(409).json({ error: 'היום כבר אושר סופית על ידי הנהלת החשבונות' });
+      }
+    }
+
+    const base = {
+      employee_id, date, branch_id, labels: clean, minutes, note: note || '',
+    };
     const doc = await PunchResolution.findOneAndUpdate(
       { employee_id, date },
-      {
-        employee_id, date, branch_id, status: 'approved', labels: clean, minutes,
-        note: note || '', resolved_by: req.user?.id || null, resolved_at: new Date(),
-      },
+      isApprover
+        ? { ...base, status: 'approved', resolved_by: req.user?.id || null, resolved_at: new Date() }
+        : {
+            ...base,
+            status: 'pending',
+            proposed_by: req.user?.id || null,
+            proposed_by_name: req.user?.full_name || '',
+            proposed_at: new Date(),
+            resolved_by: null,
+            resolved_at: null,
+          },
       { upsert: true, new: true },
     ).lean();
-    res.json({ ok: true, minutes, resolution: doc });
+    res.json({ ok: true, minutes, resolution: doc, status: doc.status });
   } catch (err) { next(err); }
 }
 
@@ -2673,8 +2705,17 @@ async function punchIssues(month) {
     if (list.length > 2) dupKeys.push(k);
     else if (list.length === 1) missKeys.push(k); // a lone punch — the pair is incomplete
   }
-  const resolved = new Set((await PunchResolution.find({ date: { $regex: `^${month}` } })
-    .select('employee_id date').lean()).map(r => String(r.employee_id) + '|' + r.date));
+  // A branch manager's proposal does NOT clear the day — it still shows and
+  // still blocks the send — but it comes back with the day so accounting can
+  // confirm it in one click instead of re-deciding from scratch.
+  const resolutionDocs = await PunchResolution.find({ date: { $regex: `^${month}` } })
+    .select('employee_id date status labels minutes note proposed_by_name proposed_at').lean();
+  const resolved = new Set(resolutionDocs
+    .filter(r => r.status === 'approved')
+    .map(r => String(r.employee_id) + '|' + r.date));
+  const proposalByKey = new Map(resolutionDocs
+    .filter(r => r.status === 'pending')
+    .map(r => [String(r.employee_id) + '|' + r.date, r]));
   const pendingDup = dupKeys.filter(k => !resolved.has(k));
 
   const empIds = [...new Set([...pendingDup, ...missKeys].map(k => k.split('|')[0]))];
@@ -2704,14 +2745,24 @@ async function punchIssues(month) {
     const list = byDay.get(k).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     const suggestion = suggestPunchLabels(list);
     const roleById = new Map(suggestion.labels.map(l => [l.punch_id, l.role]));
+    // A manager's proposal beats the automatic suggestion — she was there.
+    const proposal = proposalByKey.get(k);
+    const proposedRoleById = new Map((proposal?.labels || []).map(l => [String(l.punch_id), l.role]));
     return {
       ...meta(k),
       punches: list.map(p => ({
         id: String(p._id), hhmm: ISR_HHMM(p.timestamp),
         is_manual: p.timestamp_source === 'manual',
-        suggested_role: roleById.get(String(p._id)) || 'ignore',
+        suggested_role: proposedRoleById.get(String(p._id))
+          || roleById.get(String(p._id)) || 'ignore',
       })),
       suggestion_reason: suggestion.reason,
+      pending_resolution: proposal ? {
+        by: proposal.proposed_by_name || '',
+        at: proposal.proposed_at,
+        minutes: proposal.minutes,
+        note: proposal.note || '',
+      } : null,
     };
   }).sort(byName);
 

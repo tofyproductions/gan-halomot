@@ -98,7 +98,12 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       date: day.date,
       labels: day.punches.map(p => ({ punch_id: p.id, role: roles[p.id] || 'ignore' })),
     })
-      .then(() => { toast.success(`${day.full_name} · ${day.date} אושר`); load(); onChanged && onChanged(); })
+      .then((r) => {
+        toast.success(r.data?.status === 'pending'
+          ? `${day.full_name} · ${day.date} — נשלח לאישור הנהלת החשבונות`
+          : `${day.full_name} · ${day.date} אושר`);
+        load(); onChanged && onChanged();
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
 
   const addMissing = (item) => {
@@ -428,7 +433,13 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                         <Box sx={{ flex: 1 }} />
                         <Typography sx={{ fontWeight: 700 }}>לתשלום: {asHours(mins)}</Typography>
                       </Stack>
-                      {day.suggestion_reason && (
+                      {day.pending_resolution ? (
+                        <Alert severity="warning" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
+                          ⏳ מנהל/ת הסניף {day.pending_resolution.by ? `(${day.pending_resolution.by}) ` : ''}
+                          כבר סימנ/ה את היום — הסימון למטה הוא שלה
+                          {canRemind ? '. ממתין לאישורך הסופי.' : '. ממתין לאישור הנהלת החשבונות.'}
+                        </Alert>
+                      ) : day.suggestion_reason && (
                         <Alert severity="info" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>💡 {day.suggestion_reason}</Alert>
                       )}
                       <Stack spacing={0.8}>
@@ -451,8 +462,12 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                         <>
                           <Divider sx={{ my: 1 }} />
                           <Stack direction="row" justifyContent="flex-end">
+                            {/* Only accounting/admin settle a day. A manager's
+                                click is a proposal, and the label says so. */}
                             <BusyButton size="small" variant="contained" color="success"
-                              loading={!!busy[k]} onClick={() => approve(day)}>אשר יום</BusyButton>
+                              loading={!!busy[k]} onClick={() => approve(day)}>
+                              {canRemind ? 'אשר יום' : 'שלח לאישור הנה״ח'}
+                            </BusyButton>
                           </Stack>
                         </>
                       )}

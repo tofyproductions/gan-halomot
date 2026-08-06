@@ -24,7 +24,9 @@ router.put('/accountant-contacts',            requireRole('system_admin', 'accou
 // the branch manager's login gate polls; completing is theirs to do.
 router.get('/punch-entry-tasks/mine',         c.myPunchEntryTasks);
 router.post('/punch-entry-tasks/:id/done',    requireRole('system_admin', 'accountant', 'branch_manager'), c.completePunchEntryTask);
-router.post('/punch-resolutions',              requireRole('system_admin', 'accountant'), c.resolvePunchDay);
+// A branch manager labels her own branches' >2-punch days; the controller
+// stores hers as `pending` until accounting confirms (models/PunchResolution).
+router.post('/punch-resolutions',              requireRole('system_admin', 'accountant', 'branch_manager'), c.resolvePunchDay);
 router.delete('/punch-resolutions',            requireRole('system_admin', 'accountant'), c.unresolvePunchDay);
 router.get('/pregnancy-settings',             requireRole('system_admin', 'accountant', 'branch_manager'), c.getPregnancySettings);
 router.put('/pregnancy-settings',             requireRole('system_admin', 'accountant'), c.setPregnancySettings);

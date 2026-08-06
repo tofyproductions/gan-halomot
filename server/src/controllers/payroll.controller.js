@@ -700,7 +700,7 @@ async function attendanceByMonth(req, res, next) {
 
     // Accountant decisions for >2-punch days, so the grid shows approved days as
     // settled instead of flagging them red forever.
-    const attResDocs = await PunchResolution.find({ date: { $regex: `^${ymPrefix}` } })
+    const attResDocs = await PunchResolution.find({ date: { $regex: `^${ymPrefix}` }, status: 'approved' })
       .select('employee_id date labels status minutes').lean();
     const attRes = new Map();
     for (const r of attResDocs) {
@@ -795,7 +795,7 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
     // Accountant decisions for this employee's >2-punch days, so the report bills
     // exactly what the salary does.
     const resDocs = await PunchResolution.find({
-      employee_id: emp._id, date: { $regex: `^${ymPrefix}` },
+      employee_id: emp._id, date: { $regex: `^${ymPrefix}` }, status: 'approved',
     }).lean();
     const resByDate = new Map(resDocs.map(r => [r.date, r]));
     const dayRows = Object.keys(days).sort().map(k => {

@@ -10,13 +10,26 @@ const mongoose = require('mongoose');
  * has an approved resolution it is shown provisionally (first→last span) and
  * flagged for review — it is NEVER silently trusted.
  *
- * Presence of an approved doc = resolved. Absence for a >2-punch day = pending.
+ * WHO decides is two-stage. The branch manager is the one who actually knows
+ * what happened that day, so she labels it — but her decision lands as
+ * `pending` and bills nothing until the accountant or an admin confirms it.
+ * An accountant/admin labelling a day approves it outright. So:
+ *
+ *   approved doc  → resolved, billed by the labels
+ *   pending doc   → a manager's proposal; still shown as an open issue and
+ *                   still blocks the accountant send, but pre-filled for the
+ *                   one-click confirmation
+ *   no doc        → nobody has looked at it; shown provisionally (first→last)
  */
 const punchResolutionSchema = new mongoose.Schema({
   employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true, index: true },
   date: { type: String, required: true },            // 'YYYY-MM-DD' (Israel-local)
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
-  status: { type: String, enum: ['approved'], default: 'approved' },
+  status: { type: String, enum: ['pending', 'approved'], default: 'approved' },
+  // Who proposed it, when the proposer isn't the approver (branch manager).
+  proposed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  proposed_by_name: { type: String, default: '' },
+  proposed_at: { type: Date, default: null },
   labels: {
     type: [{
       punch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Punch', required: true },
