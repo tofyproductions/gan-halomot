@@ -12,6 +12,8 @@ import DiscountIcon from '@mui/icons-material/LocalOffer';
 import DeleteIcon from '@mui/icons-material/Delete';
 import Tooltip from '@mui/material/Tooltip';
 import EditIcon from '@mui/icons-material/Edit';
+import BeachAccessIcon from '@mui/icons-material/BeachAccess';
+import Switch from '@mui/material/Switch';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
@@ -28,10 +30,19 @@ const MONTH_LABELS = [
 
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
+// קייטנה rides along as a thirteenth column after אוג׳ — see the server's
+// models/SummerCamp.js. It is not an exit month: a child does not "leave" in it.
+const CAMP_MONTH = 13;
+
 const EXIT_MONTHS = [
   { value: '', label: 'ללא' },
   ...MONTH_LABELS.map((label, i) => ({ value: ACADEMIC_MONTHS[i], label })),
 ];
+
+/** Every billable cell of a row — the twelve months plus the camp, if any. */
+const cellsOf = (row) => [...(row.months || []), ...(row.camp ? [row.camp] : [])];
+
+const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '');
 
 export default function CollectionsTable() {
   const { selectedYear, setSelectedYear } = useAcademicYear();
@@ -56,6 +67,11 @@ export default function CollectionsTable() {
   // Discount dialog
   const [discountDialog, setDiscountDialog] = useState({ open: false });
 
+  // קייטנה: the header info that comes back with the table, and the per-branch
+  // setup dialog (one editable row per branch the user can see).
+  const [campInfo, setCampInfo] = useState(null);
+  const [campDialog, setCampDialog] = useState({ open: false, rows: [], loading: false, savingBranch: null });
+
   // Child detail dialog
   const [selectedChild, setSelectedChild] = useState(null);
   const [discounts, setDiscounts] = useState([]);
@@ -71,7 +87,10 @@ export default function CollectionsTable() {
   const fetchData = useCallback(() => {
     setLoading(true);
     api.get(`/collections?year=${selectedYear}`)
-      .then((res) => setRawData(res.data.collections || {}))
+      .then((res) => {
+        setRawData(res.data.collections || {});
+        setCampInfo(res.data.summer_camp || null);
+      })
       .catch(() => toast.error('שגיאה בטעינת נתוני גבייה'))
       .finally(() => setLoading(false));
   }, [selectedYear]);
@@ -136,6 +155,60 @@ export default function CollectionsTable() {
 
   const allRows = useMemo(() => grouped.flatMap(([, rows]) => rows), [grouped]);
 
+  // The camp column exists only when a visible child's branch actually runs one.
+  const hasCamp = useMemo(() => allRows.some(r => r.camp), [allRows]);
+  const campLabel = campInfo?.label || 'קייטנה';
+  const columns = useMemo(() => (hasCamp ? [...ACADEMIC_MONTHS, CAMP_MONTH] : ACADEMIC_MONTHS), [hasCamp]);
+  const columnLabels = useMemo(() => (hasCamp ? [...MONTH_LABELS, campLabel] : MONTH_LABELS), [hasCamp, campLabel]);
+
+  // --- קייטנה setup ------------------------------------------------------
+  const openCampDialog = () => {
+    setCampDialog({ open: true, rows: [], loading: true, savingBranch: null });
+    api.get('/collections/summer-camp', { params: { year: selectedYear } })
+      .then(res => setCampDialog(d => ({
+        ...d,
+        loading: false,
+        rows: (res.data.camps || []).map(c => ({
+          ...c,
+          // <input type="date"> wants YYYY-MM-DD, never an ISO timestamp.
+          start_date: c.start_date ? String(c.start_date).slice(0, 10) : '',
+          end_date: c.end_date ? String(c.end_date).slice(0, 10) : '',
+          amount: c.amount || '',
+        })),
+      })))
+      .catch(() => {
+        toast.error('שגיאה בטעינת הגדרות קייטנה');
+        setCampDialog({ open: false, rows: [], loading: false, savingBranch: null });
+      });
+  };
+
+  const patchCampRow = (branchId, patch) => setCampDialog(d => ({
+    ...d,
+    rows: d.rows.map(r => (r.branch_id === branchId ? { ...r, ...patch } : r)),
+  }));
+
+  const saveCampRow = async (row) => {
+    setCampDialog(d => ({ ...d, savingBranch: row.branch_id }));
+    try {
+      await api.put('/collections/summer-camp', {
+        branch_id: row.branch_id,
+        year: selectedYear,
+        enabled: row.enabled,
+        label: row.label,
+        start_date: row.start_date || null,
+        end_date: row.end_date || null,
+        amount: row.amount === '' ? 0 : Number(row.amount),
+        notes: row.notes || '',
+      });
+      toast.success(`נשמר — ${row.branch_name}`);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    } finally {
+      setCampDialog(d => ({ ...d, savingBranch: null }));
+    }
+  };
+
   // KPI
   const kpi = useMemo(() => {
     let expected = 0;
@@ -145,8 +218,11 @@ export default function CollectionsTable() {
     allRows.forEach(r => {
       const fee = r.monthly_fee || 0;
       potential += fee * 12;
+      // The camp is real income the parents owe, so it belongs in the yearly
+      // potential as well as in the realistic expectation.
+      potential += r.camp?.expected_amount || 0;
       totalRegFees += r.registration_fee || 0;
-      (r.months || []).forEach(m => {
+      cellsOf(r).forEach(m => {
         expected += m.expected_amount || 0;
         collected += m.paid_amount || 0;
       });
@@ -278,26 +354,21 @@ export default function CollectionsTable() {
   // Monthly totals (collected + expected + percentage)
   const monthlySummary = useMemo(() => {
     const summary = {};
-    ACADEMIC_MONTHS.forEach(m => { summary[m] = { collected: 0, expected: 0 }; });
+    columns.forEach(m => { summary[m] = { collected: 0, expected: 0 }; });
     allRows.forEach(r => {
-      (r.months || []).forEach(m => {
+      cellsOf(r).forEach(m => {
+        if (!summary[m.month]) return;
         summary[m.month].collected += (m.paid_amount || 0);
         summary[m.month].expected += (m.expected_amount || 0);
       });
     });
-    ACADEMIC_MONTHS.forEach(m => {
+    columns.forEach(m => {
       summary[m].pct = summary[m].expected > 0
         ? Math.round((summary[m].collected / summary[m].expected) * 100)
         : 0;
     });
     return summary;
-  }, [allRows]);
-
-  const monthlyTotals = useMemo(() => {
-    const totals = {};
-    ACADEMIC_MONTHS.forEach(m => { totals[m] = monthlySummary[m].collected; });
-    return totals;
-  }, [monthlySummary]);
+  }, [allRows, columns]);
 
   const handlePrint = () => window.print();
 
@@ -314,6 +385,11 @@ export default function CollectionsTable() {
             onClick={() => { setDiscountDialog({ open: true }); fetchDiscounts(); }} size="small"
           >
             הנחות
+          </Button>
+          <Button variant="outlined" startIcon={<BeachAccessIcon />} onClick={openCampDialog} size="small"
+            sx={{ color: '#5b21b6', borderColor: '#c4b5fd' }}
+          >
+            קייטנה
           </Button>
           <Button variant="outlined" startIcon={<PrintIcon />} onClick={handlePrint} size="small">
             הדפסה
@@ -391,9 +467,22 @@ export default function CollectionsTable() {
                 שם הילד/ה
               </TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, minWidth: 75, bgcolor: '#fef9c3' }}>דמי רישום</TableCell>
-              {MONTH_LABELS.map((m) => (
-                <TableCell key={m} align="center" sx={{ fontWeight: 700, minWidth: 90 }}>{m}</TableCell>
-              ))}
+              {columnLabels.map((label, i) => {
+                const isCamp = columns[i] === CAMP_MONTH;
+                return (
+                  <TableCell
+                    key={label + i} align="center"
+                    sx={{ fontWeight: 700, minWidth: 90, ...(isCamp ? { bgcolor: '#f5f3ff', color: '#5b21b6' } : {}) }}
+                  >
+                    {label}
+                    {isCamp && campInfo?.start_date && campInfo?.end_date && (
+                      <Box sx={{ fontSize: '0.65rem', fontWeight: 600, opacity: 0.8 }}>
+                        {fmtDate(campInfo.start_date)}–{fmtDate(campInfo.end_date)}
+                      </Box>
+                    )}
+                  </TableCell>
+                );
+              })}
               <TableCell sx={{ fontWeight: 700, minWidth: 100 }}>חודש יציאה</TableCell>
             </TableRow>
           </TableHead>
@@ -403,6 +492,7 @@ export default function CollectionsTable() {
                 key={classroom}
                 classroom={classroom}
                 rows={rows}
+                columns={columns}
                 onCellClick={handleCellClick}
                 onRegFeeClick={handleRegFeeClick}
                 onExitMonth={handleExitMonth}
@@ -417,7 +507,7 @@ export default function CollectionsTable() {
                 נגבה בפועל
               </TableCell>
               <TableCell />
-              {ACADEMIC_MONTHS.map((m, i) => (
+              {columns.map((m, i) => (
                 <TableCell key={i} align="center" sx={{ fontWeight: 700, fontSize: '0.8rem', color: 'success.main' }}>
                   {formatCurrency(monthlySummary[m].collected)}
                 </TableCell>
@@ -429,7 +519,7 @@ export default function CollectionsTable() {
                 צפוי
               </TableCell>
               <TableCell />
-              {ACADEMIC_MONTHS.map((m, i) => (
+              {columns.map((m, i) => (
                 <TableCell key={i} align="center" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
                   {formatCurrency(monthlySummary[m].expected)}
                 </TableCell>
@@ -441,7 +531,7 @@ export default function CollectionsTable() {
                 אחוז גבייה
               </TableCell>
               <TableCell />
-              {ACADEMIC_MONTHS.map((m, i) => {
+              {columns.map((m, i) => {
                 const pct = monthlySummary[m].pct;
                 return (
                   <TableCell key={i} align="center" sx={{
@@ -457,6 +547,74 @@ export default function CollectionsTable() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* קייטנה setup — one row per branch, saved individually so setting up
+          one branch never risks overwriting another's dates. */}
+      <Dialog open={campDialog.open} onClose={() => setCampDialog(d => ({ ...d, open: false }))} dir="rtl" maxWidth="md" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>הגדרת קייטנה — {selectedYear}</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            הקייטנה מופיעה כעמודה נוספת אחרי אוגוסט, רק בגנים שהיא מופעלת בהם. הסכום כאן הוא ברירת המחדל —
+            להורה שמשלם אחרת, לחצו על התא שלו בטבלה והזינו סכום אחר (בדיוק כמו דריסת מחיר בחודש רגיל).
+          </Alert>
+          {campDialog.loading ? <LinearProgress /> : (
+            <Stack spacing={2}>
+              {campDialog.rows.map(row => (
+                <Paper key={row.branch_id} variant="outlined" sx={{ p: 1.5, borderRadius: 2, opacity: row.enabled ? 1 : 0.65 }}>
+                  <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                    <Stack direction="row" alignItems="center" sx={{ minWidth: 200 }}>
+                      <Switch checked={!!row.enabled} onChange={(e) => patchCampRow(row.branch_id, { enabled: e.target.checked })} />
+                      <Typography sx={{ fontWeight: 700 }}>{row.branch_name}</Typography>
+                    </Stack>
+                    <TextField
+                      size="small" label="שם העמודה" value={row.label} disabled={!row.enabled}
+                      onChange={(e) => patchCampRow(row.branch_id, { label: e.target.value })}
+                      sx={{ width: 140 }}
+                    />
+                    <TextField
+                      size="small" type="date" label="מתאריך" value={row.start_date} disabled={!row.enabled}
+                      onChange={(e) => patchCampRow(row.branch_id, { start_date: e.target.value })}
+                      InputLabelProps={{ shrink: true }} sx={{ width: 155 }}
+                    />
+                    <TextField
+                      size="small" type="date" label="עד תאריך" value={row.end_date} disabled={!row.enabled}
+                      onChange={(e) => patchCampRow(row.branch_id, { end_date: e.target.value })}
+                      InputLabelProps={{ shrink: true }} sx={{ width: 155 }}
+                    />
+                    <TextField
+                      size="small" type="number" label="סכום לילד" value={row.amount} disabled={!row.enabled}
+                      onChange={(e) => patchCampRow(row.branch_id, { amount: e.target.value })}
+                      InputProps={{ endAdornment: <InputAdornment position="end">₪</InputAdornment> }}
+                      sx={{ width: 130 }}
+                    />
+                    <Box sx={{ flex: 1 }} />
+                    <Button
+                      variant="contained" size="small"
+                      disabled={campDialog.savingBranch === row.branch_id}
+                      onClick={() => saveCampRow(row)}
+                    >
+                      {campDialog.savingBranch === row.branch_id ? 'שומר…' : 'שמור'}
+                    </Button>
+                  </Stack>
+                  {row.enabled && (
+                    <TextField
+                      size="small" fullWidth label="הערה (לא מוצגת להורים)" value={row.notes}
+                      onChange={(e) => patchCampRow(row.branch_id, { notes: e.target.value })}
+                      sx={{ mt: 1.5 }}
+                    />
+                  )}
+                </Paper>
+              ))}
+              {campDialog.rows.length === 0 && (
+                <Typography color="text.secondary">אין גנים להצגה.</Typography>
+              )}
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCampDialog(d => ({ ...d, open: false }))}>סגור</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Discount Dialog */}
       <Dialog open={discountDialog.open} onClose={() => setDiscountDialog({ open: false })} dir="rtl" maxWidth="md" fullWidth>
@@ -745,11 +903,11 @@ export default function CollectionsTable() {
 }
 
 /* Grouped rows for a classroom */
-function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, getCellSx, onChildClick }) {
+function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExitMonth, getCellSx, onChildClick }) {
   const subtotals = {};
-  ACADEMIC_MONTHS.forEach(m => { subtotals[m] = 0; });
+  columns.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
-    (r.months || []).forEach(m => {
+    cellsOf(r).forEach(m => {
       subtotals[m.month] = (subtotals[m.month] || 0) + (m.paid_amount || 0);
     });
   });
@@ -758,7 +916,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
     <>
       {/* Classroom header */}
       <TableRow>
-        <TableCell colSpan={15} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', left: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
+        <TableCell colSpan={columns.length + 3} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', left: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
           <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: getClassroomColor(classroom).primary, color: '#fff' }} />
         </TableCell>
       </TableRow>
@@ -767,7 +925,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
         const regId = row.registration_id;
         const cc = getClassroomColor(classroom);
         const monthsMap = {};
-        (row.months || []).forEach(m => { monthsMap[m.month] = m; });
+        cellsOf(row).forEach(m => { monthsMap[m.month] = m; });
 
         return (
           <TableRow key={regId} hover sx={{ '& td:first-of-type': { borderRight: `3px solid ${cc.border}` } }}>
@@ -791,7 +949,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
             >
               {row.registration_fee_receipt || (row.registration_fee > 0 ? formatCurrency(row.registration_fee) : '')}
             </TableCell>
-            {ACADEMIC_MONTHS.map((monthNum, mi) => {
+            {columns.map((monthNum, mi) => {
               const m = monthsMap[monthNum] || {};
               const paid = m.paid_amount || 0;
               const expected = m.expected_amount || 0;
@@ -890,7 +1048,7 @@ function GroupRows({ classroom, rows, onCellClick, onRegFeeClick, onExitMonth, g
           סה״כ {classroom}
         </TableCell>
         <TableCell />
-        {ACADEMIC_MONTHS.map((m, i) => (
+        {columns.map((m, i) => (
           <TableCell key={i} align="center" sx={{ fontWeight: 600, fontSize: '0.8rem' }}>
             {(subtotals[m] || 0) > 0 ? formatCurrency(subtotals[m]) : ''}
           </TableCell>

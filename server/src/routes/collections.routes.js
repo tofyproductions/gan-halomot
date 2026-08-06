@@ -8,6 +8,13 @@ router.get('/', collectionsController.getAll);
 // GET /api/collections/history
 router.get('/history', collectionsController.getHistory);
 
+// Summer camp (קייטנה) config — MUST stay above '/:registrationId', which
+// would otherwise swallow this path as a registration id.
+// GET /api/collections/summer-camp?year=
+router.get('/summer-camp', collectionsController.getSummerCamps);
+// PUT /api/collections/summer-camp
+router.put('/summer-camp', collectionsController.upsertSummerCamp);
+
 // GET /api/collections/:registrationId
 router.get('/:registrationId', collectionsController.getByRegistration);
 

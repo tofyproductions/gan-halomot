@@ -1,5 +1,5 @@
-const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount } = require('../models');
-const { normalizeYear, getAcademicYears, getAcademicYearStr, ACADEMIC_MONTHS } = require('../services/academic-year.service');
+const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount, SummerCamp, Branch } = require('../models');
+const { normalizeYear, getAcademicYears, getAcademicYearStr, ACADEMIC_MONTHS, CAMP_MONTH } = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
@@ -62,6 +62,61 @@ async function getAll(req, res, next) {
 
     // Load discounts for this branch
     const allDiscounts = await Discount.find({ is_active: true, ...getBranchFilter(req) }).lean();
+
+    // Summer-camp config, keyed by branch. Only the branches that run one this
+    // year get a camp cell — for everyone else the column simply isn't there.
+    const campByBranch = new Map(
+      (await SummerCamp.find({
+        academic_year: targetYear,
+        enabled: true,
+        branch_id: { $in: [...new Set(filteredRegs.map(r => String(r.branch_id)).filter(Boolean))] },
+      }).lean()).map(c => [String(c.branch_id), c]),
+    );
+
+    /**
+     * The camp cell for one child, or null when her branch has no camp.
+     *
+     * The charge is flat — never prorated like a monthly fee — because the camp
+     * is a fixed-price product, not a month of care. What DOES remove it is not
+     * being enrolled while it runs: a child who left before the camp started,
+     * or who starts after it ended, is not billed for it.
+     */
+    function buildCampCell(reg, existing) {
+      const camp = campByBranch.get(String(reg.branch_id));
+      if (!camp) return null;
+
+      const regStart = reg.start_date ? new Date(reg.start_date) : null;
+      const regEnd = reg.end_date ? new Date(reg.end_date) : null;
+      const outOfRange = (camp.end_date && regStart && regStart > new Date(camp.end_date))
+        || (camp.start_date && regEnd && regEnd < new Date(camp.start_date));
+
+      const hasOverride = existing.fee_override != null;
+      const base = camp.amount || 0;
+      const expected = hasOverride ? existing.fee_override : (outOfRange ? 0 : base);
+
+      let receiptNumber = existing.receipt_number || null;
+      if (!receiptNumber) receiptNumber = findSiblingMonthReceipt(reg, CAMP_MONTH);
+      let paymentStatus = existing.payment_status || (outOfRange ? 'pending' : 'expected');
+      if (receiptNumber) paymentStatus = 'paid';
+
+      return {
+        month: CAMP_MONTH,
+        label: camp.label || 'קייטנה',
+        expected_amount: expected,
+        paid_amount: paymentStatus === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0),
+        discount_amount: 0,
+        receipt_number: receiptNumber,
+        payment_status: paymentStatus,
+        payment_date: existing.payment_date || null,
+        is_prorated: false,
+        // Reuses the greyed-out "outside this child's enrolment" cell styling.
+        is_before_start: !!outOfRange,
+        notes: existing.notes || null,
+        has_fee_override: hasOverride,
+        fee_override_reason: existing.fee_override_reason || null,
+        original_expected: hasOverride ? (outOfRange ? 0 : base) : null,
+      };
+    }
 
     // Build sibling map: parent_id_number -> [reg_id, reg_id, ...]
     const siblingMap = {};
@@ -232,13 +287,99 @@ async function getAll(req, res, next) {
         registration_fee: reg.registration_fee || 0,
         registration_fee_receipt: detectedRegFeeReceipt || null,
         months: monthData,
+        camp: buildCampCell(reg, monthsMap[CAMP_MONTH] || {}),
       });
     }
 
-    res.json({ collections: grouped, academicYear: targetYear });
+    // One camp label/date range for the header. With several branches in view
+    // the label is only shown when they agree; the per-child amounts are always
+    // each branch's own.
+    const camps = [...campByBranch.values()];
+    const summerCamp = camps.length ? {
+      label: [...new Set(camps.map(c => c.label || 'קייטנה'))].length === 1
+        ? (camps[0].label || 'קייטנה') : 'קייטנה',
+      start_date: camps.length === 1 ? camps[0].start_date : null,
+      end_date: camps.length === 1 ? camps[0].end_date : null,
+      branch_count: camps.length,
+    } : null;
+
+    res.json({ collections: grouped, academicYear: targetYear, summer_camp: summerCamp });
   } catch (error) {
     next(error);
   }
+}
+
+/**
+ * GET /api/collections/summer-camp?year=
+ * The camp setup for every branch the user can see — including branches with
+ * no camp, returned as a disabled row, so the dialog is a complete picture of
+ * "which of my branches runs one" rather than a list of the ones already set.
+ */
+async function getSummerCamps(req, res, next) {
+  try {
+    const targetYear = req.query.year ? normalizeYear(req.query.year) : getAcademicYears().current.range;
+    const branchFilter = getBranchFilter(req, '_id');
+    const branches = await Branch.find({ is_active: true, ...branchFilter }).select('name').sort({ name: 1 }).lean();
+    const existing = new Map(
+      (await SummerCamp.find({ academic_year: targetYear }).lean()).map(c => [String(c.branch_id), c]),
+    );
+    res.json({
+      academic_year: targetYear,
+      camps: branches.map(b => {
+        const c = existing.get(String(b._id));
+        return {
+          branch_id: String(b._id),
+          branch_name: b.name,
+          enabled: c?.enabled ?? false,
+          label: c?.label || 'קייטנה',
+          start_date: c?.start_date || null,
+          end_date: c?.end_date || null,
+          amount: c?.amount || 0,
+          notes: c?.notes || '',
+        };
+      }),
+    });
+  } catch (error) { next(error); }
+}
+
+/**
+ * PUT /api/collections/summer-camp  { branch_id, year, enabled, label, start_date, end_date, amount, notes }
+ * Upsert one branch's camp. Turning it off leaves the row (and any receipts
+ * already recorded against the camp) intact — the column just stops showing,
+ * so switching it back on doesn't lose what was collected.
+ */
+async function upsertSummerCamp(req, res, next) {
+  try {
+    const { branch_id, year, enabled, label, start_date, end_date, amount, notes } = req.body || {};
+    if (!branch_id) return res.status(400).json({ error: 'branch_id נדרש' });
+    const targetYear = year ? normalizeYear(year) : getAcademicYears().current.range;
+
+    const start = start_date ? new Date(start_date) : null;
+    const end = end_date ? new Date(end_date) : null;
+    if (start && end && end < start) {
+      return res.status(400).json({ error: 'תאריך הסיום מוקדם מתאריך ההתחלה' });
+    }
+    const amountNum = amount === '' || amount == null ? 0 : Number(amount);
+    if (!Number.isFinite(amountNum) || amountNum < 0) {
+      return res.status(400).json({ error: 'סכום לא תקין' });
+    }
+
+    const camp = await SummerCamp.findOneAndUpdate(
+      { branch_id, academic_year: targetYear },
+      {
+        $set: {
+          enabled: enabled !== false,
+          label: (label || '').trim() || 'קייטנה',
+          start_date: start,
+          end_date: end,
+          amount: amountNum,
+          notes: notes || '',
+        },
+      },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    res.json({ camp });
+  } catch (error) { next(error); }
 }
 
 async function getByRegistration(req, res, next) {
@@ -265,8 +406,9 @@ async function updateMonth(req, res, next) {
     const { receipt_number, paid_amount, payment_status, notes, force, fee_override, fee_override_reason } = req.body;
     const monthNum = parseInt(monthIndex);
 
-    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
-      return res.status(400).json({ error: 'Invalid month index (1-12)' });
+    // 13 = קייטנה. It stores exactly like a month, so nothing below it changes.
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > CAMP_MONTH) {
+      return res.status(400).json({ error: `Invalid month index (1-${CAMP_MONTH})` });
     }
 
     const registration = await Registration.findById(registrationId);
@@ -299,7 +441,7 @@ async function updateMonth(req, res, next) {
       );
 
       const duplicates = [];
-      const MONTH_NAMES = { 9: 'ספט׳', 10: 'אוק׳', 11: 'נוב׳', 12: 'דצמ׳', 1: 'ינו׳', 2: 'פבר׳', 3: 'מרץ', 4: 'אפר׳', 5: 'מאי', 6: 'יוני', 7: 'יולי', 8: 'אוג׳' };
+      const MONTH_NAMES = { 9: 'ספט׳', 10: 'אוק׳', 11: 'נוב׳', 12: 'דצמ׳', 1: 'ינו׳', 2: 'פבר׳', 3: 'מרץ', 4: 'אפר׳', 5: 'מאי', 6: 'יוני', 7: 'יולי', 8: 'אוג׳', [CAMP_MONTH]: 'קייטנה' };
 
       for (const dc of duplicateCollections) {
         // Skip if it's the same registration + same month (editing own receipt)
@@ -581,4 +723,5 @@ async function backup(req, res, next) {
 module.exports = {
   getAll, getByRegistration, updateMonth, updateExitMonth,
   updateRegistrationFee, recalculate, getHistory, backup,
+  getSummerCamps, upsertSummerCamp,
 };

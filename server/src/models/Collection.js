@@ -1,7 +1,11 @@
 const mongoose = require('mongoose');
 
 const collectionMonthSchema = new mongoose.Schema({
-  month_number: { type: Number, required: true, min: 1, max: 12 },
+  // 1–12 are calendar months. 13 is the קייטנה pseudo-month (see
+  // models/SummerCamp.js): the August camp is a separate charge with its own
+  // receipt, and riding on this schema means it inherits receipts, sibling
+  // receipts, duplicate detection, fee overrides and history for free.
+  month_number: { type: Number, required: true, min: 1, max: 13 },
   expected_amount: { type: Number, default: 0 },
   paid_amount: { type: Number, default: 0 },
   receipt_number: { type: String, default: null },

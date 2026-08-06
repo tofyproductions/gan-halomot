@@ -17,6 +17,11 @@ const HEBREW_MONTHS = [
 // Academic year months in order: Sept(9)..Dec(12), Jan(1)..Aug(8)
 const ACADEMIC_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8];
 
+// קייטנה — the August camp, billed as a thirteenth column after אוג׳. Not a
+// calendar month: it never comes out of the prorated monthly fee, and it only
+// exists for branches that actually run one (models/SummerCamp.js).
+const CAMP_MONTH = 13;
+
 /**
  * Get Hebrew year string from a date.
  * Cutoff: Aug 10th -> if on or after, belongs to NEXT Hebrew year.
@@ -112,5 +117,6 @@ module.exports = {
   getHebrewMonthName,
   normalizeYear,
   ACADEMIC_MONTHS,
+  CAMP_MONTH,
   HEBREW_MONTHS,
 };
