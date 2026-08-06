@@ -53,6 +53,7 @@ export default function EmployeeLetters() {
   const [loading, setLoading] = useState(true);
   const [empId, setEmpId] = useState('');
   const [ctx, setCtx] = useState(null);
+  const [issuers, setIssuers] = useState([]);
   const [history, setHistory] = useState([]);
   const [form, setForm] = useState(null);      // { type, values }
   const [previewHtml, setPreviewHtml] = useState('');
@@ -72,9 +73,9 @@ export default function EmployeeLetters() {
   }, []);
 
   useEffect(() => {
-    if (!empId) { setCtx(null); setHistory([]); return; }
+    if (!empId) { setCtx(null); setIssuers([]); setHistory([]); return; }
     api.get(`/employee-letters/context/${empId}`)
-      .then(res => setCtx(res.data.context))
+      .then(res => { setCtx(res.data.context); setIssuers(res.data.issuers || []); })
       .catch(err => { setCtx(null); toast.error(err.response?.data?.error || 'שגיאה'); });
     loadHistory(empId);
   }, [empId, loadHistory]);
@@ -97,6 +98,9 @@ export default function EmployeeLetters() {
       end_date_iso: '',
       extra: '',
       scope_text: ctx?.scope_text || 'משרה מלאה',
+      // Who signs. Defaults to the branch's own manager, not whoever is logged in.
+      issuer_name: ctx?.issuer_name || '',
+      issuer_title: ctx?.issuer_title || '',
     };
     // The dismissal letter defaults to ending at the end of the statutory
     // notice period, counted from today — the date the manager most often means.
@@ -247,7 +251,8 @@ export default function EmployeeLetters() {
                 <TableRow>
                   <TableCell sx={{ fontWeight: 700 }}>מסמך</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>הונפק ב</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>ע״י</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>חתום/ה</TableCell>
+                  <TableCell sx={{ fontWeight: 700 }}>הונפק ע״י</TableCell>
                   <TableCell align="left" />
                 </TableRow>
               </TableHead>
@@ -256,7 +261,8 @@ export default function EmployeeLetters() {
                   <TableRow key={h.id} hover>
                     <TableCell sx={{ fontWeight: 600 }}>{h.title}</TableCell>
                     <TableCell>{new Date(h.created_at).toLocaleString('he-IL')}</TableCell>
-                    <TableCell>{h.issued_by_name || '—'}</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>{h.signed_by_name || h.issued_by_name || '—'}</TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>{h.issued_by_name || '—'}</TableCell>
                     <TableCell align="left">
                       <IconButton size="small" onClick={() => openPdf(h.id)} title="פתח PDF">
                         <OpenInNewIcon fontSize="small" />
@@ -294,6 +300,28 @@ export default function EmployeeLetters() {
                 <TextField
                   size="small" type="date" label="תאריך המכתב" InputLabelProps={{ shrink: true }}
                   value={form?.values.letter_date_iso || ''} onChange={(e) => setVal('letter_date_iso', e.target.value)}
+                />
+                {/* The signature says who ran the process, not who clicked. A
+                    letter for a משה דיין employee is signed by that branch's
+                    manager even when an admin issues it from the office. */}
+                <TextField
+                  select size="small" label="מנפיק/ה וחותם/ת על המסמך"
+                  value={form?.values.issuer_name || ''}
+                  onChange={(e) => {
+                    const opt = issuers.find(i => i.name === e.target.value);
+                    setForm(f => ({ ...f, values: { ...f.values, issuer_name: e.target.value, issuer_title: opt?.title || f.values.issuer_title } }));
+                  }}
+                  helperText="ברירת המחדל היא מנהל/ת הסניף של העובד/ת"
+                >
+                  {issuers.map(i => (
+                    <MenuItem key={i.id} value={i.name}>
+                      {i.name}{i.is_branch_manager ? ' — מנהל/ת המעון' : ` — ${i.title}`}
+                    </MenuItem>
+                  ))}
+                </TextField>
+                <TextField
+                  size="small" label="תפקיד החותם/ת" value={form?.values.issuer_title || ''}
+                  onChange={(e) => setVal('issuer_title', e.target.value)}
                 />
 
                 {form?.type === 'hearing_invite' && (

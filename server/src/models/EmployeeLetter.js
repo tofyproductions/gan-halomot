@@ -38,8 +38,13 @@ const employeeLetterSchema = new mongoose.Schema({
     notice_days: { type: Number, default: 0 },
   },
 
+  // Who operated the system, and who the letter is SIGNED BY — not always the
+  // same person. An admin can issue a letter for a branch that is signed by
+  // that branch's manager; the audit trail has to keep both.
   issued_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   issued_by_name: { type: String, default: '' },
+  signed_by_name: { type: String, default: '' },
+  signed_by_title: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 employeeLetterSchema.index({ employee_id: 1, created_at: -1 });

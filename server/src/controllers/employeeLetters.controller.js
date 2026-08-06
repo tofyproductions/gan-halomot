@@ -7,7 +7,7 @@
  * the system genuinely cannot know — the reasons, the meeting time, what the
  * employee said at the hearing.
  */
-const { Employee, Branch, EmployeeLetter } = require('../models');
+const { Employee, Branch, EmployeeLetter, User } = require('../models');
 const letters = require('../services/employeeLetters');
 const { htmlToPdf } = require('../services/htmlPdf');
 
@@ -33,6 +33,46 @@ async function loadEmployee(req, employeeId) {
 }
 
 /**
+ * Who can be named as the issuer of a letter for this employee.
+ *
+ * The signature is a statement about who ran the process, not about who
+ * happened to click the button: a hearing at משה דיין is conducted and signed
+ * by that branch's manager, even when a system admin issues the paperwork from
+ * the office. So the default is the branch's own manager, and an admin who
+ * genuinely is the issuer picks themselves from the list.
+ */
+async function issuerOptions(emp, currentUser) {
+  const branchId = emp.branch_id ? String(emp.branch_id) : null;
+  const managers = branchId
+    ? await User.find({
+        role: 'branch_manager',
+        is_active: true,
+        $or: [{ managed_branch_ids: branchId }, { branch_id: branchId }],
+      }).select('full_name role').sort({ full_name: 1 }).lean()
+    : [];
+
+  const options = managers.map(m => ({
+    id: String(m._id), name: m.full_name, title: 'מנהל/ת המעון', is_branch_manager: true,
+  }));
+  // The caller is always selectable — but only as an explicit choice.
+  if (currentUser?.id && !options.some(o => o.id === String(currentUser.id))) {
+    options.push({
+      id: String(currentUser.id),
+      name: currentUser.full_name || '',
+      title: currentUser.role === 'accountant' ? 'הנהלת חשבונות' : 'הנהלה',
+      is_branch_manager: false,
+    });
+  }
+  // A branch manager issuing for her own staff signs as herself; anyone else
+  // defaults to the branch's manager and may override.
+  const self = options.find(o => o.id === String(currentUser?.id));
+  const preferred = (currentUser?.role === 'branch_manager' && self)
+    ? self
+    : (options.find(o => o.is_branch_manager) || self || options[0] || null);
+  return { options, preferred };
+}
+
+/**
  * GET /api/employee-letters/context/:employeeId
  * Everything the letters will be filled with, before the manager edits it —
  * so the form opens pre-filled and she can see the computed notice period and
@@ -42,9 +82,16 @@ async function getContext(req, res, next) {
   try {
     const { emp, branch, error } = await loadEmployee(req, req.params.employeeId);
     if (error) return res.status(error.status).json({ error: error.message });
-    const ctx = letters.buildContext(emp, { branch, issuer: req.user });
+    const { options, preferred } = await issuerOptions(emp, req.user);
+    const ctx = letters.buildContext(emp, {
+      branch,
+      issuer: req.user,
+      overrides: preferred ? { issuer_name: preferred.name, issuer_title: preferred.title } : {},
+    });
     res.json({
       context: ctx,
+      issuers: options,
+      default_issuer_id: preferred?.id || null,
       types: letters.LETTER_TYPES.map(t => ({ type: t, label: letters.LETTER_LABELS[t] })),
     });
   } catch (err) { next(err); }
@@ -61,8 +108,16 @@ async function preview(req, res, next) {
     if (!letters.LETTER_TYPES.includes(type)) return res.status(400).json({ error: 'סוג מסמך לא מוכר' });
     const { emp, branch, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
-    const ctx = letters.buildContext(emp, { branch, issuer: req.user, overrides: overrides || {} });
-    res.json({ html: letters.renderLetter(type, ctx), context: ctx });
+    const { preferred } = await issuerOptions(emp, req.user);
+    const ctx = letters.buildContext(emp, {
+      branch,
+      issuer: req.user,
+      overrides: {
+        ...(preferred ? { issuer_name: preferred.name, issuer_title: preferred.title } : {}),
+        ...(overrides || {}),
+      },
+    });
+    res.json({ html: letters.renderLetter(type, ctx, { preview: true }), context: ctx });
   } catch (err) { next(err); }
 }
 
@@ -77,7 +132,15 @@ async function issue(req, res, next) {
     const { emp, branch, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
 
-    const ctx = letters.buildContext(emp, { branch, issuer: req.user, overrides: overrides || {} });
+    const { preferred } = await issuerOptions(emp, req.user);
+    const ctx = letters.buildContext(emp, {
+      branch,
+      issuer: req.user,
+      overrides: {
+        ...(preferred ? { issuer_name: preferred.name, issuer_title: preferred.title } : {}),
+        ...(overrides || {}),
+      },
+    });
 
     // A hearing invitation with no reasons and no date is not a letter — it is
     // a blank the employee cannot answer, and the whole point of a שימוע is
@@ -109,6 +172,8 @@ async function issue(req, res, next) {
       },
       issued_by: req.user?.id || null,
       issued_by_name: req.user?.full_name || '',
+      signed_by_name: ctx.issuer_name || '',
+      signed_by_title: ctx.issuer_title || '',
     });
     res.status(201).json({ letter: { ...doc.toObject(), html: undefined, id: doc._id } });
   } catch (err) { next(err); }

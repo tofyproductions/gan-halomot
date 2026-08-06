@@ -165,9 +165,47 @@ const PAGE_CSS = `
   .footer-note { font-size: 10pt; color: #555; margin-top: 26pt; border-top: 1px solid #ddd; padding-top: 6pt; }
 `;
 
-function page(title, inner) {
+/**
+ * On paper the letter is an A4 page. In the preview frame it was being laid out
+ * to whatever width the frame happened to be, so 13.5pt type and 18mm margins
+ * came out looking oversized and the lines broke in the wrong places — the
+ * preview disagreed with the PDF, which defeats its purpose.
+ *
+ * `preview` renders the same markup at true A4 width on a grey desk and scales
+ * the whole page down to fit the frame, so what you see is the printed page.
+ */
+const PREVIEW_CSS = `
+  @media screen {
+    html { background:#e5e7eb; margin:0; padding:10px 0; }
+    body {
+      width:210mm; min-height:297mm; margin:0 auto; background:#fff;
+      padding:18mm 18mm 16mm;
+      box-shadow:0 1px 10px rgba(0,0,0,.18);
+      transform-origin: top center;
+    }
+  }
+`;
+// Fit-to-width without guessing the frame size server-side.
+const PREVIEW_JS = `
+  (function () {
+    var b = document.body;
+    function fit() {
+      b.style.transform = 'none';
+      var w = document.documentElement.clientWidth - 20;
+      var s = Math.min(1, w / b.offsetWidth);
+      b.style.transform = 'scale(' + s + ')';
+      // A scaled element keeps its original height in flow — reclaim the gap.
+      document.documentElement.style.height = (b.offsetHeight * s + 24) + 'px';
+    }
+    fit();
+    window.addEventListener('resize', fit);
+  })();
+`;
+
+function page(title, inner, { preview = false } = {}) {
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"/>
-<title>${esc(title)}</title><style>${PAGE_CSS}</style></head><body>${inner}</body></html>`;
+<title>${esc(title)}</title><style>${PAGE_CSS}${preview ? PREVIEW_CSS : ''}</style></head>
+<body>${inner}</body>${preview ? `<script>${PREVIEW_JS}</script>` : ''}</html>`;
 }
 
 const signature = (ctx) => `
@@ -186,7 +224,7 @@ const addressee = (ctx) => `
   </div>`;
 
 /** מכתב זימון לשימוע. */
-function hearingInvite(ctx) {
+function hearingInvite(ctx, opts) {
   const f = ctx.female;
   const inner = `
   <div class="bsd">בס"ד</div>
@@ -208,11 +246,11 @@ function hearingInvite(ctx) {
         כפי ${G(f, 'שתמצאי', 'שתמצא')} לנכון.</li>
   </ol>
   ${signature(ctx)}`;
-  return page(`זימון לשימוע — ${ctx.employee_name}`, inner);
+  return page(`זימון לשימוע — ${ctx.employee_name}`, inner, opts);
 }
 
 /** מכתב פיטורין. */
-function termination(ctx) {
+function termination(ctx, opts) {
   const f = ctx.female;
   const noticeLine = ctx.immediate
     ? `<li>${G(f, 'העסקתך מסתיימת לאלתר', 'העסקתך מסתיימת לאלתר')}.</li>`
@@ -223,7 +261,7 @@ function termination(ctx) {
   ${addressee(ctx)}
   <div class="subject">הנדון: הודעה על סיום העסקה.</div>
   <ol class="body">
-    <li>${escLines(ctx.reasons)}</li>
+    ${String(ctx.reasons || '').trim() ? `<li>${escLines(ctx.reasons)}</li>` : ''}
     ${noticeLine}
     ${ctx.extra ? `<li>${escLines(ctx.extra)}</li>` : ''}
     <li>גמר החשבון, לרבות פדיון ימי חופשה ויתר הזכויות המגיעות לך על פי דין,
@@ -231,11 +269,11 @@ function termination(ctx) {
   </ol>
   <p>אנו מאחלים ל${esc(ctx.first_name)} הצלחה רבה בהמשך הדרך.</p>
   ${signature(ctx)}`;
-  return page(`מכתב סיום העסקה — ${ctx.employee_name}`, inner);
+  return page(`מכתב סיום העסקה — ${ctx.employee_name}`, inner, opts);
 }
 
 /** פרוטוקול ישיבת שימוע — filled in during/after the meeting. */
-function hearingProtocol(ctx) {
+function hearingProtocol(ctx, opts) {
   const row = (label, value) => `<tr><td class="label">${label}</td><td>${esc(value) || '<span class="field"></span>'}</td></tr>`;
   const attendees = (ctx.attendees && ctx.attendees.length ? ctx.attendees : [{}, {}, {}])
     .map(a => `<tr><td class="label">שם: ${esc(a.name) || '<span class="field"></span>'}</td>
@@ -262,11 +300,11 @@ function hearingProtocol(ctx) {
     ${row('תפקיד בחברה:', ctx.issuer_title)}
   </table>
   <div class="note">*העתק מפרוטוקול זה יימסר לידי העובד/ת</div>`;
-  return page(`פרוטוקול שימוע — ${ctx.employee_name}`, inner);
+  return page(`פרוטוקול שימוע — ${ctx.employee_name}`, inner, opts);
 }
 
 /** אישור העסקה / מכתב סיום העסקה "לכל מען דבעי". */
-function employmentConfirmation(ctx) {
+function employmentConfirmation(ctx, opts) {
   const f = ctx.female;
   const period = ctx.end_date
     ? `בין התאריך ${esc(ctx.start_date)} ועד לתאריך ${esc(ctx.end_date)}`
@@ -284,7 +322,7 @@ function employmentConfirmation(ctx) {
   </p>
   ${ctx.extra ? `<p>${escLines(ctx.extra)}</p>` : ''}
   ${signature(ctx)}`;
-  return page(`אישור העסקה — ${ctx.employee_name}`, inner);
+  return page(`אישור העסקה — ${ctx.employee_name}`, inner, opts);
 }
 
 const RENDERERS = {
@@ -368,10 +406,10 @@ function buildContext(employee, { branch, issuer, overrides = {} } = {}) {
   return ctx;
 }
 
-function renderLetter(type, ctx) {
+function renderLetter(type, ctx, opts = {}) {
   const fn = RENDERERS[type];
   if (!fn) throw new Error(`unknown letter type: ${type}`);
-  return fn(ctx);
+  return fn(ctx, opts);
 }
 
 module.exports = {
