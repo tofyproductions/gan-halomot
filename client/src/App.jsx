@@ -37,6 +37,7 @@ import MyDocuments from './components/employee-portal/MyDocuments';
 import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
+import EmployeeLetters from './components/employees/EmployeeLetters';
 import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
@@ -127,6 +128,7 @@ function AppRoutes() {
         <Route path="my-updates" element={<Updates />} />
 
         <Route path="employee-requests" element={<RequestsManager />} />
+        <Route path="employee-letters" element={<EmployeeLetters />} />
         <Route path="salary-requests" element={<Navigate to="/payroll?tab=raises" replace />} />
         <Route path="admin/permissions" element={
           <ProtectedRoute roles={['system_admin']}>

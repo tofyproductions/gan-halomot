@@ -29,6 +29,7 @@ export const TAB_GROUPS = [
       { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
     ],
   },
   {
