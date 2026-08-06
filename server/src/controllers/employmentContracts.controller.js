@@ -6,7 +6,7 @@
  * employed with no contract in the system, and without "התעלם" / "העלה" this
  * feature would mark every one of them as a problem on the day it ships.
  */
-const { Employee, Branch, EmploymentContract, User } = require('../models');
+const { Employee, Branch, EmploymentContract, ContractAnnex, User } = require('../models');
 const tpl = require('../services/employmentContract');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
@@ -32,6 +32,11 @@ async function loadEmployee(req, employeeId) {
   const branch = emp.branch_id ? await Branch.findById(emp.branch_id).select('name').lean() : null;
   return { emp, branch };
 }
+
+/** The annex parts, in the shape the contract template lists them. */
+const annexParts = async () => (await ContractAnnex.find({ is_active: true })
+  .select('title part page_count').sort({ part: 1 }).lean())
+  .map(a => ({ title: a.title, part: a.part, page_count: a.page_count }));
 
 /** The live contract for an employee = the newest one that isn't superseded. */
 const currentFor = (employeeId) =>
@@ -135,7 +140,7 @@ async function preview(req, res, next) {
     const { employee_id, overrides } = req.body || {};
     const { emp, branch, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
-    const ctx = tpl.buildContext(emp, { branch, overrides: overrides || {} });
+    const ctx = tpl.buildContext(emp, { branch, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
     res.json({ html: tpl.render(ctx), context: ctx });
   } catch (err) { next(err); }
 }
@@ -160,7 +165,7 @@ async function create(req, res, next) {
       });
     }
 
-    const ctx = tpl.buildContext(emp, { branch, overrides: overrides || {} });
+    const ctx = tpl.buildContext(emp, { branch, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
     const doc = await EmploymentContract.create({
       employee_id: emp._id,
       branch_id: emp.branch_id || null,
@@ -347,6 +352,65 @@ function withSignature(doc) {
   });
 }
 
+// --- standing annexes (נספח ג' — ונשמרתם) --------------------------------
+
+/** The annex parts as a light list — never the base64 payload. */
+const annexList = () => ContractAnnex.find({ is_active: true })
+  .select('-file_data').sort({ annex_key: 1, part: 1 }).lean();
+
+/** GET /api/employment-contracts/annexes */
+async function listAnnexes(req, res, next) {
+  try {
+    const parts = await annexList();
+    res.json({ annexes: parts.map(p => ({ ...p, id: String(p._id) })) });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/employment-contracts/annexes
+ * Replacing a part supersedes the previous one rather than deleting it — a
+ * contract signed against last year's manual must still resolve to the file
+ * the employee actually saw.
+ */
+async function uploadAnnex(req, res, next) {
+  try {
+    if (!isApprover(req)) {
+      return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת יכולים לעדכן נספחים' });
+    }
+    const { annex_key, title, part, file_name, file_data, mime_type, page_count } = req.body || {};
+    if (!file_data || !file_name) return res.status(400).json({ error: 'יש לצרף קובץ' });
+    const key = annex_key || 'c';
+    const partNum = Number(part) || 1;
+    await ContractAnnex.updateMany({ annex_key: key, part: partNum, is_active: true }, { is_active: false });
+    const doc = await ContractAnnex.create({
+      annex_key: key,
+      title: title || 'נספח ג׳ — ונשמרתם',
+      part: partNum,
+      file_name,
+      mime_type: mime_type || 'application/pdf',
+      page_count: Number(page_count) || 0,
+      file_data: String(file_data).replace(/^data:[^;]+;base64,/, ''),
+      size_bytes: Buffer.from(String(file_data).replace(/^data:[^;]+;base64,/, ''), 'base64').length,
+      uploaded_by: req.user?.id || null,
+      uploaded_by_name: req.user?.full_name || '',
+    });
+    const { file_data: _omit, ...light } = doc.toObject();
+    res.status(201).json({ annex: { ...light, id: String(doc._id) } });
+  } catch (err) { next(err); }
+}
+
+/** GET /api/employment-contracts/annexes/:id/file — also reachable publicly
+ *  from the signing page, so the employee can read it before signing. */
+async function annexFile(req, res, next) {
+  try {
+    const doc = await ContractAnnex.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'נספח לא נמצא' });
+    res.setHeader('Content-Type', doc.mime_type || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.file_name)}`);
+    res.send(Buffer.from(doc.file_data, 'base64'));
+  } catch (err) { next(err); }
+}
+
 // --- public (token) side --------------------------------------------------
 
 /**
@@ -363,12 +427,19 @@ async function publicGet(req, res, next) {
       return res.status(410).json({ error: 'תוקף הקישור פג. יש לפנות למנהל/ת הסניף.' });
     }
     const emp = await Employee.findById(doc.employee_id).select('full_name israeli_id').lean();
+    const annexes = await annexList();
     res.json({
       html: withSignature(doc),
       status: doc.status,
       already_signed: !!doc.signed_at,
       employee_name: emp?.full_name || '',
       id_hint: (emp?.israeli_id || '').slice(-4),
+      // The employee must be able to actually open נספח ג' before she signs it.
+      annexes: annexes.map(a => ({
+        id: String(a._id), title: a.title, part: a.part,
+        file_name: a.file_name, page_count: a.page_count,
+        url: `/api/public/contract-annex/${a._id}`,
+      })),
     });
   } catch (err) { next(err); }
 }
@@ -427,5 +498,6 @@ async function publicSign(req, res, next) {
 
 module.exports = {
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
+  listAnnexes, uploadAnnex, annexFile,
   publicGet, publicSign,
 };

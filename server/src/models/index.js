@@ -42,6 +42,7 @@ const BranchPricing = require('./BranchPricing');
 const SummerCamp = require('./SummerCamp');
 const EmployeeLetter = require('./EmployeeLetter');
 const EmploymentContract = require('./EmploymentContract');
+const ContractAnnex = require('./ContractAnnex');
 const EmployeeDocument = require('./EmployeeDocument');
 const Setting = require('./Setting');
 const ClassProvider = require('./ClassProvider');
@@ -98,6 +99,7 @@ module.exports = {
   SummerCamp,
   EmployeeLetter,
   EmploymentContract,
+  ContractAnnex,
   EmployeeDocument,
   Setting,
   ClassProvider,

@@ -10,6 +10,9 @@ router.use(requireRole('system_admin', 'accountant', 'branch_manager'));
 router.get('/', c.list);
 // Static paths before '/:id/...' so they aren't read as ids.
 router.get('/status', c.statusMap);
+router.get('/annexes', c.listAnnexes);
+router.post('/annexes', c.uploadAnnex);
+router.get('/annexes/:id/file', c.annexFile);
 router.get('/context/:employeeId', c.getContext);
 router.post('/preview', c.preview);
 router.post('/waive', c.waive);

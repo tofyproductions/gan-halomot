@@ -29,6 +29,9 @@ router.post(
 // --- Employment contract signing (employee's phone, token only) ---
 // GET /api/public/contract/:token
 router.get('/contract/:token', require('../controllers/employmentContracts.controller').publicGet);
+// GET /api/public/contract-annex/:id — נספח ג' as read by the employee before
+// signing. It is the same safety manual for everyone, so it is not secret.
+router.get('/contract-annex/:id', require('../controllers/employmentContracts.controller').annexFile);
 // POST /api/public/contract/:token/sign
 router.post('/contract/:token/sign', require('../controllers/employmentContracts.controller').publicSign);
 

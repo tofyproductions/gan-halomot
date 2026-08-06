@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Box, Paper, Typography, Button, Stack, TextField, Alert, CircularProgress, Divider,
+  Checkbox, FormControlLabel, Chip,
 } from '@mui/material';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
 import { toast } from 'react-toastify';
@@ -25,6 +27,11 @@ export default function ContractSigning() {
   const [name, setName] = useState('');
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  // נספח ג' is 113 scanned pages that cannot live inside the contract page.
+  // She must actually open every part before the sign button unlocks — an
+  // unopened annex is exactly the thing a contract shouldn't claim she read.
+  const [openedAnnexes, setOpenedAnnexes] = useState({});
+  const [annexAck, setAnnexAck] = useState(false);
   const sigRef = useRef(null);
 
   useEffect(() => {
@@ -38,7 +45,13 @@ export default function ContractSigning() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  const annexes = data?.annexes || [];
+  const allOpened = annexes.every(a => openedAnnexes[a.id]);
+
   const submit = async () => {
+    if (annexes.length > 0 && !(allOpened && annexAck)) {
+      return toast.error('יש לפתוח את נספח ג׳ ולאשר שקראתם אותו');
+    }
     if (!sigRef.current || sigRef.current.isEmpty()) return toast.error('נא לחתום במסגרת');
     if (String(idLast4).trim().length !== 4) return toast.error('נא להזין 4 ספרות אחרונות של ת״ז');
     setSaving(true);
@@ -86,6 +99,35 @@ export default function ContractSigning() {
         />
       </Paper>
 
+      {!done && annexes.length > 0 && (
+        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2, bgcolor: '#fffbeb', borderColor: '#fde68a' }}>
+          <Typography sx={{ fontWeight: 800, mb: 0.5 }}>נספח ג׳ — ונשמרתם</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            נוהל הבטיחות מהווה חלק בלתי נפרד מההסכם. יש לפתוח ולקרוא את כל החלקים לפני החתימה.
+          </Typography>
+          <Stack spacing={1}>
+            {annexes.map(a => (
+              <Stack key={a.id} direction="row" alignItems="center" spacing={1}>
+                <Button
+                  size="small" variant={openedAnnexes[a.id] ? 'outlined' : 'contained'}
+                  startIcon={<PictureAsPdfIcon />} href={a.url} target="_blank" rel="noreferrer"
+                  onClick={() => setOpenedAnnexes(o => ({ ...o, [a.id]: true }))}
+                >
+                  חלק {a.part}{a.page_count ? ` · ${a.page_count} עמ׳` : ''}
+                </Button>
+                {openedAnnexes[a.id] && <Chip size="small" color="success" label="נפתח" />}
+              </Stack>
+            ))}
+          </Stack>
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={<Checkbox checked={annexAck} disabled={!allOpened}
+              onChange={(e) => setAnnexAck(e.target.checked)} />}
+            label={<Typography variant="body2">קראתי את נוהל "ונשמרתם" במלואו והבנתי את תוכנו</Typography>}
+          />
+        </Paper>
+      )}
+
       {!done && (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
           <Typography sx={{ fontWeight: 800, mb: 1.5 }}>חתימה</Typography>
@@ -111,7 +153,8 @@ export default function ContractSigning() {
               </Box>
               <Button size="small" sx={{ mt: 0.5 }} onClick={() => sigRef.current?.clear()}>נקה חתימה</Button>
             </Box>
-            <Button variant="contained" size="large" disabled={saving} onClick={submit}>
+            <Button variant="contained" size="large"
+              disabled={saving || (annexes.length > 0 && !(allOpened && annexAck))} onClick={submit}>
               {saving ? 'שומר…' : 'אני מאשר/ת וחותם/ת על ההסכם'}
             </Button>
           </Stack>
