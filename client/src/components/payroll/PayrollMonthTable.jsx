@@ -23,6 +23,7 @@ import TuneIcon from '@mui/icons-material/Tune';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import CelebrationIcon from '@mui/icons-material/Celebration';
 import { toast } from 'react-toastify';
 import * as XLSX from 'xlsx';
 import api from '../../api/client';
@@ -38,6 +39,7 @@ import EmployeeDocsDialog from './EmployeeDocsDialog';
 import PregnancyDetailDialog from './PregnancyDetailDialog';
 import PunchReviewDialog from './PunchReviewDialog';
 import PunchIssuesDialog from './PunchIssuesDialog';
+import SpecialDaysDialog from './SpecialDaysDialog';
 import FixedSchedulesDialog from './FixedSchedulesDialog';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -456,11 +458,13 @@ function BankDialog({ open, row, onClose, onSave }) {
   const [num, setNum] = useState('');
   const [branch, setBranch] = useState('');
   const [acct, setAcct] = useState('');
+  const [holder, setHolder] = useState('');
   const [pension, setPension] = useState('');
   const [edu, setEdu] = useState('');
   useEffect(() => {
     if (open) {
       setNum(row?.bank_number || ''); setBranch(row?.bank_branch || ''); setAcct(row?.bank_account || '');
+      setHolder(row?.bank_account_holder || '');
       setPension(row?.pension_fund || ''); setEdu(row?.education_fund || '');
     }
   }, [open, row]);
@@ -476,6 +480,17 @@ function BankDialog({ open, row, onClose, onSave }) {
           <TextField label="בנק (קוד)" size="small" value={num} onChange={e => setNum(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="לדוגמה 10" />
           <TextField label="סניף" size="small" value={branch} onChange={e => setBranch(e.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField label="מספר חשבון" size="small" value={acct} onChange={e => setAcct(e.target.value)} InputLabelProps={{ shrink: true }} />
+          {/* A minor is often paid into a parent's account. Leaving this blank
+              means the account is her own — filling it tells the accountant the
+              differing name on the transfer is deliberate, not a typo. */}
+          <TextField
+            label="בעל/ת החשבון (אם שונה מהעובד/ת)" size="small" value={holder}
+            onChange={e => setHolder(e.target.value)} InputLabelProps={{ shrink: true }}
+            placeholder="ריק = החשבון על שם העובד/ת"
+            helperText={holder.trim() && holder.trim() !== (row.full_name || '').trim()
+              ? 'ההעברה תבוצע לחשבון על שם אחר — יופיע בדוח לרו״ח'
+              : ' '}
+          />
           <Divider />
           <TextField label="קופת פנסיה" size="small" value={pension} onChange={e => setPension(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="שם / מספר הקופה" />
           <TextField label="קרן השתלמות" size="small" value={edu} onChange={e => setEdu(e.target.value)} InputLabelProps={{ shrink: true }} placeholder="שם / מספר הקרן" />
@@ -483,7 +498,7 @@ function BankDialog({ open, row, onClose, onSave }) {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={() => onSave({ bank_number: num.trim(), bank_branch: branch.trim(), bank_account: acct.trim(), pension_fund: pension.trim(), education_fund: edu.trim() })}>שמור</Button>
+        <Button variant="contained" onClick={() => onSave({ bank_number: num.trim(), bank_branch: branch.trim(), bank_account: acct.trim(), bank_account_holder: holder.trim(), pension_fund: pension.trim(), education_fund: edu.trim() })}>שמור</Button>
       </DialogActions>
     </Dialog>
   );
@@ -843,6 +858,7 @@ export default function PayrollMonthTable() {
   // >2-punch day without a final decision.
   const [punchGate, setPunchGate] = useState({ blocked: false, count: 0, duplicates_count: 0, missing_count: 0 });
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const [specialDaysOpen, setSpecialDaysOpen] = useState(false);
   const [fixedSchedOpen, setFixedSchedOpen] = useState(false);
   useEffect(() => {
     if (!month) return;
@@ -1643,6 +1659,7 @@ export default function PayrollMonthTable() {
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
           <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
+          <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: '#7c3aed', borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
           <Tooltip title="עובדים שמקבלים שעות קבועות ללא החתמה בשעון">
@@ -2307,6 +2324,13 @@ export default function PayrollMonthTable() {
       <FixedSchedulesDialog
         open={fixedSchedOpen}
         onClose={() => setFixedSchedOpen(false)}
+        onChanged={fetchData}
+      />
+      <SpecialDaysDialog
+        open={specialDaysOpen}
+        month={month}
+        branches={data?.branches || []}
+        onClose={() => setSpecialDaysOpen(false)}
         onChanged={fetchData}
       />
       <PunchIssuesDialog

@@ -28,6 +28,11 @@ router.post('/punch-entry-tasks/:id/done',    requireRole('system_admin', 'accou
 // stores hers as `pending` until accounting confirms (models/PunchResolution).
 router.post('/punch-resolutions',              requireRole('system_admin', 'accountant', 'branch_manager'), c.resolvePunchDay);
 router.delete('/punch-resolutions',            requireRole('system_admin', 'accountant'), c.unresolvePunchDay);
+// ימים מיוחדים — employer-declared closures. Literal paths, before /:param.
+router.get('/special-days',                   c.listSpecialDays);
+router.post('/special-days',                  requireRole('system_admin', 'accountant'), c.createSpecialDay);
+router.patch('/special-days/:id',             requireRole('system_admin', 'accountant'), c.updateSpecialDay);
+router.delete('/special-days/:id',            requireRole('system_admin', 'accountant'), c.deleteSpecialDay);
 router.get('/pregnancy-settings',             requireRole('system_admin', 'accountant', 'branch_manager'), c.getPregnancySettings);
 router.put('/pregnancy-settings',             requireRole('system_admin', 'accountant'), c.setPregnancySettings);
 

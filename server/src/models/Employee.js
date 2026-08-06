@@ -240,6 +240,11 @@ const employeeSchema = new mongoose.Schema({
   bank_number: { type: String, default: '' },   // קוד בנק (e.g. 10 = לאומי)
   bank_branch: { type: String, default: '' },    // מספר סניף
   bank_account: { type: String, default: '' },   // מספר חשבון
+  // Whose account it is, when that is not the employee. A 16-year-old often has
+  // no account of her own and is paid into a parent's; the accountant must see
+  // that the name on the transfer legitimately differs from the payslip, rather
+  // than reading it as a typo. Empty = the account is the employee's own.
+  bank_account_holder: { type: String, default: '' },
   pension_fund: { type: String, default: '' },     // קופת פנסיה (שם/מספר) — for the accountant
   education_fund: { type: String, default: '' },   // קרן השתלמות (שם/מספר)
 

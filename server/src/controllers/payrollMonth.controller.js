@@ -5,7 +5,7 @@
  */
 const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
-  Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday,
+  Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday, SpecialDay,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
   User, PunchEntryTask,
 } = require('../models');
@@ -498,6 +498,20 @@ async function getMonth(req, res, next) {
       start_date: { $lte: monthEnd },
       end_date: { $gte: monthStart },
     }).lean();
+
+    // Employer-declared one-off closures (מסיבת סיום, יום צוות). branch_id null
+    // means every branch. Unlike a Holiday these do NOT draw a vacation day —
+    // see models/SpecialDay.js.
+    const specialDays = await SpecialDay.find({
+      date: { $regex: `^${month}` },
+      $or: [{ branch_id: null }, { branch_id: { $in: branchIds } }],
+    }).lean();
+    const specialDaysByBranch = new Map();
+    for (const b of branchIds) {
+      specialDaysByBranch.set(String(b), specialDays.filter(
+        d => !d.branch_id || String(d.branch_id) === String(b),
+      ));
+    }
     const holidaysByBranch = new Map();
     for (const h of kindergartenHolidays) {
       const k = String(h.branch_id);
@@ -582,6 +596,16 @@ async function getMonth(req, res, next) {
       const holidayDates = new Set();
       for (const h of (holidaysByBranch.get(String(emp.branch_id)) || [])) {
         addRangeToSet(holidayDates, h.start_date, h.end_date, month);
+      }
+      // Employer-declared closures. For a global employee a day marked
+      // `pay_global` joins holidayDates, which is what stops the month reading
+      // it as an unexplained absence and deducting a daily rate. Hourly staff
+      // are handled below as a credit — adding their day here would do nothing,
+      // since an hourly employee is never "absent" to begin with.
+      const empSpecialDays = specialDaysByBranch.get(String(emp.branch_id)) || [];
+      const isTekenEmp = emp.salary_type === 'global';
+      for (const sd of empSpecialDays) {
+        if (isTekenEmp && sd.pay_global) holidayDates.add(sd.date);
       }
       const leaveDates = new Set();
       for (const r of (leaveByEmp.get(String(emp._id)) || [])) {
@@ -775,6 +799,29 @@ async function getMonth(req, res, next) {
         : 0;
       if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
 
+      // --- Employer-declared closures paid to hourly staff -----------------
+      // She punched nothing that day because the gan was shut by decision, so
+      // there are no hours to pay from. Credit the day at her rate — by her own
+      // average working day when no fixed number is set, which is fairer to a
+      // part-timer than a flat 8. This draws NO vacation day: it is the
+      // employer's closure, not her leave.
+      const specialDayLines = [];
+      let specialDayPay = 0;
+      for (const sd of empSpecialDays) {
+        const applies = isTeken ? sd.pay_global : sd.pay_hourly;
+        if (!applies) continue;
+        const hours = isTeken
+          ? 0
+          : (Number(sd.hourly_hours) > 0 ? Number(sd.hourly_hours) : (Number(avgDailyHours) || 8));
+        const pay = isTeken ? 0 : Math.round(hours * (Number(hourlyRate) || 0) * 100) / 100;
+        specialDayPay += pay;
+        specialDayLines.push({
+          date: sd.date, name: sd.name, hours: Math.round(hours * 100) / 100, pay,
+          basis: isTeken ? 'לא מנוכה מהשכר' : (Number(sd.hourly_hours) > 0 ? 'שעות שהוגדרו ליום' : 'ממוצע יום עבודה שלה'),
+        });
+      }
+      if (specialDayPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + specialDayPay;
+
       // --- Sick pay (דמי מחלה) --------------------------------------------
       // Each approved certificate is its OWN spell ("אין רצף") — bracketed per
       // חוק דמי מחלה (day 1 = 0%, days 2-3 = 50%, day 4+ = 100%), unless the
@@ -955,6 +1002,7 @@ async function getMonth(req, res, next) {
           bank_number: emp.bank_number || '',
           bank_branch: emp.bank_branch || '',
           bank_account: emp.bank_account || '',
+          bank_account_holder: emp.bank_account_holder || '',
           pension_fund: emp.pension_fund || '',
           education_fund: emp.education_fund || '',
         } : {}),
@@ -1196,6 +1244,7 @@ async function getMonth(req, res, next) {
           worked_on_holiday: vacationAutoInfo.worked_on_holiday,
         },
         vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
+        special_days: { pay: specialDayPay, lines: specialDayLines },
         vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
         sick_info: {
           policy: emp.sick_pay_policy || 'statutory',
@@ -2450,6 +2499,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('בנק', r.bank_number || '')}
         ${cell('סניף בנק', r.bank_branch || '')}
         ${cell('חשבון בנק', r.bank_account || '')}
+        ${cell('בעל/ת החשבון', r.bank_account_holder || '')}
         ${cell('קופת פנסיה', r.pension_fund || '')}
         ${cell('קרן השתלמות', r.education_fund || '')}
         ${cell('', '')}
@@ -3085,6 +3135,81 @@ async function resolveFixedConflict(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- ימים מיוחדים (employer-declared closures) ----------------------------
+
+/** GET /api/payroll-month/special-days?month=YYYY-MM */
+async function listSpecialDays(req, res, next) {
+  try {
+    const filter = {};
+    if (/^\d{4}-\d{2}$/.test(String(req.query.month || ''))) filter.date = { $regex: `^${req.query.month}` };
+    const days = await SpecialDay.find(filter).populate('branch_id', 'name').sort({ date: -1 }).lean();
+    res.json({
+      special_days: days.map(d => ({
+        ...d, id: String(d._id),
+        branch_name: d.branch_id?.name || 'כל הסניפים',
+        branch_id: d.branch_id?._id ? String(d.branch_id._id) : null,
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll-month/special-days
+ * { name, date, branch_id?, pay_global, pay_hourly, hourly_hours?, note? }
+ */
+async function createSpecialDay(req, res, next) {
+  try {
+    const { name, date, branch_id, pay_global, pay_hourly, hourly_hours, note } = req.body || {};
+    if (!String(name || '').trim()) return res.status(400).json({ error: 'יש להזין שם ליום' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return res.status(400).json({ error: 'תאריך נדרש (YYYY-MM-DD)' });
+    const hours = Number(hourly_hours) || 0;
+    if (hours < 0 || hours > 24) return res.status(400).json({ error: 'מספר שעות לא תקין' });
+    // A day that pays nobody changes nothing — it would just sit in the list
+    // looking as if it had been handled.
+    if (pay_global === false && pay_hourly === false) {
+      return res.status(400).json({ error: 'יש לבחור לפחות סוג עובד אחד שיקבל תשלום על היום' });
+    }
+    const doc = await SpecialDay.create({
+      name: String(name).trim(),
+      date,
+      branch_id: branch_id || null,
+      pay_global: pay_global !== false,
+      pay_hourly: pay_hourly === true,
+      hourly_hours: hours,
+      note: note || '',
+      created_by: req.user?.id || null,
+      created_by_name: req.user?.full_name || '',
+    });
+    res.status(201).json({ special_day: { ...doc.toObject(), id: String(doc._id) } });
+  } catch (err) { next(err); }
+}
+
+/** PATCH /api/payroll-month/special-days/:id */
+async function updateSpecialDay(req, res, next) {
+  try {
+    const set = {};
+    for (const k of ['name', 'date', 'note']) if (req.body[k] !== undefined) set[k] = req.body[k];
+    if (req.body.branch_id !== undefined) set.branch_id = req.body.branch_id || null;
+    if (req.body.pay_global !== undefined) set.pay_global = !!req.body.pay_global;
+    if (req.body.pay_hourly !== undefined) set.pay_hourly = !!req.body.pay_hourly;
+    if (req.body.hourly_hours !== undefined) set.hourly_hours = Number(req.body.hourly_hours) || 0;
+    if (set.pay_global === false && set.pay_hourly === false) {
+      return res.status(400).json({ error: 'יש לבחור לפחות סוג עובד אחד שיקבל תשלום על היום' });
+    }
+    const doc = await SpecialDay.findByIdAndUpdate(req.params.id, set, { new: true });
+    if (!doc) return res.status(404).json({ error: 'יום לא נמצא' });
+    res.json({ special_day: { ...doc.toObject(), id: String(doc._id) } });
+  } catch (err) { next(err); }
+}
+
+/** DELETE /api/payroll-month/special-days/:id */
+async function deleteSpecialDay(req, res, next) {
+  try {
+    await SpecialDay.deleteOne({ _id: req.params.id });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
 /**
  * POST /api/payroll-month/:month/punch-issues/split-branch
  * { employee_id, date, transfer_time }
@@ -3626,6 +3751,10 @@ module.exports = {
   completePunchEntryTask,
   resolveFixedConflict,
   splitCrossBranchDay,
+  listSpecialDays,
+  createSpecialDay,
+  updateSpecialDay,
+  deleteSpecialDay,
   upsertEntry,
   createChangeRequest,
   listChangeRequests,
