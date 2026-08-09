@@ -49,6 +49,51 @@ function sortBySeverity(findings) {
   return [...findings].sort((a, b) => (order[a.severity] ?? 99) - (order[b.severity] ?? 99));
 }
 
+/** Label an employee the way the accountant looks them up: name · branch · מס׳ עובד. */
+function employeeLabel(e) {
+  const bits = [];
+  if (e.branch) bits.push(e.branch);
+  if (e.employee_no !== null && e.employee_no !== undefined && e.employee_no !== '') bits.push(`מס׳ עובד ${e.employee_no}`);
+  if (e.employee_id) bits.push(`ת"ז ${e.employee_id}`);
+  return { name: e.name || '—', meta: bits.join(' · ') };
+}
+
+/**
+ * The "already checked — don't touch" block.
+ *
+ * The whole point of the email is to tell the accountant where NOT to spend
+ * time. Sending only the problems left him re-checking all 27 payslips to see
+ * whether a name's absence meant "fine" or "we forgot it". So the payslips the
+ * manager ticked ✓ טופל are listed explicitly, and only the ones needing work
+ * are attached as a PDF.
+ */
+function buildApprovedBlockHtml(approved) {
+  if (!approved || approved.length === 0) return '';
+  const cells = approved.map((e) => {
+    const { name, meta } = employeeLabel(e);
+    return `
+      <td style="padding:4px 10px; border:1px solid #c8e6c9; background:#f1f8f4; border-radius:4px;">
+        <span style="color:#1b5e20; font-size:12.5px; font-weight:700;">${escapeHtml(name)}</span>
+        ${meta ? `<span style="color:#5b7a63; font-size:10.5px;"> · ${escapeHtml(meta)}</span>` : ''}
+      </td>`;
+  });
+  // 2 per row — long employee names blow up a 3-column layout in Outlook.
+  const rows = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    rows.push(`<tr>${cells.slice(i, i + 2).join('')}${cells.length % 2 && i + 2 > cells.length ? '<td></td>' : ''}</tr>`);
+  }
+  return `
+    <div style="margin:18px 0 4px; padding:10px 12px; border:2px solid #2e7d32; border-radius:8px; background:#f7fcf8;">
+      <p style="margin:0 0 6px; color:#1b5e20; font-size:14px; font-weight:800;">
+        ✓ ${approved.length} תלושים נבדקו ואושרו — אין צורך לעבור עליהם
+      </p>
+      <p style="margin:0 0 8px; color:#446b4e; font-size:12px;">
+        עברנו על התלושים האלה במלואם ולא נדרש בהם שינוי. הם אינם מצורפים לקובץ.
+      </p>
+      <table cellpadding="0" cellspacing="4" border="0" width="100%" style="border-collapse:separate;">${rows.join('')}</table>
+    </div>`;
+}
+
 /** Build the HTML body of the audit email. */
 function buildAuditEmailHtml(audit, options = {}) {
   const ym = audit.year_month || '';
@@ -60,6 +105,10 @@ function buildAuditEmailHtml(audit, options = {}) {
   const withIssues = audit.results.filter((r) =>
     r.findings.some((f) => f.severity === 'critical' || f.severity === 'warning')
   );
+
+  const approved = options.approvedPayslips || [];
+  const approvedCount = approved.length;
+  const attachmentName = options.attachmentName || '';
 
   let totalCritical = 0;
   let totalWarning = 0;
@@ -98,6 +147,9 @@ function buildAuditEmailHtml(audit, options = {}) {
         <td style="background:#f5f5f5; color:#444; padding:6px 14px; border-radius:6px;">
           ${audit.payslips_in_pdf} תלושים נבדקו מתוך ${audit.rows_in_table} שורות בטבלה
         </td>
+        ${approvedCount ? `<td style="background:${SEVERITY_BG.ok}; color:${SEVERITY_COLOR.ok}; padding:6px 14px; border-radius:6px; font-weight:700;">
+          ✓ ${approvedCount} אושרו
+        </td>` : ''}
       </tr>
     </table>
   `;
@@ -169,6 +221,14 @@ function buildAuditEmailHtml(audit, options = {}) {
     `);
   }
 
+  // Say up front what the attachment is, so the accountant knows the PDF holds
+  // ONLY the payslips needing work — not the whole month's bundle again.
+  const attachmentNote = attachmentName ? `
+    <p style="margin:0 0 14px; padding:8px 12px; border-right:4px solid #1976d2; background:#f3f8fd; font-size:13px; color:#0d47a1;">
+      📎 מצורף <b>${escapeHtml(attachmentName)}</b> — ${withIssues.length} התלושים שדורשים תיקון בלבד.
+      ${approvedCount ? `שאר ${approvedCount} התלושים אושרו על ידינו ומופיעים ברשימה למטה.` : ''}
+    </p>` : '';
+
   return `<!doctype html>
 <html lang="he" dir="rtl">
 <head><meta charset="utf-8"><title>תיקוני תלושים — ${escapeHtml(ym)}</title></head>
@@ -176,7 +236,9 @@ function buildAuditEmailHtml(audit, options = {}) {
   <h2 style="margin:0 0 4px;">תיקוני תלושי שכר — ${escapeHtml(ym)}</h2>
   <p style="color:#666; margin:0 0 12px; white-space:pre-line;">${escapeHtml(intro)}</p>
   ${headerStats}
+  ${attachmentNote}
   ${blocks || '<p style="color:#2e7d32; font-weight:700;">✓ לא נמצאו אי-התאמות הדורשות תיקון.</p>'}
+  ${buildApprovedBlockHtml(approved)}
   ${footerExtras.join('')}
   <p style="color:#999; font-size:11px; margin-top:24px; border-top:1px solid #eee; padding-top:8px;">
     דו"ח זה נוצר אוטומטית ממערכת גן החלומות.
@@ -202,6 +264,9 @@ function buildAuditEmailText(audit, options = {}) {
     }
   }
   lines.push(`סיכום: ${totalCritical} קריטיים, ${totalWarning} אזהרות. ${audit.payslips_in_pdf} תלושים מתוך ${audit.rows_in_table} שורות.`);
+  if (options.attachmentName) {
+    lines.push(`מצורף ${options.attachmentName} — התלושים שדורשים תיקון בלבד.`);
+  }
   lines.push('');
 
   const withIssues = audit.results.filter((r) =>
@@ -227,6 +292,16 @@ function buildAuditEmailText(audit, options = {}) {
   const orphans = audit.orphan_payslips || [];
   if (orphans.length) {
     lines.push(`תלושים שלא תאמו לטבלה: ${orphans.map((p) => p.employee_name).join(', ')}`);
+  }
+
+  const approved = options.approvedPayslips || [];
+  if (approved.length) {
+    lines.push('');
+    lines.push(`✓ ${approved.length} תלושים נבדקו ואושרו — אין צורך לעבור עליהם:`);
+    for (const e of approved) {
+      const { name, meta } = employeeLabel(e);
+      lines.push(`  - ${name}${meta ? ` (${meta})` : ''}`);
+    }
   }
 
   lines.push('');

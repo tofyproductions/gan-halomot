@@ -347,7 +347,16 @@ function PerEmployeePairedView({
   const approvedCount = allFindings.filter((f) => f.status === 'approved').length;
   const rejectedCount = allFindings.filter((f) => f.status === 'rejected').length;
   const pendingCount  = allFindings.filter((f) => !f.status || f.status === 'pending').length;
-  const willSendCount = allFindings.filter((f) => f.status !== 'rejected' && f.message && f.message.trim()).length;
+  // A ✓ טופל payslip is excluded from the email even when it still carries
+  // findings — the tick is the office saying "we looked, it's fine".
+  const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
+  const willSendCount = editableResults.reduce(
+    (s, r, idx) => s + (reviewedMap?.[idx] ? 0 : r.findings.filter(sendable).length), 0);
+  const reviewedCount = editableResults.filter((_, idx) => reviewedMap?.[idx]).length;
+  // Ticked ✓ טופל but still holding live corrections — those corrections will
+  // NOT be sent. Worth saying out loud rather than silently dropping them.
+  const mutedCount = editableResults.reduce(
+    (s, r, idx) => s + (reviewedMap?.[idx] ? r.findings.filter(sendable).length : 0), 0);
 
   // Map an audit result to its parallel editableResult by index
   const editableByAuditIdx = (auditIdx) => editableResults[auditIdx];
@@ -380,10 +389,12 @@ function PerEmployeePairedView({
               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                 תיקונים לרו"ח · <b>{willSendCount}</b> יישלחו במייל
               </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 0.25 }}>
+              <Stack direction="row" spacing={1} sx={{ mt: 0.25, flexWrap: 'wrap' }}>
                 {approvedCount > 0 && <Chip size="small" color="success" label={`✓ ${approvedCount} מאושרים`} sx={{ height: 18, fontSize: 10 }} />}
                 {rejectedCount > 0 && <Chip size="small" color="error"   label={`✗ ${rejectedCount} נדחו`}    sx={{ height: 18, fontSize: 10 }} />}
                 {pendingCount > 0  && <Chip size="small" variant="outlined" label={`${pendingCount} לסקירה`} sx={{ height: 18, fontSize: 10 }} />}
+                {reviewedCount > 0 && <Chip size="small" color="success" variant="outlined" label={`✓ ${reviewedCount} תלושים טופלו — יישלחו כרשימה`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
+                {mutedCount > 0 && <Chip size="small" color="warning" label={`⚠ ${mutedCount} תיקונים לא יישלחו (התלוש סומן טופל)`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
               </Stack>
             </Box>
             <Button
@@ -2045,6 +2056,9 @@ export default function PayslipAudit() {
   // "נבדק" checkmark per payslip (keyed by audit index), persisted on the record.
   const [reviewedMap, setReviewedMap] = useState({});
 
+  // Attach a PDF of just the to-fix payslips to the accountant's email.
+  const [attachPayslips, setAttachPayslips] = useState(true);
+
   const toggleReviewed = (idx) => {
     setReviewedMap((prev) => {
       const next = { ...prev, [idx]: !prev[idx] };
@@ -2055,6 +2069,21 @@ export default function PayslipAudit() {
       return next;
     });
   };
+
+  // The ✓ טופל payslips, in the shape the email lists them. Built off the
+  // ORIGINAL audit.results so the indices match reviewedMap's keys.
+  const approvedPayslips = useMemo(() => {
+    if (!audit) return [];
+    return audit.results
+      .map((r, idx) => ({ r, idx }))
+      .filter(({ idx }) => reviewedMap[idx])
+      .map(({ r }) => ({
+        name: r.table_row?.employee_name || r.payslip?.employee_name || '—',
+        branch: (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim(),
+        employee_no: r.payslip?.employee_no ?? null,
+        employee_id: r.payslip?.employee_id || null,
+      }));
+  }, [audit, reviewedMap]);
 
   const stats = useMemo(() => {
     if (!audit) return null;
@@ -2237,17 +2266,19 @@ export default function PayslipAudit() {
       toast.warn('יש להוסיף לפחות נמען אחד בשדה "אל"');
       return;
     }
-    // Drop empty-message findings AND those the user explicitly rejected.
-    // Pending status is treated as "include by default" — only explicit
-    // rejection excludes from the email.
+    // A payslip ticked ✓ טופל is one the office already went through and
+    // accepted. It never goes to the accountant as a correction — it goes in
+    // the "approved, don't touch" list instead, so his absence from the fix
+    // list means "checked and fine" rather than "we forgot him".
     const cleaned = editableResults
-      .map((r) => ({
+      .map((r, idx) => ({
         ...r,
+        __audit_idx: idx,
         findings: r.findings.filter((f) =>
           f.message && f.message.trim() && f.status !== 'rejected'
         ),
       }))
-      .filter((r) => r.findings.length > 0);
+      .filter((r) => r.findings.length > 0 && !reviewedMap[r.__audit_idx]);
     if (cleaned.length === 0) {
       toast.warn('אין תיקונים לשליחה — הוסף לפחות תיקון אחד עם תוכן');
       return;
@@ -2261,8 +2292,14 @@ export default function PayslipAudit() {
         intro_text: emailIntro,
         to: emailTo,
         cc: emailCc,
+        approved_payslips: approvedPayslips,
+        attach_payslips: attachPayslips,
       });
-      toast.success(`המייל נשלח (${res.data.provider}) ל-${res.data.sent_to.join(', ')}${res.data.cc.length ? ', עותק: ' + res.data.cc.join(', ') : ''}`);
+      const extra = [
+        res.data.attached ? `מצורף: ${res.data.attached}` : null,
+        res.data.approved_count ? `${res.data.approved_count} אושרו` : null,
+      ].filter(Boolean).join(' · ');
+      toast.success(`המייל נשלח (${res.data.provider}) ל-${res.data.sent_to.join(', ')}${res.data.cc.length ? ', עותק: ' + res.data.cc.join(', ') : ''}${extra ? ` — ${extra}` : ''}`);
       setEmailDialog({ open: false });
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בשליחת המייל');
@@ -3250,11 +3287,55 @@ export default function PayslipAudit() {
               onChange={(e) => setEmailIntro(e.target.value)}
               fullWidth
             />
-            <Alert severity="info" sx={{ fontSize: 12 }}>
-              גוף המייל יורכב מ-<b>{editableResults.reduce((s, r) => s + r.findings.length, 0)}</b> תיקונים
-              {' '}עבור <b>{editableResults.filter((r) => r.findings.length > 0).length}</b> עובדים שערכת בעמוד הראשי.
-              {editableResults.reduce((s, r) => s + r.findings.length, 0) === 0 && ' ⚠ אין תיקונים — סגור והוסף תיקונים בעמוד.'}
-            </Alert>
+            {/* What the accountant actually receives — the two lists side by
+                side, so it's obvious before sending that he gets the fixes AND
+                the list of payslips he can skip. */}
+            {(() => {
+              const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
+              const toFix = editableResults
+                .map((r, idx) => ({ r, idx }))
+                .filter(({ r, idx }) => !reviewedMap[idx] && r.findings.filter(sendable).length > 0);
+              const fixCount = toFix.reduce((s, { r }) => s + r.findings.filter(sendable).length, 0);
+              const muted = editableResults.reduce(
+                (s, r, idx) => s + (reviewedMap[idx] ? r.findings.filter(sendable).length : 0), 0);
+              return (
+                <>
+                  <Alert severity={fixCount === 0 ? 'warning' : 'info'} sx={{ fontSize: 12 }}>
+                    <b>{fixCount}</b> תיקונים עבור <b>{toFix.length}</b> תלושים יישלחו לתיקון
+                    {approvedPayslips.length > 0 && <> · <b>{approvedPayslips.length}</b> תלושים יופיעו כרשימת "אושרו — אין צורך לעבור עליהם"</>}
+                    {fixCount === 0 && ' ⚠ אין תיקונים לשליחה — סגור והוסף תיקונים בעמוד.'}
+                    {muted > 0 && (
+                      <Box sx={{ mt: 0.5, fontWeight: 700, color: 'warning.dark' }}>
+                        ⚠ {muted} תיקונים לא יישלחו — התלושים שלהם סומנו "✓ טופל". הסר את הסימון אם רצית שיישלחו.
+                      </Box>
+                    )}
+                  </Alert>
+
+                  <FormControlLabel
+                    control={<Checkbox checked={attachPayslips} onChange={(e) => setAttachPayslips(e.target.checked)} />}
+                    label={
+                      <Typography variant="body2">
+                        צרף קובץ PDF עם <b>{toFix.length}</b> התלושים לתיקון בלבד
+                        <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          עמודי התלושים נחתכים מקבצי הסניפים השמורים. התלושים שאושרו לא מצורפים — רק שמותיהם ברשימה.
+                        </Typography>
+                      </Typography>
+                    }
+                  />
+
+                  {approvedPayslips.length > 0 && (
+                    <Paper variant="outlined" sx={{ p: 1, bgcolor: 'success.50', borderColor: 'success.light' }}>
+                      <Typography variant="caption" sx={{ fontWeight: 800, color: 'success.dark' }}>
+                        ✓ {approvedPayslips.length} תלושים מאושרים שיצוינו במייל:
+                      </Typography>
+                      <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'text.secondary', lineHeight: 1.7 }}>
+                        {approvedPayslips.map((e) => e.name).join(' · ')}
+                      </Typography>
+                    </Paper>
+                  )}
+                </>
+              );
+            })()}
           </Stack>
         </DialogContent>
         <DialogActions>

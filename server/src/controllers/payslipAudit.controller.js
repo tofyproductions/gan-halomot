@@ -552,7 +552,12 @@ function dedup(list) {
  *     to:         string[]  (optional),    // primary recipients — defaults to [ACCOUNTANT_EMAIL]
  *     cc:         string[]  (optional),    // CC recipients      — defaults to [OFFICE_EMAIL]
  *     intro_text: string    (optional),    // Hebrew greeting, defaults to a template
- *     subject:    string    (optional)     // override the default subject
+ *     subject:    string    (optional),    // override the default subject
+ *     approved_payslips: [{ name, branch, employee_no, employee_id }] (optional),
+ *                                          // ticked ✓ טופל — listed as "don't touch"
+ *     attach_payslips:   boolean (optional, default true)
+ *                                          // attach a PDF holding ONLY the pages
+ *                                          // of the payslips that need a fix
  *   }
  */
 async function emailAudit(req, res) {
@@ -577,8 +582,44 @@ async function emailAudit(req, res) {
     const subject = req.body.subject || `תיקוני תלושי שכר — ${ym}${branch ? ` — ${branch}` : ''}`;
     const introText = typeof req.body.intro_text === 'string' && req.body.intro_text.trim()
       ? req.body.intro_text.trim() : undefined;
-    const html = buildAuditEmailHtml(audit, { introText });
-    const text = buildAuditEmailText(audit, { introText });
+    const approvedPayslips = Array.isArray(req.body.approved_payslips) ? req.body.approved_payslips : [];
+
+    // Attach ONLY the pages of the payslips that need work. The accountant was
+    // getting the corrections in prose while the payslips themselves sat in the
+    // full month bundle he had to hunt through — so the fix list and the pages
+    // now travel together, and the approved ones are named but not attached.
+    const wantAttachment = req.body.attach_payslips !== false;
+    const fileAttachments = [];
+    let attachmentName = '';
+    if (wantAttachment && audit.saved_audit_id) {
+      const pageEntries = audit.results
+        .map((r) => ({
+          has_page: true,
+          page: r.payslip?.page_index || null,
+          source_branch: (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim(),
+        }))
+        .filter((e) => e.page && e.source_branch);
+      if (pageEntries.length) {
+        try {
+          const merged = await mergeGroupPages({ _id: audit.saved_audit_id }, pageEntries, new Map());
+          if (merged) {
+            attachmentName = `תלושים לתיקון — ${ym || 'שכר'}.pdf`;
+            fileAttachments.push({
+              filename: attachmentName,
+              contentBase64: merged.toString('base64'),
+              contentType: 'application/pdf',
+            });
+          }
+        } catch (err) {
+          // A missing/corrupt source PDF must not block the corrections email —
+          // the findings are the payload, the attachment is the convenience.
+          console.error('audit email attachment failed:', err.message);
+        }
+      }
+    }
+
+    const html = buildAuditEmailHtml(audit, { introText, approvedPayslips, attachmentName });
+    const text = buildAuditEmailText(audit, { introText, approvedPayslips, attachmentName });
 
     const result = await dispatchEmail({
       to,
@@ -586,6 +627,7 @@ async function emailAudit(req, res) {
       subject,
       html,
       text,
+      fileAttachments: fileAttachments.length ? fileAttachments : undefined,
     });
     res.json({
       success: true,
@@ -593,6 +635,8 @@ async function emailAudit(req, res) {
       provider: result.provider,
       sent_to: to,
       cc,
+      attached: attachmentName || null,
+      approved_count: approvedPayslips.length,
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'שגיאה בשליחת המייל', code: err.code, detail: err.detail });
