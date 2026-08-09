@@ -159,6 +159,11 @@ router.post(
   requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.emailAudit,
 );
+router.post(
+  '/payslip-audit/email/preview',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.previewAuditEmail,
+);
 router.get(
   '/payslip-audit/email/defaults',
   requireRole('system_admin', 'branch_manager', 'accountant'),

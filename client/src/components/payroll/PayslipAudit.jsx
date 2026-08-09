@@ -1953,7 +1953,7 @@ function resultKey(r) {
   return `nm:${name}::${branch}`;
 }
 
-export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRound }) {
+export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRound, onAddNote, onSendAccountant }) {
   const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -2082,8 +2082,25 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
             <Alert severity={data.open_notes ? 'info' : 'warning'}>
               {data.open_notes
                 ? <>הביקורת הזו כוללת <b>{data.open_notes}</b> הערות על <b>{data.open_targets}</b> תלושים. העלה את התלושים המתוקנים ונבדוק כל הערה מולם — הטבלה השמורה משמשת כמקור, לא צריך להעלות אותה מחדש.</>
-                : <>אין הערות פתוחות בביקורת הזו. סמן תיקונים בעמוד הראשי לפני הרצת סבב.</>}
+                : <>אין הערות פתוחות בביקורת הזו. הוסף תיקון לעובד/ת כדי לפתוח סבב.</>}
             </Alert>
+
+            {/* Problems surface while reading the round's results, so the two
+                things you'd want next belong here rather than behind a close. */}
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+              {onAddNote && (
+                <Button size="small" variant="outlined" color="warning" startIcon={<AddIcon />}
+                  onClick={() => onAddNote(load)}>
+                  הוסף תיקון לסבב הבא
+                </Button>
+              )}
+              {onSendAccountant && (
+                <Button size="small" variant="outlined" startIcon={<EmailIcon />}
+                  disabled={!data.open_notes} onClick={onSendAccountant}>
+                  שלח לרו״ח {data.open_notes ? `(${data.open_notes} הערות)` : ''}
+                </Button>
+              )}
+            </Stack>
 
             {/* Upload */}
             <Paper variant="outlined" sx={{ p: 1.5 }}>
@@ -2582,7 +2599,7 @@ export default function PayslipAudit() {
 
   // Add one correction to an employee already signed off, so the next round
   // picks them up again.
-  const [addNoteDlg, setAddNoteDlg] = useState({ open: false, key: '', message: '', severity: 'critical' });
+  const [addNoteDlg, setAddNoteDlg] = useState({ open: false, key: '', message: '', severity: 'critical', reload: null });
   const submitAddNote = async () => {
     const originId = roundView ? roundView.audit_id : audit?.saved_audit_id;
     if (!originId || !addNoteDlg.key || !addNoteDlg.message.trim()) return;
@@ -2591,11 +2608,29 @@ export default function PayslipAudit() {
         key: addNoteDlg.key, message: addNoteDlg.message.trim(), severity: addNoteDlg.severity,
       });
       toast.success(`נוסף תיקון ל${res.data.employee} · ${res.data.open_notes} הערות פתוחות לסבב הבא`);
-      setAddNoteDlg({ open: false, key: '', message: '', severity: 'critical' });
+      // The fix dialog shows the open-notes count; refresh it so the new
+      // correction is reflected without closing and reopening.
+      if (typeof addNoteDlg.reload === 'function') addNoteDlg.reload();
+      if (!roundView) await loadFromHistory(originId, true);
+      setAddNoteDlg({ open: false, key: '', message: '', severity: 'critical', reload: null });
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בהוספת התיקון');
     }
   };
+
+  // Reach the accountant mail from wherever the problem was noticed. The mail
+  // is always composed against the ORIGIN audit, never a round view — a round
+  // holds only the re-checked employees, so composing from it would quietly
+  // drop everyone else who still needs a fix.
+  const sendToAccountant = async () => {
+    setFixDialog(false);
+    if (roundView) await exitRoundView();
+    openEmailDialog();
+  };
+
+  // Render the message before it goes out.
+  const [mailPreview, setMailPreview] = useState(null); // { html, subject, attachment_name, attachment_pages }
+  const [previewBusy, setPreviewBusy] = useState(false);
   // Notes already sent to the accountant this month, keyed by employee, so the
   // reviewer sees the instruction next to the number it was meant to produce.
   const [priorNotes, setPriorNotes] = useState({});
@@ -2839,6 +2874,40 @@ export default function PayslipAudit() {
         __manual: true,
       },
     ]);
+  };
+
+  // The exact body the send would post — built once so the preview cannot
+  // drift from the message that actually goes out.
+  const buildEmailPayload = () => {
+    const cleaned = editableResults
+      .map((r, idx) => ({
+        ...r,
+        __audit_idx: idx,
+        findings: r.findings.filter((f) => f.message && f.message.trim() && f.status !== 'rejected'),
+      }))
+      .filter((r) => r.findings.length > 0);
+    return {
+      audit: { ...audit, results: cleaned },
+      intro_text: emailIntro,
+      to: emailTo,
+      cc: emailCc,
+      approved_payslips: approvedPayslips,
+      attach_payslips: attachPayslips,
+      ...(includeFixLink && fixLink ? { fix_url: fixLink } : {}),
+    };
+  };
+
+  const previewEmail = async () => {
+    if (!audit) return;
+    setPreviewBusy(true);
+    try {
+      const res = await api.post('/payroll/payslip-audit/email/preview', buildEmailPayload());
+      setMailPreview(res.data);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בבניית התצוגה המקדימה');
+    } finally {
+      setPreviewBusy(false);
+    }
   };
 
   const sendEmail = async () => {
@@ -3862,6 +3931,8 @@ export default function PayslipAudit() {
           branches={(audit?.payslip_files || []).map((f) => f.branch).filter(Boolean)}
           onClose={() => setFixDialog(false)}
           onOpenRound={openRoundInView}
+          onAddNote={(reload) => setAddNoteDlg({ open: true, key: '', message: '', severity: 'critical', reload })}
+          onSendAccountant={sendToAccountant}
         />
 
         {!audit && !running && (
@@ -3982,6 +4053,14 @@ export default function PayslipAudit() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEmailDialog({ open: false })}>ביטול</Button>
+          <Box sx={{ flex: 1 }} />
+          <Button
+            startIcon={previewBusy ? <CircularProgress size={16} /> : <DescriptionIcon />}
+            onClick={previewEmail}
+            disabled={previewBusy || emailSending}
+          >
+            {previewBusy ? 'בונה…' : 'תצוגה מקדימה'}
+          </Button>
           <Button
             variant="contained"
             startIcon={emailSending ? <CircularProgress size={16} color="inherit" /> : <EmailIcon />}
@@ -3989,6 +4068,40 @@ export default function PayslipAudit() {
             disabled={emailSending}
           >
             {emailSending ? 'שולח…' : 'שלח'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* The message itself, rendered by the same builder the send uses. */}
+      <Dialog open={!!mailPreview} onClose={() => setMailPreview(null)} fullWidth maxWidth="md" dir="rtl">
+        <DialogTitle sx={{ pb: 0.5 }}>
+          תצוגה מקדימה — המייל לרו״ח
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 400 }}>
+            נושא: {mailPreview?.subject}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 0.75 }}>
+            {mailPreview?.attachment_name
+              ? <Chip size="small" color="primary" variant="outlined"
+                  label={`📎 ${mailPreview.attachment_name} · ${mailPreview.attachment_pages} עמודים`} />
+              : <Chip size="small" variant="outlined" label="ללא קובץ מצורף" />}
+            {!!mailPreview?.approved_count && <Chip size="small" color="success" variant="outlined" label={`${mailPreview.approved_count} מאושרים ברשימה`} />}
+          </Stack>
+        </DialogTitle>
+        <DialogContent dividers sx={{ p: 0, height: '70vh' }}>
+          {mailPreview && (
+            <iframe
+              title="email-preview"
+              srcDoc={mailPreview.html}
+              sandbox=""
+              style={{ width: '100%', height: '100%', border: 0, background: '#fff' }}
+            />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMailPreview(null)}>סגור</Button>
+          <Button variant="contained" startIcon={<EmailIcon />} disabled={emailSending}
+            onClick={async () => { setMailPreview(null); await sendEmail(); }}>
+            שלח
           </Button>
         </DialogActions>
       </Dialog>
