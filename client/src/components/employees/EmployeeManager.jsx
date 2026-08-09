@@ -156,6 +156,35 @@ function mergePrimaryAmuta(existing, form) {
   return dist;
 }
 
+
+/* What this employee record still lacks. Blocking gaps stop the month being
+   paid or the person being identified; the rest just make later steps harder.
+   Shown as a count so the column stays narrow, with the actual list on hover —
+   a full-width red row per employee would make the table unreadable. */
+function MissingChip({ missing }) {
+  const list = missing || [];
+  if (list.length === 0) {
+    return <Chip size="small" color="success" variant="outlined" label="✓" sx={{ height: 20, fontSize: 11 }} />;
+  }
+  const blocking = list.filter((m) => m.level === 'blocking');
+  const warn = list.filter((m) => m.level !== 'blocking');
+  return (
+    <Tooltip
+      title={
+        <Box sx={{ fontSize: 12 }}>
+          {blocking.length > 0 && <><b>חוסם תשלום:</b><br />{blocking.map((m) => `• ${m.label}`).join('\n').split('\n').map((t, i) => <span key={i}>{t}<br /></span>)}</>}
+          {warn.length > 0 && <><b>חסר:</b><br />{warn.map((m) => `• ${m.label}`).join('\n').split('\n').map((t, i) => <span key={i}>{t}<br /></span>)}</>}
+        </Box>
+      }
+    >
+      <Stack direction="row" spacing={0.25} justifyContent="center">
+        {blocking.length > 0 && <Chip size="small" color="error" label={blocking.length} sx={{ height: 20, fontSize: 11, fontWeight: 800 }} />}
+        {warn.length > 0 && <Chip size="small" color="warning" variant="outlined" label={warn.length} sx={{ height: 20, fontSize: 11 }} />}
+      </Stack>
+    </Tooltip>
+  );
+}
+
 export default function EmployeeManager() {
   const { isAdmin, isManager, isAccountant } = useAuth();
   const navigate = useNavigate();
@@ -184,6 +213,8 @@ export default function EmployeeManager() {
   // Inline editing: { empId, field, value }
   const [inlineEdit, setInlineEdit] = useState(null);
   const [search, setSearch] = useState('');
+  // Narrow the roster to records that are still missing something.
+  const [onlyIncomplete, setOnlyIncomplete] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
   const fetchEmployees = useCallback(() => {
@@ -432,15 +463,30 @@ export default function EmployeeManager() {
   }), [employees]);
 
   const filteredEmployees = useMemo(() => {
-    if (!search.trim()) return employees;
+    let list = employees;
+    if (onlyIncomplete) list = list.filter(e => (e.missing_fields || []).length > 0);
+    if (!search.trim()) return list;
     const q = search.trim().toLowerCase();
-    return employees.filter(e =>
+    return list.filter(e =>
       (e.full_name || '').toLowerCase().includes(q) ||
       (e.israeli_id || '').includes(q) ||
       (e.position || '').toLowerCase().includes(q) ||
-      (e.phone || '').includes(q)
+      (e.phone || '').includes(q) ||
+      (e.email || '').toLowerCase().includes(q)
     );
-  }, [employees, search]);
+  }, [employees, search, onlyIncomplete]);
+
+  // How much of the roster is unusable as-is. Blocking gaps mean the month
+  // cannot be paid for that person, so they get counted separately.
+  const gapStats = useMemo(() => {
+    let blocking = 0, warning = 0;
+    for (const e of employees) {
+      const m = e.missing_fields || [];
+      if (m.some(x => x.level === 'blocking')) blocking++;
+      else if (m.length) warning++;
+    }
+    return { blocking, warning };
+  }, [employees]);
 
   // Group filtered employees by branch (only used when "all branches" view).
   const employeesByBranch = useMemo(() => {
@@ -469,6 +515,19 @@ export default function EmployeeManager() {
             {totalCount} עובדים
             {missingIdCount > 0 && ` • ${missingIdCount} בלי ת״ז`}
           </Typography>
+          {(gapStats.blocking > 0 || gapStats.warning > 0) && (
+            <Stack direction="row" spacing={0.75} sx={{ mt: 0.75 }} alignItems="center">
+              {gapStats.blocking > 0 && (
+                <Chip size="small" color="error" label={`${gapStats.blocking} חוסמים תשלום`} sx={{ fontWeight: 700 }} />
+              )}
+              {gapStats.warning > 0 && (
+                <Chip size="small" color="warning" variant="outlined" label={`${gapStats.warning} עם נתונים חסרים`} />
+              )}
+              <Button size="small" onClick={() => setOnlyIncomplete(v => !v)} sx={{ fontSize: 12 }}>
+                {onlyIncomplete ? 'הצג את כולם' : 'הצג רק חסרים'}
+              </Button>
+            </Stack>
+          )}
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
           <TextField
@@ -531,10 +590,12 @@ export default function EmployeeManager() {
               <TableCell sx={{ fontWeight: 700 }}>ת״ז</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>תפקיד</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>טלפון</TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>אימייל</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>סוג שכר</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">שכר / תעריף</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">שעות חובה</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">נסיעות</TableCell>
+              <TableCell sx={{ fontWeight: 700 }} align="center">שלמות</TableCell>
               {canManage && <TableCell align="center">פעולות</TableCell>}
             </TableRow>
           </TableHead>
@@ -566,6 +627,8 @@ export default function EmployeeManager() {
                     </TableCell>
                     <TableCell>{emp.position || '—'}</TableCell>
                     <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
+                    <EditableCell empId={empId} field="email" value={emp.email} displayValue={emp.email || '—'} dir="ltr"
+                      sx={{ fontSize: '0.8rem', color: emp.email ? 'text.primary' : 'warning.main' }} />
                     <TableCell>
                       <Chip
                         label={emp.salary_type === 'global' ? 'תקן' : 'שעתי'}
@@ -580,6 +643,7 @@ export default function EmployeeManager() {
                       {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
                     </TableCell>
                     <EditableCell empId={empId} field="travel_allowance" value={emp.travel_allowance} displayValue={emp.travel_allowance ? `₪${emp.travel_allowance}` : '—'} align="center" />
+                    <TableCell align="center"><MissingChip missing={emp.missing_fields} /></TableCell>
                     {canManage && (
                       <TableCell align="center">
                         <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
@@ -659,7 +723,7 @@ export default function EmployeeManager() {
                   </TableRow>
                 );
               };
-              if (loading) return <TableRow><TableCell colSpan={9} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
+              if (loading) return <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
               const out = [];
               if (employeesByBranch) {
                 const ordered = (branches || [])
@@ -672,7 +736,7 @@ export default function EmployeeManager() {
                   const list = employeesByBranch.get(bid) || [];
                   out.push(
                     <TableRow key={`hdr-${bid}`} sx={{ bgcolor: color.header }}>
-                      <TableCell colSpan={canManage ? 9 : 8} sx={{
+                      <TableCell colSpan={canManage ? 11 : 10} sx={{
                         fontWeight: 900, fontSize: '0.9rem', py: 1,
                         color: color.accent, borderTop: '3px solid', borderColor: color.border,
                       }}>
@@ -683,13 +747,13 @@ export default function EmployeeManager() {
                   for (const emp of list) out.push(renderEmp(emp));
                 }
                 if (out.length === 0) {
-                  out.push(<TableRow key="empty"><TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.disabled' }}>אין עובדים תואמים את החיפוש</TableCell></TableRow>);
+                  out.push(<TableRow key="empty"><TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.disabled' }}>אין עובדים תואמים את החיפוש</TableCell></TableRow>);
                 }
                 return out;
               }
               // Single-branch view: simple flat list
               if (filteredEmployees.length === 0) {
-                return <TableRow><TableCell colSpan={9} align="center" sx={{ py: 4, color: 'text.disabled' }}>{search ? 'אין עובדים תואמים את החיפוש' : 'אין עובדים בסניף זה'}</TableCell></TableRow>;
+                return <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.disabled' }}>{search ? 'אין עובדים תואמים את החיפוש' : 'אין עובדים בסניף זה'}</TableCell></TableRow>;
               }
               return filteredEmployees.map(renderEmp);
             })()}

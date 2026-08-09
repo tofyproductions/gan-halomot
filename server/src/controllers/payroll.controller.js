@@ -122,6 +122,43 @@ function summarizeDay(dayPunches, resolution) {
 
 // --- Employee CRUD --------------------------------------------------------
 
+/**
+ * What an employee record is missing before payroll can run cleanly.
+ *
+ * These gaps used to surface one at a time, at the worst moment — a salary
+ * that can't be paid because there is no bank account, a payslip that can't be
+ * emailed because there is no address. The list screen can say so up front.
+ *
+ * `formIds` is the set of employee ids that have a טופס 101 on file. There is
+ * no structured document type, so it is matched on the document's label —
+ * a heuristic, and deliberately the only one here: everything else is a
+ * straightforward "is this field empty".
+ */
+function missingFieldsFor(emp, formIds) {
+  const miss = [];
+  const blank = (v) => v === null || v === undefined || String(v).trim() === '';
+  // 'blocking' stops the month from being paid or the person from being
+  // identified. 'warning' is everything that merely makes life harder later.
+  const add = (label, level) => miss.push({ label, level });
+
+  if (blank(emp.israeli_id)) add('ת״ז', 'blocking');
+  if (blank(emp.bank_number) || blank(emp.bank_branch) || blank(emp.bank_account)) add('חשבון בנק', 'blocking');
+
+  // A rate can live either at the top level or per-amuta; either one counts.
+  const dist = emp.amuta_distribution || [];
+  if (emp.salary_type === 'global') {
+    if (!(emp.global_salary || dist.some((d) => d.global_salary))) add('שכר תקן', 'blocking');
+  } else if (!(emp.hourly_rate || dist.some((d) => d.hourly_rate))) {
+    add('תעריף שעתי', 'blocking');
+  }
+
+  if (blank(emp.phone)) add('טלפון', 'warning');
+  if (blank(emp.email)) add('אימייל', 'warning');
+  if (!emp.start_date) add('תאריך תחילה', 'warning');
+  if (!formIds.has(String(emp._id))) add('טופס 101', 'warning');
+  return miss;
+}
+
 async function listEmployees(req, res, next) {
   try {
     const { branch, active } = req.query;
@@ -150,10 +187,20 @@ async function listEmployees(req, res, next) {
       .sort({ full_name: 1 })
       .lean();
 
+    // One pass for everyone who has a טופס 101 attached, so the per-employee
+    // check below stays a pure function over data already in hand.
+    const { EmployeeDocument } = require('../models');
+    const formDocs = await EmployeeDocument.find({
+      employee_id: { $in: employees.map((e) => e._id) },
+      $or: [{ name: /101/ }, { file_name: /101/ }],
+    }).select('employee_id').lean();
+    const formIds = new Set(formDocs.map((d) => String(d.employee_id)));
+
     res.json({
       employees: employees.map(e => ({
         ...e,
         id: e._id,
+        missing_fields: missingFieldsFor(e, formIds),
         branch_name: e.branch_id?.name || null,
         branch_id: e.branch_id?._id || e.branch_id,
         // Flatten the first amuta's rate into top-level display fields so the
