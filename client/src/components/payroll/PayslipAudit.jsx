@@ -350,7 +350,7 @@ function PerEmployeePairedView({
   const rejectedCount = allFindings.filter((f) => f.status === 'rejected').length;
   const pendingCount  = allFindings.filter((f) => !f.status || f.status === 'pending').length;
   // Corrections decide what travels; the ✓ נבדק tick is review progress only.
-  const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
+  const sendable = (f) => f.status !== 'rejected' && f.settled !== 'fixed' && f.message && f.message.trim();
   const willSendCount = editableResults.reduce((s, r) => s + r.findings.filter(sendable).length, 0);
   const reviewedCount = editableResults.filter((_, idx) => reviewedMap?.[idx]).length;
   const cleanCount = editableResults.filter((r) => r.findings.filter(sendable).length === 0).length;
@@ -850,6 +850,16 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
+                {/* Already settled by a correction round — say so, and say
+                    which round, rather than leaving it looking unsent. */}
+                {f.settled === 'fixed' && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5, mr: 11 }}>
+                    <Chip size="small" color="success" label={`✓ תוקן בסבב ${f.settled_round}`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                      לא יישלח שוב לרו״ח
+                    </Typography>
+                  </Stack>
+                )}
                 {/* Verification toolbar — teach the system which findings to act on */}
                 <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5, mr: 11 }}>
                   <Button
@@ -2677,7 +2687,7 @@ export default function PayslipAudit() {
       .map((r, idx) => ({ r, idx }))
       .filter(({ idx }) => {
         const live = (editableResults[idx]?.findings || [])
-          .filter((f) => f.message && f.message.trim() && f.status !== 'rejected');
+          .filter((f) => f.message && f.message.trim() && f.status !== 'rejected' && f.settled !== 'fixed');
         return live.length === 0;
       })
       .map(({ r, idx }) => ({
@@ -2883,7 +2893,7 @@ export default function PayslipAudit() {
       .map((r, idx) => ({
         ...r,
         __audit_idx: idx,
-        findings: r.findings.filter((f) => f.message && f.message.trim() && f.status !== 'rejected'),
+        findings: r.findings.filter((f) => f.message && f.message.trim() && f.status !== 'rejected' && f.settled !== 'fixed'),
       }))
       .filter((r) => r.findings.length > 0);
     return {
@@ -2926,8 +2936,10 @@ export default function PayslipAudit() {
       .map((r, idx) => ({
         ...r,
         __audit_idx: idx,
+        // Settled-as-fixed notes are done — asking for them again is how the
+        // accountant got a list of the seven things he had just corrected.
         findings: r.findings.filter((f) =>
-          f.message && f.message.trim() && f.status !== 'rejected'
+          f.message && f.message.trim() && f.status !== 'rejected' && f.settled !== 'fixed'
         ),
       }))
       .filter((r) => r.findings.length > 0);
@@ -3017,7 +3029,10 @@ export default function PayslipAudit() {
     }
     setReviewedMap(audit.reviewed_payslips || {});
     const savedEdits = audit.editor_verifications || {}; // { auditIdx: [{field, message, status, note}] }
+    // Verdicts the correction rounds reached, keyed `employeeKey::message`.
+    const settled = audit.settled_notes || {};
     const cloned = audit.results.map((r, idx) => {
+      const empKey = resultKey(r);
       const savedFindings = savedEdits[idx] || [];
       const findingsList = r.findings
         .filter((f) => f.severity === 'critical' || f.severity === 'warning')
@@ -3036,6 +3051,13 @@ export default function PayslipAudit() {
         if (!findingsList.find((f) => f.message === ms.message)) {
           findingsList.push({ ...ms, status: ms.status || 'approved' });
         }
+      }
+      // Stamp what the correction rounds concluded. A note settled as fixed is
+      // finished: it stays visible with its verdict, but stops being something
+      // we ask the accountant for again.
+      for (const f of findingsList) {
+        const s = settled[`${empKey}::${f.message}`];
+        if (s) { f.settled = s.verdict; f.settled_round = s.round_no; }
       }
       return { ...r, findings: findingsList };
     });
@@ -3980,7 +4002,7 @@ export default function PayslipAudit() {
                 side, so it's obvious before sending that he gets the fixes AND
                 the list of payslips he can skip. */}
             {(() => {
-              const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
+              const sendable = (f) => f.status !== 'rejected' && f.settled !== 'fixed' && f.message && f.message.trim();
               const toFix = editableResults
                 .map((r, idx) => ({ r, idx }))
                 .filter(({ r }) => r.findings.filter(sendable).length > 0);

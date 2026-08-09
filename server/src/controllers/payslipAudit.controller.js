@@ -733,6 +733,9 @@ async function getAuditFromHistory(req, res) {
       created_by_name: doc.created_by_name,
       table_filename: doc.table_filename,
       payslip_files: doc.payslip_files,
+      // Verdicts the correction rounds reached, so the editor and the mail can
+      // drop what is already done instead of asking for it a second time.
+      settled_notes: settledNotesFrom(doc),
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'שגיאה בטעינת ביקורת' });
@@ -1126,17 +1129,47 @@ async function getCycleProgression(req, res) {
  * the editor) we fall back to its critical/warning findings — the email treats
  * an untouched finding as "send it", so the round has to grade it too.
  */
+/**
+ * Every note a correction round has already settled, keyed `employeeKey::message`.
+ *
+ * Rounds are walked in order, so the latest verdict wins — a note fixed in
+ * round 1 that regresses in round 2 counts as open again.
+ *
+ * Without this the verdict was a dead end: marking seven notes ✓ תוקן changed
+ * the round and nothing else, so the next mail asked the accountant to fix
+ * exactly the seven things he had just fixed.
+ */
+function settledNotesFrom(doc) {
+  const settled = {};
+  for (const round of doc.fix_rounds || []) {
+    for (const it of round.items || []) {
+      for (const n of it.notes || []) {
+        settled[`${it.key}::${n.message}`] = {
+          verdict: n.manual_verdict || n.auto_verdict,
+          round_no: round.round_no,
+        };
+      }
+    }
+  }
+  return settled;
+}
+
 function fixTargetsFrom(doc) {
   const full = doc.full_result || {};
   const results = full.results || [];
   const verifications = full.editor_verifications || {};
+  const settled = settledNotesFrom(doc);
   const targets = [];
   results.forEach((r, idx) => {
+    const key = targetKey(r);
     const saved = verifications[idx];
     const notes = (saved
       ? saved
       : (r.findings || []).filter((f) => f.severity === 'critical' || f.severity === 'warning')
-    ).filter((n) => n.status !== 'rejected' && n.message && String(n.message).trim());
+    ).filter((n) => n.status !== 'rejected' && n.message && String(n.message).trim())
+      // A note a round already settled as fixed is done — it must not be sent
+      // back to the accountant, and it must not re-open the next round.
+      .filter((n) => settled[`${key}::${n.message}`]?.verdict !== 'fixed');
     if (!notes.length) return;
     targets.push({ audit_idx: idx, result: r, notes });
   });
