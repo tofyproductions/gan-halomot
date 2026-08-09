@@ -96,6 +96,94 @@ function plannedHoursFor(schedule, dateStr) {
   return { in: day.in, out: day.out, from_exception: false };
 }
 
+// ── Minute-level variation ─────────────────────────────────────────────────
+//
+// A month of days that all start at exactly 08:00 and end at exactly 16:30
+// reads as a machine's output, because it is one — nobody arrives on the
+// second. The times are spread within ±MAX_JITTER minutes so the record shows
+// the precision it actually has.
+//
+// Two properties make this safe to keep regenerating:
+//
+//   • DETERMINISTIC. The offset comes from a hash of (employee, date), never
+//     from a random source. Re-materializing the same month reproduces the
+//     same times, so a day cannot silently change under an already-approved
+//     report, and a regenerated month stays byte-identical to what payroll
+//     already saw.
+//   • BALANCED PER MONTH. Offsets are nudged until the month's total minutes
+//     land exactly on the planned total, so a longer morning is always paid
+//     back by a shorter one. Variation changes how the days look, never how
+//     many hours the month contains.
+//
+// Days driven by an explicit exception are left alone: a human typed those
+// hours on purpose and they are not ours to move.
+const MAX_JITTER = 10;
+
+/** Stable 31-bit hash — same inputs, same number, on every machine and run. */
+function hash32(...parts) {
+  let h = 0x811c9dc5;
+  const s = parts.join('|');
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+/** Deterministic offset in [-MAX_JITTER, +MAX_JITTER] minutes. */
+function jitterFor(employeeId, dateStr, slot) {
+  return (hash32(String(employeeId), dateStr, slot) % (MAX_JITTER * 2 + 1)) - MAX_JITTER;
+}
+
+function addMinutes(hhmm, delta) {
+  const [h, m] = hhmm.split(':').map(Number);
+  let total = h * 60 + m + delta;
+  total = Math.max(0, Math.min(23 * 60 + 59, total));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Spread one employee's days for a month, then settle the books.
+ *
+ * `entries` is [{ date, planned }] for a single employee, in date order.
+ * Returns the same list with `planned.in/out` shifted, leaving exception days
+ * untouched and the month's total identical to the plan.
+ */
+function applyJitter(employeeId, entries) {
+  const movable = entries.filter(e => !e.planned.from_exception);
+  if (movable.length === 0) return entries;
+
+  const offsets = movable.map(e => ({
+    e,
+    in: jitterFor(employeeId, e.date, 'in'),
+    out: jitterFor(employeeId, e.date, 'out'),
+  }));
+
+  // Drift = minutes this month gained (or lost) against the plan. Walk the days
+  // in order nudging the departure by a minute at a time — each stays inside
+  // the ±MAX_JITTER band, and with ~22 days there is far more headroom than
+  // the worst-case drift needs.
+  let drift = offsets.reduce((s, o) => s + (o.out - o.in), 0);
+  for (let pass = 0; drift !== 0 && pass < MAX_JITTER * 2 + 2; pass++) {
+    for (const o of offsets) {
+      if (drift === 0) break;
+      const step = drift > 0 ? -1 : 1;          // over-worked → leave earlier
+      if (Math.abs(o.out + step) > MAX_JITTER) continue;
+      o.out += step;
+      drift += step > 0 ? 1 : -1;
+    }
+  }
+
+  for (const o of offsets) {
+    o.e.planned = {
+      ...o.e.planned,
+      in: addMinutes(o.e.planned.in, o.in),
+      out: addMinutes(o.e.planned.out, o.out),
+    };
+  }
+  return entries;
+}
+
 /** Employees with an active fixed schedule, optionally narrowed to branches. */
 async function scheduledEmployees({ branchIds = null, employeeIds = null } = {}) {
   // Never materialize hours for someone the system does not pay — the hours
@@ -180,8 +268,32 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
 
   if (toCreate.length === 0) return { created: 0, conflicts };
 
+  // Spread the times — but balance each employee over the WHOLE month, not
+  // just the days being written now. The month fills a day at a time, so
+  // balancing only the current batch would settle every day against itself and
+  // produce no variation at all. Working from the complete month also means a
+  // day's time never shifts as later days arrive: what payroll saw on the 9th
+  // is still what it sees on the 30th.
+  const wholeMonth = datesInMonth(month, null);
+  const adjusted = new Map(); // 'empId|date' → { in, out }
+  for (const emp of employees) {
+    const sched = emp.fixed_schedule || {};
+    const empStart = emp.start_date ? ISR_DAY(emp.start_date) : null;
+    const floor = [sched.start_date, empStart].filter(Boolean).sort().pop() || null;
+    const entries = [];
+    for (const date of wholeMonth) {
+      if (floor && date < floor) continue;
+      const planned = plannedHoursFor(sched, date);
+      if (planned) entries.push({ date, planned });
+    }
+    for (const e of applyJitter(emp._id, entries)) {
+      adjusted.set(`${String(emp._id)}|${e.date}`, e.planned);
+    }
+  }
+
   const docs = [];
-  toCreate.forEach(({ emp, date, planned }) => {
+  toCreate.forEach(({ emp, date, planned: basePlanned }) => {
+    const planned = adjusted.get(`${String(emp._id)}|${date}`) || basePlanned;
     const inSn = syntheticSn(emp._id, date, 0);
     const outSn = syntheticSn(emp._id, date, 1);
     const note = planned.from_exception ? 'שעות קבועות (חריג ליום זה)' : 'שעות קבועות';
