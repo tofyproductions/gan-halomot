@@ -26,6 +26,18 @@ router.post(
   publicController.uploadDocument
 );
 
+// --- Accountant's corrected-payslip upload (token only, no account) ---
+// The page shows the month and the notes we already emailed him, and accepts
+// the corrected PDFs straight into a new correction round.
+const payslipAudit = require('../controllers/payslipAudit.controller');
+router.get('/payslip-fix/:token', payslipAudit.publicFixInfo);
+router.post(
+  '/payslip-fix/:token/upload',
+  multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } })
+    .fields(Array.from({ length: 10 }, (_, i) => ({ name: `payslip_file_${i}`, maxCount: 1 }))),
+  payslipAudit.publicFixUpload
+);
+
 // --- Employment contract signing (employee's phone, token only) ---
 // GET /api/public/contract/:token
 router.get('/contract/:token', require('../controllers/employmentContracts.controller').publicGet);

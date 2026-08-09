@@ -109,6 +109,7 @@ function buildAuditEmailHtml(audit, options = {}) {
   const approved = options.approvedPayslips || [];
   const approvedCount = approved.length;
   const attachmentName = options.attachmentName || '';
+  const fixUrl = options.fixUrl || '';
 
   let totalCritical = 0;
   let totalWarning = 0;
@@ -240,6 +241,15 @@ function buildAuditEmailHtml(audit, options = {}) {
   ${blocks || '<p style="color:#2e7d32; font-weight:700;">✓ לא נמצאו אי-התאמות הדורשות תיקון.</p>'}
   ${buildApprovedBlockHtml(approved)}
   ${footerExtras.join('')}
+  ${fixUrl ? `
+  <div style="margin:20px 0 4px; padding:14px; border:2px solid #1976d2; border-radius:8px; background:#f3f8fd; text-align:center;">
+    <p style="margin:0 0 10px; font-size:14px; font-weight:800; color:#0d47a1;">אחרי התיקונים — העלה את התלושים המתוקנים כאן</p>
+    <p style="margin:0 0 12px; font-size:12px; color:#33618f;">
+      נבדוק כל הערה מול התלוש החדש ונחזור אליך רק אם משהו נשאר פתוח. אין צורך בחשבון.
+    </p>
+    <a href="${escapeHtml(fixUrl)}" style="display:inline-block; background:#1976d2; color:#fff; text-decoration:none; padding:10px 26px; border-radius:6px; font-weight:800; font-size:14px;">העלאת תלושים מתוקנים</a>
+    <p style="margin:10px 0 0; font-size:10.5px; color:#7b93ad; direction:ltr;">${escapeHtml(fixUrl)}</p>
+  </div>` : ''}
   <p style="color:#999; font-size:11px; margin-top:24px; border-top:1px solid #eee; padding-top:8px;">
     דו"ח זה נוצר אוטומטית ממערכת גן החלומות.
   </p>
@@ -302,6 +312,12 @@ function buildAuditEmailText(audit, options = {}) {
       const { name, meta } = employeeLabel(e);
       lines.push(`  - ${name}${meta ? ` (${meta})` : ''}`);
     }
+  }
+
+  if (options.fixUrl) {
+    lines.push('');
+    lines.push('להעלאת התלושים המתוקנים (ללא צורך בחשבון):');
+    lines.push(options.fixUrl);
   }
 
   lines.push('');

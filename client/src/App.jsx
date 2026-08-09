@@ -39,6 +39,7 @@ import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import EmployeeLetters from './components/employees/EmployeeLetters';
 import ContractSigning from './components/employees/ContractSigning';
+import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
@@ -58,6 +59,8 @@ function AppRoutes() {
       <Route path="/register/:token" element={<ParentOnboarding />} />
       <Route path="/event/:token" element={<EventSignup />} />
       <Route path="/sign-contract/:token" element={<ContractSigning />} />
+      {/* The accountant's corrected-payslip upload — token only, no account. */}
+      <Route path="/payslip-fix/:token" element={<PayslipFixUpload />} />
       {/* Public new-parent inquiry (marketed link). Standalone, outside the shell. */}
       <Route path="/lead" element={<LeadForm />} />
       <Route path="/lead/:branchId" element={<LeadForm />} />

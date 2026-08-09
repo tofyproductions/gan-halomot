@@ -618,8 +618,13 @@ async function emailAudit(req, res) {
       }
     }
 
-    const html = buildAuditEmailHtml(audit, { introText, approvedPayslips, attachmentName });
-    const text = buildAuditEmailText(audit, { introText, approvedPayslips, attachmentName });
+    // The accountant's own upload link, so the corrections and the way to
+    // answer them arrive together instead of the office relaying files by hand.
+    const fixUrl = typeof req.body.fix_url === 'string' && /^https?:\/\//.test(req.body.fix_url.trim())
+      ? req.body.fix_url.trim() : '';
+
+    const html = buildAuditEmailHtml(audit, { introText, approvedPayslips, attachmentName, fixUrl });
+    const text = buildAuditEmailText(audit, { introText, approvedPayslips, attachmentName, fixUrl });
 
     const result = await dispatchEmail({
       to,
@@ -1046,6 +1051,397 @@ async function getCycleProgression(req, res) {
     });
   } catch (err) {
     res.status(500).json({ error: err.message || 'שגיאה בטעינת השוואת סבבים' });
+  }
+}
+
+// ── Correction rounds ──────────────────────────────────────────────────────
+//
+// The office sends the accountant a list of notes. He fixes the payslips and
+// sends them back. The only question then is whether each note was acted on —
+// but answering it meant deleting the audit and re-running everything from the
+// salary table, which threw away the notes along with the answer. A round
+// keeps the audit intact: it re-reads ONLY the employees that had notes, and
+// grades note by note.
+
+/**
+ * The employees + notes that went to the accountant, exactly as the email
+ * decided them: ✓ טופל payslips are excluded, rejected findings are dropped.
+ *
+ * If a result has no saved verification entry (the manager never touched it in
+ * the editor) we fall back to its critical/warning findings — the email treats
+ * an untouched finding as "send it", so the round has to grade it too.
+ */
+function fixTargetsFrom(doc) {
+  const full = doc.full_result || {};
+  const results = full.results || [];
+  const verifications = full.editor_verifications || {};
+  const reviewed = full.reviewed_payslips || {};
+  const targets = [];
+  results.forEach((r, idx) => {
+    if (reviewed[idx]) return;                       // ticked ✓ טופל — never sent
+    const saved = verifications[idx];
+    const notes = (saved
+      ? saved
+      : (r.findings || []).filter((f) => f.severity === 'critical' || f.severity === 'warning')
+    ).filter((n) => n.status !== 'rejected' && n.message && String(n.message).trim());
+    if (!notes.length) return;
+    targets.push({ audit_idx: idx, result: r, notes });
+  });
+  return targets;
+}
+
+function targetKey(r) {
+  const id = r.payslip?.employee_id || r.table_row?.employee_id;
+  if (id) return `id:${id}`;
+  const name = (r.table_row?.employee_name || r.payslip?.employee_name || '').trim();
+  const branch = (r.table_row?.branch || r.__source_branch || '').replace(/\s+/g, ' ').trim();
+  return `nm:${name}::${branch}`;
+}
+
+/**
+ * Re-check one round of corrected payslips against the notes that were sent.
+ *
+ * `entries` is [{ branch, file }] — the same per-branch shape the original run
+ * uses. The salary table is NOT re-uploaded: the table rows stored with the
+ * audit are the reference, which is the whole point (the accountant corrected
+ * the payslips, not the table).
+ */
+async function runFixRound(doc, entries, { source = 'internal', user = null, note = '' } = {}) {
+  const targets = fixTargetsFrom(doc);
+  if (targets.length === 0) {
+    const err = new Error('אין הערות פתוחות בביקורת הזו — אין מה לאמת');
+    err.status = 400;
+    throw err;
+  }
+
+  const roundNo = (doc.fix_rounds?.length || 0) + 1;
+
+  // Parse each uploaded PDF and tag every payslip with the branch it came from,
+  // so the round's per-employee preview knows which file holds its page.
+  const freshPayslips = [];
+  for (const entry of entries) {
+    const parsed = await parsePayslipsPdf(entry.file.buffer);
+    for (const p of parsed.payslips || []) {
+      delete p.raw_text;                 // never persist the full page text
+      p.__round_branch = entry.branch;
+      freshPayslips.push(p);
+    }
+    await storePayslipPdfDb(doc._id, entry.branch, entry.file.buffer, `fix_${roundNo}`);
+  }
+
+  // Compare the NEW payslips against the SAVED table rows of the flagged
+  // employees only. The comparator returns the very table_row objects we
+  // passed in, so results map back to targets by reference — no re-matching.
+  const tableRows = targets.map((t) => t.result.table_row).filter(Boolean);
+  const fresh = comparePayslipsToTable(tableRows, freshPayslips);
+  const byRow = new Map();
+  for (const fr of fresh.results) if (fr.table_row) byRow.set(fr.table_row, fr);
+
+  const items = [];
+  const summary = { employees: 0, notes: 0, fixed: 0, not_fixed: 0, manual: 0, unmatched: 0, new_issues: 0 };
+
+  for (const t of targets) {
+    const fr = t.result.table_row ? byRow.get(t.result.table_row) : null;
+    const matched = !!(fr && fr.payslip);
+
+    // Live problems in the new payslip, indexed by field.
+    const stillByField = new Map();
+    if (matched) {
+      for (const f of fr.findings || []) {
+        if (f.severity === 'critical' || f.severity === 'warning') stillByField.set(f.field, f);
+      }
+    }
+
+    const noteFields = new Set();
+    const notes = t.notes.map((n) => {
+      if (n.field) noteFields.add(n.field);
+      // A note with no machine field behind it — one the manager typed by hand —
+      // cannot be graded automatically. It goes to the user as a question, not
+      // as a wrong answer.
+      if (!matched || !n.field || n.field === 'manual') {
+        return {
+          field: n.field || 'manual',
+          severity: n.severity || 'critical',
+          message: n.message,
+          auto_verdict: 'manual',
+          manual_verdict: null,
+          still_expected: null,
+          still_actual: null,
+          reply: '',
+        };
+      }
+      const still = stillByField.get(n.field);
+      return {
+        field: n.field,
+        severity: n.severity || 'critical',
+        message: n.message,
+        auto_verdict: still ? 'not_fixed' : 'fixed',
+        manual_verdict: null,
+        still_expected: still ? still.expected : null,
+        still_actual: still ? still.actual : null,
+        reply: '',
+      };
+    });
+
+    // A correction that broke something else — flagged separately so it never
+    // hides inside a "fixed" row.
+    const newFindings = matched
+      ? (fr.findings || [])
+          .filter((f) => (f.severity === 'critical' || f.severity === 'warning') && !noteFields.has(f.field))
+          .map((f) => ({ field: f.field, severity: f.severity, message: f.message, expected: f.expected, actual: f.actual }))
+      : [];
+
+    summary.employees += 1;
+    summary.notes += notes.length;
+    for (const n of notes) summary[n.auto_verdict === 'fixed' ? 'fixed' : n.auto_verdict === 'not_fixed' ? 'not_fixed' : 'manual'] += 1;
+    if (!matched) summary.unmatched += 1;
+    summary.new_issues += newFindings.length;
+
+    items.push({
+      key: targetKey(t.result),
+      audit_idx: t.audit_idx,
+      employee_name: t.result.table_row?.employee_name || t.result.payslip?.employee_name || '—',
+      branch: (t.result.__source_branch || t.result.table_row?.branch || '').replace(/\s+/g, ' ').trim(),
+      employee_no: fr?.payslip?.employee_no ?? t.result.payslip?.employee_no ?? null,
+      employee_id: fr?.payslip?.employee_id || t.result.payslip?.employee_id || '',
+      page_index: fr?.payslip?.page_index || null,
+      round_branch: fr?.payslip?.__round_branch || null,
+      matched,
+      notes,
+      new_findings: newFindings,
+    });
+  }
+
+  doc.fix_rounds.push({
+    round_no: roundNo,
+    created_at: new Date(),
+    created_by: user?.id || null,
+    created_by_name: source === 'accountant' ? 'רו״ח (העלאה חיצונית)' : (user?.full_name || ''),
+    source,
+    note: String(note || '').slice(0, 2000),
+    uploaded_files: entries.map((e) => ({ branch: e.branch, filename: e.file.originalname })),
+    items,
+    summary,
+  });
+  await doc.save();
+  return doc.fix_rounds[doc.fix_rounds.length - 1];
+}
+
+/** Pull the per-branch payslip uploads out of a multipart request. */
+function payslipEntriesFrom(req) {
+  const entries = [];
+  for (const key of Object.keys(req.files || {})) {
+    const m = key.match(/^payslip_file_(\d+)$/);
+    if (!m) continue;
+    const idx = Number(m[1]);
+    const file = req.files[key][0];
+    const branch = (req.body[`branch_${idx}`] || '').trim();
+    if (!branch) {
+      const err = new Error(`חסר שם סניף לקובץ ${file.originalname}`);
+      err.status = 400;
+      throw err;
+    }
+    entries.push({ idx, file, branch });
+  }
+  entries.sort((a, b) => a.idx - b.idx);
+  return entries;
+}
+
+/**
+ * POST /payslip-audit/history/:id/fix-round   (multipart)
+ * Fields: payslip_file_<i> + branch_<i>, optional `note`.
+ */
+async function createFixRound(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const entries = payslipEntriesFrom(req);
+    if (entries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
+    const round = await runFixRound(doc, entries, { source: 'internal', user: req.user, note: req.body.note });
+    res.json({ success: true, round });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'שגיאה בהרצת סבב תיקון' });
+  }
+}
+
+/**
+ * GET /payslip-audit/history/:id/fix-rounds
+ * The rounds so far plus the notes still waiting — what the accountant owes us.
+ */
+async function listFixRounds(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const targets = fixTargetsFrom(doc);
+    res.json({
+      year_month: doc.year_month,
+      open_targets: targets.length,
+      open_notes: targets.reduce((s, t) => s + t.notes.length, 0),
+      branches: (doc.payslip_files || []).map((f) => f.branch),
+      rounds: doc.fix_rounds || [],
+      fix_token: doc.fix_token || null,
+      fix_token_expires: doc.fix_token_expires || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בטעינת סבבי תיקון' });
+  }
+}
+
+/**
+ * PATCH /payslip-audit/history/:id/fix-rounds/:roundNo/verdict
+ * Body: { key, note_index, manual_verdict: 'fixed'|'not_fixed'|null, reply }
+ * Lets a human settle the notes the re-check couldn't grade, or overrule it.
+ */
+async function setFixVerdict(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const round = (doc.fix_rounds || []).find((r) => r.round_no === Number(req.params.roundNo));
+    if (!round) return res.status(404).json({ error: 'סבב לא נמצא' });
+    const item = round.items.find((i) => i.key === req.body.key);
+    if (!item) return res.status(404).json({ error: 'עובד לא נמצא בסבב' });
+    const note = item.notes[Number(req.body.note_index)];
+    if (!note) return res.status(404).json({ error: 'הערה לא נמצאה' });
+
+    const v = req.body.manual_verdict;
+    if (v !== undefined) note.manual_verdict = (v === 'fixed' || v === 'not_fixed') ? v : null;
+    if (typeof req.body.reply === 'string') note.reply = req.body.reply.slice(0, 1000);
+
+    // Keep the headline counts honest — they drive the "can we close this
+    // month" call, so a manual decision has to move them.
+    const s = { employees: round.items.length, notes: 0, fixed: 0, not_fixed: 0, manual: 0, unmatched: 0, new_issues: 0 };
+    for (const it of round.items) {
+      s.notes += it.notes.length;
+      if (!it.matched) s.unmatched += 1;
+      s.new_issues += it.new_findings.length;
+      for (const n of it.notes) {
+        const eff = n.manual_verdict || n.auto_verdict;
+        s[eff === 'fixed' ? 'fixed' : eff === 'not_fixed' ? 'not_fixed' : 'manual'] += 1;
+      }
+    }
+    round.summary = s;
+    doc.markModified('fix_rounds');
+    await doc.save();
+    res.json({ success: true, summary: s });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בעדכון הכרעה' });
+  }
+}
+
+/**
+ * GET /payslip-audit/history/:id/fix-rounds/:roundNo/page?branch=&page=
+ * One page out of a round's PDF, for the old-vs-new preview.
+ */
+async function getFixRoundPage(req, res) {
+  try {
+    const roundNo = Number(req.params.roundNo);
+    const branch = (req.query.branch || '').toString();
+    const page = Number(req.query.page);
+    if (!branch || !page) return res.status(400).json({ error: 'נדרש branch ו-page' });
+    const rec = await PayslipAuditPdf.findOne({ audit_id: req.params.id, branch, kind: `fix_${roundNo}` }).lean();
+    if (!rec?.data) return res.status(404).json({ error: 'קובץ הסבב לא נמצא' });
+    const bytes = rec.data.buffer ? Buffer.from(rec.data.buffer) : Buffer.from(rec.data);
+    const out = await extractPage(bytes, page);
+    if (!out) return res.status(404).json({ error: 'עמוד לא נמצא' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.send(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בטעינת עמוד' });
+  }
+}
+
+// ── Accountant upload link ─────────────────────────────────────────────────
+//
+// The accountant has no account here. Rather than make the office the only
+// route in — mail arrives, someone downloads, someone re-uploads — he gets a
+// tokenised page that accepts his corrected PDFs straight into a round. The
+// page exposes only what we already emailed him: the month and his own notes.
+
+const FIX_TOKEN_TTL_DAYS = 30;
+
+/** POST /payslip-audit/history/:id/fix-token → mint (or re-mint) the link. */
+async function createFixToken(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const days = Math.min(Math.max(parseInt(req.body?.days, 10) || FIX_TOKEN_TTL_DAYS, 1), 180);
+    doc.fix_token = require('crypto').randomBytes(24).toString('hex');
+    doc.fix_token_created_at = new Date();
+    doc.fix_token_expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    await doc.save();
+    res.json({ success: true, token: doc.fix_token, expires: doc.fix_token_expires });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה ביצירת קישור' });
+  }
+}
+
+/** DELETE /payslip-audit/history/:id/fix-token → kill the link. */
+async function revokeFixToken(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    doc.fix_token = null;
+    doc.fix_token_expires = null;
+    await doc.save();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בביטול הקישור' });
+  }
+}
+
+async function auditByFixToken(token) {
+  if (!token || String(token).length < 20) return null;
+  const doc = await PayslipAuditRecord.findOne({ fix_token: String(token) });
+  if (!doc) return null;
+  if (doc.fix_token_expires && doc.fix_token_expires.getTime() < Date.now()) return null;
+  return doc;
+}
+
+/**
+ * GET /public/payslip-fix/:token
+ * What the accountant sees before uploading: the month, the branches we expect
+ * files for, and his own notes grouped by employee. No salary figures beyond
+ * the ones already in the notes he received.
+ */
+async function publicFixInfo(req, res) {
+  try {
+    const doc = await auditByFixToken(req.params.token);
+    if (!doc) return res.status(404).json({ error: 'הקישור אינו תקף או שפג תוקפו' });
+    const targets = fixTargetsFrom(doc);
+    res.json({
+      year_month: doc.year_month || '',
+      branches: [...new Set((doc.payslip_files || []).map((f) => f.branch).filter(Boolean))],
+      rounds_so_far: (doc.fix_rounds || []).length,
+      employees: targets.map((t) => ({
+        name: t.result.table_row?.employee_name || t.result.payslip?.employee_name || '—',
+        branch: (t.result.__source_branch || t.result.table_row?.branch || '').replace(/\s+/g, ' ').trim(),
+        employee_no: t.result.payslip?.employee_no ?? null,
+        notes: t.notes.map((n) => ({ severity: n.severity, message: n.message })),
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה' });
+  }
+}
+
+/** POST /public/payslip-fix/:token/upload  (multipart, same fields as a round) */
+async function publicFixUpload(req, res) {
+  try {
+    const doc = await auditByFixToken(req.params.token);
+    if (!doc) return res.status(404).json({ error: 'הקישור אינו תקף או שפג תוקפו' });
+    const entries = payslipEntriesFrom(req);
+    if (entries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
+    const round = await runFixRound(doc, entries, { source: 'accountant', note: req.body.note });
+    // The uploader gets a receipt, not the verdicts — grading the office's own
+    // notes is the office's call to look at first.
+    res.json({
+      success: true,
+      round_no: round.round_no,
+      employees_checked: round.summary.employees,
+      received: entries.map((e) => e.file.originalname),
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'שגיאה בהעלאה' });
   }
 }
 
@@ -2372,4 +2768,12 @@ module.exports = {
   approveAudit,
   unapproveAudit,
   getCycleProgression,
+  createFixRound,
+  listFixRounds,
+  setFixVerdict,
+  getFixRoundPage,
+  createFixToken,
+  revokeFixToken,
+  publicFixInfo,
+  publicFixUpload,
 };

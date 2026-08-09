@@ -201,6 +201,42 @@ router.get(
   requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.getCycleProgression,
 );
+
+// ── Correction rounds — the accountant's corrected payslips, graded note by
+// note against what we asked for. Same per-branch upload shape as run-multi.
+const fixRoundFields = Array.from({ length: 10 }, (_, i) => ({ name: `payslip_file_${i}`, maxCount: 1 }));
+router.post(
+  '/payslip-audit/history/:id/fix-round',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  auditUpload.fields(fixRoundFields),
+  audit.createFixRound,
+);
+router.get(
+  '/payslip-audit/history/:id/fix-rounds',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.listFixRounds,
+);
+router.patch(
+  '/payslip-audit/history/:id/fix-rounds/:roundNo/verdict',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.setFixVerdict,
+);
+router.get(
+  '/payslip-audit/history/:id/fix-rounds/:roundNo/page',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.getFixRoundPage,
+);
+// The accountant's own upload link — minting it is an admin action.
+router.post(
+  '/payslip-audit/history/:id/fix-token',
+  requireRole('system_admin', 'accountant'),
+  audit.createFixToken,
+);
+router.delete(
+  '/payslip-audit/history/:id/fix-token',
+  requireRole('system_admin', 'accountant'),
+  audit.revokeFixToken,
+);
 // Approval workflow — accepts up to 10 corrected payslip PDFs
 router.patch(
   '/payslip-audit/history/:id/approve',

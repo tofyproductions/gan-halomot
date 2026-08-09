@@ -13,7 +13,12 @@ const mongoose = require('mongoose');
 const payslipAuditPdfSchema = new mongoose.Schema({
   audit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PayslipAuditRecord', required: true, index: true },
   branch: { type: String, required: true },
-  kind: { type: String, enum: ['original', 'approved'], default: 'original' },
+  // 'original' | 'approved' | 'fix_<n>' — the accountant's re-submission for
+  // correction round n. Deliberately NOT an enum: each round needs its own
+  // kind so the existing unique {audit_id, branch, kind} index keeps every
+  // round's PDF instead of rounds overwriting each other, and widening the
+  // index on a live collection would need a migration.
+  kind: { type: String, default: 'original' },
   data: { type: Buffer, required: true },
 }, { timestamps: true });
 

@@ -335,7 +335,7 @@ function RecipientEditor({ label, required, chips, onRemove, inputValue, onInput
 function PerEmployeePairedView({
   filteredResults, audit, editableResults, expanded, setExpanded,
   updateFinding, removeFinding, addFinding, removeEmployee, addManualEmployee,
-  onSendEmail, onSaveEdits, reviewedMap, onToggleReviewed,
+  onSendEmail, onSaveEdits, onFixRound, reviewedMap, onToggleReviewed,
 }) {
   const [showAllEmpty, setShowAllEmpty] = useState(false);
   const [newName, setNewName] = useState('');
@@ -407,6 +407,11 @@ function PerEmployeePairedView({
             {onSaveEdits && (
               <Button size="small" variant="outlined" onClick={onSaveEdits}>
                 💾 שמור
+              </Button>
+            )}
+            {onFixRound && (
+              <Button size="small" variant="outlined" color="secondary" startIcon={<CheckCircleIcon />} onClick={onFixRound}>
+                סבב תיקון
               </Button>
             )}
             <Button
@@ -1803,6 +1808,312 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   );
 }
 
+/* ── Correction rounds ──────────────────────────────────────────────────────
+
+   After the notes go out, the accountant sends corrected payslips back. Before
+   this the only way to check him was to delete the audit and re-run the whole
+   month — which threw away the very notes you were trying to verify. Here the
+   audit stays put: upload only the corrected PDFs, and every note gets graded
+   ✓ תוקן / ✗ לא תוקן against the salary table already stored with the audit.
+
+   Notes the manager typed by hand have no machine field behind them, so they
+   can't be graded automatically — they come back as a question to settle by
+   hand rather than as a confident wrong answer.                            */
+
+const VERDICT_LABEL = { fixed: '✓ תוקן', not_fixed: '✗ לא תוקן', manual: '? להכרעה' };
+const VERDICT_COLOR = { fixed: 'success', not_fixed: 'error', manual: 'warning' };
+
+export function FixRoundDialog({ open, auditId, branches = [], onClose }) {
+  const confirm = useConfirm();
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [openRound, setOpenRound] = useState(null);
+  const [preview, setPreview] = useState(null);   // { title, url }
+
+  const load = async () => {
+    if (!auditId) return;
+    setLoading(true);
+    try {
+      const res = await api.get(`/payroll/payslip-audit/history/${auditId}/fix-rounds`);
+      setData(res.data);
+      const list = (res.data.branches?.length ? res.data.branches : branches);
+      setFiles(list.length ? list.map((b) => ({ branch: b, file: null })) : [{ branch: '', file: null }]);
+      setOpenRound(res.data.rounds?.length ? res.data.rounds[res.data.rounds.length - 1].round_no : null);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בטעינת סבבי תיקון');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { if (open) load(); /* eslint-disable-next-line */ }, [open, auditId]);
+  useEffect(() => () => { if (preview?.url) URL.revokeObjectURL(preview.url); }, [preview]);
+
+  const runRound = async () => {
+    const chosen = files.filter((r) => r.file && r.branch.trim());
+    if (chosen.length === 0) { toast.warn('בחר לפחות קובץ תלושים אחד עם סניף'); return; }
+    setBusy(true);
+    try {
+      const form = new FormData();
+      chosen.forEach((row, i) => {
+        form.append(`payslip_file_${i}`, row.file);
+        form.append(`branch_${i}`, row.branch.trim());
+      });
+      if (note.trim()) form.append('note', note.trim());
+      const res = await api.post(`/payroll/payslip-audit/history/${auditId}/fix-round`, form,
+        { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 180000 });
+      const s = res.data.round.summary;
+      toast.success(`סבב ${res.data.round.round_no}: ${s.fixed} תוקנו · ${s.not_fixed} לא תוקנו · ${s.manual} להכרעה`);
+      setNote('');
+      setFiles((prev) => prev.map((r) => ({ ...r, file: null })));
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בהרצת הסבב');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setVerdict = async (roundNo, key, noteIndex, manual_verdict, reply) => {
+    try {
+      await api.patch(`/payroll/payslip-audit/history/${auditId}/fix-rounds/${roundNo}/verdict`,
+        { key, note_index: noteIndex, manual_verdict, ...(reply !== undefined ? { reply } : {}) });
+      setData((prev) => {
+        if (!prev) return prev;
+        const rounds = prev.rounds.map((r) => {
+          if (r.round_no !== roundNo) return r;
+          return {
+            ...r,
+            items: r.items.map((it) => it.key !== key ? it : {
+              ...it,
+              notes: it.notes.map((n, i) => i !== noteIndex ? n
+                : { ...n, manual_verdict, ...(reply !== undefined ? { reply } : {}) }),
+            }),
+          };
+        });
+        return { ...prev, rounds };
+      });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירת ההכרעה');
+    }
+  };
+
+  const showPage = async (roundNo, it) => {
+    if (!it.round_branch || !it.page_index) { toast.info('אין עמוד תלוש שמור לעובד הזה בסבב'); return; }
+    try {
+      const res = await fetch(
+        `/api/payroll/payslip-audit/history/${auditId}/fix-rounds/${roundNo}/page?branch=${encodeURIComponent(it.round_branch)}&page=${it.page_index}`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `שגיאה ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      setPreview({ title: `${it.employee_name} · סבב ${roundNo}`, url });
+    } catch (err) {
+      toast.error(err.message || 'שגיאה בטעינת התלוש');
+    }
+  };
+
+  const makeToken = async () => {
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${auditId}/fix-token`, {});
+      setData((p) => ({ ...p, fix_token: res.data.token, fix_token_expires: res.data.expires }));
+      toast.success('נוצר קישור העלאה לרו״ח');
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה ביצירת קישור'); }
+  };
+  const killToken = async () => {
+    if (!(await confirm({ title: 'ביטול הקישור', message: 'לבטל את קישור ההעלאה? הרו״ח לא יוכל להעלות קבצים דרכו.', danger: true }))) return;
+    try {
+      await api.delete(`/payroll/payslip-audit/history/${auditId}/fix-token`);
+      setData((p) => ({ ...p, fix_token: null, fix_token_expires: null }));
+      toast.success('הקישור בוטל');
+    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+  };
+
+  const fixUrl = data?.fix_token ? `${window.location.origin}/payslip-fix/${data.fix_token}` : '';
+
+  return (
+    <>
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="lg" dir="rtl">
+      <DialogTitle sx={{ fontWeight: 700 }}>
+        סבבי תיקון — אימות שההערות בוצעו
+        {data?.year_month && <Chip size="small" sx={{ mr: 1 }} label={data.year_month} />}
+      </DialogTitle>
+      <DialogContent dividers>
+        {loading && <LinearProgress />}
+        {data && (
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity={data.open_notes ? 'info' : 'warning'}>
+              {data.open_notes
+                ? <>הביקורת הזו כוללת <b>{data.open_notes}</b> הערות על <b>{data.open_targets}</b> תלושים. העלה את התלושים המתוקנים ונבדוק כל הערה מולם — הטבלה השמורה משמשת כמקור, לא צריך להעלות אותה מחדש.</>
+                : <>אין הערות פתוחות בביקורת הזו. סמן תיקונים בעמוד הראשי לפני הרצת סבב.</>}
+            </Alert>
+
+            {/* Upload */}
+            <Paper variant="outlined" sx={{ p: 1.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>העלאת תלושים מתוקנים</Typography>
+              <Stack spacing={1}>
+                {files.map((row, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="center">
+                    <TextField size="small" label="סניף" value={row.branch} sx={{ minWidth: 200 }}
+                      onChange={(e) => setFiles((p) => p.map((x, j) => j === i ? { ...x, branch: e.target.value } : x))} />
+                    <Button size="small" variant="outlined" component="label" startIcon={<UploadFileIcon />}>
+                      {row.file ? row.file.name : 'בחר PDF'}
+                      <input hidden type="file" accept="application/pdf"
+                        onChange={(e) => { const f = e.target.files?.[0] || null; setFiles((p) => p.map((x, j) => j === i ? { ...x, file: f } : x)); }} />
+                    </Button>
+                    {files.length > 1 && (
+                      <IconButton size="small" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))}><DeleteIcon fontSize="small" /></IconButton>
+                    )}
+                  </Stack>
+                ))}
+                <Box>
+                  <Button size="small" startIcon={<AddIcon />} disabled={files.length >= 10}
+                    onClick={() => setFiles((p) => [...p, { branch: '', file: null }])}>סניף נוסף</Button>
+                </Box>
+                <TextField size="small" label="הערה לסבב (אופציונלי)" value={note} onChange={(e) => setNote(e.target.value)} fullWidth />
+                <Box>
+                  <Button variant="contained" startIcon={<PlayArrowIcon />} disabled={busy || !data.open_notes} onClick={runRound}>
+                    {busy ? 'בודק…' : 'הרץ אימות'}
+                  </Button>
+                </Box>
+              </Stack>
+            </Paper>
+
+            {/* Accountant's own upload link */}
+            <Paper variant="outlined" sx={{ p: 1.5 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>קישור העלאה לרו״ח</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+                מאפשר לרו״ח להעלות בעצמו את התלושים המתוקנים בלי חשבון. הדף מציג לו רק את החודש ואת ההערות ששלחנו לו.
+              </Typography>
+              {fixUrl ? (
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ flexWrap: 'wrap' }}>
+                  <TextField size="small" value={fixUrl} dir="ltr" sx={{ flex: 1, minWidth: 280 }} InputProps={{ readOnly: true }} />
+                  <Button size="small" onClick={() => { navigator.clipboard.writeText(fixUrl); toast.success('הקישור הועתק'); }}>העתק</Button>
+                  <Button size="small" color="error" onClick={killToken}>בטל קישור</Button>
+                  {data.fix_token_expires && (
+                    <Typography variant="caption" color="text.secondary">
+                      בתוקף עד {new Date(data.fix_token_expires).toLocaleDateString('he-IL')}
+                    </Typography>
+                  )}
+                </Stack>
+              ) : (
+                <Button size="small" variant="outlined" onClick={makeToken}>צור קישור</Button>
+              )}
+            </Paper>
+
+            {/* Rounds */}
+            {(data.rounds || []).length === 0 && <Alert severity="info">עדיין לא הורץ אף סבב תיקון.</Alert>}
+            {[...(data.rounds || [])].reverse().map((r) => {
+              const isOpen = openRound === r.round_no;
+              const s = r.summary || {};
+              return (
+                <Paper key={r.round_no} variant="outlined">
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ p: 1.25, cursor: 'pointer' }}
+                    onClick={() => setOpenRound(isOpen ? null : r.round_no)}>
+                    <Typography sx={{ fontWeight: 800, flex: 1 }}>
+                      סבב {r.round_no}
+                      <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+                        {new Date(r.created_at).toLocaleString('he-IL')} · {r.created_by_name || '—'}
+                        {r.source === 'accountant' && ' · הועלה ע״י הרו״ח'}
+                      </Typography>
+                    </Typography>
+                    <Chip size="small" color="success" label={`${s.fixed || 0} תוקנו`} />
+                    <Chip size="small" color="error" label={`${s.not_fixed || 0} לא תוקנו`} />
+                    {!!s.manual && <Chip size="small" color="warning" label={`${s.manual} להכרעה`} />}
+                    {!!s.new_issues && <Chip size="small" color="error" variant="outlined" label={`${s.new_issues} ממצאים חדשים`} />}
+                    {!!s.unmatched && <Chip size="small" variant="outlined" label={`${s.unmatched} לא בקובץ`} />}
+                    {isOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                  </Stack>
+                  <Collapse in={isOpen}>
+                    <Divider />
+                    <Box sx={{ p: 1 }}>
+                      {r.items.map((it) => (
+                        <Paper key={it.key} variant="outlined" sx={{ p: 1, mb: 1, bgcolor: it.matched ? 'transparent' : 'grey.50' }}>
+                          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }}>
+                            <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{it.employee_name}</Typography>
+                            {it.branch && <Typography variant="caption" color="text.secondary">{it.branch}</Typography>}
+                            {!it.matched && <Chip size="small" variant="outlined" label="לא נמצא בקובץ הסבב" />}
+                            <Box sx={{ flex: 1 }} />
+                            {it.matched && it.page_index && (
+                              <Button size="small" startIcon={<DescriptionIcon />} onClick={() => showPage(r.round_no, it)}>
+                                תלוש מתוקן
+                              </Button>
+                            )}
+                          </Stack>
+                          <Stack spacing={0.75}>
+                            {it.notes.map((n, ni) => {
+                              const eff = n.manual_verdict || n.auto_verdict;
+                              return (
+                                <Box key={ni} sx={{ p: 0.75, borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                                  <Stack direction="row" spacing={1} alignItems="flex-start">
+                                    <Chip size="small" color={VERDICT_COLOR[eff]} label={VERDICT_LABEL[eff]}
+                                      sx={{ fontWeight: 700, minWidth: 84 }} />
+                                    <Box sx={{ flex: 1 }}>
+                                      <Typography variant="body2">{n.message}</Typography>
+                                      {eff === 'not_fixed' && (n.still_expected != null || n.still_actual != null) && (
+                                        <Typography variant="caption" color="error.main" sx={{ display: 'block' }}>
+                                          עדיין: צפוי <b>{String(n.still_expected ?? '—')}</b> · בתלוש <b>{String(n.still_actual ?? '—')}</b>
+                                        </Typography>
+                                      )}
+                                      {n.auto_verdict === 'manual' && (
+                                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                          {it.matched ? 'הערה ידנית — אין לה בדיקה אוטומטית, הכרע לפי התלוש המתוקן.'
+                                                      : 'העובד/ת לא נכלל/ה בקובץ שהועלה — לא נבדק.'}
+                                        </Typography>
+                                      )}
+                                      {n.manual_verdict && n.manual_verdict !== n.auto_verdict && n.auto_verdict !== 'manual' && (
+                                        <Typography variant="caption" color="warning.dark" sx={{ display: 'block' }}>
+                                          הוכרע ידנית (הבדיקה האוטומטית אמרה {VERDICT_LABEL[n.auto_verdict]})
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                    <Stack direction="row" spacing={0.5}>
+                                      <Button size="small" color="success"
+                                        variant={n.manual_verdict === 'fixed' ? 'contained' : 'outlined'}
+                                        sx={{ minWidth: 0, px: 1, fontSize: 11 }}
+                                        onClick={() => setVerdict(r.round_no, it.key, ni, n.manual_verdict === 'fixed' ? null : 'fixed')}>✓</Button>
+                                      <Button size="small" color="error"
+                                        variant={n.manual_verdict === 'not_fixed' ? 'contained' : 'outlined'}
+                                        sx={{ minWidth: 0, px: 1, fontSize: 11 }}
+                                        onClick={() => setVerdict(r.round_no, it.key, ni, n.manual_verdict === 'not_fixed' ? null : 'not_fixed')}>✗</Button>
+                                    </Stack>
+                                  </Stack>
+                                </Box>
+                              );
+                            })}
+                            {it.new_findings.map((f, fi) => (
+                              <Box key={`nf${fi}`} sx={{ p: 0.75, borderRadius: 1, bgcolor: 'error.50', border: '1px solid', borderColor: 'error.light' }}>
+                                <Typography variant="caption" sx={{ fontWeight: 800, color: 'error.dark' }}>⚠ ממצא חדש שלא היה בהערות: </Typography>
+                                <Typography variant="caption">{f.message}</Typography>
+                              </Box>
+                            ))}
+                          </Stack>
+                        </Paper>
+                      ))}
+                    </Box>
+                  </Collapse>
+                </Paper>
+              );
+            })}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions><Button onClick={onClose}>סגור</Button></DialogActions>
+    </Dialog>
+
+    <Dialog open={!!preview} onClose={() => setPreview(null)} fullWidth maxWidth="md" dir="rtl">
+      <DialogTitle>{preview?.title}</DialogTitle>
+      <DialogContent dividers sx={{ height: '75vh', p: 0 }}>
+        {preview && <iframe title="payslip" src={preview.url} style={{ width: '100%', height: '100%', border: 0 }} />}
+      </DialogContent>
+      <DialogActions><Button onClick={() => setPreview(null)}>סגור</Button></DialogActions>
+    </Dialog>
+    </>
+  );
+}
+
 /* Distribute the consolidated per-branch payslip bundle to each branch manager.
    Preview which branches will be sent, their manager email + payslip count, pick
    which branches, toggle the hours report, then send. */
@@ -2058,6 +2369,29 @@ export default function PayslipAudit() {
 
   // Attach a PDF of just the to-fix payslips to the accountant's email.
   const [attachPayslips, setAttachPayslips] = useState(true);
+  // Correction rounds — verify the accountant acted on the notes.
+  const [fixDialog, setFixDialog] = useState(false);
+  // The accountant's upload link, offered inside the corrections email so the
+  // fixes and the way to return them travel together.
+  const [fixLink, setFixLink] = useState('');
+  const [includeFixLink, setIncludeFixLink] = useState(true);
+  const [fixLinkBusy, setFixLinkBusy] = useState(false);
+
+  // Mint the link on demand — most months it won't exist yet when the email
+  // is being written.
+  const ensureFixLink = async () => {
+    if (fixLink || !audit?.saved_audit_id) return;
+    setFixLinkBusy(true);
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${audit.saved_audit_id}/fix-token`, {});
+      setFixLink(`${window.location.origin}/payslip-fix/${res.data.token}`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה ביצירת קישור ההעלאה');
+      setIncludeFixLink(false);
+    } finally {
+      setFixLinkBusy(false);
+    }
+  };
 
   const toggleReviewed = (idx) => {
     setReviewedMap((prev) => {
@@ -2175,6 +2509,16 @@ export default function PayslipAudit() {
       if (Array.isArray(res.data?.cc))  setEmailCc(res.data.cc);
     } catch {
       // ignore — fall back to the local defaults
+    }
+    // Reuse an upload link if this audit already has one, so re-sending the
+    // corrections doesn't invalidate the link the accountant already has.
+    if (audit.saved_audit_id) {
+      try {
+        const res = await api.get(`/payroll/payslip-audit/history/${audit.saved_audit_id}/fix-rounds`);
+        setFixLink(res.data?.fix_token ? `${window.location.origin}/payslip-fix/${res.data.fix_token}` : '');
+      } catch {
+        setFixLink('');
+      }
     }
     setRecipientInput({ to: '', cc: '' });
     // editableResults already maintained by useEffect when audit changes —
@@ -2294,6 +2638,7 @@ export default function PayslipAudit() {
         cc: emailCc,
         approved_payslips: approvedPayslips,
         attach_payslips: attachPayslips,
+        ...(includeFixLink && fixLink ? { fix_url: fixLink } : {}),
       });
       const extra = [
         res.data.attached ? `מצורף: ${res.data.attached}` : null,
@@ -3241,10 +3586,18 @@ export default function PayslipAudit() {
             addManualEmployee={addManualEmployee}
             onSendEmail={openEmailDialog}
             onSaveEdits={() => saveEdits(false)}
+            onFixRound={audit.saved_audit_id ? () => setFixDialog(true) : null}
             reviewedMap={reviewedMap}
             onToggleReviewed={toggleReviewed}
           />
         )}
+
+        <FixRoundDialog
+          open={fixDialog}
+          auditId={audit?.saved_audit_id}
+          branches={(audit?.payslip_files || []).map((f) => f.branch).filter(Boolean)}
+          onClose={() => setFixDialog(false)}
+        />
 
         {!audit && !running && (
           <Alert severity="info">העלה את קבצי הטבלה והתלושים מעלה ולחץ על "הרץ בדיקה"</Alert>
@@ -3322,6 +3675,35 @@ export default function PayslipAudit() {
                       </Typography>
                     }
                   />
+
+                  <Box>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={includeFixLink}
+                          disabled={fixLinkBusy || !audit?.saved_audit_id}
+                          onChange={async (e) => {
+                            setIncludeFixLink(e.target.checked);
+                            if (e.target.checked) await ensureFixLink();
+                          }}
+                        />
+                      }
+                      label={
+                        <Typography variant="body2">
+                          צרף לרו"ח קישור להעלאת התלושים המתוקנים
+                          <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                            הוא מעלה ישירות למערכת ואנחנו מאמתים כל הערה — בלי שתצטרך להוריד ולהעלות מחדש.
+                          </Typography>
+                        </Typography>
+                      }
+                    />
+                    {includeFixLink && fixLink && (
+                      <Typography variant="caption" dir="ltr" sx={{ display: 'block', color: 'text.secondary', pr: 4, wordBreak: 'break-all' }}>
+                        {fixLink}
+                      </Typography>
+                    )}
+                    {fixLinkBusy && <Typography variant="caption" sx={{ pr: 4 }}>יוצר קישור…</Typography>}
+                  </Box>
 
                   {approvedPayslips.length > 0 && (
                     <Paper variant="outlined" sx={{ p: 1, bgcolor: 'success.50', borderColor: 'success.light' }}>
