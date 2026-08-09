@@ -7,7 +7,7 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth } = require('../models');
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
@@ -2768,14 +2768,73 @@ async function myPunches(req, res, next) {
  * GET /api/payroll/my-payslips
  * Returns payslip history for the logged-in employee (placeholder — returns empty for now)
  */
+const HE_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי',
+  'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+/**
+ * The employee's own payslips.
+ *
+ * The distribution has been archiving a SavedPayslip per employee per month
+ * all along; this endpoint returned an empty array, so "התלושים שלי" was blank
+ * no matter how many payslips had been sent. The bytes were there the whole
+ * time — nothing read them.
+ */
 async function myPayslips(req, res, next) {
   try {
-    // Payslips will be populated when the payroll finalization feature is built
-    res.json({ payslips: [] });
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.json({ payslips: [] });
+
+    const saved = await SavedPayslip.find({ employee_id: emp._id })
+      .select('-data')                       // the PDF is fetched per-row on demand
+      .sort({ year_month: -1 })
+      .lean();
+    if (saved.length === 0) return res.json({ payslips: [] });
+
+    // Net pay lives on the monthly payroll row, not on the archived PDF.
+    const months = saved.map((p) => p.year_month);
+    const rows = await PayrollMonth.find({ employee_id: emp._id, month: { $in: months } })
+      .select('month net_pay estimated_total payslip_paid').lean();
+    const byMonth = new Map(rows.map((r) => [r.month, r]));
+
+    res.json({
+      payslips: saved.map((p) => {
+        const [y, m] = p.year_month.split('-');
+        const row = byMonth.get(p.year_month);
+        const net = row?.net_pay ?? row?.estimated_total ?? null;
+        return {
+          year_month: p.year_month,
+          month_name: HE_MONTHS[Number(m) - 1] || m,
+          year: y,
+          net_amount: net != null ? Math.round(net).toLocaleString('he-IL') : '—',
+          status: row?.payslip_paid ? 'paid' : 'pending',
+          sent_at: p.sent_at,
+          file_url: `/api/payroll/my-payslips/${p.year_month}/file`,
+        };
+      }),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /payroll/my-payslips/:ym/file
+ * Scoped to the caller's own employee record — the month is the only input,
+ * so there is no id to tamper with and no way to read someone else's payslip.
+ */
+async function myPayslipFile(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
+    const p = await SavedPayslip.findOne({ employee_id: emp._id, year_month: req.params.ym }).lean();
+    if (!p?.data) return res.status(404).json({ error: 'לא נמצא תלוש לחודש הזה' });
+    const buf = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="payslip-${req.params.ym}.pdf"`);
+    res.send(buf);
   } catch (err) { next(err); }
 }
 
 module.exports = {
+  myPayslipFile,
   listEmployees,
   getEmployee,
   createEmployee,

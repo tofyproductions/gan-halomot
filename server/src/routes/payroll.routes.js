@@ -85,6 +85,7 @@ router.patch('/punches/:id',                   requireRole('system_admin', 'bran
 router.get('/my-salary-preview',               c.mySalaryPreview);
 router.get('/my-punches',                      c.myPunches);
 router.get('/my-payslips',                     c.myPayslips);
+router.get('/my-payslips/:ym/file',            c.myPayslipFile);
 
 // ── Payslip audit (admin only) — upload xlsx + PDF, get a comparison report ──
 router.post(

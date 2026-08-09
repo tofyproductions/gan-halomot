@@ -79,12 +79,15 @@ export default function Distribution() {
                   </TableCell>
                   <TableCell align="center">{h.summary?.payslips_in_pdf ?? '—'}</TableCell>
                   <TableCell align="center">
-                    <Stack direction="row" spacing={0.5} justifyContent="center">
+                    <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
                       <Button size="small" variant="contained" color="secondary" startIcon={<SupervisorAccountIcon />}
                         onClick={() => setMgrDialog({ open: true, audit: h })} sx={{ fontSize: 11 }}>למנהלים / משרד</Button>
                       <Button size="small" variant="contained" color="primary" startIcon={<PeopleIcon />}
                         onClick={() => setEmpDialog({ open: true, audit: h })} sx={{ fontSize: 11 }}>לעובדים</Button>
                     </Stack>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontSize: 10.5 }}>
+                      השליחה לעובדים גם מתייקת את התלוש ב״התלושים שלי״ של כל עובד/ת
+                    </Typography>
                   </TableCell>
                 </TableRow>
               ))}

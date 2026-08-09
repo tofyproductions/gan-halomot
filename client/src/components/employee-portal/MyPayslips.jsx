@@ -6,7 +6,7 @@ import {
 import DescriptionIcon from '@mui/icons-material/Description';
 import DownloadIcon from '@mui/icons-material/Download';
 import { useAuth } from '../../hooks/useAuth';
-import api from '../../api/client';
+import api, { openApiFile } from '../../api/client';
 
 export default function MyPayslips() {
   const { user } = useAuth();
@@ -57,7 +57,9 @@ export default function MyPayslips() {
                   <TableCell>
                     {p.file_url && (
                       <Tooltip title="הורד תלוש">
-                        <IconButton size="small" href={p.file_url} target="_blank">
+                        {/* The route is behind the bearer token, so a plain href
+                            would 401 — fetch it with the token instead. */}
+                        <IconButton size="small" onClick={() => openApiFile(p.file_url, { filename: `תלוש_${p.year_month}.pdf` })}>
                           <DownloadIcon />
                         </IconButton>
                       </Tooltip>
