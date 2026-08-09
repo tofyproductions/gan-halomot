@@ -489,12 +489,24 @@ function isGeneratedHtmlContract(key) {
   return /_(signed|contract)_/.test(key || '');
 }
 
+// Some contract paths are not storage keys at all — the migration from the old
+// Google Apps Script system stored the Drive URL of the signed PDF in the same
+// field. Presigning one produces a valid-looking R2 link that points at
+// nothing, so the parent gets a 404 instead of the live-render fallback. An
+// absolute URL is already the answer; hand it back as-is.
+function isAbsoluteUrl(key) {
+  return /^https?:\/\//i.test(key || '');
+}
+
 async function downloadContractVersion(req, res, next) {
   try {
     const { versionId } = req.params;
     const version = await ContractVersion.findById(versionId).lean();
     if (!version) {
       return res.status(404).json({ error: 'Contract version not found' });
+    }
+    if (version.contract_pdf_path && isAbsoluteUrl(version.contract_pdf_path)) {
+      return res.json({ url: version.contract_pdf_path });
     }
     if (version.contract_pdf_path && !isGeneratedHtmlContract(version.contract_pdf_path)) {
       try {
@@ -528,6 +540,9 @@ async function downloadContract(req, res, next) {
     // A genuine uploaded file (manual finalize) is a real binary — serve it
     // directly. Server-generated contracts are HTML-as-.pdf and must be
     // re-rendered below so the client makes a real PDF (else: blank page).
+    if (registration.contract_pdf_path && isAbsoluteUrl(registration.contract_pdf_path)) {
+      return res.json({ url: registration.contract_pdf_path });
+    }
     if (registration.contract_pdf_path && !isGeneratedHtmlContract(registration.contract_pdf_path)) {
       try {
         const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
