@@ -73,7 +73,7 @@ function buildApprovedBlockHtml(approved) {
     const { name, meta } = employeeLabel(e);
     return `
       <td style="padding:4px 10px; border:1px solid #c8e6c9; background:#f1f8f4; border-radius:4px;">
-        <span style="color:#1b5e20; font-size:12.5px; font-weight:700;">${escapeHtml(name)}</span>
+        ${e.reviewed ? '<span style="color:#2e7d32; font-weight:800;">✓ </span>' : ''}<span style="color:#1b5e20; font-size:12.5px; font-weight:700;">${escapeHtml(name)}</span>
         ${meta ? `<span style="color:#5b7a63; font-size:10.5px;"> · ${escapeHtml(meta)}</span>` : ''}
       </td>`;
   });
@@ -88,7 +88,8 @@ function buildApprovedBlockHtml(approved) {
         ✓ ${approved.length} תלושים נבדקו ואושרו — אין צורך לעבור עליהם
       </p>
       <p style="margin:0 0 8px; color:#446b4e; font-size:12px;">
-        עברנו על התלושים האלה במלואם ולא נדרש בהם שינוי. הם אינם מצורפים לקובץ.
+        עברנו על התלושים האלה ולא נדרש בהם שינוי. הם אינם מצורפים לקובץ.
+        ${approved.some((e) => e.reviewed) ? `המסומנים ב-✓ נבדקו אחד-אחד מול טבלת השכר.` : ''}
       </p>
       <table cellpadding="0" cellspacing="4" border="0" width="100%" style="border-collapse:separate;">${rows.join('')}</table>
     </div>`;

@@ -347,16 +347,11 @@ function PerEmployeePairedView({
   const approvedCount = allFindings.filter((f) => f.status === 'approved').length;
   const rejectedCount = allFindings.filter((f) => f.status === 'rejected').length;
   const pendingCount  = allFindings.filter((f) => !f.status || f.status === 'pending').length;
-  // A ✓ טופל payslip is excluded from the email even when it still carries
-  // findings — the tick is the office saying "we looked, it's fine".
+  // Corrections decide what travels; the ✓ נבדק tick is review progress only.
   const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
-  const willSendCount = editableResults.reduce(
-    (s, r, idx) => s + (reviewedMap?.[idx] ? 0 : r.findings.filter(sendable).length), 0);
+  const willSendCount = editableResults.reduce((s, r) => s + r.findings.filter(sendable).length, 0);
   const reviewedCount = editableResults.filter((_, idx) => reviewedMap?.[idx]).length;
-  // Ticked ✓ טופל but still holding live corrections — those corrections will
-  // NOT be sent. Worth saying out loud rather than silently dropping them.
-  const mutedCount = editableResults.reduce(
-    (s, r, idx) => s + (reviewedMap?.[idx] ? r.findings.filter(sendable).length : 0), 0);
+  const cleanCount = editableResults.filter((r) => r.findings.filter(sendable).length === 0).length;
 
   // Map an audit result to its parallel editableResult by index
   const editableByAuditIdx = (auditIdx) => editableResults[auditIdx];
@@ -393,8 +388,8 @@ function PerEmployeePairedView({
                 {approvedCount > 0 && <Chip size="small" color="success" label={`✓ ${approvedCount} מאושרים`} sx={{ height: 18, fontSize: 10 }} />}
                 {rejectedCount > 0 && <Chip size="small" color="error"   label={`✗ ${rejectedCount} נדחו`}    sx={{ height: 18, fontSize: 10 }} />}
                 {pendingCount > 0  && <Chip size="small" variant="outlined" label={`${pendingCount} לסקירה`} sx={{ height: 18, fontSize: 10 }} />}
-                {reviewedCount > 0 && <Chip size="small" color="success" variant="outlined" label={`✓ ${reviewedCount} תלושים טופלו — יישלחו כרשימה`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
-                {mutedCount > 0 && <Chip size="small" color="warning" label={`⚠ ${mutedCount} תיקונים לא יישלחו (התלוש סומן טופל)`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
+                {cleanCount > 0 && <Chip size="small" color="success" variant="outlined" label={`${cleanCount} ללא תיקונים — יישלחו כרשימת מאושרים`} sx={{ height: 18, fontSize: 10, fontWeight: 700 }} />}
+                {reviewedCount > 0 && <Chip size="small" variant="outlined" label={`✓ נבדקו ${reviewedCount}/${editableResults.length}`} sx={{ height: 18, fontSize: 10 }} />}
               </Stack>
             </Box>
             <Button
@@ -2475,20 +2470,28 @@ export default function PayslipAudit() {
     });
   };
 
-  // The ✓ טופל payslips, in the shape the email lists them. Built off the
-  // ORIGINAL audit.results so the indices match reviewedMap's keys.
+  // The payslips the accountant can skip: the ones left with no live
+  // correction. Indices run over the ORIGINAL audit.results, which
+  // editableResults is kept parallel to.
   const approvedPayslips = useMemo(() => {
-    if (!audit) return [];
+    if (!audit || editableResults.length === 0) return [];
     return audit.results
       .map((r, idx) => ({ r, idx }))
-      .filter(({ idx }) => reviewedMap[idx])
-      .map(({ r }) => ({
+      .filter(({ idx }) => {
+        const live = (editableResults[idx]?.findings || [])
+          .filter((f) => f.message && f.message.trim() && f.status !== 'rejected');
+        return live.length === 0;
+      })
+      .map(({ r, idx }) => ({
         name: r.table_row?.employee_name || r.payslip?.employee_name || '—',
         branch: (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim(),
         employee_no: r.payslip?.employee_no ?? null,
         employee_id: r.payslip?.employee_id || null,
+        // Ticked ✓ נבדק — someone actually opened this one, as opposed to it
+        // simply never having been flagged. Worth telling the accountant apart.
+        reviewed: !!reviewedMap[idx],
       }));
-  }, [audit, reviewedMap]);
+  }, [audit, editableResults, reviewedMap]);
 
   const stats = useMemo(() => {
     if (!audit) return null;
@@ -2681,10 +2684,12 @@ export default function PayslipAudit() {
       toast.warn('יש להוסיף לפחות נמען אחד בשדה "אל"');
       return;
     }
-    // A payslip ticked ✓ טופל is one the office already went through and
-    // accepted. It never goes to the accountant as a correction — it goes in
-    // the "approved, don't touch" list instead, so his absence from the fix
-    // list means "checked and fine" rather than "we forgot him".
+    // What decides is the corrections. A payslip with a live correction goes to
+    // the accountant; one without goes in the "approved, don't touch" list, so
+    // his absence from the fix list means "checked and fine" rather than "we
+    // forgot him". The ✓ נבדק tick is a progress marker and excludes nothing —
+    // treating it as approval silently emptied the whole correction list once
+    // a review pass was finished.
     const cleaned = editableResults
       .map((r, idx) => ({
         ...r,
@@ -2693,7 +2698,7 @@ export default function PayslipAudit() {
           f.message && f.message.trim() && f.status !== 'rejected'
         ),
       }))
-      .filter((r) => r.findings.length > 0 && !reviewedMap[r.__audit_idx]);
+      .filter((r) => r.findings.length > 0);
     if (cleaned.length === 0) {
       toast.warn('אין תיקונים לשליחה — הוסף לפחות תיקון אחד עם תוכן');
       return;
@@ -3728,21 +3733,16 @@ export default function PayslipAudit() {
               const sendable = (f) => f.status !== 'rejected' && f.message && f.message.trim();
               const toFix = editableResults
                 .map((r, idx) => ({ r, idx }))
-                .filter(({ r, idx }) => !reviewedMap[idx] && r.findings.filter(sendable).length > 0);
+                .filter(({ r }) => r.findings.filter(sendable).length > 0);
               const fixCount = toFix.reduce((s, { r }) => s + r.findings.filter(sendable).length, 0);
-              const muted = editableResults.reduce(
-                (s, r, idx) => s + (reviewedMap[idx] ? r.findings.filter(sendable).length : 0), 0);
+              const reviewedApproved = approvedPayslips.filter((e) => e.reviewed).length;
               return (
                 <>
                   <Alert severity={fixCount === 0 ? 'warning' : 'info'} sx={{ fontSize: 12 }}>
                     <b>{fixCount}</b> תיקונים עבור <b>{toFix.length}</b> תלושים יישלחו לתיקון
-                    {approvedPayslips.length > 0 && <> · <b>{approvedPayslips.length}</b> תלושים יופיעו כרשימת "אושרו — אין צורך לעבור עליהם"</>}
+                    {approvedPayslips.length > 0 && <> · <b>{approvedPayslips.length}</b> תלושים יופיעו כרשימת "אושרו — אין צורך לעבור עליהם"
+                      {reviewedApproved > 0 && ` (${reviewedApproved} מהם סומנו כנבדקו ידנית)`}</>}
                     {fixCount === 0 && ' ⚠ אין תיקונים לשליחה — סגור והוסף תיקונים בעמוד.'}
-                    {muted > 0 && (
-                      <Box sx={{ mt: 0.5, fontWeight: 700, color: 'warning.dark' }}>
-                        ⚠ {muted} תיקונים לא יישלחו — התלושים שלהם סומנו "✓ טופל". הסר את הסימון אם רצית שיישלחו.
-                      </Box>
-                    )}
                   </Alert>
 
                   <FormControlLabel

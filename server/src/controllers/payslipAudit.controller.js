@@ -1065,7 +1065,14 @@ async function getCycleProgression(req, res) {
 
 /**
  * The employees + notes that went to the accountant, exactly as the email
- * decided them: ✓ טופל payslips are excluded, rejected findings are dropped.
+ * decided them: a payslip travels if it still carries at least one live
+ * correction. Rejected findings are dropped.
+ *
+ * The ✓ נבדק tick deliberately plays NO part here. It is a progress marker the
+ * reviewer puts on every payslip as they work through the list, so treating it
+ * as "approved, don't send" meant a completed review excluded everything and
+ * left nothing to verify — 29 of 29 ticked, zero open notes, while the audit
+ * still held 8 critical findings. What decides is the corrections themselves.
  *
  * If a result has no saved verification entry (the manager never touched it in
  * the editor) we fall back to its critical/warning findings — the email treats
@@ -1075,10 +1082,8 @@ function fixTargetsFrom(doc) {
   const full = doc.full_result || {};
   const results = full.results || [];
   const verifications = full.editor_verifications || {};
-  const reviewed = full.reviewed_payslips || {};
   const targets = [];
   results.forEach((r, idx) => {
-    if (reviewed[idx]) return;                       // ticked ✓ טופל — never sent
     const saved = verifications[idx];
     const notes = (saved
       ? saved
