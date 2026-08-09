@@ -2070,11 +2070,50 @@ async function setFixedSchedules(req, res, next) {
 
     // Fill the current month straight away so the change is visible.
     const month = fixedSchedule.todayIsrael().slice(0, 7);
+    const empIds = employees.map(e => e._id);
+
+    // Days already materialized this month still carry the OLD hours, and the
+    // generator skips any day it has already filled — so changing 08:00-17:00
+    // to 08:00-16:30 mid-month used to report "0 punches created" and leave the
+    // month on the old times. Payroll would then pay hours nobody meant to set.
+    // Clear this month's generated rows first so the new pattern actually lands.
+    //
+    // Three things are deliberately spared:
+    //   • real clock reads and hand-typed entries — a different timestamp_source
+    //   • days a human corrected by hand — schedule_edited
+    //   • past months — the arrangement changed from now on, not retroactively
+    const monthFrom = fixedSchedule.ilDateTime(`${month}-01`, '00:00');
+    const monthTo = new Date(fixedSchedule.ilDateTime(`${month}-31`, '00:00').getTime() + 36 * 3600 * 1000);
+    const editedDays = await Punch.find({
+      employee_id: { $in: empIds },
+      timestamp_source: 'fixed_schedule',
+      schedule_edited: true,
+      timestamp: { $gte: monthFrom, $lt: monthTo },
+    }).select('employee_id timestamp').lean();
+    const keep = new Set(editedDays.map(p => `${String(p.employee_id)}|${fixedSchedule.ISR_DAY(p.timestamp)}`));
+
+    const generated = await Punch.find({
+      employee_id: { $in: empIds },
+      timestamp_source: 'fixed_schedule',
+      timestamp: { $gte: monthFrom, $lt: monthTo },
+    }).select('_id employee_id timestamp').lean();
+    const staleIds = generated
+      .filter(p => !keep.has(`${String(p.employee_id)}|${fixedSchedule.ISR_DAY(p.timestamp)}`))
+      .map(p => p._id);
+    if (staleIds.length) await Punch.deleteMany({ _id: { $in: staleIds } });
+
     const result = await fixedSchedule.materializeMonth(month, {
-      employeeIds: employees.map(e => e._id),
+      employeeIds: empIds,
       userId: req.user?.id || null,
     });
-    res.json({ ok: true, updated: employees.length, punches_created: result.created, conflicts: result.conflicts });
+    res.json({
+      ok: true,
+      updated: employees.length,
+      punches_created: result.created,
+      punches_refreshed: staleIds.length,
+      days_kept_edited: keep.size,
+      conflicts: result.conflicts,
+    });
   } catch (err) { next(err); }
 }
 
@@ -2341,7 +2380,15 @@ async function editPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
-    if (req.body.timestamp) p.timestamp = new Date(req.body.timestamp);
+    if (req.body.timestamp) {
+      const next = new Date(req.body.timestamp);
+      // Correcting a generated row makes it a human decision. Mark it so the
+      // regenerator leaves that day alone when the weekly hours change.
+      if (p.timestamp_source === 'fixed_schedule' && next.getTime() !== p.timestamp.getTime()) {
+        p.schedule_edited = true;
+      }
+      p.timestamp = next;
+    }
     if (req.body.state != null) p.state = Number(req.body.state);
     if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
     // Editing a still-pending manual punch advances it through the chain:

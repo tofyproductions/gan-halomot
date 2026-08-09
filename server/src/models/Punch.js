@@ -31,6 +31,12 @@ const punchSchema = new mongoose.Schema({
     enum: ['device', 'agent_received_at', 'manual', 'fixed_schedule'],
     default: 'agent_received_at',
   },
+  // A generated row a human then corrected by hand. Editing a fixed_schedule
+  // punch keeps its source (it is still that day's generated pair), so without
+  // this flag the regenerator cannot tell "the machine wrote 16:30" from "a
+  // manager checked and it was really 15:00" — and would silently overwrite
+  // the correction the next time the weekly hours change.
+  schedule_edited: { type: Boolean, default: false },
   // For manual punches: who created it + optional free-text reason.
   manual_note: { type: String, default: '' },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
