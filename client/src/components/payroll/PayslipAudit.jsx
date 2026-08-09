@@ -335,7 +335,7 @@ function RecipientEditor({ label, required, chips, onRemove, inputValue, onInput
 function PerEmployeePairedView({
   filteredResults, audit, editableResults, expanded, setExpanded,
   updateFinding, removeFinding, addFinding, removeEmployee, addManualEmployee,
-  onSendEmail, onSaveEdits, onFixRound, reviewedMap, onToggleReviewed,
+  onSendEmail, onSaveEdits, onFixRound, reviewedMap, onToggleReviewed, priorNotes,
 }) {
   const [showAllEmpty, setShowAllEmpty] = useState(false);
   const [newName, setNewName] = useState('');
@@ -481,6 +481,7 @@ function PerEmployeePairedView({
                   savedAuditId={audit.saved_audit_id}
                   reviewed={!!reviewedMap?.[idx]}
                   onToggleReviewed={() => onToggleReviewed(idx)}
+                  priorNotes={priorNotes?.[resultKey(result)]}
                 />
                 {/* Left column (RTL second): per-employee editor.
                     Side stripe color reflects review state — green when all
@@ -860,7 +861,13 @@ const DIFF_FIELDS = [
   { key: 'ot_125',       label: 'שעות נוספות 125%',    tableKey: 'ot_125',              payslipFn: (p) => p?.item_ot_125_hours ?? null,   tolerance: 0.5, hours: true },
   { key: 'ot_150',       label: 'שעות נוספות 150%',    tableKey: 'ot_150',              payslipFn: (p) => p?.item_ot_150_hours ?? null,   tolerance: 0.5, hours: true },
   { key: 'hourly_rate',  label: 'תעריף שעתי',          tableKey: 'hourly_rate',         payslipKey: 'hourly_rate',     tolerance: 0.5, currency: true },
-  { key: 'global',       label: 'שכר תקן',          tableKey: 'global_salary_amount', payslipKey: 'base_salary',     tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
+  // שכר תקן — prefer the money actually paid over the header's תעריף. On a
+  // part-time payslip the header carries the FULL-TIME rate (₪9,000) while the
+  // agreed pay is the כמות-scaled amount (0.66 → ₪5,983), and comparing the
+  // table against the rate turned a correct payslip into a ₪3,017 shortfall.
+  // The candidate list is the same one the comparator matches against, so the
+  // two views can no longer disagree about the same payslip.
+  { key: 'global',       label: 'שכר תקן',          tableKey: 'global_salary_amount', payslipFn: (p) => p?.base_salary_paid ?? p?.base_salary ?? null, candidatesKey: 'base_salary_candidates', tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'global_ot',    label: 'שעות נוספות גלובלי',  tableKey: 'global_ot_amount',    payslipKey: 'global_ot_amount', tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'transport',    label: 'נסיעות',              tableKey: 'transport',           payslipKey: 'transport_value', tolerance: 0.5, currency: true },
   { key: 'recup',        label: 'הבראה',               tableKey: 'recuperation',        payslipKey: null,              currency: true, infoOnly: true, note: 'מופיע בתלוש כ-"שווי הבראה" או "סיבוס"' },
@@ -989,6 +996,20 @@ function DiffPanel({ tableRow, payslip, cibusRow }) {
       } else if (Number.isFinite(t) && Number.isFinite(pCompare)) {
         status = 'gap';
         delta = pCompare - t;
+        // The payslip's base line carries several money columns (סכום התשלום /
+        // נטו-לגילום / שכר-לקופ"ג). The comparator accepts a match against any
+        // of them; this panel used to compare only one, so the same payslip
+        // could read "fine" in the findings and "₪3,017 off" here. Fall back to
+        // the same candidate list before calling it a gap.
+        const candidates = field.candidatesKey ? payslip?.[field.candidatesKey] : null;
+        if (Array.isArray(candidates)) {
+          const hit = candidates.find((c) => Number.isFinite(c) && Math.abs(t - c) <= tol);
+          if (hit != null) {
+            status = 'match';
+            payslipVal = hit;
+            delta = null;
+          }
+        }
       } else {
         // One side is non-numeric — show without comparison
         status = 'missing';
@@ -1105,6 +1126,14 @@ function DiffPanel({ tableRow, payslip, cibusRow }) {
                         {r.field.note}
                       </Typography>
                     )}
+                    {/* Part-time base pay — spell out the arithmetic, otherwise
+                        the payslip's big תעריף number looks like the salary and
+                        the smaller amount looks like an error. */}
+                    {r.field.key === 'global' && payslip?.base_salary_paid != null && payslip?.job_percent != null && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontSize: 10 }}>
+                        {payslip.job_percent} משרה × ₪{Number(payslip.base_salary_rate).toLocaleString('he-IL')} (תעריף מלא)
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell sx={{ fontWeight: 600 }}>
                     {fmt(r.tableVal, r.field)}
@@ -1145,7 +1174,7 @@ function StatTile({ label, value, color = 'default' }) {
   );
 }
 
-function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed }) {
+function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes }) {
   const name = result.table_row?.employee_name || result.payslip?.employee_name || '—';
   // Prefer __source_branch (set by /run-multi) — it's the canonical branch the
   // PDF was tagged with — over the table_row's branch column which may have
@@ -1380,16 +1409,12 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
                 />
               )}
             </Stack>
-            <DiffPanel
-              tableRow={result.table_row}
-              payslip={result.payslip}
-              cibusRow={result.cibus_row}
-            />
-            {/* Notes / directives recorded for the accountant in the system table —
-                free-text that DiffPanel can't compare, shown here so the user can
-                track exactly what was instructed against the payslip. */}
+            {/* What we ASKED FOR comes before what we're comparing. A payslip
+                number only means something against the instruction behind it —
+                reviewing the diff first and finding the note underneath it is
+                how a deliberate ₪5,983 gets read as a ₪3,017 error. */}
             {(result.table_row?.notes || result.table_row?.advance_directive) && (
-              <Box sx={{ mt: 1.5, p: 1.25, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 1 }}>
+              <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 1 }}>
                 <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
                   📝 הערות והוראות בטבלת המערכת (לרו״ח)
                 </Typography>
@@ -1405,6 +1430,38 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
                 )}
               </Box>
             )}
+            {/* Corrections already sent to the accountant this month — with the
+                correction round's verdict when one exists, so an ignored note
+                doesn't look like a note that was never written. */}
+            {priorNotes?.length > 0 && (
+              <Box sx={{ mb: 1.5, p: 1.25, bgcolor: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 1 }}>
+                <Typography variant="caption" sx={{ fontWeight: 800, display: 'block', mb: 0.5 }}>
+                  ✉️ תיקונים שכבר נשלחו לרו״ח לחודש הזה ({priorNotes.length})
+                </Typography>
+                <Stack spacing={0.5}>
+                  {priorNotes.map((n, i) => (
+                    <Stack key={i} direction="row" spacing={0.75} alignItems="flex-start">
+                      {n.verdict
+                        ? <Chip size="small" color={VERDICT_COLOR[n.verdict]} label={VERDICT_LABEL[n.verdict]}
+                            sx={{ height: 18, fontSize: 9.5, fontWeight: 700, minWidth: 74 }} />
+                        : <Chip size="small" variant="outlined" label="נשלח" sx={{ height: 18, fontSize: 9.5, minWidth: 74 }} />}
+                      <Typography variant="body2" sx={{ fontSize: 12 }}>
+                        {n.message}
+                        <Typography component="span" variant="caption" color="text.secondary" sx={{ fontSize: 10 }}>
+                          {' · '}{new Date(n.created_at).toLocaleDateString('he-IL')}
+                          {n.verdict_round ? ` · סבב ${n.verdict_round}` : ''}
+                        </Typography>
+                      </Typography>
+                    </Stack>
+                  ))}
+                </Stack>
+              </Box>
+            )}
+            <DiffPanel
+              tableRow={result.table_row}
+              payslip={result.payslip}
+              cibusRow={result.cibus_row}
+            />
             {/* Full system-table row — every column the accountant was given, not
                 just the auto-compared numeric fields. */}
             {result.table_row?.system_detail?.length > 0 && (
@@ -1822,6 +1879,17 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
 
 const VERDICT_LABEL = { fixed: '✓ תוקן', not_fixed: '✗ לא תוקן', manual: '? להכרעה' };
 const VERDICT_COLOR = { fixed: 'success', not_fixed: 'error', manual: 'warning' };
+
+/* Identify an employee the same way the server does, so notes written in an
+   earlier audit land on the right person here. Must mirror targetKey() in
+   payslipAudit.controller.js — a drift between the two silently hides notes. */
+function resultKey(r) {
+  const id = r?.payslip?.employee_id || r?.table_row?.employee_id;
+  if (id) return `id:${id}`;
+  const name = (r?.table_row?.employee_name || r?.payslip?.employee_name || '').trim();
+  const branch = (r?.table_row?.branch || r?.__source_branch || '').replace(/\s+/g, ' ').trim();
+  return `nm:${name}::${branch}`;
+}
 
 export function FixRoundDialog({ open, auditId, branches = [], onClose }) {
   const confirm = useConfirm();
@@ -2371,6 +2439,9 @@ export default function PayslipAudit() {
   const [attachPayslips, setAttachPayslips] = useState(true);
   // Correction rounds — verify the accountant acted on the notes.
   const [fixDialog, setFixDialog] = useState(false);
+  // Notes already sent to the accountant this month, keyed by employee, so the
+  // reviewer sees the instruction next to the number it was meant to produce.
+  const [priorNotes, setPriorNotes] = useState({});
   // The accountant's upload link, offered inside the corrections email so the
   // fixes and the way to return them travel together.
   const [fixLink, setFixLink] = useState('');
@@ -2667,6 +2738,15 @@ export default function PayslipAudit() {
   };
 
   useEffect(() => { fetchHistory(); }, []);
+
+  useEffect(() => {
+    if (!audit?.year_month) { setPriorNotes({}); return; }
+    const q = new URLSearchParams({ year_month: audit.year_month });
+    if (audit.saved_audit_id) q.set('exclude_audit_id', String(audit.saved_audit_id));
+    api.get(`/payroll/payslip-audit/prior-notes?${q}`)
+      .then((r) => setPriorNotes(r.data?.items || {}))
+      .catch(() => setPriorNotes({}));   // non-essential — never block the review
+  }, [audit?.year_month, audit?.saved_audit_id]);
 
   // Persist the last viewed audit id so leaving the tab and returning restores
   // the audit (results + payslip previews) instead of an empty form.
@@ -3589,6 +3669,7 @@ export default function PayslipAudit() {
             onFixRound={audit.saved_audit_id ? () => setFixDialog(true) : null}
             reviewedMap={reviewedMap}
             onToggleReviewed={toggleReviewed}
+            priorNotes={priorNotes}
           />
         )}
 

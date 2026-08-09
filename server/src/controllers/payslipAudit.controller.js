@@ -1350,6 +1350,65 @@ async function getFixRoundPage(req, res) {
   }
 }
 
+/**
+ * GET /payslip-audit/prior-notes?year_month=YYYY-MM&exclude_audit_id=...
+ *
+ * Every note already sent to the accountant this month, keyed by employee.
+ *
+ * Checking a payslip means asking "did he do what I asked" — but the ask lived
+ * in an email and in a previous audit, so the reviewer was comparing numbers
+ * with no memory of what was requested. A note that was silently ignored looked
+ * identical to one that never existed. This hands the reviewer their own words
+ * back, with the correction round's verdict attached when there is one.
+ */
+async function getPriorNotes(req, res) {
+  const ym = (req.query.year_month || '').toString().trim();
+  if (!ym) return res.status(400).json({ error: 'נדרש year_month' });
+  const exclude = (req.query.exclude_audit_id || '').toString();
+  try {
+    const docs = await PayslipAuditRecord.find({ year_month: ym })
+      .sort({ created_at: 1 })
+      .limit(20)
+      .lean();
+
+    const items = {};
+    for (const d of docs) {
+      if (exclude && String(d._id) === exclude) continue;
+      // The verdict the last correction round reached for each note, so a note
+      // that came back ✗ לא תוקן is visible as such while re-checking.
+      const verdicts = new Map();
+      for (const round of d.fix_rounds || []) {
+        for (const it of round.items || []) {
+          for (const n of it.notes || []) {
+            verdicts.set(`${it.key}::${n.message}`, {
+              verdict: n.manual_verdict || n.auto_verdict,
+              round_no: round.round_no,
+            });
+          }
+        }
+      }
+      for (const t of fixTargetsFrom(d)) {
+        const key = targetKey(t.result);
+        if (!items[key]) items[key] = [];
+        for (const n of t.notes) {
+          const v = verdicts.get(`${key}::${n.message}`);
+          items[key].push({
+            audit_id: String(d._id),
+            created_at: d.created_at,
+            severity: n.severity || 'critical',
+            message: n.message,
+            verdict: v ? v.verdict : null,
+            verdict_round: v ? v.round_no : null,
+          });
+        }
+      }
+    }
+    res.json({ year_month: ym, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בטעינת הערות קודמות' });
+  }
+}
+
 // ── Accountant upload link ─────────────────────────────────────────────────
 //
 // The accountant has no account here. Rather than make the office the only
@@ -2768,6 +2827,7 @@ module.exports = {
   approveAudit,
   unapproveAudit,
   getCycleProgression,
+  getPriorNotes,
   createFixRound,
   listFixRounds,
   setFixVerdict,

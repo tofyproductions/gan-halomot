@@ -41,7 +41,12 @@ function parsePage(rawText, pageIndex) {
     actual_hours: null,
     daily_rate: null,
     hourly_rate: null,
+    // The header's last money column. For a part-time global employee this is
+    // the FULL-TIME rate, not what was paid — see base_salary_paid below.
     base_salary: null,
+    job_percent: null,        // כמות on the שכר-יסוד line (1 = full time)
+    base_salary_rate: null,   // the rate that fraction applies to
+    base_salary_paid: null,   // rate × fraction — the money actually paid
     items: [],
     mandatory_deductions: [],
     voluntary_deductions: [],
@@ -462,6 +467,29 @@ function parsePage(rawText, pageIndex) {
     const bigs = nums.filter((n) => n >= 100);
     if (last > 0 && last <= 1.5 && bigs.length >= 2) {
       result.base_salary_candidates = [...new Set(bigs)];
+      // The כמות column on the base line is the part-time fraction. On a 0.66
+      // payslip the header's תעריף (₪9,000) is the FULL-TIME rate while the
+      // money actually paid is ₪5,983 — so without this the agreed ₪5,983
+      // reads as a ₪3,017 shortfall against a rate nobody was paid.
+      //
+      // We pair a rate with the amount it produces rather than multiplying
+      // ourselves: כמות is printed to two decimals, so 0.66 × 9,000 = 5,940
+      // while the payslip says 5,983 (the true fraction is 0.6648). The
+      // tolerance is the worst-case rounding error of that fraction, and the
+      // amount we keep is the one actually printed.
+      result.job_percent = last;
+      if (Math.abs(last - 1) > 0.01) {
+        for (const rate of result.base_salary_candidates) {
+          const slack = rate * 0.006 + 1;
+          const amount = result.base_salary_candidates.find(
+            (a) => a < rate && Math.abs(rate * last - a) <= slack);
+          if (amount != null) {
+            result.base_salary_rate = rate;
+            result.base_salary_paid = amount;
+            break;
+          }
+        }
+      }
       break;
     }
   }

@@ -202,6 +202,13 @@ router.get(
   audit.getCycleProgression,
 );
 
+// Notes already sent to the accountant this month — surfaced while reviewing.
+router.get(
+  '/payslip-audit/prior-notes',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.getPriorNotes,
+);
+
 // ── Correction rounds — the accountant's corrected payslips, graded note by
 // note against what we asked for. Same per-branch upload shape as run-multi.
 const fixRoundFields = Array.from({ length: 10 }, (_, i) => ({ name: `payslip_file_${i}`, maxCount: 1 }));
