@@ -2227,8 +2227,9 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
                                       )}
                                       {n.auto_verdict === 'manual' && (
                                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                          {it.matched ? 'הערה ידנית — אין לה בדיקה אוטומטית, הכרע לפי התלוש המתוקן.'
-                                                      : 'העובד/ת לא נכלל/ה בקובץ שהועלה — לא נבדק.'}
+                                          {it.matched
+                                            ? 'הערה ידנית — אין לה בדיקה אוטומטית, הכרע לפי התלוש המתוקן.'
+                                            : 'התלוש לא נמצא בקובץ הסבב. אם ההערה הייתה לבטל את התלוש — הביטול בוצע, סמן ✓. אחרת הרו״ח פשוט לא שלח אותו.'}
                                         </Typography>
                                       )}
                                       {n.manual_verdict && n.manual_verdict !== n.auto_verdict && n.auto_verdict !== 'manual' && (

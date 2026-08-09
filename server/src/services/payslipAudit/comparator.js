@@ -226,6 +226,22 @@ function matchRows(tableRows, payslips) {
     }
   }
 
+  // A ת"ז that is known on BOTH sides and differs is a definitive no. Two
+  // employees can share a surname — מוריה טייכמן and רחל הלל טייכמן do — and
+  // when one of them has no payslip at all (hers was cancelled for the month)
+  // the name passes below would hand her the other's page. Her verdict would
+  // then be computed against a colleague's numbers, and the audit would report
+  // the cancelled payslip as present and fine.
+  //
+  // Names are a fallback for rows with no ת"ז. They must never overrule one.
+  const idConflict = (tableRow, payslip) => {
+    const tid = tableRow?.israeli_id ? pad9(tableRow.israeli_id) : null;
+    const pid = payslip?.employee_id ? pad9(payslip.employee_id) : null;
+    if (!tid || !pid) return false;
+    if (tid === '000000000' || pid === '000000000') return false;
+    return tid !== pid;
+  };
+
   // Pass 1: strict name — only for table rows not matched by ת"ז.
   const strictMatched = [];
   for (let ti = 0; ti < tableRows.length; ti++) {
@@ -237,6 +253,7 @@ function matchRows(tableRows, payslips) {
     let bestCommon = 0;
     for (let i = 0; i < payslips.length; i++) {
       if (used.has(i)) continue;
+      if (idConflict(tableRow, payslips[i])) continue;   // different ת"ז — not her
       const pName = normalizeName(payslips[i].employee_name);
       if (!pName) continue;
       const pTokens = pName.split(' ').filter(Boolean);
@@ -267,6 +284,7 @@ function matchRows(tableRows, payslips) {
     const candidates = [];
     for (let i = 0; i < payslips.length; i++) {
       if (used.has(i)) continue;
+      if (idConflict(tableRow, payslips[i])) continue;   // different ת"ז — not her
       const pName = normalizeName(payslips[i].employee_name);
       if (!pName) continue;
       const pTokens = pName.split(' ').filter(Boolean);
