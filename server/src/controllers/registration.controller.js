@@ -2,7 +2,6 @@ const { Registration, Classroom, Child, Archive, Collection, ContractVersion, Do
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
 const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
-const fileStorage = require('../services/file-storage.service');
 const env = require('../config/env');
 
 async function getAll(req, res, next) {
@@ -409,11 +408,21 @@ async function finalizeManual(req, res, next) {
     // Optional signed contract file (PDF/image). Best-effort upload to R2.
     if (req.file) {
       try {
-        const key = `contracts/${registration.unique_id}_manual_${Date.now()}_${req.file.originalname}`;
-        await fileStorage.upload(req.file.buffer, key, req.file.mimetype);
-        registration.contract_pdf_path = key;
+        if (req.file.size > 8 * 1024 * 1024) throw new Error('file too large (max 8MB)');
+        const { Contract } = require('../models');
+        const contract = await Contract.create({
+          registration_id: registration._id,
+          type: 'enrollment',
+          doc_type: 'enrollment_contract',
+          file_name: req.file.originalname,
+          file_data: req.file.buffer.toString('base64'),
+          file_mimetype: req.file.mimetype || 'application/pdf',
+          status: 'signed',
+          signed_at: new Date(),
+        });
+        registration.contract_pdf_path = `/api/contracts/doc/${contract._id}/file`;
       } catch (uploadErr) {
-        console.error('Manual contract upload failed:', uploadErr.message);
+        console.error('Manual contract store failed:', uploadErr.message);
       }
     }
 
@@ -494,8 +503,8 @@ function isGeneratedHtmlContract(key) {
 // field. Presigning one produces a valid-looking R2 link that points at
 // nothing, so the parent gets a 404 instead of the live-render fallback. An
 // absolute URL is already the answer; hand it back as-is.
-function isAbsoluteUrl(key) {
-  return /^https?:\/\//i.test(key || '');
+function isServableUrl(key) {
+  return /^(https?:\/\/|\/api\/)/i.test(key || '');
 }
 
 async function downloadContractVersion(req, res, next) {
@@ -505,16 +514,8 @@ async function downloadContractVersion(req, res, next) {
     if (!version) {
       return res.status(404).json({ error: 'Contract version not found' });
     }
-    if (version.contract_pdf_path && isAbsoluteUrl(version.contract_pdf_path)) {
+    if (version.contract_pdf_path && isServableUrl(version.contract_pdf_path)) {
       return res.json({ url: version.contract_pdf_path });
-    }
-    if (version.contract_pdf_path && !isGeneratedHtmlContract(version.contract_pdf_path)) {
-      try {
-        const url = await fileStorage.getPresignedUrl(version.contract_pdf_path, 600);
-        return res.json({ url });
-      } catch (err) {
-        console.error('Presigned URL failed for version, falling back:', err.message);
-      }
     }
     // Live render from snapshot.
     const { generateContractHTML } = require('../services/contract-pdf.service');
@@ -540,16 +541,8 @@ async function downloadContract(req, res, next) {
     // A genuine uploaded file (manual finalize) is a real binary — serve it
     // directly. Server-generated contracts are HTML-as-.pdf and must be
     // re-rendered below so the client makes a real PDF (else: blank page).
-    if (registration.contract_pdf_path && isAbsoluteUrl(registration.contract_pdf_path)) {
+    if (registration.contract_pdf_path && isServableUrl(registration.contract_pdf_path)) {
       return res.json({ url: registration.contract_pdf_path });
-    }
-    if (registration.contract_pdf_path && !isGeneratedHtmlContract(registration.contract_pdf_path)) {
-      try {
-        const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
-        return res.json({ url });
-      } catch (storageErr) {
-        console.error('Presigned URL failed, falling back to live render:', storageErr.message);
-      }
     }
     // Live fallback: render HTML now using current registration data + saved
     // signature. Works even if R2 isn't configured.

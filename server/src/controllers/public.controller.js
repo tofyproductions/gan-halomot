@@ -1,6 +1,5 @@
 const { Registration, Child, Document, GanEvent, Branch } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
-const fileStorage = require('../services/file-storage.service');
 const { sendAgreementEmail } = require('../services/email.service');
 const { getAcademicYearStr, getAcademicYears } = require('../services/academic-year.service');
 
@@ -132,13 +131,27 @@ async function storeSignedContract(req, res, next) {
       return res.status(400).json({ error: 'Invalid PDF content' });
     }
 
+    // The signed PDF is kept as a Contract record — base64 in Mongo, the same
+    // place employment contracts and employee documents have always lived.
+    // It used to be pushed to object storage that was never configured, so
+    // every parent signature since launch was written into a void and only the
+    // emailed copy survived.
     try {
-      const key = `contracts/${registration.unique_id}_signed_${Date.now()}.pdf`;
-      await fileStorage.upload(pdfBuffer, key, 'application/pdf');
-      registration.contract_pdf_path = key;
+      const { Contract } = require('../models');
+      const contract = await Contract.create({
+        registration_id: registration._id,
+        type: 'enrollment',
+        doc_type: 'enrollment_contract',
+        file_name: `contract_${registration.unique_id}_signed.pdf`,
+        file_data: pdfBuffer.toString('base64'),
+        file_mimetype: 'application/pdf',
+        status: 'signed',
+        signed_at: new Date(),
+      });
+      registration.contract_pdf_path = `/api/contracts/doc/${contract._id}/file`;
       await registration.save();
     } catch (uploadErr) {
-      console.error('Failed to upload signed contract:', uploadErr.message);
+      console.error('Failed to store signed contract:', uploadErr.message);
     }
 
     try {
@@ -213,14 +226,13 @@ async function uploadDocument(req, res, next) {
 
     const savedDocs = [];
     for (const { file, doc_type } of filesToSave) {
-      const key = `documents/${registration.unique_id}/${doc_type}_${Date.now()}_${file.originalname}`;
       try {
-        await fileStorage.upload(file.buffer, key, file.mimetype);
+        if (file.size > 8 * 1024 * 1024) throw new Error('file too large (max 8MB)');
         const doc = await Document.create({
           registration_id: registration._id,
           doc_type,
           file_name: file.originalname,
-          file_path: key,
+          file_data: file.buffer.toString('base64'),
           mime_type: file.mimetype,
           file_size_bytes: file.size,
         });

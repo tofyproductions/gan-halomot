@@ -23,10 +23,6 @@ const env = {
   GAS_EMAIL_SECRET: process.env.GAS_EMAIL_SECRET,
 
   // Cloudflare R2
-  R2_ENDPOINT: process.env.R2_ENDPOINT,
-  R2_BUCKET: process.env.R2_BUCKET || 'gan-halomot-files',
-  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
-  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
 
   // Google Sheets (migration only)
   GOOGLE_SHEETS_ID: process.env.GOOGLE_SHEETS_ID,

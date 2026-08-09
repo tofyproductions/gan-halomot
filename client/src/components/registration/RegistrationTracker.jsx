@@ -19,7 +19,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { openApiFile } from '../../api/client';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { getHebrewYear } from '../../utils/hebrewYear';
 import { printContractHtml } from '../../utils/contractPdf';
@@ -113,11 +113,8 @@ export default function RegistrationTracker() {
         toast.info('נפתחת תצוגת הדפסה — בחר/י "שמירה כ-PDF"');
         await printContractHtml(res.data.html);
       } else if (res.data?.url) {
-        // Saved PDF in R2 — download directly.
-        const a = document.createElement('a');
-        a.href = res.data.url;
-        a.download = `חוזה_${docsDialog.reg?.child_name || regId}.pdf`;
-        a.click();
+        // Stored PDF — served by the API behind auth, or an old Drive link.
+        await openApiFile(res.data.url, { filename: `חוזה_${docsDialog.reg?.child_name || regId}.pdf` });
       } else {
         toast.error('אין חוזה זמין');
       }
@@ -127,7 +124,7 @@ export default function RegistrationTracker() {
   };
 
   const downloadDoc = (docId) => {
-    window.open(`/api/documents/${docId}/download`, '_blank');
+    openApiFile(`/api/documents/${docId}/download`).catch((e) => toast.error(e.message));
   };
 
   const DOC_TYPE_LABELS = {

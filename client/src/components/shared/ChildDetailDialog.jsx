@@ -14,7 +14,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { openApiFile } from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
 import { printContractHtml } from '../../utils/contractPdf';
 
@@ -365,10 +365,8 @@ function ContractSection({ registrationId }) {
         toast.info('נפתחת תצוגת הדפסה — בחר/י "שמירה כ-PDF"');
         await printContractHtml(res.data.html);
       } else if (res.data?.url) {
-        const a = document.createElement('a');
-        a.href = res.data.url;
-        a.download = 'חוזה.pdf';
-        a.click();
+        // Stored PDF — served by the API behind auth, or an old Drive link.
+        await openApiFile(res.data.url, { filename: 'חוזה.pdf' });
       } else {
         toast.error('אין חוזה זמין');
       }

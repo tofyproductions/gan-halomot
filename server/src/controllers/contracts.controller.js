@@ -1,6 +1,5 @@
 const { Registration, Contract } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
-const fileStorage = require('../services/file-storage.service');
 
 async function preview(req, res, next) {
   try {
@@ -33,13 +32,18 @@ async function generate(req, res, next) {
     registration.classroom = registration.classroom_id?.name || null;
 
     const pdfBuffer = await generateContractPDF(registration);
-    const key = `contracts/${registration.unique_id}_contract_${Date.now()}.pdf`;
-    await fileStorage.upload(pdfBuffer, key, 'application/pdf');
-
-    await Registration.findByIdAndUpdate(registrationId, { contract_pdf_path: key });
-
-    const url = await fileStorage.getPresignedUrl(key, 3600);
-    res.json({ message: 'Contract PDF generated successfully', contract_pdf_path: key, url });
+    const contract = await Contract.create({
+      registration_id: registrationId,
+      type: 'enrollment',
+      doc_type: 'enrollment_contract',
+      file_name: `contract_${registration.unique_id}.pdf`,
+      file_data: pdfBuffer.toString('base64'),
+      file_mimetype: 'application/pdf',
+      status: 'draft',
+    });
+    const url = `/api/contracts/doc/${contract._id}/file`;
+    await Registration.findByIdAndUpdate(registrationId, { contract_pdf_path: url });
+    res.json({ message: 'Contract PDF generated successfully', contract_pdf_path: url, url });
   } catch (error) {
     next(error);
   }
@@ -54,12 +58,17 @@ async function download(req, res, next) {
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found' });
     }
-    if (!registration.contract_pdf_path) {
-      return res.status(404).json({ error: 'Contract PDF has not been generated yet' });
+    // Either an absolute Drive link carried over from the old system, or the
+    // in-app route to a Contract record. Both are already URLs.
+    if (registration.contract_pdf_path) {
+      return res.redirect(registration.contract_pdf_path);
     }
-
-    const url = await fileStorage.getPresignedUrl(registration.contract_pdf_path, 600);
-    res.redirect(url);
+    // No stored path: fall back to the newest Contract record for this
+    // registration before declaring there is nothing.
+    const contract = await Contract.findOne({ registration_id: registrationId })
+      .sort({ created_at: -1 }).select('_id').lean();
+    if (contract) return res.redirect(`/api/contracts/doc/${contract._id}/file`);
+    return res.status(404).json({ error: 'Contract PDF has not been generated yet' });
   } catch (error) {
     next(error);
   }
