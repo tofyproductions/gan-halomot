@@ -115,8 +115,83 @@ function summarizeAudit(audit) {
 /** Persist an audit run with metadata, return the saved doc. Best-effort —
  * never throws back to the request handler so a DB hiccup doesn't make the
  * audit itself fail. */
+/**
+ * Carry the still-open corrections from this month's previous check onto a
+ * freshly uploaded one, already graded against the new payslips.
+ *
+ * Re-uploading a corrected file used to start from zero: what was asked for
+ * last time lived in the old record, so the only way to check the accountant
+ * was a separate round screen holding a filtered subset of employees. Notes
+ * now travel with the month instead. Open the new check and every employee is
+ * there — including the ones signed off, which sometimes need changing too —
+ * each carrying what was asked and whether the new file answers it.
+ *
+ * Grading mirrors the correction round: a note tied to a real comparator field
+ * is fixed when that field no longer trips. A note typed by hand has nothing to
+ * test, so it stays undecided rather than being guessed at.
+ *
+ * Mutates `audit.editor_verifications` in place; safe to call with no history.
+ */
+async function carryForwardNotes(audit) {
+  const ym = audit.year_month;
+  if (!ym || !Array.isArray(audit.results)) return { carried: 0, fixed: 0 };
+  const prior = await PayslipAuditRecord.find({ year_month: ym })
+    .sort({ created_at: -1 }).limit(1).lean();
+  if (!prior.length) return { carried: 0, fixed: 0 };
+
+  const open = fixTargetsFrom(prior[0]);        // already excludes settled-fixed
+  if (!open.length) return { carried: 0, fixed: 0 };
+  const byKey = new Map(open.map((t) => [targetKey(t.result), t]));
+
+  const ver = { ...(audit.editor_verifications || {}) };
+  let carried = 0;
+  let fixed = 0;
+  audit.results.forEach((r, idx) => {
+    const t = byKey.get(targetKey(r));
+    if (!t) return;
+    const live = new Set(
+      (r.findings || [])
+        .filter((f) => f.severity === 'critical' || f.severity === 'warning')
+        .map((f) => f.field),
+    );
+    const existing = [...(ver[idx] || [])];
+    for (const n of t.notes) {
+      if (existing.some((e) => e.message === n.message)) continue;   // already there
+      const gradable = n.field && n.field !== 'manual';
+      const verdict = gradable ? (live.has(n.field) ? 'not_fixed' : 'fixed') : null;
+      if (verdict === 'fixed') fixed += 1;
+      existing.push({
+        field: n.field || 'manual',
+        severity: n.severity || 'critical',
+        message: n.message,
+        // Something the new file answers is not re-sent; anything else is, and
+        // an ungradable note comes back as a question rather than an answer.
+        status: verdict === 'fixed' ? 'rejected' : 'approved',
+        note: '',
+        carried_from: String(prior[0]._id),
+        carried_at: prior[0].created_at,
+        carry_verdict: verdict,          // 'fixed' | 'not_fixed' | null (undecided)
+      });
+      carried += 1;
+    }
+    if (existing.length) ver[idx] = existing;
+  });
+  audit.editor_verifications = ver;
+  return { carried, fixed };
+}
+
 async function persistAudit({ audit, user, table_filename, payslip_files, branches }) {
   try {
+    // Seed the new record with the previous check's open corrections, graded
+    // against these payslips, so re-uploading a corrected file continues the
+    // conversation instead of restarting it.
+    let carry = { carried: 0, fixed: 0 };
+    try {
+      carry = await carryForwardNotes(audit);
+    } catch (e) {
+      console.error('carryForwardNotes failed:', e.message);
+    }
+    audit.carry_summary = carry;
     const doc = await PayslipAuditRecord.create({
       created_by: user?.id || null,
       created_by_name: user?.full_name || '',
@@ -3063,6 +3138,7 @@ module.exports = {
   unapproveAudit,
   getCycleProgression,
   getPriorNotes,
+  carryForwardNotes,
   createFixRound,
   listFixRounds,
   setFixVerdict,

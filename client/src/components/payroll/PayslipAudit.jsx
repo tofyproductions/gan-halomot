@@ -354,6 +354,11 @@ function PerEmployeePairedView({
   const willSendCount = editableResults.reduce((s, r) => s + r.findings.filter(sendable).length, 0);
   const reviewedCount = editableResults.filter((_, idx) => reviewedMap?.[idx]).length;
   const cleanCount = editableResults.filter((r) => r.findings.filter(sendable).length === 0).length;
+  // Corrections inherited from this month's previous check.
+  const carried = editableResults.flatMap((r) => r.findings).filter((f) => f.carried_from);
+  const carriedFixed = carried.filter((f) => f.carry_verdict === 'fixed').length;
+  const carriedOpen = carried.filter((f) => f.carry_verdict === 'not_fixed').length;
+  const carriedUndecided = carried.filter((f) => f.carried_from && !f.carry_verdict).length;
 
   // Map an audit result to its parallel editableResult by index
   const editableByAuditIdx = (auditIdx) => editableResults[auditIdx];
@@ -437,6 +442,18 @@ function PerEmployeePairedView({
             )}
           </CardContent>
         </Card>
+      )}
+      {/* This upload continues the month rather than starting it over. */}
+      {carried.length > 0 && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          <b>{carried.length}</b> תיקונים שביקשת בבדיקה הקודמת של החודש הועברו לקובץ הזה ונבדקו מולו:
+          {' '}<b style={{ color: '#2e7d32' }}>{carriedFixed} תוקנו</b>
+          {carriedOpen > 0 && <> · <b style={{ color: '#d32f2f' }}>{carriedOpen} עדיין לא</b></>}
+          {carriedUndecided > 0 && <> · <b style={{ color: '#ed6c02' }}>{carriedUndecided} להכרעה שלך</b></>}
+          <Box sx={{ fontSize: 12, mt: 0.25, opacity: 0.85 }}>
+            מה שתוקן לא יישלח שוב לרו״ח. מה שלא — כבר מסומן לשליחה. הערות ידניות מחכות להכרעה שלך מול התלוש.
+          </Box>
+        </Alert>
       )}
       {/* Top bar — sticky so the email button + add-employee stay reachable */}
       <Card sx={{ borderTop: 4, borderColor: 'primary.main', mb: 1.5, position: 'sticky', top: 0, zIndex: 5 }}>
@@ -850,6 +867,27 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </Stack>
+                {/* Asked for in this month's previous check. The badge says
+                    whether this file answers it, so the decision is "is this
+                    done" rather than "what did I ask for again". */}
+                {f.carried_from && (
+                  <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5, mr: 11, flexWrap: 'wrap' }}>
+                    <Chip size="small" variant="outlined" label="↩ מהבדיקה הקודמת"
+                      sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+                    {f.carry_verdict === 'fixed' && (
+                      <Chip size="small" color="success" label="✓ תוקן בקובץ החדש" sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+                    )}
+                    {f.carry_verdict === 'not_fixed' && (
+                      <Chip size="small" color="error" label="✗ עדיין לא תוקן" sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+                    )}
+                    {!f.carry_verdict && (
+                      <Chip size="small" color="warning" label="? הכרע לפי התלוש" sx={{ height: 18, fontSize: 9.5, fontWeight: 700 }} />
+                    )}
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize: 9.5 }}>
+                      {f.carried_at ? new Date(f.carried_at).toLocaleDateString('he-IL') : ''}
+                    </Typography>
+                  </Stack>
+                )}
                 {/* Already settled by a correction round — say so, and say
                     which round, rather than leaving it looking unsent. */}
                 {f.settled === 'fixed' && (
@@ -3044,6 +3082,11 @@ export default function PayslipAudit() {
             ...f,
             status: prior?.status || 'pending',
             note: prior?.note || '',
+            // Carried over from this month's previous check, with how the new
+            // file answers it. Kept on the finding so the editor can show it.
+            carried_from: prior?.carried_from,
+            carried_at: prior?.carried_at,
+            carry_verdict: prior?.carry_verdict,
           };
         });
       // Also pull in any manually-added findings from saved edits that aren't in audit.results
