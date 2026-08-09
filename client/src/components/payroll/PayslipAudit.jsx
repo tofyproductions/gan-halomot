@@ -336,7 +336,8 @@ function PerEmployeePairedView({
   filteredResults, audit, editableResults, expanded, setExpanded,
   updateFinding, removeFinding, addFinding, removeEmployee, addManualEmployee,
   onSendEmail, onSaveEdits, onFixRound, reviewedMap, onToggleReviewed, priorNotes,
-  previewKind, roundView, onExitRoundView,
+  previewKind, roundView, onExitRoundView, onApproveRound, onSendEmployees, onSendManagers,
+  onAnotherRound, onResendAccountant, onAddNote,
 }) {
   const [showAllEmpty, setShowAllEmpty] = useState(false);
   const [newName, setNewName] = useState('');
@@ -379,17 +380,63 @@ function PerEmployeePairedView({
       {/* Viewing a correction round, not the original audit. Say so loudly —
           the numbers on screen came from the accountant's re-submission. */}
       {roundView && (
-        <Alert
-          severity="success"
-          sx={{ mb: 1.5 }}
-          action={<Button size="small" onClick={onExitRoundView}>חזור לביקורת המקורית</Button>}
-        >
-          <b>סבב תיקון {roundView.round_no}</b> — התלושים המתוקנים שהתקבלו מהרו״ח.
-          התצוגה המקדימה מציגה את התלוש החדש.
-          {roundView.summary && <> · {roundView.summary.fixed} תוקנו · {roundView.summary.not_fixed} לא תוקנו
-            {!!roundView.summary.manual && ` · ${roundView.summary.manual} להכרעה`}</>}
-          <Box sx={{ fontSize: 12, mt: 0.25, opacity: 0.85 }}>לצפייה בלבד — עריכת תיקונים וסימונים נעשית בביקורת המקורית.</Box>
-        </Alert>
+        <Card sx={{ mb: 1.5, borderTop: 4, borderColor: roundView.open === 0 ? 'success.main' : 'warning.main' }}>
+          <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ flexWrap: 'wrap', mb: 1 }}>
+              <Typography sx={{ fontWeight: 800 }}>סבב תיקון {roundView.round_no}</Typography>
+              <Typography variant="caption" color="text.secondary">התלושים המתוקנים שהתקבלו מהרו״ח · התצוגה המקדימה מציגה את התלוש החדש</Typography>
+              <Box sx={{ flex: 1 }} />
+              {roundView.approved && <Chip size="small" color="success" label="✓ הסבב אושר" sx={{ fontWeight: 800 }} />}
+              <Button size="small" onClick={onExitRoundView}>חזור לביקורת המקורית</Button>
+            </Stack>
+            {roundView.summary && (
+              <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+                <Chip size="small" color="success" label={`${roundView.summary.fixed} תוקנו`} />
+                {!!roundView.summary.not_fixed && <Chip size="small" color="error" label={`${roundView.summary.not_fixed} לא תוקנו`} />}
+                {!!roundView.summary.manual && <Chip size="small" color="warning" label={`${roundView.summary.manual} להכרעה`} />}
+                {!!roundView.summary.new_issues && <Chip size="small" color="error" variant="outlined" label={`${roundView.summary.new_issues} ממצאים חדשים`} />}
+              </Stack>
+            )}
+
+            {/* The fork at the end of a round: sign off and release the payslips,
+                or send the accountant back for another pass. */}
+            {roundView.approved ? (
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, color: 'success.dark', width: '100%', mb: 0.5 }}>
+                  התלושים המתוקנים מוכנים להפצה:
+                </Typography>
+                <Button size="small" variant="contained" color="success" startIcon={<EmailIcon />} onClick={onSendEmployees}>
+                  שלח לעובדים (תלוש + דוח שעות אישי)
+                </Button>
+                <Button size="small" variant="contained" color="success" startIcon={<EmailIcon />} onClick={onSendManagers}>
+                  שלח למנהלי סניפים (כל הסניף)
+                </Button>
+              </Stack>
+            ) : (
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
+                <Button size="small" variant="contained" color="success" startIcon={<CheckCircleIcon />}
+                  disabled={roundView.busy} onClick={() => onApproveRound(false)}>
+                  {roundView.open === 0 ? 'אשר סבב וסיים' : `אשר בכל זאת (${roundView.open} פתוחות)`}
+                </Button>
+                <Button size="small" variant="outlined" onClick={onAnotherRound}>סבב תיקון נוסף</Button>
+                <Button size="small" variant="outlined" startIcon={<EmailIcon />} onClick={onResendAccountant}>
+                  שלח שוב לרו״ח
+                </Button>
+                {/* Something turns up on a payslip that was already signed off.
+                    Adding the correction to the origin audit puts that employee
+                    back in the next round — no need to redo the review. */}
+                <Button size="small" variant="outlined" color="warning" startIcon={<AddIcon />} onClick={onAddNote}>
+                  הוסף תיקון לסבב הבא
+                </Button>
+                {roundView.open > 0 && (
+                  <Typography variant="caption" sx={{ color: 'warning.dark', fontWeight: 700, alignSelf: 'center' }}>
+                    {roundView.open} הערות עדיין לא סגורות — סגור אותן בדיאלוג הסבב, או אשר בכל זאת
+                  </Typography>
+                )}
+              </Stack>
+            )}
+          </CardContent>
+        </Card>
       )}
       {/* Top bar — sticky so the email button + add-employee stay reachable */}
       <Card sx={{ borderTop: 4, borderColor: 'primary.main', mb: 1.5, position: 'sticky', top: 0, zIndex: 5 }}>
@@ -2473,7 +2520,16 @@ export default function PayslipAudit() {
   const openRoundInView = (round) => {
     const originId = roundView ? roundView.audit_id : audit?.saved_audit_id;
     if (!round?.audit_view || !originId) return;
-    setRoundView({ audit_id: originId, round_no: round.round_no, summary: round.summary });
+    // Anything not settled as "fixed" blocks a clean sign-off.
+    const open = (round.items || []).reduce((s, it) => s + (it.notes || [])
+      .filter((n) => (n.manual_verdict || n.auto_verdict) !== 'fixed').length, 0);
+    setRoundView({
+      audit_id: originId,
+      round_no: round.round_no,
+      summary: round.summary,
+      open,
+      approved: !!round.approved,
+    });
     setAudit({
       ...round.audit_view,
       saved_audit_id: originId,
@@ -2493,6 +2549,52 @@ export default function PayslipAudit() {
     const id = roundView?.audit_id;
     setRoundView(null);
     if (id) await loadFromHistory(id, true);
+  };
+
+  // Sign the round off. Approving promotes its PDFs to the audit's 'approved'
+  // copy, which is what every distribution path reads — so the managers and
+  // the employees receive the corrected payslips and not the original file.
+  const approveRound = async (force = false) => {
+    if (!roundView) return;
+    const open = roundView.open || 0;
+    if (open > 0 && !force) {
+      const go = await confirm({
+        title: 'אישור סבב עם הערות פתוחות',
+        message: `${open} הערות עדיין לא סומנו כתוקנו. אישור הסבב משחרר את התלושים להפצה למנהלים ולעובדים. להמשיך בכל זאת?`,
+        danger: true,
+      });
+      if (!go) return;
+    }
+    setRoundView((p) => ({ ...p, busy: true }));
+    try {
+      const res = await api.post(
+        `/payroll/payslip-audit/history/${roundView.audit_id}/fix-rounds/${roundView.round_no}/approve`,
+        { force: true },
+      );
+      toast.success(`סבב ${res.data.round_no} אושר · ${res.data.pdfs_promoted} קבצים סומנו כגרסה הסופית`);
+      setRoundView((p) => ({ ...p, busy: false, approved: true }));
+      fetchHistory();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה באישור הסבב');
+      setRoundView((p) => ({ ...p, busy: false }));
+    }
+  };
+
+  // Add one correction to an employee already signed off, so the next round
+  // picks them up again.
+  const [addNoteDlg, setAddNoteDlg] = useState({ open: false, key: '', message: '', severity: 'critical' });
+  const submitAddNote = async () => {
+    const originId = roundView ? roundView.audit_id : audit?.saved_audit_id;
+    if (!originId || !addNoteDlg.key || !addNoteDlg.message.trim()) return;
+    try {
+      const res = await api.post(`/payroll/payslip-audit/history/${originId}/notes`, {
+        key: addNoteDlg.key, message: addNoteDlg.message.trim(), severity: addNoteDlg.severity,
+      });
+      toast.success(`נוסף תיקון ל${res.data.employee} · ${res.data.open_notes} הערות פתוחות לסבב הבא`);
+      setAddNoteDlg({ open: false, key: '', message: '', severity: 'critical' });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בהוספת התיקון');
+    }
   };
   // Notes already sent to the accountant this month, keyed by employee, so the
   // reviewer sees the instruction next to the number it was meant to produce.
@@ -3745,6 +3847,12 @@ export default function PayslipAudit() {
             previewKind={audit.__preview_kind || null}
             roundView={roundView}
             onExitRoundView={exitRoundView}
+            onApproveRound={approveRound}
+            onSendEmployees={() => setDistDialog({ open: true, audit: { _id: roundView?.audit_id } })}
+            onSendManagers={() => setMgrDialog({ open: true, audit: { _id: roundView?.audit_id } })}
+            onAnotherRound={() => setFixDialog(true)}
+            onResendAccountant={async () => { await exitRoundView(); openEmailDialog(); }}
+            onAddNote={() => setAddNoteDlg({ open: true, key: '', message: '', severity: 'critical' })}
           />
         )}
 
@@ -3886,6 +3994,44 @@ export default function PayslipAudit() {
       </Dialog>
 
       <BranchManagerEmailsDialog open={mgrEmailsOpen} onClose={() => setMgrEmailsOpen(false)} />
+      {/* Put a signed-off employee back in play — one correction, appended to
+          the origin audit, which is what the next round reads. */}
+      <Dialog open={addNoteDlg.open} onClose={() => setAddNoteDlg({ ...addNoteDlg, open: false })} fullWidth maxWidth="sm" dir="rtl">
+        <DialogTitle sx={{ fontWeight: 700 }}>הוסף תיקון לסבב הבא</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              התיקון נוסף לביקורת המקורית. העובד/ת יחזרו אוטומטית לסבב התיקון הבא ולמייל לרו״ח,
+              גם אם התלוש כבר סומן כנבדק.
+            </Alert>
+            <Autocomplete
+              options={(audit?.results || []).map((r, i) => ({
+                key: resultKey(r), i,
+                label: `${r.table_row?.employee_name || r.payslip?.employee_name || '—'}${(r.__source_branch || r.table_row?.branch) ? ` · ${(r.__source_branch || r.table_row.branch).replace(/\s+/g, ' ').trim()}` : ''}`,
+              }))}
+              getOptionLabel={(o) => o.label || ''}
+              isOptionEqualToValue={(a, b) => a.key === b.key}
+              onChange={(_, v) => setAddNoteDlg((p) => ({ ...p, key: v?.key || '' }))}
+              renderInput={(p) => <TextField {...p} label="עובד/ת" size="small" />}
+            />
+            <Select size="small" value={addNoteDlg.severity}
+              onChange={(e) => setAddNoteDlg((p) => ({ ...p, severity: e.target.value }))}>
+              <MenuItem value="critical">קריטי</MenuItem>
+              <MenuItem value="warning">אזהרה</MenuItem>
+            </Select>
+            <TextField label="תיאור התיקון הנדרש" multiline minRows={3} fullWidth
+              value={addNoteDlg.message}
+              onChange={(e) => setAddNoteDlg((p) => ({ ...p, message: e.target.value }))} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddNoteDlg({ ...addNoteDlg, open: false })}>ביטול</Button>
+          <Button variant="contained" disabled={!addNoteDlg.key || !addNoteDlg.message.trim()} onClick={submitAddNote}>
+            הוסף
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <PayslipDistributionDialog open={distDialog.open} audit={distDialog.audit} onClose={() => setDistDialog({ open: false, audit: null })} />
       <ManagerDistributionDialog open={mgrDialog.open} audit={mgrDialog.audit} onClose={() => setMgrDialog({ open: false, audit: null })} />
 

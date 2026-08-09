@@ -1358,6 +1358,136 @@ async function setFixVerdict(req, res) {
 }
 
 /**
+ * POST /payslip-audit/history/:id/notes
+ * Body: { key | audit_idx, message, severity? }
+ *
+ * Append ONE correction to an employee on this audit.
+ *
+ * A payslip signed off in round 1 turns out to have a problem in round 2. The
+ * whole review does not need redoing — the employee just has to carry a live
+ * correction again, which is what puts them in the next round. This appends
+ * surgically rather than through the editor's whole-audit save, because the
+ * screen the user is on when they notice is showing the ROUND's results, and
+ * saving that set over the origin would wipe the notes it was graded against.
+ */
+async function addAuditNote(req, res) {
+  try {
+    const { key, audit_idx, message, severity = 'critical' } = req.body || {};
+    if (!message || !String(message).trim()) return res.status(400).json({ error: 'נדרש תוכן לתיקון' });
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+
+    const full = { ...(doc.full_result || {}) };
+    const results = full.results || [];
+    let idx = Number.isInteger(audit_idx) ? audit_idx : -1;
+    if (idx < 0 && key) idx = results.findIndex((r) => targetKey(r) === key);
+    if (idx < 0 || idx >= results.length) return res.status(404).json({ error: 'עובד לא נמצא בביקורת' });
+
+    const ver = { ...(full.editor_verifications || {}) };
+    const list = [...(ver[idx] || [])];
+    if (list.some((n) => n.message === String(message).trim() && n.status !== 'rejected')) {
+      return res.status(409).json({ error: 'התיקון הזה כבר קיים לעובד/ת' });
+    }
+    list.push({
+      field: 'manual',
+      severity: severity === 'warning' ? 'warning' : 'critical',
+      message: String(message).trim(),
+      status: 'approved',
+      note: '',
+    });
+    ver[idx] = list;
+    full.editor_verifications = ver;
+    doc.full_result = full;
+    doc.markModified('full_result');
+    await doc.save();
+
+    const r = results[idx];
+    res.json({
+      success: true,
+      employee: r.table_row?.employee_name || r.payslip?.employee_name || '—',
+      open_notes: fixTargetsFrom(doc).reduce((s, t) => s + t.notes.length, 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה בהוספת התיקון' });
+  }
+}
+
+/**
+ * POST /payslip-audit/history/:id/fix-rounds/:roundNo/approve
+ * Body: { force?: boolean, note?: string }
+ *
+ * Close the cycle on a round. Every note has to be settled — a note still
+ * reading ✗ לא תוקן or ? להכרעה blocks it, because approving is what releases
+ * the payslips to the branch managers and to the employees themselves, and
+ * that is not a step to take over an open question. `force` overrides with the
+ * override recorded on the round.
+ *
+ * The round's PDFs are copied into the audit's 'approved' slot. Every
+ * distribution path reads through loadBranchPdf, which prefers 'approved' —
+ * so this is what makes the send deliver the CORRECTED payslips instead of the
+ * file the month started with.
+ */
+async function approveFixRound(req, res) {
+  try {
+    const doc = await PayslipAuditRecord.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
+    const round = (doc.fix_rounds || []).find((r) => r.round_no === Number(req.params.roundNo));
+    if (!round) return res.status(404).json({ error: 'סבב לא נמצא' });
+
+    const open = [];
+    for (const it of round.items || []) {
+      for (const n of it.notes || []) {
+        const eff = n.manual_verdict || n.auto_verdict;
+        if (eff !== 'fixed') open.push({ employee: it.employee_name, message: n.message, verdict: eff });
+      }
+    }
+    const force = req.body?.force === true;
+    if (open.length && !force) {
+      return res.status(409).json({
+        error: `${open.length} הערות עדיין לא סגורות — אשר אותן או השתמש ב"אשר בכל זאת"`,
+        open_notes: open,
+      });
+    }
+
+    // Promote this round's uploads to the approved copy.
+    const kind = `fix_${round.round_no}`;
+    const pdfs = await PayslipAuditPdf.find({ audit_id: doc._id, kind }).lean();
+    for (const p of pdfs) {
+      const bytes = p.data?.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
+      await storePayslipPdfDb(doc._id, p.branch, bytes, 'approved');
+      try {
+        ensureDir(path.join(PDF_STORAGE_DIR, String(doc._id), 'approved'));
+        fs.writeFileSync(approvedPdfStoragePath(doc._id, p.branch), bytes);
+      } catch (e) { /* disk is a convenience; Mongo is the durable copy */ }
+    }
+
+    round.approved = true;
+    round.approved_at = new Date();
+    round.approved_by_name = req.user?.full_name || '';
+    round.approved_forced = !!open.length;
+
+    doc.approved = true;
+    doc.approved_at = new Date();
+    doc.approved_by = req.user?.id || null;
+    doc.approved_by_name = req.user?.full_name || '';
+    if (round.uploaded_files?.length) doc.approved_payslip_files = round.uploaded_files;
+    if (typeof req.body?.note === 'string' && req.body.note.trim()) doc.approved_note = req.body.note.trim();
+    doc.markModified('fix_rounds');
+    await doc.save();
+
+    res.json({
+      success: true,
+      round_no: round.round_no,
+      forced: !!open.length,
+      open_notes: open.length,
+      pdfs_promoted: pdfs.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message || 'שגיאה באישור הסבב' });
+  }
+}
+
+/**
  * GET /payslip-audit/history/:id/fix-rounds/:roundNo/page?branch=&page=
  * One page out of a round's PDF, for the old-vs-new preview.
  */
@@ -2860,6 +2990,8 @@ module.exports = {
   createFixRound,
   listFixRounds,
   setFixVerdict,
+  approveFixRound,
+  addAuditNote,
   getFixRoundPage,
   createFixToken,
   revokeFixToken,

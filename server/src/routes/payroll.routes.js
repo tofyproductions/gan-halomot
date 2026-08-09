@@ -228,6 +228,16 @@ router.patch(
   requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.setFixVerdict,
 );
+router.post(
+  '/payslip-audit/history/:id/notes',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  audit.addAuditNote,
+);
+router.post(
+  '/payslip-audit/history/:id/fix-rounds/:roundNo/approve',
+  requireRole('system_admin', 'accountant'),
+  audit.approveFixRound,
+);
 router.get(
   '/payslip-audit/history/:id/fix-rounds/:roundNo/page',
   requireRole('system_admin', 'branch_manager', 'accountant'),

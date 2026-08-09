@@ -128,6 +128,14 @@ const payslipAuditSchema = new mongoose.Schema(
         // Reading a verdict without the payslip in front of you is guesswork —
         // the screen that pairs each employee with their page already exists.
         audit_view: { type: mongoose.Schema.Types.Mixed, default: null },
+        // Signed off: every note in this round was settled. Approving copies
+        // the round's PDFs over the audit's 'approved' slot, which is what the
+        // distribution reads — so managers and employees get the corrected
+        // payslips, not the file the month started with.
+        approved: { type: Boolean, default: false },
+        approved_at: { type: Date, default: null },
+        approved_by_name: { type: String, default: '' },
+        approved_forced: { type: Boolean, default: false },  // closed with notes still open
         summary: {
           employees:  { type: Number, default: 0 },
           notes:      { type: Number, default: 0 },
