@@ -94,6 +94,10 @@ const payslipAuditSchema = new mongoose.Schema(
             employee_no: mongoose.Schema.Types.Mixed,
             employee_id: String,
             page_index: Number,        // page in the NEW round PDF, for preview
+            // Which uploaded file that page lives in. Undeclared fields are
+            // stripped on save, and without this the preview had a page number
+            // and no file to take it from.
+            round_branch: String,
             matched: { type: Boolean, default: false },  // found in the new PDF at all
             notes: {
               type: [{
@@ -119,6 +123,11 @@ const payslipAuditSchema = new mongoose.Schema(
           }],
           default: [],
         },
+        // The re-check in the same shape as an ordinary audit result, so the
+        // round can be opened in the main review screen instead of a list.
+        // Reading a verdict without the payslip in front of you is guesswork —
+        // the screen that pairs each employee with their page already exists.
+        audit_view: { type: mongoose.Schema.Types.Mixed, default: null },
         summary: {
           employees:  { type: Number, default: 0 },
           notes:      { type: Number, default: 0 },

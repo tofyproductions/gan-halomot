@@ -336,6 +336,7 @@ function PerEmployeePairedView({
   filteredResults, audit, editableResults, expanded, setExpanded,
   updateFinding, removeFinding, addFinding, removeEmployee, addManualEmployee,
   onSendEmail, onSaveEdits, onFixRound, reviewedMap, onToggleReviewed, priorNotes,
+  previewKind, roundView, onExitRoundView,
 }) {
   const [showAllEmpty, setShowAllEmpty] = useState(false);
   const [newName, setNewName] = useState('');
@@ -375,6 +376,21 @@ function PerEmployeePairedView({
 
   return (
     <Box>
+      {/* Viewing a correction round, not the original audit. Say so loudly —
+          the numbers on screen came from the accountant's re-submission. */}
+      {roundView && (
+        <Alert
+          severity="success"
+          sx={{ mb: 1.5 }}
+          action={<Button size="small" onClick={onExitRoundView}>חזור לביקורת המקורית</Button>}
+        >
+          <b>סבב תיקון {roundView.round_no}</b> — התלושים המתוקנים שהתקבלו מהרו״ח.
+          התצוגה המקדימה מציגה את התלוש החדש.
+          {roundView.summary && <> · {roundView.summary.fixed} תוקנו · {roundView.summary.not_fixed} לא תוקנו
+            {!!roundView.summary.manual && ` · ${roundView.summary.manual} להכרעה`}</>}
+          <Box sx={{ fontSize: 12, mt: 0.25, opacity: 0.85 }}>לצפייה בלבד — עריכת תיקונים וסימונים נעשית בביקורת המקורית.</Box>
+        </Alert>
+      )}
       {/* Top bar — sticky so the email button + add-employee stay reachable */}
       <Card sx={{ borderTop: 4, borderColor: 'primary.main', mb: 1.5, position: 'sticky', top: 0, zIndex: 5 }}>
         <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
@@ -475,8 +491,9 @@ function PerEmployeePairedView({
                   onToggle={() => setExpanded(expanded === idx ? null : idx)}
                   savedAuditId={audit.saved_audit_id}
                   reviewed={!!reviewedMap?.[idx]}
-                  onToggleReviewed={() => onToggleReviewed(idx)}
+                  onToggleReviewed={onToggleReviewed ? () => onToggleReviewed(idx) : null}
                   priorNotes={priorNotes?.[resultKey(result)]}
+                  previewKind={previewKind}
                 />
                 {/* Left column (RTL second): per-employee editor.
                     Side stripe color reflects review state — green when all
@@ -1169,7 +1186,7 @@ function StatTile({ label, value, color = 'default' }) {
   );
 }
 
-function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes }) {
+function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onToggleReviewed, priorNotes, previewKind }) {
   const name = result.table_row?.employee_name || result.payslip?.employee_name || '—';
   // Prefer __source_branch (set by /run-multi) — it's the canonical branch the
   // PDF was tagged with — over the table_row's branch column which may have
@@ -1198,6 +1215,9 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
         auditId: savedAuditId,
         branch,
         page: result.payslip.page_index,
+        // A correction round reuses the origin audit's id, so the page has to
+        // be pulled from that round's upload rather than the original file.
+        kind: previewKind || null,
         year_month: null, // current
       });
     }
@@ -1214,7 +1234,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
     (async () => {
       try {
         const res = await fetch(
-          `/api/payroll/payslip-audit/history/${activePreview.auditId}/payslip-page?branch=${encodeURIComponent(activePreview.branch)}&page=${activePreview.page}`,
+          `/api/payroll/payslip-audit/history/${activePreview.auditId}/payslip-page?branch=${encodeURIComponent(activePreview.branch)}&page=${activePreview.page}${activePreview.kind ? `&kind=${encodeURIComponent(activePreview.kind)}` : ''}`,
           { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }
         );
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `שגיאה ${res.status}`);
@@ -1886,7 +1906,7 @@ function resultKey(r) {
   return `nm:${name}::${branch}`;
 }
 
-export function FixRoundDialog({ open, auditId, branches = [], onClose }) {
+export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRound }) {
   const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
@@ -1928,11 +1948,16 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose }) {
       if (note.trim()) form.append('note', note.trim());
       const res = await api.post(`/payroll/payslip-audit/history/${auditId}/fix-round`, form,
         { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 180000 });
-      const s = res.data.round.summary;
-      toast.success(`סבב ${res.data.round.round_no}: ${s.fixed} תוקנו · ${s.not_fixed} לא תוקנו · ${s.manual} להכרעה`);
+      const round = res.data.round;
+      const s = round.summary;
+      toast.success(`סבב ${round.round_no}: ${s.fixed} תוקנו · ${s.not_fixed} לא תוקנו · ${s.manual} להכרעה`);
       setNote('');
       setFiles((prev) => prev.map((r) => ({ ...r, file: null })));
       await load();
+      // Land straight in the review screen with the corrected payslips, the way
+      // a fresh upload does — a verdict list with no payslip beside it can't be
+      // checked against anything.
+      if (onOpenRound && round.audit_view) onOpenRound(round);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בהרצת הסבב');
     } finally {
@@ -2087,6 +2112,12 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose }) {
                     {!!s.manual && <Chip size="small" color="warning" label={`${s.manual} להכרעה`} />}
                     {!!s.new_issues && <Chip size="small" color="error" variant="outlined" label={`${s.new_issues} ממצאים חדשים`} />}
                     {!!s.unmatched && <Chip size="small" variant="outlined" label={`${s.unmatched} לא בקובץ`} />}
+                    {onOpenRound && r.audit_view && (
+                      <Button size="small" variant="outlined" startIcon={<DescriptionIcon />}
+                        onClick={(ev) => { ev.stopPropagation(); onOpenRound(r); }}>
+                        פתח בתצוגה מלאה
+                      </Button>
+                    )}
                     {isOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                   </Stack>
                   <Collapse in={isOpen}>
@@ -2434,6 +2465,35 @@ export default function PayslipAudit() {
   const [attachPayslips, setAttachPayslips] = useState(true);
   // Correction rounds — verify the accountant acted on the notes.
   const [fixDialog, setFixDialog] = useState(false);
+  // When a round is opened in the main screen, this holds which one. The screen
+  // is then showing the accountant's corrected payslips, NOT the original
+  // audit — editing must not write back over the notes that produced it.
+  const [roundView, setRoundView] = useState(null); // { audit_id, round_no, summary }
+
+  const openRoundInView = (round) => {
+    const originId = roundView ? roundView.audit_id : audit?.saved_audit_id;
+    if (!round?.audit_view || !originId) return;
+    setRoundView({ audit_id: originId, round_no: round.round_no, summary: round.summary });
+    setAudit({
+      ...round.audit_view,
+      saved_audit_id: originId,
+      // Point every payslip preview at the round's upload rather than the
+      // original one — otherwise the screen shows the pre-correction page.
+      __preview_kind: `fix_${round.round_no}`,
+    });
+    setExpanded(null);
+    setFilterSev('all');
+    setFilterBranch('all');
+    setSearchQuery('');
+    setFixDialog(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const exitRoundView = async () => {
+    const id = roundView?.audit_id;
+    setRoundView(null);
+    if (id) await loadFromHistory(id, true);
+  };
   // Notes already sent to the accountant this month, keyed by employee, so the
   // reviewer sees the instruction next to the number it was meant to produce.
   const [priorNotes, setPriorNotes] = useState({});
@@ -2460,6 +2520,7 @@ export default function PayslipAudit() {
   };
 
   const toggleReviewed = (idx) => {
+    if (roundView) return;   // round view is read-only — see openRoundInView
     setReviewedMap((prev) => {
       const next = { ...prev, [idx]: !prev[idx] };
       if (audit?.saved_audit_id) {
@@ -2834,6 +2895,12 @@ export default function PayslipAudit() {
   const saveEdits = async (silent = false) => {
     if (!audit?.saved_audit_id) {
       if (!silent) toast.warn('יש להריץ קודם בדיקה');
+      return;
+    }
+    // A round view borrows the origin audit's id for previews. Saving here
+    // would overwrite the very notes the round was graded against.
+    if (roundView) {
+      if (!silent) toast.info('תצוגת סבב — לצפייה בלבד. חזור לביקורת המקורית כדי לערוך תיקונים.');
       return;
     }
     // Build a compact verifications map: { auditIdx: [{field, message, status, note, severity}] }
@@ -3669,20 +3736,24 @@ export default function PayslipAudit() {
             addFinding={addFinding}
             removeEmployee={removeEmployee}
             addManualEmployee={addManualEmployee}
-            onSendEmail={openEmailDialog}
-            onSaveEdits={() => saveEdits(false)}
+            onSendEmail={roundView ? null : openEmailDialog}
+            onSaveEdits={roundView ? null : () => saveEdits(false)}
             onFixRound={audit.saved_audit_id ? () => setFixDialog(true) : null}
             reviewedMap={reviewedMap}
-            onToggleReviewed={toggleReviewed}
+            onToggleReviewed={roundView ? null : toggleReviewed}
             priorNotes={priorNotes}
+            previewKind={audit.__preview_kind || null}
+            roundView={roundView}
+            onExitRoundView={exitRoundView}
           />
         )}
 
         <FixRoundDialog
           open={fixDialog}
-          auditId={audit?.saved_audit_id}
+          auditId={roundView ? roundView.audit_id : audit?.saved_audit_id}
           branches={(audit?.payslip_files || []).map((f) => f.branch).filter(Boolean)}
           onClose={() => setFixDialog(false)}
+          onOpenRound={openRoundInView}
         />
 
         {!audit && !running && (

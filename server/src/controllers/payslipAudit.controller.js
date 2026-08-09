@@ -796,14 +796,20 @@ async function getPayslipPage(req, res) {
     const branch = (req.query.branch || '').toString();
     const pageNum = Math.max(1, parseInt(req.query.page, 10) || 1);
     if (!branch) return res.status(400).json({ error: 'נדרש שם סניף' });
-    const kind = req.query.kind === 'approved' ? 'approved' : 'original';
+    // 'original' | 'approved' | 'fix_<n>' — a correction round's re-submission,
+    // so the review screen can show the page the accountant actually sent back.
+    const raw = String(req.query.kind || '');
+    const kind = raw === 'approved' || /^fix_\d+$/.test(raw) ? raw : 'original';
     // Prefer the durable Mongo copy (disk is ephemeral and wiped on restart);
     // fall back to disk for audits saved before Mongo storage existed.
     let srcBytes = null;
     const dbDoc = await PayslipAuditPdf.findOne({ audit_id: auditId, branch, kind }).lean();
     if (dbDoc?.data) {
       srcBytes = dbDoc.data.buffer ? Buffer.from(dbDoc.data.buffer) : Buffer.from(dbDoc.data);
-    } else {
+    } else if (kind === 'original') {
+      // Disk only ever held the original upload — falling back to it for a
+      // round would quietly serve the pre-correction payslip as the corrected
+      // one, which is the exact comparison the reviewer is trying to make.
       const filePath = pdfStoragePath(auditId, branch);
       if (fs.existsSync(filePath)) srcBytes = fs.readFileSync(filePath);
     }
@@ -1217,8 +1223,26 @@ async function runFixRound(doc, entries, { source = 'internal', user = null, not
     });
   }
 
+  // Keep the re-check in ordinary audit shape too. The verdict list answers
+  // "was it fixed"; seeing the corrected payslip next to the numbers is a
+  // different question, and the review screen already does that well.
+  const auditView = {
+    year_month: doc.year_month || null,
+    table_sheet_name: doc.table_sheet_name || null,
+    branch_filter: entries.map((e) => e.branch).join(', '),
+    rows_in_table: tableRows.length,
+    payslips_in_pdf: freshPayslips.length,
+    results: (fresh.results || []).map((r) => ({
+      ...r,
+      __source_branch: r.payslip?.__round_branch || entries[0]?.branch || null,
+    })),
+    missing_payslips: fresh.missing_payslips || [],
+    orphan_payslips: fresh.orphan_payslips || [],
+  };
+
   doc.fix_rounds.push({
     round_no: roundNo,
+    audit_view: auditView,
     created_at: new Date(),
     created_by: user?.id || null,
     created_by_name: source === 'accountant' ? 'רו״ח (העלאה חיצונית)' : (user?.full_name || ''),
