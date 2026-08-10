@@ -242,25 +242,32 @@ async function migrateClockId(employeeId, { fromId, createdBy = null } = {}) {
   if (!oldId || !newId) return { status: 'missing_id', queued: [] };
   if (oldId === newId) return { status: 'nothing_to_migrate', queued: [] };
 
-  const branches = await relevantBranches(emp);
-  if (!branches.length) return { status: 'no_clock_branches', queued: [] };
-
-  // EVERY device holding the old number, not just one.
+  // EVERY device holding the old number — and a device holds it wherever it
+  // was written, NOT only where she works.
   //
-  // A worker is enrolled on every branch she can punch at, so a wrong ת"ז is
-  // wrong on all of them — אדולה was on four. Migrating one leaves the other
-  // three holding a record that the punch matcher only reaches through an
-  // alias, and that the next sweep will happily refresh. Each branch gets its
-  // own capture; `handleCommandConfirmed` migrates each independently, using
-  // that device's own uid for the delete.
+  // אדולה works at הרצליה alone, and was enrolled on all four clocks on the
+  // same afternoon. Filtering targets through `relevantBranches` (branch +
+  // branch_rates + hourly_bonuses) reached exactly one of the four and left
+  // three devices carrying a record the punch matcher only finds through an
+  // alias. Removing a wrong record is not employment-gated: it is wrong
+  // wherever it sits.
+  //
+  // Each branch gets its own capture; handleCommandConfirmed migrates each
+  // independently, deleting with that device's own uid.
   const enrolled = await AgentCommand.find({
     type: 'add_user', status: 'confirmed', 'payload.israeli_id': oldId,
   }).select('branch_id').lean();
-  const enrolledIds = new Set(enrolled.map(c => String(c.branch_id)));
-  const targets = branches.filter(b => enrolledIds.has(String(b._id)));
-  // No history of the old number anywhere — ask her home branch, which is
+  const enrolledIds = [...new Set(enrolled.map(c => String(c.branch_id)))];
+
+  let targets = enrolledIds.length
+    ? await Branch.find({ _id: { $in: enrolledIds }, clock_ip: { $nin: [null, ''] } })
+      .select('_id name').lean()
+    : [];
+
+  // No history of the old number anywhere — ask the branches she works at,
   // where an enrolment nobody recorded is most likely to be.
-  if (targets.length === 0) targets.push(branches[0]);
+  if (!targets.length) targets = await relevantBranches(emp);
+  if (!targets.length) return { status: 'no_clock_branches', queued: [] };
 
   const queued = [];
   for (const b of targets) {
