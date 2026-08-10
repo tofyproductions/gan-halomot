@@ -40,6 +40,7 @@ import RequestsManager from './components/employees/RequestsManager';
 import EmployeeLetters from './components/employees/EmployeeLetters';
 import Form101Center from './components/employees/Form101Center';
 import PayrollUpdates from './components/payroll/PayrollUpdates';
+import BranchPayslips from './components/payroll/BranchPayslips';
 import ContractSigning from './components/employees/ContractSigning';
 import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
@@ -112,6 +113,14 @@ function AppRoutes() {
         <Route path="payroll-updates" element={
           <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
             <PayrollUpdates />
+          </ProtectedRoute>
+        } />
+        {/* A branch manager's view of the payslips her staff already received.
+            Separate from /payroll on purpose: that page is the salary table,
+            with every employee's rate and net on it. */}
+        <Route path="branch-payslips" element={
+          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+            <BranchPayslips />
           </ProtectedRoute>
         } />
         {/* Legacy routes — redirect to unified payroll page */}

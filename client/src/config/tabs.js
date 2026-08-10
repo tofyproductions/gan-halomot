@@ -31,6 +31,10 @@ export const TAB_GROUPS = [
       // employee's rate and net in order to record a bonus.
       { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant'] },
       { id: 'payroll_updates',    label: 'עדכוני שכר', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      // A payslip that was already SENT to the employee, unlike the salary
+      // table above it. It is the document her staff bring to her when they
+      // think a month is wrong, so she can answer without the accountant.
+      { id: 'branch_payslips',    label: 'תלושי עובדים', path: '/branch-payslips', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },

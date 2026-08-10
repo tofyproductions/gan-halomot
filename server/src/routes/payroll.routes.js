@@ -342,6 +342,14 @@ router.post(
   requireRole('system_admin', 'accountant'),
   audit.sendPayslipsToManagers,
 );
+// Every archived payslip in the branches this user manages — the branch
+// manager's own view of her staff's payslips. Scoped in the handler to the
+// branches she actually holds, so the route is not the thing protecting it.
+router.get(
+  '/branch-payslips',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  audit.listBranchPayslips,
+);
 // Saved (archived) payslips per employee — produced when payslips are sent to
 // employees. List / download one / export several merged.
 router.get(

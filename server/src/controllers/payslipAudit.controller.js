@@ -2921,9 +2921,60 @@ async function managerDistributionPreview(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+/**
+ * The branches this user may see payslips for — or null, meaning all of them.
+ *
+ * Read from the database rather than from the token: a manager whose branches
+ * changed this morning would otherwise keep the ones her token was minted
+ * with, which for this data is the wrong direction to be wrong in.
+ */
+async function payslipBranchScope(req) {
+  const uid = req.user?.id || req.user?._id;
+  const dbUser = uid
+    ? await User.findById(uid).select('role managed_branch_ids branch_id').lean()
+    : null;
+  const role = dbUser?.role || req.user?.role;
+  if (role === 'system_admin' || role === 'accountant') return null;
+
+  const managed = (dbUser?.managed_branch_ids || req.user?.managed_branch_ids || []).map(String);
+  if (managed.length) return managed;
+  const own = dbUser?.branch_id || req.user?.branch_id;
+  return own ? [String(own)] : [];
+}
+
+/**
+ * May this user open this employee's payslip?
+ *
+ * The three archived-payslip endpoints take an employee id straight from the
+ * URL and never asked. `branch_manager` is on all three, so a manager of one
+ * gan could read the payslip of an employee at another simply by changing the
+ * number — the screen never offered it, which is not the same as it being
+ * refused. A payslip is a person's salary; the check belongs on the endpoint,
+ * not on the screen that happens to call it.
+ */
+async function assertPayslipAccess(req, res, employeeId) {
+  const scope = await payslipBranchScope(req);
+  if (scope === null) return true;
+  if (!scope.length) {
+    res.status(403).json({ error: 'לא משויכים אליך סניפים לניהול' });
+    return false;
+  }
+  const emp = await Employee.findById(employeeId).select('branch_id').lean();
+  if (!emp) {
+    res.status(404).json({ error: 'עובד/ת לא נמצא/ה' });
+    return false;
+  }
+  if (!scope.includes(String(emp.branch_id))) {
+    res.status(403).json({ error: 'העובד/ת אינו/ה בסניף שבניהולך' });
+    return false;
+  }
+  return true;
+}
+
 // GET /employees/:id/saved-payslips — list an employee's archived payslips.
 async function listSavedPayslips(req, res) {
   try {
+    if (!await assertPayslipAccess(req, res, req.params.id)) return;
     const list = await SavedPayslip.find({ employee_id: req.params.id })
       .select('year_month branch sent_to sent_at page').sort({ year_month: -1 }).lean();
     res.json({ payslips: list.map(p => ({
@@ -2935,9 +2986,9 @@ async function listSavedPayslips(req, res) {
 // GET /employees/:id/saved-payslips/:ym.pdf — download one archived payslip.
 async function downloadSavedPayslip(req, res) {
   try {
+    if (!await assertPayslipAccess(req, res, req.params.id)) return;
     const p = await SavedPayslip.findOne({ employee_id: req.params.id, year_month: req.params.ym }).lean();
     if (!p || !p.data) return res.status(404).json({ error: 'תלוש לא נמצא' });
-    const emp = await Employee.findById(req.params.id).select('full_name').lean();
     const bytes = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="payslip-${req.params.ym}.pdf"`);
@@ -2949,6 +3000,7 @@ async function downloadSavedPayslip(req, res) {
 // the selected archived payslips into a single PDF (chronological).
 async function exportSavedPayslips(req, res) {
   try {
+    if (!await assertPayslipAccess(req, res, req.params.id)) return;
     const months = Array.isArray(req.body?.months) ? req.body.months : [];
     const q = { employee_id: req.params.id };
     if (months.length) q.year_month = { $in: months };
@@ -2969,6 +3021,72 @@ async function exportSavedPayslips(req, res) {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'inline; filename="payslips.pdf"');
     res.send(outBytes);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
+/**
+ * GET /payroll/branch-payslips  — every archived payslip in the branches this
+ * user manages, one row per employee.
+ *
+ * A branch manager had no way to see these at all. The salary table is
+ * accountant-only for a good reason — she has no business seeing every
+ * employee's rate and net — but a payslip that has already been SENT to the
+ * employee is a different thing: it is the document her staff bring to her
+ * when they think a month is wrong, and until now the only answer she could
+ * give was to ask the accountant to look it up.
+ *
+ * Employees with no archived payslip are included deliberately. "Nobody sent
+ * her one" is the thing worth seeing, and a list of only the employees who
+ * have payslips cannot show it.
+ */
+async function listBranchPayslips(req, res) {
+  try {
+    const scope = await payslipBranchScope(req);
+    const filter = { is_active: true };
+    if (scope !== null) {
+      if (!scope.length) return res.json({ employees: [], months: [], branches: [] });
+      filter.branch_id = { $in: scope };
+    }
+    // An explicit branch narrows the view, but only within what is allowed.
+    if (req.query.branch && req.query.branch !== 'all') {
+      if (scope !== null && !scope.includes(String(req.query.branch))) {
+        return res.status(403).json({ error: 'הסניף המבוקש אינו בניהולך' });
+      }
+      filter.branch_id = req.query.branch;
+    }
+
+    const employees = await Employee.find(filter)
+      .select('full_name israeli_id branch_id position')
+      .populate('branch_id', 'name')
+      .sort({ full_name: 1 })
+      .lean();
+
+    const slips = await SavedPayslip.find({ employee_id: { $in: employees.map(e => e._id) } })
+      .select('employee_id year_month sent_to sent_at')
+      .sort({ year_month: -1 })
+      .lean();
+
+    const byEmployee = new Map();
+    for (const s of slips) {
+      const k = String(s.employee_id);
+      byEmployee.set(k, [...(byEmployee.get(k) || []), {
+        year_month: s.year_month, sent_to: s.sent_to, sent_at: s.sent_at,
+      }]);
+    }
+
+    res.json({
+      employees: employees.map(e => ({
+        id: e._id,
+        full_name: e.full_name,
+        israeli_id: e.israeli_id,
+        position: e.position || '',
+        branch_id: e.branch_id?._id || e.branch_id,
+        branch_name: e.branch_id?.name || '',
+        payslips: byEmployee.get(String(e._id)) || [],
+      })),
+      // Every month anyone in scope has a payslip for — the month filter.
+      months: [...new Set(slips.map(s => s.year_month))].sort().reverse(),
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
@@ -3296,6 +3414,7 @@ module.exports = {
   listSavedPayslips,
   downloadSavedPayslip,
   exportSavedPayslips,
+  listBranchPayslips,
   updateEmployeeEmails,
   distributionPreview,
   managerDistributionPreview,
@@ -3305,6 +3424,7 @@ module.exports = {
   listSavedPayslips,
   downloadSavedPayslip,
   exportSavedPayslips,
+  listBranchPayslips,
   updateEmployeeEmails,
   sendPayslipsToEmployees,
   sendPayslipsToManagers,
