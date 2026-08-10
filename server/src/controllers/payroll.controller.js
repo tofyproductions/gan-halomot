@@ -2314,25 +2314,34 @@ async function materializeFixedSchedules(req, res, next) {
  * her punches but gets "אין רשומת עובד מקושרת" when she tries to report one.
  */
 async function resolveSelfEmployee(req) {
+  // is_active is an EMPLOYMENT flag, not a permission. It goes false for
+  // maternity leave, for a stay abroad, for the end of employment — and while
+  // it was part of the lookup, every one of those women logged in successfully
+  // and was told "לא נמצא עובד מקושר" on her own payslips, her own hours and
+  // her own 101. Four of the six affected were on maternity leave, which is
+  // precisely when a woman needs her documents and has no manager to ask.
+  //
+  // Access is decided at login (auth.controller checks User.is_active). A
+  // disabled login gets nothing; an enabled one belongs to a person entitled to
+  // her own records whatever her employment state. An ACTIVE record still wins,
+  // so an old duplicate can never shadow the current one.
+  const firstOf = async (filter) =>
+    (await Employee.findOne({ ...filter, is_active: true }).lean())
+    || (await Employee.findOne(filter).sort({ updated_at: -1, _id: -1 }).lean());
+
   if (req.user?.id) {
-    const byLink = await Employee.findOne({ user_id: req.user.id, is_active: true }).lean();
+    const byLink = await firstOf({ user_id: req.user.id });
     if (byLink) return byLink;
   }
   const idNumber = fingerprintSync.normalizeId(req.user?.id_number || '');
   if (idNumber) {
-    const byId = await Employee.findOne({
-      is_active: true,
-      $or: [{ israeli_id: idNumber }, { clock_aliases: idNumber }],
-    }).lean();
+    const byId = await firstOf({ $or: [{ israeli_id: idNumber }, { clock_aliases: idNumber }] });
     if (byId) return byId;
   }
   const name = (req.user?.full_name || '').trim();
   if (name) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const byName = await Employee.findOne({
-      is_active: true,
-      full_name: { $regex: new RegExp(`^${escaped}$`, 'i') },
-    }).lean();
+    const byName = await firstOf({ full_name: { $regex: new RegExp(`^${escaped}$`, 'i') } });
     if (byName) return byName;
   }
   return null;
