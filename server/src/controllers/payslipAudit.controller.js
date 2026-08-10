@@ -3022,26 +3022,52 @@ async function hoursDistributionPreview(req, res) {
 }
 
 // GET /payroll/hours-distribution/preview-html?month=&scope=employee|branch&employee_id=|branch=
+/** Resolve the preview's scope (one employee, or a branch's staff) to ids. */
+async function hoursPreviewIds(req) {
+  const month = String(req.query.month || '').trim();
+  if (req.query.scope === 'employee') {
+    if (!req.query.employee_id) { const e = new Error('עובד לא נמצא'); e.status = 404; throw e; }
+    return { month, ids: [String(req.query.employee_id)] };
+  }
+  const groups = await buildHoursBranchGroups(month, req.user);
+  const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
+  for (const [, gg] of groups) {
+    if (gg.name.replace(/\s+/g, ' ').trim() === bname) return { month, ids: gg.employees.map(e => e.employee_id) };
+  }
+  const e = new Error('סניף לא נמצא'); e.status = 404; throw e;
+}
+
 async function hoursDistributionPreviewHtml(req, res) {
   try {
     const { buildRichHoursHtml } = require('./payroll.controller');
-    const month = String(req.query.month || '').trim();
-    let ids = [];
-    if (req.query.scope === 'employee') {
-      if (!req.query.employee_id) return res.status(404).send('עובד לא נמצא');
-      ids = [String(req.query.employee_id)];
-    } else {
-      const groups = await buildHoursBranchGroups(month, req.user);
-      const bname = String(req.query.branch || '').replace(/\s+/g, ' ').trim();
-      let g = null;
-      for (const [, gg] of groups) { if (gg.name.replace(/\s+/g, ' ').trim() === bname) { g = gg; break; } }
-      if (!g) return res.status(404).send('סניף לא נמצא');
-      ids = g.employees.map(e => e.employee_id);
-    }
+    const { month, ids } = await hoursPreviewIds(req);
     const html = await buildRichHoursHtml(ids, month, req.user || { role: 'system_admin' });
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
-  } catch (err) { res.status(500).send(err.message); }
+  } catch (err) { res.status(err.status || 500).send(err.message); }
+}
+
+/**
+ * The preview as the PDF that is actually sent.
+ *
+ * The HTML preview is the same markup, but not the same rendering: page
+ * fragmentation, the print scaling and the fixed-width table all resolve
+ * differently in an iframe than in the Chromium print pipeline, so a report
+ * could look wrong in the preview and right in the mail, or the reverse.
+ * Reviewing the file that goes out removes the guesswork.
+ */
+async function hoursDistributionPreviewPdf(req, res) {
+  try {
+    const { renderHoursPdfForEmployees } = require('./payroll.controller');
+    const { month, ids } = await hoursPreviewIds(req);
+    const pdf = await renderHoursPdfForEmployees(ids, month, req.user || { role: 'system_admin' });
+    if (!pdf) return res.status(500).json({ error: 'רינדור ה-PDF לא החזיר עמודים' });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="hours-report-${month}.pdf"`);
+    res.send(pdf);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 }
 
 // POST /payroll/hours-distribution/send-employees { month, employee_ids, to? }
@@ -3259,6 +3285,7 @@ module.exports = {
   setBranchManagerEmails,
   hoursDistributionPreview,
   hoursDistributionPreviewHtml,
+  hoursDistributionPreviewPdf,
   sendHoursToEmployees,
   sendHoursToManagers,
   distributionPreview,

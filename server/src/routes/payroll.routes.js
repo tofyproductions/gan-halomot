@@ -30,6 +30,8 @@ router.post('/hours-report/send-managers',     c.sendHoursReportsToManagers);
 // Rich monthly hours-report distribution (employees / managers / office / specific email)
 router.get('/hours-distribution/preview',           requireRole('system_admin', 'accountant'), audit.hoursDistributionPreview);
 router.get('/hours-distribution/preview-html',      requireRole('system_admin', 'accountant'), audit.hoursDistributionPreviewHtml);
+// The preview as the actual PDF — what the employee receives, not a lookalike.
+router.get('/hours-distribution/preview-pdf',       requireRole('system_admin', 'accountant'), audit.hoursDistributionPreviewPdf);
 router.post('/hours-distribution/send-employees',   requireRole('system_admin', 'accountant'), audit.sendHoursToEmployees);
 router.post('/hours-distribution/send-managers',    requireRole('system_admin', 'accountant'), audit.sendHoursToManagers);
 

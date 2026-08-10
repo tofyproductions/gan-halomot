@@ -1068,8 +1068,9 @@ const HOURS_REPORT_CSS = `
   table.daily thead th { background: #f6f7f9 !important; border: 1px solid #c4cad3; padding: 1px 3px; font-weight: 700; font-size: 6.5pt; text-align: center; line-height: 1.05; color: #374151; }
   table.daily tbody td { border: 1px solid #e2e5e9; padding: 0.5px 3px; text-align: center; line-height: 1.05; }
   table.daily tbody td.date { text-align: right; font-weight: 500; white-space: nowrap; color: #374151; }
-  /* The weekday sits beside an LTR date inside an RTL cell — see dateCell(). */
-  table.daily tbody td.date .dow { display: inline-block; margin-inline-start: 6px; color: #6b7280; font-weight: 400; }
+  /* The weekday has its own column — see dateCell(). Sharing the date cell
+     overflowed a fixed-width, nowrap column and printed on top of the branch. */
+  table.daily tbody td.dow { color: #6b7280; font-weight: 400; }
   table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 6.5pt; color: #555; text-align: right; }
@@ -1104,7 +1105,7 @@ const HOURS_REPORT_CSS = `
 
 function renderHoursReportDoc(reports) {
   const HD = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
-  const dow = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-').map(Number); return 'יום ' + HD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]; };
+  const dow = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-').map(Number); return HD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()] + '׳'; };
   const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '');
   const fdate = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
 
@@ -1123,7 +1124,7 @@ function renderHoursReportDoc(reports) {
    * gap is real layout (a styled span) rather than a character that bidi is
    * free to move.
    */
-  const dateCell = (ymd) => `<bdi dir="ltr">${fdate(ymd)}</bdi><bdi class="dow">${dow(ymd)}</bdi>`;
+  const dateCell = (ymd) => `<td class="date"><bdi dir="ltr">${fdate(ymd)}</bdi></td><td class="dow">${dow(ymd)}</td>`;
   // Short branch for the per-day cell — the segment after " - " (e.g.
   // "כפר סבא - משה דיין" → "משה דיין"), so it fits one line. Full name stays in
   // the header. Handles cross-branch days ("A + B").
@@ -1143,14 +1144,14 @@ function renderHoursReportDoc(reports) {
     const totals = { regular: 0, ot125: 0, ot150: 0, total: 0, committed: 0, shortfall: 0, extra: 0, days: 0 };
     // Tally the absence/leave rows actually shown so the bottom summary matches.
     const tally = { sick: 0, vacation: 0, miluim: 0, holiday: 0, absence: 0 };
-    const colCount = hasCommit ? 11 : 8;
+    const colCount = hasCommit ? 12 : 9;
     const tbodyHtml = (report.days || []).map(d => {
       if (d.is_absence) {
         if (tally[d.leave_type] != null) tally[d.leave_type]++;
         const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
         const commitCell = hasCommit ? '<td class="num mute">—</td>' : '';
         const shExCells = hasCommit ? '<td class="num mute">—</td><td class="num mute">—</td>' : '';
-        return `<tr class="${cls}"><td class="date">${dateCell(d.date)}</td><td class="branch">—</td><td>—</td><td>—</td>
+        return `<tr class="${cls}">${dateCell(d.date)}<td class="branch">—</td><td>—</td><td>—</td>
           <td class="num mute">—</td>${commitCell}<td class="num mute">—</td><td class="num mute">—</td>${shExCells}<td class="note">${d.note || 'היעדרות'}</td></tr>`;
       }
       const { regular, ot125, ot150 } = split(d.total_hours);
@@ -1183,7 +1184,7 @@ function renderHoursReportDoc(reports) {
       }
       const commitCell = hasCommit ? `<td class="num ${committed != null ? '' : 'mute'}">${committed != null ? fmt(committed) : '—'}</td>` : '';
       const shExCells = hasCommit ? `<td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td>` : '';
-      return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${dateCell(d.date)}</td>
+      return `<tr ${rowClass ? `class="${rowClass}"` : ''}>${dateCell(d.date)}
         <td class="branch">${shortBranch(d.branch_label)}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
         <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}
         <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
@@ -1218,12 +1219,12 @@ function renderHoursReportDoc(reports) {
       <tr>${hcell('סניף', emp.branch_name || '—')}${hcell('תפקיד', emp.position || '—')}</tr>
     </table>
     <table class="daily">${hasCommit
-      ? '<colgroup><col style="width:10%"><col style="width:15%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:8%"><col style="width:17%"></colgroup>'
-      : '<colgroup><col style="width:13%"><col style="width:19%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:9%"><col style="width:23%"></colgroup>'}<thead><tr>
-      <th>תאריך</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th>${hasCommit ? '<th>מחויב</th>' : ''}
+      ? '<colgroup><col style="width:9%"><col style="width:4%"><col style="width:13%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:6%"><col style="width:7%"><col style="width:7%"><col style="width:24%"></colgroup>'
+      : '<colgroup><col style="width:11%"><col style="width:5%"><col style="width:17%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:27%"></colgroup>'}<thead><tr>
+      <th>תאריך</th><th>יום</th><th>סניף</th><th>שעת כניסה</th><th>שעת יציאה</th><th>סה״כ שעות</th>${hasCommit ? '<th>מחויב</th>' : ''}
       <th>125% (יומי)</th><th>150% (יומי)</th>${hasCommit ? '<th>חוסר<br><span style="font-weight:400;font-size:7pt">מקוזז שכר</span></th><th>תוספת<br><span style="font-weight:400;font-size:7pt">מעבר להתחייבות</span></th>' : ''}<th>הערות</th></tr></thead>
       <tbody>${tbodyHtml || `<tr><td colspan="${colCount}" style="padding:16px;text-align:center;color:#888">אין נתוני החתמה לחודש זה</td></tr>`}</tbody>
-      <tfoot><tr><td class="label" colspan="4">סה״כ</td><td>${fmt(totals.total)}</td>${hasCommit ? `<td>${fmt(totals.committed)}</td>` : ''}
+      <tfoot><tr><td class="label" colspan="5">סה״כ</td><td>${fmt(totals.total)}</td>${hasCommit ? `<td>${fmt(totals.committed)}</td>` : ''}
         <td>${fmt(totals.ot125)}</td><td>${fmt(totals.ot150)}</td>
         ${hasCommit ? `<td class="miss-ded">${totals.shortfall > 0 ? fmt(totals.shortfall) : '—'}</td><td class="extra-ok">${totals.extra > 0 ? fmt(totals.extra) : '—'}</td>` : ''}<td></td></tr></tfoot>
     </table>

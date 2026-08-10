@@ -10,29 +10,59 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 
-/* Nested preview of the exact hours-report HTML that will be sent. */
+/**
+ * Preview of the hours report — the actual PDF the employee receives.
+ *
+ * It used to render the source HTML in an iframe, which is the same markup but
+ * not the same rendering: page fragmentation, print scaling and the fixed-width
+ * table resolve differently in a browser frame than in Chromium's print
+ * pipeline, so what was reviewed here was never quite the file that went out.
+ * The HTML is kept only as a fallback for when the PDF render fails (the
+ * 512MB tier can run Chromium out of memory), and says so when it does.
+ */
 function HoursPreview({ open, onClose, title, month, scope, employeeId, branch }) {
+  const [src, setSrc] = useState('');
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(false);
+
   useEffect(() => {
-    if (!open) { setHtml(''); return; }
+    if (!open) { setSrc(''); setHtml(''); return undefined; }
     let cancelled = false;
-    setLoading(true); setHtml('');
-    api.get('/payroll/hours-distribution/preview-html', {
-      params: { month, scope, employee_id: employeeId, branch }, responseType: 'text', timeout: 180000,
-    }).then(res => { if (!cancelled) setHtml(res.data); })
-      .catch(() => { if (!cancelled) toast.error('שגיאה בטעינת התצוגה'); })
+    let url = '';
+    setLoading(true); setSrc(''); setHtml('');
+    const params = { month, scope, employee_id: employeeId, branch };
+    api.get('/payroll/hours-distribution/preview-pdf', { params, responseType: 'blob', timeout: 180000 })
+      .then((res) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+        setSrc(url);
+      })
+      .catch(() => api
+        .get('/payroll/hours-distribution/preview-html', { params, responseType: 'text', timeout: 180000 })
+        .then((res) => {
+          if (cancelled) return;
+          toast.warn('רינדור ה-PDF נכשל — מוצגת תצוגת HTML, שעשויה להיראות שונה מהקובץ שנשלח');
+          setHtml(res.data);
+        })
+        .catch(() => { if (!cancelled) toast.error('שגיאה בטעינת התצוגה'); }))
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
   }, [open, month, scope, employeeId, branch]);
+
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth PaperProps={{ sx: { height: '92vh' } }}>
       <DialogTitle sx={{ fontWeight: 700 }}>תצוגה מקדימה — {title}</DialogTitle>
       <DialogContent dividers sx={{ p: 0, bgcolor: '#f1f5f9' }}>
         {loading ? <Box sx={{ textAlign: 'center', py: 6 }}><CircularProgress /></Box>
-          : <iframe title="hours" srcDoc={html} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />}
+          : src
+            ? <iframe title="hours" src={src} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />
+            : <iframe title="hours" srcDoc={html} style={{ width: '100%', height: '100%', border: 0, background: '#fff' }} />}
       </DialogContent>
-      <DialogActions><Button onClick={onClose}>סגור</Button></DialogActions>
+      <DialogActions>
+        {src && <Button onClick={() => window.open(src, '_blank', 'noopener')}>פתח בכרטיסייה חדשה</Button>}
+        <Button onClick={onClose}>סגור</Button>
+      </DialogActions>
     </Dialog>
   );
 }
