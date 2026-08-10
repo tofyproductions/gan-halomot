@@ -3,11 +3,56 @@
  * Ported from GAS: getHebrewYear(), getHebrewMonthName(), etc.
  */
 
-const HEBREW_YEAR_MAP = {
-  5784: 'תשפ״ד', 5785: 'תשפ״ה', 5786: 'תשפ״ו',
-  5787: 'תשפ״ז', 5788: 'תשפ״ח', 5789: 'תשפ״ט',
-  5790: 'תשצ״י', 5791: 'תשצ״א', 5792: 'תשצ״ב',
-};
+/**
+ * The Hebrew year in letters, computed rather than looked up.
+ *
+ * Both the server and the client carried a hand-written map that stopped at
+ * 5792 and fell back to `תש״87` — digits where letters belong. It also had
+ * 5790 as תשצ״י, which is not a number: 790 is ת+ש+צ, so the year is תש״ץ.
+ * Gematria is a rule, so it is written as one and never runs out.
+ */
+const GEMATRIA = [
+  [400, 'ת'], [300, 'ש'], [200, 'ר'], [100, 'ק'],
+  [90, 'צ'], [80, 'פ'], [70, 'ע'], [60, 'ס'], [50, 'נ'],
+  [40, 'מ'], [30, 'ל'], [20, 'כ'], [10, 'י'],
+  [9, 'ט'], [8, 'ח'], [7, 'ז'], [6, 'ו'], [5, 'ה'], [4, 'ד'], [3, 'ג'], [2, 'ב'], [1, 'א'],
+];
+const FINALS = { כ: 'ך', מ: 'ם', נ: 'ן', פ: 'ף', צ: 'ץ' };
+
+function hebrewYearLetters(hebrewYear) {
+  let n = hebrewYear % 1000;            // 5787 -> 787; the millennium is implied
+  let out = '';
+  for (const [v, letter] of GEMATRIA) {
+    // 15 and 16 are written טו / טז — never יה / יו, which spell the Name.
+    if (n === 15) { out += 'טו'; n = 0; break; }
+    if (n === 16) { out += 'טז'; n = 0; break; }
+    while (n >= v) { out += letter; n -= v; }
+  }
+  if (out.length < 2) return out;
+  // A final form on the last letter, and the gershayim before it.
+  const last = out.slice(-1);
+  return `${out.slice(0, -1)}״${FINALS[last] || last}`;
+}
+
+/** The Hebrew year a gan year starting in `gregorianStartYear` belongs to. */
+function hebrewYearForStart(gregorianStartYear) {
+  return hebrewYearLetters(gregorianStartYear + 3761);
+}
+
+/**
+ * "2026-2027 תשפ״ז" — how the year is actually referred to.
+ *
+ * The gan year runs September to August, so it straddles two Gregorian years
+ * and exactly one Hebrew one. Showing only the Gregorian range asks everyone
+ * to translate; showing only the Hebrew one hides which calendar year a date
+ * falls in. Both, always.
+ */
+function formatAcademicYear(range) {
+  if (!range) return '';
+  const startYear = Number(String(range).split('-')[0]);
+  if (!Number.isFinite(startYear)) return String(range);
+  return `${range} ${hebrewYearForStart(startYear)}`;
+}
 
 const HEBREW_MONTHS = [
   'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
@@ -38,7 +83,7 @@ function getHebrewYear(dateStr) {
   const isAfterCutoff = month > 8 || (month === 8 && day >= 10);
   const hYear = isAfterCutoff ? year + 3761 : year + 3760;
 
-  return HEBREW_YEAR_MAP[hYear] || `תש״${hYear % 100}`;
+  return hebrewYearLetters(hYear);
 }
 
 /**
@@ -74,20 +119,21 @@ function getAcademicYears() {
   return {
     current: {
       value: currentStartYear,
-      label: getHebrewYearFromStart(currentStartYear),
+      label: formatAcademicYear(`${currentStartYear}-${currentStartYear + 1}`),
+      hebrew: getHebrewYearFromStart(currentStartYear),
       range: `${currentStartYear}-${currentStartYear + 1}`,
     },
     next: {
       value: currentStartYear + 1,
-      label: getHebrewYearFromStart(currentStartYear + 1),
+      label: formatAcademicYear(`${currentStartYear + 1}-${currentStartYear + 2}`),
+      hebrew: getHebrewYearFromStart(currentStartYear + 1),
       range: `${currentStartYear + 1}-${currentStartYear + 2}`,
     },
   };
 }
 
 function getHebrewYearFromStart(gregorianStartYear) {
-  const hYearNum = gregorianStartYear + 3761;
-  return HEBREW_YEAR_MAP[hYearNum] || `תש״${hYearNum % 100}`;
+  return hebrewYearForStart(gregorianStartYear);
 }
 
 function getHebrewMonthName(monthIndex) {
@@ -99,19 +145,28 @@ function getHebrewMonthName(monthIndex) {
  */
 function normalizeYear(y) {
   if (!y) return '';
-  const hMap = {
-    'תשפ״ד': '2023-2024', 'תשפד': '2023-2024',
-    'תשפ״ה': '2024-2025', 'תשפה': '2024-2025',
-    'תשפ״ו': '2025-2026', 'תשפו': '2025-2026',
-    'תשפ״ז': '2026-2027', 'תשפז': '2026-2027',
-    'תשפ״ח': '2027-2028', 'תשפח': '2027-2028',
-  };
   const clean = String(y).trim();
-  return hMap[clean] || clean;
+  if (/^\d{4}-\d{4}$/.test(clean)) return clean;
+
+  // A Hebrew year, with or without gershayim and with or without a final form.
+  // Derived from the same gematria that renders it, so the two can never drift
+  // the way a hand-written map did — the old one covered five years and
+  // silently passed anything else straight through.
+  const strip = (v) => String(v).replace(/[״"'׳]/g, '')
+    .replace(/ך/g, 'כ').replace(/ם/g, 'מ').replace(/ן/g, 'נ')
+    .replace(/ף/g, 'פ').replace(/ץ/g, 'צ');
+  const want = strip(clean);
+  for (let start = 2015; start <= 2060; start += 1) {
+    if (strip(hebrewYearForStart(start)) === want) return `${start}-${start + 1}`;
+  }
+  return clean;
 }
 
 module.exports = {
   getHebrewYear,
+  hebrewYearLetters,
+  hebrewYearForStart,
+  formatAcademicYear,
   getAcademicYearStr,
   getAcademicYears,
   getHebrewMonthName,

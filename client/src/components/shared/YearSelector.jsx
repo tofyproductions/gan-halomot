@@ -1,5 +1,5 @@
 import { FormControl, InputLabel, Select, MenuItem } from '@mui/material';
-import { getAcademicYears } from '../../hooks/useAcademicYear';
+import { getAcademicYears, formatAcademicYear } from '../../hooks/useAcademicYear';
 
 export default function YearSelector({ value, onChange }) {
   const { current, next } = getAcademicYears();
@@ -8,7 +8,7 @@ export default function YearSelector({ value, onChange }) {
   const prevStartYear = current.value - 1;
   years.unshift({
     value: prevStartYear,
-    label: `${prevStartYear}-${prevStartYear + 1}`,
+    label: formatAcademicYear(`${prevStartYear}-${prevStartYear + 1}`),
     range: `${prevStartYear}-${prevStartYear + 1}`,
   });
 

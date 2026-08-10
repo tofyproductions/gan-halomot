@@ -21,6 +21,7 @@ import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
 import api, { openApiFile } from '../../api/client';
+import { formatAcademicYear } from '../../hooks/useAcademicYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { getHebrewYear } from '../../utils/hebrewYear';
 import { printContractHtml } from '../../utils/contractPdf';
@@ -510,12 +511,19 @@ export default function RegistrationTracker() {
           הנפקת חוזה לשנה החדשה
           <Typography variant="body2" color="text.secondary">
             {renewDlg.reg?.child_name} · {renewDlg.reg?.parent_name}
+            {renewDlg.reg?.start_date && (() => {
+              // The year renewed INTO — derived from this registration's own
+              // year, not from today's date. Shown so nobody has to trust it.
+              const d = new Date(renewDlg.reg.start_date);
+              const startYear = d.getUTCFullYear() - (d.getUTCMonth() + 1 < 8 ? 1 : 0);
+              return ` · ${formatAcademicYear(`${startYear + 1}-${startYear + 2}`)}`;
+            })()}
           </Typography>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Alert severity="info" icon={false}>
-              נוצר רישום חדש לשנה הבאה עם קישור חתימה להורה. הרישום של השנה הנוכחית נשאר כפי שהוא —
+              שנת גן מלאה: 1 בספטמבר עד 31 באוגוסט. נוצר רישום חדש עם קישור חתימה להורה, והרישום של השנה הנוכחית נשאר כפי שהוא —
               הוא מחזיק את החוזה החתום ואת הגבייה של השנה. הילד/ה ייכנס/תיכנס למערכת של השנה החדשה רק לאחר החתימה.
             </Alert>
             <TextField

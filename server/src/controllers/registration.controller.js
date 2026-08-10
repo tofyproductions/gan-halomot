@@ -362,9 +362,11 @@ async function renew(req, res, next) {
       : `${sourceStartYear + 1}-${sourceStartYear + 2}`;
     const [y1, y2] = targetYear.split('-').map(Number);
 
-    // The school year runs Sept 1 → Jul 31 unless the caller says otherwise.
+    // A gan year runs 1 September → 31 AUGUST — twelve months, which is why
+    // ACADEMIC_MONTHS ends at 8 and why the fee is billed for August too. An
+    // end date in July would have cut the last month off every renewal.
     const startDate = req.body?.start_date ? new Date(req.body.start_date) : new Date(Date.UTC(y1, 8, 1));
-    const endDate = req.body?.end_date ? new Date(req.body.end_date) : new Date(Date.UTC(y2, 6, 31));
+    const endDate = req.body?.end_date ? new Date(req.body.end_date) : new Date(Date.UTC(y2, 7, 31));
     if (!(startDate < endDate)) {
       return res.status(400).json({ error: 'תאריך הסיום חייב להיות אחרי תאריך ההתחלה' });
     }
