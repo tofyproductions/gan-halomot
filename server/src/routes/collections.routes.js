@@ -17,6 +17,10 @@ router.get('/summer-camp', collectionsController.getSummerCamps);
 // that set prices may write it, not merely anyone who is logged in.
 router.put('/summer-camp', requireRole('system_admin', 'accountant', 'branch_manager'), collectionsController.upsertSummerCamp);
 
+// PUT /api/collections/camp-enrollment/bulk — mark a whole branch at once.
+// MUST stay above '/:registrationId', which would swallow it.
+router.put('/camp-enrollment/bulk', requireRole('system_admin', 'accountant', 'branch_manager'), collectionsController.bulkCampEnrollment);
+
 // GET /api/collections/:registrationId
 router.get('/:registrationId', collectionsController.getByRegistration);
 

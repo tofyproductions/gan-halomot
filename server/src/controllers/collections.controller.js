@@ -459,6 +459,58 @@ async function updateCampEnrollment(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * PUT /api/collections/camp-enrollment/bulk   { enrolled, branch_id?, academic_year? }
+ *
+ * Mark every child in scope at once.
+ *
+ * Most children are not in the camp — it is an opt-in product — so marking
+ * them one at a time is the wrong shape of work. Setting the whole branch to
+ * "not attending" and then flipping the handful who signed up is a dozen
+ * clicks instead of eighty.
+ *
+ * Children already marked are NOT touched: a bulk sweep must not undo an
+ * answer somebody already gave.
+ */
+async function bulkCampEnrollment(req, res, next) {
+  try {
+    const raw = req.body?.enrolled;
+    const enrolled = raw === true || raw === 'true' ? true
+      : raw === false || raw === 'false' ? false
+        : null;
+    const year = req.body?.academic_year ? normalizeYear(req.body.academic_year) : getAcademicYears().current.range;
+    const onlyUnmarked = req.body?.only_unmarked !== false;
+
+    const regFilter = { ...getBranchFilter(req) };
+    if (req.body?.branch_id) regFilter.branch_id = req.body.branch_id;
+    const regs = await Registration.find(regFilter).select('_id child_id').lean();
+    if (regs.length === 0) return res.json({ ok: true, updated: 0 });
+
+    const regIds = regs.map(r => r._id);
+    const existing = await Collection.find({ registration_id: { $in: regIds }, academic_year: year })
+      .select('registration_id camp_enrolled').lean();
+    const byReg = new Map(existing.map(c => [String(c.registration_id), c]));
+
+    let updated = 0;
+    for (const reg of regs) {
+      const current = byReg.get(String(reg._id));
+      if (onlyUnmarked && current && current.camp_enrolled !== null && current.camp_enrolled !== undefined) continue;
+
+      await Collection.findOneAndUpdate(
+        { registration_id: reg._id, academic_year: year },
+        {
+          $set: { camp_enrolled: enrolled, last_updated: new Date() },
+          $setOnInsert: { child_id: reg.child_id || null, months: [] },
+        },
+        { upsert: true },
+      );
+      updated += 1;
+    }
+
+    res.json({ ok: true, updated, skipped: regs.length - updated });
+  } catch (error) { next(error); }
+}
+
 async function updateMonth(req, res, next) {
   try {
     const { registrationId, monthIndex } = req.params;
@@ -782,5 +834,5 @@ async function backup(req, res, next) {
 module.exports = {
   getAll, getByRegistration, updateMonth, updateExitMonth,
   updateRegistrationFee, recalculate, getHistory, backup,
-  getSummerCamps, upsertSummerCamp, updateCampEnrollment,
+  getSummerCamps, upsertSummerCamp, updateCampEnrollment, bulkCampEnrollment,
 };

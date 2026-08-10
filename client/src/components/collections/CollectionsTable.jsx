@@ -256,6 +256,27 @@ export default function CollectionsTable() {
    * used to be assumed, which let one child's camp receipt mark the other as
    * paid — with nothing stored, so there was nothing to undo.
    */
+  /**
+   * Mark everyone in a branch at once.
+   *
+   * The camp is opt-in, so most children are not in it — marking eighty cells
+   * to record that is the wrong shape of work. Sweep the branch to "not
+   * attending", then flip the handful who signed up. Children already answered
+   * for are left alone: a sweep must not undo somebody's decision.
+   */
+  const bulkCampEnrollment = async (branchId, branchName) => {
+    if (!window.confirm(`לסמן את כל הילדים ב"${branchName}" שטרם סומנו כ״לא בקייטנה״?\nילדים שכבר סומנו לא ישתנו.`)) return;
+    try {
+      const res = await api.put('/collections/camp-enrollment/bulk', {
+        enrolled: false, branch_id: branchId, academic_year: selectedYear, only_unmarked: true,
+      });
+      toast.success(`סומנו ${res.data.updated} ילדים${res.data.skipped ? ` · ${res.data.skipped} כבר היו מסומנים` : ''}`);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
   const setCampEnrollment = async (regId, enrolled) => {
     try {
       await api.put(`/collections/${regId}/camp-enrollment`, { enrolled, academic_year: selectedYear });
@@ -617,6 +638,17 @@ export default function CollectionsTable() {
                     </Button>
                   </Stack>
                   {row.enabled && (
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                      <Button size="small" variant="outlined" color="warning"
+                        onClick={() => bulkCampEnrollment(row.branch_id, row.branch_name || 'הסניף')}>
+                        סמן את כל מי שטרם סומן כ״לא בקייטנה״
+                      </Button>
+                      <Typography variant="caption" color="text.secondary">
+                        ואז סמן/י ״כן״ רק למי שנרשם/ה, מתוך תא הקייטנה שלו/ה.
+                      </Typography>
+                    </Stack>
+                  )}
+                  {row.enabled && (
                     <TextField
                       size="small" fullWidth label="הערה (לא מוצגת להורים)" value={row.notes}
                       onChange={(e) => patchCampRow(row.branch_id, { notes: e.target.value })}
@@ -902,26 +934,6 @@ export default function CollectionsTable() {
           </Typography>
         </DialogTitle>
         <DialogContent>
-          {dialog.monthNum === CAMP_MONTH && (
-            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: '#f5f3ff' }}>
-              <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>האם הילד/ה בקייטנה?</Typography>
-              <ToggleButtonGroup
-                size="small" exclusive
-                value={dialog.campEnrolled === null || dialog.campEnrolled === undefined ? 'unset' : String(dialog.campEnrolled)}
-                onChange={(_, v) => {
-                  if (v === null) return;
-                  setCampEnrollment(dialog.regId, v === 'unset' ? null : v === 'true');
-                }}
-              >
-                <ToggleButton value="true" color="success">כן</ToggleButton>
-                <ToggleButton value="false" color="error">לא</ToggleButton>
-                <ToggleButton value="unset">לא סומן</ToggleButton>
-              </ToggleButtonGroup>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                ״לא״ מאפס את החיוב ומנתק קבלה שהגיעה מאח/ות. קבלה של אח/ות מסומנת אוטומטית רק כשהילד/ה מסומן/ת כמשתתף/ת.
-              </Typography>
-            </Box>
-          )}
           <TextField
             autoFocus
             fullWidth
