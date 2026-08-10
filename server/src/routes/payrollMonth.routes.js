@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const router = express.Router();
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware, requireRole, requireBranchScope } = require('../middleware/auth');
 const c = require('../controllers/payrollMonth.controller');
 
 // In-memory upload for Cibus xlsx/csv imports. 10MB cap covers a typical month.
@@ -38,11 +38,11 @@ router.put('/pregnancy-settings',             requireRole('system_admin', 'accou
 
 // The branch manager's own area: her staff and the updates she may file, with
 // none of the salary table around it.
-router.get('/my-updates',                     requireRole('system_admin', 'accountant', 'branch_manager'), c.myPayrollUpdates);
+router.get('/my-updates',                     requireBranchScope, c.myPayrollUpdates);
 
 // Change-request workflow: branch managers stage edits → accountant approves.
-router.post('/change-requests',               requireRole('system_admin', 'accountant', 'branch_manager'), c.createChangeRequest);
-router.get('/change-requests',                requireRole('system_admin', 'accountant', 'branch_manager'), c.listChangeRequests);
+router.post('/change-requests',               requireBranchScope, c.createChangeRequest);
+router.get('/change-requests',                requireBranchScope, c.listChangeRequests);
 router.post('/change-requests/:id/decide',    requireRole('system_admin', 'accountant'), c.decideChangeRequest);
 
 // accountant/admin edit any field; branch_manager may set ONLY the manager
@@ -90,7 +90,7 @@ router.delete('/custom-columns/:id',          requireRole('system_admin', 'accou
 // or delete: a filed request is a record, and withdrawing it is the
 // accountant's rejection rather than the manager's eraser.
 router.get('/adjustments',                    c.listAdjustments);
-router.post('/adjustments',                   requireRole('system_admin', 'accountant', 'branch_manager'), c.createAdjustment);
+router.post('/adjustments',                   requireBranchScope, c.createAdjustment);
 router.post('/adjustments/decide-bulk',       requireRole('system_admin', 'accountant'), c.decideAdjustmentsBulk);
 router.post('/adjustments/:id/decide',        requireRole('system_admin', 'accountant'), c.decideAdjustment);
 router.patch('/adjustments/:id',              requireRole('system_admin', 'accountant'), c.updateAdjustment);

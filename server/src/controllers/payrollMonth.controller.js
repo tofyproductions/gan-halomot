@@ -2235,9 +2235,17 @@ async function myPayrollUpdates(req, res, next) {
     if (req.query.branch && req.query.branch !== 'all') empFilter.branch_id = req.query.branch;
     if (!isFinal) {
       const allowed = managedBranchIds(req.user);
-      if (allowed.length === 0) return res.json({ month, employees: [], branches: [] });
+      // "No branches assigned" and "no employees in your branches" look the
+      // same on screen and have completely different fixes, so say which.
+      if (allowed.length === 0) {
+        return res.json({ month, employees: [], branches: [], scope_branch_count: 0 });
+      }
       if (empFilter.branch_id && !allowed.includes(String(empFilter.branch_id))) {
-        return res.json({ month, employees: [], branches: [] });
+        return res.json({
+          month, employees: [], branches: [],
+          scope_branch_count: allowed.length,
+          out_of_scope_branch: true,
+        });
       }
       if (!empFilter.branch_id) empFilter.branch_id = { $in: allowed };
     }
@@ -2311,6 +2319,7 @@ async function myPayrollUpdates(req, res, next) {
       month,
       can_decide: isFinal,
       branches,
+      scope_branch_count: isFinal ? null : managedBranchIds(req.user).length,
       // The salary-table fields a manager may ask to change, with the labels
       // the screen shows. Kept server-side so the two lists cannot drift.
       requestable_fields: MANAGER_REQUESTABLE_FIELDS,

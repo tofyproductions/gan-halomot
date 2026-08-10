@@ -310,12 +310,24 @@ export default function PayrollUpdates() {
   const [tab, setTab] = useState('all');
   const [addFor, setAddFor] = useState(null);
   const [deciding, setDeciding] = useState(false);
+  const [denied, setDenied] = useState('');
 
   const load = () => {
     setLoading(true);
+    setDenied('');
     api.get('/payroll-month/my-updates', { params: { month } })
       .then(res => setData(res.data))
-      .catch(err => { toast.error(err.response?.data?.error || 'שגיאה בטעינה'); setData(null); })
+      .catch((err) => {
+        setData(null);
+        // A refusal is an explanation, not a red flash that disappears. The
+        // account is either not set up as a manager or holds a stale token,
+        // and both are fixed by someone — not by retrying.
+        if (err.response?.status === 403) {
+          setDenied(err.response?.data?.error || 'אין הרשאה לצפות במסך זה.');
+        } else {
+          toast.error(err.response?.data?.error || 'שגיאה בטעינה');
+        }
+      })
       .finally(() => setLoading(false));
   };
 
@@ -374,7 +386,14 @@ export default function PayrollUpdates() {
         <Tooltip title="רענן"><IconButton onClick={load}><RefreshIcon /></IconButton></Tooltip>
       </Stack>
 
-      {!canDecide && (
+      {denied && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <AlertTitle sx={{ fontWeight: 700 }}>אין גישה למסך</AlertTitle>
+          {denied}
+        </Alert>
+      )}
+
+      {!canDecide && !denied && (
         <Alert severity="info" sx={{ mb: 2 }}>
           <AlertTitle sx={{ fontWeight: 700 }}>איך זה עובד</AlertTitle>
           אפשר להוסיף לכל עובד/ת בסניפים שבניהולך כל עדכון שכר — בונוס, הלוואה, מקדמה, תיקון שעות, החזר קניות,
@@ -413,7 +432,11 @@ export default function PayrollUpdates() {
             <Box sx={{ textAlign: 'center', py: 5 }}><CircularProgress /></Box>
           ) : employees.length === 0 ? (
             <Alert severity="warning">
-              לא נמצאו עובדים משויכים לסניפים שבניהולך. אם זו טעות — פנה/י למנהל המערכת.
+              {data?.scope_branch_count === 0
+                ? 'לא משויכים אליך סניפים לניהול, ולכן אין עובדים להצגה. מנהל המערכת צריך לשייך לך סניפים במסך ההרשאות.'
+                : data?.out_of_scope_branch
+                  ? 'הסניף שנבחר בראש המסך אינו אחד מהסניפים שבניהולך. החלף/י סניף בבורר שלמעלה.'
+                  : 'אין עובדים פעילים בסניפים שבניהולך.'}
             </Alert>
           ) : (
             <TableContainer>
