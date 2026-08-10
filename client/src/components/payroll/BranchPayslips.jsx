@@ -9,6 +9,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 
@@ -57,6 +58,29 @@ export default function BranchPayslips() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  /**
+   * The hours report behind a month.
+   *
+   * Rendered server-side on first request and cached, so the first click can
+   * take a few seconds and the rest are instant. The payslip says what was
+   * paid; this says why — which is the half a manager is actually asked about.
+   */
+  const openHours = async (emp, ym) => {
+    setBusy(`hours-${emp.id}-${ym}`);
+    try {
+      const res = await api.get(`/payroll/employees/${emp.id}/saved-payslips/${ym}/hours-report`,
+        { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err) {
+      // A blob response carries the JSON error as a blob, not as parsed data.
+      let msg = 'שגיאה בהפקת דוח השעות';
+      try { msg = JSON.parse(await err.response?.data?.text?.())?.error || msg; } catch { /* keep default */ }
+      toast.error(msg);
+    } finally { setBusy(''); }
+  };
 
   const openPayslip = async (emp, ym, { download } = {}) => {
     setBusy(`${emp.id}-${ym}`);
@@ -246,7 +270,7 @@ export default function BranchPayslips() {
                         <Chip size="small" color="warning" variant="outlined"
                           label={month ? 'לא נשלח תלוש לחודש זה' : 'אין תלושים'} />
                       ) : (
-                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                        <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
                           {slips.map(p => (
                             <Tooltip
                               key={p.year_month}
@@ -268,6 +292,26 @@ export default function BranchPayslips() {
                                 disabled={busy === `${emp.id}-${p.year_month}`}
                                 sx={{ cursor: 'pointer', fontWeight: 600 }}
                               />
+                            </Tooltip>
+                          ))}
+                          {/* The hours behind the number. Deliberately its own
+                              control per month, not a second chip: the manager
+                              opens it for one employee at a time, and it is
+                              rendered when asked rather than for everybody. */}
+                          {slips.map(p => (
+                            <Tooltip key={`h-${p.year_month}`} title={`דוח שעות — ${monthLabel(p.year_month)}`}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  disabled={busy === `hours-${emp.id}-${p.year_month}`}
+                                  onClick={() => openHours(emp, p.year_month)}
+                                  sx={{ p: 0.3 }}
+                                >
+                                  {busy === `hours-${emp.id}-${p.year_month}`
+                                    ? <CircularProgress size={14} />
+                                    : <AccessTimeIcon fontSize="small" sx={{ color: '#0891b2' }} />}
+                                </IconButton>
+                              </span>
                             </Tooltip>
                           ))}
                         </Stack>

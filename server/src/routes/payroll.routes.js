@@ -362,6 +362,14 @@ router.get(
   requireRole('system_admin', 'accountant', 'branch_manager'),
   audit.downloadSavedPayslip,
 );
+// The hours report behind a payslip month — rendered on demand and cached,
+// because the send to managers only ever attached one consolidated report per
+// branch and per employee there was nothing.
+router.get(
+  '/employees/:id/saved-payslips/:ym/hours-report',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  audit.downloadHoursReport,
+);
 router.post(
   '/employees/:id/saved-payslips/export',
   requireRole('system_admin', 'accountant', 'branch_manager'),

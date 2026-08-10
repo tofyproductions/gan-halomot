@@ -16,6 +16,9 @@ export const TAB_GROUPS = [
       { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'branch_manager'] },
+      // The מעונות אמונה branches enroll in קליקטאק, so their families arrive
+      // as a spreadsheet rather than through the registration flow.
+      { id: 'clicktac',       label: 'קליטה מקליקטאק', path: '/external-enrollments', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },

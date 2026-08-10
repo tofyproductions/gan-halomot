@@ -47,6 +47,9 @@ router.use('/branches', require('./branch.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
 router.use('/registrations', require('./registration.routes'));
+// קליקטאק — enrollments from the מעונות אמונה system, reviewed before they
+// become registrations here.
+router.use('/external-enrollments', require('./externalEnrollment.routes'));
 router.use('/contracts', require('./contracts.routes'));
 router.use('/collections', require('./collections.routes'));
 router.use('/archives', require('./archive.routes'));

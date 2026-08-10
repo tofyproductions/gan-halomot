@@ -3041,6 +3041,62 @@ async function downloadSavedPayslip(req, res) {
   } catch (err) { res.status(500).json({ error: err.message }); }
 }
 
+/**
+ * GET /employees/:id/saved-payslips/:ym/hours-report — the hours report behind
+ * a payslip month.
+ *
+ * The payslip is a number; the hours report is where that number comes from,
+ * and it is the half of the conversation a manager actually needs when someone
+ * says a month looks short. It rides along with the payslip in the employee
+ * distribution, but the send to managers attaches ONE consolidated report per
+ * branch — so per employee there was nothing.
+ *
+ * Rendered on demand rather than in the send loop, and cached onto the same
+ * SavedPayslip row. Rendering 68 of these up front means 68 Chromium pages on
+ * a 512MB instance, which is what the batching elsewhere in this file exists
+ * to avoid; rendering the one somebody asked for costs one.
+ */
+async function downloadHoursReport(req, res) {
+  try {
+    if (!await assertPayslipAccess(req, res, req.params.id)) return;
+    const { id, ym } = req.params;
+
+    const existing = await SavedPayslip.findOne({ employee_id: id, year_month: ym }).lean();
+    if (existing?.hours_report_data) {
+      const bytes = existing.hours_report_data.buffer
+        ? Buffer.from(existing.hours_report_data.buffer)
+        : Buffer.from(existing.hours_report_data);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="hours-${ym}.pdf"`);
+      return res.send(bytes);
+    }
+
+    const { buildRichHoursHtml } = require('./payroll.controller');
+    const html = await buildRichHoursHtml([id], ym, { role: 'system_admin' });
+    if (!html) return res.status(404).json({ error: 'אין נתוני שעות לחודש זה' });
+
+    const pdf = await require('../services/htmlPdf').htmlToPdf(html);
+    require('../services/htmlPdf').tryGc();
+    if (!pdf) return res.status(500).json({ error: 'שגיאה בהפקת דוח השעות' });
+
+    // Cache it where the payslip already lives, so the second person to ask
+    // does not pay for another render. Upsert: a month can have an hours
+    // report and no payslip.
+    await SavedPayslip.findOneAndUpdate(
+      { employee_id: id, year_month: ym },
+      {
+        $set: { hours_report_data: pdf },
+        $setOnInsert: { employee_id: id, year_month: ym, delivered_to_employee: false },
+      },
+      { upsert: true },
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="hours-${ym}.pdf"`);
+    res.send(pdf);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+}
+
 // POST /employees/:id/saved-payslips/export { months: ['YYYY-MM', ...] } — merge
 // the selected archived payslips into a single PDF (chronological).
 async function exportSavedPayslips(req, res) {
@@ -3466,6 +3522,7 @@ module.exports = {
   downloadSavedPayslip,
   exportSavedPayslips,
   listBranchPayslips,
+  downloadHoursReport,
   updateEmployeeEmails,
   distributionPreview,
   managerDistributionPreview,
@@ -3476,6 +3533,7 @@ module.exports = {
   downloadSavedPayslip,
   exportSavedPayslips,
   listBranchPayslips,
+  downloadHoursReport,
   updateEmployeeEmails,
   sendPayslipsToEmployees,
   sendPayslipsToManagers,

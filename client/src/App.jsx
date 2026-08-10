@@ -8,6 +8,7 @@ import { hasTabAccess } from './config/tabs';
 import RegistrationWizard from './components/registration/RegistrationWizard';
 import ParentOnboarding from './components/registration/ParentOnboarding';
 import RegistrationTracker from './components/registration/RegistrationTracker';
+import ExternalEnrollments from './components/registration/ExternalEnrollments';
 import CollectionsTable from './components/collections/CollectionsTable';
 import ArchiveList from './components/archive/ArchiveList';
 import ContactListPDF from './components/contacts/ContactListPDF';
@@ -84,6 +85,11 @@ function AppRoutes() {
         <Route path="registrations" element={<RegistrationTracker />} />
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
+        <Route path="external-enrollments" element={
+          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+            <ExternalEnrollments />
+          </ProtectedRoute>
+        } />
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="pricing" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>

@@ -1,0 +1,514 @@
+const XLSX = require('xlsx');
+const {
+  ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing,
+} = require('../models');
+const {
+  parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
+} = require('../services/clicktac.service');
+const {
+  normalizeYear, getAcademicYears, hebrewYearForStart, academicYearOf, normalizeChildName,
+} = require('../services/academic-year.service');
+const { generateUniqueId } = require('../utils/id-generator');
+const { getBranchFilter } = require('../utils/branch-filter');
+
+/**
+ * קליטת רישומים מקליקטאק — the review queue between an external export and
+ * this system's live tables.
+ *
+ * Nothing here writes a Registration on its own. A spreadsheet of 77 children
+ * is not something to trust blind: the branch is not in the file, the tuition
+ * is not in the file, and roughly half the rows are children who already exist
+ * somewhere. Every row lands as an ExternalEnrollment, gets matched against
+ * what is already here, and becomes a registration only when someone says so.
+ */
+
+/** The ת"ז of a child, wherever this system happens to keep it. */
+function childIdOf(reg, child) {
+  return String(child?.child_id_number || reg?.configuration?.registration_card?.childIdNumber || '')
+    .replace(/\D/g, '');
+}
+
+const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+
+/**
+ * Tie an imported row to a registration that already exists.
+ *
+ * ת"ז first — it is unique in every export seen and it is the child's own.
+ * Name + birth date second, because this system barely stores child ID numbers
+ * (one record in seventy), so for almost every existing child the ת"ז cannot
+ * match anything and the fallback is the only thing that will.
+ */
+function matchExisting(doc, registrations, childByReg) {
+  const wantId = String(doc.child.id_number || '').replace(/\D/g, '');
+  if (wantId) {
+    const byId = registrations.find(r => childIdOf(r, childByReg.get(String(r._id))) === wantId);
+    if (byId) return { reg: byId, by: 'id_number' };
+  }
+  const wantName = normalizeChildName(doc.child.full_name);
+  const wantBirth = dayKey(doc.child.birth_date);
+  const byNameBirth = registrations.find(r => normalizeChildName(r.child_name) === wantName
+    && dayKey(r.child_birth_date) === wantBirth);
+  if (byNameBirth) return { reg: byNameBirth, by: 'name_birth' };
+  return { reg: null, by: '' };
+}
+
+/**
+ * POST /api/external-enrollments/import   (multipart: file, branch_id, academic_year?)
+ *
+ * The branch is a parameter and never a column. `מוסד` reads "כפר סבא" on every
+ * row and two branches answer to that; filing a whole cohort under the wrong
+ * gan is not a mistake anyone would notice quickly.
+ */
+async function importFile(req, res, next) {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'לא נבחר קובץ' });
+    const branchId = req.body?.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף — הקובץ עצמו לא מבחין בין סניפי כפר סבא' });
+    const branch = await Branch.findById(branchId).lean();
+    if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames[0];
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null, raw: false });
+    if (!rows.length) return res.status(400).json({ error: 'הגיליון ריק' });
+
+    const missing = missingColumns(rows[0]);
+    if (missing.length) {
+      return res.status(400).json({
+        error: `חסרות עמודות בקובץ: ${missing.join(', ')}`,
+        code: 'MISSING_COLUMNS',
+        expected: Object.values(COLUMNS),
+      });
+    }
+
+    const parsed = parseSheet(rows, {
+      branchId,
+      sourceFile: req.file.originalname || '',
+    });
+    if (req.body?.academic_year) {
+      const forced = normalizeYear(req.body.academic_year);
+      for (const d of parsed) d.academic_year = forced;
+    }
+
+    // What this system already holds, for matching. Not branch-filtered: a
+    // family that moved between branches is still the same child.
+    const registrations = await Registration.find({}).lean();
+    const children = await Child.find({}).select('registration_id child_id_number').lean();
+    const childByReg = new Map(children.map(c => [String(c.registration_id), c]));
+
+    let created = 0; let updated = 0; let unchanged = 0;
+    const results = [];
+
+    for (const doc of parsed) {
+      const { reg, by } = matchExisting(doc, registrations, childByReg);
+      doc.review = {
+        status: 'pending',
+        matched_registration_id: reg?._id || null,
+        matched_by: by,
+      };
+      doc.imported_by = req.user?.id || null;
+
+      const existing = await ExternalEnrollment.findOne({
+        source: 'clicktac',
+        academic_year: doc.academic_year,
+        'child.id_number': doc.child.id_number,
+      });
+
+      if (!existing) {
+        await ExternalEnrollment.create(doc);
+        created += 1;
+        results.push({ child: doc.child.full_name, action: 'created' });
+      } else if (existing.content_hash === doc.content_hash) {
+        unchanged += 1;
+      } else {
+        // A row that changed in ClickTac. Keep the review decision already made
+        // about it — the point of re-importing is the data, not to reopen a
+        // question somebody answered.
+        const keepReview = existing.review;
+        Object.assign(existing, doc, { review: keepReview });
+        await existing.save();
+        updated += 1;
+        results.push({ child: doc.child.full_name, action: 'updated' });
+      }
+    }
+
+    res.json({
+      branch: branch.name,
+      sheet: sheetName,
+      rows: rows.length,
+      parsed: parsed.length,
+      created,
+      updated,
+      unchanged,
+      results: results.slice(0, 50),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** GET /api/external-enrollments — the queue. Never includes bank details. */
+async function list(req, res, next) {
+  try {
+    const filter = { ...getBranchFilter(req) };
+    if (req.query.year) filter.academic_year = normalizeYear(req.query.year);
+    if (req.query.status) filter['review.status'] = req.query.status;
+
+    const docs = await ExternalEnrollment.find(filter)
+      // standing_order and raw are deliberately absent: a list request is not
+      // a reason to put 64 families' bank accounts on the wire.
+      .select('-standing_order -raw')
+      .populate('branch_id', 'name')
+      .populate('review.matched_registration_id', 'child_name academic_year monthly_fee')
+      .sort({ 'child.full_name': 1 })
+      .lean();
+
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const filtered = q
+      ? docs.filter(d => d.child.full_name?.toLowerCase().includes(q)
+        || String(d.child.id_number).includes(q)
+        || `${d.parent1?.first_name} ${d.parent1?.last_name}`.toLowerCase().includes(q)
+        || `${d.parent2?.first_name} ${d.parent2?.last_name}`.toLowerCase().includes(q))
+      : docs;
+
+    res.json({
+      enrollments: filtered.map(d => ({
+        ...d,
+        id: d._id,
+        branch_name: d.branch_id?.name || '',
+        branch_id: d.branch_id?._id || d.branch_id,
+      })),
+      summary: {
+        total: docs.length,
+        pending: docs.filter(d => d.review?.status === 'pending').length,
+        imported: docs.filter(d => d.review?.status === 'imported').length,
+        ignored: docs.filter(d => d.review?.status === 'ignored').length,
+        matched: docs.filter(d => d.review?.matched_registration_id).length,
+        cancelled: docs.filter(d => d.enrollment?.status === 'ביטל רישום').length,
+        disagree_age_group: docs.filter(d => d.computed?.agrees_with_source === false).length,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** GET /api/external-enrollments/:id — one record, bank details included. */
+async function getOne(req, res, next) {
+  try {
+    const doc = await ExternalEnrollment.findById(req.params.id)
+      .populate('branch_id', 'name')
+      .populate('review.matched_registration_id', 'child_name academic_year monthly_fee parent_name')
+      .lean();
+    if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    res.json({ enrollment: { ...doc, id: doc._id } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/external-enrollments/pricing?branch=&year=
+ *
+ * The tuition is NOT in the export — ClickTac carries the funding type, not
+ * the amount, and the subsidy tier (דרגה) that decides the price is a property
+ * of the family's income that this file does not include. So the price comes
+ * from the branch's own state matrix, and the tier is chosen per child at
+ * import.
+ *
+ * The matrix columns are the state's: עד 15 חודש / 15–24 חודש / מעל 24 חודש —
+ * the same two boundaries the export's own age groups fall on, which is what
+ * makes the computed age group usable for picking a column.
+ */
+async function pricing(req, res, next) {
+  try {
+    const year = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const hebrew = hebrewYearForStart(Number(year.split('-')[0]));
+    // BranchPricing stores the year in Hebrew letters, not as "YYYY-YYYY".
+    const doc = await BranchPricing.findOne({
+      branch_id: req.query.branch,
+      $or: [{ academic_year: hebrew }, { academic_year: year }],
+    }).lean();
+    if (!doc) return res.json({ pricing: null, age_groups: AGE_GROUPS.map(g => g.name) });
+    res.json({
+      pricing: {
+        pricing_type: doc.pricing_type,
+        fixed_monthly_fee: doc.fixed_monthly_fee,
+        age_groups: doc.age_groups,
+        tiers: doc.tiers,
+        addons: doc.addons,
+        one_time: doc.one_time,
+        installments: doc.installments,
+      },
+      // Which matrix column each ClickTac age group belongs to. Index-aligned
+      // to `age_groups`, because the labels are the state's wording and will
+      // not match the export's.
+      age_group_columns: AGE_GROUPS.map((g, i) => ({ name: g.name, column: i })),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Turn one reviewed enrollment into a real registration.
+ *
+ * Creates the Registration and the Child, and — when ClickTac recorded a
+ * registration-fee receipt — the Collection row that already holds it, so the
+ * money the family has demonstrably paid is not asked for a second time.
+ *
+ * The contract was signed in ClickTac. `agreement_signed` stays FALSE because
+ * this system holds no signature, and `configuration.external_source` records
+ * where it was signed instead — a completed registration with no signature is
+ * flagged on the registrations page, and that flag would be a lie here.
+ */
+async function promoteOne(doc, opts) {
+  const { monthly_fee, registration_fee, classroom_id, userId } = opts;
+
+  const parentName = `${doc.parent1?.first_name || ''} ${doc.parent1?.last_name || ''}`.trim();
+  const [y1, y2] = doc.academic_year.split('-').map(Number);
+
+  const registration = await Registration.create({
+    unique_id: generateUniqueId('REG'),
+    branch_id: doc.branch_id,
+    child_name: doc.child.full_name,
+    child_birth_date: doc.child.birth_date,
+    classroom_id: classroom_id || null,
+    parent_name: parentName,
+    parent_id_number: doc.parent1?.id_number || null,
+    parent_phone: doc.parent1?.phone || null,
+    parent_email: doc.parent1?.email || null,
+    monthly_fee,
+    registration_fee: registration_fee || 0,
+    start_date: new Date(Date.UTC(y1, 8, 1)),
+    end_date: new Date(Date.UTC(y2, 7, 31)),
+    academic_year: doc.academic_year,
+    // Enrolled, and accepted — but signed somewhere else.
+    status: 'completed',
+    agreement_signed: false,
+    card_completed: true,
+    configuration: {
+      external_source: {
+        system: 'clicktac',
+        enrollment_id: String(doc._id),
+        child_id_number: doc.child.id_number,
+        status: doc.enrollment?.status || '',
+        second_signer: doc.enrollment?.second_signer || '',
+        continuing: !!doc.enrollment?.continuing,
+        registered_at: doc.enrollment?.registered_at || null,
+        receipt_number: doc.enrollment?.receipt_number || '',
+        portal: doc.enrollment?.portal || '',
+        age_group: doc.child.age_group,
+        computed_age_group: doc.computed?.age_group,
+        health_fund: doc.child.health_fund,
+        gender: doc.child.gender,
+        standing_order: doc.standing_order || {},
+        tuition_method: doc.enrollment?.tuition_method || '',
+      },
+      medical_alerts: doc.child.has_allergy ? doc.child.allergy_detail : '',
+    },
+  });
+
+  // Both parents, from the start. ClickTac asks for two registrants and 73 of
+  // 77 rows have both — this is the one import where the second parent is not
+  // something to infer later.
+  const parent2Name = `${doc.parent2?.first_name || ''} ${doc.parent2?.last_name || ''}`.trim();
+  await Child.create({
+    registration_id: registration._id,
+    child_name: doc.child.full_name,
+    child_id_number: doc.child.id_number || null,
+    birth_date: doc.child.birth_date,
+    classroom_id: classroom_id || null,
+    parent_name: parentName,
+    parent_id_number: doc.parent1?.id_number || null,
+    phone: doc.parent1?.phone || null,
+    email: doc.parent1?.email || null,
+    parent2_name: parent2Name || null,
+    parent2_id_number: doc.parent2?.id_number || null,
+    parent2_phone: doc.parent2?.phone || null,
+    parent2_email: doc.parent2?.email || null,
+    address: doc.parent1?.address || doc.parent2?.address || null,
+    allergies: doc.child.has_allergy ? doc.child.allergy_detail : null,
+    medical_alerts: doc.child.health_fund ? `קופת חולים: ${doc.child.health_fund}` : null,
+    emergency_contact: doc.child.aide_name || null,
+    emergency_phone: doc.child.aide_phone || null,
+    academic_year: doc.academic_year,
+    is_active: true,
+  });
+
+  // The registration fee was paid in ClickTac and has a receipt number. Filing
+  // it means the collections table opens showing it paid rather than owed.
+  if (doc.enrollment?.receipt_number) {
+    await Collection.findOneAndUpdate(
+      { registration_id: registration._id, academic_year: doc.academic_year },
+      {
+        $set: { registration_fee_receipt: doc.enrollment.receipt_number },
+        $setOnInsert: { registration_id: registration._id, academic_year: doc.academic_year, months: [] },
+      },
+      { upsert: true },
+    );
+  }
+
+  await ExternalEnrollment.updateOne({ _id: doc._id }, {
+    $set: {
+      'review.status': 'imported',
+      'review.imported_registration_id': registration._id,
+      'review.imported_at': new Date(),
+    },
+  });
+
+  return registration;
+}
+
+/** POST /api/external-enrollments/:id/promote */
+async function promote(req, res, next) {
+  try {
+    const doc = await ExternalEnrollment.findById(req.params.id).lean();
+    if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    if (doc.review?.status === 'imported') {
+      return res.status(409).json({ error: 'הרשומה כבר יובאה למערכת' });
+    }
+    const monthlyFee = Number(req.body?.monthly_fee);
+    if (!Number.isFinite(monthlyFee) || monthlyFee <= 0) {
+      return res.status(400).json({ error: 'יש לקבוע שכר לימוד — הוא לא קיים בקובץ הייצוא' });
+    }
+    if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
+      return res.status(409).json({
+        error: `${doc.child.full_name} כבר קיים/ת במערכת`,
+        code: 'ALREADY_IN_SYSTEM',
+        matched_registration_id: doc.review.matched_registration_id,
+      });
+    }
+
+    const registration = await promoteOne(doc, {
+      monthly_fee: monthlyFee,
+      registration_fee: Number(req.body?.registration_fee) || 0,
+      classroom_id: req.body?.classroom_id || null,
+      userId: req.user?.id || null,
+    });
+
+    res.status(201).json({ registration: { ...registration.toObject(), id: registration._id } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/external-enrollments/promote-bulk  { ids, fees_by_age_group, registration_fee }
+ *
+ * `fees_by_age_group` rather than one fee: the state matrix prices a תינוק
+ * differently from a בוגר, and a single number applied to seventy children
+ * would be wrong for most of them.
+ *
+ * Each failure is reported with its reason instead of aborting the run — a
+ * duplicate in the middle of a list should not leave half of it imported with
+ * nothing saying which half.
+ */
+async function promoteBulk(req, res, next) {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ error: 'לא נבחרו רשומות' });
+    const fees = req.body?.fees_by_age_group || {};
+    const regFee = Number(req.body?.registration_fee) || 0;
+
+    const imported = [];
+    const skipped = [];
+    for (const id of ids) {
+      // eslint-disable-next-line no-await-in-loop
+      const doc = await ExternalEnrollment.findById(id).lean();
+      if (!doc) { skipped.push({ id, error: 'לא נמצאה' }); continue; }
+      if (doc.review?.status === 'imported') { skipped.push({ id, child: doc.child.full_name, error: 'כבר יובאה' }); continue; }
+      if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
+        skipped.push({ id, child: doc.child.full_name, error: 'כבר קיים/ת במערכת' });
+        continue;
+      }
+      const group = doc.computed?.age_group || doc.child.age_group;
+      const fee = Number(fees[group]);
+      if (!Number.isFinite(fee) || fee <= 0) {
+        skipped.push({ id, child: doc.child.full_name, error: `אין שכר לימוד לשכבה "${group}"` });
+        continue;
+      }
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const reg = await promoteOne(doc, {
+          monthly_fee: fee,
+          registration_fee: regFee,
+          classroom_id: req.body?.classroom_id || null,
+          userId: req.user?.id || null,
+        });
+        imported.push({ id, child: doc.child.full_name, registration_id: reg._id });
+      } catch (e) {
+        skipped.push({ id, child: doc.child.full_name, error: e.message });
+      }
+    }
+
+    res.json({ imported: imported.length, skipped, details: imported });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** PUT /api/external-enrollments/:id/review  { status, note } */
+async function setReview(req, res, next) {
+  try {
+    const status = req.body?.status;
+    if (!['pending', 'ignored'].includes(status)) {
+      return res.status(400).json({ error: 'סטטוס לא תקין' });
+    }
+    const doc = await ExternalEnrollment.findByIdAndUpdate(
+      req.params.id,
+      { $set: { 'review.status': status, 'review.note': req.body?.note || '' } },
+      { new: true },
+    ).lean();
+    if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    res.json({ enrollment: { ...doc, id: doc._id } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * GET /api/external-enrollments/contacts?branch=&year=
+ *
+ * The parent contact sheet — the thing that could not be built at all from the
+ * previous export, which carried no parent data of any kind. One row per
+ * child, both parents, phones and emails, with the relation (אם / אב) so it is
+ * clear who is who.
+ */
+async function contacts(req, res, next) {
+  try {
+    const filter = { ...getBranchFilter(req) };
+    if (req.query.year) filter.academic_year = normalizeYear(req.query.year);
+    if (req.query.status) filter['review.status'] = req.query.status;
+
+    const docs = await ExternalEnrollment.find(filter)
+      .select('child parent1 parent2 academic_year enrollment.status computed')
+      .sort({ 'child.full_name': 1 })
+      .lean();
+
+    res.json({
+      contacts: docs.map(d => ({
+        child_name: d.child.full_name,
+        child_id_number: d.child.id_number,
+        birth_date: d.child.birth_date,
+        age_group: d.computed?.age_group || d.child.age_group,
+        status: d.enrollment?.status || '',
+        parent1_name: `${d.parent1?.first_name || ''} ${d.parent1?.last_name || ''}`.trim(),
+        parent1_relation: d.parent1?.relation || '',
+        parent1_phone: d.parent1?.phone || '',
+        parent1_email: d.parent1?.email || '',
+        parent2_name: `${d.parent2?.first_name || ''} ${d.parent2?.last_name || ''}`.trim(),
+        parent2_relation: d.parent2?.relation || '',
+        parent2_phone: d.parent2?.phone || '',
+        parent2_email: d.parent2?.email || '',
+        address: d.parent1?.address || d.parent2?.address || '',
+      })),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = {
+  importFile, list, getOne, pricing, promote, promoteBulk, setReview, contacts,
+};
