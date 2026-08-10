@@ -4,6 +4,7 @@ import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
   TextField, InputAdornment, Button, MenuItem,
   Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress, Alert,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
@@ -43,7 +44,7 @@ export default function RegistrationTracker() {
   const [missingSigOnly, setMissingSigOnly] = useState(false);
   const [missingDocsOnly, setMissingDocsOnly] = useState(false);
   const [confirm, setConfirm] = useState({ open: false, id: null });
-  const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false });
+  const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
   // Which upload is in flight — drives the spinner so a slow upload never looks
@@ -223,14 +224,35 @@ export default function RegistrationTracker() {
   const handleRenew = async () => {
     const reg = renewDlg.reg;
     if (!reg) return;
+    if (renewDlg.mode === 'signed' && !renewDlg.file) {
+      return toast.error('יש לבחור את קובץ החוזה החתום');
+    }
     setRenewDlg(d => ({ ...d, saving: true }));
     try {
       const res = await api.post(`/registrations/${reg._id || reg.id}/renew`, {
         monthly_fee: renewDlg.monthlyFee === '' ? undefined : Number(renewDlg.monthlyFee),
         registration_fee: renewDlg.regFee === '' ? undefined : Number(renewDlg.regFee),
       });
+      const newId = res.data.registration.id || res.data.registration._id;
+
+      // Already signed elsewhere — on paper, or in the old system. There is
+      // nothing for the parent to do, so the renewal is finalised on the spot
+      // with the file attached: contract stored, registration completed, and
+      // the child created for the new year, which is what actually makes them
+      // appear in it.
+      if (renewDlg.mode === 'signed') {
+        const form = new FormData();
+        form.append('contract_file', renewDlg.file);
+        await api.post(`/registrations/${newId}/finalize-manual`, form,
+          { headers: { 'Content-Type': 'multipart/form-data' } });
+        setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
+        fetchData();
+        toast.success('הרישום לשנה החדשה נוצר עם החוזה החתום — הילד/ה נמצא/ת במערכת');
+        return;
+      }
+
       const link = `${window.location.origin}/register/${res.data.access_token}`;
-      setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false });
+      setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
       fetchData();
 
       const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
@@ -475,7 +497,7 @@ export default function RegistrationTracker() {
                         open: true, reg,
                         monthlyFee: String(reg.monthly_fee ?? ''),
                         regFee: String(reg.registration_fee ?? ''),
-                        saving: false,
+                        saving: false, mode: 'link', file: null,
                       })}
                     >
                       <AutorenewIcon fontSize="small" />
@@ -522,10 +544,43 @@ export default function RegistrationTracker() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            <ToggleButtonGroup
+              size="small" exclusive fullWidth value={renewDlg.mode}
+              onChange={(_, v) => { if (v) setRenewDlg(d => ({ ...d, mode: v })); }}
+            >
+              <ToggleButton value="link">שלח קישור חתימה להורה</ToggleButton>
+              <ToggleButton value="signed">יש כבר חוזה חתום</ToggleButton>
+            </ToggleButtonGroup>
+
             <Alert severity="info" icon={false}>
-              שנת גן מלאה: 1 בספטמבר עד 31 באוגוסט. נוצר רישום חדש עם קישור חתימה להורה, והרישום של השנה הנוכחית נשאר כפי שהוא —
-              הוא מחזיק את החוזה החתום ואת הגבייה של השנה. הילד/ה ייכנס/תיכנס למערכת של השנה החדשה רק לאחר החתימה.
+              שנת גן מלאה: 1 בספטמבר עד 31 באוגוסט. הרישום של השנה הנוכחית נשאר כפי שהוא —
+              הוא מחזיק את החוזה החתום ואת הגבייה של השנה.
+              {renewDlg.mode === 'signed'
+                ? ' החוזה שתעלה/י נשמר על הרישום החדש, והילד/ה נכנס/ת מיד למערכת של השנה החדשה — בלי לשלוח שום דבר להורה.'
+                : ' הילד/ה ייכנס/תיכנס למערכת של השנה החדשה רק לאחר החתימה.'}
             </Alert>
+
+            {renewDlg.mode === 'signed' && (
+              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={renewDlg.saving}>
+                  {renewDlg.file ? 'החלף קובץ' : 'בחר/י חוזה חתום'}
+                  <input
+                    type="file" hidden accept="application/pdf,image/*"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = '';
+                      if (!f) return;
+                      if (f.size > 8 * 1024 * 1024) return toast.error('הקובץ גדול מדי (מקסימום 8MB)');
+                      setRenewDlg(d => ({ ...d, file: f }));
+                    }}
+                  />
+                </Button>
+                {renewDlg.file && (
+                  <Chip size="small" label={renewDlg.file.name}
+                    onDelete={() => setRenewDlg(d => ({ ...d, file: null }))} />
+                )}
+              </Stack>
+            )}
             <TextField
               size="small" type="number" label="שכר לימוד חודשי" value={renewDlg.monthlyFee}
               onChange={e => setRenewDlg(d => ({ ...d, monthlyFee: e.target.value }))}
@@ -541,7 +596,7 @@ export default function RegistrationTracker() {
           <Button onClick={() => setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false })}
             disabled={renewDlg.saving}>ביטול</Button>
           <Button variant="contained" onClick={handleRenew} disabled={renewDlg.saving}>
-            {renewDlg.saving ? 'מנפיק…' : 'הנפק ושלח להורה'}
+            {renewDlg.saving ? 'מנפיק…' : renewDlg.mode === 'signed' ? 'צור רישום עם החוזה החתום' : 'הנפק ושלח להורה'}
           </Button>
         </DialogActions>
       </Dialog>
