@@ -437,8 +437,19 @@ async function pollCommands() {
           });
         }
       } catch (cmdErr) {
-        log.error(`command ${cmd.id} (${cmd.type}) failed`, { err: cmdErr.message });
-        await server.commandResult(cmd.id, 'failed', { error: cmdErr.message }).catch(() => {});
+        // zkteco-js rejects with bare strings and plain objects, not Errors —
+        // a device write that times out arrives as TIMEOUT_ON_WRITING_MESSAGE
+        // with no `.message` at all. Reading `.message` off it produced
+        // `failed {}` in the log and an EMPTY last_error on the server, so four
+        // failed commands at משה דיין said nothing about why. Whatever was
+        // thrown, say something about it.
+        const reason = cmdErr?.message
+          || cmdErr?.err?.message
+          || (typeof cmdErr === 'string' ? cmdErr : '')
+          || (() => { try { return JSON.stringify(cmdErr); } catch { return String(cmdErr); } })()
+          || 'unknown error';
+        log.error(`command ${cmd.id} (${cmd.type}) failed`, { err: reason });
+        await server.commandResult(cmd.id, 'failed', { error: String(reason).slice(0, 300) }).catch(() => {});
       }
     }
   } catch (err) {
