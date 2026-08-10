@@ -1762,11 +1762,131 @@ async function createAdjustment(req, res, next) {
       decided_by: isFinal ? req.user.id : null,
       decided_at: isFinal ? new Date() : null,
     });
+    // An accountant's own entry is approved on the spot, so it lands in its
+    // column on the spot too — the same path a manager's takes on approval.
+    let applied = null;
+    if (isFinal) {
+      try { applied = await applyApprovedAdjustment(adj); }
+      catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
+    }
+
     res.json({
       adjustment: { ...adj.toObject(), id: String(adj._id) },
       pending: !isFinal,
+      applied,
     });
   } catch (err) { next(err); }
+}
+
+/**
+ * Where an approved adjustment lands in the salary table.
+ *
+ * Approving used to change nothing at all. `adj_totals` was computed, shipped
+ * to the client and rendered in its own column — and never added to
+ * `estimated_total`. Every bonus, reimbursement and loan ever entered was
+ * decoration: not in the month's total, not in the accountant's PDF. The row
+ * has to land in the column that already knows how to pay it.
+ *
+ *   תוספת כספית / החזר קניות / אחר → בונוס
+ *   ניכוי כספי                      → בונוס שלילי (there is no deductions column)
+ *   תוספת נסיעות                    → נסיעות, on top of what the month already pays
+ *   בקשת מקדמה                      → קיזוז מקדמה (a directive, as it is today)
+ *   בקשת הלוואה                     → Employee.loans[], which is what the הלוואות column reads
+ *
+ * Hours types are deliberately absent: hours come from the clock, so an hours
+ * correction is a punch correction, and those already reach the accountant as
+ * "בעיות בהחתמה". Legacy hours rows keep showing in the adjustments column and
+ * move no money — the same as before, and now honestly so.
+ */
+const BONUS_TYPES = new Set(['money_add', 'purchase_reimburse', 'other']);
+
+async function applyApprovedAdjustment(adj, cache = {}) {
+  const month = adj.month;
+  const employeeId = adj.employee_id;
+  const amount = Number(adj.amount) || 0;
+  const reason = (adj.reason || '').trim();
+
+  const stamp = (base, line) => [base, line].filter(Boolean).join(' · ').slice(0, 500);
+
+  if (BONUS_TYPES.has(adj.type) || adj.type === 'money_deduct') {
+    // A deduction is a negative bonus: the column already adds its value to the
+    // total, so a negative one subtracts. There is no deductions column to use.
+    const delta = adj.type === 'money_deduct' ? -Math.abs(amount) : amount;
+    const row = await PayrollMonth.findOne({ employee_id: employeeId, month }).select('manual.bonus').lean();
+    const prev = row?.manual?.bonus || {};
+    const base = prev.override_amount != null ? Number(prev.override_amount) : 0;
+    await PayrollMonth.findOneAndUpdate(
+      { employee_id: employeeId, month },
+      {
+        $set: {
+          'manual.bonus.override_amount': Math.round((base + delta) * 100) / 100,
+          'manual.bonus.note': stamp(prev.note, reason || 'עדכון שכר מאושר'),
+          'manual.bonus.disabled': false,
+        },
+      },
+      { upsert: true },
+    );
+    return { field: 'bonus', delta };
+  }
+
+  if (adj.type === 'travel_add') {
+    // travel_override is absolute, so the addition has to sit on top of what
+    // the month would otherwise pay — not replace it.
+    const row = await PayrollMonth.findOne({ employee_id: employeeId, month }).select('manual.travel_override').lean();
+    let base = row?.manual?.travel_override;
+    if (base == null) {
+      if (cache.autoTravel === undefined) {
+        const emp = await Employee.findById(employeeId).select('branch_id').lean();
+        const data = await fetchMonthData({ month, branch: String(emp?.branch_id || '') }, { role: 'system_admin' });
+        const r = (data.rows || []).find(x => String(x.employee_id) === String(employeeId));
+        cache.autoTravel = r?.breakdown?.components?.travel ?? 0;
+      }
+      base = cache.autoTravel;
+    }
+    await PayrollMonth.findOneAndUpdate(
+      { employee_id: employeeId, month },
+      { $set: { 'manual.travel_override': Math.round((Number(base) + amount) * 100) / 100 } },
+      { upsert: true },
+    );
+    return { field: 'travel_override', delta: amount };
+  }
+
+  if (adj.type === 'advance_request') {
+    const row = await PayrollMonth.findOne({ employee_id: employeeId, month }).select('manual.advance_deduction_text').lean();
+    const line = `מקדמה ₪${Math.abs(amount).toLocaleString('he-IL')}${reason ? ` — ${reason}` : ''}`;
+    await PayrollMonth.findOneAndUpdate(
+      { employee_id: employeeId, month },
+      { $set: { 'manual.advance_deduction_text': stamp(row?.manual?.advance_deduction_text, line) } },
+      { upsert: true },
+    );
+    return { field: 'advance_deduction_text', delta: 0 };
+  }
+
+  if (adj.type === 'loan_request') {
+    // The הלוואות column reads Employee.loans[]. A single-instalment loan
+    // starting this month is the honest translation of "advance me X" — the
+    // accountant re-spreads it if it was meant to be paid over months.
+    const total = Math.abs(amount);
+    if (total > 0) {
+      await Employee.findByIdAndUpdate(employeeId, {
+        $push: {
+          loans: {
+            total_amount: total,
+            installment_amount: total,
+            installments_total: 1,
+            start_month: month,
+            payments: [{ month, amount: total, paused: false }],
+            started_at: new Date(),
+            notes: stamp('נוצר מאישור עדכון שכר', reason),
+          },
+        },
+      });
+    }
+    return { field: 'loans', delta: total };
+  }
+
+  // Hours types (and anything new) move no money on their own.
+  return { field: null, delta: 0 };
 }
 
 /**
@@ -1783,13 +1903,22 @@ async function decideAdjustment(req, res, next) {
     if (!adj) return res.status(404).json({ error: 'עדכון לא נמצא' });
 
     const approve = req.body?.approve !== false;
+    const wasPending = adj.status === 'pending';
     adj.status = approve ? 'approved' : 'rejected';
     adj.decided_by = req.user.id;
     adj.decided_at = new Date();
     adj.decided_note = String(req.body?.note || '').slice(0, 500);
     await adj.save();
 
-    res.json({ adjustment: { ...adj.toObject(), id: String(adj._id) } });
+    // Approving is what moves the money. Guarded on `wasPending` so approving
+    // an already-approved row twice cannot add the same bonus twice.
+    let applied = null;
+    if (approve && wasPending) {
+      try { applied = await applyApprovedAdjustment(adj); }
+      catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
+    }
+
+    res.json({ adjustment: { ...adj.toObject(), id: String(adj._id) }, applied });
   } catch (err) { next(err); }
 }
 
@@ -1802,6 +1931,10 @@ async function decideAdjustmentsBulk(req, res, next) {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
     if (ids.length === 0) return res.status(400).json({ error: 'לא נבחרו עדכונים' });
     const approve = req.body?.approve !== false;
+    // Read the rows BEFORE flipping them: only the ones that were actually
+    // pending may move money, and after updateMany that is no longer knowable.
+    const pending = await SalaryAdjustment.find({ _id: { $in: ids }, status: 'pending' }).lean();
+
     const result = await SalaryAdjustment.updateMany(
       { _id: { $in: ids }, status: 'pending' },
       {
@@ -1813,7 +1946,20 @@ async function decideAdjustmentsBulk(req, res, next) {
         },
       },
     );
-    res.json({ ok: true, decided: result.modifiedCount || 0 });
+
+    let applied = 0;
+    if (approve) {
+      // One cache per employee+month, so a month's travel is computed once
+      // rather than once per row.
+      const caches = new Map();
+      for (const adj of pending) {
+        const key = `${adj.employee_id}|${adj.month}`;
+        if (!caches.has(key)) caches.set(key, {});
+        try { await applyApprovedAdjustment(adj, caches.get(key)); applied += 1; }
+        catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
+      }
+    }
+    res.json({ ok: true, decided: result.modifiedCount || 0, applied });
   } catch (err) { next(err); }
 }
 
@@ -2411,6 +2557,105 @@ async function myUpdateAbsences(req, res, next) {
         excused: !!c.excused,
         reason: c.reason || '',
       })),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /payroll-month/my-updates/punches?month=YYYY-MM&employee_id=…
+ *
+ * One employee's clock days for the month, with the problems marked.
+ *
+ * This replaces "תיקון דיווח שעות" as an adjustment type. Hours come from the
+ * clock, so a number typed into a form was never the fix — it hid the missing
+ * punch instead of correcting it, and the accountant got a figure with no way
+ * to check it. The manager sees the actual days here; a correction goes in as a
+ * punch, which already arrives at the accountant as a pending clock issue.
+ */
+async function myUpdatePunches(req, res, next) {
+  const IL = 'Asia/Jerusalem';
+  const dayKey = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: IL }).format(d);
+  const timeHHMM = (d) => new Intl.DateTimeFormat('he-IL', {
+    timeZone: IL, hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(d);
+  try {
+    const month = (req.query.month || '').trim();
+    const employeeId = String(req.query.employee_id || '');
+    if (!/^\d{4}-\d{2}$/.test(month) || !employeeId) {
+      return res.status(400).json({ error: 'נדרשים חודש ומזהה עובד' });
+    }
+
+    const emp = await Employee.findById(employeeId).select('branch_id full_name').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!decidesPayroll(req.user)) {
+      const allowed = managedBranchIds(req.user);
+      if (!allowed.includes(String(emp.branch_id))) {
+        return res.status(403).json({ error: 'העובד/ת אינו/ה בסניפים שבניהולך' });
+      }
+    }
+
+    const [y, m] = month.split('-').map(Number);
+    // The window is widened by three hours on each side because a punch is
+    // stored in UTC and read in Israel time — a 23:xx punch on the 1st belongs
+    // to the month, and a 00:xx punch on the 1st of next month does not.
+    const from = new Date(Date.UTC(y, m - 1, 1) - 3 * 3600 * 1000);
+    const to = new Date(Date.UTC(y, m, 2));
+
+    const punches = await Punch.find({
+      employee_id: employeeId,
+      timestamp: { $gte: from, $lt: to },
+      ignored: { $ne: true },
+    }).sort({ timestamp: 1 }).lean();
+
+    const branchNames = new Map(
+      (await Branch.find({ _id: { $in: [...new Set(punches.map(p => String(p.branch_id)))] } })
+        .select('name').lean()).map(b => [String(b._id), b.name]),
+    );
+
+    const PENDING = new Set(['pending', 'pending_manager', 'pending_accountant']);
+    const byDate = new Map();
+    for (const p of punches) {
+      const key = dayKey(new Date(p.timestamp));
+      if (!byDate.has(key)) {
+        byDate.set(key, { date: key, times: [], branches: new Set(), pending: false, stage: null });
+      }
+      const day = byDate.get(key);
+      day.times.push(timeHHMM(new Date(p.timestamp)));
+      day.branches.add(branchNames.get(String(p.branch_id)) || '');
+      if (PENDING.has(p.approval_status)) {
+        day.pending = true;
+        day.stage = p.approval_status === 'pending_accountant' ? 'accountant' : 'manager';
+      }
+    }
+
+    const days = [...byDate.values()].map((d) => {
+      // Three problems, three different fixes: a lone punch needs the missing
+      // side, an odd count above two means somebody punched in or out twice,
+      // and a day already waiting on a decision must not be "fixed" again.
+      const incomplete = d.times.length === 1;
+      const tooMany = d.times.length > 2;
+      return {
+        date: d.date,
+        times: d.times,
+        in_time: d.times[0] || null,
+        out_time: d.times.length >= 2 ? d.times[d.times.length - 1] : null,
+        branch: [...d.branches].filter(Boolean).join(' + '),
+        pending_approval: d.pending,
+        approval_stage: d.stage,
+        incomplete,
+        too_many: tooMany,
+        has_problem: incomplete || tooMany,
+      };
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json({
+      month,
+      employee_id: employeeId,
+      employee_name: emp.full_name,
+      home_branch_id: String(emp.branch_id || ''),
+      days,
+      problem_count: days.filter(d => d.has_problem).length,
+      pending_count: days.filter(d => d.pending_approval).length,
     });
   } catch (err) { next(err); }
 }
@@ -4135,6 +4380,7 @@ module.exports = {
   decideAdjustmentsBulk,
   myPayrollUpdates,
   myUpdateAbsences,
+  myUpdatePunches,
   importCibus,
   applyAutoHolidays,
   applyVacationRequests,

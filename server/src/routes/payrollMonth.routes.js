@@ -41,6 +41,9 @@ router.put('/pregnancy-settings',             requireRole('system_admin', 'accou
 router.get('/my-updates',                     requireBranchScope, c.myPayrollUpdates);
 // Loaded on demand — it recomputes the month, which is the expensive part.
 router.get('/my-updates/absences',            requireBranchScope, c.myUpdateAbsences);
+// The employee's clock days, with the problems marked — this is what replaced
+// "תיקון דיווח שעות" as a thing a manager types.
+router.get('/my-updates/punches',             requireBranchScope, c.myUpdatePunches);
 
 // Change-request workflow: branch managers stage edits → accountant approves.
 router.post('/change-requests',               requireBranchScope, c.createChangeRequest);

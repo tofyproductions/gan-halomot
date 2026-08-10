@@ -288,6 +288,135 @@ function AbsenceForm({ employee, month, onDone, canDecide }) {
   );
 }
 
+
+/**
+ * החתמות — the employee's clock days for the month, problems first.
+ *
+ * This is what "תיקון דיווח שעות" became. Typing a number of hours into a form
+ * hid the missing punch rather than correcting it, and handed the accountant a
+ * figure with nothing behind it. Here the manager sees the day that is actually
+ * broken; the correction goes in as a punch and reaches the accountant as a
+ * pending clock issue, like every other punch correction.
+ */
+function PunchesForm({ employee, month, initial, onCounts }) {
+  const [data, setData] = useState(initial || null);
+  const [loading, setLoading] = useState(!initial);
+  const [fix, setFix] = useState(null);       // the day being completed
+  const [inTime, setInTime] = useState('');
+  const [outTime, setOutTime] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    setLoading(true);
+    api.get('/payroll-month/my-updates/punches', {
+      params: { month, employee_id: employee.employee_id },
+    })
+      .then((res) => { setData(res.data); onCounts?.(res.data.problem_count || 0); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינת ההחתמות'))
+      .finally(() => setLoading(false));
+  };
+
+  // The shell already fetched this to colour the tab; don't fetch it twice.
+  useEffect(() => { if (!initial) load(); }, [employee.employee_id, month, initial]);
+
+  const submitFix = () => {
+    if (!inTime && !outTime) return toast.error('יש להזין לפחות שעה אחת');
+    setSaving(true);
+    api.post('/payroll/manual-punches', {
+      employee_id: employee.employee_id,
+      branch_id: data?.home_branch_id,
+      date: fix.date,
+      in_time: inTime || undefined,
+      out_time: outTime || undefined,
+    })
+      .then(() => { toast.success('הדיווח נשלח לאישור הנהלת החשבונות'); setFix(null); setInTime(''); setOutTime(''); load(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
+      .finally(() => setSaving(false));
+  };
+
+  if (loading) return <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>;
+
+  const days = data?.days || [];
+  const problems = days.filter(d => d.has_problem);
+
+  return (
+    <Stack spacing={2}>
+      {problems.length === 0
+        ? <Alert severity="success">אין בעיות בהחתמות לחודש זה.</Alert>
+        : (
+          <Alert severity="error">
+            {problems.length} ימים עם בעיה בהחתמה. תיקון נרשם כהחתמה חדשה ועובר לאישור הנהלת החשבונות.
+          </Alert>
+        )}
+
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell sx={{ fontWeight: 700 }}>תאריך</TableCell>
+            <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
+            <TableCell sx={{ fontWeight: 700 }} align="center">כניסה</TableCell>
+            <TableCell sx={{ fontWeight: 700 }} align="center">יציאה</TableCell>
+            <TableCell sx={{ fontWeight: 700 }}>סטטוס</TableCell>
+            <TableCell sx={{ fontWeight: 700 }} align="center">פעולה</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {days.map(d => (
+            <TableRow key={d.date} sx={d.has_problem ? { bgcolor: '#fef2f2' } : undefined}>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(d.date)}</TableCell>
+              <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>{d.branch || '—'}</TableCell>
+              <TableCell align="center">{d.in_time || '—'}</TableCell>
+              <TableCell align="center">{d.out_time || (d.incomplete ? '⚠' : '—')}</TableCell>
+              <TableCell>
+                {d.incomplete && <Chip size="small" color="error" label="החתמה חסרה" />}
+                {d.too_many && <Chip size="small" color="warning" label={`${d.times.length} החתמות`} />}
+                {d.pending_approval && (
+                  <Chip size="small" variant="outlined" color="info"
+                    label={d.approval_stage === 'accountant' ? 'ממתין להנה״ח' : 'ממתין למנהל/ת'} sx={{ ml: 0.5 }} />
+                )}
+                {!d.has_problem && !d.pending_approval && <Typography variant="caption" color="text.disabled">תקין</Typography>}
+              </TableCell>
+              <TableCell align="center">
+                {d.incomplete && !d.pending_approval && (
+                  <Button size="small" variant="outlined"
+                    onClick={() => { setFix(d); setInTime(d.in_time || ''); setOutTime(''); }}>
+                    השלם
+                  </Button>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+          {days.length === 0 && (
+            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+              אין החתמות לחודש זה
+            </TableCell></TableRow>
+          )}
+        </TableBody>
+      </Table>
+
+      <Dialog open={!!fix} onClose={() => setFix(null)} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>השלמת החתמה — {fix ? fmtDate(fix.date) : ''}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              הדיווח נרשם כהחתמה ידנית ועובר לאישור הנהלת החשבונות — הוא אינו משנה שעות בעצמו.
+            </Typography>
+            <TextField type="time" size="small" label="שעת כניסה" value={inTime}
+              onChange={e => setInTime(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+            <TextField type="time" size="small" label="שעת יציאה" value={outTime}
+              onChange={e => setOutTime(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+            <UploadingBar show={saving} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFix(null)} disabled={saving}>ביטול</Button>
+          <BusyButton variant="contained" loading={saving} loadingText="שולח…" onClick={submitFix}>שלח</BusyButton>
+        </DialogActions>
+      </Dialog>
+    </Stack>
+  );
+}
+
 /* ------------------------------------------------------------- field forms */
 
 /** number_or_text fields arrive as { kind, amount, text }. */
@@ -483,8 +612,24 @@ export default function AddUpdateDialog({
   open, employee, month, onClose, onSaved, canDecide, requestableFields, leaveKinds,
 }) {
   const [mode, setMode] = useState('adjustment');
+  // Set by the punches panel once it knows. The tab has to be able to shout
+  // before anyone opens it — a missing punch is not something to go looking for.
+  const [punchProblems, setPunchProblems] = useState(0);
+  const [punchData, setPunchData] = useState(null);
 
-  useEffect(() => { if (open) setMode('adjustment'); }, [open]);
+  useEffect(() => {
+    if (!open || !employee) { setPunchData(null); setPunchProblems(0); return; }
+    setMode('adjustment');
+    setPunchData(null);
+    setPunchProblems(0);
+    // Fetched with the dialog rather than with the tab: a missing punch has to
+    // announce itself, not wait to be found.
+    api.get('/payroll-month/my-updates/punches', {
+      params: { month, employee_id: employee.employee_id },
+    })
+      .then((res) => { setPunchData(res.data); setPunchProblems(res.data.problem_count || 0); })
+      .catch(() => { /* the tab still opens and reports its own failure */ });
+  }, [open, employee, month]);
   if (!employee) return null;
 
   const done = () => { onSaved(); onClose(); };
@@ -511,6 +656,11 @@ export default function AddUpdateDialog({
             <Tab value="sick" label="ימי מחלה" />
             <Tab value="vacation" label="ימי חופשה" />
             <Tab value="absence" label="ימי היעדרות" />
+            <Tab
+              value="punches"
+              label={punchProblems > 0 ? `החתמות (${punchProblems})` : 'החתמות'}
+              sx={punchProblems > 0 ? { color: 'error.main', fontWeight: 800 } : undefined}
+            />
           </Tabs>
 
           {mode === 'adjustment' && (
@@ -525,6 +675,9 @@ export default function AddUpdateDialog({
           )}
           {mode === 'absence' && (
             <AbsenceForm employee={employee} month={month} onDone={done} canDecide={canDecide} />
+          )}
+          {mode === 'punches' && (
+            <PunchesForm employee={employee} month={month} initial={punchData} onCounts={setPunchProblems} />
           )}
           {leaveKinds && null}
         </Stack>
