@@ -372,7 +372,31 @@ async function handleCommandConfirmed(cmd) {
     // export_template
     if (cmd.status !== 'confirmed') return;
     const templates = (cmd.result?.templates || []).filter(t => t && t.b64);
-    if (templates.length === 0) return;   // employee is on that device but has no finger there
+
+    if (templates.length === 0) {
+      // The employee is on that device but has no finger there.
+      //
+      // For a normal capture that is the end of it. For a clock-id migration it
+      // is not: the device record still carries the wrong ת"ז, and there is no
+      // finger to lose by moving it. Guarded on the device explicitly answering
+      // `finger_count: 0` — a confirmed read that says "this user has no
+      // fingers" — rather than on an empty array, which is also what a hiccup
+      // looks like. Deleting on a hiccup would destroy a real fingerprint.
+      const currentIdNoFinger = normalizeId(emp.israeli_id);
+      const deviceSaysNoFinger = cmd.result?.finger_count === 0;
+      if (currentIdNoFinger && currentIdNoFinger !== israeliId && deviceSaysNoFinger) {
+        await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
+        await AgentCommand.create({
+          branch_id: cmd.branch_id,
+          type: 'delete_user',
+          payload: { israeli_id: israeliId },
+          status: 'pending',
+          created_by: cmd.created_by || null,
+        });
+        console.log(`[fingerprint] clock-id migration ${israeliId} -> ${currentIdNoFinger} (no finger on device) for ${emp.full_name}`);
+      }
+      return;
+    }
 
     emp.fingerprint = {
       templates: templates.map(t => ({ fid: t.fid, valid: t.valid ?? 1, size: t.size || 0, b64: t.b64 })),
