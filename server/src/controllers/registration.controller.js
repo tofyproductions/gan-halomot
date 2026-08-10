@@ -324,6 +324,111 @@ async function generateLink(req, res, next) {
   }
 }
 
+/**
+ * POST /api/registration/:id/renew
+ * Body: { academic_year?, monthly_fee?, registration_fee?, classroom_id?,
+ *         start_date?, end_date? }
+ *
+ * Issue next year's contract for a family already in the gan.
+ *
+ * A registration covers one year and carries the signature for that year. When
+ * the year turns there is nothing to sign against, so a child whose parent has
+ * already paid the registration fee is simply absent from next year's system —
+ * which is exactly what happened, and looked like a data loss rather than a
+ * missing signature.
+ *
+ * The renewal is a NEW registration: same child, same parent, same branch, new
+ * dates and a fresh token for the parent to sign. The old year is left exactly
+ * as it is — it holds a signed contract and a year of payments, and rewriting
+ * it would destroy both.
+ */
+async function renew(req, res, next) {
+  try {
+    const source = await Registration.findById(req.params.id).lean();
+    if (!source) return res.status(404).json({ error: 'רישום לא נמצא' });
+
+    // The year to renew INTO is the one after the year this registration
+    // covers — not "next year" as the calendar sees it. getAcademicYears()
+    // rolls over on 10 August, so in the weeks around the rollover its `next`
+    // is a year too far: a family whose registration ends in July 2026 needs
+    // 2026-2027, which the service is already calling `current`. Deriving from
+    // the source's own start date is right on every date of the year.
+    const years = getAcademicYears();
+    const sourceStartYear = source.start_date
+      ? new Date(source.start_date).getUTCFullYear() - (new Date(source.start_date).getUTCMonth() + 1 < 8 ? 1 : 0)
+      : years.current.value;
+    const targetYear = req.body?.academic_year
+      ? normalizeYear(req.body.academic_year)
+      : `${sourceStartYear + 1}-${sourceStartYear + 2}`;
+    const [y1, y2] = targetYear.split('-').map(Number);
+
+    // The school year runs Sept 1 → Jul 31 unless the caller says otherwise.
+    const startDate = req.body?.start_date ? new Date(req.body.start_date) : new Date(Date.UTC(y1, 8, 1));
+    const endDate = req.body?.end_date ? new Date(req.body.end_date) : new Date(Date.UTC(y2, 6, 31));
+    if (!(startDate < endDate)) {
+      return res.status(400).json({ error: 'תאריך הסיום חייב להיות אחרי תאריך ההתחלה' });
+    }
+
+    // One renewal per child per year. Re-issuing should refresh the existing
+    // link, not leave two half-signed registrations for the same year.
+    const existing = await Registration.findOne({
+      child_name: source.child_name,
+      parent_name: source.parent_name,
+      start_date: { $gte: new Date(Date.UTC(y1, 7, 1)), $lt: new Date(Date.UTC(y2, 8, 1)) },
+      _id: { $ne: source._id },
+    });
+    if (existing) {
+      existing.access_token = generateAccessToken();
+      existing.token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await existing.save();
+      return res.json({
+        registration: { ...existing.toObject(), id: existing._id },
+        link: `${env.FRONTEND_URL}/register/${existing.access_token}`,
+        access_token: existing.access_token,
+        academic_year: targetYear,
+        reused: true,
+      });
+    }
+
+    const access_token = generateAccessToken();
+    const renewal = await Registration.create({
+      unique_id: generateUniqueId('REG'),
+      branch_id: source.branch_id || null,
+      child_name: source.child_name,
+      child_birth_date: source.child_birth_date || null,
+      classroom_id: req.body?.classroom_id || source.classroom_id || null,
+      parent_name: source.parent_name,
+      parent_id_number: source.parent_id_number || null,
+      parent_phone: source.parent_phone || null,
+      parent_email: source.parent_email || null,
+      // Next year's fee is a decision, not a carry-over — but defaulting to
+      // last year's means the common case is one click.
+      monthly_fee: req.body?.monthly_fee != null ? Number(req.body.monthly_fee) : source.monthly_fee,
+      registration_fee: req.body?.registration_fee != null ? Number(req.body.registration_fee) : (source.registration_fee || 0),
+      start_date: startDate,
+      end_date: endDate,
+      // Nothing is signed yet. That is the whole point of the renewal.
+      status: 'link_generated',
+      agreement_signed: false,
+      card_completed: false,
+      signature_data: null,
+      contract_pdf_path: null,
+      access_token,
+      token_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      configuration: source.configuration || {},
+      renewed_from: source._id,
+    });
+
+    res.status(201).json({
+      registration: { ...renewal.toObject(), id: renewal._id },
+      link: `${env.FRONTEND_URL}/register/${access_token}`,
+      access_token,
+      academic_year: targetYear,
+      reused: false,
+    });
+  } catch (error) { next(error); }
+}
+
 async function activate(req, res, next) {
   try {
     const { id } = req.params;
@@ -575,7 +680,7 @@ async function fixOrphanBranch(req, res, next) {
 }
 
 module.exports = {
-  getAll, getById, create, update, generateLink, activate, remove,
+  getAll, getById, create, update, generateLink, renew, activate, remove,
   finalizeManual, downloadContract, listContractVersions, downloadContractVersion,
   fixOrphanBranch,
 };

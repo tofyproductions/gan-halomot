@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
   TextField, InputAdornment, Button, MenuItem,
-  Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress,
+  Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress, Alert,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
+import AutorenewIcon from '@mui/icons-material/Autorenew';
 import DescriptionIcon from '@mui/icons-material/Description';
 import LinkIcon from '@mui/icons-material/Link';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
@@ -41,6 +42,7 @@ export default function RegistrationTracker() {
   const [missingSigOnly, setMissingSigOnly] = useState(false);
   const [missingDocsOnly, setMissingDocsOnly] = useState(false);
   const [confirm, setConfirm] = useState({ open: false, id: null });
+  const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
   // Which upload is in flight — drives the spinner so a slow upload never looks
@@ -204,6 +206,46 @@ export default function RegistrationTracker() {
       toast.success('נפתחה תזכורת בוואטסאפ');
     } catch {
       toast.error('שגיאה ביצירת תזכורת');
+    }
+  };
+
+  /**
+   * Issue next year's contract for a family already in the gan.
+   *
+   * A registration covers one year and holds the signature for it, so when the
+   * year turns there is nothing to sign against — a child whose parent already
+   * paid the registration fee is simply absent from next year, which reads as
+   * lost data rather than a missing signature. The renewal is a new
+   * registration; last year's is left untouched, because it holds a signed
+   * contract and a year of payments.
+   */
+  const handleRenew = async () => {
+    const reg = renewDlg.reg;
+    if (!reg) return;
+    setRenewDlg(d => ({ ...d, saving: true }));
+    try {
+      const res = await api.post(`/registrations/${reg._id || reg.id}/renew`, {
+        monthly_fee: renewDlg.monthlyFee === '' ? undefined : Number(renewDlg.monthlyFee),
+        registration_fee: renewDlg.regFee === '' ? undefined : Number(renewDlg.regFee),
+      });
+      const link = `${window.location.origin}/register/${res.data.access_token}`;
+      setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false });
+      fetchData();
+
+      const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
+      if (phone) {
+        const text = encodeURIComponent(
+          `שלום ${reg.parent_name}, לקראת שנת הלימודים החדשה מצורף חוזה הרישום של ${reg.child_name} לחתימה 🌟\nנא להיכנס לקישור:\n${link}`,
+        );
+        window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+        toast.success(res.data.reused ? 'הקישור הקיים רוענן ונשלח' : 'נוצר רישום לשנה החדשה ונשלח להורה');
+      } else {
+        navigator.clipboard.writeText(link);
+        toast.success('נוצר רישום לשנה החדשה — הקישור הועתק (אין טלפון להורה)');
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בהנפקת החוזה');
+      setRenewDlg(d => ({ ...d, saving: false }));
     }
   };
 
@@ -425,6 +467,19 @@ export default function RegistrationTracker() {
                       </IconButton>
                     </Tooltip>
                   )}
+                  <Tooltip title="הנפקת חוזה לשנה החדשה">
+                    <IconButton
+                      size="small" sx={{ color: '#7c3aed' }}
+                      onClick={() => setRenewDlg({
+                        open: true, reg,
+                        monthlyFee: String(reg.monthly_fee ?? ''),
+                        regFee: String(reg.registration_fee ?? ''),
+                        saving: false,
+                      })}
+                    >
+                      <AutorenewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="עריכה">
                     <IconButton size="small" onClick={() => navigate(`/edit-registration/${id}`)}>
                       <EditIcon fontSize="small" />
@@ -446,6 +501,42 @@ export default function RegistrationTracker() {
           </Box>
         )}
       </Stack>
+
+      {/* Next year's contract. The old registration is untouched — it holds a
+          signed contract and a year of payments. */}
+      <Dialog open={renewDlg.open} onClose={() => setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false })}
+        dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          הנפקת חוזה לשנה החדשה
+          <Typography variant="body2" color="text.secondary">
+            {renewDlg.reg?.child_name} · {renewDlg.reg?.parent_name}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info" icon={false}>
+              נוצר רישום חדש לשנה הבאה עם קישור חתימה להורה. הרישום של השנה הנוכחית נשאר כפי שהוא —
+              הוא מחזיק את החוזה החתום ואת הגבייה של השנה. הילד/ה ייכנס/תיכנס למערכת של השנה החדשה רק לאחר החתימה.
+            </Alert>
+            <TextField
+              size="small" type="number" label="שכר לימוד חודשי" value={renewDlg.monthlyFee}
+              onChange={e => setRenewDlg(d => ({ ...d, monthlyFee: e.target.value }))}
+              helperText="ברירת מחדל: כמו השנה הנוכחית" fullWidth
+            />
+            <TextField
+              size="small" type="number" label="דמי רישום" value={renewDlg.regFee}
+              onChange={e => setRenewDlg(d => ({ ...d, regFee: e.target.value }))} fullWidth
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRenewDlg({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false })}
+            disabled={renewDlg.saving}>ביטול</Button>
+          <Button variant="contained" onClick={handleRenew} disabled={renewDlg.saving}>
+            {renewDlg.saving ? 'מנפיק…' : 'הנפק ושלח להורה'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <ConfirmDialog
         open={confirm.open}

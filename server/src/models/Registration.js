@@ -28,6 +28,18 @@ const registrationSchema = new mongoose.Schema({
   access_token: { type: String, default: null },
   token_expires_at: { type: Date, default: null },
   configuration: { type: mongoose.Schema.Types.Mixed, default: {} },
+
+  /**
+   * The registration this one renews.
+   *
+   * A registration covers ONE year — start_date to end_date — and a contract
+   * is signed against it. When the year turns, the family needs a new
+   * registration and a new signature; until they sign, the child is simply not
+   * in next year's system, even if the parent already paid the registration
+   * fee. This links the new year back to the old one so the renewal is
+   * traceable, and so the same family is not issued two.
+   */
+  renewed_from: { type: mongoose.Schema.Types.ObjectId, ref: 'Registration', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 registrationSchema.index({ access_token: 1 });

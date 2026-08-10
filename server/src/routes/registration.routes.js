@@ -23,6 +23,11 @@ router.put('/:id', registrationController.update);
 // POST /api/registration/:id/generate-link
 router.post('/:id/generate-link', registrationController.generateLink);
 
+// POST /api/registration/:id/renew — issue next year's contract for a family
+// already in the gan. A registration covers ONE year; when the year turns the
+// family needs a new one and a new signature.
+router.post('/:id/renew', registrationController.renew);
+
 // POST /api/registration/:id/activate
 router.post('/:id/activate', registrationController.activate);
 
