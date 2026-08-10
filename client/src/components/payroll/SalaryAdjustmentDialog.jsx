@@ -8,7 +8,11 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import AddIcon from '@mui/icons-material/Add';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
+import {
+  ADJUSTMENT_TYPES as TYPES, TYPE_LABEL, typeColor, STATUS_META, canDecidePayroll,
+} from './adjustmentTypes';
 
 /**
  * Per-employee per-month salary-adjustment editor. Lists existing
@@ -17,31 +21,10 @@ import { useConfirm } from '../shared/ConfirmProvider';
  * deductions, hour corrections, etc. — each rendering a slightly
  * different form.
  */
-const TYPES = [
-  { value: 'money_add',          label: 'תוספת כספית',           field: 'amount', positive: true  },
-  { value: 'money_deduct',       label: 'ניכוי כספי',             field: 'amount', positive: false },
-  { value: 'hours_add',          label: 'תוספת שעות',             field: 'hours',  positive: true  },
-  { value: 'hours_deduct',       label: 'הורדת שעות',             field: 'hours',  positive: false },
-  { value: 'hour_correction',    label: 'תיקון דיווח שעות',       field: 'hours',  positive: null  },
-  { value: 'travel_add',         label: 'תוספת נסיעות',           field: 'amount', positive: true  },
-  { value: 'purchase_reimburse', label: 'החזר קניות עבור הגן',    field: 'amount', positive: true  },
-  { value: 'advance_request',    label: 'בקשת מקדמה',             field: 'amount', positive: false },
-  { value: 'loan_request',       label: 'בקשת הלוואה',            field: 'amount', positive: false },
-  { value: 'other',              label: 'אחר',                    field: 'amount', positive: null  },
-];
-const TYPE_LABEL = Object.fromEntries(TYPES.map(t => [t.value, t.label]));
-
-function typeColor(t) {
-  switch (t) {
-    case 'money_add': case 'travel_add': case 'purchase_reimburse': case 'hours_add': return 'success';
-    case 'money_deduct': case 'hours_deduct': case 'advance_request': case 'loan_request': return 'error';
-    case 'hour_correction': return 'warning';
-    default: return 'default';
-  }
-}
-
 export default function SalaryAdjustmentDialog({ open, onClose, row, month, onChanged }) {
   const confirm = useConfirm();
+  const { user } = useAuth();
+  const canDecide = canDecidePayroll(user);
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState({ type: 'money_add', amount: '', hours: '', reason: '' });
@@ -80,8 +63,8 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
       reason: draft.reason,
     };
     api.post('/payroll-month/adjustments', payload)
-      .then(() => {
-        toast.success('עדכון נוסף');
+      .then((res) => {
+        toast.success(res.data?.pending ? 'העדכון נשלח לאישור הנהלת החשבונות' : 'עדכון נוסף');
         setDraft({ type: 'money_add', amount: '', hours: '', reason: '' });
         load();
         onChanged && onChanged();
@@ -106,8 +89,10 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
         </Typography>
       </DialogTitle>
       <DialogContent dividers>
-        <Alert severity="info" sx={{ mb: 2 }} icon={false}>
-          תוספות והורדות חודשיות. ייכנסו לחישוב התלוש מיידית.
+        <Alert severity={canDecide ? 'info' : 'warning'} sx={{ mb: 2 }} icon={false}>
+          {canDecide
+            ? 'תוספות והורדות חודשיות. ייכנסו לחישוב התלוש מיידית.'
+            : 'ניתן להוסיף כל עדכון. העדכון יירשם כ״ממתין לאישור״ ולא ייכנס לחישוב השכר עד שהנהלת החשבונות תאשר אותו.'}
         </Alert>
 
         {/* List of existing */}
@@ -120,8 +105,13 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
               <ListItem key={adj.id} sx={{ pr: 1 }}>
                 <ListItemText
                   primary={
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Chip size="small" color={typeColor(adj.type)} label={TYPE_LABEL[adj.type] || adj.type} />
+                      {adj.status !== 'approved' && (
+                        <Chip size="small" variant="outlined"
+                          color={(STATUS_META[adj.status] || {}).color || 'default'}
+                          label={(STATUS_META[adj.status] || {}).label || adj.status} />
+                      )}
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
                         {adj.amount !== 0 ? `${adj.amount > 0 ? '+' : ''}${adj.amount} ₪` : ''}
                         {adj.hours !== 0  ? `${adj.hours > 0 ? '+' : ''}${adj.hours}h`   : ''}
@@ -137,11 +127,13 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
                     </Box>
                   }
                 />
-                <ListItemSecondaryAction>
-                  <IconButton size="small" color="error" onClick={() => remove(adj.id)}>
-                    <DeleteOutlineIcon fontSize="small" />
-                  </IconButton>
-                </ListItemSecondaryAction>
+                {canDecide && (
+                  <ListItemSecondaryAction>
+                    <IconButton size="small" color="error" onClick={() => remove(adj.id)}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                )}
               </ListItem>
             ))}
           </List>

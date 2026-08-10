@@ -17,6 +17,13 @@ const mongoose = require('mongoose');
  *
  * Adjustments aggregate into the PayrollMonth breakdown at read time, so the
  * monthly table shows the adjusted total alongside the auto-computed one.
+ *
+ * WHO CAN DECIDE. A branch manager may add anything here, and what she adds is
+ * `pending` — visible, attributed, and deliberately NOT part of the salary
+ * until an accountant or admin approves it. The row used to be written as
+ * `approved` on the spot ("branch managers' entries auto-approve"), which is
+ * the opposite: it let a branch change what the month pays with nobody
+ * reviewing it. Only `status: 'approved'` is ever summed into a salary.
  */
 const salaryAdjustmentSchema = new mongoose.Schema({
   employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true, index: true },
@@ -35,6 +42,11 @@ const salaryAdjustmentSchema = new mongoose.Schema({
       'purchase_reimburse',  // החזר עבור קניות שביצע עבור הגן
       'advance_request',     // בקשת מקדמה (לקיזוז עתידי)
       'loan_request',        // בקשת הלוואה
+      // NB: גיפט קארד, מילואים, הבראה and סיבוס are NOT here. They are columns
+      // on the salary table itself (PayrollMonth.manual), and a manager files
+      // them through the change-request flow, which already exists and already
+      // waits for the accountant. Duplicating them as adjustments would let the
+      // same benefit be entered twice and counted twice.
       'other',               // אחר — חופשי
     ],
     required: true,
@@ -45,10 +57,16 @@ const salaryAdjustmentSchema = new mongoose.Schema({
 
   // Workflow
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // The role that entered it. Kept because "who may still change this" is a
+  // question about the author, not about the current status: a manager's row
+  // stays hers even after an accountant approves it.
+  created_by_role: { type: String, default: '' },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected'],
-    default: 'approved', // managers' entries auto-approve; admin-only types may switch this
+    // Pending by default. An accountant/admin entry is marked approved by the
+    // controller at creation; anything else has to be looked at first.
+    default: 'pending',
   },
   decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   decided_at: { type: Date, default: null },

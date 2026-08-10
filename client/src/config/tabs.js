@@ -26,7 +26,11 @@ export const TAB_GROUPS = [
     items: [
       { id: 'employees',          label: 'עובדים',  path: '/employees',          defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'branch_manager'] },
-      { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      // The salary table itself is accountant/admin. A branch manager files what
+      // she knows from 'עדכוני שכר' instead — she has no business seeing every
+      // employee's rate and net in order to record a bonus.
+      { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant'] },
+      { id: 'payroll_updates',    label: 'עדכוני שכר', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },

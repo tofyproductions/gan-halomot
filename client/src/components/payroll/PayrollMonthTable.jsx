@@ -3244,9 +3244,17 @@ function LoansSummaryCell({ row }) {
 function AdjustmentSummary({ row, onOpen, disabled }) {
   const totals = row.adj_totals || { money_add: 0, money_deduct: 0, hours_delta: 0 };
   const count = row.adjustments?.length || 0;
+  // Only approved rows are in `totals`. A branch manager's entry waits here,
+  // and the chips alone would show nothing — the accountant has to be able to
+  // see that something is asking for a decision.
+  const pending = (row.adjustments || []).filter(a => a.status === 'pending').length;
   const hasAny = totals.money_add !== 0 || totals.money_deduct !== 0 || totals.hours_delta !== 0;
   return (
     <Stack direction="row" spacing={0.3} alignItems="center" justifyContent="center" flexWrap="wrap" useFlexGap>
+      {pending > 0 && (
+        <Chip size="small" color="warning" variant="outlined" label={`${pending} לאישור`}
+          onClick={onOpen} sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+      )}
       {!hasAny ? (
         <IconButton size="small" onClick={onOpen} disabled={disabled} sx={{ opacity: 0.5 }}>
           <TuneIcon fontSize="small" />

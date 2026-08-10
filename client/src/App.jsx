@@ -39,6 +39,7 @@ import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import EmployeeLetters from './components/employees/EmployeeLetters';
 import Form101Center from './components/employees/Form101Center';
+import PayrollUpdates from './components/payroll/PayrollUpdates';
 import ContractSigning from './components/employees/ContractSigning';
 import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
@@ -104,8 +105,13 @@ function AppRoutes() {
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
         <Route path="payroll" element={
-          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+          <ProtectedRoute roles={['system_admin', 'accountant']}>
             <PayrollPage />
+          </ProtectedRoute>
+        } />
+        <Route path="payroll-updates" element={
+          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+            <PayrollUpdates />
           </ProtectedRoute>
         } />
         {/* Legacy routes — redirect to unified payroll page */}

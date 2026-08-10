@@ -36,6 +36,10 @@ router.delete('/special-days/:id',            requireRole('system_admin', 'accou
 router.get('/pregnancy-settings',             requireRole('system_admin', 'accountant', 'branch_manager'), c.getPregnancySettings);
 router.put('/pregnancy-settings',             requireRole('system_admin', 'accountant'), c.setPregnancySettings);
 
+// The branch manager's own area: her staff and the updates she may file, with
+// none of the salary table around it.
+router.get('/my-updates',                     requireRole('system_admin', 'accountant', 'branch_manager'), c.myPayrollUpdates);
+
 // Change-request workflow: branch managers stage edits → accountant approves.
 router.post('/change-requests',               requireRole('system_admin', 'accountant', 'branch_manager'), c.createChangeRequest);
 router.get('/change-requests',                requireRole('system_admin', 'accountant', 'branch_manager'), c.listChangeRequests);
@@ -79,9 +83,16 @@ router.post('/custom-columns',                requireRole('system_admin', 'accou
 router.patch('/custom-columns/:id',           requireRole('system_admin', 'accountant'), c.updateCustomColumn);
 router.delete('/custom-columns/:id',          requireRole('system_admin', 'accountant'), c.deleteCustomColumn);
 
-// Salary adjustments — branch-manager-level credits/debits/hour corrections
+// Salary adjustments — credits/debits/hour corrections.
+//
+// A branch manager may ADD (the controller files hers as `pending`, scoped to
+// her own branches, and only `approved` rows reach a salary). She may not edit
+// or delete: a filed request is a record, and withdrawing it is the
+// accountant's rejection rather than the manager's eraser.
 router.get('/adjustments',                    c.listAdjustments);
-router.post('/adjustments',                   requireRole('system_admin', 'accountant'), c.createAdjustment);
+router.post('/adjustments',                   requireRole('system_admin', 'accountant', 'branch_manager'), c.createAdjustment);
+router.post('/adjustments/decide-bulk',       requireRole('system_admin', 'accountant'), c.decideAdjustmentsBulk);
+router.post('/adjustments/:id/decide',        requireRole('system_admin', 'accountant'), c.decideAdjustment);
 router.patch('/adjustments/:id',              requireRole('system_admin', 'accountant'), c.updateAdjustment);
 router.delete('/adjustments/:id',             requireRole('system_admin', 'accountant'), c.deleteAdjustment);
 

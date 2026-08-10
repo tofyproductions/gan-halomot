@@ -1658,30 +1658,94 @@ async function upsertAmuta(req, res, next) {
 
 // ── Salary adjustments CRUD ─────────────────────────────────────────
 
+/** Does this user get the final word, or does their entry wait for review? */
+function decidesPayroll(user) {
+  return user?.role === 'system_admin' || user?.role === 'accountant';
+}
+
+/** The branches a non-accountant user is allowed to touch. */
+function managedBranchIds(user) {
+  const managed = (user?.managed_branch_ids || []).map(String);
+  const fallback = user?.branch_id ? [String(user.branch_id)] : [];
+  return managed.length > 0 ? managed : fallback;
+}
+
+/**
+ * GET /payroll-month/adjustments
+ *
+ * A branch manager sees her own branches only — including her PENDING rows,
+ * which is the point: she has to be able to watch what she filed move.
+ * `status=pending` is what the accountant's review queue asks for.
+ */
 async function listAdjustments(req, res, next) {
   try {
-    const { month, employee_id, branch } = req.query;
-    const filter = { status: { $ne: 'rejected' } };
+    const { month, employee_id, branch, status } = req.query;
+    const filter = {};
+    // 'rejected' is excluded unless asked for by name — a refused row should
+    // not quietly reappear in the month's list.
+    if (status && status !== 'all') filter.status = status;
+    else filter.status = { $ne: 'rejected' };
     if (month) filter.month = month;
     if (employee_id) filter.employee_id = employee_id;
     if (branch && branch !== 'all') filter.branch_id = branch;
+
+    if (!decidesPayroll(req.user)) {
+      const allowed = managedBranchIds(req.user);
+      if (filter.branch_id && !allowed.includes(String(filter.branch_id))) {
+        return res.json({ adjustments: [] });
+      }
+      if (!filter.branch_id) filter.branch_id = { $in: allowed };
+    }
+
     const list = await SalaryAdjustment.find(filter)
       .populate('employee_id', 'full_name israeli_id')
+      .populate('branch_id', 'name')
       .populate('created_by', 'full_name')
+      .populate('decided_by', 'full_name')
       .sort({ created_at: -1 })
       .lean();
-    res.json({ adjustments: list.map(a => ({ ...a, id: String(a._id) })) });
+    res.json({
+      adjustments: list.map(a => ({
+        ...a,
+        id: String(a._id),
+        employee_name: a.employee_id?.full_name || '',
+        branch_name: a.branch_id?.name || '',
+        created_by_name: a.created_by?.full_name || '',
+        decided_by_name: a.decided_by?.full_name || '',
+      })),
+      pending_count: await SalaryAdjustment.countDocuments(
+        decidesPayroll(req.user)
+          ? { status: 'pending', ...(month ? { month } : {}) }
+          : { status: 'pending', branch_id: { $in: managedBranchIds(req.user) }, ...(month ? { month } : {}) },
+      ),
+    });
   } catch (err) { next(err); }
 }
 
+/**
+ * POST /payroll-month/adjustments
+ *
+ * A branch manager may file anything here for her own staff. What she files is
+ * `pending` and stays out of the salary until an accountant approves it — she
+ * is never blocked from recording something, and never able to change what the
+ * month pays on her own.
+ */
 async function createAdjustment(req, res, next) {
   try {
     const { employee_id, month, type, amount, hours, reason } = req.body;
     if (!employee_id || !month || !type) {
       return res.status(400).json({ error: 'employee_id, month, type are required' });
     }
-    const emp = await Employee.findById(employee_id).select('branch_id').lean();
+    const emp = await Employee.findById(employee_id).select('branch_id full_name').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const isFinal = decidesPayroll(req.user);
+    if (!isFinal) {
+      const allowed = managedBranchIds(req.user);
+      if (!allowed.includes(String(emp.branch_id))) {
+        return res.status(403).json({ error: 'ניתן להוסיף עדכוני שכר רק לעובדי הסניפים שבניהולך' });
+      }
+    }
 
     const adj = await SalaryAdjustment.create({
       employee_id,
@@ -1692,11 +1756,63 @@ async function createAdjustment(req, res, next) {
       hours: Number(hours) || 0,
       reason: reason || '',
       created_by: req.user.id,
-      status: 'approved', // branch managers' entries auto-approve
-      decided_by: req.user.id,
-      decided_at: new Date(),
+      created_by_role: req.user.role || '',
+      status: isFinal ? 'approved' : 'pending',
+      decided_by: isFinal ? req.user.id : null,
+      decided_at: isFinal ? new Date() : null,
     });
+    res.json({
+      adjustment: { ...adj.toObject(), id: String(adj._id) },
+      pending: !isFinal,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /payroll-month/adjustments/:id/decide   { approve: bool, note?: string }
+ *
+ * The accountant's answer. Approving is what puts the row into the salary;
+ * rejecting keeps it on the record with a reason rather than deleting it, so
+ * the manager sees what happened to what she filed instead of watching it
+ * vanish.
+ */
+async function decideAdjustment(req, res, next) {
+  try {
+    const adj = await SalaryAdjustment.findById(req.params.id);
+    if (!adj) return res.status(404).json({ error: 'עדכון לא נמצא' });
+
+    const approve = req.body?.approve !== false;
+    adj.status = approve ? 'approved' : 'rejected';
+    adj.decided_by = req.user.id;
+    adj.decided_at = new Date();
+    adj.decided_note = String(req.body?.note || '').slice(0, 500);
+    await adj.save();
+
     res.json({ adjustment: { ...adj.toObject(), id: String(adj._id) } });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /payroll-month/adjustments/decide-bulk   { ids: [], approve, note? }
+ * A month's queue is approved in one pass far more often than one row at a time.
+ */
+async function decideAdjustmentsBulk(req, res, next) {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'לא נבחרו עדכונים' });
+    const approve = req.body?.approve !== false;
+    const result = await SalaryAdjustment.updateMany(
+      { _id: { $in: ids }, status: 'pending' },
+      {
+        $set: {
+          status: approve ? 'approved' : 'rejected',
+          decided_by: req.user.id,
+          decided_at: new Date(),
+          decided_note: String(req.body?.note || '').slice(0, 500),
+        },
+      },
+    );
+    res.json({ ok: true, decided: result.modifiedCount || 0 });
   } catch (err) { next(err); }
 }
 
@@ -2093,7 +2209,150 @@ async function setBranchAmuta(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /payroll-month/my-updates?month=YYYY-MM[&branch=<id>]
+ *
+ * The branch manager's own view: her staff, and only what she is allowed to
+ * file about them.
+ *
+ * She used to reach all of this through the monthly salary table, which meant
+ * that to add one bonus she was looking at everybody's rate, everybody's
+ * global salary and everybody's net — none of which is hers to see, and none
+ * of which she needs. This returns names, the updates already filed, the
+ * handful of salary-table fields she may request a change to, and their
+ * current values. No rates, no totals, no net.
+ *
+ * Accountants and admins get the same shape for whichever branch they ask
+ * about, so the screen is one screen rather than two.
+ */
+async function myPayrollUpdates(req, res, next) {
+  try {
+    const month = (req.query.month || '').trim();
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'נדרש חודש (YYYY-MM)' });
+
+    const isFinal = decidesPayroll(req.user);
+    const empFilter = { is_active: true };
+    if (req.query.branch && req.query.branch !== 'all') empFilter.branch_id = req.query.branch;
+    if (!isFinal) {
+      const allowed = managedBranchIds(req.user);
+      if (allowed.length === 0) return res.json({ month, employees: [], branches: [] });
+      if (empFilter.branch_id && !allowed.includes(String(empFilter.branch_id))) {
+        return res.json({ month, employees: [], branches: [] });
+      }
+      if (!empFilter.branch_id) empFilter.branch_id = { $in: allowed };
+    }
+
+    const employees = await Employee.find(empFilter)
+      .populate('branch_id', 'name')
+      .select('full_name branch_id israeli_id')
+      .sort({ full_name: 1 })
+      .lean();
+    const empIds = employees.map(e => e._id);
+
+    const [adjustments, rows, changeRequests] = await Promise.all([
+      SalaryAdjustment.find({ employee_id: { $in: empIds }, month })
+        .populate('created_by', 'full_name')
+        .populate('decided_by', 'full_name')
+        .sort({ created_at: -1 })
+        .lean(),
+      // Only the manual fields she may request; the rest of the row stays here.
+      PayrollMonth.find({ employee_id: { $in: empIds }, month }).select('employee_id manual').lean(),
+      PayrollChangeRequest.find({ month, status: 'pending', 'changes.employee_id': { $in: empIds } })
+        .select('changes requested_by_name created_at status')
+        .lean(),
+    ]);
+
+    const adjByEmp = new Map();
+    for (const a of adjustments) {
+      const k = String(a.employee_id);
+      if (!adjByEmp.has(k)) adjByEmp.set(k, []);
+      adjByEmp.get(k).push({
+        id: String(a._id),
+        type: a.type,
+        amount: a.amount,
+        hours: a.hours,
+        reason: a.reason,
+        status: a.status,
+        created_by_name: a.created_by?.full_name || '',
+        created_by_role: a.created_by_role || '',
+        decided_by_name: a.decided_by?.full_name || '',
+        decided_note: a.decided_note || '',
+        created_at: a.created_at,
+      });
+    }
+
+    const rowByEmp = new Map(rows.map(r => [String(r.employee_id), r.manual || {}]));
+
+    // Field changes already awaiting a decision, so the manager doesn't file
+    // the same one twice while the first is still in the queue.
+    const pendingFieldsByEmp = new Map();
+    for (const cr of changeRequests) {
+      for (const ch of cr.changes || []) {
+        const k = String(ch.employee_id);
+        if (!pendingFieldsByEmp.has(k)) pendingFieldsByEmp.set(k, []);
+        pendingFieldsByEmp.get(k).push({
+          field: ch.field,
+          field_label: ch.field_label || ch.field,
+          requested_value: ch.requested_value,
+          requested_by_name: cr.requested_by_name || '',
+          created_at: cr.created_at,
+        });
+      }
+    }
+
+    const branches = [...new Map(employees
+      .filter(e => e.branch_id)
+      .map(e => [String(e.branch_id._id || e.branch_id), {
+        id: String(e.branch_id._id || e.branch_id),
+        name: e.branch_id.name || '',
+      }])).values()];
+
+    res.json({
+      month,
+      can_decide: isFinal,
+      branches,
+      // The salary-table fields a manager may ask to change, with the labels
+      // the screen shows. Kept server-side so the two lists cannot drift.
+      requestable_fields: MANAGER_REQUESTABLE_FIELDS,
+      employees: employees.map(e => {
+        const manual = rowByEmp.get(String(e._id)) || {};
+        const mine = adjByEmp.get(String(e._id)) || [];
+        return {
+          employee_id: String(e._id),
+          full_name: e.full_name,
+          branch_id: String(e.branch_id?._id || e.branch_id || ''),
+          branch_name: e.branch_id?.name || '',
+          adjustments: mine,
+          pending_count: mine.filter(a => a.status === 'pending').length,
+          field_values: Object.fromEntries(
+            MANAGER_REQUESTABLE_FIELDS.map(f => [f.field, manual[f.field] ?? null]),
+          ),
+          pending_fields: pendingFieldsByEmp.get(String(e._id)) || [],
+        };
+      }),
+    });
+  } catch (err) { next(err); }
+}
+
 // ── Payroll change requests (branch-manager → accountant approval) ──────
+
+/**
+ * The salary-table fields a branch manager may request a change to, and how
+ * they are entered. A subset of CHANGE_ALLOWED_FIELDS: the ones that describe
+ * something the branch actually knows about — a gift card handed out, days of
+ * reserve duty — rather than an accounting decision.
+ */
+const MANAGER_REQUESTABLE_FIELDS = [
+  { field: 'gift_card', label: 'גיפט קארד', kind: 'number_or_text' },
+  { field: 'miluim', label: 'מילואים', kind: 'number_or_text' },
+  { field: 'recreation', label: 'דמי הבראה', kind: 'number_or_text' },
+  { field: 'cibus', label: 'סיבוס', kind: 'number_or_text' },
+  { field: 'sick_days', label: 'ימי מחלה', kind: 'number' },
+  { field: 'vacation_days', label: 'ימי חופשה', kind: 'number' },
+  { field: 'absence_days', label: 'ימי היעדרות', kind: 'number' },
+  { field: 'travel_override', label: 'נסיעות (עקיפה)', kind: 'number' },
+  { field: 'notes', label: 'הערה לרו״ח', kind: 'text' },
+];
 
 const CHANGE_ALLOWED_FIELDS = [
   'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
@@ -2130,6 +2389,17 @@ async function createChangeRequest(req, res, next) {
     const emps = await Employee.find({ _id: { $in: empIds } })
       .populate('branch_id', 'name').select('full_name branch_id').lean();
     const empMap = new Map(emps.map(e => [String(e._id), e]));
+
+    // A manager files for her own staff. The route let any authenticated
+    // manager name any employee_id, which the review screen would then show as
+    // a request from the wrong branch about someone she has never met.
+    if (!decidesPayroll(req.user)) {
+      const allowed = managedBranchIds(req.user);
+      const outsider = emps.find(e => !allowed.includes(String(e.branch_id?._id || e.branch_id)));
+      if (outsider) {
+        return res.status(403).json({ error: `ניתן לבקש שינוי רק לעובדי הסניפים שבניהולך (${outsider.full_name})` });
+      }
+    }
 
     // Submitter's branch (first managed branch / their branch_id)
     const submitterBranchId = (req.user.managed_branch_ids?.[0]) || req.user.branch_id || null;
@@ -3759,6 +4029,9 @@ module.exports = {
   createAdjustment,
   updateAdjustment,
   deleteAdjustment,
+  decideAdjustment,
+  decideAdjustmentsBulk,
+  myPayrollUpdates,
   importCibus,
   applyAutoHolidays,
   applyVacationRequests,
