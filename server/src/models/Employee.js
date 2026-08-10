@@ -163,6 +163,20 @@ const employeeSchema = new mongoose.Schema({
   // ת"ז (typo/digit-shift). Punches with these IDs are matched to this employee
   // too, so they don't come in as "unidentified". Stored normalized to 9 digits.
   clock_aliases: { type: [String], default: [], index: true },
+  /**
+   * The Latin name written to the attendance clocks. NOT shown anywhere in the
+   * application — the app displays `full_name`, in Hebrew, everywhere.
+   *
+   * The device stores a name in a fixed 24-BYTE field and does not hold UTF-8.
+   * A Hebrew name is two bytes a letter, so it truncates mid-character and
+   * comes back as mojibake — the export from הרצליה returned אדולה מהרט as
+   * "WWWWW WWW(W". Nobody at
+   * the device can read that, or find anyone in the user list.
+   *
+   * Derived by services/clockName.service.js and stored rather than computed on
+   * each push, so a transliteration that reads wrong is corrected once, here.
+   */
+  clock_name: { type: String, default: '' },
   // Fingerprint templates read off a clock, kept server-side so a cross-branch
   // worker can be pushed onto EVERY branch she works at without enrolling her
   // finger again on each device (and so a wiped/replaced device can be

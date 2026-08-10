@@ -23,6 +23,18 @@
 
 const mongoose = require('mongoose');
 const { Employee, Branch, AgentCommand } = require('../models');
+const { toClockName } = require('./clockName.service');
+
+/**
+ * The name to write on a device.
+ *
+ * Latin, always: the clock's name field is 24 bytes and not UTF-8, so a Hebrew
+ * name arrives truncated mid-character and unreadable. The stored clock_name
+ * wins so a correction sticks; otherwise it is derived on the spot.
+ */
+function deviceName(emp) {
+  return emp.clock_name || toClockName(emp.full_name) || '';
+}
 
 // Don't re-try a source branch that had no finger for this employee more often
 // than this — a worker with no fingerprint anywhere must not poll forever.
@@ -112,7 +124,7 @@ async function ensureEnrolled(branchId, emp, createdBy = null) {
   return AgentCommand.create({
     branch_id: branchId,
     type: 'add_user',
-    payload: { israeli_id: israeliId, name: emp.full_name || '', privilege: 0 },
+    payload: { israeli_id: israeliId, name: deviceName(emp), privilege: 0 },
     status: 'pending',
     created_by: createdBy,
   });
@@ -131,7 +143,7 @@ async function pushTemplatesTo(branchId, emp, createdBy = null) {
     type: 'import_template',
     payload: {
       israeli_id: israeliId,
-      name: emp.full_name || '',
+      name: deviceName(emp),
       templates: templates.map(t => ({ fid: t.fid, valid: t.valid, size: t.size, b64: t.b64 })),
     },
     status: 'pending',
@@ -389,7 +401,10 @@ async function handleCommandConfirmed(cmd) {
         await AgentCommand.create({
           branch_id: cmd.branch_id,
           type: 'delete_user',
-          payload: { israeli_id: israeliId },
+          // The agent deletes by DEVICE uid — it rejects a payload carrying only
+          // a ת"ז (`missing uid in payload`). The export we just read is where
+          // that uid comes from.
+          payload: { uid: cmd.result?.uid, israeli_id: israeliId },
           status: 'pending',
           created_by: cmd.created_by || null,
         });
@@ -430,7 +445,8 @@ async function handleCommandConfirmed(cmd) {
       await AgentCommand.create({
         branch_id: cmd.branch_id,
         type: 'delete_user',
-        payload: { israeli_id: israeliId },
+        // By DEVICE uid — see the note on the other delete_user above.
+        payload: { uid: cmd.result?.uid, israeli_id: israeliId },
         status: 'pending',
         created_by: cmd.created_by || null,
       });
