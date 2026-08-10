@@ -162,8 +162,48 @@ function normalizeYear(y) {
   return clean;
 }
 
+/**
+ * The year a registration is filed under.
+ *
+ * `academic_year` is the answer whenever it is set. start_date is only the
+ * fallback, for rows written before the field existed — and it is a fallback,
+ * not a second opinion: once the field is set it wins, which is what makes a
+ * registration movable between years at all.
+ */
+function academicYearOf(reg) {
+  if (!reg) return null;
+  if (reg.academic_year) return normalizeYear(reg.academic_year);
+  return getAcademicYearStr(reg.start_date);
+}
+
+/** 1 September → 31 August of "YYYY-YYYY". */
+function academicYearBounds(range) {
+  const [y1, y2] = normalizeYear(range).split('-').map(Number);
+  if (!Number.isFinite(y1)) return null;
+  return { start: new Date(Date.UTC(y1, 8, 1)), end: new Date(Date.UTC(y2, 7, 31)) };
+}
+
+/**
+ * A child's name reduced to what two people typing it would agree on.
+ *
+ * Duplicate detection compares names, and names are typed: double spaces,
+ * a trailing space, gershayim, a maqaf where a space belongs. None of those
+ * make it a different child.
+ */
+function normalizeChildName(name) {
+  return String(name || '')
+    .replace(/[״"'׳`]/g, '')
+    .replace(/[-־–]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 module.exports = {
   getHebrewYear,
+  academicYearOf,
+  academicYearBounds,
+  normalizeChildName,
   hebrewYearLetters,
   hebrewYearForStart,
   formatAcademicYear,

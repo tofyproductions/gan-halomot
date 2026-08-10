@@ -1,5 +1,8 @@
 const { Registration, Classroom, Child, Collection, CollectionHistory, PriceAdjustment, Discount, SummerCamp, Branch } = require('../models');
-const { normalizeYear, getAcademicYears, getAcademicYearStr, ACADEMIC_MONTHS, CAMP_MONTH } = require('../services/academic-year.service');
+const {
+  normalizeYear, getAcademicYears, academicYearOf,
+  ACADEMIC_MONTHS, CAMP_MONTH,
+} = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
@@ -26,20 +29,14 @@ async function getAll(req, res, next) {
       .sort({ child_name: 1 })
       .lean();
 
-    const [y1, y2] = targetYear.split('-').map(Number);
-    const acadStart = new Date(y1, 8, 1);   // Sep 1 of y1
-    const acadEnd = new Date(y2, 7, 31);    // Aug 31 of y2
-
-    const filteredRegs = registrations.filter(r => {
-      if (!r.start_date) return false;
-      const startDate = new Date(r.start_date);
-      if (startDate > acadEnd) return false;
-      if (r.end_date) {
-        const endDate = new Date(r.end_date);
-        if (endDate < acadStart) return false;
-      }
-      return true;
-    });
+    // A registration belongs to the year it is FILED under — one year, the one
+    // its contract was signed against. This used to be a date-range OVERLAP,
+    // which is a different question: a registration running January 2026 to
+    // August 2027 overlaps two gan years, so it was listed in both, twice
+    // demanding a full year of payments from the same family. Overlap also
+    // could not be corrected — the year was a consequence of the dates rather
+    // than something anyone could set.
+    const filteredRegs = registrations.filter(r => academicYearOf(r) === targetYear);
 
     // Get children for these registrations
     const regIds = filteredRegs.map(r => r._id);
@@ -606,7 +603,7 @@ async function updateMonth(req, res, next) {
       }
     }
 
-    const academicYear = getAcademicYearStr(registration.start_date)
+    const academicYear = academicYearOf(registration)
       || getAcademicYears().current.range;
 
     const child = await Child.findOne({ registration_id: registrationId, is_active: true });
@@ -689,7 +686,7 @@ async function updateRegistrationFee(req, res, next) {
     }
 
     const academicYear = year
-      || getAcademicYearStr(registration.start_date)
+      || academicYearOf(registration)
       || getAcademicYears().current.range;
 
     const child = await Child.findOne({ registration_id: registrationId, is_active: true });

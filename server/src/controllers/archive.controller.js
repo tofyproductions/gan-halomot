@@ -1,5 +1,5 @@
 const { Archive, Registration, Child, Collection, Classroom } = require('../models');
-const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
+const { normalizeYear, getAcademicYears, academicYearOf } = require('../services/academic-year.service');
 
 async function getAll(req, res, next) {
   try {
@@ -40,7 +40,7 @@ async function create(req, res, next) {
     }
 
     const archiveType = registration.agreement_signed ? 'signed' : 'unsigned';
-    const academicYear = getAcademicYearStr(registration.start_date) || '';
+    const academicYear = academicYearOf(registration) || '';
 
     const archiveRecord = await Archive.create({
       registration_id: registration._id,
@@ -91,6 +91,10 @@ async function restore(req, res, next) {
       registration_fee: originalData.registration_fee,
       start_date: originalData.start_date,
       end_date: originalData.end_date,
+      // Restore the year it was filed under, not one re-derived from its dates:
+      // a registration that was moved between years and then archived comes
+      // back where it was, rather than where its start date suggests.
+      academic_year: academicYearOf(originalData),
       status: originalData.status || 'link_generated',
       agreement_signed: originalData.agreement_signed || false,
       card_completed: originalData.card_completed || false,
@@ -101,7 +105,7 @@ async function restore(req, res, next) {
     });
 
     if (archive.archive_type === 'signed' || originalData.status === 'completed') {
-      const academicYear = getAcademicYearStr(originalData.start_date)
+      const academicYear = academicYearOf(originalData)
         || getAcademicYears().current.range;
 
       await Child.create({

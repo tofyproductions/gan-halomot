@@ -11,6 +11,10 @@ router.get('/', registrationController.getAll);
 // POST /api/registration/fix-orphan-branch — assign null-branch regs to a branch
 router.post('/fix-orphan-branch', registrationController.fixOrphanBranch);
 
+// POST /api/registration/academic-year/bulk — move many registrations to another
+// gan year at once. Declared before /:id so "academic-year" is not read as an id.
+router.post('/academic-year/bulk', registrationController.bulkSetAcademicYear);
+
 // GET /api/registration/:id
 router.get('/:id', registrationController.getById);
 
@@ -19,6 +23,10 @@ router.post('/', registrationController.create);
 
 // PUT /api/registration/:id
 router.put('/:id', registrationController.update);
+
+// PUT /api/registration/:id/academic-year — move this registration to another
+// gan year, taking its child record and its collection row with it.
+router.put('/:id/academic-year', registrationController.setAcademicYear);
 
 // POST /api/registration/:id/generate-link
 router.post('/:id/generate-link', registrationController.generateLink);

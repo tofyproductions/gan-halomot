@@ -17,6 +17,7 @@ import { toast } from 'react-toastify';
 import api, { openApiFile } from '../../api/client';
 import { getClassroomColor } from '../../utils/classroomColors';
 import { printContractHtml } from '../../utils/contractPdf';
+import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYear';
 
 /**
  * ChildDetailDialog — view and edit details of a single child.
@@ -42,8 +43,18 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
     monthly_fee: '', phone: '', email: '', medical_alerts: '',
-    fee_effective_from: '', previous_monthly_fee: '',
+    fee_effective_from: '', previous_monthly_fee: '', academic_year: '',
   });
+
+  // A child filed under the wrong gan year has to be movable from where you
+  // notice it, which is here — not only from the registrations page.
+  const years = getAcademicYears();
+  const yearChoices = Array.from(new Set([
+    child?.academic_year,
+    `${years.current.value - 1}-${years.current.value}`,
+    years.current.range,
+    years.next.range,
+  ].filter(Boolean))).sort();
 
   useEffect(() => {
     if (!open || !childId) return;
@@ -66,6 +77,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
           medical_alerts: c.medical_alerts || '',
           fee_effective_from: reg?.fee_effective_from || curMonth,
           previous_monthly_fee: reg?.previous_monthly_fee != null ? String(reg.previous_monthly_fee) : '',
+          academic_year: c.academic_year || reg?.academic_year || '',
         });
       })
       .catch(err => {
@@ -99,6 +111,20 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
         }
         await api.put(`/registrations/${registration._id || registration.id}`, payload);
       }
+
+      // The year moves through the registration, which carries the child and
+      // the collection row with it. Setting Child.academic_year on its own is
+      // what left children filed in one year and billed in another.
+      if (registration && editForm.academic_year && editForm.academic_year !== child.academic_year) {
+        const res = await api.put(
+          `/registrations/${registration._id || registration.id}/academic-year`,
+          { academic_year: editForm.academic_year },
+        );
+        toast.success(res.data.months_moved
+          ? `הועבר ל-${formatAcademicYear(editForm.academic_year)} עם ${res.data.months_moved} חודשי גבייה`
+          : `הועבר ל-${formatAcademicYear(editForm.academic_year)}`);
+      }
+
       toast.success('פרטים עודכנו');
       setEditing(false);
       onChanged?.();
@@ -187,8 +213,21 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                     <Typography>{child.birth_date ? formatDate(child.birth_date) : '—'}</Typography>
                   </Grid>
                   <Grid size={{ xs: 6 }}>
-                    <Typography variant="caption" color="text.secondary">שנה אקדמית</Typography>
-                    <Typography>{child.academic_year || '—'}</Typography>
+                    <Typography variant="caption" color="text.secondary">שנת לימודים</Typography>
+                    {editing ? (
+                      <TextField
+                        select size="small" fullWidth
+                        value={editForm.academic_year}
+                        onChange={e => setEditForm({ ...editForm, academic_year: e.target.value })}
+                        helperText="העברה מזיזה גם את הרישום ואת שורת הגבייה"
+                      >
+                        {yearChoices.map(y => (
+                          <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
+                        ))}
+                      </TextField>
+                    ) : (
+                      <Typography>{child.academic_year ? formatAcademicYear(child.academic_year) : '—'}</Typography>
+                    )}
                   </Grid>
                 </Grid>
                 {editing ? (

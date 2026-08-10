@@ -1,8 +1,63 @@
 const { Registration, Classroom, Child, Archive, Collection, ContractVersion, Document } = require('../models');
 const { generateUniqueId, generateAccessToken } = require('../utils/id-generator');
-const { normalizeYear, getAcademicYears, getAcademicYearStr } = require('../services/academic-year.service');
+const {
+  normalizeYear, getAcademicYears, getAcademicYearStr,
+  academicYearOf, academicYearBounds, normalizeChildName,
+} = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 const env = require('../config/env');
+
+/**
+ * Give every registration the year it is filed under.
+ *
+ * The field is new; the data is not. For a row that predates it the start date
+ * is the only evidence there is, and it is the same evidence the old filters
+ * used — so the backfill changes nothing about what anyone sees. What it
+ * changes is that the year becomes editable from that moment on.
+ *
+ * Runs once per process: after the first pass there is nothing left to match.
+ */
+let backfilled = false;
+async function backfillAcademicYears() {
+  if (backfilled) return;
+  try {
+    const pending = await Registration.find({
+      $or: [{ academic_year: null }, { academic_year: '' }, { academic_year: { $exists: false } }],
+    }).select('start_date').lean();
+    for (const r of pending) {
+      const year = getAcademicYearStr(r.start_date);
+      if (year) await Registration.updateOne({ _id: r._id }, { $set: { academic_year: year } });
+    }
+    backfilled = true;
+  } catch (err) {
+    console.error('academic_year backfill failed:', err.message);
+  }
+}
+
+/**
+ * Other registrations for the same child in the same year.
+ *
+ * Matched on the normalised name rather than the stored one, and NOT on the
+ * parent: the two rows that started this were "שי נוטי" and "סברינה נוטי" —
+ * two parents of one child. Requiring the parent to match would have found
+ * nothing, which is exactly what the old code did.
+ */
+async function findDuplicatesInYear(childName, year, excludeId = null) {
+  if (!childName || !year) return [];
+  const bounds = academicYearBounds(year);
+  const candidates = await Registration.find({
+    $or: [
+      { academic_year: year },
+      ...(bounds ? [{
+        academic_year: { $in: [null, ''] },
+        start_date: { $gte: bounds.start, $lte: bounds.end },
+      }] : []),
+    ],
+  }).lean();
+  const want = normalizeChildName(childName);
+  return candidates.filter(c => normalizeChildName(c.child_name) === want
+    && String(c._id) !== String(excludeId));
+}
 
 async function getAll(req, res, next) {
   try {
@@ -28,7 +83,7 @@ async function getAll(req, res, next) {
         r.status = 'completed';
         r.card_completed = true;
         await r.save();
-        const academicYear = getAcademicYearStr(r.start_date)
+        const academicYear = academicYearOf(r)
           || getAcademicYears().current.range;
         const card = (r.configuration && r.configuration.registration_card) || {};
         const existingChild = await Child.findOne({ registration_id: r._id });
@@ -65,6 +120,10 @@ async function getAll(req, res, next) {
       console.error('Lazy completion migration failed:', migErr.message);
     }
 
+    // Every registration carries the year it is filed under. Rows written
+    // before the field existed get it from their start date, once.
+    await backfillAcademicYears();
+
     let filter = { ...getBranchFilter(req) };
     if (status) filter.status = status;
 
@@ -72,7 +131,15 @@ async function getAll(req, res, next) {
       const normalized = normalizeYear(year);
       const [y1] = normalized.split('-').map(Number);
       if (y1) {
-        filter.start_date = { $gte: new Date(`${y1}-09-01`), $lte: new Date(`${y1 + 1}-08-31`) };
+        // The stored year, or — for anything the backfill could not reach —
+        // a start date inside it.
+        filter.$or = [
+          { academic_year: normalized },
+          {
+            academic_year: { $in: [null, ''] },
+            start_date: { $gte: new Date(`${y1}-09-01`), $lte: new Date(`${y1 + 1}-08-31`) },
+          },
+        ];
       }
     }
 
@@ -96,6 +163,16 @@ async function getAll(req, res, next) {
       }
     }
 
+    // Two registrations for the same child in the same year. Always a mistake —
+    // usually a renewal typed with this year's dates — and until now nothing
+    // said so: the child simply appeared twice in collections, once with a
+    // year of payments and once demanding a full year of them.
+    const dupCount = new Map();
+    for (const r of registrations) {
+      const key = `${normalizeChildName(r.child_name)}|${academicYearOf(r) || '?'}`;
+      dupCount.set(key, (dupCount.get(key) || 0) + 1);
+    }
+
     const formatted = registrations.map(r => {
       // A signature lives in signature_data, or (for old-system imports) inside
       // configuration.signature. signature_missing flags a reg that's marked
@@ -108,10 +185,13 @@ async function getAll(req, res, next) {
         configuration = { ...configuration };
         delete configuration.signature;
       }
+      const academicYear = academicYearOf(r);
       return {
         ...rest,
         configuration,
         id: r._id,
+        academic_year: academicYear,
+        duplicate_in_year: (dupCount.get(`${normalizeChildName(r.child_name)}|${academicYear || '?'}`) || 0) > 1,
         classroom_name: r.classroom_id?.name || null,
         classroom_id: r.classroom_id?._id || r.classroom_id,
         has_signature: hasSignature,
@@ -165,13 +245,36 @@ async function create(req, res, next) {
       child_name, child_birth_date, classroom_id, branch_id,
       parent_name, parent_id_number, parent_phone, parent_email,
       monthly_fee, registration_fee, start_date, end_date,
-      configuration,
+      configuration, academic_year, allow_duplicate,
     } = req.body;
 
     if (!child_name || !parent_name || !monthly_fee || !start_date || !end_date) {
       return res.status(400).json({
         error: 'Missing required fields: child_name, parent_name, monthly_fee, start_date, end_date',
       });
+    }
+
+    const year = academic_year ? normalizeYear(academic_year) : getAcademicYearStr(start_date);
+
+    // The same child, twice, in the same year. It is nearly always a renewal
+    // filled in with this year's dates, and it is much cheaper to say so now
+    // than to find it in the collections table in March.
+    if (!allow_duplicate) {
+      const clash = await findDuplicatesInYear(child_name, year);
+      if (clash.length) {
+        return res.status(409).json({
+          error: `${child_name} כבר רשום/ה לשנת ${year}`,
+          code: 'DUPLICATE_IN_YEAR',
+          duplicates: clash.map(d => ({
+            id: d._id,
+            child_name: d.child_name,
+            parent_name: d.parent_name,
+            monthly_fee: d.monthly_fee,
+            status: d.status,
+            start_date: d.start_date,
+          })),
+        });
+      }
     }
 
     const unique_id = generateUniqueId('REG');
@@ -196,6 +299,7 @@ async function create(req, res, next) {
       registration_fee: registration_fee || 0,
       start_date,
       end_date,
+      academic_year: year,
       status: 'link_generated',
       access_token,
       configuration: configuration || {},
@@ -221,6 +325,17 @@ async function update(req, res, next) {
     delete updates.id;
     delete updates.unique_id;
     delete updates.created_at;
+
+    // The year is normally moved through its own endpoint, which also carries
+    // the child and the collection across. Editing start_date here is a
+    // different act — fixing when a child actually starts — and it must not
+    // silently refile the registration under another year. It only sets the
+    // year when there isn't one yet.
+    if (updates.academic_year) {
+      updates.academic_year = normalizeYear(updates.academic_year);
+    } else if (updates.start_date && !existing.academic_year) {
+      updates.academic_year = getAcademicYearStr(updates.start_date);
+    }
 
     // Auto-capture previous fee when a forward-dated price change is applied,
     // so the collections view bills the old fee for months before
@@ -302,6 +417,154 @@ async function update(req, res, next) {
   }
 }
 
+/**
+ * Move one registration to a different gan year.
+ *
+ * PUT /api/registration/:id/academic-year
+ * Body: { academic_year, start_date?, end_date?, allow_duplicate? }
+ *
+ * A registration filled in with the wrong year was, until now, unfixable: the
+ * year was read off start_date on the registration page, off a date *overlap*
+ * in collections, and off a copy on the Child — so correcting it meant editing
+ * a date and hoping the other two followed, which they did not. The child then
+ * sat in two years at once, or in neither.
+ *
+ * Everything that carries the year moves together, or nothing does:
+ * the registration, the child record that puts them in a classroom, and the
+ * collection row that holds their payments.
+ *
+ * The dates are SHIFTED by the number of years moved rather than reset to
+ * 1 September. A child who joins in January and is filed under the wrong year
+ * still joins in January; flattening that to the start of the year would
+ * silently bill them for four months they were not there.
+ */
+async function setAcademicYear(req, res, next) {
+  try {
+    const reg = await Registration.findById(req.params.id);
+    if (!reg) return res.status(404).json({ error: 'רישום לא נמצא' });
+
+    const target = normalizeYear(req.body?.academic_year || '');
+    if (!/^\d{4}-\d{4}$/.test(target)) {
+      return res.status(400).json({ error: 'שנת לימודים לא תקינה' });
+    }
+
+    const from = academicYearOf(reg);
+    if (from === target) {
+      return res.json({ registration: { ...reg.toObject(), id: reg._id }, moved: false });
+    }
+
+    if (!req.body?.allow_duplicate) {
+      const clash = await findDuplicatesInYear(reg.child_name, target, reg._id);
+      if (clash.length) {
+        return res.status(409).json({
+          error: `${reg.child_name} כבר רשום/ה לשנת ${target}`,
+          code: 'DUPLICATE_IN_YEAR',
+          duplicates: clash.map(d => ({
+            id: d._id, child_name: d.child_name, parent_name: d.parent_name,
+            monthly_fee: d.monthly_fee, status: d.status, start_date: d.start_date,
+          })),
+        });
+      }
+    }
+
+    const delta = Number(target.split('-')[0]) - Number((from || target).split('-')[0]);
+    const shift = (d) => {
+      if (!d) return d;
+      const next = new Date(d);
+      next.setUTCFullYear(next.getUTCFullYear() + delta);
+      return next;
+    };
+
+    reg.academic_year = target;
+    reg.start_date = req.body?.start_date ? new Date(req.body.start_date) : shift(reg.start_date);
+    reg.end_date = req.body?.end_date ? new Date(req.body.end_date) : shift(reg.end_date);
+    if (!(reg.start_date < reg.end_date)) {
+      return res.status(400).json({ error: 'תאריך הסיום חייב להיות אחרי תאריך ההתחלה' });
+    }
+    await reg.save();
+
+    // The child record is what puts them in a classroom for a year. Left
+    // behind, the registration moves and the child does not.
+    const children = await Child.updateMany(
+      { registration_id: reg._id },
+      { $set: { academic_year: target } },
+    );
+
+    // The collection row holds this registration's money. It belongs to the
+    // registration, so it moves with it — unless the target year already has
+    // one, in which case merging is a decision nobody asked for.
+    let collectionMoved = false;
+    let monthsMoved = 0;
+    const existingTarget = await Collection.findOne({ registration_id: reg._id, academic_year: target });
+    const source = from
+      ? await Collection.findOne({ registration_id: reg._id, academic_year: from })
+      : null;
+    if (source && !existingTarget) {
+      monthsMoved = (source.months || []).length;
+      source.academic_year = target;
+      await source.save();
+      collectionMoved = true;
+    }
+
+    res.json({
+      registration: { ...reg.toObject(), id: reg._id },
+      moved: true,
+      from,
+      to: target,
+      children_updated: children.modifiedCount ?? children.nModified ?? 0,
+      collection_moved: collectionMoved,
+      months_moved: monthsMoved,
+      collection_conflict: !!(source && existingTarget),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * Move a whole set of registrations at once.
+ *
+ * POST /api/registration/academic-year/bulk   { ids: [], academic_year }
+ *
+ * Correcting a year one card at a time is fine for one child and unusable for
+ * a class that was imported into the wrong one. Each registration is moved by
+ * the same path as a single move, and each failure is reported with its reason
+ * instead of aborting the rest — a duplicate in the middle of thirty rows
+ * should not leave fifteen moved and fifteen not, with nothing saying which.
+ */
+async function bulkSetAcademicYear(req, res, next) {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const target = normalizeYear(req.body?.academic_year || '');
+    if (!ids.length) return res.status(400).json({ error: 'לא נבחרו רישומים' });
+    if (!/^\d{4}-\d{4}$/.test(target)) {
+      return res.status(400).json({ error: 'שנת לימודים לא תקינה' });
+    }
+
+    const moved = [];
+    const skipped = [];
+    for (const id of ids) {
+      const fakeRes = {
+        statusCode: 200,
+        status(code) { this.statusCode = code; return this; },
+        json(payload) { this.payload = payload; return this; },
+      };
+      // eslint-disable-next-line no-await-in-loop
+      await setAcademicYear(
+        { params: { id }, body: { academic_year: target, allow_duplicate: req.body?.allow_duplicate } },
+        fakeRes,
+        (err) => { fakeRes.statusCode = 500; fakeRes.payload = { error: err.message }; },
+      );
+      if (fakeRes.statusCode < 400) moved.push({ id, ...fakeRes.payload });
+      else skipped.push({ id, error: fakeRes.payload?.error || 'שגיאה' });
+    }
+
+    res.json({ moved: moved.length, skipped, academic_year: target });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function generateLink(req, res, next) {
   try {
     const { id } = req.params;
@@ -354,8 +617,9 @@ async function renew(req, res, next) {
     // 2026-2027, which the service is already calling `current`. Deriving from
     // the source's own start date is right on every date of the year.
     const years = getAcademicYears();
-    const sourceStartYear = source.start_date
-      ? new Date(source.start_date).getUTCFullYear() - (new Date(source.start_date).getUTCMonth() + 1 < 8 ? 1 : 0)
+    const sourceYear = academicYearOf(source);
+    const sourceStartYear = sourceYear
+      ? Number(sourceYear.split('-')[0])
       : years.current.value;
     const targetYear = req.body?.academic_year
       ? normalizeYear(req.body.academic_year)
@@ -372,13 +636,12 @@ async function renew(req, res, next) {
     }
 
     // One renewal per child per year. Re-issuing should refresh the existing
-    // link, not leave two half-signed registrations for the same year.
-    const existing = await Registration.findOne({
-      child_name: source.child_name,
-      parent_name: source.parent_name,
-      start_date: { $gte: new Date(Date.UTC(y1, 7, 1)), $lt: new Date(Date.UTC(y2, 8, 1)) },
-      _id: { $ne: source._id },
-    });
+    // link, not leave two half-signed registrations for the same year. Matched
+    // on the year the registration is FILED under and on the child alone — the
+    // parent name is not part of it, because the same child is regularly
+    // registered by one parent and renewed by the other.
+    const clash = (await findDuplicatesInYear(source.child_name, targetYear, source._id))[0];
+    const existing = clash ? await Registration.findById(clash._id) : null;
     if (existing) {
       existing.access_token = generateAccessToken();
       existing.token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -409,6 +672,7 @@ async function renew(req, res, next) {
       registration_fee: req.body?.registration_fee != null ? Number(req.body.registration_fee) : (source.registration_fee || 0),
       start_date: startDate,
       end_date: endDate,
+      academic_year: targetYear,
       // Nothing is signed yet. That is the whole point of the renewal.
       status: 'link_generated',
       agreement_signed: false,
@@ -441,7 +705,7 @@ async function activate(req, res, next) {
 
     await Registration.findByIdAndUpdate(id, { status: 'completed' });
 
-    const academicYear = getAcademicYearStr(registration.start_date)
+    const academicYear = academicYearOf(registration)
       || getAcademicYears().current.range;
 
     let child = await Child.findOne({ registration_id: id });
@@ -483,7 +747,7 @@ async function remove(req, res, next) {
     }
 
     const archiveType = registration.agreement_signed ? 'signed' : 'unsigned';
-    const academicYear = getAcademicYearStr(registration.start_date) || '';
+    const academicYear = academicYearOf(registration) || '';
 
     await Archive.create({
       registration_id: registration._id,
@@ -544,7 +808,7 @@ async function finalizeManual(req, res, next) {
     await registration.save();
 
     // Create Child if missing
-    const academicYear = getAcademicYearStr(registration.start_date)
+    const academicYear = academicYearOf(registration)
       || getAcademicYears().current.range;
     const existingChild = await Child.findOne({ registration_id: registration._id });
     if (!existingChild) {
@@ -684,5 +948,5 @@ async function fixOrphanBranch(req, res, next) {
 module.exports = {
   getAll, getById, create, update, generateLink, renew, activate, remove,
   finalizeManual, downloadContract, listContractVersions, downloadContractVersion,
-  fixOrphanBranch,
+  fixOrphanBranch, setAcademicYear, bulkSetAcademicYear,
 };

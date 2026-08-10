@@ -16,6 +16,24 @@ const registrationSchema = new mongoose.Schema({
   registration_fee: { type: Number, default: 0 },
   start_date: { type: Date, required: true },
   end_date: { type: Date, required: true },
+
+  /**
+   * The gan year this registration is FOR — "YYYY-YYYY".
+   *
+   * Until now the year was inferred from start_date, in three different ways:
+   * the registration page took start_date inside Sep–Aug, collections took any
+   * registration whose date range *overlapped* the year, and Child carried its
+   * own academic_year string copied at creation. Three derivations of one fact
+   * that nothing kept in agreement — so a registration typed with the wrong
+   * start date could not be moved to the year it belonged to, and one that
+   * spanned two years appeared twice in collections.
+   *
+   * The year is a decision, not a consequence of a date, so it is stored. The
+   * dates still say when the child actually starts and stops (a mid-year join
+   * is prorated from start_date), but they no longer decide which year the
+   * registration is filed under.
+   */
+  academic_year: { type: String, default: null },
   status: {
     type: String,
     enum: ['link_generated', 'contract_signed', 'docs_uploaded', 'completed'],
@@ -44,5 +62,12 @@ const registrationSchema = new mongoose.Schema({
 
 registrationSchema.index({ access_token: 1 });
 registrationSchema.index({ status: 1 });
+registrationSchema.index({ academic_year: 1 });
+// Deliberately NOT unique. Two registrations for the same child in one year is
+// always a mistake, but the names are typed by hand — "מור קיסר" and
+// "מור אור קיסר" are the same parent — so a unique index would reject good data
+// while missing the duplicates that matter. The check is done in code, where it
+// can normalise the name, explain itself, and be overridden.
+registrationSchema.index({ child_name: 1, academic_year: 1 });
 
 module.exports = mongoose.model('Registration', registrationSchema);

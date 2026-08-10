@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, Stack, Chip, IconButton, Tooltip,
-  TextField, InputAdornment, Button, MenuItem,
+  TextField, InputAdornment, Button, MenuItem, Checkbox,
   Dialog, DialogTitle, DialogContent, DialogActions, Divider, CircularProgress, Alert,
   ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
@@ -20,11 +20,13 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import HistoryEduIcon from '@mui/icons-material/HistoryEdu';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import ContentCopyTwoToneIcon from '@mui/icons-material/ContentCopyTwoTone';
 import { toast } from 'react-toastify';
 import api, { openApiFile } from '../../api/client';
-import { formatAcademicYear } from '../../hooks/useAcademicYear';
+import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
-import { getHebrewYear } from '../../utils/hebrewYear';
+import { getAcademicYearRange } from '../../utils/hebrewYear';
 import { printContractHtml } from '../../utils/contractPdf';
 
 const STATUS_CONFIG = {
@@ -43,6 +45,10 @@ export default function RegistrationTracker() {
   const [yearFilter, setYearFilter] = useState('');
   const [missingSigOnly, setMissingSigOnly] = useState(false);
   const [missingDocsOnly, setMissingDocsOnly] = useState(false);
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+  // Moving registrations between gan years — one card, or everything ticked.
+  const [selected, setSelected] = useState([]);
+  const [yearDlg, setYearDlg] = useState({ open: false, regs: [], year: '', saving: false, conflict: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
@@ -149,19 +155,103 @@ export default function RegistrationTracker() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  // The year a registration is FILED under, which is a stored decision — not
+  // whatever its start date happens to imply. A registration typed with last
+  // year's dates is exactly the case this page has to be able to show and fix.
+  const yearOf = (r) => r.academic_year || getAcademicYearRange(r.start_date) || '';
+
   const yearOptions = Array.from(
-    new Set(registrations.map(r => r.start_date ? getHebrewYear(r.start_date) : null).filter(Boolean))
+    new Set(registrations.map(yearOf).filter(Boolean))
   ).sort();
+
+  // Years a registration can be moved INTO: the ones already in use, plus the
+  // window around today — a year with nobody in it yet is precisely where a
+  // misfiled registration usually needs to go.
+  const years = getAcademicYears();
+  const moveTargets = Array.from(new Set([
+    ...yearOptions,
+    `${years.current.value - 1}-${years.current.value}`,
+    years.current.range,
+    years.next.range,
+    `${years.next.value + 1}-${years.next.value + 2}`,
+  ])).sort();
 
   const filtered = registrations.filter(r => {
     const q = search.trim().toLowerCase();
     if (q && !r.child_name?.toLowerCase().includes(q) && !r.parent_name?.toLowerCase().includes(q)) return false;
     if (statusFilter && r.status !== statusFilter) return false;
-    if (yearFilter && (!r.start_date || getHebrewYear(r.start_date) !== yearFilter)) return false;
+    if (yearFilter && yearOf(r) !== yearFilter) return false;
     if (missingSigOnly && !r.signature_missing) return false;
     if (missingDocsOnly && !r.documents_missing) return false;
+    if (duplicatesOnly && !r.duplicate_in_year) return false;
     return true;
   });
+
+  const selectedRegs = registrations.filter(r => selected.includes(r._id || r.id));
+
+  const toggleSelected = (id) => setSelected(
+    prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]),
+  );
+
+  const openYearDialog = (regs) => setYearDlg({
+    open: true,
+    regs,
+    // Pre-filled with the year after the one they are in, because the mistake
+    // this fixes is almost always a renewal filed as the current year.
+    year: (() => {
+      const from = regs.length === 1 ? yearOf(regs[0]) : '';
+      if (!from) return years.next.range;
+      const start = Number(from.split('-')[0]);
+      return `${start + 1}-${start + 2}`;
+    })(),
+    saving: false,
+    conflict: null,
+  });
+
+  /**
+   * Move the chosen registrations into another gan year.
+   *
+   * The server carries the child record and the collection row across with the
+   * registration — the three used to derive the year separately, which is how
+   * a child ended up listed in one year and billed in another.
+   */
+  const handleMoveYear = async (force = false) => {
+    const { regs, year } = yearDlg;
+    if (!regs.length || !year) return;
+    setYearDlg(d => ({ ...d, saving: true, conflict: null }));
+    try {
+      if (regs.length === 1) {
+        const id = regs[0]._id || regs[0].id;
+        const res = await api.put(`/registrations/${id}/academic-year`, {
+          academic_year: year, allow_duplicate: force,
+        });
+        const moved = res.data.months_moved || 0;
+        toast.success(moved
+          ? `הועבר ל-${formatAcademicYear(year)} יחד עם ${moved} חודשי גבייה`
+          : `הועבר ל-${formatAcademicYear(year)}`);
+      } else {
+        const res = await api.post('/registrations/academic-year/bulk', {
+          ids: regs.map(r => r._id || r.id), academic_year: year, allow_duplicate: force,
+        });
+        const skipped = res.data.skipped || [];
+        toast.success(`${res.data.moved} רישומים הועברו ל-${formatAcademicYear(year)}`);
+        if (skipped.length) toast.warning(`${skipped.length} לא הועברו: ${skipped[0].error}`);
+      }
+      setYearDlg({ open: false, regs: [], year: '', saving: false, conflict: null });
+      setSelected([]);
+      fetchData();
+    } catch (err) {
+      const data = err.response?.data;
+      if (data?.code === 'DUPLICATE_IN_YEAR') {
+        // Not an error to swallow: the same child is already registered for
+        // that year, which is the very thing this page exists to prevent.
+        setYearDlg(d => ({ ...d, saving: false, conflict: data }));
+        return;
+      }
+      toast.error(data?.error || 'שגיאה בהעברת שנה');
+      setYearDlg(d => ({ ...d, saving: false }));
+    }
+  };
 
   const handleDelete = async () => {
     if (!confirm.id) return;
@@ -294,6 +384,7 @@ export default function RegistrationTracker() {
   const pendingCount = registrations.filter(r => r.status !== 'completed').length;
   const missingSigCount = registrations.filter(r => r.signature_missing).length;
   const missingDocsCount = registrations.filter(r => r.documents_missing).length;
+  const duplicateCount = registrations.filter(r => r.duplicate_in_year).length;
 
   return (
     <Box dir="rtl">
@@ -325,6 +416,19 @@ export default function RegistrationTracker() {
                 onClick={() => setMissingDocsOnly(v => !v)}
                 sx={{ cursor: 'pointer', fontWeight: 700 }}
               />
+            )}
+            {duplicateCount > 0 && (
+              <Tooltip title="אותו ילד/ה רשום/ה יותר מפעם אחת באותה שנה — בדרך כלל רישום לשנה הבאה שנשמר בשנה הנוכחית">
+                <Chip
+                  icon={<ContentCopyTwoToneIcon />}
+                  label={`${duplicateCount} כפולים באותה שנה`}
+                  color="error"
+                  size="small"
+                  variant={duplicatesOnly ? 'filled' : 'outlined'}
+                  onClick={() => setDuplicatesOnly(v => !v)}
+                  sx={{ cursor: 'pointer', fontWeight: 700 }}
+                />
+              </Tooltip>
             )}
           </Stack>
         </Box>
@@ -373,14 +477,33 @@ export default function RegistrationTracker() {
           ))}
         </TextField>
         <TextField select size="small" value={yearFilter} onChange={e => setYearFilter(e.target.value)}
-          sx={{ minWidth: 140 }} label="שנה"
+          sx={{ minWidth: 200 }} label="שנת לימודים"
         >
           <MenuItem value="">כל השנים</MenuItem>
           {yearOptions.map(y => (
-            <MenuItem key={y} value={y}>{y}</MenuItem>
+            <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
           ))}
         </TextField>
       </Stack>
+
+      {/* Moving a whole group at once. Correcting a year card by card is fine
+          for one child and unusable for a class imported into the wrong one. */}
+      {selected.length > 0 && (
+        <Card sx={{ p: 1.5, mb: 2, bgcolor: '#eef2ff', border: '1px solid #6366f1' }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <Typography sx={{ fontWeight: 700 }}>{selected.length} נבחרו</Typography>
+            <Button size="small" variant="contained" startIcon={<SwapHorizIcon />}
+              onClick={() => openYearDialog(selectedRegs)}>
+              העבר לשנת לימודים אחרת
+            </Button>
+            <Button size="small" onClick={() => setSelected([])}>נקה בחירה</Button>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" onClick={() => setSelected(filtered.map(r => r._id || r.id))}>
+              בחר את כל {filtered.length} המוצגים
+            </Button>
+          </Stack>
+        </Card>
+      )}
 
       {/* Registration Cards */}
       <Stack spacing={1.5}>
@@ -401,8 +524,25 @@ export default function RegistrationTracker() {
               <Stack direction="row" justifyContent="space-between" alignItems="center">
                 {/* Info */}
                 <Stack direction="row" spacing={4} alignItems="center" sx={{ flex: 1 }}>
-                  <Box sx={{ minWidth: 160 }}>
+                  <Checkbox
+                    size="small"
+                    checked={selected.includes(id)}
+                    onChange={() => toggleSelected(id)}
+                    sx={{ p: 0.5 }}
+                  />
+                  <Box sx={{ minWidth: 160, ml: '0 !important' }}>
                     <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>{reg.child_name}</Typography>
+                    {reg.duplicate_in_year && (
+                      <Tooltip title="רשום/ה פעמיים באותה שנת לימודים — העבר/י את הרישום המיותר לשנה הנכונה">
+                        <Chip
+                          icon={<ContentCopyTwoToneIcon />}
+                          label="כפול בשנה"
+                          size="small"
+                          color="error"
+                          sx={{ fontWeight: 700, mt: 0.5 }}
+                        />
+                      </Tooltip>
+                    )}
                   </Box>
                   <Box sx={{ minWidth: 140 }}>
                     <Typography variant="body2" color="text.secondary">הורה</Typography>
@@ -412,10 +552,10 @@ export default function RegistrationTracker() {
                     <Typography variant="body2" color="text.secondary">שובץ לקבוצה</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{reg.classroom_name || '—'}</Typography>
                   </Box>
-                  <Box sx={{ minWidth: 90 }}>
+                  <Box sx={{ minWidth: 130 }}>
                     <Typography variant="body2" color="text.secondary">שנת לימוד</Typography>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {reg.start_date ? getHebrewYear(reg.start_date) : '—'}
+                      {yearOf(reg) ? formatAcademicYear(yearOf(reg)) : '—'}
                     </Typography>
                   </Box>
                   <Box>
@@ -501,6 +641,15 @@ export default function RegistrationTracker() {
                       })}
                     >
                       <AutorenewIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="העברה לשנת לימודים אחרת">
+                    <IconButton
+                      size="small"
+                      sx={{ color: reg.duplicate_in_year ? '#dc2626' : '#0891b2' }}
+                      onClick={() => openYearDialog([reg])}
+                    >
+                      <SwapHorizIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="עריכה">
@@ -597,6 +746,72 @@ export default function RegistrationTracker() {
             disabled={renewDlg.saving}>ביטול</Button>
           <Button variant="contained" onClick={handleRenew} disabled={renewDlg.saving}>
             {renewDlg.saving ? 'מנפיק…' : renewDlg.mode === 'signed' ? 'צור רישום עם החוזה החתום' : 'הנפק ושלח להורה'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Move to another gan year. The child record and the collection row go
+          with the registration — until now each derived the year on its own. */}
+      <Dialog
+        open={yearDlg.open}
+        onClose={() => setYearDlg({ open: false, regs: [], year: '', saving: false, conflict: null })}
+        dir="rtl" maxWidth="xs" fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          העברה לשנת לימודים אחרת
+          <Typography variant="body2" color="text.secondary">
+            {yearDlg.regs.length === 1
+              ? `${yearDlg.regs[0]?.child_name} · ${formatAcademicYear(yearOf(yearDlg.regs[0] || {}))}`
+              : `${yearDlg.regs.length} רישומים`}
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField
+              select size="small" label="שנת לימודים חדשה" fullWidth
+              value={yearDlg.year}
+              onChange={e => setYearDlg(d => ({ ...d, year: e.target.value, conflict: null }))}
+            >
+              {moveTargets.map(y => (
+                <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
+              ))}
+            </TextField>
+
+            <Alert severity="info" icon={false}>
+              תאריכי ההתחלה והסיום יוזזו באותו מספר שנים — ילד/ה שהתחיל/ה בינואר
+              ימשיך/תמשיך להתחיל בינואר, ולא יחויב/תחויב על חודשים שלא היה/הייתה בהם.
+              הילד/ה בכיתה ושורת הגבייה עוברים יחד עם הרישום.
+            </Alert>
+
+            {yearDlg.conflict && (
+              <Alert severity="error">
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>{yearDlg.conflict.error}</Typography>
+                {(yearDlg.conflict.duplicates || []).map(d => (
+                  <Typography key={d.id} variant="caption" sx={{ display: 'block' }}>
+                    {d.child_name} · {d.parent_name} · ₪{d.monthly_fee}
+                  </Typography>
+                ))}
+                <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+                  אם באמת מדובר בשני ילדים שונים עם אותו שם — אפשר להעביר בכל זאת.
+                </Typography>
+              </Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => setYearDlg({ open: false, regs: [], year: '', saving: false, conflict: null })}
+            disabled={yearDlg.saving}
+          >
+            ביטול
+          </Button>
+          {yearDlg.conflict && (
+            <Button color="error" onClick={() => handleMoveYear(true)} disabled={yearDlg.saving}>
+              העבר בכל זאת
+            </Button>
+          )}
+          <Button variant="contained" onClick={() => handleMoveYear(false)} disabled={yearDlg.saving || !yearDlg.year}>
+            {yearDlg.saving ? 'מעביר…' : 'העבר'}
           </Button>
         </DialogActions>
       </Dialog>

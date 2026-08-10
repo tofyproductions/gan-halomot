@@ -2,21 +2,22 @@
  * Client-side Hebrew/Israeli utility functions
  */
 
+import { hebrewYearLetters } from '../hooks/useAcademicYear';
+
 const HEBREW_MONTHS = [
   'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר',
 ];
 
-const HEBREW_YEAR_MAP = {
-  5784: 'תשפ״ד', 5785: 'תשפ״ה', 5786: 'תשפ״ו',
-  5787: 'תשפ״ז', 5788: 'תשפ״ח', 5789: 'תשפ״ט',
-  5790: 'תש״צ', 5791: 'תשצ״א', 5792: 'תשצ״ב',
-};
-
 /**
  * Convert a Gregorian date to the Hebrew academic year string.
  * Cutoff is Aug 10 (matches kindergarten contract end-of-year).
  * Dates on/after Aug 10 belong to the next academic year.
+ *
+ * The letters are computed by the one gematria rule the server and
+ * useAcademicYear already share. The nine-entry map this replaced ran out
+ * after 5792 and fell back to `תש״93` — digits where letters belong — and
+ * this file is what the registrations page reads its year labels from.
  */
 export function getHebrewYear(date) {
   const d = date instanceof Date ? date : new Date(date);
@@ -25,8 +26,7 @@ export function getHebrewYear(date) {
   const month = d.getMonth() + 1; // 1-12
   const day = d.getDate();
   const isAfterCutoff = month > 8 || (month === 8 && day >= 10);
-  const hebrewYearNum = gYear + (isAfterCutoff ? 3761 : 3760);
-  return HEBREW_YEAR_MAP[hebrewYearNum] || `תש״${hebrewYearNum % 100}`;
+  return hebrewYearLetters(gYear + (isAfterCutoff ? 3761 : 3760));
 }
 
 /**

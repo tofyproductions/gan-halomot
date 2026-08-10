@@ -1,7 +1,7 @@
 const { Registration, Child, Document, GanEvent, Branch } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
 const { sendAgreementEmail } = require('../services/email.service');
-const { getAcademicYearStr, getAcademicYears } = require('../services/academic-year.service');
+const { academicYearOf, getAcademicYears } = require('../services/academic-year.service');
 
 async function getRegistrationForm(req, res, next) {
   try {
@@ -266,7 +266,7 @@ async function uploadDocument(req, res, next) {
     await registration.save();
 
     if (isFullyComplete) {
-      const academicYear = getAcademicYearStr(registration.start_date)
+      const academicYear = academicYearOf(registration)
         || getAcademicYears().current.range;
 
       const childPayload = {
