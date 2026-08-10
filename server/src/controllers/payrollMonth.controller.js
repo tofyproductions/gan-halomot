@@ -2323,6 +2323,7 @@ async function myPayrollUpdates(req, res, next) {
       // The salary-table fields a manager may ask to change, with the labels
       // the screen shows. Kept server-side so the two lists cannot drift.
       requestable_fields: MANAGER_REQUESTABLE_FIELDS,
+      leave_kinds: MANAGER_LEAVE_KINDS,
       employees: employees.map(e => {
         const manual = rowByEmp.get(String(e._id)) || {};
         const mine = adjByEmp.get(String(e._id)) || [];
@@ -2343,6 +2344,76 @@ async function myPayrollUpdates(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /payroll-month/my-updates/absences?month=YYYY-MM&employee_id=…
+ *
+ * One employee's absence days for the month, so a manager can say what each
+ * one was before the accountant decides whether it costs anything.
+ *
+ * Whole-day absences and partial ones (showed up, left more than an hour
+ * short) are different records with different consequences, so both are
+ * returned and labelled rather than folded together. The decisions themselves
+ * are written back through PATCH /payroll-month/:employeeId, which already
+ * merges each role into its OWN approval flag — a manager cannot set the
+ * accounting side and vice versa.
+ *
+ * Loaded on demand rather than with the employee list: it recomputes the
+ * month, which is the expensive part of payroll.
+ */
+async function myUpdateAbsences(req, res, next) {
+  try {
+    const month = (req.query.month || '').trim();
+    const employeeId = String(req.query.employee_id || '');
+    if (!/^\d{4}-\d{2}$/.test(month) || !employeeId) {
+      return res.status(400).json({ error: 'נדרשים חודש ומזהה עובד' });
+    }
+
+    const emp = await Employee.findById(employeeId).select('branch_id full_name').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    if (!decidesPayroll(req.user)) {
+      const allowed = managedBranchIds(req.user);
+      if (!allowed.includes(String(emp.branch_id))) {
+        return res.status(403).json({ error: 'העובד/ת אינו/ה בסניפים שבניהולך' });
+      }
+    }
+
+    const data = await fetchMonthData({ month, branch: String(emp.branch_id || '') }, req.user);
+    const row = (data.rows || []).find(r => String(r.employee_id) === employeeId);
+    if (!row) return res.json({ month, employee_id: employeeId, absences: [], partial: [] });
+
+    const abs = row.absence || {};
+    const entryByDate = new Map((abs.entries || []).map(e => [e.date, e]));
+
+    res.json({
+      month,
+      employee_id: employeeId,
+      employee_name: emp.full_name,
+      // `source` says why the day is on the list: a known leave, a kindergarten
+      // holiday, or nothing the system can explain — the last is the only kind
+      // that actually needs the manager to say what happened.
+      absences: (abs.days || []).map((d) => {
+        const e = entryByDate.get(d.date) || {};
+        return {
+          date: d.date,
+          source: d.source || 'unknown',
+          category: e.category || 'unpaid',
+          note: e.note || '',
+          manager_approved: !!e.manager_approved,
+          accounting_approved: !!e.accounting_approved,
+        };
+      }),
+      partial: (row.partial_absence?.candidates || []).map(c => ({
+        date: c.date,
+        committed_hours: c.committed_h ?? null,
+        worked_hours: c.worked_h ?? null,
+        shortfall_hours: c.shortfall_h ?? null,
+        excused: !!c.excused,
+        reason: c.reason || '',
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
 // ── Payroll change requests (branch-manager → accountant approval) ──────
 
 /**
@@ -2352,15 +2423,36 @@ async function myPayrollUpdates(req, res, next) {
  * reserve duty — rather than an accounting decision.
  */
 const MANAGER_REQUESTABLE_FIELDS = [
-  { field: 'gift_card', label: 'גיפט קארד', kind: 'number_or_text' },
-  { field: 'miluim', label: 'מילואים', kind: 'number_or_text' },
-  { field: 'recreation', label: 'דמי הבראה', kind: 'number_or_text' },
-  { field: 'cibus', label: 'סיבוס', kind: 'number_or_text' },
-  { field: 'sick_days', label: 'ימי מחלה', kind: 'number' },
-  { field: 'vacation_days', label: 'ימי חופשה', kind: 'number' },
-  { field: 'absence_days', label: 'ימי היעדרות', kind: 'number' },
-  { field: 'travel_override', label: 'נסיעות (עקיפה)', kind: 'number' },
-  { field: 'notes', label: 'הערה לרו״ח', kind: 'text' },
+  // `input` is what the screen renders. It is NOT the same as the stored type:
+  // גיפט קארד holds a number and a reason in one numberOrText value, and
+  // מילואים holds a day count with the dates written into its text — so the
+  // accountant sees the dates behind the number instead of a bare figure.
+  { field: 'gift_card', label: 'גיפט קארד', kind: 'number_or_text', input: 'amount_reason' },
+  { field: 'miluim', label: 'מילואים', kind: 'number_or_text', input: 'date_range' },
+  { field: 'recreation', label: 'דמי הבראה', kind: 'number_or_text', input: 'text' },
+  { field: 'cibus', label: 'סיבוס', kind: 'number_or_text', input: 'text' },
+  // travel_override is a Number the salary calculation reads directly, so it
+  // takes a figure — a free-text there would break the month. The explanation
+  // rides along as the request's note.
+  { field: 'travel_override', label: 'נסיעות', kind: 'number', input: 'number_note' },
+  { field: 'notes', label: 'הערות נוספות', kind: 'text', input: 'text' },
+];
+
+/**
+ * The leave surfaces a manager files through instead of a change request.
+ *
+ * ימי מחלה / ימי חופשה are EmployeeRequests: they carry dates, a certificate,
+ * and an approval chain that already ends at the accountant and already
+ * applies itself to payroll on approval. Writing the day COUNT straight into
+ * the salary table would skip all of that and lose the dates.
+ *
+ * ימי היעדרות are per-day decisions on PayrollMonth.manual.absence_entries,
+ * where manager and accounting each hold their own approval flag.
+ */
+const MANAGER_LEAVE_KINDS = [
+  { kind: 'sick', label: 'ימי מחלה', needs_certificate: true },
+  { kind: 'vacation', label: 'ימי חופשה', needs_certificate: false },
+  { kind: 'absence', label: 'ימי היעדרות', needs_certificate: false },
 ];
 
 const CHANGE_ALLOWED_FIELDS = [
@@ -4041,6 +4133,7 @@ module.exports = {
   decideAdjustment,
   decideAdjustmentsBulk,
   myPayrollUpdates,
+  myUpdateAbsences,
   importCibus,
   applyAutoHolidays,
   applyVacationRequests,

@@ -39,6 +39,8 @@ router.put('/pregnancy-settings',             requireRole('system_admin', 'accou
 // The branch manager's own area: her staff and the updates she may file, with
 // none of the salary table around it.
 router.get('/my-updates',                     requireBranchScope, c.myPayrollUpdates);
+// Loaded on demand — it recomputes the month, which is the expensive part.
+router.get('/my-updates/absences',            requireBranchScope, c.myUpdateAbsences);
 
 // Change-request workflow: branch managers stage edits → accountant approves.
 router.post('/change-requests',               requireBranchScope, c.createChangeRequest);

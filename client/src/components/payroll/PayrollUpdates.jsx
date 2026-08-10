@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Box, Typography, Stack, Card, CardContent, Table, TableHead, TableBody, TableRow,
-  TableCell, TableContainer, Chip, IconButton, Tooltip, TextField, MenuItem, Alert,
-  AlertTitle, Divider, CircularProgress, Button, Dialog, DialogTitle, DialogContent,
-  DialogActions, InputAdornment, Tabs, Tab, Collapse, Badge,
+  TableCell, TableContainer, Chip, IconButton, Tooltip, TextField, Alert,
+  AlertTitle, Divider, CircularProgress, Button, Tabs, Tab, Collapse, Badge,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditNoteIcon from '@mui/icons-material/EditNote';
@@ -18,8 +17,9 @@ import { useAuth } from '../../hooks/useAuth';
 import { useWorkMonth } from '../../hooks/useWorkMonth';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { BusyButton } from '../shared/UploadControls';
+import AddUpdateDialog from './AddUpdateDialog';
 import {
-  ADJUSTMENT_TYPES, TYPE_LABEL, typeColor, STATUS_META, canDecidePayroll, adjustmentValue,
+  TYPE_LABEL, typeColor, STATUS_META, canDecidePayroll, adjustmentValue,
 } from './adjustmentTypes';
 
 const fmtDateTime = (d) => { try { return d ? new Date(d).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' }) : ''; } catch { return ''; } };
@@ -33,155 +33,6 @@ function fieldValueText(v) {
     return '—';
   }
   return String(v);
-}
-
-/* ------------------------------------------------------- add-update dialog */
-
-function AddUpdateDialog({ open, employee, month, onClose, onSaved, canDecide, requestableFields }) {
-  const [mode, setMode] = useState('adjustment'); // 'adjustment' | 'field'
-  const [draft, setDraft] = useState({ type: 'money_add', amount: '', hours: '', reason: '' });
-  const [field, setField] = useState({ field: 'gift_card', value: '', note: '' });
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setMode('adjustment');
-    setDraft({ type: 'money_add', amount: '', hours: '', reason: '' });
-    setField({ field: requestableFields?.[0]?.field || 'gift_card', value: '', note: '' });
-  }, [open, requestableFields]);
-
-  if (!employee) return null;
-
-  const currentType = ADJUSTMENT_TYPES.find(t => t.value === draft.type);
-  const usesAmount = currentType?.field === 'amount';
-  const currentField = (requestableFields || []).find(f => f.field === field.field);
-
-  const saveAdjustment = () => {
-    const value = usesAmount ? Number(draft.amount) : Number(draft.hours);
-    if (!value || Number.isNaN(value)) return toast.error('יש להזין ערך מספרי');
-    setSaving(true);
-    api.post('/payroll-month/adjustments', {
-      employee_id: employee.employee_id,
-      month,
-      type: draft.type,
-      amount: usesAmount ? Math.abs(value) * (currentType.positive === false ? -1 : 1) : 0,
-      hours: !usesAmount ? Math.abs(value) * (currentType.positive === false ? -1 : 1) : 0,
-      reason: draft.reason,
-    })
-      .then((res) => {
-        toast.success(res.data?.pending ? 'נשלח לאישור הנהלת החשבונות' : 'העדכון נוסף');
-        onSaved();
-        onClose();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
-      .finally(() => setSaving(false));
-  };
-
-  const saveField = () => {
-    if (field.value === '' && !field.note) return toast.error('יש להזין ערך');
-    const numeric = currentField?.kind !== 'text' && field.value !== '' && !Number.isNaN(Number(field.value));
-    setSaving(true);
-    api.post('/payroll-month/change-requests', {
-      month,
-      note: field.note,
-      changes: [{
-        employee_id: employee.employee_id,
-        field: field.field,
-        field_label: currentField?.label || field.field,
-        current_value: employee.field_values?.[field.field] ?? null,
-        requested_value: numeric ? Number(field.value) : field.value,
-      }],
-    })
-      .then(() => {
-        toast.success(canDecide ? 'נרשמה בקשת שינוי' : 'הבקשה נשלחה לאישור הנהלת החשבונות');
-        onSaved();
-        onClose();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
-      .finally(() => setSaving(false));
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ fontWeight: 700 }}>
-        עדכון שכר — {employee.full_name}
-        <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
-          {employee.branch_name} • חודש {month}
-        </Typography>
-      </DialogTitle>
-      <DialogContent dividers>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          {!canDecide && (
-            <Alert severity="warning" icon={false}>
-              אפשר להוסיף כל עדכון. הוא יירשם על שמך כ״ממתין לאישור״ ולא ישפיע על השכר עד שהנהלת החשבונות תאשר.
-            </Alert>
-          )}
-
-          <Tabs value={mode} onChange={(_, v) => setMode(v)}>
-            <Tab value="adjustment" label="תוספת / ניכוי / שעות" />
-            <Tab value="field" label="שדה בטבלת השכר" />
-          </Tabs>
-
-          {mode === 'adjustment' ? (
-            <>
-              <TextField select size="small" label="סוג עדכון" value={draft.type}
-                onChange={e => setDraft({ ...draft, type: e.target.value })} fullWidth>
-                {ADJUSTMENT_TYPES.map(t => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
-              </TextField>
-              {usesAmount ? (
-                <TextField
-                  type="number" size="small" label="סכום" value={draft.amount}
-                  onChange={e => setDraft({ ...draft, amount: e.target.value })} fullWidth
-                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-                  helperText={currentType.positive === false ? 'הסכום ינוכה מהשכר' : currentType.positive === true ? 'הסכום יתווסף לשכר' : 'חיובי = תוספת, שלילי = ניכוי'}
-                />
-              ) : (
-                <TextField
-                  type="number" size="small" label="שעות" value={draft.hours}
-                  onChange={e => setDraft({ ...draft, hours: e.target.value })} fullWidth
-                  InputProps={{ endAdornment: <InputAdornment position="end">שעות</InputAdornment> }}
-                  helperText={currentType.positive === false ? 'השעות יורדו' : 'השעות יתווספו'}
-                />
-              )}
-              <TextField
-                size="small" label="סיבה / הערה" value={draft.reason} fullWidth multiline minRows={2}
-                onChange={e => setDraft({ ...draft, reason: e.target.value })}
-                placeholder="למשל: בונוס הובלת קבוצה / קניות חומרי יצירה / שעות שלא נחתמו"
-              />
-            </>
-          ) : (
-            <>
-              <TextField select size="small" label="שדה" value={field.field}
-                onChange={e => setField({ ...field, field: e.target.value, value: '' })} fullWidth>
-                {(requestableFields || []).map(f => <MenuItem key={f.field} value={f.field}>{f.label}</MenuItem>)}
-              </TextField>
-              <Typography variant="caption" color="text.secondary">
-                ערך נוכחי: <b>{fieldValueText(employee.field_values?.[field.field])}</b>
-              </Typography>
-              <TextField
-                size="small" label="ערך מבוקש" value={field.value} fullWidth
-                type={currentField?.kind === 'text' ? 'text' : 'number'}
-                onChange={e => setField({ ...field, value: e.target.value })}
-                multiline={currentField?.kind === 'text'}
-                minRows={currentField?.kind === 'text' ? 2 : undefined}
-              />
-              <TextField
-                size="small" label="הערה לבקשה (אופציונלי)" value={field.note} fullWidth
-                onChange={e => setField({ ...field, note: e.target.value })}
-              />
-            </>
-          )}
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={saving}>ביטול</Button>
-        <BusyButton variant="contained" startIcon={<AddIcon />} loading={saving} loadingText="שולח…"
-          onClick={mode === 'adjustment' ? saveAdjustment : saveField}>
-          {canDecide ? 'הוסף' : 'שלח לאישור'}
-        </BusyButton>
-      </DialogActions>
-    </Dialog>
-  );
 }
 
 /* ------------------------------------------------------------ employee row */
@@ -479,6 +330,7 @@ export default function PayrollUpdates() {
         month={month}
         canDecide={canDecide}
         requestableFields={data?.requestable_fields || []}
+        leaveKinds={data?.leave_kinds || []}
         onClose={() => setAddFor(null)}
         onSaved={load}
       />
