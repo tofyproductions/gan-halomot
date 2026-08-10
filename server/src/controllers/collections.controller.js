@@ -93,18 +93,29 @@ async function getAll(req, res, next) {
       const exitM = collectionByReg[String(reg._id)]?.exit_month ?? null;
       const leftEarly = exitM != null && exitM !== 7 && exitM !== 8;
 
+      // Attendance is per child. Two siblings, one camp — see
+      // Collection.camp_enrolled for why this is three-state.
+      const enrolled = collectionByReg[String(reg._id)]?.camp_enrolled ?? null;
+
       const hasOverride = existing.fee_override != null;
       const base = camp.amount || 0;
-      const expected = hasOverride ? existing.fee_override : (leftEarly ? 0 : base);
+      const expected = hasOverride
+        ? existing.fee_override
+        : (leftEarly || enrolled === false ? 0 : base);
 
       let receiptNumber = existing.receipt_number || null;
-      if (!receiptNumber) receiptNumber = findSiblingMonthReceipt(reg, CAMP_MONTH);
+      // A camp receipt only travels between siblings who are BOTH in the camp.
+      // This is the line that marked a child as paid for a camp they never
+      // attended, and it could not be undone because nothing was stored.
+      if (!receiptNumber && enrolled === true) receiptNumber = findSiblingMonthReceipt(reg, CAMP_MONTH);
       let paymentStatus = existing.payment_status || 'expected';
       if (receiptNumber) paymentStatus = 'paid';
+      else if (enrolled === false) paymentStatus = 'exempt';
 
       return {
         month: CAMP_MONTH,
         label: camp.label || 'קייטנה',
+        camp_enrolled: enrolled,
         expected_amount: expected,
         paid_amount: paymentStatus === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0),
         discount_amount: 0,
@@ -404,6 +415,48 @@ async function getByRegistration(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+/**
+ * PUT /api/collections/:registrationId/camp-enrollment   { enrolled: true|false|null }
+ *
+ * Mark whether this child is in the camp. Setting it to false also clears the
+ * camp cell: a child who is not attending should not be left holding a receipt
+ * or a paid amount from when everyone assumed they were.
+ */
+async function updateCampEnrollment(req, res, next) {
+  try {
+    const { registrationId } = req.params;
+    const raw = req.body?.enrolled;
+    const enrolled = raw === true || raw === 'true' ? true
+      : raw === false || raw === 'false' ? false
+        : null;
+
+    const registration = await Registration.findById(registrationId).lean();
+    if (!registration) return res.status(404).json({ error: 'Registration not found' });
+
+    const year = req.body?.academic_year
+      ? normalizeYear(req.body.academic_year)
+      : getAcademicYears().current.range;
+    const collection = await Collection.findOne({ registration_id: registrationId, academic_year: year })
+      || new Collection({ registration_id: registrationId, child_id: registration.child_id || null, academic_year: year, months: [] });
+
+    collection.camp_enrolled = enrolled;
+
+    if (enrolled === false) {
+      const cell = (collection.months || []).find(m => m.month_number === CAMP_MONTH);
+      if (cell) {
+        cell.receipt_number = null;
+        cell.paid_amount = 0;
+        cell.payment_status = 'exempt';
+        cell.payment_date = null;
+      }
+    }
+    collection.last_updated = new Date();
+    await collection.save();
+
+    res.json({ ok: true, camp_enrolled: collection.camp_enrolled });
+  } catch (error) { next(error); }
 }
 
 async function updateMonth(req, res, next) {
@@ -729,5 +782,5 @@ async function backup(req, res, next) {
 module.exports = {
   getAll, getByRegistration, updateMonth, updateExitMonth,
   updateRegistrationFee, recalculate, getHistory, backup,
-  getSummerCamps, upsertSummerCamp,
+  getSummerCamps, upsertSummerCamp, updateCampEnrollment,
 };

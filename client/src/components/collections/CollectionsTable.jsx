@@ -4,6 +4,7 @@ import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, LinearProgress, MenuItem, InputAdornment, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert,
+  ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import PrintIcon from '@mui/icons-material/Print';
@@ -244,7 +245,26 @@ export default function CollectionsTable() {
       feeOverrideReason: monthData?.fee_override_reason || '',
       hasFeeOverride: monthData?.has_fee_override || false,
       originalExpected: monthData?.original_expected || null,
+      campEnrolled: monthNum === CAMP_MONTH ? (monthData?.camp_enrolled ?? null) : undefined,
     });
+  };
+
+  /**
+   * Mark whether this child is actually in the camp.
+   *
+   * Attendance is per child: two siblings, and only one of them signed up. It
+   * used to be assumed, which let one child's camp receipt mark the other as
+   * paid — with nothing stored, so there was nothing to undo.
+   */
+  const setCampEnrollment = async (regId, enrolled) => {
+    try {
+      await api.put(`/collections/${regId}/camp-enrollment`, { enrolled, academic_year: selectedYear });
+      setDialog(prev => ({ ...prev, campEnrolled: enrolled }));
+      toast.success(enrolled === false ? 'סומן: לא בקייטנה' : enrolled === true ? 'סומן: בקייטנה' : 'הסימון הוסר');
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
   };
 
   // Save receipt (with duplicate handling)
@@ -736,6 +756,26 @@ export default function CollectionsTable() {
           </Typography>
         </DialogTitle>
         <DialogContent>
+          {dialog.monthNum === CAMP_MONTH && (
+            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: '#f5f3ff' }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>האם הילד/ה בקייטנה?</Typography>
+              <ToggleButtonGroup
+                size="small" exclusive
+                value={dialog.campEnrolled === null || dialog.campEnrolled === undefined ? 'unset' : String(dialog.campEnrolled)}
+                onChange={(_, v) => {
+                  if (v === null) return;
+                  setCampEnrollment(dialog.regId, v === 'unset' ? null : v === 'true');
+                }}
+              >
+                <ToggleButton value="true" color="success">כן</ToggleButton>
+                <ToggleButton value="false" color="error">לא</ToggleButton>
+                <ToggleButton value="unset">לא סומן</ToggleButton>
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                ״לא״ מאפס את החיוב ומנתק קבלה שהגיעה מאח/ות. קבלה של אח/ות מסומנת אוטומטית רק כשהילד/ה מסומן/ת כמשתתף/ת.
+              </Typography>
+            </Box>
+          )}
           <TextField
             autoFocus
             fullWidth
@@ -862,6 +902,26 @@ export default function CollectionsTable() {
           </Typography>
         </DialogTitle>
         <DialogContent>
+          {dialog.monthNum === CAMP_MONTH && (
+            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: '#f5f3ff' }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>האם הילד/ה בקייטנה?</Typography>
+              <ToggleButtonGroup
+                size="small" exclusive
+                value={dialog.campEnrolled === null || dialog.campEnrolled === undefined ? 'unset' : String(dialog.campEnrolled)}
+                onChange={(_, v) => {
+                  if (v === null) return;
+                  setCampEnrollment(dialog.regId, v === 'unset' ? null : v === 'true');
+                }}
+              >
+                <ToggleButton value="true" color="success">כן</ToggleButton>
+                <ToggleButton value="false" color="error">לא</ToggleButton>
+                <ToggleButton value="unset">לא סומן</ToggleButton>
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                ״לא״ מאפס את החיוב ומנתק קבלה שהגיעה מאח/ות. קבלה של אח/ות מסומנת אוטומטית רק כשהילד/ה מסומן/ת כמשתתף/ת.
+              </Typography>
+            </Box>
+          )}
           <TextField
             autoFocus
             fullWidth
@@ -983,7 +1043,9 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                     }
                   }}
                 >
-                  {hasContent ? (
+                  {monthNum === CAMP_MONTH && m.camp_enrolled === false ? (
+                    <span style={{ fontSize: '0.72rem', fontWeight: 600, opacity: 0.7 }}>לא בקייטנה</span>
+                  ) : hasContent ? (
                     <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.15 }}>
                       {receipt && <span>{receipt}</span>}
                       {notes && (
@@ -991,6 +1053,17 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                       )}
                     </Box>
                   ) : (m.expected_amount != null ? formatCurrency(expected) : '')}
+                  {/* Unanswered attendance. The charge still counts, but nobody
+                      has said whether this child is going — which is exactly
+                      the state that needs chasing. */}
+                  {monthNum === CAMP_MONTH && (m.camp_enrolled === null || m.camp_enrolled === undefined) && (
+                    <Tooltip title="לא סומן אם הילד/ה בקייטנה" arrow>
+                      <Box component="span" sx={{
+                        position: 'absolute', top: 2, right: 4,
+                        width: 6, height: 6, borderRadius: '50%', bgcolor: '#8b5cf6',
+                      }} />
+                    </Tooltip>
+                  )}
                   {isDupOverride && (
                     <Box
                       component="span"

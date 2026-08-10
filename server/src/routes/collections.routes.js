@@ -26,6 +26,10 @@ router.put('/:registrationId/month/:monthIndex', collectionsController.updateMon
 // POST /api/collections/:registrationId/recalculate
 router.post('/:registrationId/recalculate', collectionsController.recalculate);
 
+// PUT /api/collections/:registrationId/camp-enrollment — is this child in the
+// camp. Per child, because siblings attend separately.
+router.put('/:registrationId/camp-enrollment', collectionsController.updateCampEnrollment);
+
 // PUT /api/collections/:registrationId/exit-month
 router.put('/:registrationId/exit-month', collectionsController.updateExitMonth);
 

@@ -27,6 +27,27 @@ const collectionSchema = new mongoose.Schema({
   academic_year: { type: String, required: true },
   exit_month: { type: Number, default: null },
   registration_fee_receipt: { type: String, default: null },
+
+  /**
+   * Is this child actually in the קייטנה?
+   *
+   * Deliberately three-state, and deliberately NOT defaulted to true.
+   *
+   * Every other month rides on the registration: a registered child is in the
+   * gan in March, so a receipt the parent paid for one sibling legitimately
+   * covers the other. The camp is a separate product that siblings attend
+   * separately — and the sibling-receipt inheritance was applying to it
+   * anyway, so entering one child's receipt silently marked the other as paid
+   * for a camp they were never in, with no way to take it back: the value was
+   * derived at read time, not stored, so there was nothing to delete.
+   *
+   *   true   → attending; behaves like any other month, sibling receipts included
+   *   false  → not attending; charged nothing and never inherits a receipt
+   *   null   → nobody has said yet. Charged the default so the column still
+   *            totals, but marked as unanswered and NOT eligible to inherit a
+   *            sibling's receipt — attendance is not something to assume.
+   */
+  camp_enrolled: { type: Boolean, default: null },
   months: [collectionMonthSchema],
   last_updated: { type: Date, default: Date.now },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
