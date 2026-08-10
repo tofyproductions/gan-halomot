@@ -59,6 +59,7 @@ const GanEvent = require('./GanEvent');
 const Lead = require('./Lead');
 const PunchResolution = require('./PunchResolution');
 const PunchEntryTask = require('./PunchEntryTask');
+const ExternalEnrollment = require('./ExternalEnrollment');
 
 module.exports = {
   User,
@@ -121,4 +122,5 @@ module.exports = {
   Lead,
   PunchResolution,
   PunchEntryTask,
+  ExternalEnrollment,
 };
