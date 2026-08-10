@@ -336,11 +336,6 @@ function FieldForm({ employee, month, fields, onDone, canDecide }) {
         if (note.trim()) parts.push(note.trim());
         return { kind: days ? 'number' : 'text', amount: days ?? null, text: parts.join(' · ') };
       }
-      case 'number_note': {
-        const n = Number(amount);
-        if (!amount || Number.isNaN(n)) { toast.error('יש להזין סכום'); return undefined; }
-        return n;
-      }
       default: {
         if (!text.trim()) { toast.error('יש להזין טקסט'); return undefined; }
         return def?.kind === 'text' ? text.trim() : { kind: 'text', amount: null, text: text.trim() };
@@ -354,7 +349,7 @@ function FieldForm({ employee, month, fields, onDone, canDecide }) {
     setSaving(true);
     api.post('/payroll-month/change-requests', {
       month,
-      note: input === 'number_note' ? note : '',
+      note: '',
       changes: [{
         employee_id: employee.employee_id,
         field,
@@ -405,19 +400,6 @@ function FieldForm({ employee, month, fields, onDone, canDecide }) {
           </Typography>
           <TextField size="small" label="הערה (אופציונלי)" value={note} fullWidth
             onChange={e => setNote(e.target.value)} />
-        </>
-      )}
-
-      {input === 'number_note' && (
-        <>
-          <TextField
-            type="number" size="small" label={def?.label} value={amount} fullWidth
-            onChange={e => setAmount(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-            helperText="שדה מספרי שנכנס ישירות לחישוב — הסבר חופשי בשדה שמתחת"
-          />
-          <TextField size="small" label="הערה (אופציונלי)" value={note} fullWidth
-            onChange={e => setNote(e.target.value)} multiline minRows={2} />
         </>
       )}
 

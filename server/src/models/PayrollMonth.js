@@ -59,6 +59,12 @@ const payrollMonthSchema = new mongoose.Schema({
     // Optional per-month override of the employee's default travel allowance.
     // If null, the auto value (travel_per_day × days_worked or monthly flat) is used.
     travel_override: { type: Number, default: null },
+    // Free text about this month's travel — "3 ימים ברכב פרטי", "נסע עם הורה".
+    // Deliberately NOT the same field as travel_override: that one is a Number
+    // the salary engine reads directly, so putting prose in it would silently
+    // zero the travel component. A branch manager writes here; the accountant
+    // reads it and sets the figure.
+    travel_note: { type: String, default: '' },
 
     notes: { type: String, default: '' },
 

@@ -1134,6 +1134,7 @@ async function getMonth(req, res, next) {
           cibus:       manual.cibus       || { kind: 'empty', amount: null, text: '' },
           miluim:      manual.miluim      || { kind: 'empty', amount: null, text: '' },
           travel_override: manual.travel_override ?? null,
+          travel_note: manual.travel_note || '',
           bonus: {
             override_amount: manual.bonus?.override_amount ?? null,
             note: manual.bonus?.note || '',
@@ -1370,7 +1371,7 @@ async function upsertEntry(req, res, next) {
       'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
-      'travel_override', 'bonus', 'notes', 'custom_values',
+      'travel_override', 'travel_note', 'bonus', 'notes', 'custom_values',
       'include_salary_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'vacation_pay_confirmed',
@@ -2431,10 +2432,10 @@ const MANAGER_REQUESTABLE_FIELDS = [
   { field: 'miluim', label: 'מילואים', kind: 'number_or_text', input: 'date_range' },
   { field: 'recreation', label: 'דמי הבראה', kind: 'number_or_text', input: 'text' },
   { field: 'cibus', label: 'סיבוס', kind: 'number_or_text', input: 'text' },
-  // travel_override is a Number the salary calculation reads directly, so it
-  // takes a figure — a free-text there would break the month. The explanation
-  // rides along as the request's note.
-  { field: 'travel_override', label: 'נסיעות', kind: 'number', input: 'number_note' },
+  // The manager writes prose; the accountant turns it into the figure.
+  // travel_override itself stays a Number the salary engine reads directly —
+  // prose in THAT field would silently zero the travel component.
+  { field: 'travel_note', label: 'נסיעות', kind: 'text', input: 'text' },
   { field: 'notes', label: 'הערות נוספות', kind: 'text', input: 'text' },
 ];
 
@@ -2459,7 +2460,7 @@ const CHANGE_ALLOWED_FIELDS = [
   'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
   'advance_deduction_preset_id', 'advance_deduction_text',
   'gift_card', 'recreation', 'cibus', 'miluim',
-  'travel_override', 'notes', 'custom_values', 'include_salary_completion',
+  'travel_override', 'travel_note', 'notes', 'custom_values', 'include_salary_completion',
 ];
 
 /**

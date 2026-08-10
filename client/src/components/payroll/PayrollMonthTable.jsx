@@ -2084,6 +2084,15 @@ export default function PayrollMonthTable() {
                           {hasTravelOverride(r)
                             ? <Chip size="small" color="info" variant="filled" label="ידני" sx={{ height: 14, fontSize: '0.55rem', '& .MuiChip-label': { px: 0.5 } }} />
                             : <Typography variant="caption" sx={{ fontSize: '0.55rem', color: 'text.disabled' }}>אוטומטי</Typography>}
+                          {/* What the branch manager wrote about this month's
+                              travel. It sets no amount by itself — it is here so
+                              the figure beside it can be decided. */}
+                          {r.manual?.travel_note && (
+                            <Tooltip title={r.manual.travel_note}>
+                              <Chip size="small" color="warning" variant="outlined" label="הערת מנהל/ת"
+                                sx={{ height: 14, fontSize: '0.5rem', '& .MuiChip-label': { px: 0.5 } }} />
+                            </Tooltip>
+                          )}
                         </Stack>
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setSick({ open: true, row: r })}>
