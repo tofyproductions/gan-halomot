@@ -183,7 +183,7 @@ export default function RegistrationTracker() {
     if (yearFilter && yearOf(r) !== yearFilter) return false;
     if (missingSigOnly && !r.signature_missing) return false;
     if (missingDocsOnly && !r.documents_missing) return false;
-    if (duplicatesOnly && !r.duplicate_in_year) return false;
+    if (duplicatesOnly && !r.duplicate_in_year && !r.possible_duplicate_in_year) return false;
     return true;
   });
 
@@ -385,6 +385,7 @@ export default function RegistrationTracker() {
   const missingSigCount = registrations.filter(r => r.signature_missing).length;
   const missingDocsCount = registrations.filter(r => r.documents_missing).length;
   const duplicateCount = registrations.filter(r => r.duplicate_in_year).length;
+  const possibleDuplicateCount = registrations.filter(r => r.possible_duplicate_in_year).length;
 
   return (
     <Box dir="rtl">
@@ -418,11 +419,24 @@ export default function RegistrationTracker() {
               />
             )}
             {duplicateCount > 0 && (
-              <Tooltip title="אותו ילד/ה רשום/ה יותר מפעם אחת באותה שנה — בדרך כלל רישום לשנה הבאה שנשמר בשנה הנוכחית">
+              <Tooltip title="אותו ילד/ה — שם ותאריך לידה זהים — רשום/ה יותר מפעם אחת באותה שנה. בדרך כלל רישום לשנה הבאה שנשמר בשנה הנוכחית">
                 <Chip
                   icon={<ContentCopyTwoToneIcon />}
                   label={`${duplicateCount} כפולים באותה שנה`}
                   color="error"
+                  size="small"
+                  variant={duplicatesOnly ? 'filled' : 'outlined'}
+                  onClick={() => setDuplicatesOnly(v => !v)}
+                  sx={{ cursor: 'pointer', fontWeight: 700 }}
+                />
+              </Tooltip>
+            )}
+            {possibleDuplicateCount > 0 && (
+              <Tooltip title="שמות זהים באותה שנה שלא ניתן היה לאמת — ייתכן ששני ילדים שונים">
+                <Chip
+                  icon={<ContentCopyTwoToneIcon />}
+                  label={`${possibleDuplicateCount} שמות זהים לבדיקה`}
+                  color="warning"
                   size="small"
                   variant={duplicatesOnly ? 'filled' : 'outlined'}
                   onClick={() => setDuplicatesOnly(v => !v)}
@@ -533,12 +547,23 @@ export default function RegistrationTracker() {
                   <Box sx={{ minWidth: 160, ml: '0 !important' }}>
                     <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>{reg.child_name}</Typography>
                     {reg.duplicate_in_year && (
-                      <Tooltip title="רשום/ה פעמיים באותה שנת לימודים — העבר/י את הרישום המיותר לשנה הנכונה">
+                      <Tooltip title="אותו ילד/ה (שם ותאריך לידה זהים) רשום/ה פעמיים באותה שנת לימודים — העבר/י את הרישום המיותר לשנה הנכונה">
                         <Chip
                           icon={<ContentCopyTwoToneIcon />}
                           label="כפול בשנה"
                           size="small"
                           color="error"
+                          sx={{ fontWeight: 700, mt: 0.5 }}
+                        />
+                      </Tooltip>
+                    )}
+                    {reg.possible_duplicate_in_year && (
+                      <Tooltip title="שם זהה לרישום אחר באותה שנה, אך אין תאריך לידה להשוואה — ייתכן ששני ילדים שונים">
+                        <Chip
+                          icon={<ContentCopyTwoToneIcon />}
+                          label="שם זהה — לבדיקה"
+                          size="small"
+                          color="warning"
                           sx={{ fontWeight: 700, mt: 0.5 }}
                         />
                       </Tooltip>
@@ -784,15 +809,19 @@ export default function RegistrationTracker() {
             </Alert>
 
             {yearDlg.conflict && (
-              <Alert severity="error">
+              <Alert severity={yearDlg.conflict.confidence === 'confirmed' ? 'error' : 'warning'}>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>{yearDlg.conflict.error}</Typography>
                 {(yearDlg.conflict.duplicates || []).map(d => (
                   <Typography key={d.id} variant="caption" sx={{ display: 'block' }}>
                     {d.child_name} · {d.parent_name} · ₪{d.monthly_fee}
+                    {d.child_birth_date && ` · נולד/ה ${new Date(d.child_birth_date).toLocaleDateString('he-IL')}`}
+                    {d.match_reason && ` · ${d.match_reason}`}
                   </Typography>
                 ))}
                 <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-                  אם באמת מדובר בשני ילדים שונים עם אותו שם — אפשר להעביר בכל זאת.
+                  {yearDlg.conflict.confidence === 'confirmed'
+                    ? 'תאריך הלידה זהה — כנראה אותו ילד/ה. העברה בכל זאת תיצור שני רישומים לאותה שנה.'
+                    : 'אין תאריך לידה להשוואה. אם מדובר בשני ילדים שונים עם אותו שם — אפשר להעביר בכל זאת.'}
                 </Typography>
               </Alert>
             )}

@@ -4,6 +4,7 @@ const {
   normalizeYear, getAcademicYears, getAcademicYearStr,
   academicYearOf, academicYearBounds, normalizeChildName,
 } = require('../services/academic-year.service');
+const { compareChildIdentity } = require('../services/child-identity.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 const env = require('../config/env');
 
@@ -35,14 +36,23 @@ async function backfillAcademicYears() {
 }
 
 /**
- * Other registrations for the same child in the same year.
+ * Other registrations for the SAME CHILD in the same year.
  *
- * Matched on the normalised name rather than the stored one, and NOT on the
- * parent: the two rows that started this were "שי נוטי" and "סברינה נוטי" —
- * two parents of one child. Requiring the parent to match would have found
- * nothing, which is exactly what the old code did.
+ * The name gets us the candidates and nothing more — a gan of eighty has more
+ * than one אופק, and blocking a real registration for a real child is as bad
+ * as missing a duplicate. What decides is the birth date, which every
+ * registration has and which belongs to the child rather than to whoever
+ * filled the form (services/child-identity.service.js).
+ *
+ * The parent is deliberately not part of it. The two rows that started this
+ * were "שי נוטי" and "סברינה נוטי": different name, different ID, different
+ * phone, one child. Requiring the parent to match is exactly why the old
+ * renewal guard found nothing.
+ *
+ * Each hit comes back with the verdict that produced it, so the caller can
+ * tell "same birth date" from "same name, nothing to compare".
  */
-async function findDuplicatesInYear(childName, year, excludeId = null) {
+async function findDuplicatesInYear(childName, year, excludeId = null, subject = null) {
   if (!childName || !year) return [];
   const bounds = academicYearBounds(year);
   const candidates = await Registration.find({
@@ -54,9 +64,57 @@ async function findDuplicatesInYear(childName, year, excludeId = null) {
       }] : []),
     ],
   }).lean();
+
   const want = normalizeChildName(childName);
-  return candidates.filter(c => normalizeChildName(c.child_name) === want
+  const sameName = candidates.filter(c => normalizeChildName(c.child_name) === want
     && String(c._id) !== String(excludeId));
+  if (!sameName.length) return [];
+
+  // The child records hold the ID numbers the registrations do not.
+  const ids = [...sameName.map(c => c._id), ...(subject?._id ? [subject._id] : [])];
+  const children = await Child.find({ registration_id: { $in: ids } })
+    .select('registration_id child_id_number birth_date').lean();
+  const childByReg = new Map(children.map(c => [String(c.registration_id), c]));
+
+  const me = subject || { child_name: childName };
+  return sameName
+    .map((c) => {
+      const { verdict, reason } = compareChildIdentity(
+        me, c, childByReg.get(String(me._id)) || null, childByReg.get(String(c._id)) || null,
+      );
+      return { ...c, match_verdict: verdict, match_reason: reason };
+    })
+    .filter(c => c.match_verdict !== 'different');
+}
+
+/**
+ * The 409 body for a clash, with the evidence that produced it.
+ *
+ * `confidence` is the difference between "same birth date" and "same name,
+ * nothing to compare". The second is still worth stopping on, but the message
+ * has to admit what it does not know — otherwise the override becomes a reflex
+ * and stops meaning anything.
+ */
+function duplicatePayload(childName, year, clash) {
+  const confirmed = clash.some(d => d.match_verdict === 'same');
+  return {
+    error: confirmed
+      ? `${childName} כבר רשום/ה לשנת ${year}`
+      : `קיים רישום בשם ${childName} לשנת ${year} — לא ניתן לוודא אם זה אותו ילד/ה`,
+    code: 'DUPLICATE_IN_YEAR',
+    confidence: confirmed ? 'confirmed' : 'possible',
+    duplicates: clash.map(d => ({
+      id: d._id,
+      child_name: d.child_name,
+      parent_name: d.parent_name,
+      monthly_fee: d.monthly_fee,
+      status: d.status,
+      start_date: d.start_date,
+      child_birth_date: d.child_birth_date,
+      match_verdict: d.match_verdict,
+      match_reason: d.match_reason,
+    })),
+  };
 }
 
 async function getAll(req, res, next) {
@@ -167,10 +225,38 @@ async function getAll(req, res, next) {
     // usually a renewal typed with this year's dates — and until now nothing
     // said so: the child simply appeared twice in collections, once with a
     // year of payments and once demanding a full year of them.
-    const dupCount = new Map();
+    //
+    // A shared name only puts two rows in the same group; whether they are one
+    // child is decided per pair, on the birth date. Two children called אופק
+    // in one year are not a duplicate, and must not be reported as one.
+    const groups = new Map();
     for (const r of registrations) {
       const key = `${normalizeChildName(r.child_name)}|${academicYearOf(r) || '?'}`;
-      dupCount.set(key, (dupCount.get(key) || 0) + 1);
+      groups.set(key, [...(groups.get(key) || []), r]);
+    }
+    const childByReg = new Map();
+    const grouped = [...groups.values()].filter(g => g.length > 1).flat();
+    if (grouped.length) {
+      const kids = await Child.find({ registration_id: { $in: grouped.map(r => r._id) } })
+        .select('registration_id child_id_number birth_date').lean();
+      for (const k of kids) childByReg.set(String(k.registration_id), k);
+    }
+    const verdictById = new Map();
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      for (const a of group) {
+        for (const b of group) {
+          if (String(a._id) === String(b._id)) continue;
+          const { verdict } = compareChildIdentity(
+            a, b, childByReg.get(String(a._id)) || null, childByReg.get(String(b._id)) || null,
+          );
+          if (verdict === 'different') continue;
+          // 'same' outranks 'unknown': one confirmed match is enough.
+          if (verdict === 'same' || !verdictById.has(String(a._id))) {
+            verdictById.set(String(a._id), verdict);
+          }
+        }
+      }
     }
 
     const formatted = registrations.map(r => {
@@ -191,7 +277,11 @@ async function getAll(req, res, next) {
         configuration,
         id: r._id,
         academic_year: academicYear,
-        duplicate_in_year: (dupCount.get(`${normalizeChildName(r.child_name)}|${academicYear || '?'}`) || 0) > 1,
+        // Confirmed same child — same name, same birth date (or same ID).
+        duplicate_in_year: verdictById.get(String(r._id)) === 'same',
+        // Same name, nothing that can confirm or rule it out. Worth showing,
+        // not worth asserting: it may well be a second child of that name.
+        possible_duplicate_in_year: verdictById.get(String(r._id)) === 'unknown',
         classroom_name: r.classroom_id?.name || null,
         classroom_id: r.classroom_id?._id || r.classroom_id,
         has_signature: hasSignature,
@@ -258,23 +348,14 @@ async function create(req, res, next) {
 
     // The same child, twice, in the same year. It is nearly always a renewal
     // filled in with this year's dates, and it is much cheaper to say so now
-    // than to find it in the collections table in March.
+    // than to find it in the collections table in March. A different child who
+    // happens to share the name is let through without a word — the birth date
+    // has already ruled it out by here.
     if (!allow_duplicate) {
-      const clash = await findDuplicatesInYear(child_name, year);
-      if (clash.length) {
-        return res.status(409).json({
-          error: `${child_name} כבר רשום/ה לשנת ${year}`,
-          code: 'DUPLICATE_IN_YEAR',
-          duplicates: clash.map(d => ({
-            id: d._id,
-            child_name: d.child_name,
-            parent_name: d.parent_name,
-            monthly_fee: d.monthly_fee,
-            status: d.status,
-            start_date: d.start_date,
-          })),
-        });
-      }
+      const clash = await findDuplicatesInYear(child_name, year, null, {
+        child_name, child_birth_date, parent_id_number, parent_phone,
+      });
+      if (clash.length) return res.status(409).json(duplicatePayload(child_name, year, clash));
     }
 
     const unique_id = generateUniqueId('REG');
@@ -454,17 +535,8 @@ async function setAcademicYear(req, res, next) {
     }
 
     if (!req.body?.allow_duplicate) {
-      const clash = await findDuplicatesInYear(reg.child_name, target, reg._id);
-      if (clash.length) {
-        return res.status(409).json({
-          error: `${reg.child_name} כבר רשום/ה לשנת ${target}`,
-          code: 'DUPLICATE_IN_YEAR',
-          duplicates: clash.map(d => ({
-            id: d._id, child_name: d.child_name, parent_name: d.parent_name,
-            monthly_fee: d.monthly_fee, status: d.status, start_date: d.start_date,
-          })),
-        });
-      }
+      const clash = await findDuplicatesInYear(reg.child_name, target, reg._id, reg);
+      if (clash.length) return res.status(409).json(duplicatePayload(reg.child_name, target, clash));
     }
 
     const delta = Number(target.split('-')[0]) - Number((from || target).split('-')[0]);
@@ -640,7 +712,11 @@ async function renew(req, res, next) {
     // on the year the registration is FILED under and on the child alone — the
     // parent name is not part of it, because the same child is regularly
     // registered by one parent and renewed by the other.
-    const clash = (await findDuplicatesInYear(source.child_name, targetYear, source._id))[0];
+    // Only a confirmed match is reused. A child who merely shares the name gets
+    // her own registration — reusing hers would hand one family the other's
+    // contract to sign.
+    const clash = (await findDuplicatesInYear(source.child_name, targetYear, source._id, source))
+      .find(c => c.match_verdict === 'same');
     const existing = clash ? await Registration.findById(clash._id) : null;
     if (existing) {
       existing.access_token = generateAccessToken();

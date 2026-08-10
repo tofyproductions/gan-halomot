@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Typography, TextField, Button, MenuItem,
   FormControlLabel, Checkbox, Stack, Divider, Alert, IconButton,
-  Tooltip, InputAdornment,
+  Tooltip, InputAdornment, Dialog, DialogTitle, DialogContent, DialogActions,
 } from '@mui/material';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
@@ -42,6 +42,8 @@ export default function RegistrationWizard() {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
   const [errors, setErrors] = useState({});
+  // The server refused this as an existing registration for the same child.
+  const [duplicate, setDuplicate] = useState(null);
 
   // Load classrooms
   useEffect(() => {
@@ -119,8 +121,16 @@ export default function RegistrationWizard() {
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  /**
+   * `force` re-sends a registration the server refused as a duplicate.
+   *
+   * The refusal is on the child, not the name: same name AND same birth date.
+   * Two children called אופק with different birth dates never reach here. What
+   * does reach here is a name with no birth date to compare, and that is worth
+   * one question rather than a silent second row in the collections table.
+   */
+  const handleSubmit = async (e, force = false) => {
+    e?.preventDefault?.();
     if (!validate()) return;
 
     setSaving(true);
@@ -144,6 +154,7 @@ export default function RegistrationWizard() {
           fri_time: form.fri_time,
           manual_import: form.manual_import,
         },
+        allow_duplicate: force,
       };
 
       let res;
@@ -163,7 +174,12 @@ export default function RegistrationWizard() {
         navigate('/');
       }
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בשמירת הרישום');
+      const data = err.response?.data;
+      if (data?.code === 'DUPLICATE_IN_YEAR') {
+        setDuplicate(data);
+      } else {
+        toast.error(data?.error || 'שגיאה בשמירת הרישום');
+      }
     } finally {
       setSaving(false);
     }
@@ -442,6 +458,47 @@ export default function RegistrationWizard() {
           </Box>
         </CardContent>
       </Card>
+
+      {/* The child already has a registration for this year. Stopping here is
+          the point — the alternative is finding it in the collections table in
+          March, by which time the family has been billed twice. */}
+      <Dialog open={!!duplicate} onClose={() => setDuplicate(null)} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {duplicate?.confidence === 'confirmed' ? 'הילד/ה כבר רשום/ה' : 'קיים רישום בשם זהה'}
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity={duplicate?.confidence === 'confirmed' ? 'error' : 'warning'} sx={{ mb: 2 }}>
+            {duplicate?.error}
+          </Alert>
+          <Stack spacing={0.5}>
+            {(duplicate?.duplicates || []).map(d => (
+              <Typography key={d.id} variant="body2">
+                {d.child_name} · {d.parent_name} · {formatCurrency(d.monthly_fee)}
+                {d.child_birth_date && ` · נולד/ה ${new Date(d.child_birth_date).toLocaleDateString('he-IL')}`}
+                {d.match_reason && (
+                  <Typography component="span" variant="caption" color="text.secondary"> ({d.match_reason})</Typography>
+                )}
+              </Typography>
+            ))}
+          </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+            {duplicate?.confidence === 'confirmed'
+              ? 'אם הכוונה היא לרשום לשנה הבאה — סגור/י כאן ושנה/י את תאריך ההתחלה, או השתמש/י ב"הנפקת חוזה לשנה החדשה" מדף מעקב הרישום.'
+              : 'אם אלה שני ילדים שונים עם אותו שם — אפשר להמשיך. מומלץ למלא תאריך לידה כדי שהמערכת תדע להבחין ביניהם בהמשך.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDuplicate(null)}>חזרה לעריכה</Button>
+          <Button
+            color={duplicate?.confidence === 'confirmed' ? 'error' : 'primary'}
+            variant="contained"
+            disabled={saving}
+            onClick={() => { setDuplicate(null); handleSubmit(null, true); }}
+          >
+            צור רישום נוסף בכל זאת
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
