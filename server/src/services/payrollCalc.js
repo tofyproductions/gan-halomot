@@ -563,6 +563,42 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     baseSalary = guaranteedRegular + guaranteedOt + completion + supplementApplied;
   }
 
+  // --- Base pay split (single source of truth) -------------------------------
+  // base_salary is ONE number that already contains regular pay, the OT premium
+  // and (for תקן) the completion/supplement. Every screen that wants to show
+  // "שכר בסיס" and "שעות נוספות" as separate lines has to decompose it, and a
+  // screen that decomposes it on its own drifts: the employee's own preview was
+  // reading components.ot_125 — a key that never existed — and so showed ₪0 of
+  // overtime for a month that contained some.
+  //
+  // The parts below ALWAYS sum to base_salary, so a consumer can show any subset
+  // and reconcile the remainder without double-counting anything.
+  const paySplit = { regular: 0, ot_125: 0, ot_150: 0, completion: 0, supplement: 0 };
+  if (employee.salary_type === 'hourly') {
+    if (branchBuckets.size > 0 && branchRateMap.size > 0) {
+      for (const [bId, bk] of branchBuckets) {
+        const r = rateForBranch(bId);
+        paySplit.regular += (bk.regular_hours || 0) * r.hourly_rate;
+        paySplit.ot_125  += (bk.ot_125_hours || 0) * r.hourly_rate * 1.25;
+        paySplit.ot_150  += (bk.ot_150_hours || 0) * r.hourly_rate * 1.5;
+      }
+    } else {
+      paySplit.regular = regHours * rates.hourly_rate;
+      paySplit.ot_125  = ot125Hours * rates.hourly_rate * 1.25;
+      paySplit.ot_150  = ot150Hours * rates.hourly_rate * 1.5;
+    }
+  } else if (tekenBreakdown) {
+    paySplit.regular    = tekenBreakdown.regular_pay;
+    paySplit.ot_125     = tekenBreakdown.ot125_pay;
+    paySplit.ot_150     = tekenBreakdown.ot150_pay;
+    paySplit.completion = tekenBreakdown.completion;
+    paySplit.supplement = tekenBreakdown.supplement_applied;
+  } else {
+    // תקן with no required_hours configured: the whole agreed salary, undivided.
+    paySplit.regular = baseSalary;
+  }
+  for (const k of Object.keys(paySplit)) paySplit[k] = Math.round(paySplit[k] * 100) / 100;
+
   // --- Extras ---
   // Travel: prefer the new per_day/monthly_flat fields. Legacy employees
   // (created before the travel_mode field existed) default to 16 ₪/day if
@@ -656,6 +692,9 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     rates,
     components: {
       base_salary:    Math.round(baseSalary * 100) / 100,
+      // Decomposition of base_salary — regular / OT premium / completion /
+      // supplement. Parts sum to base_salary; never add them ON TOP of it.
+      pay_split:      paySplit,
       travel,
       meal_vouchers:  meal,
       recreation_monthly: Math.round(recreation * 100) / 100,

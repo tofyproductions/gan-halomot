@@ -895,6 +895,12 @@ async function getMonth(req, res, next) {
         tb.completion_reduced_by_sick = Math.round(completionOffset * 100) / 100;
         breakdown.components.base_salary =
           Math.round((Number(breakdown.components.base_salary || 0) - completionOffset) * 100) / 100;
+        // pay_split decomposes base_salary — the completion it names is the one
+        // just reduced, so it has to shrink with it or the parts stop summing.
+        if (breakdown.components.pay_split) {
+          breakdown.components.pay_split.completion =
+            Math.round((Number(breakdown.components.pay_split.completion || 0) - completionOffset) * 100) / 100;
+        }
         breakdown.estimated_total = Math.round((breakdown.estimated_total - completionOffset) * 100) / 100;
       }
 

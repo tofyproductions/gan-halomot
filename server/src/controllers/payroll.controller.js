@@ -2666,58 +2666,120 @@ async function salarySummary(req, res, next) {
 // --- Employee self-service endpoints ---
 
 /**
- * GET /api/payroll/my-salary-preview
- * Returns salary preview for the logged-in employee (current month)
+ * GET /api/payroll/my-salary-preview?month=YYYY-MM
+ * Returns the salary preview for the logged-in employee (defaults to this month).
+ *
+ * This reads the SAME row the manager's salary table reads, via fetchMonthData →
+ * getMonth. It used to call calculateMonthlySalary directly, which is only the
+ * first stage: the manager's table then layers vacation pay, sick pay, holiday
+ * pay, employer closures, bonuses, approved extra hours and every deduction on
+ * top of that number. An employee with 13 vacation days from the gan's calendar
+ * was shown a total that was ₪4,370 short of what her manager was looking at,
+ * and no line on the screen explained the gap.
+ *
+ * Every earning and deduction is returned as a LINE, and the lines are
+ * reconciled against the authoritative total — so a layer added to the manager's
+ * table tomorrow shows up here as an amount instead of silently widening a gap.
  */
 async function mySalaryPreview(req, res, next) {
   try {
-    const emp = await Employee.findOne({ israeli_id: req.user.id_number || '', is_active: true }).lean()
-      || await Employee.findOne({ full_name: { $regex: new RegExp(`^${(req.user.full_name || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }, is_active: true }).lean();
-
+    const emp = await resolveSelfEmployee(req);
     if (!emp) {
-      return res.json({ base_salary: 0, overtime: 0, travel: 0, total: 0, loans: 0, message: 'לא נמצא עובד מקושר' });
+      return res.json({ lines: [], total: 0, loans: 0, message: 'לא נמצא עובד מקושר' });
     }
 
     const now = new Date();
-    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const [y, m] = month.split('-').map(Number);
-    const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
-    const to = new Date(Date.UTC(y, m, 2, 0, 0, 0));
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || '')
+      ? req.query.month
+      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    // Fetch punches from ALL branches (cross-branch support)
-    const punches = await Punch.find({
-      employee_id: emp._id,
-      timestamp: { $gte: from, $lt: to },
-      ignored: { $ne: true },
-    }).sort({ timestamp: 1 }).lean();
-
-    const b = calculateMonthlySalary(emp, punches, month);
-
-    // Build per-branch breakdown
-    const branchIds = [...new Set(punches.map(p => String(p.branch_id)))];
-    const branches = await Branch.find({ _id: { $in: branchIds } }).select('name').lean();
-    const branchMap = {};
-    for (const br of branches) branchMap[String(br._id)] = br.name;
-
-    const byBranch = {};
-    for (const p of punches) {
-      const bId = String(p.branch_id);
-      if (!byBranch[bId]) byBranch[bId] = { name: branchMap[bId] || 'לא ידוע', count: 0 };
-      byBranch[bId].count++;
+    // The whole branch is computed and her row picked out of it — the same call
+    // the accountant's export and the hours report already make. The synthetic
+    // admin context is about SCOPE, not exposure: she may punch at a branch her
+    // own user record doesn't name, and only her own row leaves this function.
+    const { fetchMonthData } = require('./payrollMonth.controller');
+    const data = await fetchMonthData(
+      { month, branch: String(emp.branch_id?._id || emp.branch_id || '') },
+      { role: 'system_admin' },
+    );
+    const row = (data?.rows || []).find(r => String(r.employee_id) === String(emp._id));
+    if (!row) {
+      return res.json({ lines: [], total: 0, loans: 0, month, message: 'אין נתוני שכר לחודש זה' });
     }
 
+    const b = row.breakdown || {};
+    const c = b.components || {};
+    const split = c.pay_split || {};
+    const ded = b.deductions || {};
+    // Holiday pay follows the manager's rule: an entered amount wins over the
+    // automatic one (payrollMonth.controller — "fold holiday pay into the total").
+    const holidayPay = Number(row.manual?.holiday_pay) > 0
+      ? Number(row.manual.holiday_pay)
+      : (row.holiday_pay_auto?.total_pay || 0);
+
+    const lines = [];
+    const add = (key, label, amount, note) => {
+      const v = Math.round((Number(amount) || 0) * 100) / 100;
+      if (v !== 0) lines.push({ key, label, amount: v, ...(note ? { note } : {}) });
+    };
+
+    add('base', 'שכר בסיס', split.regular != null ? split.regular : c.base_salary);
+    add('overtime', 'שעות נוספות', (split.ot_125 || 0) + (split.ot_150 || 0));
+    add('completion', 'השלמת שכר', split.completion);
+    add('supplement', 'תוספת מעבר להתחייבות', split.supplement);
+    add('vacation', 'דמי חופשה', row.vacation_pay,
+      row.vacation_eff_days ? `${row.vacation_eff_days} ימים` : '');
+    add('sick', 'דמי מחלה', row.sick_info?.pay,
+      row.sick_info?.paid_days ? `${row.sick_info.paid_days} ימים` : '');
+    add('holiday', 'דמי חגים', holidayPay);
+    add('special_days', 'ימים מיוחדים', row.special_days?.pay);
+    add('extra_hours', 'שעות נוספות מאושרות', row.partial_absence?.extra_pay);
+    add('travel', 'נסיעות', c.travel);
+    add('meals', 'ארוחות', c.meal_vouchers);
+    add('recreation', 'הבראה', c.recreation_monthly);
+    add('bonuses', 'בונוסים', c.bonuses);
+    add('hourly_bonus', 'תוספת שעתית', row.bonus?.effective);
+    add('absence', 'ניכוי היעדרות', -(row.absence?.deduction || 0));
+    add('partial_absence', 'ניכוי שעות חסרות', -(row.partial_absence?.deduction || 0));
+    add('loans', 'ניכוי הלוואה', -(ded.loans || 0));
+
+    // The total is the authoritative number — the one the manager sees. Anything
+    // it contains that has no line above is surfaced rather than swallowed, so
+    // the screen always adds up to the number printed at the bottom of it.
+    const total = Math.round((Number(b.estimated_total) || 0) * 100) / 100;
+    const listed = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+    const residual = Math.round((total - listed) * 100) / 100;
+    if (Math.abs(residual) >= 1) {
+      lines.push({
+        key: 'other',
+        label: residual > 0 ? 'רכיבים נוספים' : 'ניכויים נוספים',
+        amount: residual,
+        note: 'לפירוט פנו למנהלת',
+      });
+    }
+
+    // Branches she actually punched at this month, named for the screen.
+    const branchNames = Object.keys(b.per_branch || {})
+      .map(id => (data.branches_in_view || []).find(x => x.id === id)?.name)
+      .filter(Boolean);
+
     res.json({
-      base_salary: Math.round(b.components.base_salary),
-      overtime: Math.round((b.components.ot_125 || 0) + (b.components.ot_150 || 0)),
-      travel: Math.round(b.components.travel || 0),
-      meals: Math.round(b.components.meal_vouchers || 0),
-      bonuses: Math.round(b.components.bonuses || 0),
-      loans: Math.round(b.deductions.loans || 0),
-      total: Math.round(b.estimated_total),
-      hours_total: Math.round(b.hours.total * 100) / 100,
-      days_worked: b.hours.days_worked,
       month,
-      branches_breakdown: Object.values(byBranch),
+      employee_name: emp.full_name,
+      salary_type: row.salary_type,
+      salary_is_net: !!row.salary_is_net,
+      lines,
+      total,
+      hours_total: Math.round((b.hours?.total || 0) * 100) / 100,
+      days_worked: b.hours?.days_worked || 0,
+      loans: Math.round((ded.loans || 0) * 100) / 100,
+      loans_remaining: Math.round((row.loans_info?.loans || [])
+        .reduce((s, l) => s + (Number(l.remaining) || 0), 0) * 100) / 100,
+      branches: branchNames,
+      // Back-compat for any older client still reading flat keys.
+      base_salary: Math.round(Number(c.base_salary) || 0),
+      overtime: Math.round((split.ot_125 || 0) + (split.ot_150 || 0)),
+      travel: Math.round(Number(c.travel) || 0),
     });
   } catch (err) { next(err); }
 }

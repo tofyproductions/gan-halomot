@@ -2488,6 +2488,14 @@ function VacationCell({ row }) {
 function paySplit(row) {
   const tb = row.breakdown?.components?.teken_breakdown;
   const h = row.breakdown?.hours || {};
+  // The server now decomposes base_salary itself (components.pay_split) and the
+  // employee's own preview reads the same numbers. Prefer it, so the two screens
+  // cannot drift apart; the branches below stay as the fallback for a row served
+  // by an older deploy.
+  const ps = row.breakdown?.components?.pay_split;
+  if (ps && (row.salary_type === 'hourly' || tb)) {
+    return { reg: ps.regular || 0, ot125: ps.ot_125 || 0, ot150: ps.ot_150 || 0 };
+  }
   if (row.salary_type === 'global' && tb) {
     return { reg: tb.regular_pay || 0, ot125: tb.ot125_pay || 0, ot150: tb.ot150_pay || 0 };
   }
