@@ -3402,6 +3402,12 @@ export default function PayslipAudit() {
       setExpanded(null);
       const branches = res.data.per_branch?.length || validRows.length;
       toast.success(`הושוו ${res.data.payslips_in_pdf} תלושים מול ${res.data.rows_in_table} שורות (${branches} סניפים)`);
+      // Two files tagged with the same branch are now concatenated instead of
+      // overwriting each other. Say so — silently merging is how a wrong tag
+      // stays invisible.
+      for (const m of res.data.merged_branches || []) {
+        toast.info(`"${m.branch}": ${m.parts.length} קבצים אוחדו לקובץ אחד (${m.total_pages} עמודים)`, { autoClose: 8000 });
+      }
       // Refresh history with the just-saved run at the top
       fetchHistory();
     } catch (err) {

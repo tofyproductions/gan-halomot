@@ -7,6 +7,7 @@ import PeopleIcon from '@mui/icons-material/People';
 import SupervisorAccountIcon from '@mui/icons-material/SupervisorAccount';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SettingsIcon from '@mui/icons-material/Settings';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useWorkMonth } from '../../hooks/useWorkMonth';
@@ -14,6 +15,7 @@ import {
   ManagerDistributionDialog, PayslipDistributionDialog, BranchManagerEmailsDialog,
 } from './PayslipAudit';
 import HoursDistributionDialog from '../attendance/HoursDistributionDialog';
+import DirectPayslipDialog from './DirectPayslipDialog';
 
 /**
  * Distribution hub — sends payslips (from an approved audit) and monthly hours
@@ -28,6 +30,7 @@ export default function Distribution() {
   const [empDialog, setEmpDialog] = useState({ open: false, audit: null });
   const [emailsOpen, setEmailsOpen] = useState(false);
   const [hoursOpen, setHoursOpen] = useState(false);
+  const [directOpen, setDirectOpen] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -96,6 +99,20 @@ export default function Distribution() {
         )}
       </Paper>
 
+      {/* ── Direct send, no audit ── */}
+      <Paper variant="outlined" sx={{ borderRadius: 3, mb: 2, p: 2 }}>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, flex: 1 }}>הפצה ישירה (ללא ביקורת)</Typography>
+          <Button variant="contained" color="warning" startIcon={<UploadFileIcon />} onClick={() => setDirectOpen(true)}>
+            העלאה ושליחה
+          </Button>
+        </Stack>
+        <Typography variant="caption" color="text.secondary">
+          קובץ סופי שכבר נבדק, או עמוד בודד של עובד/ת שנשכח/ה בקובץ הגדול. כל עמוד מותאם לפי ת״ז, בוחרים למי לשלוח,
+          והתלוש מתויק ב״התלושים שלי״ והחודש מסומן כשולם — כמו בהפצה מביקורת. אין כאן השוואה מול טבלת שכר.
+        </Typography>
+      </Paper>
+
       {/* ── Hours reports ── */}
       <Paper variant="outlined" sx={{ borderRadius: 3, p: 2 }}>
         <Typography variant="h6" sx={{ fontWeight: 800, mb: 1 }}>הפצת דוחות שעות</Typography>
@@ -115,6 +132,7 @@ export default function Distribution() {
       <PayslipDistributionDialog open={empDialog.open} audit={empDialog.audit} onClose={() => setEmpDialog({ open: false, audit: null })} />
       <BranchManagerEmailsDialog open={emailsOpen} onClose={() => setEmailsOpen(false)} />
       <HoursDistributionDialog open={hoursOpen} onClose={() => setHoursOpen(false)} month={month} />
+      <DirectPayslipDialog open={directOpen} onClose={() => setDirectOpen(false)} defaultMonth={month} />
     </Box>
   );
 }

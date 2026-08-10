@@ -48,6 +48,69 @@ async function storePayslipPdfDb(auditId, branch, buffer, kind = 'original') {
     console.error('storePayslipPdfDb failed:', err.message);
   }
 }
+/** Branch tags arrive with newlines and double spaces; compare them flattened. */
+const normalizeBranchTag = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Two uploads tagged with the SAME branch used to destroy each other.
+ *
+ * Every place a payslip PDF is kept — the file on disk and the row in Mongo —
+ * is keyed by (audit, branch, kind), so the second file simply overwrote the
+ * first. The audit itself was computed from both, so its page numbers pointed
+ * into a PDF that no longer existed: the distribution then either found no
+ * page at all, or, if the surviving file was long enough, cut out SOMEONE
+ * ELSE'S payslip and mailed it. Nothing in the client or the server said a
+ * word.
+ *
+ * Rejecting the second file would be safe but wrong — a branch whose payslips
+ * arrive in two files is an ordinary thing, and the person who forgot someone
+ * in the big file has exactly one page to add. So the files are CONCATENATED
+ * in upload order into one buffer per branch. Page numbers are then computed
+ * against the merged document, which is also the one that gets stored, so
+ * every later page extraction lines up by construction.
+ *
+ * @returns {{ entries, merged }} `merged` describes what was combined, for the UI.
+ */
+async function coalesceBranchEntries(entries) {
+  const groups = new Map();
+  for (const e of entries) {
+    const key = normalizeBranchTag(e.branch);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+
+  const out = [];
+  const merged = [];
+  for (const list of groups.values()) {
+    if (list.length === 1) { out.push(list[0]); continue; }
+
+    const { PDFDocument } = require('pdf-lib');
+    const combined = await PDFDocument.create();
+    const parts = [];
+    for (const e of list) {
+      const src = await PDFDocument.load(e.file.buffer);
+      const indices = src.getPageIndices();
+      const copied = await combined.copyPages(src, indices);
+      copied.forEach((p) => combined.addPage(p));
+      parts.push({ filename: e.file.originalname, pages: indices.length });
+    }
+    const buffer = Buffer.from(await combined.save());
+    out.push({
+      idx: list[0].idx,
+      branch: list[0].branch,
+      file: {
+        buffer,
+        originalname: list.map((e) => e.file.originalname).join(' + '),
+        size: buffer.length,
+      },
+    });
+    merged.push({ branch: list[0].branch, parts, total_pages: combined.getPageCount() });
+  }
+
+  out.sort((a, b) => a.idx - b.idx);
+  return { entries: out, merged };
+}
+
 // Reused to build the "table" side from the in-system computed salary data,
 // so the audit can run against the system table (payslips-only upload).
 const { getMonth } = require('./payrollMonth.controller');
@@ -316,6 +379,13 @@ async function runAuditMulti(req, res) {
   }
 
   try {
+    // Files sharing a branch tag become one document before anything reads a
+    // page number off them — see coalesceBranchEntries.
+    const coalesced = await coalesceBranchEntries(payslipEntries);
+    payslipEntries.length = 0;
+    payslipEntries.push(...coalesced.entries);
+    const mergedBranches = coalesced.merged;
+
     const sheet = typeof req.body?.sheet_name === 'string' ? req.body.sheet_name : undefined;
     // Parse the table once, then filter per branch in the loop.
     const tableResult = parseSalaryTable(tableFile.buffer, { sheetName: sheet });
@@ -545,6 +615,7 @@ async function runAuditMulti(req, res) {
 
     res.json({
       ...merged,
+      merged_branches: mergedBranches,
       available_sheets: tableResult.available_sheets,
       available_branches: [...new Set(tableResult.rows.map((r) => r.branch).filter(Boolean))],
       saved_audit_id: saved?._id || null,
@@ -1020,6 +1091,12 @@ async function approveAudit(req, res) {
     }
 
     if (approvedFiles.length > 0) {
+      // Same branch twice would overwrite here too, and this is the copy the
+      // distribution actually reads.
+      const { entries: approvedEntries } = await coalesceBranchEntries(approvedFiles);
+      approvedFiles.length = 0;
+      approvedFiles.push(...approvedEntries);
+
       ensureDir(path.join(PDF_STORAGE_DIR, String(doc._id), 'approved'));
       for (const entry of approvedFiles) {
         fs.writeFileSync(approvedPdfStoragePath(doc._id, entry.branch), entry.file.buffer);
@@ -1407,7 +1484,7 @@ async function runFixRound(doc, entries, { source = 'internal', user = null, not
 }
 
 /** Pull the per-branch payslip uploads out of a multipart request. */
-function payslipEntriesFrom(req) {
+async function payslipEntriesFrom(req) {
   const entries = [];
   for (const key of Object.keys(req.files || {})) {
     const m = key.match(/^payslip_file_(\d+)$/);
@@ -1423,7 +1500,11 @@ function payslipEntriesFrom(req) {
     entries.push({ idx, file, branch });
   }
   entries.sort((a, b) => a.idx - b.idx);
-  return entries;
+  // A correction round stores its PDFs under kind `fix_<n>` keyed by branch, so
+  // two files with the same tag would overwrite each other exactly as they did
+  // in the original upload. Merge them instead.
+  const { entries: coalesced } = await coalesceBranchEntries(entries);
+  return coalesced;
 }
 
 /**
@@ -1434,7 +1515,7 @@ async function createFixRound(req, res) {
   try {
     const doc = await PayslipAuditRecord.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
-    const entries = payslipEntriesFrom(req);
+    const entries = await payslipEntriesFrom(req);
     if (entries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
     const round = await runFixRound(doc, entries, { source: 'internal', user: req.user, note: req.body.note });
     res.json({ success: true, round });
@@ -1797,7 +1878,7 @@ async function publicFixUpload(req, res) {
   try {
     const doc = await auditByFixToken(req.params.token);
     if (!doc) return res.status(404).json({ error: 'הקישור אינו תקף או שפג תוקפו' });
-    const entries = payslipEntriesFrom(req);
+    const entries = await payslipEntriesFrom(req);
     if (entries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
     const round = await runFixRound(doc, entries, { source: 'accountant', note: req.body.note });
     // The uploader gets a receipt, not the verdicts — grading the office's own
@@ -1950,6 +2031,13 @@ async function runAuditSystem(req, res) {
   if (payslipEntries.length === 0) return res.status(400).json({ error: 'נדרש לפחות קובץ תלושים אחד' });
 
   try {
+    // Files sharing a branch tag become one document before anything reads a
+    // page number off them — see coalesceBranchEntries.
+    const coalesced = await coalesceBranchEntries(payslipEntries);
+    payslipEntries.length = 0;
+    payslipEntries.push(...coalesced.entries);
+    const mergedBranches = coalesced.merged;
+
     const monthData = await fetchSystemMonth(req.user, month);
     // Freelancers issue an invoice, not a payslip — exclude them from the audit.
     const allRows = (monthData.rows || []).filter((r) => !r.is_freelancer).map(systemRowToTableRow);
@@ -2036,6 +2124,7 @@ async function runAuditSystem(req, res) {
 
     res.json({
       ...merged,
+      merged_branches: mergedBranches,
       from_system_table: true,
       available_sheets: [],
       available_branches: [...new Set(allRows.map((r) => r.branch).filter(Boolean))],
@@ -2150,6 +2239,76 @@ function realEmployeeEmail(emp) {
     return e;
   }
   return null;
+}
+
+/**
+ * Mail one employee their payslip page, then file it.
+ *
+ * Shared by the audit-driven distribution and the direct one, because the part
+ * that matters is not the email — it is the two side effects after it. A
+ * payslip that goes out without landing in SavedPayslip is invisible in
+ * "התלושים שלי", and a month never marked paid looks outstanding forever. Two
+ * copies of that would drift.
+ *
+ * `toOverride` is test mode: every message goes to one address and NEITHER side
+ * effect runs, so a dry run cannot mark a month paid.
+ *
+ * @returns {{ status: 'sent'|'no_email', email: string|null }}
+ */
+async function deliverPayslipToEmployee({
+  emp, month, pageBuf, branch = '', page = null, auditId = null,
+  includeHours = true, hoursPdf = null, toOverride = '', userId = null,
+}) {
+  const email = toOverride || realEmployeeEmail(emp);
+  if (!email) return { status: 'no_email', email: null };
+
+  const { hoursReportEmailAttachments } = require('./payroll.controller');
+  const fileAttachments = [{
+    filename: `payslip-${month}.pdf`,
+    contentBase64: pageBuf.toString('base64'),
+    contentType: 'application/pdf',
+  }];
+  const attachments = [];
+  if (includeHours) {
+    if (hoursPdf) {
+      fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
+    } else {
+      const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
+      if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+    }
+  }
+
+  const introBody = includeHours
+    ? `<p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p>`
+    : `<p>מצורף תלוש השכר שלך לחודש ${month}.</p>`;
+  await dispatchEmail({
+    to: email,
+    subject: `${includeHours ? 'תלוש שכר ודוח שעות' : 'תלוש שכר'} — ${month}${toOverride ? ` — ${emp.full_name} (בדיקה)` : ''}`,
+    html: `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`,
+    fileAttachments,
+    attachments,
+  });
+
+  if (!toOverride) {
+    try {
+      // Upsert on (employee, month): re-sending a corrected payslip REPLACES
+      // the archived one rather than leaving the employee with two.
+      await SavedPayslip.findOneAndUpdate(
+        { employee_id: emp._id, year_month: month },
+        {
+          employee_id: emp._id, israeli_id: emp.israeli_id || '', year_month: month, branch,
+          data: pageBuf, audit_id: auditId, page, sent_to: email, sent_at: new Date(), sent_by: userId,
+        },
+        { upsert: true },
+      );
+      await PayrollMonth.findOneAndUpdate(
+        { employee_id: emp._id, month },
+        { payslip_paid: true, payslip_paid_at: new Date(), payslip_sent_to: email },
+      );
+    } catch (se) { console.error('archive payslip failed:', emp.full_name, se.message); }
+  }
+
+  return { status: 'sent', email };
 }
 
 async function saveDistributionLog(auditId, key, payload) {
@@ -2275,7 +2434,7 @@ async function sendPayslipsToEmployees(req, res) {
     res.json({ ok: true, queued: true, count: selectedIds ? selectedIds.size : results.length });
 
     runDistributionJob(doc._id, 'employees', userId, async () => {
-      const { hoursReportEmailAttachments, renderHoursPdfPerEmployee } = require('./payroll.controller');
+      const { renderHoursPdfPerEmployee } = require('./payroll.controller');
       const pdfCache = new Map();
       const out = [];
       // Pre-render every selected employee's hours PDF in ONE browser pass —
@@ -2303,52 +2462,21 @@ async function sendPayslipsToEmployees(req, res) {
           const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
           if (!emp) { out.push({ name: dispName, status: 'no_match' }); continue; }
           if (selectedIds && !selectedIds.has(String(emp._id))) continue; // not selected for this send
-          const email = toOverride || realEmployeeEmail(emp);
-          if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
           if (!page || !branch) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
           if (!pdfCache.has(branch)) pdfCache.set(branch, await loadBranchPdf(doc._id, branch));
           const bytes = pdfCache.get(branch);
           if (!bytes) { out.push({ name: emp.full_name, status: 'no_pdf' }); continue; }
           const pageBuf = await extractPage(bytes, page);
           if (!pageBuf) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
-          const fileAttachments = [{ filename: `payslip-${month}.pdf`, contentBase64: pageBuf.toString('base64'), contentType: 'application/pdf' }];
-          const attachments = [];
-          if (includeHours) {
-            const pre = hoursPdfByEmp.get(String(emp._id));
-            if (pre) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
-            else {
-              const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
-              if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
-            }
-          }
-          const introBody = includeHours
-            ? `<p>מצורפים תלוש השכר שלך ודוח השעות שלך לחודש ${month}.</p>`
-            : `<p>מצורף תלוש השכר שלך לחודש ${month}.</p>`;
-          const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p>${introBody}<p>בברכה,<br>הנהלת גן החלומות</p></div>`;
-          await dispatchEmail({
-            to: email,
-            subject: `${includeHours ? 'תלוש שכר ודוח שעות' : 'תלוש שכר'} — ${month}${toOverride ? ` — ${emp.full_name} (בדיקה)` : ''}`,
-            html: intro,
-            fileAttachments,
-            attachments,
+
+          const sent = await deliverPayslipToEmployee({
+            emp: { ...emp, israeli_id: emp.israeli_id || israeliId },
+            month, pageBuf, branch, page, auditId: doc._id,
+            includeHours, hoursPdf: hoursPdfByEmp.get(String(emp._id)) || null,
+            toOverride, userId,
           });
-          // Archive the payslip to the employee's file + mark the month paid —
-          // but NOT in test mode (`to` override).
-          if (!toOverride) {
-            try {
-              await SavedPayslip.findOneAndUpdate(
-                { employee_id: emp._id, year_month: month },
-                { employee_id: emp._id, israeli_id: emp.israeli_id || israeliId, year_month: month, branch,
-                  data: pageBuf, audit_id: doc._id, page, sent_to: email, sent_at: new Date(), sent_by: userId },
-                { upsert: true },
-              );
-              await PayrollMonth.findOneAndUpdate(
-                { employee_id: emp._id, month },
-                { payslip_paid: true, payslip_paid_at: new Date(), payslip_sent_to: email },
-              );
-            } catch (se) { console.error('archive payslip failed:', emp.full_name, se.message); }
-          }
-          out.push({ name: emp.full_name, email, status: 'sent' });
+          if (sent.status === 'no_email') { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
+          out.push({ name: emp.full_name, email: sent.email, status: 'sent' });
         } catch (e) {
           out.push({ name: dispName, status: 'error', error: e.message });
         }
@@ -3149,4 +3277,10 @@ module.exports = {
   revokeFixToken,
   publicFixInfo,
   publicFixUpload,
+  // Shared with the direct (audit-free) distribution — one implementation of
+  // "mail the page, archive it, mark the month paid".
+  deliverPayslipToEmployee,
+  realEmployeeEmail,
+  extractPage,
+  coalesceBranchEntries,
 };

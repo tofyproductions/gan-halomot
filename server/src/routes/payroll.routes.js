@@ -4,6 +4,7 @@ const router = express.Router();
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const c = require('../controllers/payroll.controller');
 const audit = require('../controllers/payslipAudit.controller');
+const direct = require('../controllers/directPayslips.controller');
 
 // In-memory uploads — audit files are transient and not persisted.
 const auditUpload = multer({
@@ -358,5 +359,19 @@ router.patch(
   requireRole('system_admin', 'branch_manager', 'accountant'),
   audit.unapproveAudit,
 );
+
+// ── Direct payslip distribution — a final file sent without an audit ────────
+// Same delivery as the audit path (mail + archive + mark paid); what it skips
+// is the comparison, which a verified file or a single forgotten page has
+// nothing to gain from. Accountant/admin only: this sends real payslips with
+// no round to approve first.
+const DIRECT = requireRole('system_admin', 'accountant');
+router.post('/direct-payslips', DIRECT, auditUpload.single('payslip_file'), direct.upload);
+router.get('/direct-payslips', DIRECT, direct.list);
+router.get('/direct-payslips/:id', DIRECT, direct.get);
+router.get('/direct-payslips/:id/page/:page', DIRECT, direct.pagePreview);
+router.put('/direct-payslips/:id/pages/:page', DIRECT, direct.assignPage);
+router.post('/direct-payslips/:id/send', DIRECT, direct.send);
+router.delete('/direct-payslips/:id', DIRECT, direct.remove);
 
 module.exports = router;

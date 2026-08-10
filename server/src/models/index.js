@@ -31,6 +31,7 @@ const StockBatch = require('./StockBatch');
 const PayslipAuditRecord = require('./PayslipAuditRecord');
 const PayslipAuditPdf = require('./PayslipAuditPdf');
 const SavedPayslip = require('./SavedPayslip');
+const DirectPayslipBatch = require('./DirectPayslipBatch');
 const HoursDistributionLog = require('./HoursDistributionLog');
 const PayrollMonth = require('./PayrollMonth');
 const PayrollPresetOption = require('./PayrollPresetOption');
@@ -92,6 +93,7 @@ module.exports = {
   PayslipAuditRecord,
   PayslipAuditPdf,
   SavedPayslip,
+  DirectPayslipBatch,
   HoursDistributionLog,
   PayrollMonth,
   PayrollPresetOption,
