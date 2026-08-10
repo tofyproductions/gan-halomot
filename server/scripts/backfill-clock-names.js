@@ -56,13 +56,17 @@ const FORCE = process.argv.includes('--force');
 
     if (!PUSH) continue;
 
-    // Only devices this worker is already on. Enrolling her somewhere new is a
-    // different decision, and not one a rename should make.
-    const ids = [emp.israeli_id, ...(emp.clock_aliases || [])].filter(Boolean);
+    // Only devices this worker is already on, and only under her CURRENT ת"ז.
+    //
+    // Aliases are deliberately excluded. An alias is a device record under a
+    // number that has since been corrected — writing a name to it re-creates
+    // the very record a clock-id migration exists to remove, and on a device
+    // where the migration had already run it puts the old user straight back.
+    // That is exactly what happened on the first run of this script.
     const enrolled = await AgentCommand.find({
       type: 'add_user',
       status: 'confirmed',
-      'payload.israeli_id': { $in: ids },
+      'payload.israeli_id': emp.israeli_id,
     }).select('branch_id payload.israeli_id').lean();
 
     const seen = new Set();

@@ -245,21 +245,34 @@ async function migrateClockId(employeeId, { fromId, createdBy = null } = {}) {
   const branches = await relevantBranches(emp);
   if (!branches.length) return { status: 'no_clock_branches', queued: [] };
 
-  // The device that actually answered for the old number is the one to read
-  // from; without that history, her home branch is the best guess.
+  // EVERY device holding the old number, not just one.
+  //
+  // A worker is enrolled on every branch she can punch at, so a wrong ת"ז is
+  // wrong on all of them — אדולה was on four. Migrating one leaves the other
+  // three holding a record that the punch matcher only reaches through an
+  // alias, and that the next sweep will happily refresh. Each branch gets its
+  // own capture; `handleCommandConfirmed` migrates each independently, using
+  // that device's own uid for the delete.
   const enrolled = await AgentCommand.find({
     type: 'add_user', status: 'confirmed', 'payload.israeli_id': oldId,
   }).select('branch_id').lean();
   const enrolledIds = new Set(enrolled.map(c => String(c.branch_id)));
-  const source = branches.find(b => enrolledIds.has(String(b._id))) || branches[0];
+  const targets = branches.filter(b => enrolledIds.has(String(b._id)));
+  // No history of the old number anywhere — ask her home branch, which is
+  // where an enrolment nobody recorded is most likely to be.
+  if (targets.length === 0) targets.push(branches[0]);
 
-  const cmd = await requestCapture(source._id, emp, createdBy, oldId);
+  const queued = [];
+  for (const b of targets) {
+    const cmd = await requestCapture(b._id, emp, createdBy, oldId);
+    if (cmd) queued.push({ branch_id: String(b._id), branch_name: b.name, type: 'export_template' });
+  }
   return {
-    status: cmd ? 'capture_requested' : 'already_queued',
+    status: queued.length ? 'capture_requested' : 'already_queued',
     from: oldId,
     to: newId,
-    source_branch: source.name,
-    queued: cmd ? [{ branch_id: String(source._id), branch_name: source.name, type: 'export_template' }] : [],
+    branches: targets.map(b => b.name),
+    queued,
   };
 }
 
