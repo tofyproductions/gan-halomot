@@ -5,6 +5,7 @@ const {
   academicYearOf, academicYearBounds, normalizeChildName,
 } = require('../services/academic-year.service');
 const { compareChildIdentity } = require('../services/child-identity.service');
+const { attachSecondParent } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 const env = require('../config/env');
 
@@ -167,6 +168,9 @@ async function getAll(req, res, next) {
           academic_year: academicYear,
           is_active: true,
         };
+        // Both parents on the child, even though no single registration holds
+        // both — see services/household.service.js.
+        Object.assign(childPayload, await attachSecondParent(childPayload, r));
         if (existingChild) {
           Object.assign(existingChild, childPayload);
           await existingChild.save();
@@ -791,17 +795,18 @@ async function activate(req, res, next) {
       child.is_active = true;
       await child.save();
     } else {
-      child = await Child.create({
+      child = await Child.create(await attachSecondParent({
         registration_id: id,
         child_name: registration.child_name,
         birth_date: registration.child_birth_date,
         classroom_id: registration.classroom_id?._id || registration.classroom_id,
         parent_name: registration.parent_name,
+        parent_id_number: registration.parent_id_number || null,
         phone: registration.parent_phone,
         email: registration.parent_email,
         academic_year: academicYear,
         is_active: true,
-      });
+      }, registration));
     }
 
     res.json({
@@ -888,17 +893,18 @@ async function finalizeManual(req, res, next) {
       || getAcademicYears().current.range;
     const existingChild = await Child.findOne({ registration_id: registration._id });
     if (!existingChild) {
-      await Child.create({
+      await Child.create(await attachSecondParent({
         registration_id: registration._id,
         child_name: registration.child_name,
         birth_date: registration.child_birth_date,
         classroom_id: registration.classroom_id,
         parent_name: registration.parent_name,
+        parent_id_number: registration.parent_id_number || null,
         phone: registration.parent_phone,
         email: registration.parent_email,
         academic_year: academicYear,
         is_active: true,
-      });
+      }, registration));
     } else if (!existingChild.is_active) {
       existingChild.is_active = true;
       await existingChild.save();

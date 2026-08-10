@@ -166,9 +166,29 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                   </Grid>
                   <Grid size={{ xs: 6 }}>
                     <Typography variant="caption" color="text.secondary">ת.ז הורה</Typography>
-                    <Typography dir="ltr">{registration?.parent_id_number || '—'}</Typography>
+                    <Typography dir="ltr">{registration?.parent_id_number || child.parent_id_number || '—'}</Typography>
                   </Grid>
                 </Grid>
+
+                {/* The second parent. A registration carries whoever signed it,
+                    so without this the other parent exists only as a separate
+                    row somewhere else — and the family reads as two families. */}
+                {(child.parent2_name || child.parent2_phone) && (
+                  <Grid container spacing={1} sx={{ mt: 0.5, pt: 1, borderTop: '1px dashed #cbd5e1' }}>
+                    <Grid size={{ xs: 6 }}>
+                      <Typography variant="caption" color="text.secondary">הורה נוסף</Typography>
+                      <Typography sx={{ fontWeight: 600 }}>{child.parent2_name || '—'}</Typography>
+                    </Grid>
+                    <Grid size={{ xs: 3 }}>
+                      <Typography variant="caption" color="text.secondary">ת.ז</Typography>
+                      <Typography dir="ltr">{child.parent2_id_number || '—'}</Typography>
+                    </Grid>
+                    <Grid size={{ xs: 3 }}>
+                      <Typography variant="caption" color="text.secondary">טלפון</Typography>
+                      <Typography dir="ltr" sx={{ fontWeight: 600 }}>{child.parent2_phone || '—'}</Typography>
+                    </Grid>
+                  </Grid>
+                )}
                 {editing ? (
                   <Stack spacing={1.5} sx={{ mt: 1.5 }}>
                     <TextField

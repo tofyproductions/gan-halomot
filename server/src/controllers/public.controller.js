@@ -2,6 +2,7 @@ const { Registration, Child, Document, GanEvent, Branch } = require('../models')
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
 const { sendAgreementEmail } = require('../services/email.service');
 const { academicYearOf, getAcademicYears } = require('../services/academic-year.service');
+const { attachSecondParent } = require('../services/household.service');
 
 async function getRegistrationForm(req, res, next) {
   try {
@@ -291,6 +292,9 @@ async function uploadDocument(req, res, next) {
         academic_year: academicYear,
         is_active: true,
       };
+      // If the family left the second-parent fields empty, the other parent is
+      // still in the system — on the registration they signed themselves.
+      Object.assign(childPayload, await attachSecondParent(childPayload, registration));
 
       const existingChild = await Child.findOne({ registration_id: registration._id });
       if (!existingChild) {

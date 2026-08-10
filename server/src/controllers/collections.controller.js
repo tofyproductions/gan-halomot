@@ -4,6 +4,7 @@ const {
   ACADEMIC_MONTHS, CAMP_MONTH,
 } = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
+const { buildHouseholds } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
@@ -132,10 +133,19 @@ async function getAll(req, res, next) {
       };
     }
 
-    // Build sibling map: parent_id_number -> [reg_id, reg_id, ...]
+    // Build sibling map: household -> [reg, reg, ...]
+    //
+    // Keyed by household rather than by the parent who happened to sign. A
+    // child has two parents, and each registration carries only one of them —
+    // different name, different ID, different phone — so grouping on the
+    // parent puts one family's children in two groups and hides a receipt paid
+    // by the other parent. The households are joined by the children they
+    // share, across every registration in the system rather than only this
+    // year's, because that is where the two parents show up separately.
+    const householdOf = buildHouseholds(registrations);
     const siblingMap = {};
     for (const reg of filteredRegs) {
-      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      const key = householdOf(reg);
       if (!key) continue;
       if (!siblingMap[key]) siblingMap[key] = [];
       siblingMap[key].push(reg);
@@ -143,7 +153,7 @@ async function getAll(req, res, next) {
 
     // Helper: find sibling's reg fee receipt if current child doesn't have one
     function findSiblingRegFee(reg) {
-      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      const key = householdOf(reg);
       if (!key) return null;
       const siblings = siblingMap[key] || [];
       for (const sib of siblings) {
@@ -158,7 +168,7 @@ async function getAll(req, res, next) {
 
     // Helper: find sibling's monthly receipt for shared payments
     function findSiblingMonthReceipt(reg, monthNum) {
-      const key = reg.parent_id_number?.trim() || reg.parent_name?.trim() || reg.parent_phone?.trim();
+      const key = householdOf(reg);
       if (!key) return null;
       const siblings = siblingMap[key] || [];
       for (const sib of siblings) {
