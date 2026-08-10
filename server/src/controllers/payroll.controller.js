@@ -1805,6 +1805,40 @@ async function importEmployeeTemplate(req, res, next) {
  * (see services/fingerprintSync). Safe to press repeatedly — work already
  * queued is never duplicated.
  */
+/**
+ * POST /payroll/employees/:id/migrate-clock-id  { from_id }
+ *
+ * The clock holds whatever ת"ז it was enrolled with. Correcting a typo in the
+ * system does not reach the device: the finger stays under the old number, and
+ * from that moment her punches arrive as somebody the system does not know.
+ *
+ * `clock_aliases` keeps her punches working; this moves the device record so
+ * the alias is no longer load-bearing. The finger is read off the clock first
+ * and only then rewritten and the old record deleted — nobody has to enroll a
+ * finger again.
+ */
+async function migrateEmployeeClockId(req, res, next) {
+  try {
+    const fromId = String(req.body?.from_id || '').trim();
+    if (!fromId) return res.status(400).json({ error: 'חסר ת"ז ישן להעברה' });
+    const result = await fingerprintSync.migrateClockId(req.params.id, {
+      fromId,
+      createdBy: req.user?.id || null,
+    });
+    const HE = {
+      employee_not_found: 'עובד/ת לא נמצא/ה',
+      missing_id: 'ת"ז חסר או לא תקין',
+      nothing_to_migrate: 'הת"ז בשעון כבר זהה לת"ז במערכת',
+      no_clock_branches: 'לעובד/ת אין סניפים עם שעון נוכחות',
+      already_queued: 'בקשת קריאה כבר ממתינה בתור',
+      capture_requested: 'נשלחה בקשת קריאת טביעה לפי הת"ז הישן — הרישום בשעון יועבר לת"ז החדש אוטומטית',
+    };
+    if (result.status === 'employee_not_found') return res.status(404).json({ error: HE.employee_not_found });
+    if (result.status === 'missing_id') return res.status(400).json({ error: HE.missing_id });
+    res.json({ ok: true, ...result, message: HE[result.status] || result.status });
+  } catch (err) { next(err); }
+}
+
 async function syncEmployeeFingerprint(req, res, next) {
   try {
     const result = await fingerprintSync.syncEmployee(req.params.id, {
@@ -3016,6 +3050,7 @@ module.exports = {
   exportEmployeeTemplate,
   importEmployeeTemplate,
   syncEmployeeFingerprint,
+  migrateEmployeeClockId,
   employeeFingerprintStatus,
   listEmployeeChangeRequests,
   decideEmployeeChangeRequest,

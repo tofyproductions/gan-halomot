@@ -45,6 +45,9 @@ router.post('/employees/:id/import-template',  requireRole('system_admin', 'bran
 // One press: capture the finger (if we don't hold it yet) and mirror it to every
 // branch the employee works at, so a cross-branch worker can punch anywhere.
 router.post('/employees/:id/sync-fingerprint', requireRole('system_admin', 'branch_manager', 'accountant'), c.syncEmployeeFingerprint);
+// Move a worker's clock record from an old, corrected-away ת"ז to her current
+// one — read the finger first, rewrite it, then delete the old record.
+router.post('/employees/:id/migrate-clock-id', requireRole('system_admin', 'accountant'), c.migrateEmployeeClockId);
 router.get('/employees/:id/fingerprint-status', requireRole('system_admin', 'branch_manager', 'accountant'), c.employeeFingerprintStatus);
 // Employee-card edits filed by branch managers, awaiting accountant approval
 router.get('/employee-change-requests',        requireRole('system_admin', 'accountant', 'branch_manager'), c.listEmployeeChangeRequests);

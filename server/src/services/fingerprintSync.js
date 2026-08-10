@@ -173,9 +173,33 @@ async function pickCaptureSource(emp, branches) {
   return branches.find(b => !triedIds.has(String(b._id))) || null;
 }
 
-/** Queue the read-only capture of the employee's finger from one branch. */
-async function requestCapture(branchId, emp, createdBy = null) {
-  const israeliId = normalizeId(emp.israeli_id);
+/**
+ * Every ID the CLOCK might know this worker by — her ת"ז, plus the ones she was
+ * enrolled under before it was corrected.
+ *
+ * A device holds whatever ת"ז it was enrolled with. When a typo is fixed in the
+ * system, the clock does NOT hear about it: the finger stays under the old
+ * number, and a capture asking for the new one comes back empty from a device
+ * that is holding the finger the whole time. `clock_aliases` already exists for
+ * exactly this on the punch-ingestion side; the capture side has to read it too.
+ */
+function clockIdsOf(emp) {
+  const ids = [];
+  for (const v of [emp.israeli_id, ...(emp.clock_aliases || [])]) {
+    const id = normalizeId(v);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Queue the read-only capture of the employee's finger from one branch.
+ *
+ * `asId` overrides which ת"ז to ask the device for — used when the finger is
+ * enrolled under an old, corrected number.
+ */
+async function requestCapture(branchId, emp, createdBy = null, asId = null) {
+  const israeliId = normalizeId(asId || emp.israeli_id);
   if (!israeliId) return null;
   if (await alreadyQueued(branchId, 'export_template', israeliId)) return null;
   return AgentCommand.create({
@@ -185,6 +209,46 @@ async function requestCapture(branchId, emp, createdBy = null) {
     status: 'pending',
     created_by: createdBy,
   });
+}
+
+/**
+ * Move a worker's clock record from an old ת"ז to her current one.
+ *
+ * Only the first step is queued here — a read of the finger from the device
+ * that holds it, under the OLD number. The rest cannot be queued yet: the
+ * templates do not exist server-side until that read comes back, and writing
+ * an empty user under the new number would leave her unable to punch at all.
+ * `handleCommandConfirmed` continues it the moment the templates land.
+ *
+ * Nothing is deleted before the finger is safely stored AND written back.
+ */
+async function migrateClockId(employeeId, { fromId, createdBy = null } = {}) {
+  const emp = await Employee.findById(employeeId).select('+fingerprint');
+  if (!emp) return { status: 'employee_not_found', queued: [] };
+  const oldId = normalizeId(fromId);
+  const newId = normalizeId(emp.israeli_id);
+  if (!oldId || !newId) return { status: 'missing_id', queued: [] };
+  if (oldId === newId) return { status: 'nothing_to_migrate', queued: [] };
+
+  const branches = await relevantBranches(emp);
+  if (!branches.length) return { status: 'no_clock_branches', queued: [] };
+
+  // The device that actually answered for the old number is the one to read
+  // from; without that history, her home branch is the best guess.
+  const enrolled = await AgentCommand.find({
+    type: 'add_user', status: 'confirmed', 'payload.israeli_id': oldId,
+  }).select('branch_id').lean();
+  const enrolledIds = new Set(enrolled.map(c => String(c.branch_id)));
+  const source = branches.find(b => enrolledIds.has(String(b._id))) || branches[0];
+
+  const cmd = await requestCapture(source._id, emp, createdBy, oldId);
+  return {
+    status: cmd ? 'capture_requested' : 'already_queued',
+    from: oldId,
+    to: newId,
+    source_branch: source.name,
+    queued: cmd ? [{ branch_id: String(source._id), branch_name: source.name, type: 'export_template' }] : [],
+  };
 }
 
 /**
@@ -216,7 +280,17 @@ async function syncEmployee(employeeId, { createdBy = null, force = false } = {}
     if (!source) {
       return { status: 'no_source_left', queued: [], waiting_for_capture: false, branches: branches.map(b => b.name) };
     }
-    const cmd = await requestCapture(source._id, emp, createdBy);
+    // Ask the device for the ת"ז it was actually enrolled with. Where a worker
+    // carries an alias, a capture under her corrected number comes back empty
+    // from a clock that is holding her finger the whole time.
+    const knownAs = await AgentCommand.findOne({
+      branch_id: source._id,
+      type: 'add_user',
+      status: 'confirmed',
+      'payload.israeli_id': { $in: clockIdsOf(emp) },
+    }).sort({ created_at: -1 }).select('payload.israeli_id').lean();
+
+    const cmd = await requestCapture(source._id, emp, createdBy, knownAs?.payload?.israeli_id || null);
     return {
       status: 'capture_requested',
       queued: cmd ? [{ branch_id: String(source._id), branch_name: source.name, type: 'export_template' }] : [],
@@ -275,7 +349,12 @@ async function handleCommandConfirmed(cmd) {
     if (!cmd || (cmd.type !== 'export_template' && cmd.type !== 'import_template')) return;
     const israeliId = normalizeId(cmd.payload?.israeli_id || cmd.result?.israeli_id);
     if (!israeliId) return;
-    const emp = await Employee.findOne({ israeli_id: israeliId }).select('+fingerprint');
+    // Also by alias: a capture issued under a corrected-away ת"ז belongs to the
+    // same worker, and looking her up only by her current one would drop the
+    // templates on the floor.
+    const emp = await Employee.findOne({
+      $or: [{ israeli_id: israeliId }, { clock_aliases: israeliId }],
+    }).select('+fingerprint');
     if (!emp) return;
 
     if (cmd.type === 'import_template') {
@@ -311,6 +390,28 @@ async function handleCommandConfirmed(cmd) {
     };
     await emp.save();
     console.log(`[fingerprint] stored ${templates.length} finger(s) for ${emp.full_name} (${israeliId})`);
+
+    // Captured under an OLD ת"ז — so this is a clock-id migration, and the
+    // device that answered still holds her under the wrong number. Rewrite her
+    // there under the current one and remove the old record.
+    //
+    // Order matters and the agent consumes commands in creation order: add,
+    // then write the finger, then delete. Deleting first would leave her unable
+    // to punch in the window between the two, and deleting before the templates
+    // were stored would lose the finger outright.
+    const currentId = normalizeId(emp.israeli_id);
+    if (currentId && currentId !== israeliId) {
+      await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
+      await pushTemplatesTo(cmd.branch_id, emp, cmd.created_by || null);
+      await AgentCommand.create({
+        branch_id: cmd.branch_id,
+        type: 'delete_user',
+        payload: { israeli_id: israeliId },
+        status: 'pending',
+        created_by: cmd.created_by || null,
+      });
+      console.log(`[fingerprint] clock-id migration ${israeliId} -> ${currentId} queued for ${emp.full_name}`);
+    }
 
     // Now that we hold a copy, push it to every other branch she works at.
     const res = await syncEmployee(emp._id, { createdBy: cmd.created_by || null });
@@ -384,6 +485,8 @@ async function statusFor(employeeId) {
 
 module.exports = {
   syncEmployee,
+  migrateClockId,
+  clockIdsOf,
   handleCommandConfirmed,
   sweep,
   statusFor,

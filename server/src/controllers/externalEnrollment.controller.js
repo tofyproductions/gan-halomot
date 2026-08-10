@@ -1,6 +1,6 @@
 const XLSX = require('xlsx');
 const {
-  ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing,
+  ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing, Classroom,
 } = require('../models');
 const {
   parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
@@ -251,6 +251,104 @@ async function pricing(req, res, next) {
 }
 
 /**
+ * ClickTac's age layer -> this system's classroom category.
+ *
+ * Classroom.category is the enum that survives renaming: a branch calls its
+ * rooms תינוקייה א and תינוקייה ב, and both are the same category. Matching on
+ * the name would put half a cohort nowhere.
+ */
+const AGE_GROUP_TO_CATEGORY = {
+  'תינוק': 'תינוקייה',
+  'פעוט': 'צעירים',
+  'בוגר': 'בוגרים',
+};
+
+/**
+ * GET /api/external-enrollments/classroom-plan?branch=&year=
+ *
+ * How many children fall in each age group, and which classrooms exist to
+ * receive them. משה דיין has no classrooms at all for תשפ״ז — importing
+ * seventy-seven children into a year with no rooms puts every one of them
+ * outside the classes screen, the attendance screen and the collections
+ * grouping, which is a worse outcome than not importing.
+ */
+async function classroomPlan(req, res, next) {
+  try {
+    const year = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const branchId = req.query.branch;
+    if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
+
+    const pending = await ExternalEnrollment.find({
+      branch_id: branchId,
+      academic_year: year,
+      'review.status': 'pending',
+    }).select('computed.age_group child.age_group enrollment.status').lean();
+
+    const rooms = await Classroom.find({ branch_id: branchId, academic_year: year, is_active: true })
+      .select('name category capacity').lean();
+
+    // A name with a replacement character in it is a corrupted row, not a
+    // room anybody should be able to pick. Half the classrooms in the database
+    // are these; offering them would file children into a name nobody can read.
+    const clean = rooms.filter(r => !/�/.test(r.name));
+
+    const groups = Object.entries(AGE_GROUP_TO_CATEGORY).map(([ageGroup, category]) => {
+      const children = pending.filter(p => (p.computed?.age_group || p.child?.age_group) === ageGroup);
+      return {
+        age_group: ageGroup,
+        category,
+        count: children.length,
+        active_count: children.filter(p => p.enrollment?.status !== 'ביטל רישום').length,
+        classrooms: clean.filter(r => r.category === category)
+          .map(r => ({ id: r._id, name: r.name, capacity: r.capacity })),
+      };
+    });
+
+    res.json({
+      academic_year: year,
+      groups,
+      // Every clean room in the year, for the cases where the category is not
+      // set on an older row and the name is the only clue.
+      classrooms: clean.map(r => ({ id: r._id, name: r.name, category: r.category, capacity: r.capacity })),
+      garbled_classrooms: rooms.length - clean.length,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/external-enrollments/classrooms  { branch_id, academic_year, category, name, capacity }
+ *
+ * Creating the year's rooms from inside the import, because that is where the
+ * absence is discovered and sending someone to another screen mid-import is
+ * how a cohort ends up half-filed.
+ */
+async function createClassroom(req, res, next) {
+  try {
+    const { branch_id, category, name, capacity } = req.body || {};
+    const academic_year = normalizeYear(req.body?.academic_year || '');
+    if (!branch_id || !name || !academic_year) {
+      return res.status(400).json({ error: 'חסרים סניף, שם כיתה או שנה' });
+    }
+    if (category && !Classroom.CATEGORIES.includes(category)) {
+      return res.status(400).json({ error: 'קטגוריית כיתה לא תקינה' });
+    }
+    const existing = await Classroom.findOne({ name, academic_year, branch_id });
+    if (existing) {
+      return res.status(409).json({ error: 'כיתה בשם זה כבר קיימת בסניף לשנה זו' });
+    }
+    const classroom = await Classroom.create({
+      name, category: category || null, academic_year, branch_id,
+      capacity: Number(capacity) || null,
+    });
+    res.status(201).json({ classroom: { ...classroom.toObject(), id: classroom._id } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * Turn one reviewed enrollment into a real registration.
  *
  * Creates the Registration and the Child, and — when ClickTac recorded a
@@ -433,7 +531,11 @@ async function promoteBulk(req, res, next) {
         const reg = await promoteOne(doc, {
           monthly_fee: fee,
           registration_fee: regFee,
-          classroom_id: req.body?.classroom_id || null,
+          // The classroom follows the child's age group, which is the whole
+          // point of computing it. One classroom for everybody would put a
+          // four-month-old in with the two-year-olds.
+          classroom_id: (req.body?.classrooms_by_age_group || {})[group]
+            || req.body?.classroom_id || null,
           userId: req.user?.id || null,
         });
         imported.push({ id, child: doc.child.full_name, registration_id: reg._id });
@@ -511,4 +613,5 @@ async function contacts(req, res, next) {
 
 module.exports = {
   importFile, list, getOne, pricing, promote, promoteBulk, setReview, contacts,
+  classroomPlan, createClassroom,
 };

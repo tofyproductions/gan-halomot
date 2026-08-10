@@ -48,7 +48,10 @@ export default function ExternalEnrollments() {
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, branchId: '', saving: false, result: null });
   const [detail, setDetail] = useState({ open: false, loading: false, data: null });
-  const [importDlg, setImportDlg] = useState({ open: false, saving: false, pricing: null, tier: '', fees: {}, regFee: '' });
+  const [importDlg, setImportDlg] = useState({
+    open: false, saving: false, pricing: null, tier: '', fees: {}, regFee: '',
+    plan: null, classrooms: {}, creating: '',
+  });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
 
   const fetchData = useCallback(() => {
@@ -106,20 +109,73 @@ export default function ExternalEnrollments() {
     }
   };
 
-  /** The state price matrix for the branch, so a tier picks the fees. */
+  /**
+   * The price matrix and the year's classrooms, both fetched for the branch.
+   *
+   * The classrooms matter as much as the fees: משה דיין has none at all for
+   * תשפ״ז, and importing into a year with no rooms puts every child outside
+   * the classes screen, the attendance screen and the collections grouping.
+   */
   const openImportDialog = async () => {
     if (!selectedIds.length) return toast.info('לא נבחרו רשומות');
     const branchId = rows.find(r => r.id === selectedIds[0])?.branch_id;
-    setImportDlg({ open: true, saving: false, pricing: null, tier: '', fees: {}, regFee: '' });
+    setImportDlg({
+      open: true, saving: false, pricing: null, tier: '', fees: {}, regFee: '',
+      plan: null, classrooms: {}, creating: '', branchId,
+    });
     try {
-      const res = await api.get('/external-enrollments/pricing', { params: { branch: branchId, year } });
-      const p = res.data.pricing;
+      const [priceRes, planRes] = await Promise.all([
+        api.get('/external-enrollments/pricing', { params: { branch: branchId, year } }),
+        api.get('/external-enrollments/classroom-plan', { params: { branch: branchId, year } }),
+      ]);
+      const p = priceRes.data.pricing;
+      const plan = planRes.data;
       setImportDlg(d => ({
         ...d,
         pricing: p,
+        plan,
         regFee: p?.one_time?.registration != null ? String(p.one_time.registration) : '',
+        // Pre-select where there is exactly one room of the right category —
+        // no choice to make, and one fewer thing to forget.
+        classrooms: Object.fromEntries(
+          (plan.groups || [])
+            .filter(g => g.classrooms.length === 1)
+            .map(g => [g.age_group, g.classrooms[0].id]),
+        ),
       }));
-    } catch { /* the fees can still be typed by hand */ }
+    } catch { /* fees and rooms can still be chosen by hand */ }
+  };
+
+  /** Create the missing room for an age group without leaving the import. */
+  const createClassroom = async (group) => {
+    const name = window.prompt(`שם הכיתה עבור ${group.age_group} (${group.category}):`, group.category);
+    if (!name) return;
+    setImportDlg(d => ({ ...d, creating: group.age_group }));
+    try {
+      const res = await api.post('/external-enrollments/classrooms', {
+        branch_id: importDlg.branchId,
+        academic_year: year,
+        category: group.category,
+        name,
+        capacity: Math.max(group.active_count, 20),
+      });
+      const created = res.data.classroom;
+      setImportDlg(d => ({
+        ...d,
+        creating: '',
+        classrooms: { ...d.classrooms, [group.age_group]: created.id },
+        plan: {
+          ...d.plan,
+          groups: d.plan.groups.map(g => (g.age_group === group.age_group
+            ? { ...g, classrooms: [...g.classrooms, { id: created.id, name: created.name, capacity: created.capacity }] }
+            : g)),
+        },
+      }));
+      toast.success(`נוצרה כיתה "${created.name}"`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה ביצירת הכיתה');
+      setImportDlg(d => ({ ...d, creating: '' }));
+    }
   };
 
   /** A tier row prices all three age groups at once — column per age group. */
@@ -146,6 +202,7 @@ export default function ExternalEnrollments() {
         fees_by_age_group: Object.fromEntries(
           Object.entries(fees).map(([k, v]) => [k, Number(v) || 0]),
         ),
+        classrooms_by_age_group: importDlg.classrooms,
         registration_fee: Number(importDlg.regFee) || 0,
       });
       toast.success(`${res.data.imported} רישומים נוצרו במערכת`);
@@ -464,6 +521,54 @@ export default function ExternalEnrollments() {
             <TextField size="small" type="number" label="דמי רישום" value={importDlg.regFee}
               onChange={e => setImportDlg(d => ({ ...d, regFee: e.target.value }))}
               helperText="ברירת מחדל מהמחירון של הסניף" />
+
+            <Divider />
+
+            {/* Where each age group lands. Computing the age was always the
+                point — this is what it is computed FOR. */}
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>שיבוץ לכיתות</Typography>
+            {!importDlg.plan ? (
+              <Typography variant="caption" color="text.secondary">טוען כיתות…</Typography>
+            ) : (
+              <>
+                {importDlg.plan.groups.every(g => g.classrooms.length === 0) && (
+                  <Alert severity="warning">
+                    לסניף אין אף כיתה לשנה זו. ילד/ה ללא כיתה לא מופיע/ה במעקב הכיתות,
+                    בנוכחות ובקיבוץ של הגבייה — עדיף ליצור את הכיתות כאן.
+                  </Alert>
+                )}
+                {importDlg.plan.groups.map(g => (
+                  <Stack key={g.age_group} direction="row" spacing={1} alignItems="center">
+                    <Chip size="small" label={`${g.age_group} · ${g.active_count}`}
+                      sx={{ minWidth: 90, fontWeight: 700 }} />
+                    <TextField select size="small" fullWidth label={`כיתה (${g.category})`}
+                      value={importDlg.classrooms[g.age_group] || ''}
+                      onChange={e => setImportDlg(d => ({
+                        ...d, classrooms: { ...d.classrooms, [g.age_group]: e.target.value },
+                      }))}
+                      disabled={!g.classrooms.length}
+                      helperText={g.classrooms.length ? '' : 'אין כיתה מתאימה לשנה זו'}
+                    >
+                      <MenuItem value="">ללא שיבוץ</MenuItem>
+                      {g.classrooms.map(c => (
+                        <MenuItem key={c.id} value={c.id}>
+                          {c.name}{c.capacity ? ` (${c.capacity})` : ''}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+                    <Button size="small" onClick={() => createClassroom(g)}
+                      disabled={importDlg.creating === g.age_group || !g.active_count}>
+                      {importDlg.creating === g.age_group ? '…' : 'צור כיתה'}
+                    </Button>
+                  </Stack>
+                ))}
+                {importDlg.plan.garbled_classrooms > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    {importDlg.plan.garbled_classrooms} כיתות עם שם פגום הוסתרו מהרשימה.
+                  </Typography>
+                )}
+              </>
+            )}
           </Stack>
         </DialogContent>
         <DialogActions>

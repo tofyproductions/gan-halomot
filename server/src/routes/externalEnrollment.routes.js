@@ -15,6 +15,8 @@ router.post('/import', requireRole('system_admin', 'accountant'), upload.single(
 // Static paths before /:id, so "contacts" and "pricing" are not read as ids.
 router.get('/contacts', ctrl.contacts);
 router.get('/pricing', ctrl.pricing);
+router.get('/classroom-plan', ctrl.classroomPlan);
+router.post('/classrooms', requireRole('system_admin', 'accountant'), ctrl.createClassroom);
 router.post('/promote-bulk', requireRole('system_admin', 'accountant'), ctrl.promoteBulk);
 
 router.get('/', ctrl.list);
