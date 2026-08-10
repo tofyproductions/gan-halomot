@@ -78,6 +78,19 @@ async function relevantBranches(emp) {
   return employeeBranchIds(emp).filter(id => ids.includes(id)).map(id => byId[id]);
 }
 
+/**
+ * Does this worker actually work at this branch?
+ *
+ * A device record is not evidence of employment — אדולה was written onto all
+ * four clocks in one afternoon and works at exactly one branch. The distinction
+ * matters when a wrong record is being cleaned up: it should be REMOVED
+ * everywhere, and re-created only where she can actually punch.
+ */
+async function worksAt(emp, branchId) {
+  const branches = await relevantBranches(emp);
+  return branches.some(b => String(b._id) === String(branchId));
+}
+
 /** Is there already an unfinished command of this type for this worker+branch? */
 async function alreadyQueued(branchId, type, israeliId) {
   const existing = await AgentCommand.findOne({
@@ -417,7 +430,15 @@ async function handleCommandConfirmed(cmd) {
       const currentIdNoFinger = normalizeId(emp.israeli_id);
       const deviceSaysNoFinger = cmd.result?.finger_count === 0;
       if (currentIdNoFinger && currentIdNoFinger !== israeliId && deviceSaysNoFinger) {
-        await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
+        // Re-enrol her under the corrected number ONLY where she actually
+        // works. אדולה works at הרצליה and had been written onto all four
+        // clocks; migrating the record everywhere carried her onto three
+        // devices she has no business being on — a wrong record replaced by a
+        // tidier wrong record. Everywhere else, the old record is simply
+        // removed.
+        if (await worksAt(emp, cmd.branch_id)) {
+          await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
+        }
         await AgentCommand.create({
           branch_id: cmd.branch_id,
           type: 'delete_user',
@@ -460,8 +481,11 @@ async function handleCommandConfirmed(cmd) {
     // were stored would lose the finger outright.
     const currentId = normalizeId(emp.israeli_id);
     if (currentId && currentId !== israeliId) {
-      await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
-      await pushTemplatesTo(cmd.branch_id, emp, cmd.created_by || null);
+      // Only where she works — see the note on the no-finger path above.
+      if (await worksAt(emp, cmd.branch_id)) {
+        await ensureEnrolled(cmd.branch_id, emp, cmd.created_by || null);
+        await pushTemplatesTo(cmd.branch_id, emp, cmd.created_by || null);
+      }
       await AgentCommand.create({
         branch_id: cmd.branch_id,
         type: 'delete_user',
