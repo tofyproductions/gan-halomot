@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DownloadIcon from '@mui/icons-material/Download';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useAuth } from '../../hooks/useAuth';
 import api, { openApiFile } from '../../api/client';
 
@@ -38,7 +39,7 @@ export default function MyPayslips() {
                 <TableCell sx={{ fontWeight: 700 }}>שנה</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>סכום נטו</TableCell>
                 <TableCell sx={{ fontWeight: 700 }}>סטטוס</TableCell>
-                <TableCell />
+                <TableCell sx={{ fontWeight: 700 }}>מסמכים</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -55,15 +56,25 @@ export default function MyPayslips() {
                     />
                   </TableCell>
                   <TableCell>
-                    {p.file_url && (
-                      <Tooltip title="הורד תלוש">
-                        {/* The route is behind the bearer token, so a plain href
-                            would 401 — fetch it with the token instead. */}
-                        <IconButton size="small" onClick={() => openApiFile(p.file_url, { filename: `תלוש_${p.year_month}.pdf` })}>
-                          <DownloadIcon />
-                        </IconButton>
-                      </Tooltip>
-                    )}
+                    {/* Both routes sit behind the bearer token, so a plain href
+                        would 401 — fetch them with the token instead. */}
+                    <Stack direction="row" spacing={0.5}>
+                      {p.file_url && (
+                        <Tooltip title="הורד תלוש">
+                          <IconButton size="small" onClick={() => openApiFile(p.file_url, { filename: `תלוש_${p.year_month}.pdf` })}>
+                            <DownloadIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                      {p.hours_report_url && (
+                        <Tooltip title="הורד דוח שעות">
+                          <IconButton size="small" color="secondary"
+                            onClick={() => openApiFile(p.hours_report_url, { filename: `דוח_שעות_${p.year_month}.pdf` })}>
+                            <ScheduleIcon />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))}

@@ -87,6 +87,9 @@ router.get('/my-salary-preview',               c.mySalaryPreview);
 router.get('/my-punches',                      c.myPunches);
 router.get('/my-payslips',                     c.myPayslips);
 router.get('/my-payslips/:ym/file',            c.myPayslipFile);
+// The hours report that was mailed with it — archived on send, so the employee
+// can find it here instead of digging through their inbox.
+router.get('/my-payslips/:ym/hours-file',      c.myHoursReportFile);
 // טופס 101 — filed by the employee, and readable by them for as long as it is
 // on file. Every route resolves the employee from the token, so there is no id
 // to tamper with.

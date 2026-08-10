@@ -2269,12 +2269,23 @@ async function deliverPayslipToEmployee({
     contentType: 'application/pdf',
   }];
   const attachments = [];
+  // Kept so the same bytes that were mailed can be archived below — an hours
+  // report the employee cannot find later is an hours report they will ask for.
+  let hoursBuf = hoursPdf || null;
   if (includeHours) {
-    if (hoursPdf) {
-      fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: hoursPdf.toString('base64'), contentType: 'application/pdf' });
+    if (hoursBuf) {
+      fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: hoursBuf.toString('base64'), contentType: 'application/pdf' });
     } else {
       const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
-      if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+      if (att.fileAttachments) {
+        fileAttachments.push(...att.fileAttachments);
+        const first = att.fileAttachments[0];
+        if (first?.contentBase64) hoursBuf = Buffer.from(first.contentBase64, 'base64');
+      } else {
+        // The HTML fallback (Chromium out of memory) is not a PDF, so there is
+        // nothing worth archiving — the mail still goes.
+        attachments.push(...att.attachments);
+      }
     }
   }
 
@@ -2298,6 +2309,9 @@ async function deliverPayslipToEmployee({
         {
           employee_id: emp._id, israeli_id: emp.israeli_id || '', year_month: month, branch,
           data: pageBuf, audit_id: auditId, page, sent_to: email, sent_at: new Date(), sent_by: userId,
+          // Only overwrite the archived hours report when one actually went out
+          // with this send; a payslip-only re-send must not erase it.
+          ...(hoursBuf ? { hours_report_data: hoursBuf, hours_report_sent_at: new Date() } : {}),
         },
         { upsert: true },
       );
@@ -3065,14 +3079,33 @@ async function sendHoursToEmployees(req, res) {
           const email = realEmployeeEmail(emp);
           if (!email) { out.push({ name: emp.full_name, status: 'no_email' }); continue; }
           const fileAttachments = []; const attachments = [];
-          const pre = pdfByEmp.get(String(emp._id));
-          if (pre) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: pre.toString('base64'), contentType: 'application/pdf' });
+          let hoursBuf = pdfByEmp.get(String(emp._id)) || null;
+          if (hoursBuf) fileAttachments.push({ filename: `hours-report-${month}.pdf`, contentBase64: hoursBuf.toString('base64'), contentType: 'application/pdf' });
           else {
             const att = await hoursReportEmailAttachments([emp._id], month, { role: 'system_admin' }, `hours-report-${month}`);
-            if (att.fileAttachments) fileAttachments.push(...att.fileAttachments); else attachments.push(...att.attachments);
+            if (att.fileAttachments) {
+              fileAttachments.push(...att.fileAttachments);
+              const first = att.fileAttachments[0];
+              if (first?.contentBase64) hoursBuf = Buffer.from(first.contentBase64, 'base64');
+            } else attachments.push(...att.attachments);
           }
           const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום ${emp.full_name},</p><p>מצורף דוח השעות שלך לחודש ${month}.</p><p>בברכה,<br>הנהלת גן החלומות</p></div>`;
           await dispatchEmail({ to: email, subject: `דוח שעות — ${month}`, html: intro, fileAttachments, attachments });
+          // File it where the employee will look for it. The row may not have a
+          // payslip yet — hours go out on their own schedule — so this upserts
+          // the month and leaves `data` alone.
+          if (hoursBuf) {
+            try {
+              await SavedPayslip.findOneAndUpdate(
+                { employee_id: emp._id, year_month: month },
+                {
+                  $set: { hours_report_data: hoursBuf, hours_report_sent_at: new Date() },
+                  $setOnInsert: { israeli_id: emp.israeli_id || '', branch: '', sent_by: userId },
+                },
+                { upsert: true },
+              );
+            } catch (se) { console.error('archive hours report failed:', emp.full_name, se.message); }
+          }
           out.push({ name: emp.full_name, email, status: 'sent' });
         } catch (e) { out.push({ name: String(id), status: 'error', error: e.message }); }
         if (++sinceLog >= 5) { sinceLog = 0; await saveHoursLog(month, 'employees', { at: new Date(), by: userId, running: true, results: out }); require('../services/htmlPdf').tryGc(); }

@@ -1068,6 +1068,8 @@ const HOURS_REPORT_CSS = `
   table.daily thead th { background: #f6f7f9 !important; border: 1px solid #c4cad3; padding: 1px 3px; font-weight: 700; font-size: 6.5pt; text-align: center; line-height: 1.05; color: #374151; }
   table.daily tbody td { border: 1px solid #e2e5e9; padding: 0.5px 3px; text-align: center; line-height: 1.05; }
   table.daily tbody td.date { text-align: right; font-weight: 500; white-space: nowrap; color: #374151; }
+  /* The weekday sits beside an LTR date inside an RTL cell — see dateCell(). */
+  table.daily tbody td.date .dow { display: inline-block; margin-inline-start: 6px; color: #6b7280; font-weight: 400; }
   table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 6.5pt; color: #555; text-align: right; }
@@ -1105,6 +1107,23 @@ function renderHoursReportDoc(reports) {
   const dow = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-').map(Number); return 'יום ' + HD[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]; };
   const fmt = (n) => (Math.round((Number(n) || 0) * 100) / 100).toFixed(2).replace(/\.00$/, '');
   const fdate = (ymd) => { if (!ymd) return ''; const [y, m, d] = ymd.split('-'); return `${d}/${m}/${y}`; };
+
+  /**
+   * The date cell — a Latin-numeral date and a Hebrew weekday in one RTL cell.
+   *
+   * Written as plain `${fdate} ${dow}` these two ran together as
+   * "12/07/2026יוםא": the space between them is a neutral character, so the
+   * bidi algorithm folds it into the surrounding right-to-left run instead of
+   * keeping it between the two, and the day appeared glued to the date and
+   * spilling toward the branch column. This is not a preview artifact — the
+   * PDF is rendered from this same HTML, so what went out to employees had it
+   * too.
+   *
+   * `<bdi>` isolates each side so neither reorders against the other, and the
+   * gap is real layout (a styled span) rather than a character that bidi is
+   * free to move.
+   */
+  const dateCell = (ymd) => `<bdi dir="ltr">${fdate(ymd)}</bdi><bdi class="dow">${dow(ymd)}</bdi>`;
   // Short branch for the per-day cell — the segment after " - " (e.g.
   // "כפר סבא - משה דיין" → "משה דיין"), so it fits one line. Full name stays in
   // the header. Handles cross-branch days ("A + B").
@@ -1131,7 +1150,7 @@ function renderHoursReportDoc(reports) {
         const cls = (d.leave_type === 'absence' && !d.absence_approved) ? 'r-ded' : 'r-exc';
         const commitCell = hasCommit ? '<td class="num mute">—</td>' : '';
         const shExCells = hasCommit ? '<td class="num mute">—</td><td class="num mute">—</td>' : '';
-        return `<tr class="${cls}"><td class="date">${fdate(d.date)} ${dow(d.date)}</td><td class="branch">—</td><td>—</td><td>—</td>
+        return `<tr class="${cls}"><td class="date">${dateCell(d.date)}</td><td class="branch">—</td><td>—</td><td>—</td>
           <td class="num mute">—</td>${commitCell}<td class="num mute">—</td><td class="num mute">—</td>${shExCells}<td class="note">${d.note || 'היעדרות'}</td></tr>`;
       }
       const { regular, ot125, ot150 } = split(d.total_hours);
@@ -1164,7 +1183,7 @@ function renderHoursReportDoc(reports) {
       }
       const commitCell = hasCommit ? `<td class="num ${committed != null ? '' : 'mute'}">${committed != null ? fmt(committed) : '—'}</td>` : '';
       const shExCells = hasCommit ? `<td class="num ${shClass}">${shTxt}</td><td class="num ${exClass}">${exTxt}</td>` : '';
-      return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${fdate(d.date)} ${dow(d.date)}</td>
+      return `<tr ${rowClass ? `class="${rowClass}"` : ''}><td class="date">${dateCell(d.date)}</td>
         <td class="branch">${shortBranch(d.branch_label)}</td><td>${d.first_in || '—'}</td><td>${d.last_out || (d.incomplete ? '⚠' : '—')}</td>
         <td class="num">${fmt(d.total_hours || 0)}</td>${commitCell}
         <td class="num ${ot125 > 0 ? 'ot' : 'mute'}">${ot125 > 0 ? fmt(ot125) : '—'}</td>
@@ -2785,11 +2804,19 @@ async function myPayslips(req, res, next) {
     const emp = await resolveSelfEmployee(req);
     if (!emp) return res.json({ payslips: [] });
 
+    // The PDFs are fetched per row on demand; `has_*` is all the list needs.
     const saved = await SavedPayslip.find({ employee_id: emp._id })
-      .select('-data')                       // the PDF is fetched per-row on demand
+      .select('year_month branch sent_at page audit_id hours_report_sent_at')
       .sort({ year_month: -1 })
       .lean();
     if (saved.length === 0) return res.json({ payslips: [] });
+
+    // Which months actually hold bytes. A month can carry an hours report and
+    // no payslip — the hours distribution does not wait for an approved audit.
+    const withData = await SavedPayslip.find(
+      { employee_id: emp._id, data: { $ne: null } },
+    ).select('year_month').lean();
+    const hasPayslip = new Set(withData.map(d => d.year_month));
 
     // Net pay lives on the monthly payroll row, not on the archived PDF.
     const months = saved.map((p) => p.year_month);
@@ -2809,7 +2836,9 @@ async function myPayslips(req, res, next) {
           net_amount: net != null ? Math.round(net).toLocaleString('he-IL') : '—',
           status: row?.payslip_paid ? 'paid' : 'pending',
           sent_at: p.sent_at,
-          file_url: `/api/payroll/my-payslips/${p.year_month}/file`,
+          file_url: hasPayslip.has(p.year_month) ? `/api/payroll/my-payslips/${p.year_month}/file` : null,
+          hours_report_url: p.hours_report_sent_at ? `/api/payroll/my-payslips/${p.year_month}/hours-file` : null,
+          hours_report_sent_at: p.hours_report_sent_at || null,
         };
       }),
     });
@@ -2830,6 +2859,25 @@ async function myPayslipFile(req, res, next) {
     const buf = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `inline; filename="payslip-${req.params.ym}.pdf"`);
+    res.send(buf);
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /payroll/my-payslips/:ym/hours-file
+ * The monthly hours report that was mailed with the payslip. Scoped to the
+ * caller's own employee record, month only — no id to tamper with.
+ */
+async function myHoursReportFile(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
+    const p = await SavedPayslip.findOne({ employee_id: emp._id, year_month: req.params.ym })
+      .select('hours_report_data').lean();
+    if (!p?.hours_report_data) return res.status(404).json({ error: 'לא נמצא דוח שעות לחודש הזה' });
+    const buf = p.hours_report_data.buffer ? Buffer.from(p.hours_report_data.buffer) : Buffer.from(p.hours_report_data);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="hours-report-${req.params.ym}.pdf"`);
     res.send(buf);
   } catch (err) { next(err); }
 }
@@ -2944,6 +2992,7 @@ async function myForm101File(req, res, next) {
 
 module.exports = {
   myPayslipFile,
+  myHoursReportFile,
   myForm101,
   uploadMyForm101,
   myForm101File,
