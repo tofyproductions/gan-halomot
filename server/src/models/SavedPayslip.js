@@ -30,6 +30,23 @@ const savedPayslipSchema = new mongoose.Schema({
   sent_at:     { type: Date, default: Date.now },
   sent_by:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
+  /**
+   * Did the EMPLOYEE receive this, or only her manager?
+   *
+   * A payslip reaches the branch manager and the employee through two separate
+   * sends, and the manager's copy is often the only one that has gone out. The
+   * manager's screen must show it — that is what it is for — and "התלושים שלי"
+   * must not, because a payslip appearing in an employee's portal is a claim
+   * that it was sent to her.
+   *
+   * Defaults to false, so a record created by any path that does not say
+   * otherwise stays out of the employee's portal. The employee send sets it
+   * explicitly.
+   */
+  delivered_to_employee: { type: Boolean, default: false },
+  manager_sent_to: { type: String, default: '' },
+  manager_sent_at: { type: Date, default: null },
+
   // The monthly hours report that went out with (or instead of) the payslip.
   hours_report_data:    { type: Buffer, default: null },
   hours_report_sent_at: { type: Date, default: null },

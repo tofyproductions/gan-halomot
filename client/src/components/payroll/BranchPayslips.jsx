@@ -250,14 +250,20 @@ export default function BranchPayslips() {
                           {slips.map(p => (
                             <Tooltip
                               key={p.year_month}
-                              title={p.sent_at
-                                ? `נשלח ${new Date(p.sent_at).toLocaleDateString('he-IL')}${p.sent_to ? ` אל ${p.sent_to}` : ''}`
-                                : 'נשמר בארכיון'}
+                              title={p.delivered_to_employee
+                                ? `נשלח לעובד/ת ${p.sent_at ? new Date(p.sent_at).toLocaleDateString('he-IL') : ''}${p.sent_to ? ` אל ${p.sent_to}` : ''}`
+                                : `טרם נשלח לעובד/ת — הגיע לניהול${p.manager_sent_at ? ` ב-${new Date(p.manager_sent_at).toLocaleDateString('he-IL')}` : ''}`}
                             >
                               <Chip
                                 size="small"
                                 icon={<DescriptionIcon />}
                                 label={monthLabel(p.year_month)}
+                                // Filled = the employee has it. Outlined = only
+                                // this screen does. A manager asked "did she
+                                // get her payslip?" needs to see the difference
+                                // without opening anything.
+                                variant={p.delivered_to_employee ? 'filled' : 'outlined'}
+                                color={p.delivered_to_employee ? 'success' : 'default'}
                                 onClick={() => openPayslip(emp, p.year_month)}
                                 disabled={busy === `${emp.id}-${p.year_month}`}
                                 sx={{ cursor: 'pointer', fontWeight: 600 }}

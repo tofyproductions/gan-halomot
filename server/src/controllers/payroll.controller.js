@@ -2805,8 +2805,12 @@ async function myPayslips(req, res, next) {
     const emp = await resolveSelfEmployee(req);
     if (!emp) return res.json({ payslips: [] });
 
+    // Only what was sent to HER. The same collection now also archives the
+    // copy that went to her branch manager, and a payslip showing up here is a
+    // claim that it was sent to the employee — so a manager-only copy stays
+    // out until the employee distribution runs.
     // The PDFs are fetched per row on demand; `has_*` is all the list needs.
-    const saved = await SavedPayslip.find({ employee_id: emp._id })
+    const saved = await SavedPayslip.find({ employee_id: emp._id, delivered_to_employee: true })
       .select('year_month branch sent_at page audit_id hours_report_sent_at')
       .sort({ year_month: -1 })
       .lean();
@@ -2815,7 +2819,7 @@ async function myPayslips(req, res, next) {
     // Which months actually hold bytes. A month can carry an hours report and
     // no payslip — the hours distribution does not wait for an approved audit.
     const withData = await SavedPayslip.find(
-      { employee_id: emp._id, data: { $ne: null } },
+      { employee_id: emp._id, delivered_to_employee: true, data: { $ne: null } },
     ).select('year_month').lean();
     const hasPayslip = new Set(withData.map(d => d.year_month));
 
@@ -2855,7 +2859,7 @@ async function myPayslipFile(req, res, next) {
   try {
     const emp = await resolveSelfEmployee(req);
     if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
-    const p = await SavedPayslip.findOne({ employee_id: emp._id, year_month: req.params.ym }).lean();
+    const p = await SavedPayslip.findOne({ employee_id: emp._id, delivered_to_employee: true, year_month: req.params.ym }).lean();
     if (!p?.data) return res.status(404).json({ error: 'לא נמצא תלוש לחודש הזה' });
     const buf = p.data.buffer ? Buffer.from(p.data.buffer) : Buffer.from(p.data);
     res.setHeader('Content-Type', 'application/pdf');
@@ -2873,7 +2877,7 @@ async function myHoursReportFile(req, res, next) {
   try {
     const emp = await resolveSelfEmployee(req);
     if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
-    const p = await SavedPayslip.findOne({ employee_id: emp._id, year_month: req.params.ym })
+    const p = await SavedPayslip.findOne({ employee_id: emp._id, delivered_to_employee: true, year_month: req.params.ym })
       .select('hours_report_data').lean();
     if (!p?.hours_report_data) return res.status(404).json({ error: 'לא נמצא דוח שעות לחודש הזה' });
     const buf = p.hours_report_data.buffer ? Buffer.from(p.hours_report_data.buffer) : Buffer.from(p.hours_report_data);

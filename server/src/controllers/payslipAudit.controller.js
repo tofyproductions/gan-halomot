@@ -2309,6 +2309,9 @@ async function deliverPayslipToEmployee({
         {
           employee_id: emp._id, israeli_id: emp.israeli_id || '', year_month: month, branch,
           data: pageBuf, audit_id: auditId, page, sent_to: email, sent_at: new Date(), sent_by: userId,
+          // This send is the one that reaches the employee, so it is the one
+          // that puts the payslip in "התלושים שלי".
+          delivered_to_employee: true,
           // Only overwrite the archived hours report when one actually went out
           // with this send; a payslip-only re-send must not erase it.
           ...(hoursBuf ? { hours_report_data: hoursBuf, hours_report_sent_at: new Date() } : {}),
@@ -2767,6 +2770,48 @@ async function sendPayslipsToManagers(req, res) {
             attachments,
           });
           out.push({ branch: label, emails, status: 'sent' });
+
+          // Archive each employee's own page as well as mailing the bundle.
+          //
+          // The manager got a merged PDF of her whole branch, which answers
+          // nothing when one employee asks about her own month — and it was
+          // the ONLY place these payslips existed, so "תלושי עובדים" showed
+          // every employee as having none. The pages are already extracted
+          // here; splitting them per employee costs one more copy each.
+          //
+          // `delivered_to_employee` is NOT set: the employee has received
+          // nothing, and "התלושים שלי" must keep saying so.
+          if (!g.isOffice) {
+            for (const e of chosen) {
+              try {
+                if (!pdfCache.has(e.source_branch)) continue;
+                const srcDoc = await PDFDocument.load(pdfCache.get(e.source_branch));
+                if (e.page < 1 || e.page > srcDoc.getPageCount()) continue;
+                const one = await PDFDocument.create();
+                (await one.copyPages(srcDoc, [e.page - 1])).forEach(pg => one.addPage(pg));
+                const oneBuf = Buffer.from(await one.save());
+                await SavedPayslip.findOneAndUpdate(
+                  { employee_id: e.employee_id, year_month: month },
+                  {
+                    // Deliberately does not touch delivered_to_employee on an
+                    // existing row: a month already sent to the employee must
+                    // not be demoted by a later manager send.
+                    $set: {
+                      data: oneBuf, audit_id: doc._id, page: e.page, branch: label,
+                      manager_sent_to: emails.join(', '), manager_sent_at: new Date(),
+                    },
+                    $setOnInsert: {
+                      israeli_id: e.israeli_id || '', sent_by: userId,
+                      delivered_to_employee: false,
+                    },
+                  },
+                  { upsert: true },
+                );
+              } catch (se) {
+                console.error('archive manager payslip failed:', e.employee_id, se.message);
+              }
+            }
+          }
         } catch (e) {
           out.push({ branch: g.name, status: 'error', error: e.message });
         }
@@ -3062,7 +3107,7 @@ async function listBranchPayslips(req, res) {
       .lean();
 
     const slips = await SavedPayslip.find({ employee_id: { $in: employees.map(e => e._id) } })
-      .select('employee_id year_month sent_to sent_at')
+      .select('employee_id year_month sent_to sent_at delivered_to_employee manager_sent_at')
       .sort({ year_month: -1 })
       .lean();
 
@@ -3070,7 +3115,13 @@ async function listBranchPayslips(req, res) {
     for (const s of slips) {
       const k = String(s.employee_id);
       byEmployee.set(k, [...(byEmployee.get(k) || []), {
-        year_month: s.year_month, sent_to: s.sent_to, sent_at: s.sent_at,
+        year_month: s.year_month,
+        sent_to: s.sent_to,
+        sent_at: s.sent_at,
+        // Whether the employee herself has it, or only this screen does. A
+        // manager asked "did she get her payslip?" needs the difference.
+        delivered_to_employee: !!s.delivered_to_employee,
+        manager_sent_at: s.manager_sent_at,
       }]);
     }
 
