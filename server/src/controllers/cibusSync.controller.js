@@ -9,7 +9,7 @@
  */
 const { CibusSync } = require('../models');
 const job = require('../services/cibusSyncJob');
-const mailbox = require('../services/cibusMailbox');
+const mailbox = require('../services/mailbox.service');
 
 const publicShape = (d) => ({
   enabled: d.enabled,

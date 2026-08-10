@@ -86,6 +86,12 @@ router.get('/my-salary-preview',               c.mySalaryPreview);
 router.get('/my-punches',                      c.myPunches);
 router.get('/my-payslips',                     c.myPayslips);
 router.get('/my-payslips/:ym/file',            c.myPayslipFile);
+// טופס 101 — filed by the employee, and readable by them for as long as it is
+// on file. Every route resolves the employee from the token, so there is no id
+// to tamper with.
+router.get('/my-form-101',                     c.myForm101);
+router.post('/my-form-101',                    c.uploadMyForm101);
+router.get('/my-form-101/:id/file',            c.myForm101File);
 
 // ── Payslip audit (admin only) — upload xlsx + PDF, get a comparison report ──
 router.post(

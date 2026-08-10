@@ -10,7 +10,7 @@
  * fixed date and giving up.
  */
 const { CibusSync, User } = require('../models');
-const mailbox = require('./cibusMailbox');
+const mailbox = require('./mailbox.service');
 const { applyCibusReport } = require('./cibusImport');
 const { dispatchEmail } = require('./email.service');
 

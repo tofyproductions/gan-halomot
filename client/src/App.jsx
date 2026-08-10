@@ -38,6 +38,7 @@ import MyAttendance from './components/employee-portal/MyAttendance';
 import Updates from './components/employee-portal/Updates';
 import RequestsManager from './components/employees/RequestsManager';
 import EmployeeLetters from './components/employees/EmployeeLetters';
+import Form101Center from './components/employees/Form101Center';
 import ContractSigning from './components/employees/ContractSigning';
 import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
@@ -134,6 +135,11 @@ function AppRoutes() {
 
         <Route path="employee-requests" element={<RequestsManager />} />
         <Route path="employee-letters" element={<EmployeeLetters />} />
+        <Route path="form-101" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+            <Form101Center />
+          </ProtectedRoute>
+        } />
         <Route path="salary-requests" element={<Navigate to="/payroll?tab=raises" replace />} />
         <Route path="admin/permissions" element={
           <ProtectedRoute roles={['system_admin']}>

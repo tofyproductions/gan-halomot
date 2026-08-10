@@ -21,6 +21,8 @@ router.use('/payroll-month', require('./payrollMonth.routes'));
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table
 router.use('/employee-documents', require('./employeeDocuments.routes'));
+// טופס 101 — the roster view, the mail scan and its review queue
+router.use('/form-101', require('./form101.routes'));
 // Class tracking (מעקב חוגים) — providers, programs, sessions + occurrence popup
 router.use('/classes', require('./classes.routes'));
 // Maintenance (אחזקה) — assets per branch with service cycles + fault reports

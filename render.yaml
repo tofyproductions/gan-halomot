@@ -21,7 +21,8 @@ services:
       # Without it the scan endpoint returns 501 and manual entry still works.
       - key: ANTHROPIC_API_KEY
         sync: false
-      # Mailbox the scheduled Cibus report arrives in. Gmail needs an APP
+      # The mailbox that is read over IMAP — the scheduled Cibus report, and
+      # the טופס 101 scan, which reads the same box. Gmail needs an APP
       # PASSWORD, not the account password. Set in the Render dashboard — a
       # mail password must never live in the repo or in Mongo.
       - key: CIBUS_MAIL_USER

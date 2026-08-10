@@ -7,13 +7,15 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth, EmployeeDocument } = require('../models');
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const fixedSchedule = require('../services/fixedSchedule');
 const fingerprintSync = require('../services/fingerprintSync');
 const userSync = require('../services/userSync');
+const form101 = require('../services/form101');
+const { scanForm101 } = require('../services/form101Scan');
 
 // --- helpers --------------------------------------------------------------
 
@@ -129,12 +131,13 @@ function summarizeDay(dayPunches, resolution) {
  * that can't be paid because there is no bank account, a payslip that can't be
  * emailed because there is no address. The list screen can say so up front.
  *
- * `formIds` is the set of employee ids that have a טופס 101 on file. There is
- * no structured document type, so it is matched on the document's label —
- * a heuristic, and deliberately the only one here: everything else is a
- * straightforward "is this field empty".
+ * `formIds` is the set of employee ids that have a טופס 101 on file FOR THE
+ * CURRENT TAX YEAR — the form is refiled every January, so one from 2024 does
+ * not answer for 2026. It used to be matched on the document's label, which
+ * read as missing for anyone whose file was named something else; documents
+ * now carry a real type, so this is a plain lookup like the rest.
  */
-function missingFieldsFor(emp, formIds) {
+function missingFieldsFor(emp, formIds, taxYear) {
   const miss = [];
   const blank = (v) => v === null || v === undefined || String(v).trim() === '';
   // 'blocking' stops the month from being paid or the person from being
@@ -155,7 +158,7 @@ function missingFieldsFor(emp, formIds) {
   if (blank(emp.phone)) add('טלפון', 'warning');
   if (blank(emp.email)) add('אימייל', 'warning');
   if (!emp.start_date) add('תאריך תחילה', 'warning');
-  if (!formIds.has(String(emp._id))) add('טופס 101', 'warning');
+  if (!formIds.has(String(emp._id))) add(`טופס 101 (${taxYear})`, 'warning');
   return miss;
 }
 
@@ -187,20 +190,18 @@ async function listEmployees(req, res, next) {
       .sort({ full_name: 1 })
       .lean();
 
-    // One pass for everyone who has a טופס 101 attached, so the per-employee
-    // check below stays a pure function over data already in hand.
-    const { EmployeeDocument } = require('../models');
-    const formDocs = await EmployeeDocument.find({
-      employee_id: { $in: employees.map((e) => e._id) },
-      $or: [{ name: /101/ }, { file_name: /101/ }],
-    }).select('employee_id').lean();
-    const formIds = new Set(formDocs.map((d) => String(d.employee_id)));
+    // One pass for everyone who has a טופס 101 on file for this tax year, so
+    // the per-employee check below stays a pure function over data in hand.
+    const taxYear = form101.currentTaxYear();
+    const formIds = await form101.employeeIdsWithForm(employees.map((e) => e._id), taxYear);
 
     res.json({
+      tax_year: taxYear,
       employees: employees.map(e => ({
         ...e,
         id: e._id,
-        missing_fields: missingFieldsFor(e, formIds),
+        has_form_101: formIds.has(String(e._id)),
+        missing_fields: missingFieldsFor(e, formIds, taxYear),
         branch_name: e.branch_id?.name || null,
         branch_id: e.branch_id?._id || e.branch_id,
         // Flatten the first amuta's rate into top-level display fields so the
@@ -2833,8 +2834,119 @@ async function myPayslipFile(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /api/payroll/my-form-101
+ *
+ * The employee's own tax forms, and whether this year's is filed.
+ *
+ * The point of the endpoint is the ASK: an employee has no way to know the
+ * form is outstanding until a payroll goes out with the wrong deduction, and
+ * "we'll tell you when we need it" is how 72 of 83 records ended up without
+ * one. The portal can now say it, in the one place the person already visits
+ * for their payslip.
+ */
+async function myForm101(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.json({ forms: [], tax_year: form101.currentTaxYear(), has_current: false });
+
+    const docs = await EmployeeDocument.find({ employee_id: emp._id, doc_type: 'form_101' })
+      .select('tax_year created_at file_name source self_uploaded')
+      .sort({ tax_year: -1, created_at: -1 })
+      .lean();
+
+    const year = form101.currentTaxYear();
+    res.json({
+      tax_year: year,
+      has_current: docs.some(d => d.tax_year === year),
+      forms: docs.map(d => ({
+        id: String(d._id),
+        tax_year: d.tax_year,
+        created_at: d.created_at,
+        file_name: d.file_name || '',
+        source: d.source || 'upload',
+        self_uploaded: !!d.self_uploaded,
+        file_url: `/api/payroll/my-form-101/${d._id}/file`,
+      })),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/payroll/my-form-101
+ * Body: { file_data(base64), file_name?, file_mimetype?, tax_year? }
+ *
+ * The employee files their own form. The year is read off the document when it
+ * isn't given, and a failed read never blocks the upload — a form on file for
+ * the wrong year is fixable, a form the person gave up on sending is not.
+ */
+async function uploadMyForm101(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
+
+    const { file_data, file_name, file_mimetype, tax_year } = req.body || {};
+    if (!file_data) return res.status(400).json({ error: 'נדרש קובץ' });
+    if (Buffer.byteLength(file_data, 'utf8') > 8 * 1024 * 1024) {
+      return res.status(413).json({ error: 'הקובץ גדול מדי (מקסימום 8MB)' });
+    }
+
+    let scan = {};
+    let year = Number(tax_year) || null;
+    if (!year) {
+      try {
+        scan = await scanForm101(file_data, file_name, file_mimetype);
+        year = scan.tax_year || null;
+      } catch { scan = {}; }
+    }
+    year = year || form101.currentTaxYear();
+
+    const existing = await EmployeeDocument.findOne({
+      employee_id: emp._id, doc_type: 'form_101', tax_year: year,
+    }).select('_id').lean();
+    if (existing) {
+      return res.status(409).json({ error: `כבר קיים טופס 101 לשנת ${year}. לעדכון פנה/י להנהלה.` });
+    }
+
+    const doc = await form101.attachForm(emp, {
+      data: file_data, name: file_name, mimetype: file_mimetype,
+    }, {
+      scan,
+      taxYear: year,
+      source: 'upload',
+      matchBasis: 'manual',
+      selfUploaded: true,
+      createdBy: req.user?.id || null,
+      hash: form101.hashFile(file_data),
+      description: 'הועלה על ידי העובד/ת מהפורטל',
+    });
+
+    res.status(201).json({ id: String(doc._id), tax_year: year });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/my-form-101/:id/file
+ * Scoped to the caller's own employee record — an id from someone else's file
+ * simply does not resolve.
+ */
+async function myForm101File(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
+    const d = await EmployeeDocument.findOne({
+      _id: req.params.id, employee_id: emp._id, doc_type: 'form_101',
+    }).select('file_data file_name file_mimetype name').lean();
+    if (!d?.file_data) return res.status(404).json({ error: 'אין קובץ' });
+    res.json({ data: d.file_data, name: d.file_name || d.name || 'טופס 101', mimetype: d.file_mimetype || 'application/pdf' });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   myPayslipFile,
+  myForm101,
+  uploadMyForm101,
+  myForm101File,
   listEmployees,
   getEmployee,
   createEmployee,

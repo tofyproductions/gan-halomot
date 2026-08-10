@@ -172,6 +172,22 @@ connectDB().then(() => {
     const runCibus = () => cibusSyncJob.tick().catch(e => console.error('[cibus] tick failed:', e.message));
     setTimeout(runCibus, 90 * 1000);
     setInterval(runCibus, 60 * 60 * 1000);
+
+    // טופס 101: the documents that only ever carried the number in their label
+    // become typed rows, once. Idempotent — it only touches rows that have no
+    // doc_type yet — so it costs a single indexed query on every later boot.
+    const form101 = require('./services/form101');
+    form101.backfillLegacy()
+      .then(r => { if (r.converted) console.log(`[form101] converted ${r.converted} legacy documents`); })
+      .catch(e => console.error('[form101] backfill failed:', e.message));
+
+    // And the mail scan itself. Same shape as Cibus: cheap when idle (a mailbox
+    // read plus a hash lookup per attachment — the AI call only happens for a
+    // file never seen before), off until someone enables it.
+    const form101Job = require('./services/form101SyncJob');
+    const runForm101 = () => form101Job.tick().catch(e => console.error('[form101] tick failed:', e.message));
+    setTimeout(runForm101, 4 * 60 * 1000);
+    setInterval(runForm101, 6 * 60 * 60 * 1000);
   });
 });
 

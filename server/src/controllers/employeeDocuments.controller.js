@@ -30,6 +30,10 @@ async function list(req, res, next) {
       created_at: d.created_at,
       created_by_name: d.created_by?.full_name || '',
       acknowledged: !!d.acknowledged,
+      doc_type: d.doc_type || 'other',
+      tax_year: d.tax_year || null,
+      self_uploaded: !!d.self_uploaded,
+      from_mail: d.source === 'mail',
     }));
 
     // Merge in medical certificates from the employee's sick/vacation requests.
@@ -72,7 +76,7 @@ async function list(req, res, next) {
  */
 async function create(req, res, next) {
   try {
-    const { employee_id, name, description, file_data, file_name, file_mimetype, month } = req.body;
+    const { employee_id, name, description, file_data, file_name, file_mimetype, month, doc_type, tax_year } = req.body;
     if (!employee_id || !name || !file_data) {
       return res.status(400).json({ error: 'עובד, שם ומסמך נדרשים' });
     }
@@ -89,6 +93,11 @@ async function create(req, res, next) {
       file_name: file_name || '',
       file_mimetype: file_mimetype || 'application/octet-stream',
       created_by: req.user?.id || null,
+      // A generic upload is 'other' unless the caller says otherwise. Filing a
+      // טופס 101 has its own route (/api/form-101) which reads the year off the
+      // form; this is here so an explicit type isn't silently dropped.
+      doc_type: doc_type === 'form_101' ? 'form_101' : 'other',
+      tax_year: doc_type === 'form_101' ? (Number(tax_year) || new Date().getFullYear()) : null,
     });
     res.status(201).json({ id: String(doc._id) });
   } catch (err) { next(err); }

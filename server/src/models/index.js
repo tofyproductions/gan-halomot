@@ -46,6 +46,8 @@ const ContractAnnex = require('./ContractAnnex');
 const SpecialDay = require('./SpecialDay');
 const CibusSync = require('./CibusSync');
 const EmployeeDocument = require('./EmployeeDocument');
+const Form101Sync = require('./Form101Sync');
+const Form101Inbox = require('./Form101Inbox');
 const Setting = require('./Setting');
 const ClassProvider = require('./ClassProvider');
 const ClassProgram = require('./ClassProgram');
@@ -105,6 +107,8 @@ module.exports = {
   SpecialDay,
   CibusSync,
   EmployeeDocument,
+  Form101Sync,
+  Form101Inbox,
   Setting,
   ClassProvider,
   ClassProgram,
