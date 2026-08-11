@@ -21,7 +21,7 @@
  */
 
 const { normalizeChildName } = require('./academic-year.service');
-const { normalizeId, normalizePhone, canonicalAgeGroup } = require('./tmt.service');
+const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -117,6 +117,14 @@ const ISSUES = {
   place_freed: {
     label: 'מקום התפנה — יש אישור תמ"ת והרישום בוטל',
     severity: 'warning',
+  },
+  needs_absorption_date: {
+    label: 'להזין תאריך כניסה לגן בפורטל התמ"ת',
+    severity: 'warning',
+  },
+  absorption_date_inconsistent: {
+    label: 'החלטת התמ"ת אינה תואמת את תאריך הכניסה',
+    severity: 'info',
   },
   tmt_removed: {
     label: 'ירד/ה מרשימת התמ"ת בקובץ מאוחר יותר',
@@ -221,6 +229,29 @@ function issuesFor(tmt, ct, { branchId }) {
     const phone = normalizePhone(tmt.contact?.phone);
     if (phone && !parentPhones(ct).includes(phone)) {
       add('tmt_contact_unknown', `${tmt.contact.name || 'איש קשר תמ"ת'} · ${tmt.contact.phone}`);
+    }
+  }
+
+  /**
+   * התקבל vs נקלט במעון.
+   *
+   * Both are approvals; the difference is a task of ours. A child is נקלט only
+   * once somebody enters their תאריך כניסה לגן in the ministry's portal, and
+   * until that is done the row reads התקבל with the date blank. So an approved
+   * child with no entry date is a line on a to-do list, not an anomaly in the
+   * data — and the wording disagreeing with the date is worth saying out loud,
+   * because one of the two was then entered by hand somewhere.
+   */
+  if (tmt?.ministry?.is_approved && tmt.presence?.is_present !== false) {
+    const hasDate = !!tmt.ministry.absorbed_at;
+    const saysAbsorbed = tmt.ministry.decision === ABSORBED_DECISION;
+    if (!hasDate) {
+      add('needs_absorption_date', saysAbsorbed
+        ? 'ההחלטה "נקלט במעון" אך תאריך הכניסה ריק'
+        : 'אושר/ה בתמ"ת — נותר להזין תאריך כניסה לגן');
+    } else if (!saysAbsorbed) {
+      add('absorption_date_inconsistent',
+        `יש תאריך כניסה ${fmtDate(tmt.ministry.absorbed_at)} אך ההחלטה "${tmt.ministry.decision}"`);
     }
   }
 
@@ -386,6 +417,10 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       clean: by(r => r.verdict === 'approved' && r.issue_severity === 'ok'),
       with_issues: by(r => r.verdict === 'approved' && r.issue_severity !== 'ok'),
       places_freed: by(r => r.issues.some(i => i.code === 'place_freed')),
+      // Approved children still waiting for an entry date in the ministry's
+      // portal — a work list rather than a problem.
+      needs_absorption_date: by(r => r.issues.some(i => i.code === 'needs_absorption_date')),
+      absorbed: by(r => r.tmt?.is_approved && r.tmt?.absorbed_at),
       in_tmt: by(r => r.in_tmt),
       in_clicktac: by(r => r.in_clicktac),
       already_imported: by(r => r.clicktac?.review_status === 'imported'),

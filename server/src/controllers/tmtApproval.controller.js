@@ -567,6 +567,7 @@ async function exportReconcile(req, res, next) {
       action: r.verdict_action,
       issues: r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`).join(' · '),
       tmt_decision: r.tmt?.decision || '',
+      tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
       ct_status: r.clicktac?.status || 'לא נרשם',
       ct_signed: r.clicktac?.second_signer || '',
@@ -584,7 +585,8 @@ async function exportReconcile(req, res, next) {
     const COLS_FULL = [
       ['child_name', 'שם הילד/ה'], ['id_number', 'ת"ז'], ['birth_date', 'תאריך לידה'],
       ['age_group', 'שכבת גיל'], ['verdict', 'מסקנה'], ['action', 'פעולה נדרשת'],
-      ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_present', 'ברשימת תמ"ת'],
+      ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
+      ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
       ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
@@ -602,10 +604,16 @@ async function exportReconcile(req, res, next) {
     const all = result.rows.map(asRow);
     const anomalies = result.rows.filter(r => r.verdict !== 'approved' || r.issue_severity !== 'ok').map(asRow);
     const approved = result.rows.filter(r => r.verdict === 'approved').map(asRow);
+    // Its own tab, because it is not a problem to investigate — it is a list to
+    // work through in the ministry's portal, one entry date at a time.
+    const needsDate = result.rows
+      .filter(r => r.issues.some(i => i.code === 'needs_absorption_date'))
+      .map(asRow);
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheetFrom(anomalies, COLS_FULL), 'חריגות');
     XLSX.utils.book_append_sheet(wb, sheetFrom(approved, COLS_FULL), 'מאושרים');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(needsDate, COLS_FULL), 'להזין תאריך כניסה');
     XLSX.utils.book_append_sheet(wb, sheetFrom(approved, COLS_CONTACT), 'דף קשר');
     XLSX.utils.book_append_sheet(wb, sheetFrom(all, COLS_FULL), 'הכל');
 

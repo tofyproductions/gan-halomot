@@ -42,14 +42,26 @@ const COLUMNS = {
 /**
  * Decisions that mean "this child may enroll with us".
  *
- * התקבל and נקלט במעון are treated as the same answer, on the user's
- * instruction — the difference between them has not been confirmed with משרד
- * העבודה yet, and until it is, both are an approval. Anything else is not an
- * approval and is reported by name rather than silently bucketed, so the day
- * the ministry adds a third wording it shows up as a finding instead of
- * quietly dropping a child.
+ * Both are approvals, and the difference between them is a task of OURS rather
+ * than a decision of theirs:
+ *
+ *   התקבל       — approved, and nobody has entered a תאריך כניסה לגן for them
+ *                 in the ministry's portal yet. That entry is our job.
+ *   נקלט במעון  — approved, and the entry date has been filled in.
+ *
+ * The file itself proves it: in the July export every one of the 14 נקלט rows
+ * carries תאריך הקליטה 01/09/2026 and all 60 התקבל rows have it blank. So the
+ * missing date is reported as a finding (see enrollment-reconcile.service.js)
+ * and the two wordings are one answer here.
+ *
+ * Anything else is not an approval and is reported by name rather than
+ * silently bucketed, so the day the ministry adds a third wording it shows up
+ * as a finding instead of quietly dropping a child.
  */
 const APPROVED_DECISIONS = ['התקבל', 'נקלט במעון'];
+
+/** The wording the ministry uses once an entry date has been filled in. */
+const ABSORBED_DECISION = 'נקלט במעון';
 
 /**
  * The ministry writes age groups in the plural, ClickTac in the singular.
@@ -208,7 +220,7 @@ function missingColumns(rows) {
 }
 
 module.exports = {
-  COLUMNS, APPROVED_DECISIONS, AGE_GROUP_ALIASES,
+  COLUMNS, APPROVED_DECISIONS, ABSORBED_DECISION, AGE_GROUP_ALIASES,
   readSheet, parseSheet, parseRow, missingColumns,
   normalizeId, normalizePhone, canonicalAgeGroup, parseDate, hashPayload,
 };

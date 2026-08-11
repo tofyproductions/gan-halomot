@@ -252,6 +252,9 @@ export default function TmtReconcile() {
             <StatCard label='הוסרו מרשימת התמ"ת' value={summary.withdrawn || 0} color="error"
               active={verdictFilter === 'withdrawn'} hint="האישור בוטל"
               onClick={() => setVerdictFilter(verdictFilter === 'withdrawn' ? '' : 'withdrawn')} />
+            <StatCard label='להזין תאריך כניסה בתמ"ת' value={summary.needs_absorption_date || 0} color="warning"
+              active={issueFilter === 'needs_absorption_date'} hint={`${summary.absorbed || 0} כבר עם תאריך`}
+              onClick={() => setIssueFilter(issueFilter === 'needs_absorption_date' ? '' : 'needs_absorption_date')} />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
           </Stack>
 
@@ -448,7 +451,11 @@ export default function TmtReconcile() {
                       <Typography variant="body2">תאריך לידה: {fmtDate(detail.tmt.birth_date)}</Typography>
                       <Typography variant="body2">קבוצת גיל: {detail.tmt.age_group}</Typography>
                       <Typography variant="body2">החלטה: {detail.tmt.decision}</Typography>
-                      <Typography variant="body2">תאריך קליטה: {fmtDate(detail.tmt.absorbed_at)}</Typography>
+                      <Typography variant="body2">
+                        תאריך כניסה לגן: {detail.tmt.absorbed_at
+                          ? fmtDate(detail.tmt.absorbed_at)
+                          : 'טרם הוזן בפורטל התמ"ת'}
+                      </Typography>
                       <Typography variant="body2">ילד ממשיך: {detail.tmt.continuing == null ? '—' : (detail.tmt.continuing ? 'כן' : 'לא')}</Typography>
                       <Typography variant="body2">ילד רווחה: {detail.tmt.welfare == null ? '—' : (detail.tmt.welfare ? 'כן' : 'לא')}</Typography>
                       <Divider sx={{ my: 1 }} />
