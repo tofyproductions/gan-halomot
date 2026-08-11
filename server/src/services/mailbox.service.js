@@ -52,6 +52,47 @@ function mailConfig() {
  * @param {RegExp}   rules.attachmentExt   which attachments to keep (default: spreadsheets)
  * @returns {{ configured, messages: [{ uid, from, subject, date, attachments: [{ filename, buffer }] , bodyLinks: string[] }] }}
  */
+/**
+ * Turn an IMAP failure into something a person can act on.
+ *
+ * imapflow throws `Error: Command failed` for everything from a wrong password
+ * to IMAP being switched off in Gmail, and that message was going straight to
+ * the screen — a run log that says "קריאת תיבת הדואר נכשלה: Command failed"
+ * tells the operator nothing about which of the four possible mistakes they
+ * made. The detail is on the error object (responseText, authenticationFailed,
+ * serverResponseCode); this reads it and says what to fix.
+ */
+function describeMailError(err, cfg) {
+  const raw = [err?.responseText, err?.response, err?.message].filter(Boolean).join(' ');
+  const code = err?.serverResponseCode || '';
+  const box = cfg?.user ? ` (${cfg.user})` : '';
+
+  if (err?.authenticationFailed || /AUTHENTICATIONFAILED|Invalid credentials/i.test(raw + code)) {
+    if (/Application-specific password required/i.test(raw)) {
+      return `החשבון${box} דורש סיסמת אפליקציה — הוזנה כנראה סיסמת החשבון הרגילה. `
+        + 'יש ליצור App Password בהגדרות האבטחה של חשבון Google (דורש אימות דו-שלבי פעיל) '
+        + 'ולהזין אותה ב-CIBUS_MAIL_PASS.';
+    }
+    return `אימות מול תיבת הדואר${box} נכשל. בדוק/י את CIBUS_MAIL_USER ואת סיסמת האפליקציה `
+      + 'ב-CIBUS_MAIL_PASS (16 תווים, בלי רווחים).';
+  }
+  if (/IMAP access is disabled|\[ALERT\].*IMAP/i.test(raw)) {
+    return `גישת IMAP מכובה בחשבון${box}. יש להפעיל אותה בהגדרות Gmail — `
+      + '"העברה ו-POP/IMAP" ← הפעלת IMAP.';
+  }
+  if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) {
+    return `לא נמצא שרת הדואר "${cfg?.host}". בדוק/י את CIBUS_MAIL_HOST.`;
+  }
+  if (/ECONNREFUSED|ETIMEDOUT|ECONNRESET|timed out/i.test(raw)) {
+    return `אין תקשורת אל ${cfg?.host}:${cfg?.port}. ייתכן שהחיבור נחסם.`;
+  }
+  if (/certificate|self signed|SSL|TLS/i.test(raw)) {
+    return `בעיית אבטחת חיבור (TLS) מול ${cfg?.host}.`;
+  }
+  // Nothing recognised — hand back everything there is rather than one word.
+  return raw || 'שגיאה לא ידועה בקריאת תיבת הדואר';
+}
+
 async function fetchMessages(rules = {}) {
   const cfg = mailConfig();
   if (!cfg.configured) {
@@ -74,8 +115,26 @@ async function fetchMessages(rules = {}) {
   });
 
   const messages = [];
-  await client.connect();
-  const lock = await client.getMailboxLock(rules.mailbox || 'INBOX');
+  // Connecting and opening the box are where the credential and IMAP-setting
+  // mistakes surface, and they are the ones worth naming.
+  try {
+    await client.connect();
+  } catch (err) {
+    const e = new Error(describeMailError(err, cfg));
+    e.cause = err;
+    throw e;
+  }
+
+  let lock;
+  try {
+    lock = await client.getMailboxLock(rules.mailbox || 'INBOX');
+  } catch (err) {
+    await client.logout().catch(() => {});
+    const e = new Error(describeMailError(err, cfg));
+    e.cause = err;
+    throw e;
+  }
+
   try {
     // Search on the server by date only; sender/subject are matched here so a
     // rule can be a substring in either Hebrew or English without depending on
@@ -144,7 +203,7 @@ async function testConnection() {
     return { ok: true, mailbox: cfg.user, host: cfg.host, messages: box.exists };
   } catch (err) {
     try { await client.logout(); } catch { /* already down */ }
-    return { ok: false, error: err.message };
+    return { ok: false, error: describeMailError(err, cfg) };
   }
 }
 
@@ -154,4 +213,7 @@ const fetchReports = (rules = {}) => fetchMessages({ ...rules, attachmentExt: RE
 /** The טופס 101 scan's view: PDFs and photographed/scanned pages. */
 const fetchForms = (rules = {}) => fetchMessages({ ...rules, attachmentExt: FORM_EXT });
 
-module.exports = { fetchMessages, fetchReports, fetchForms, testConnection, mailConfig, FORM_EXT, REPORT_EXT };
+module.exports = {
+  describeMailError, fetchMessages, fetchReports, fetchForms, testConnection,
+  mailConfig, FORM_EXT, REPORT_EXT,
+};
