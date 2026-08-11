@@ -430,8 +430,14 @@ function ScanSettings() {
       {!meta.mailbox_configured && (
         <Alert severity="error">
           <AlertTitle sx={{ fontWeight: 700 }}>תיבת הדואר לא מוגדרת</AlertTitle>
-          הסריקה קוראת את אותה תיבה של ייבוא Cibus (CIBUS_MAIL_USER / CIBUS_MAIL_PASS ב-Render).
-          ללא הגדרתן לא ניתן לסרוק.
+          הסריקה נכנסת לתיבת דואר וקוראת ממנה את הטפסים שהגיעו. חסרים בשרת (Render)
+          שני משתנים:
+          <Box component="ul" sx={{ my: 0.5, pr: 3 }}>
+            <li><code>CIBUS_MAIL_USER</code> — <b>כתובת המייל של התיבה</b> שאליה מגיעים הטפסים</li>
+            <li><code>CIBUS_MAIL_PASS</code> — <b>סיסמת אפליקציה</b> של אותה תיבה (ב-Gmail: App Password, לא סיסמת החשבון)</li>
+          </Box>
+          <b>אלו לא שם המשתמש והסיסמה שלך בסיבוס.</b> השם CIBUS נשאר מהשימוש הראשון
+          שנעשה בתיבה הזו — ייבוא דוח סיבוס — ואותה תיבה משמשת גם לסריקת טופסי 101.
         </Alert>
       )}
       {!meta.ai_configured && (

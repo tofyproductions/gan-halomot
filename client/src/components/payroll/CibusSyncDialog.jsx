@@ -102,8 +102,11 @@ export default function CibusSyncDialog({ open, month, onClose, onChanged }) {
             {!mail?.configured ? (
               <Alert severity="warning">
                 <b>לשרת אין עדיין פרטי תיבת מייל.</b> יש להוסיף ב-Render (Environment) את המשתנים
-                <code> CIBUS_MAIL_USER</code> ו-<code>CIBUS_MAIL_PASS</code>.
-                ב-Gmail חייבים <b>App Password</b> — לא סיסמת החשבון. הסיסמה נשמרת רק שם, לא במסד ולא במסך הזה.
+                <code> CIBUS_MAIL_USER</code> — <b>כתובת המייל של התיבה</b> שאליה סיבוס שולח את הדוח —
+                ו-<code>CIBUS_MAIL_PASS</code> — <b>סיסמת אפליקציה</b> של אותה תיבה.
+                ב-Gmail חייבים <b>App Password</b>, לא סיסמת החשבון.
+                <b>אלו אינם שם המשתמש והסיסמה בפורטל סיבוס</b> — המערכת לא נכנסת לפורטל,
+                היא קוראת את המייל שסיבוס שולח. הסיסמה נשמרת רק שם, לא במסד ולא במסך הזה.
               </Alert>
             ) : (
               <Alert severity="success" icon={false}>
