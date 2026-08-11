@@ -8,8 +8,7 @@ import { hasTabAccess } from './config/tabs';
 import RegistrationWizard from './components/registration/RegistrationWizard';
 import ParentOnboarding from './components/registration/ParentOnboarding';
 import RegistrationTracker from './components/registration/RegistrationTracker';
-import ExternalEnrollments from './components/registration/ExternalEnrollments';
-import TmtReconcile from './components/registration/TmtReconcile';
+import EmunahEnrollment from './components/registration/EmunahEnrollment';
 import CollectionsTable from './components/collections/CollectionsTable';
 import ArchiveList from './components/archive/ArchiveList';
 import ContactListPDF from './components/contacts/ContactListPDF';
@@ -86,16 +85,16 @@ function AppRoutes() {
         <Route path="registrations" element={<RegistrationTracker />} />
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
-        <Route path="external-enrollments" element={
+        <Route path="emunah-enrollment" element={
           <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
-            <ExternalEnrollments />
+            <EmunahEnrollment />
           </ProtectedRoute>
         } />
-        <Route path="tmt-reconcile" element={
-          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
-            <TmtReconcile />
-          </ProtectedRoute>
-        } />
+        {/* The two screens used to be two menu entries. Anyone holding an old
+            link — or an old tab left open — lands on the merged page instead
+            of a blank one. */}
+        <Route path="external-enrollments" element={<Navigate to="/emunah-enrollment" replace />} />
+        <Route path="tmt-reconcile" element={<Navigate to="/emunah-enrollment?view=tmt" replace />} />
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="pricing" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>

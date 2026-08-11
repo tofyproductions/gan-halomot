@@ -66,6 +66,14 @@ function StatCard({ label, value, color, onClick, active, hint }) {
 
 export default function TmtReconcile() {
   const years = getAcademicYears();
+  // getAcademicYears() knows `current` and `next` only. The year before is
+  // derived here — reading years.previous.range crashed the whole app to a
+  // blank page, because a thrown render has no route left to go back to.
+  const previousRange = (() => {
+    const start = Number(years.current.range.split('-')[0]) - 1;
+    return `${start}-${start + 1}`;
+  })();
+  const YEAR_OPTIONS = [years.next.range, years.current.range, previousRange];
   const [year, setYear] = useState(years.next.range);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
@@ -209,7 +217,7 @@ export default function TmtReconcile() {
           select size="small" label="שנת לימודים" value={year}
           onChange={e => setYear(e.target.value)} sx={{ minWidth: 190 }}
         >
-          {[years.next.range, years.current.range, years.previous.range].map(y => (
+          {YEAR_OPTIONS.map(y => (
             <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
           ))}
         </TextField>
