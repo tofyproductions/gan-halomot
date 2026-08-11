@@ -13,23 +13,20 @@ export function BranchProvider({ children }) {
   const fetchBranches = () => {
     api.get('/branches')
       .then((res) => {
-        let list = res.data.branches || [];
-        // Belt-and-suspenders: if the JWT carries managed_branch_ids, filter
-        // the list to those IDs even if the server hasn't applied the same
-        // filter yet (e.g. during a rolling deploy). Without this the user
-        // can see branches in the dropdown that they're not authorized to
-        // fetch attendance / payroll data from — producing visible 403s.
-        try {
-          const token = localStorage.getItem('token');
-          if (token) {
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            const role = payload.role;
-            const managed = payload.managed_branch_ids || [];
-            if (role && role !== 'system_admin' && role !== 'accountant' && managed.length > 0) {
-              list = list.filter(b => managed.includes(String(b._id || b.id)));
-            }
-          }
-        } catch { /* token unparseable — skip filter */ }
+        /**
+         * The server's list is the list.
+         *
+         * There used to be a second filter here, applied on top, reading
+         * managed_branch_ids out of the JWT — and a token is stale exactly
+         * when it matters: the moment an admin grants somebody more branches,
+         * every token already issued still carries the old set. The server
+         * re-reads the user from the database on every /branches call
+         * (branch.controller.getAll), so this could only ever remove branches
+         * the server had just approved. A back-office manager granted three
+         * gans kept seeing one, and looked at a permissions screen that said
+         * three.
+         */
+        const list = res.data.branches || [];
         setBranches(list);
         // If no branch selected and branches exist, select first
         if (!selectedBranch && list.length > 0) {

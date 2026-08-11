@@ -86,6 +86,12 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
           <TextField select label="תפקיד" value={role} onChange={e => setRole(e.target.value)} fullWidth>
             {Object.entries(ROLE_LABELS).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
           </TextField>
+          <Stack direction="row" spacing={1}>
+            <Button size="small" onClick={() => setManaged(branches.map(b => b._id || b.id))}>
+              כל הסניפים
+            </Button>
+            <Button size="small" onClick={() => setManaged([])}>ניקוי</Button>
+          </Stack>
           <FormControl fullWidth>
             <InputLabel>סניפים מנוהלים</InputLabel>
             <Select
@@ -113,7 +119,9 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
               })}
             </Select>
             <Typography variant="caption" sx={{ mt: 0.5, color: 'text.secondary' }}>
-              משאיר ריק = ברירת מחדל = הסניף הראשי של המשתמש
+              אלו הסניפים שהמשתמש/ת יראה/תראה בבורר הסניפים ויוכל/תוכל לעבוד עליהם.
+              ריק = רק הסניף הראשי שלו/ה. לגישה לכל הרשת חוץ מגן אחד — "כל הסניפים"
+              ואז מסירים את אותו גן.
             </Typography>
           </FormControl>
         </Stack>

@@ -45,25 +45,16 @@ function isTmtSupervised(branch) {
 /**
  * The branches this request may see, or null for "all".
  *
- * Same rule the events and payroll screens use. It matters more here than on
- * most screens: a reconciliation row carries a child's ת"ז, both parents'
- * phones and the family's address, and a branch manager has no business
- * reading another gan's intake.
+ * It matters more here than on most screens: a reconciliation row carries a
+ * child's ת"ז, both parents' phones and the family's address, and nobody has
+ * business reading another gan's intake.
+ *
+ * Read from the database rather than the token — see utils/branch-scope.js.
+ * The version this replaced trusted the JWT, so a back-office manager granted
+ * three branches saw all three in the dropdown (served fresh from the DB) and
+ * was refused by every endpoint here until she logged out and back in.
  */
-function managedBranchIds(req) {
-  const role = req.user?.role;
-  if (role === 'system_admin' || role === 'accountant') return null;
-  const managed = (req.user?.managed_branch_ids || []).map(String);
-  const fallback = req.user?.branch_id ? [String(req.user.branch_id)] : [];
-  return managed.length ? managed : fallback;
-}
-
-/** Whether this request may work on this branch. */
-function canAccessBranch(req, branchId) {
-  const scope = managedBranchIds(req);
-  if (!scope) return true;
-  return scope.includes(String(branchId));
-}
+const { resolveBranchScope, canAccessBranch } = require('../utils/branch-scope');
 
 /** The fields whose change between two uploads is worth recording. */
 const TRACKED = [
@@ -105,7 +96,7 @@ async function importFile(req, res, next) {
     if (!req.file) return res.status(400).json({ error: 'לא נבחר קובץ' });
     const branchId = req.body?.branch_id;
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף — קובץ התמ"ת לא כולל את שם הסניף' });
-    if (!canAccessBranch(req, branchId)) {
+    if (!await canAccessBranch(req, branchId)) {
       return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
     }
     const branch = await Branch.findById(branchId).lean();
@@ -263,11 +254,11 @@ async function listApprovals(req, res, next) {
   try {
     const filter = { academic_year: normalizeYear(req.query.year || enrollmentYear()) };
     if (req.query.branch && req.query.branch !== 'all') {
-      if (!canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      if (!await canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
       filter.branch_id = req.query.branch;
     } else {
       // No branch asked for: a manager still gets only her own.
-      const scope = managedBranchIds(req);
+      const scope = await resolveBranchScope(req);
       if (scope) filter.branch_id = { $in: scope };
     }
 
@@ -306,7 +297,7 @@ async function listApprovals(req, res, next) {
  * way to find them is to look outside the branch being reconciled.
  */
 async function buildReconciliation({ branchId, academicYear, req }) {
-  if (req && !canAccessBranch(req, branchId)) {
+  if (req && !await canAccessBranch(req, branchId)) {
     return { error: 'אין לך הרשאה לסניף זה', status: 403 };
   }
   const branch = await Branch.findById(branchId).lean();
@@ -381,10 +372,10 @@ async function listImports(req, res, next) {
   try {
     const filter = { academic_year: normalizeYear(req.query.year || enrollmentYear()) };
     if (req.query.branch && req.query.branch !== 'all') {
-      if (!canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      if (!await canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
       filter.branch_id = req.query.branch;
     } else {
-      const scope = managedBranchIds(req);
+      const scope = await resolveBranchScope(req);
       if (scope) filter.branch_id = { $in: scope };
     }
     if (req.query.source) filter.source = req.query.source;
@@ -820,7 +811,7 @@ async function confirmPlacement(req, res, next) {
   try {
     const branchId = req.body?.branch_id;
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
-    if (!canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    if (!await canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
     const academicYear = normalizeYear(req.body?.academic_year || enrollmentYear());
 
     const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
@@ -909,7 +900,7 @@ async function deleteData(req, res, next) {
   try {
     const branchId = req.query.branch;
     if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
-    if (!canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    if (!await canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
     const academicYear = normalizeYear(req.query.year || '');
     if (!/^\d{4}-\d{4}$/.test(academicYear)) return res.status(400).json({ error: 'יש לבחור שנת לימודים' });
 
