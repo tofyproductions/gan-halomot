@@ -14,8 +14,8 @@
  *                 never silently overwritten.
  */
 
-const crypto = require('crypto');
 const { normalizeYear } = require('./academic-year.service');
+const { stableHash } = require('../utils/stable-hash');
 
 /** Vendor column -> what it means. The whole file-format contract. */
 const COLUMNS = {
@@ -239,12 +239,16 @@ function parseRow(row, { branchId, sourceFile = '' }) {
  * `raw` is excluded on purpose: a column reordered or a trailing space added
  * by the export is not a change to the enrollment, and re-importing the same
  * data should be a no-op rather than 77 modifications.
+ *
+ * This used to pass the sorted key list as JSON.stringify's second argument,
+ * which is a recursive property ALLOWLIST rather than a sort order — it
+ * emptied every nested object, so `child`, `parent1` and `enrollment` were not
+ * in the hash at all and no re-import ever detected a change. See
+ * utils/stable-hash.js.
  */
 function hashPayload(doc) {
   const { raw, content_hash, source_file, ...meaningful } = doc;
-  return crypto.createHash('sha256')
-    .update(JSON.stringify(meaningful, Object.keys(meaningful).sort()))
-    .digest('hex');
+  return stableHash(meaningful);
 }
 
 /** Every row of the sheet, parsed. Rows with no child ת״ז are not enrollments. */
