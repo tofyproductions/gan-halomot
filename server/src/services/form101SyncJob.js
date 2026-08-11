@@ -22,6 +22,7 @@ const {
 } = require('../models');
 const mailbox = require('./mailbox.service');
 const { scanForm101 } = require('./form101Scan');
+const { prefilter } = require('./form101Prefilter');
 const form101 = require('./form101');
 
 const RUN_LOG_CAP = 40;
@@ -152,6 +153,8 @@ async function run(trigger = 'schedule') {
   // separately because it is the whole point of the notebook, and because a
   // run that says "42 דולגו" tells nobody whether it cost anything.
   let cached = 0;
+  // Files rejected locally, before any AI call — the cheapest possible answer.
+  let prefiltered = 0;
   // The hashes answered from the notebook this run — counted up at the end in
   // one write, so "how many times has this file come back" is a real number
   // without paying a write per file per run.
@@ -165,6 +168,20 @@ async function run(trigger = 'schedule') {
       if (seen.seen) {
         skipped += 1;
         if (seen.cached) { cached += 1; cachedHashes.push(hash); }
+        continue;
+      }
+
+      /**
+       * Try to reject it locally before paying for a look.
+       *
+       * Only ever says "no": a text-layer PDF with no "101" in it anywhere.
+       * Anything it can't decide goes to the AI exactly as before.
+       */
+      const pre = await prefilter(att.buffer, att.contentType, att.filename);
+      if (pre.decided && !pre.isForm101) {
+        await remember(hash, 'not_form_101', att, pre.reason);
+        prefiltered += 1;
+        skipped += 1;
         continue;
       }
 
@@ -257,7 +274,12 @@ async function run(trigger = 'schedule') {
   const parts = [];
   if (attached) parts.push(`${attached} שויכו`);
   if (unmatched) parts.push(`${unmatched} ממתינים לשיוך`);
-  if (skipped) parts.push(`${skipped} דולגו${cached ? ` (${cached} מהזיכרון, ללא עלות)` : ''}`);
+  if (skipped) {
+    const free = [];
+    if (cached) free.push(`${cached} מהזיכרון`);
+    if (prefiltered) free.push(`${prefiltered} נדחו מקומית`);
+    parts.push(`${skipped} דולגו${free.length ? ` (${free.join(', ')} — ללא עלות)` : ''}`);
+  }
   if (problems.length) parts.push(`שגיאות: ${problems.slice(0, 3).join('; ')}`);
 
   return record(cfg, {
@@ -269,6 +291,7 @@ async function run(trigger = 'schedule') {
     unmatched_count: unmatched,
     skipped_count: skipped,
     cached_count: cached,
+    prefiltered_count: prefiltered,
     message: parts.join(' · ') || 'לא נמצאו טפסים חדשים',
   });
 }

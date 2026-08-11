@@ -518,7 +518,7 @@ function ScanSettings() {
                   <TableCell>מתי</TableCell>
                   <TableCell>מקור</TableCell>
                   <TableCell align="center">נסרקו ב-AI</TableCell>
-                  <TableCell align="center">מהזיכרון</TableCell>
+                  <TableCell align="center">ללא עלות</TableCell>
                   <TableCell align="center">שויכו</TableCell>
                   <TableCell align="center">לשיוך</TableCell>
                   <TableCell>הודעה</TableCell>
@@ -531,10 +531,12 @@ function ScanSettings() {
                     <TableCell>{r.trigger === 'manual' ? 'ידני' : 'מתוזמן'}</TableCell>
                     {/* The only column that costs money. */}
                     <TableCell align="center">{r.files_scanned}</TableCell>
-                    {/* Files answered from what a previous run already learned
-                        about them, instead of being sent to Claude again. */}
+                    {/* The two free paths: a verdict a previous run already
+                        recorded, and a PDF rejected by reading its own text. */}
                     <TableCell align="center" sx={{ color: 'success.main', fontWeight: 700 }}>
-                      {r.cached_count || 0}
+                      <Tooltip title={`${r.cached_count || 0} מהזיכרון · ${r.prefiltered_count || 0} נדחו מקומית`}>
+                        <span>{(r.cached_count || 0) + (r.prefiltered_count || 0)}</span>
+                      </Tooltip>
                     </TableCell>
                     <TableCell align="center">{r.attached_count}</TableCell>
                     <TableCell align="center">{r.unmatched_count}</TableCell>

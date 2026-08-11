@@ -31,6 +31,9 @@ const runSchema = new mongoose.Schema({
   // from Claude. The AI calls a run actually paid for are files_scanned; this
   // is the number it did not.
   cached_count: { type: Number, default: 0 },
+  // Of the skipped, how many were rejected locally by reading the PDF's own
+  // text layer — never sent to Claude even once.
+  prefiltered_count: { type: Number, default: 0 },
   message: { type: String, default: '' },
 }, { _id: true });
 
