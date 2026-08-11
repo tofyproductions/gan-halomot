@@ -34,6 +34,10 @@ const runSchema = new mongoose.Schema({
   // Of the skipped, how many were rejected locally by reading the PDF's own
   // text layer — never sent to Claude even once.
   prefiltered_count: { type: Number, default: 0 },
+  // How many files were put to the cheap gate model. `files_scanned` is how
+  // many of them went on to the expensive full read — the two together are the
+  // two-stage saving.
+  gated_count: { type: Number, default: 0 },
   message: { type: String, default: '' },
 }, { _id: true });
 

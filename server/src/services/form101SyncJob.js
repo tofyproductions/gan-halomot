@@ -21,7 +21,7 @@ const {
   Form101Sync, Form101Inbox, EmployeeDocument, ScannedAttachment,
 } = require('../models');
 const mailbox = require('./mailbox.service');
-const { scanForm101 } = require('./form101Scan');
+const { scanForm101, gateIsForm101 } = require('./form101Scan');
 const { prefilter } = require('./form101Prefilter');
 const form101 = require('./form101');
 
@@ -155,6 +155,8 @@ async function run(trigger = 'schedule') {
   let cached = 0;
   // Files rejected locally, before any AI call — the cheapest possible answer.
   let prefiltered = 0;
+  // Files that only ever reached the cheap gate model.
+  let gated = 0;
   // The hashes answered from the notebook this run — counted up at the end in
   // one write, so "how many times has this file come back" is a real number
   // without paying a write per file per run.
@@ -186,6 +188,29 @@ async function run(trigger = 'schedule') {
       }
 
       const data = att.buffer.toString('base64');
+
+      /**
+       * Stage one — the cheap question, on the cheap model.
+       *
+       * Almost everything in a mailbox fails "is this a form 101 at all", and
+       * that question does not need the model that reads a ת״ז off a scan. The
+       * gate leans yes when unsure (see GATE_SYSTEM), and a gate that errors or
+       * cannot answer returns null, which falls through to the full read — a
+       * failed cheap check must never discard a file.
+       */
+      let gate = null;
+      try {
+        gate = await gateIsForm101(data, att.filename, att.contentType);
+        if (gate) gated += 1;
+      } catch { /* gate unavailable — fall through to the full read */ }
+
+      if (gate && !gate.is_form_101) {
+        await remember(hash, 'not_form_101', att,
+          `סינון מהיר (${gate.model}): אינו טופס 101 · ביטחון ${gate.confidence}`);
+        skipped += 1;
+        continue;
+      }
+
       let scan;
       try {
         scan = await scanForm101(data, att.filename, att.contentType);
@@ -273,6 +298,7 @@ async function run(trigger = 'schedule') {
   const status = attached + unmatched === 0 ? 'empty' : 'ok';
   const parts = [];
   if (attached) parts.push(`${attached} שויכו`);
+  if (gated) parts.push(`${gated} עברו סינון מהיר, ${filesScanned} נקראו במלואם`);
   if (unmatched) parts.push(`${unmatched} ממתינים לשיוך`);
   if (skipped) {
     const free = [];
@@ -292,6 +318,7 @@ async function run(trigger = 'schedule') {
     skipped_count: skipped,
     cached_count: cached,
     prefiltered_count: prefiltered,
+    gated_count: gated,
     message: parts.join(' · ') || 'לא נמצאו טפסים חדשים',
   });
 }

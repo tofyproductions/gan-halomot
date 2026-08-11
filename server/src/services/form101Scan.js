@@ -19,6 +19,26 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const MODEL = process.env.FORM101_SCAN_MODEL || 'claude-opus-4-8';
 
+/**
+ * The gate model — the cheap half of a two-stage read.
+ *
+ * The job is two different questions wearing one coat. "Is this a form 101 at
+ * all?" is easy, and it is the question almost every attachment in the mailbox
+ * fails: payslips, invoices, signature pages, logos. "What ת״ז is written on
+ * this scan?" is hard, and getting it wrong files a form under the wrong
+ * employee.
+ *
+ * So the easy question is asked of a model that costs a fifth as much, and only
+ * what survives it reaches the expensive one. The extraction nobody can afford
+ * to get wrong is unchanged.
+ *
+ * Set FORM101_GATE_MODEL to '' to turn the gate off and send everything
+ * straight to the full read.
+ */
+const GATE_MODEL = process.env.FORM101_GATE_MODEL === ''
+  ? null
+  : (process.env.FORM101_GATE_MODEL || 'claude-haiku-4-5');
+
 let client = null;
 function getClient() {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -65,6 +85,87 @@ const SYSTEM = [
   'ציין/י אי-ודאות ב-confidence וב-notes.',
 ].join('\n');
 
+const GATE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    is_form_101: { type: 'boolean', description: 'האם המסמך הוא טופס 101 (כרטיס עובד לצורכי מס הכנסה)' },
+    confidence: { type: 'string', enum: ['high', 'medium', 'low'], description: 'רמת הביטחון' },
+  },
+  required: ['is_form_101', 'confidence'],
+};
+
+/**
+ * The gate's instructions are deliberately lopsided.
+ *
+ * A false yes costs one extra call to the expensive model. A false no loses an
+ * employee's tax form silently — it is recorded as "not a form" and never asked
+ * about again. Those are not symmetric mistakes, so the gate is told to lean
+ * yes whenever it is unsure.
+ */
+const GATE_SYSTEM = [
+  'עליך להחליט דבר אחד בלבד: האם המסמך שלפניך הוא טופס 101 (כרטיס עובד לצורכי מס הכנסה) של עובד בישראל.',
+  'טופס 101 הוא טופס ממשלתי עם הכותרת "כרטיס עובד" או "טופס 101", ובו פרטי עובד, ת״ז, שנת מס והצהרה חתומה.',
+  'מסמכים שאינם טופס 101: תלוש שכר, חשבונית, אישור מחלה, חוזה, צילום מסך, לוגו, תמונה כלשהי.',
+  'חשוב: אם אינך בטוח/ה — ענה/י is_form_101=true. טעות לכיוון "כן" עולה בדיקה נוספת בלבד;',
+  'טעות לכיוון "לא" גורמת לכך שטופס אמיתי של עובד/ת ייזרק ולא ייבדק שוב לעולם.',
+  'אל תחלץ/י שום פרט מהמסמך — רק ההחלטה הזו.',
+].join('\n');
+
+/**
+ * Stage one: is this a form 101 at all?
+ *
+ * Returns null when the gate is disabled or the file type is one it cannot
+ * judge — the caller then goes straight to the full read.
+ *
+ * @returns {Promise<{is_form_101: boolean, confidence: string, model: string}|null>}
+ */
+async function gateIsForm101(fileDataBase64, fileName, mimeType) {
+  if (!GATE_MODEL) return null;
+  const block = docBlockFor(fileDataBase64, fileName, mimeType);
+
+  const response = await getClient().messages.create({
+    model: GATE_MODEL,
+    max_tokens: 128,
+    system: GATE_SYSTEM,
+    output_config: { format: { type: 'json_schema', schema: GATE_SCHEMA } },
+    messages: [{
+      role: 'user',
+      content: [block, { type: 'text', text: 'האם זהו טופס 101?' }],
+    }],
+  });
+
+  // A refusal or an unreadable answer is not a "no" — hand it to the full read
+  // rather than discarding a file on a failed cheap check.
+  if (response.stop_reason === 'refusal') return null;
+  const textBlock = (response.content || []).find(b => b.type === 'text');
+  if (!textBlock?.text) return null;
+  try {
+    const parsed = JSON.parse(textBlock.text);
+    return {
+      is_form_101: !!parsed.is_form_101,
+      confidence: parsed.confidence || '',
+      model: GATE_MODEL,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The document/image content block for a file — shared by both stages. */
+function docBlockFor(fileDataBase64, fileName, mimeType) {
+  const mime = mimeType && mimeType !== 'application/octet-stream' ? mimeType : mimeFromName(fileName);
+  const isPdf = mime === 'application/pdf';
+  if (!isPdf && !mime.startsWith('image/')) {
+    const err = new Error('סוג קובץ לא נתמך לסריקה (רק תמונה או PDF)');
+    err.code = 'BAD_MIME';
+    throw err;
+  }
+  return isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileDataBase64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mime, data: fileDataBase64 } };
+}
+
 /**
  * @param {string} fileDataBase64  base64 (no data: prefix)
  * @param {string} fileName
@@ -77,18 +178,7 @@ async function scanForm101(fileDataBase64, fileName, mimeType) {
     err.code = 'NO_FILE';
     throw err;
   }
-  const mime = mimeType && mimeType !== 'application/octet-stream' ? mimeType : mimeFromName(fileName);
-  const isPdf = mime === 'application/pdf';
-  const isImage = mime.startsWith('image/');
-  if (!isPdf && !isImage) {
-    const err = new Error('סוג קובץ לא נתמך לסריקה (רק תמונה או PDF)');
-    err.code = 'BAD_MIME';
-    throw err;
-  }
-
-  const docBlock = isPdf
-    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: fileDataBase64 } }
-    : { type: 'image', source: { type: 'base64', media_type: mime, data: fileDataBase64 } };
+  const docBlock = docBlockFor(fileDataBase64, fileName, mimeType);
 
   const response = await getClient().messages.create({
     model: MODEL,
@@ -133,4 +223,4 @@ async function scanForm101(fileDataBase64, fileName, mimeType) {
   return parsed;
 }
 
-module.exports = { scanForm101, mimeFromName, MODEL };
+module.exports = { scanForm101, gateIsForm101, mimeFromName, MODEL, GATE_MODEL };
