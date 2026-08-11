@@ -12,7 +12,7 @@ import StockShortageTile from './StockShortageTile';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { selectedBranchName } = useBranch();
+  const { selectedBranch, selectedBranchName } = useBranch();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -65,14 +65,27 @@ export default function Dashboard() {
     }
   };
 
+  /**
+   * The branch has to be ON the request.
+   *
+   * The board named the selected branch in its subtitle and then asked for
+   * every branch's numbers — the server filters by `?branch=`, and nobody was
+   * sending it. So משה דיין's screen listed a קפלן child among its pending
+   * registrations, and its classroom counts and forecast were the whole
+   * network's. Refetching on branch change is the other half: switching the
+   * branch in the header used to leave the board showing the old data.
+   */
   useEffect(() => {
     let cancelled = false;
-    api.get('/dashboard/stats')
+    setLoading(true);
+    api.get('/dashboard/stats', {
+      params: selectedBranch ? { branch: selectedBranch } : {},
+    })
       .then((res) => { if (!cancelled) setData(res.data); })
       .catch((err) => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [selectedBranch]);
 
   if (loading) {
     return (
@@ -96,10 +109,19 @@ export default function Dashboard() {
   const forecast = data?.forecast || [];
   const forecastNextYear = data?.forecastNextYear || [];
   const totalCapacity = data?.totalCapacity || 0;
+  // The ministry's licence for the whole מעון, typed in on the placement board.
+  // Kept next to the rooms' own total rather than merged with it: the rooms are
+  // often laid out for more places than the licence allows, and the number that
+  // binds is the smaller one.
+  const licensedCapacity = data?.licensedCapacity ?? null;
+  const bindingCapacity = data?.bindingCapacity || 0;
   const academicYear = data?.academicYear || '';
   const nextAcademicYear = data?.nextAcademicYear || '';
 
   const totalKids = Object.values(classrooms).reduce((sum, kids) => sum + (Array.isArray(kids) ? kids.length : 0), 0);
+  // Declared here and not with the other capacity figures above: it reads
+  // totalKids, and a const read before its own declaration throws at render.
+  const freePlaces = bindingCapacity > 0 ? Math.max(0, bindingCapacity - totalKids) : null;
   const signedCount = pendingLeads.filter(l => l.agreement_signed).length;
   const pendingCount = pendingLeads.length - signedCount;
 
@@ -158,8 +180,26 @@ export default function Dashboard() {
         </Card>
         <Card>
           <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">תפוסה מקסימלית</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#3b82f6' }}>{totalCapacity || '—'}</Typography>
+            <Typography variant="body2" color="text.secondary">תפוסה מאושרת</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: '#3b82f6' }}>
+              {bindingCapacity || '—'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {licensedCapacity != null
+                ? `רישיון ${licensedCapacity} · כיתות ${totalCapacity}`
+                : 'לפי סכום מקומות בכיתות'}
+            </Typography>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent sx={{ textAlign: 'center' }}>
+            <Typography variant="body2" color="text.secondary">מקומות פנויים</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, color: freePlaces === 0 ? '#ef4444' : '#10b981' }}>
+              {freePlaces == null ? '—' : freePlaces}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" display="block">
+              {bindingCapacity > 0 ? `${totalKids} מתוך ${bindingCapacity} משובצים` : 'לא הוזנה תפוסה'}
+            </Typography>
           </CardContent>
         </Card>
         <StockShortageTile />

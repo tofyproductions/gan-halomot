@@ -1,4 +1,4 @@
-const { Child, Registration, Classroom } = require('../models');
+const { Child, Registration, Classroom, Branch } = require('../models');
 const { getAcademicYears, normalizeYear, ACADEMIC_MONTHS } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
@@ -13,9 +13,17 @@ async function getStats(req, res, next) {
     const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
     const branchClassroomIds = branchClassrooms.map(c => c._id);
 
-    // Classrooms with children (filter by branch classrooms)
+    /**
+     * Children of THIS branch — by way of its classrooms.
+     *
+     * The `length > 0` guard this replaces was a trapdoor: a branch with no
+     * classrooms yet fell through to no filter at all and was shown every child
+     * in the network as if they were its own. קפלן, which has no rooms for the
+     * coming year, listed משה דיין's cohort. A branch with no rooms has no
+     * children on this board, and an empty `$in` says exactly that.
+     */
     const childFilter = { academic_year: targetYear, is_active: true };
-    if (branchClassroomIds.length > 0 && Object.keys(branchFilter).length > 0) {
+    if (Object.keys(branchFilter).length > 0) {
       childFilter.classroom_id = { $in: branchClassroomIds };
     }
 
@@ -82,6 +90,18 @@ async function getStats(req, res, next) {
     // Total branch capacity (sum of all classroom capacities)
     const totalCapacity = classroomCapacity.reduce((sum, c) => sum + (c.capacity || 0), 0);
 
+    /**
+     * The ministry's licence for the whole מעון, when a single branch is being
+     * looked at. Kept apart from the sum above: the rooms can be laid out for
+     * more places than the licence allows, and the board must not average two
+     * different facts into one number.
+     */
+    let licensedCapacity = null;
+    if (branchFilter.branch_id) {
+      const b = await Branch.findById(branchFilter.branch_id).select('licensed_capacity').lean();
+      licensedCapacity = b?.licensed_capacity ?? null;
+    }
+
     res.json({
       classrooms,
       pendingLeads: formattedLeads,
@@ -89,6 +109,12 @@ async function getStats(req, res, next) {
       forecastNextYear,
       classroomCapacity: classroomCapacity.map(c => ({ name: c.name, capacity: c.capacity || 0 })),
       totalCapacity,
+      licensedCapacity,
+      // The number that actually limits intake: the smaller of the two when
+      // both are known.
+      bindingCapacity: licensedCapacity != null && totalCapacity
+        ? Math.min(licensedCapacity, totalCapacity)
+        : (licensedCapacity ?? totalCapacity),
       academicYear: targetYear,
       nextAcademicYear: nextYear,
     });
@@ -161,8 +187,10 @@ async function getClassrooms(req, res, next) {
     const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
     const branchClassroomIds = branchClassrooms.map(c => c._id);
 
+    // Same trapdoor as in getStats: a branch with no classrooms must return no
+    // children, not every child in the network.
     const childFilter = { academic_year: targetYear, is_active: true };
-    if (branchClassroomIds.length > 0 && Object.keys(branchFilter).length > 0) {
+    if (Object.keys(branchFilter).length > 0) {
       childFilter.classroom_id = { $in: branchClassroomIds };
     }
 
