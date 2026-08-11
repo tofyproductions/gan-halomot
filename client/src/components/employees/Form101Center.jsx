@@ -411,16 +411,58 @@ function ScanSettings() {
       .finally(() => setSaving(false));
   };
 
-  const scanNow = () => {
+  /**
+   * Start a scan and watch for its result.
+   *
+   * The scan reads a month of mail and puts every unseen file to a model — it
+   * takes minutes, and axios gives up after thirty seconds. Awaiting it printed
+   * a bare "שגיאה" over a scan that had actually succeeded: the request timed
+   * out, so `err.response` was empty and the only thing left to show was the
+   * fallback word.
+   *
+   * The server now starts the job and returns immediately. This polls the run
+   * log until a run newer than the one on screen appears, and reports that.
+   */
+  const scanNow = async () => {
+    const before = cfg?.last_run_at ? new Date(cfg.last_run_at).getTime() : 0;
     setScanning(true);
-    api.post('/form-101/scan')
-      .then((res) => {
-        const r = res.data.run || {};
-        toast.success(r.message || 'הסריקה הסתיימה');
+    try {
+      await api.post('/form-101/scan');
+      toast.info('הסריקה יצאה לדרך — התוצאה תופיע כאן בסיום');
+    } catch (err) {
+      const data = err.response?.data;
+      toast.error(data?.error
+        // No response at all is a network failure or a timeout, not a server
+        // error — say which, rather than the word "שגיאה".
+        || (err.response ? 'שגיאה בהפעלת הסריקה' : 'אין תשובה מהשרת — בדוק/י את החיבור'));
+      setScanning(false);
+      return;
+    }
+
+    // Poll for a newer run. Five minutes is longer than any scan has taken;
+    // past that the run log is still the place to look.
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(r => setTimeout(r, 3000));
+      let fresh;
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        fresh = (await api.get('/form-101/config')).data.config;
+      } catch { continue; }
+      setCfg(fresh);
+      const at = fresh?.last_run_at ? new Date(fresh.last_run_at).getTime() : 0;
+      if (at > before) {
+        const run = (fresh.runs || [])[0];
+        if (run?.status === 'error') toast.error(run.message || 'הסריקה נכשלה');
+        else toast.success(run?.message || 'הסריקה הסתיימה');
         load();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
-      .finally(() => setScanning(false));
+        setScanning(false);
+        return;
+      }
+    }
+    toast.info('הסריקה עדיין רצה — רענן/י בעוד רגע');
+    setScanning(false);
   };
 
   if (!cfg) return <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>;

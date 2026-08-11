@@ -300,10 +300,30 @@ async function updateConfig(req, res, next) {
 }
 
 /** POST /api/form-101/scan — run it now. */
+/**
+ * POST /api/form-101/scan — start a scan, don't wait for it.
+ *
+ * A scan reads a month of mail and puts every unseen attachment to a model.
+ * That takes minutes; the browser's HTTP client gives up after thirty seconds.
+ * So awaiting it here produced the worst possible outcome: the scan ran to
+ * completion and recorded its results, while the screen showed a bare "שגיאה"
+ * — the request had timed out, so there was no server message to display and
+ * nothing to say the work had in fact succeeded.
+ *
+ * The job now runs detached and the response says only that it started. The
+ * screen polls the run log, which is where the answer was going to appear
+ * anyway.
+ */
 async function scanNow(req, res, next) {
   try {
-    const result = await job.run('manual');
-    res.json({ run: result });
+    if (job.isRunning()) {
+      return res.status(409).json({ error: 'סריקה כבר רצה כרגע', code: 'ALREADY_RUNNING' });
+    }
+    // Detached on purpose: nothing awaits this, and its outcome is recorded on
+    // the sync document either way. An unhandled rejection here would take the
+    // process down, so it is caught and logged.
+    job.run('manual').catch(e => console.error('[form101] manual scan failed:', e.message));
+    res.status(202).json({ started: true, message: 'הסריקה יצאה לדרך' });
   } catch (err) { next(err); }
 }
 

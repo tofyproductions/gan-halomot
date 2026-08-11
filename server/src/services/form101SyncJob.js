@@ -104,10 +104,35 @@ async function remember(hash, verdict, att, note = '') {
 }
 
 /**
+ * Is a scan in flight right now?
+ *
+ * One instance, one mailbox, one lock. Two scans at once would read the same
+ * messages twice and — before the notebook has recorded anything about them —
+ * pay for the same files twice. It also stops a scheduled tick from landing on
+ * top of a scan somebody started by hand.
+ */
+let inFlight = false;
+
+/** Whether a scan is currently running — for the endpoint that starts one. */
+const isRunning = () => inFlight;
+
+/**
  * Run one scan.
  * @param {'schedule'|'manual'} trigger
  */
 async function run(trigger = 'schedule') {
+  if (inFlight) {
+    return { status: 'skipped', message: 'סריקה כבר רצה כרגע' };
+  }
+  inFlight = true;
+  try {
+    return await runOnce(trigger);
+  } finally {
+    inFlight = false;
+  }
+}
+
+async function runOnce(trigger) {
   const cfg = await getConfig();
 
   if (!cfg.enabled && trigger === 'schedule') {
@@ -347,4 +372,4 @@ async function tick() {
   return run('schedule');
 }
 
-module.exports = { run, tick, getConfig };
+module.exports = { run, tick, getConfig, isRunning };
