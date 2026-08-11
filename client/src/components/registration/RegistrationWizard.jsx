@@ -20,6 +20,7 @@ const DEFAULT_FORM = {
   parent_id_number: '',
   parent_phone: '',
   classroom_id: '',
+  branch_id: '',
   monthly_fee: 3200,
   sibling_discount: false,
   registration_fee: 500,
@@ -38,6 +39,9 @@ export default function RegistrationWizard() {
 
   const [form, setForm] = useState(DEFAULT_FORM);
   const [classrooms, setClassrooms] = useState([]);
+  // The gans, so the branch can be shown and changed rather than inherited
+  // from whatever the header happened to be pointing at.
+  const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
@@ -53,6 +57,21 @@ export default function RegistrationWizard() {
   }, []);
 
   useEffect(() => {
+    api.get('/branches')
+      .then(res => setBranches(res.data.branches || []))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isEdit) {
+      // A new registration starts on the gan being looked at, which is the one
+      // sensible default — and it is now visible and changeable.
+      const sel = localStorage.getItem('selectedBranch');
+      if (sel && sel !== 'all') setForm(f => ({ ...f, branch_id: sel }));
+    }
+  }, [isEdit]);
+
+  useEffect(() => {
     if (isEdit) {
       setLoading(true);
       api.get(`/registrations/${id}`)
@@ -66,6 +85,9 @@ export default function RegistrationWizard() {
             parent_id_number: d.parent_id_number || '',
             parent_phone: d.parent_phone || '',
             classroom_id: d.classroom_id || '',
+            // The registration's OWN branch, not whichever one is selected in
+            // the header. See the payload below for why this matters.
+            branch_id: (d.branch_id?._id || d.branch_id || ''),
             monthly_fee: d.monthly_fee ?? 3200,
             sibling_discount: config.sibling_discount || false,
             registration_fee: d.registration_fee ?? 500,
@@ -142,7 +164,16 @@ export default function RegistrationWizard() {
         parent_id_number: form.parent_id_number || null,
         parent_phone: form.parent_phone,
         classroom_id: form.classroom_id || null,
-        branch_id: localStorage.getItem('selectedBranch') || null,
+        /**
+         * The branch is a FIELD, and it used to be an accident.
+         *
+         * This line read the branch out of the header — so opening an existing
+         * registration while another gan was selected and pressing save moved
+         * the child to that gan, silently, with nothing on screen saying so.
+         * That is how a קפלן child ends up on משה דיין's board. Now it is what
+         * the form shows, which on an edit starts as the registration's own.
+         */
+        branch_id: form.branch_id || localStorage.getItem('selectedBranch') || null,
         monthly_fee: effectiveFee,
         registration_fee: form.registration_fee,
         start_date: form.start_date,
@@ -262,6 +293,18 @@ export default function RegistrationWizard() {
                 InputLabelProps={{ shrink: true }}
                 fullWidth
               />
+              <TextField
+                label="סניף"
+                select
+                value={form.branch_id || ''}
+                onChange={handleChange('branch_id')}
+                helperText={isEdit ? 'שינוי הסניף מעביר את הרישום לגן אחר' : ''}
+                fullWidth
+              >
+                {branches.map((b) => (
+                  <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
+                ))}
+              </TextField>
               <TextField
                 label="כיתה"
                 select

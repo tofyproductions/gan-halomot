@@ -147,7 +147,10 @@ export default function RegistrationTracker() {
 
   const fetchData = useCallback(() => {
     setLoading(true);
-    api.get('/registrations')
+    // Branch on the request, and refetch when it changes. Without it the list
+    // was every branch's registrations under one branch's name.
+    const branch = localStorage.getItem('selectedBranch');
+    api.get('/registrations', { params: branch && branch !== 'all' ? { branch } : {} })
       .then(res => setRegistrations(res.data.registrations || []))
       .catch(() => toast.error('שגיאה בטעינת רישומים'))
       .finally(() => setLoading(false));

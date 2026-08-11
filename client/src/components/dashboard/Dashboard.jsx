@@ -284,7 +284,14 @@ export default function Dashboard() {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
                   <Typography sx={{ fontWeight: 700 }}>{lead.child_name}</Typography>
-                  <Typography variant="body2" color="text.secondary">{lead.parent_name}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {lead.parent_name}
+                    {/* The branch the registration is FILED under. Spelled out
+                        because a row filed against the wrong gan looks exactly
+                        like a correct one until you can see which gan it says. */}
+                    {lead.branch_name ? ` · ${lead.branch_name}` : ' · ללא סניף'}
+                    {lead.academic_year ? ` · ${lead.academic_year}` : ''}
+                  </Typography>
                 </Box>
                 <Chip
                   label={lead.agreement_signed ? 'חתום' : 'ממתין'}

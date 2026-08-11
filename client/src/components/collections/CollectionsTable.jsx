@@ -16,6 +16,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import BeachAccessIcon from '@mui/icons-material/BeachAccess';
 import Switch from '@mui/material/Switch';
 import { toast } from 'react-toastify';
+import { useBranch } from '../../hooks/useBranch';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
 import YearSelector from '../shared/YearSelector';
@@ -47,6 +48,7 @@ const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL', { day: '2-di
 
 export default function CollectionsTable() {
   const { selectedYear, setSelectedYear } = useAcademicYear();
+  const { selectedBranch } = useBranch();
   const [rawData, setRawData] = useState({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -87,14 +89,19 @@ export default function CollectionsTable() {
 
   const fetchData = useCallback(() => {
     setLoading(true);
-    api.get(`/collections?year=${selectedYear}`)
+    // The branch has to be on the request: the server filters by `?branch=`,
+    // and without it this table showed every branch's children under whichever
+    // branch happened to be selected in the header.
+    api.get('/collections', {
+      params: { year: selectedYear, ...(selectedBranch ? { branch: selectedBranch } : {}) },
+    })
       .then((res) => {
         setRawData(res.data.collections || {});
         setCampInfo(res.data.summer_camp || null);
       })
       .catch(() => toast.error('שגיאה בטעינת נתוני גבייה'))
       .finally(() => setLoading(false));
-  }, [selectedYear]);
+  }, [selectedYear, selectedBranch]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

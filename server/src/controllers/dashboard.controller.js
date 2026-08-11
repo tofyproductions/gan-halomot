@@ -53,6 +53,9 @@ async function getStats(req, res, next) {
     };
     const pendingLeads = await Registration.find(leadFilter)
       .populate('classroom_id', 'name')
+      // The branch by name, so a registration filed under the wrong gan is
+      // readable on the card instead of only being wrong somewhere.
+      .populate('branch_id', 'name')
       .sort({ created_at: -1 })
       .lean();
 
@@ -61,6 +64,8 @@ async function getStats(req, res, next) {
       id: l._id,
       classroom_name: l.classroom_id?.name || null,
       classroom_id: l.classroom_id?._id || l.classroom_id,
+      branch_name: l.branch_id?.name || null,
+      branch_id: l.branch_id?._id || l.branch_id,
     }));
 
     // Forecast
