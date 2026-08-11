@@ -23,6 +23,7 @@ const {
 const mailbox = require('./mailbox.service');
 const { scanForm101, gateIsForm101 } = require('./form101Scan');
 const { prefilter } = require('./form101Prefilter');
+const { newLedger } = require('./aiCost');
 const form101 = require('./form101');
 
 const RUN_LOG_CAP = 40;
@@ -157,6 +158,9 @@ async function run(trigger = 'schedule') {
   let prefiltered = 0;
   // Files that only ever reached the cheap gate model.
   let gated = 0;
+  // Every API call this run, priced. The whole point of the two-stage split is
+  // a number, and a number nobody can see is a number nobody can act on.
+  const ledger = newLedger();
   // The hashes answered from the notebook this run — counted up at the end in
   // one write, so "how many times has this file come back" is a real number
   // without paying a write per file per run.
@@ -200,7 +204,9 @@ async function run(trigger = 'schedule') {
        */
       let gate = null;
       try {
-        gate = await gateIsForm101(data, att.filename, att.contentType);
+        gate = await gateIsForm101(data, att.filename, att.contentType, {
+          onUsage: (m, u) => ledger.add(m, u),
+        });
         if (gate) gated += 1;
       } catch { /* gate unavailable — fall through to the full read */ }
 
@@ -213,7 +219,9 @@ async function run(trigger = 'schedule') {
 
       let scan;
       try {
-        scan = await scanForm101(data, att.filename, att.contentType);
+        scan = await scanForm101(data, att.filename, att.contentType, {
+          onUsage: (m, u) => ledger.add(m, u),
+        });
         filesScanned += 1;
       } catch (err) {
         // A single unreadable attachment must not end the run — the next one
@@ -299,6 +307,8 @@ async function run(trigger = 'schedule') {
   const parts = [];
   if (attached) parts.push(`${attached} שויכו`);
   if (gated) parts.push(`${gated} עברו סינון מהיר, ${filesScanned} נקראו במלואם`);
+  // The cost, in the sentence a person actually reads.
+  if (ledger.total > 0) parts.push(`עלות: $${ledger.total.toFixed(4)}`);
   if (unmatched) parts.push(`${unmatched} ממתינים לשיוך`);
   if (skipped) {
     const free = [];
@@ -319,6 +329,8 @@ async function run(trigger = 'schedule') {
     cached_count: cached,
     prefiltered_count: prefiltered,
     gated_count: gated,
+    cost_usd: ledger.total,
+    cost_breakdown: ledger.breakdown,
     message: parts.join(' · ') || 'לא נמצאו טפסים חדשים',
   });
 }

@@ -38,6 +38,23 @@ const runSchema = new mongoose.Schema({
   // many of them went on to the expensive full read — the two together are the
   // two-stage saving.
   gated_count: { type: Number, default: 0 },
+
+  /**
+   * What this run cost, in dollars, from the token counts the API reported.
+   *
+   * An estimate priced against a cached rate table (services/aiCost.js), not a
+   * bill — but it is the actual tokens, so it tracks the invoice closely and it
+   * is the only place in the system where the AI spend is visible at all.
+   */
+  cost_usd: { type: Number, default: 0 },
+  cost_breakdown: [{
+    model: String,
+    calls: Number,
+    input_tokens: Number,
+    output_tokens: Number,
+    cost_usd: Number,
+    _id: false,
+  }],
   message: { type: String, default: '' },
 }, { _id: true });
 

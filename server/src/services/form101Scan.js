@@ -120,7 +120,7 @@ const GATE_SYSTEM = [
  *
  * @returns {Promise<{is_form_101: boolean, confidence: string, model: string}|null>}
  */
-async function gateIsForm101(fileDataBase64, fileName, mimeType) {
+async function gateIsForm101(fileDataBase64, fileName, mimeType, { onUsage } = {}) {
   if (!GATE_MODEL) return null;
   const block = docBlockFor(fileDataBase64, fileName, mimeType);
 
@@ -137,6 +137,10 @@ async function gateIsForm101(fileDataBase64, fileName, mimeType) {
 
   // A refusal or an unreadable answer is not a "no" — hand it to the full read
   // rather than discarding a file on a failed cheap check.
+  // A refused or unreadable call still consumed tokens — report the usage even
+  // when the answer is unusable, or the run's cost silently understates itself.
+  onUsage?.(GATE_MODEL, response.usage);
+
   if (response.stop_reason === 'refusal') return null;
   const textBlock = (response.content || []).find(b => b.type === 'text');
   if (!textBlock?.text) return null;
@@ -146,6 +150,7 @@ async function gateIsForm101(fileDataBase64, fileName, mimeType) {
       is_form_101: !!parsed.is_form_101,
       confidence: parsed.confidence || '',
       model: GATE_MODEL,
+      usage: response.usage,
     };
   } catch {
     return null;
@@ -170,9 +175,13 @@ function docBlockFor(fileDataBase64, fileName, mimeType) {
  * @param {string} fileDataBase64  base64 (no data: prefix)
  * @param {string} fileName
  * @param {string} [mimeType]
+ * @param {object} [opts]
+ * @param {(model: string, usage: object) => void} [opts.onUsage]  called with the
+ *   response's token usage, so a caller can price the run. Fired even when the
+ *   response is unusable — those tokens were spent too.
  * @returns {Promise<object>} extracted fields (matches SCHEMA)
  */
-async function scanForm101(fileDataBase64, fileName, mimeType) {
+async function scanForm101(fileDataBase64, fileName, mimeType, { onUsage } = {}) {
   if (!fileDataBase64) {
     const err = new Error('אין קובץ לסריקה');
     err.code = 'NO_FILE';
@@ -193,6 +202,8 @@ async function scanForm101(fileDataBase64, fileName, mimeType) {
       ],
     }],
   });
+
+  onUsage?.(MODEL, response.usage);
 
   if (response.stop_reason === 'refusal') {
     const err = new Error('הסריקה נדחתה על ידי המודל');

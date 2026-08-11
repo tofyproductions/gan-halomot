@@ -519,6 +519,7 @@ function ScanSettings() {
                   <TableCell>מקור</TableCell>
                   <TableCell align="center">נסרקו ב-AI</TableCell>
                   <TableCell align="center">ללא עלות</TableCell>
+                  <TableCell align="center">עלות</TableCell>
                   <TableCell align="center">שויכו</TableCell>
                   <TableCell align="center">לשיוך</TableCell>
                   <TableCell>הודעה</TableCell>
@@ -538,13 +539,25 @@ function ScanSettings() {
                         <span>{(r.cached_count || 0) + (r.prefiltered_count || 0)}</span>
                       </Tooltip>
                     </TableCell>
+                    {/* The only column that is money. Priced from the token
+                        counts the API itself reported, per model. */}
+                    <TableCell align="center">
+                      <Tooltip title={(r.cost_breakdown || []).length
+                        ? (r.cost_breakdown || []).map(b =>
+                          `${b.model}: ${b.calls} קריאות · $${(b.cost_usd || 0).toFixed(4)}`).join(' · ')
+                        : 'לא בוצעו קריאות'}>
+                        <span style={{ fontWeight: 700 }}>
+                          {r.cost_usd ? `$${r.cost_usd.toFixed(4)}` : '—'}
+                        </span>
+                      </Tooltip>
+                    </TableCell>
                     <TableCell align="center">{r.attached_count}</TableCell>
                     <TableCell align="center">{r.unmatched_count}</TableCell>
                     <TableCell sx={{ color: r.status === 'error' ? 'error.main' : 'text.secondary' }}>{r.message}</TableCell>
                   </TableRow>
                 ))}
                 {(cfg.runs || []).length === 0 && (
-                  <TableRow><TableCell colSpan={7} align="center" sx={{ color: 'text.secondary', py: 2 }}>
+                  <TableRow><TableCell colSpan={8} align="center" sx={{ color: 'text.secondary', py: 2 }}>
                     טרם רצה סריקה
                   </TableCell></TableRow>
                 )}
