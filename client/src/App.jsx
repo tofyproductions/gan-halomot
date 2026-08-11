@@ -86,7 +86,7 @@ function AppRoutes() {
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
         <Route path="emunah-enrollment" element={
-          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+          <ProtectedRoute tab="clicktac">
             <EmunahEnrollment />
           </ProtectedRoute>
         } />

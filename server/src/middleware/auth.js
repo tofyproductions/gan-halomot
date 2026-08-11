@@ -33,6 +33,37 @@ function optionalAuth(req, res, next) {
 }
 
 /**
+ * Screen-based access control, matching what the menu actually grants.
+ *
+ * requireRole below asks only "what is your role", and the app's permissions
+ * screen does not work that way: a tab can be granted to one person, or to a
+ * whole role, by id. So a back-office employee handed רישום לאמונה saw the
+ * menu item, clicked it, and was thrown back to the dashboard — the menu said
+ * yes and the route said no, because they were two different rules.
+ *
+ * This is the server half of that one rule, in the same precedence the client
+ * uses (client/src/config/tabs.js): per-user override, then role-wide
+ * override, then the role defaults passed in here. All of it rides on the JWT
+ * already, so no extra lookup.
+ *
+ * Usage: requireTab('clicktac', 'system_admin', 'accountant')
+ */
+function requireTab(tabId, ...defaultRoles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const u = req.user;
+    const has = (list) => Array.isArray(list) && list.includes(tabId);
+
+    if (has(u.tab_overrides_remove)) return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
+    if (has(u.tab_overrides_add)) return next();
+    if (has(u.role_tab_remove)) return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
+    if (has(u.role_tab_add)) return next();
+    if (defaultRoles.includes(u.role)) return next();
+    return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
+  };
+}
+
+/**
  * Role-based access control middleware factory
  * Usage: requireRole('system_admin', 'branch_manager')
  */
@@ -75,4 +106,6 @@ function requireBranchScope(req, res, next) {
   });
 }
 
-module.exports = { authMiddleware, optionalAuth, requireRole, requireBranchScope };
+module.exports = {
+  authMiddleware, optionalAuth, requireRole, requireTab, requireBranchScope,
+};
