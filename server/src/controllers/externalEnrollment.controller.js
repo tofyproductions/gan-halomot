@@ -7,7 +7,7 @@ const {
   parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
 } = require('../services/clicktac.service');
 const {
-  normalizeYear, getAcademicYears, hebrewYearForStart, academicYearOf, normalizeChildName,
+  normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
 const { generateUniqueId } = require('../utils/id-generator');
 const { getBranchFilter } = require('../utils/branch-filter');
@@ -352,7 +352,7 @@ async function getOne(req, res, next) {
  */
 async function pricing(req, res, next) {
   try {
-    const year = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const year = normalizeYear(req.query.year || enrollmentYear());
     const hebrew = hebrewYearForStart(Number(year.split('-')[0]));
     // BranchPricing stores the year in Hebrew letters, not as "YYYY-YYYY".
     const doc = await BranchPricing.findOne({
@@ -404,7 +404,7 @@ const AGE_GROUP_TO_CATEGORY = {
  */
 async function classroomPlan(req, res, next) {
   try {
-    const year = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const year = normalizeYear(req.query.year || enrollmentYear());
     const branchId = req.query.branch;
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
 

@@ -9,7 +9,7 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYear';
+import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 import ExternalEnrollments from './ExternalEnrollments';
 import TmtReconcile from './TmtReconcile';
 
@@ -47,12 +47,15 @@ const SOURCES = {
 };
 
 export default function EmunahEnrollment() {
-  const years = getAcademicYears();
-  const previousRange = (() => {
-    const start = Number(years.current.range.split('-')[0]) - 1;
-    return `${start}-${start + 1}`;
-  })();
-  const YEAR_OPTIONS = [years.next.range, years.current.range, previousRange];
+  /**
+  * One year, and it is not chosen.
+  *
+  * The intake is always about the year starting the coming September, so a
+  * picker offering last year and next year offered two wrong answers and one
+  * right one. Older years stay in the database — nothing here deletes them —
+  * they are simply not what this screen is for.
+  */
+  const year = getEnrollmentYear();
 
   const [params, setParams] = useSearchParams();
   const initialView = ['clicktac', 'tmt'].includes(params.get('view')) ? params.get('view') : 'clicktac';
@@ -60,7 +63,6 @@ export default function EmunahEnrollment() {
   const [view, setView] = useState(initialView);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
-  const [year, setYear] = useState(years.next.range);
   // Bumped after an upload or a delete: both views refetch, neither is remounted.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -155,10 +157,8 @@ export default function EmunahEnrollment() {
           ))}
         </TextField>
 
-        <TextField select size="small" label="שנת לימודים" value={year} sx={{ minWidth: 190 }}
-          onChange={e => setYear(e.target.value)}>
-          {YEAR_OPTIONS.map(y => <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>)}
-        </TextField>
+        <Chip color="primary" variant="outlined" label={`שנת ${formatAcademicYear(year)}`}
+          sx={{ fontWeight: 700 }} />
 
         <Box sx={{ flex: 1 }} />
 

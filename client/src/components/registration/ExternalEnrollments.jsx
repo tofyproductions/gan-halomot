@@ -15,7 +15,7 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import PrintIcon from '@mui/icons-material/Print';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYear';
+import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 
 /**
  * קליטת רישומים מקליקטאק — the review queue.
@@ -60,10 +60,8 @@ function ageLabel(months) {
 export default function ExternalEnrollments({
   branchId: propBranch, year: propYear, embedded = false, reloadKey = 0,
 } = {}) {
-  const years = getAcademicYears();
-  const [ownYear, setOwnYear] = useState(years.next.range);
-  const year = embedded ? propYear : ownYear;
-  const setYear = setOwnYear;
+  // The intake year — fixed, never picked. See getEnrollmentYear().
+  const year = embedded ? propYear : getEnrollmentYear();
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(true);
@@ -313,12 +311,7 @@ export default function ExternalEnrollments({
           value={search} onChange={e => setSearch(e.target.value)} sx={{ width: 300 }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }} />
         {!embedded && (
-          <TextField select size="small" label="שנת לימודים" sx={{ minWidth: 200 }}
-            value={year} onChange={e => setYear(e.target.value)}>
-            {[years.current.range, years.next.range].map(y => (
-              <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
-            ))}
-          </TextField>
+          <Chip variant="outlined" label={`שנת ${formatAcademicYear(year)}`} />
         )}
         <ToggleButtonGroup size="small" exclusive value={statusFilter}
           onChange={(_, v) => setStatusFilter(v ?? '')}>

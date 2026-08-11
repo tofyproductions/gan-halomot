@@ -4,7 +4,7 @@ const {
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
-const { normalizeYear, getAcademicYears, formatAcademicYear } = require('../services/academic-year.service');
+const { normalizeYear, enrollmentYear, formatAcademicYear } = require('../services/academic-year.service');
 
 /**
  * רישום תמ"ת — the ministry's approvals, and the reconciliation against them.
@@ -112,7 +112,7 @@ async function importFile(req, res, next) {
       });
     }
 
-    const academicYear = normalizeYear(req.body?.academic_year || getAcademicYears().next.range);
+    const academicYear = normalizeYear(req.body?.academic_year || enrollmentYear());
     if (!/^\d{4}-\d{4}$/.test(academicYear)) {
       return res.status(400).json({ error: 'שנת לימודים לא תקינה' });
     }
@@ -256,7 +256,7 @@ async function importFile(req, res, next) {
 /** GET /api/tmt/approvals?branch=&year= — the ministry's list as stored. */
 async function listApprovals(req, res, next) {
   try {
-    const filter = { academic_year: normalizeYear(req.query.year || getAcademicYears().next.range) };
+    const filter = { academic_year: normalizeYear(req.query.year || enrollmentYear()) };
     if (req.query.branch && req.query.branch !== 'all') {
       if (!canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
       filter.branch_id = req.query.branch;
@@ -349,7 +349,7 @@ async function reconcileBranch(req, res, next) {
     if (!branchId || branchId === 'all') {
       return res.status(400).json({ error: 'יש לבחור סניף — ההצלבה נעשית מול רשימת תמ"ת של מעון אחד' });
     }
-    const academicYear = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const academicYear = normalizeYear(req.query.year || enrollmentYear());
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
 
@@ -374,7 +374,7 @@ async function reconcileBranch(req, res, next) {
 /** GET /api/tmt/imports?branch=&year= — the upload history, newest first. */
 async function listImports(req, res, next) {
   try {
-    const filter = { academic_year: normalizeYear(req.query.year || getAcademicYears().next.range) };
+    const filter = { academic_year: normalizeYear(req.query.year || enrollmentYear()) };
     if (req.query.branch && req.query.branch !== 'all') {
       if (!canAccessBranch(req, req.query.branch)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
       filter.branch_id = req.query.branch;
@@ -421,7 +421,7 @@ async function apply(req, res, next) {
   try {
     const branchId = req.body?.branch_id;
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
-    const academicYear = normalizeYear(req.body?.academic_year || getAcademicYears().next.range);
+    const academicYear = normalizeYear(req.body?.academic_year || enrollmentYear());
 
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
@@ -497,7 +497,7 @@ async function contacts(req, res, next) {
   try {
     const branchId = req.query.branch;
     if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
-    const academicYear = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const academicYear = normalizeYear(req.query.year || enrollmentYear());
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
 
@@ -555,7 +555,7 @@ async function exportReconcile(req, res, next) {
   try {
     const branchId = req.query.branch;
     if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
-    const academicYear = normalizeYear(req.query.year || getAcademicYears().next.range);
+    const academicYear = normalizeYear(req.query.year || enrollmentYear());
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
 

@@ -15,7 +15,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYear';
+import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 
 /**
  * הצלבת תמ"ת מול קליקטאק.
@@ -74,18 +74,8 @@ function StatCard({ label, value, color, onClick, active, hint }) {
 export default function TmtReconcile({
   branchId: propBranch, year: propYear, embedded = false, reloadKey = 0,
 } = {}) {
-  const years = getAcademicYears();
-  // getAcademicYears() knows `current` and `next` only. The year before is
-  // derived here — reading years.previous.range crashed the whole app to a
-  // blank page, because a thrown render has no route left to go back to.
-  const previousRange = (() => {
-    const start = Number(years.current.range.split('-')[0]) - 1;
-    return `${start}-${start + 1}`;
-  })();
-  const YEAR_OPTIONS = [years.next.range, years.current.range, previousRange];
-  const [ownYear, setOwnYear] = useState(years.next.range);
-  const year = embedded ? propYear : ownYear;
-  const setYear = setOwnYear;
+  // The intake year — fixed, never picked. See getEnrollmentYear().
+  const year = embedded ? propYear : getEnrollmentYear();
   const [branches, setBranches] = useState([]);
   const [ownBranchId, setOwnBranchId] = useState(localStorage.getItem('selectedBranch') || '');
   const branchId = embedded ? propBranch : ownBranchId;
@@ -256,14 +246,7 @@ export default function TmtReconcile({
               <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
             ))}
           </TextField>
-          <TextField
-            select size="small" label="שנת לימודים" value={year}
-            onChange={e => setYear(e.target.value)} sx={{ minWidth: 190 }}
-          >
-            {YEAR_OPTIONS.map(y => (
-              <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
-            ))}
-          </TextField>
+          <Chip variant="outlined" label={`שנת ${formatAcademicYear(year)}`} />
           <Box sx={{ flex: 1 }} />
           <Button startIcon={<UploadFileIcon />} variant="contained"
             onClick={() => setUploadDlg({ open: true, file: null, saving: false, result: null })}>

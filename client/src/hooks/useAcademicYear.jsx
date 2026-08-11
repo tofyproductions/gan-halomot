@@ -47,6 +47,27 @@ export function formatAcademicYear(range) {
   return `${range} ${getHebrewYearFromStart(startYear)}`;
 }
 
+/**
+ * The year the intake screens work on — the one families are being enrolled
+ * INTO, and the only one רישום לאמונה ever shows.
+ *
+ * It is not `current` and not `next`, because both of those move on 10 August
+ * and the intake cycle does not: the ministry opens registration on 1 February
+ * for the year that starts that September, publishes its approvals in July,
+ * and the gan fills the rooms in August. Every one of those months belongs to
+ * the year beginning on the coming 1 September — which, for any date in the
+ * calendar year Y, is simply Y..Y+1. In February 2027 the screen moves to
+ * תשפ״ח on its own, on the day the new registration opens.
+ *
+ * Older years are never deleted; they are simply not something anyone works on
+ * from that screen. The same rule lives on the server, in
+ * services/academic-year.service.js.
+ */
+export function getEnrollmentYear() {
+  const y = new Date().getFullYear();
+  return `${y}-${y + 1}`;
+}
+
 export function getAcademicYears() {
   const now = new Date();
   const year = now.getFullYear();
