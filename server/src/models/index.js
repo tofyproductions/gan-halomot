@@ -62,6 +62,7 @@ const PunchEntryTask = require('./PunchEntryTask');
 const ExternalEnrollment = require('./ExternalEnrollment');
 const TmtApproval = require('./TmtApproval');
 const EnrollmentImport = require('./EnrollmentImport');
+const ScannedAttachment = require('./ScannedAttachment');
 
 module.exports = {
   User,
@@ -127,4 +128,5 @@ module.exports = {
   ExternalEnrollment,
   TmtApproval,
   EnrollmentImport,
+  ScannedAttachment,
 };

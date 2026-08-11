@@ -17,7 +17,9 @@
  *   the file kept, not dropped with a log line. "I sent it in January" then
  *   costs two clicks instead of asking the person to send it again.
  */
-const { Form101Sync, Form101Inbox, EmployeeDocument } = require('../models');
+const {
+  Form101Sync, Form101Inbox, EmployeeDocument, ScannedAttachment,
+} = require('../models');
 const mailbox = require('./mailbox.service');
 const { scanForm101 } = require('./form101Scan');
 const form101 = require('./form101');
@@ -46,16 +48,57 @@ async function record(doc, run) {
 }
 
 /**
- * Has this exact file already been handled? Checked against both places a form
- * can end up, so a message re-read inside the lookback window is not attached
- * twice and not queued twice.
+ * Has this exact file already been handled?
+ *
+ * Three places, not two. The first two are where a form ENDS UP — attached to
+ * an employee, or waiting in the queue — and they were the whole check. The
+ * third is where a file the AI already REJECTED is remembered, and its absence
+ * is what made every scan pay again for the same payslips: a file that is not
+ * a form 101 was recorded nowhere, so the next run had no way to know it had
+ * ever been asked.
+ *
+ * An `unreadable` verdict is not final — the scan can fail because the model
+ * was briefly unavailable — so it is retried, but only MAX_ATTEMPTS times.
  */
 async function alreadySeen(hash) {
-  const [doc, queued] = await Promise.all([
+  const [doc, queued, judged] = await Promise.all([
     EmployeeDocument.exists({ 'mail.hash': hash }),
     Form101Inbox.exists({ hash }),
+    ScannedAttachment.findOne({ hash }).select('verdict attempts').lean(),
   ]);
-  return !!(doc || queued);
+  if (doc || queued) return { seen: true, cached: false };
+  if (!judged) return { seen: false, cached: false };
+  if (judged.verdict === 'unreadable' && (judged.attempts || 0) < ScannedAttachment.MAX_ATTEMPTS) {
+    return { seen: false, cached: false };
+  }
+  return { seen: true, cached: true, verdict: judged.verdict };
+}
+
+/**
+ * Write down what the AI said about a file, so it is never asked twice.
+ *
+ * Upserted on the hash: the same file arriving in two different messages is
+ * one verdict and one row, with a count of how often it has come back — which
+ * is the saving, in a number.
+ */
+async function remember(hash, verdict, att, note = '') {
+  await ScannedAttachment.updateOne(
+    { hash },
+    {
+      $set: {
+        verdict,
+        source: 'form101',
+        file_name: att?.filename || '',
+        mimetype: att?.contentType || '',
+        size: att?.size ?? null,
+        note,
+        last_seen_at: new Date(),
+      },
+      $inc: { times_seen: 1, attempts: verdict === 'unreadable' ? 1 : 0 },
+      $setOnInsert: { first_seen_at: new Date() },
+    },
+    { upsert: true },
+  );
 }
 
 /**
@@ -67,6 +110,22 @@ async function run(trigger = 'schedule') {
 
   if (!cfg.enabled && trigger === 'schedule') {
     return { status: 'skipped', message: 'הסריקה מכובה' };
+  }
+
+  /**
+   * A scheduled run too soon after the last one is not a run.
+   *
+   * The scan fires four minutes after every boot and Render boots on every
+   * deploy, so a busy afternoon of deploys turned into a full thirty-day scan
+   * per deploy. A person pressing "סרוק עכשיו" is never throttled — they are
+   * asking for precisely this.
+   */
+  if (trigger === 'schedule' && cfg.last_run_at) {
+    const minutes = (Date.now() - new Date(cfg.last_run_at).getTime()) / 60000;
+    const floor = cfg.min_interval_minutes ?? 60;
+    if (minutes < floor) {
+      return { status: 'skipped', message: `נסרק לפני ${Math.round(minutes)} דקות — מדלג` };
+    }
   }
 
   const since = new Date(Date.now() - (cfg.lookback_days || 30) * 864e5);
@@ -89,12 +148,25 @@ async function run(trigger = 'schedule') {
   }
 
   let filesScanned = 0; let attached = 0; let unmatched = 0; let skipped = 0;
+  // Files answered from the notebook rather than from Claude. Counted
+  // separately because it is the whole point of the notebook, and because a
+  // run that says "42 דולגו" tells nobody whether it cost anything.
+  let cached = 0;
+  // The hashes answered from the notebook this run — counted up at the end in
+  // one write, so "how many times has this file come back" is a real number
+  // without paying a write per file per run.
+  const cachedHashes = [];
   const problems = [];
 
   for (const msg of fetched.messages) {
     for (const att of msg.attachments) {
       const hash = form101.hashFile(att.buffer);
-      if (await alreadySeen(hash)) { skipped += 1; continue; }
+      const seen = await alreadySeen(hash);
+      if (seen.seen) {
+        skipped += 1;
+        if (seen.cached) { cached += 1; cachedHashes.push(hash); }
+        continue;
+      }
 
       const data = att.buffer.toString('base64');
       let scan;
@@ -103,13 +175,22 @@ async function run(trigger = 'schedule') {
         filesScanned += 1;
       } catch (err) {
         // A single unreadable attachment must not end the run — the next one
-        // may be the form somebody is waiting on.
+        // may be the form somebody is waiting on. Recorded so a file that
+        // cannot be read is not paid for on every run forever; the attempt
+        // counter lets a transient failure through a few more times.
         problems.push(`${att.filename}: ${err.message}`);
+        await remember(hash, 'unreadable', att, err.message);
         skipped += 1;
         continue;
       }
 
-      if (!scan.is_form_101) { skipped += 1; continue; }
+      // The answer that used to be thrown away, and that every later run paid
+      // to hear again.
+      if (!scan.is_form_101) {
+        await remember(hash, 'not_form_101', att, scan.notes || '');
+        skipped += 1;
+        continue;
+      }
 
       const match = await form101.matchEmployee(scan, msg.from, { allowNameMatch: cfg.allow_name_match });
 
@@ -121,7 +202,12 @@ async function run(trigger = 'schedule') {
           doc_type: 'form_101',
           tax_year: scan.tax_year || form101.currentTaxYear(),
         });
-        if (exists) { skipped += 1; continue; }
+        if (exists) {
+          await remember(hash, 'already_filed', att,
+            `${match.employee.full_name || ''} — כבר קיים טופס לשנת ${scan.tax_year || form101.currentTaxYear()}`);
+          skipped += 1;
+          continue;
+        }
 
         await form101.attachForm(match.employee, {
           data,
@@ -160,11 +246,18 @@ async function run(trigger = 'schedule') {
     }
   }
 
+  if (cachedHashes.length) {
+    await ScannedAttachment.updateMany(
+      { hash: { $in: cachedHashes } },
+      { $inc: { times_seen: 1 }, $set: { last_seen_at: new Date() } },
+    );
+  }
+
   const status = attached + unmatched === 0 ? 'empty' : 'ok';
   const parts = [];
   if (attached) parts.push(`${attached} שויכו`);
   if (unmatched) parts.push(`${unmatched} ממתינים לשיוך`);
-  if (skipped) parts.push(`${skipped} דולגו`);
+  if (skipped) parts.push(`${skipped} דולגו${cached ? ` (${cached} מהזיכרון, ללא עלות)` : ''}`);
   if (problems.length) parts.push(`שגיאות: ${problems.slice(0, 3).join('; ')}`);
 
   return record(cfg, {
@@ -175,6 +268,7 @@ async function run(trigger = 'schedule') {
     attached_count: attached,
     unmatched_count: unmatched,
     skipped_count: skipped,
+    cached_count: cached,
     message: parts.join(' · ') || 'לא נמצאו טפסים חדשים',
   });
 }

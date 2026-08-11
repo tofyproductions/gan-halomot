@@ -517,7 +517,8 @@ function ScanSettings() {
                 <TableRow>
                   <TableCell>מתי</TableCell>
                   <TableCell>מקור</TableCell>
-                  <TableCell align="center">נסרקו</TableCell>
+                  <TableCell align="center">נסרקו ב-AI</TableCell>
+                  <TableCell align="center">מהזיכרון</TableCell>
                   <TableCell align="center">שויכו</TableCell>
                   <TableCell align="center">לשיוך</TableCell>
                   <TableCell>הודעה</TableCell>
@@ -528,14 +529,20 @@ function ScanSettings() {
                   <TableRow key={r._id}>
                     <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDateTime(r.at)}</TableCell>
                     <TableCell>{r.trigger === 'manual' ? 'ידני' : 'מתוזמן'}</TableCell>
+                    {/* The only column that costs money. */}
                     <TableCell align="center">{r.files_scanned}</TableCell>
+                    {/* Files answered from what a previous run already learned
+                        about them, instead of being sent to Claude again. */}
+                    <TableCell align="center" sx={{ color: 'success.main', fontWeight: 700 }}>
+                      {r.cached_count || 0}
+                    </TableCell>
                     <TableCell align="center">{r.attached_count}</TableCell>
                     <TableCell align="center">{r.unmatched_count}</TableCell>
                     <TableCell sx={{ color: r.status === 'error' ? 'error.main' : 'text.secondary' }}>{r.message}</TableCell>
                   </TableRow>
                 ))}
                 {(cfg.runs || []).length === 0 && (
-                  <TableRow><TableCell colSpan={6} align="center" sx={{ color: 'text.secondary', py: 2 }}>
+                  <TableRow><TableCell colSpan={7} align="center" sx={{ color: 'text.secondary', py: 2 }}>
                     טרם רצה סריקה
                   </TableCell></TableRow>
                 )}

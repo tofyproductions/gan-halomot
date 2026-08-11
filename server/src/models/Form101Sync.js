@@ -27,6 +27,10 @@ const runSchema = new mongoose.Schema({
   attached_count: { type: Number, default: 0 },   // matched to an employee
   unmatched_count: { type: Number, default: 0 },  // went to the review queue
   skipped_count: { type: Number, default: 0 },    // already imported, or not a 101
+  // Of the skipped, how many were answered from ScannedAttachment instead of
+  // from Claude. The AI calls a run actually paid for are files_scanned; this
+  // is the number it did not.
+  cached_count: { type: Number, default: 0 },
   message: { type: String, default: '' },
 }, { _id: true });
 
@@ -53,6 +57,16 @@ const form101SyncSchema = new mongoose.Schema({
   // seen, so the name on the form is all there is. Turn it off to require an
   // identity match (ת״ז or a known sender address) and send the rest to review.
   allow_name_match: { type: Boolean, default: true },
+
+  /**
+   * Don't re-scan the whole window just because the server restarted.
+   *
+   * The scan is kicked off four minutes after every boot, and Render boots on
+   * every deploy — so ten deploys in a day were ten full thirty-day scans. A
+   * scheduled run inside this window is skipped; pressing "סרוק עכשיו" is
+   * never throttled, because a person pressing it is asking for exactly that.
+   */
+  min_interval_minutes: { type: Number, default: 60 },
 
   last_run_at: { type: Date, default: null },
   last_success_at: { type: Date, default: null },
