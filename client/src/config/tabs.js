@@ -19,6 +19,10 @@ export const TAB_GROUPS = [
       // The מעונות אמונה branches enroll in קליקטאק, so their families arrive
       // as a spreadsheet rather than through the registration flow.
       { id: 'clicktac',       label: 'קליטה מקליקטאק', path: '/external-enrollments', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      // A child is enrolled only when the ministry approved them AND the family
+      // registered in קליקטאק. Neither system knows about the other, so the
+      // comparison is a screen of its own.
+      { id: 'tmt',            label: 'הצלבת תמ״ת', path: '/tmt-reconcile',    defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },

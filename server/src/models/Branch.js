@@ -19,6 +19,21 @@ const branchSchema = new mongoose.Schema({
   // amuta column for X. A single branch belongs to exactly one amuta.
   amuta_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Amuta', default: null, index: true },
 
+  /**
+   * Is this gan supervised by משרד התמ"ת?
+   *
+   * A supervised branch enrolls through the ministry's national registration
+   * and through קליקטאק, and a child needs BOTH to be admitted — which is what
+   * the תמ"ת reconciliation screen checks. קפלן is the exception: its families
+   * register directly with us, it is not in ClickTac and it has no ministry
+   * list, so reconciling it would report every child in the gan as an anomaly.
+   *
+   * null means "never set". Rows written before this field existed fall back
+   * to the branch name, and the fallback stops mattering the moment somebody
+   * saves the branch.
+   */
+  tmt_supervised: { type: Boolean, default: null },
+
   // Attendance / TIMEDOX replacement — per-branch clock integration
   clock_ip: { type: String, default: '' },           // e.g. "10.0.0.3"
   clock_port: { type: Number, default: 4370 },

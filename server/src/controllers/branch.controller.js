@@ -57,7 +57,7 @@ async function create(req, res, next) {
 async function update(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, address, color } = req.body;
+    const { name, address, color, tmt_supervised } = req.body;
 
     const branch = await Branch.findById(id);
     if (!branch) {
@@ -67,6 +67,11 @@ async function update(req, res, next) {
     if (name) branch.name = name;
     if (address !== undefined) branch.address = address;
     if (color !== undefined) branch.color = color;
+    // Whether the gan enrolls through משרד התמ"ת. Settable, because the
+    // fallback that reads it off the branch name is a stopgap for old rows.
+    if (tmt_supervised !== undefined) {
+      branch.tmt_supervised = tmt_supervised === null ? null : !!tmt_supervised;
+    }
     await branch.save();
 
     res.json({ branch: { ...branch.toObject(), id: branch._id } });

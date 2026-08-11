@@ -1,6 +1,7 @@
 const XLSX = require('xlsx');
 const {
   ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing, Classroom,
+  EnrollmentImport,
 } = require('../models');
 const {
   parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
@@ -29,6 +30,40 @@ function childIdOf(reg, child) {
 }
 
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+
+/**
+ * The fields whose change between two exports is worth recording.
+ *
+ * The list is short on purpose: an operator re-uploading in August wants to
+ * see that somebody cancelled or that a signature came in, not that a phone
+ * number gained a dash.
+ */
+const TRACKED = [
+  { path: 'enrollment.status', label: 'סטטוס' },
+  { path: 'enrollment.second_signer', label: 'חותם שני' },
+  { path: 'enrollment.continuing', label: 'ממשיך' },
+  { path: 'child.full_name', label: 'שם' },
+  { path: 'child.birth_date', label: 'תאריך לידה' },
+  { path: 'child.age_group', label: 'שכבת גיל' },
+  { path: 'parent1.phone', label: 'טלפון הורה 1' },
+  { path: 'parent2.phone', label: 'טלפון הורה 2' },
+  { path: 'enrollment.receipt_number', label: 'מספר קבלה' },
+];
+
+const at = (obj, path) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+const asText = (v) => {
+  if (v == null || v === '') return '—';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'boolean') return v ? 'כן' : 'לא';
+  return String(v);
+};
+
+/** What changed between the stored record and the freshly parsed one. */
+function diffFields(existing, doc) {
+  return TRACKED
+    .map(({ path, label }) => ({ label, from: asText(at(existing, path)), to: asText(at(doc, path)) }))
+    .filter(c => c.from !== c.to);
+}
 
 /**
  * Tie an imported row to a registration that already exists.
@@ -89,6 +124,11 @@ async function importFile(req, res, next) {
       const forced = normalizeYear(req.body.academic_year);
       for (const d of parsed) d.academic_year = forced;
     }
+    // Without a year there is nothing to scope the "which children are gone"
+    // query to, and an unscoped one would mark the whole branch missing.
+    if (!parsed.length || !parsed[0].academic_year) {
+      return res.status(400).json({ error: 'לא נמצאו שורות עם שנת לימודים' });
+    }
 
     // What this system already holds, for matching. Not branch-filtered: a
     // family that moved between branches is still the same child.
@@ -98,6 +138,9 @@ async function importFile(req, res, next) {
 
     let created = 0; let updated = 0; let unchanged = 0;
     const results = [];
+    const now = new Date();
+    const seen = new Set();
+    const updateDetails = [];
 
     for (const doc of parsed) {
       const { reg, by } = matchExisting(doc, registrations, childByReg);
@@ -107,6 +150,7 @@ async function importFile(req, res, next) {
         matched_by: by,
       };
       doc.imported_by = req.user?.id || null;
+      seen.add(String(doc.child.id_number).replace(/\D/g, ''));
 
       const existing = await ExternalEnrollment.findOne({
         source: 'clicktac',
@@ -115,22 +159,88 @@ async function importFile(req, res, next) {
       });
 
       if (!existing) {
-        await ExternalEnrollment.create(doc);
+        await ExternalEnrollment.create({
+          ...doc,
+          presence: { is_present: true, first_seen_at: now, last_seen_at: now, missing_since: null },
+        });
         created += 1;
         results.push({ child: doc.child.full_name, action: 'created' });
-      } else if (existing.content_hash === doc.content_hash) {
+      } else if (existing.content_hash === doc.content_hash && existing.presence?.is_present !== false) {
+        existing.presence.last_seen_at = now;
+        await existing.save();
         unchanged += 1;
       } else {
         // A row that changed in ClickTac. Keep the review decision already made
         // about it — the point of re-importing is the data, not to reopen a
         // question somebody answered.
         const keepReview = existing.review;
+        const changes = diffFields(existing.toObject(), doc);
+        if (existing.presence?.is_present === false) {
+          changes.push({ label: 'נוכחות בקובץ קליקטאק', from: 'הוסר/ה', to: 'חזר/ה' });
+        }
         Object.assign(existing, doc, { review: keepReview });
+        existing.presence = {
+          is_present: true,
+          first_seen_at: existing.presence?.first_seen_at || now,
+          last_seen_at: now,
+          missing_since: null,
+        };
+        for (const c of changes) {
+          existing.changes.push({ at: now, field: c.label, from: c.from, to: c.to });
+        }
         await existing.save();
+        // The hash moved but nothing a person cares about did — a whitespace
+        // fix in an address, or the record being rehashed after the hash
+        // function was corrected. Saved either way; only counted as an update
+        // when the meaning actually moved.
+        if (!changes.length) { unchanged += 1; continue; }
         updated += 1;
         results.push({ child: doc.child.full_name, action: 'updated' });
+        updateDetails.push({ name: doc.child.full_name, changes: changes.map(c => `${c.label}: ${c.from} ← ${c.to}`) });
       }
     }
+
+    /**
+     * Children this branch had in an earlier export and that this file no
+     * longer lists. Not the same as "ביטל רישום": a cancelled family is still
+     * IN the file with a status. A family that is simply gone was removed from
+     * ClickTac, and the ministry may still be holding a place for them.
+     */
+    const gone = await ExternalEnrollment.find({
+      source: 'clicktac',
+      branch_id: branchId,
+      academic_year: parsed[0]?.academic_year,
+      'presence.is_present': { $ne: false },
+    });
+    const missingNames = [];
+    for (const doc of gone) {
+      if (seen.has(String(doc.child.id_number).replace(/\D/g, ''))) continue;
+      doc.presence.is_present = false;
+      doc.presence.missing_since = now;
+      doc.changes.push({ at: now, field: 'נוכחות בקובץ קליקטאק', from: 'רשום/ה', to: 'הוסר/ה מהקובץ' });
+      await doc.save();
+      missingNames.push(doc.child.full_name);
+    }
+
+    const batch = await EnrollmentImport.create({
+      source: 'clicktac',
+      branch_id: branchId,
+      academic_year: parsed[0]?.academic_year || '',
+      file_name: req.file.originalname || '',
+      sheet_name: sheetName,
+      rows: rows.length,
+      parsed: parsed.length,
+      created,
+      updated,
+      unchanged,
+      missing: missingNames.length,
+      details: {
+        created: results.filter(r => r.action === 'created').map(r => r.child).slice(0, 100),
+        updated: updateDetails.slice(0, 100),
+        missing: missingNames.slice(0, 100),
+      },
+      imported_by: req.user?.id || null,
+    });
 
     res.json({
       branch: branch.name,
@@ -140,7 +250,10 @@ async function importFile(req, res, next) {
       created,
       updated,
       unchanged,
+      missing: missingNames.length,
+      missing_names: missingNames.slice(0, 50),
       results: results.slice(0, 50),
+      import_id: batch._id,
     });
   } catch (error) {
     next(error);

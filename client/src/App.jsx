@@ -9,6 +9,7 @@ import RegistrationWizard from './components/registration/RegistrationWizard';
 import ParentOnboarding from './components/registration/ParentOnboarding';
 import RegistrationTracker from './components/registration/RegistrationTracker';
 import ExternalEnrollments from './components/registration/ExternalEnrollments';
+import TmtReconcile from './components/registration/TmtReconcile';
 import CollectionsTable from './components/collections/CollectionsTable';
 import ArchiveList from './components/archive/ArchiveList';
 import ContactListPDF from './components/contacts/ContactListPDF';
@@ -88,6 +89,11 @@ function AppRoutes() {
         <Route path="external-enrollments" element={
           <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
             <ExternalEnrollments />
+          </ProtectedRoute>
+        } />
+        <Route path="tmt-reconcile" element={
+          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+            <TmtReconcile />
           </ProtectedRoute>
         } />
         <Route path="collections" element={<CollectionsTable />} />

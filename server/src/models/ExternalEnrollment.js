@@ -115,6 +115,31 @@ const externalEnrollmentSchema = new mongoose.Schema({
     agrees_with_source: { type: Boolean, default: null },
   },
 
+  /**
+   * Which uploads this child has been in.
+   *
+   * The export is re-uploaded through the summer as families register and
+   * cancel, so a row that DISAPPEARS is a real event — ClickTac dropped the
+   * registration entirely rather than marking it cancelled. The record is kept
+   * and marked gone, because a child who vanishes from the file still has to
+   * be reconciled against the ministry's list.
+   */
+  presence: {
+    is_present: { type: Boolean, default: true },
+    first_seen_at: { type: Date, default: Date.now },
+    last_seen_at: { type: Date, default: Date.now },
+    missing_since: { type: Date, default: null },
+  },
+
+  /** What changed between uploads, oldest first. Meaning only, never format. */
+  changes: [{
+    at: { type: Date, default: Date.now },
+    field: { type: String, default: '' },
+    from: { type: String, default: '' },
+    to: { type: String, default: '' },
+    _id: false,
+  }],
+
   review: {
     status: {
       type: String,

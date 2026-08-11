@@ -50,6 +50,9 @@ router.use('/registrations', require('./registration.routes'));
 // קליקטאק — enrollments from the מעונות אמונה system, reviewed before they
 // become registrations here.
 router.use('/external-enrollments', require('./externalEnrollment.routes'));
+// משרד התמ"ת — the ministry's approval list, and the reconciliation against
+// ClickTac that decides who is actually enrolled next year.
+router.use('/tmt', require('./tmtApproval.routes'));
 router.use('/contracts', require('./contracts.routes'));
 router.use('/collections', require('./collections.routes'));
 router.use('/archives', require('./archive.routes'));
