@@ -20,6 +20,9 @@ router.get('/approvals', ctrl.listApprovals);
 router.get('/contacts', ctrl.contacts);
 router.get('/imports', ctrl.listImports);
 
+// Undoing a whole upload. Deliberately admin/accountant only: it removes the
+// ministry's answer for a whole gan and a whole year in one call.
+router.delete('/data', requireRole('system_admin', 'accountant'), ctrl.deleteData);
 router.delete('/approvals/:id', requireRole('system_admin', 'accountant'), ctrl.removeApproval);
 
 module.exports = router;

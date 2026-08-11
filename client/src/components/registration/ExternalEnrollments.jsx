@@ -35,9 +35,35 @@ const STATUS_COLORS = {
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '—');
 
-export default function ExternalEnrollments() {
+/**
+ * A month count as an age anyone can read.
+ *
+ * `computed.age_months` is the child's age on 1 September, and it is what
+ * decides the group — but "22" is not something a person places a child by.
+ * The same wording the תמ"ת comparison uses, so the two screens read alike.
+ */
+function ageLabel(months) {
+  if (months == null) return '';
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const yearPart = years === 0 ? '' : years === 1 ? 'שנה' : years === 2 ? 'שנתיים' : `${years} שנים`;
+  const monthPart = rest === 0 ? '' : rest === 1 ? 'חודש' : rest === 2 ? 'חודשיים' : `${rest} חודשים`;
+  const label = [yearPart, monthPart].filter(Boolean).join(' ו־') || 'פחות מחודש';
+  return years > 0 ? `${label} (${months} ח׳)` : label;
+}
+
+/**
+ * `embedded` — rendered inside רישום לאמונה, which owns the branch, the year
+ * and both uploads. The screen then drops its own copies of those controls
+ * rather than showing a second set that disagrees with the first.
+ */
+export default function ExternalEnrollments({
+  branchId: propBranch, year: propYear, embedded = false, reloadKey = 0,
+} = {}) {
   const years = getAcademicYears();
-  const [year, setYear] = useState(years.next.range);
+  const [ownYear, setOwnYear] = useState(years.next.range);
+  const year = embedded ? propYear : ownYear;
+  const setYear = setOwnYear;
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState({});
   const [loading, setLoading] = useState(true);
@@ -55,13 +81,15 @@ export default function ExternalEnrollments() {
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
 
   const fetchData = useCallback(() => {
+    if (!year) return;
     setLoading(true);
-    const branch = localStorage.getItem('selectedBranch');
+    const branch = embedded ? propBranch : localStorage.getItem('selectedBranch');
     api.get('/external-enrollments', { params: { year, ...(branch ? { branch } : {}) } })
       .then(res => { setRows(res.data.enrollments || []); setSummary(res.data.summary || {}); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
       .finally(() => setLoading(false));
-  }, [year]);
+    // reloadKey: the page above uploaded a file or undid one.
+  }, [year, embedded, propBranch, reloadKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
@@ -226,7 +254,7 @@ export default function ExternalEnrollments() {
   const openContacts = async () => {
     setContactsDlg({ open: true, loading: true, rows: [] });
     try {
-      const branch = localStorage.getItem('selectedBranch');
+      const branch = embedded ? propBranch : localStorage.getItem('selectedBranch');
       const res = await api.get('/external-enrollments/contacts',
         { params: { year, ...(branch ? { branch } : {}) } });
       setContactsDlg({ open: true, loading: false, rows: res.data.contacts || [] });
@@ -240,7 +268,9 @@ export default function ExternalEnrollments() {
     <Box dir="rtl">
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>קליטת רישומים מקליקטאק</Typography>
+          {!embedded && (
+            <Typography variant="h5" sx={{ fontWeight: 800 }}>קליטת רישומים מקליקטאק</Typography>
+          )}
           <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
             <Chip size="small" label={`${summary.total || 0} רשומות`} />
             <Chip size="small" color="warning" variant={statusFilter === 'pending' ? 'filled' : 'outlined'}
@@ -269,10 +299,12 @@ export default function ExternalEnrollments() {
           <Button variant="outlined" startIcon={<ContactPhoneIcon />} onClick={openContacts}>
             דף קשר להורים
           </Button>
-          <Button variant="contained" startIcon={<UploadFileIcon />}
-            onClick={() => setUploadDlg({ open: true, file: null, branchId: '', saving: false, result: null })}>
-            קליטת קובץ
-          </Button>
+          {!embedded && (
+            <Button variant="contained" startIcon={<UploadFileIcon />}
+              onClick={() => setUploadDlg({ open: true, file: null, branchId: '', saving: false, result: null })}>
+              קליטת קובץ
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -280,12 +312,14 @@ export default function ExternalEnrollments() {
         <TextField size="small" placeholder="חיפוש לפי ילד/ה, ת.ז או הורה…"
           value={search} onChange={e => setSearch(e.target.value)} sx={{ width: 300 }}
           InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }} />
-        <TextField select size="small" label="שנת לימודים" sx={{ minWidth: 200 }}
-          value={year} onChange={e => setYear(e.target.value)}>
-          {[years.current.range, years.next.range].map(y => (
-            <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
-          ))}
-        </TextField>
+        {!embedded && (
+          <TextField select size="small" label="שנת לימודים" sx={{ minWidth: 200 }}
+            value={year} onChange={e => setYear(e.target.value)}>
+            {[years.current.range, years.next.range].map(y => (
+              <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
+            ))}
+          </TextField>
+        )}
         <ToggleButtonGroup size="small" exclusive value={statusFilter}
           onChange={(_, v) => setStatusFilter(v ?? '')}>
           <ToggleButton value="pending">ממתינים</ToggleButton>
@@ -355,11 +389,20 @@ export default function ExternalEnrollments() {
                     </TableCell>
                     <TableCell>
                       {fmtDate(r.child?.birth_date)}
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                        ב־1.9: {ageLabel(r.computed?.age_months) || '—'}
+                      </Typography>
                       <Stack direction="row" spacing={0.5} sx={{ mt: 0.3 }} alignItems="center">
                         <Chip size="small" label={r.computed?.age_group || '—'} sx={{ height: 18, fontSize: '0.65rem' }} />
                         {r.computed?.agrees_with_source === false && (
                           <Tooltip title={`בקליקטאק: ${r.child?.age_group}`}>
                             <Chip size="small" color="warning" label={`≠ ${r.child?.age_group}`}
+                              sx={{ height: 18, fontSize: '0.65rem' }} />
+                          </Tooltip>
+                        )}
+                        {r.placement?.age_group_override && (
+                          <Tooltip title="שיבוץ ידני — גובר על שתי השכבות שבקבצים, וקובע גם את הכיתה וגם את עמודת המחיר">
+                            <Chip size="small" color="primary" label={`שובץ: ${r.placement.age_group_override}`}
                               sx={{ height: 18, fontSize: '0.65rem' }} />
                           </Tooltip>
                         )}

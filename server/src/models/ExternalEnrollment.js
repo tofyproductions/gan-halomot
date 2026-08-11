@@ -140,6 +140,24 @@ const externalEnrollmentSchema = new mongoose.Schema({
     _id: false,
   }],
 
+  /**
+   * Where the manager decided this child goes — which beats every file.
+   *
+   * The ministry's שכבת גיל is a funding bracket and ClickTac's is a form
+   * field; neither is a placement. A child of 22 months can belong in בוגרים
+   * in one gan and in צעירים in another, and that call is the manager's, made
+   * against the child's actual age on 1 September. Once it is made it has to
+   * survive the next file: a re-import overwrites the parsed fields, and this
+   * is not one of them.
+   */
+  placement: {
+    age_group_override: { type: String, default: '' },   // תינוק / פעוט / בוגר
+    classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null },
+    decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    decided_at: { type: Date, default: null },
+    note: { type: String, default: '' },
+  },
+
   review: {
     status: {
       type: String,

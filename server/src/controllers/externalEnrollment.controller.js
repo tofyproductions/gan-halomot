@@ -32,6 +32,20 @@ function childIdOf(reg, child) {
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 
 /**
+ * The age group a child is actually placed in.
+ *
+ * A manager's decision first — it was made against the child's real age on 1
+ * September and it is the only one of the three that is a placement rather
+ * than a bracket. Then the computed group, then ClickTac's own.
+ */
+function effectiveAgeGroup(doc) {
+  return doc.placement?.age_group_override
+    || doc.computed?.age_group
+    || doc.child?.age_group
+    || '';
+}
+
+/**
  * The fields whose change between two exports is worth recording.
  *
  * The list is short on purpose: an operator re-uploading in August wants to
@@ -174,11 +188,14 @@ async function importFile(req, res, next) {
         // about it — the point of re-importing is the data, not to reopen a
         // question somebody answered.
         const keepReview = existing.review;
+        // The placement is a decision somebody made, not data from the file.
+        // A fresh export must not undo it.
+        const keepPlacement = existing.placement;
         const changes = diffFields(existing.toObject(), doc);
         if (existing.presence?.is_present === false) {
           changes.push({ label: 'נוכחות בקובץ קליקטאק', from: 'הוסר/ה', to: 'חזר/ה' });
         }
-        Object.assign(existing, doc, { review: keepReview });
+        Object.assign(existing, doc, { review: keepReview, placement: keepPlacement });
         existing.presence = {
           is_present: true,
           first_seen_at: existing.presence?.first_seen_at || now,
@@ -511,6 +528,7 @@ async function promoteOne(doc, opts) {
         portal: doc.enrollment?.portal || '',
         age_group: doc.child.age_group,
         computed_age_group: doc.computed?.age_group,
+        placed_age_group: doc.placement?.age_group_override || '',
         health_fund: doc.child.health_fund,
         gender: doc.child.gender,
         standing_order: doc.standing_order || {},
@@ -594,7 +612,8 @@ async function promote(req, res, next) {
     const registration = await promoteOne(doc, {
       monthly_fee: monthlyFee,
       registration_fee: Number(req.body?.registration_fee) || 0,
-      classroom_id: req.body?.classroom_id || null,
+      // The room decided on the placement screen, unless this call names one.
+      classroom_id: req.body?.classroom_id || doc.placement?.classroom_id || null,
       userId: req.user?.id || null,
     });
 
@@ -633,7 +652,7 @@ async function promoteBulk(req, res, next) {
         skipped.push({ id, child: doc.child.full_name, error: 'כבר קיים/ת במערכת' });
         continue;
       }
-      const group = doc.computed?.age_group || doc.child.age_group;
+      const group = effectiveAgeGroup(doc);
       const fee = Number(fees[group]);
       if (!Number.isFinite(fee) || fee <= 0) {
         skipped.push({ id, child: doc.child.full_name, error: `אין שכר לימוד לשכבה "${group}"` });
@@ -647,7 +666,8 @@ async function promoteBulk(req, res, next) {
           // The classroom follows the child's age group, which is the whole
           // point of computing it. One classroom for everybody would put a
           // four-month-old in with the two-year-olds.
-          classroom_id: (req.body?.classrooms_by_age_group || {})[group]
+          classroom_id: doc.placement?.classroom_id
+            || (req.body?.classrooms_by_age_group || {})[group]
             || req.body?.classroom_id || null,
           userId: req.user?.id || null,
         });
@@ -677,6 +697,126 @@ async function setReview(req, res, next) {
     ).lean();
     if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
     res.json({ enrollment: { ...doc, id: doc._id } });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * PUT /api/external-enrollments/:id/placement  { age_group, classroom_id, note }
+ *
+ * The manager's own call on which group a child joins.
+ *
+ * The ministry's שכבת גיל is a funding bracket and ClickTac's is whatever the
+ * parent's form said; neither knows this gan. A child of 22 months may belong
+ * with the בוגרים here and with the צעירים next door, and the person who runs
+ * the room is the one who can say. The decision is stored separately from
+ * everything parsed out of a file, so the next export cannot quietly undo it,
+ * and it is what the import then uses to pick the fee column and the room.
+ *
+ * Sending an empty age_group clears the decision and hands the child back to
+ * the computed group.
+ */
+async function setPlacement(req, res, next) {
+  try {
+    const group = String(req.body?.age_group || '').trim();
+    const valid = AGE_GROUPS.map(g => g.name);
+    if (group && !valid.includes(group)) {
+      return res.status(400).json({ error: `שכבת גיל לא תקינה. אפשרויות: ${valid.join(', ')}` });
+    }
+
+    const doc = await ExternalEnrollment.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    if (doc.review?.status === 'imported') {
+      return res.status(409).json({
+        error: `${doc.child.full_name} כבר נקלט/ה למערכת — שיבוץ הכיתה משתנה במסך הכיתות`,
+        code: 'ALREADY_IMPORTED',
+      });
+    }
+
+    let classroomId = req.body?.classroom_id || null;
+    if (classroomId) {
+      const room = await Classroom.findById(classroomId).lean();
+      if (!room) return res.status(404).json({ error: 'כיתה לא נמצאה' });
+      if (String(room.branch_id) !== String(doc.branch_id)) {
+        return res.status(400).json({ error: 'הכיתה שייכת לסניף אחר' });
+      }
+      if (room.academic_year && normalizeYear(room.academic_year) !== doc.academic_year) {
+        return res.status(400).json({ error: 'הכיתה שייכת לשנת לימודים אחרת' });
+      }
+    }
+    // Clearing the group with no room named clears the whole decision.
+    if (!group && !classroomId) classroomId = null;
+
+    doc.placement = {
+      age_group_override: group,
+      classroom_id: classroomId,
+      decided_by: req.user?.id || null,
+      decided_at: group || classroomId ? new Date() : null,
+      note: String(req.body?.note || ''),
+    };
+    await doc.save();
+
+    res.json({
+      enrollment: {
+        id: doc._id,
+        child_name: doc.child.full_name,
+        placement: doc.placement,
+        effective_age_group: effectiveAgeGroup(doc.toObject()),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * DELETE /api/external-enrollments/data?branch=&year=   — undo a whole upload.
+ *
+ * A file put against the wrong branch files a whole cohort in the wrong gan,
+ * and there is no way to un-see that row by row. So the unit of undo is the
+ * unit of the mistake: every ClickTac record for one branch and one year, and
+ * the upload history with it, deleted together and re-uploaded clean.
+ *
+ * Rows already turned into registrations are the one thing this refuses to
+ * touch. Those created a Registration, a Child and possibly a paid collection
+ * row; deleting the enrollment behind them would leave the registration
+ * standing with nothing to explain where it came from. They are listed by
+ * name instead, so whoever is undoing knows exactly what is in the way.
+ */
+async function deleteData(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
+    const academicYear = normalizeYear(req.query.year || '');
+    if (!/^\d{4}-\d{4}$/.test(academicYear)) return res.status(400).json({ error: 'יש לבחור שנת לימודים' });
+
+    const filter = { source: 'clicktac', branch_id: branchId, academic_year: academicYear };
+    const imported = await ExternalEnrollment.find({ ...filter, 'review.status': 'imported' })
+      .select('child.full_name review.imported_registration_id').lean();
+
+    if (imported.length && req.query.force !== 'true') {
+      return res.status(409).json({
+        error: `${imported.length} רשומות כבר נקלטו למערכת כרישום ולא ניתן למחוק אותן מכאן`,
+        code: 'HAS_IMPORTED',
+        imported: imported.map(d => d.child?.full_name).filter(Boolean),
+      });
+    }
+
+    // With force, the ones already promoted stay — only the untouched go.
+    const toDelete = imported.length
+      ? { ...filter, 'review.status': { $ne: 'imported' } }
+      : filter;
+    const { deletedCount } = await ExternalEnrollment.deleteMany(toDelete);
+    const batches = await EnrollmentImport.deleteMany({
+      source: 'clicktac', branch_id: branchId, academic_year: academicYear,
+    });
+
+    res.json({
+      deleted: deletedCount,
+      kept_imported: imported.length,
+      batches_deleted: batches.deletedCount,
+    });
   } catch (error) {
     next(error);
   }
@@ -726,5 +866,5 @@ async function contacts(req, res, next) {
 
 module.exports = {
   importFile, list, getOne, pricing, promote, promoteBulk, setReview, contacts,
-  classroomPlan, createClassroom,
+  classroomPlan, createClassroom, setPlacement, deleteData, effectiveAgeGroup,
 };

@@ -512,6 +512,7 @@ async function contacts(req, res, next) {
         id_number: r.id_number,
         birth_date: r.birth_date,
         age_group: r.age_group,
+        age_at_year_start: r.age_at_year_start?.label || '',
         verdict: r.verdict,
         verdict_label: r.verdict_label,
         parent1_name: r.clicktac?.parent1_name || '',
@@ -563,6 +564,9 @@ async function exportReconcile(req, res, next) {
       id_number: r.id_number,
       birth_date: dateCell(r.birth_date),
       age_group: r.age_group,
+      age_at_start: r.age_at_year_start?.label || '',
+      age_months: r.age_at_year_start?.months ?? '',
+      placed_group: r.age_group_override || '',
       verdict: r.verdict_label,
       action: r.verdict_action,
       issues: r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`).join(' · '),
@@ -584,7 +588,8 @@ async function exportReconcile(req, res, next) {
 
     const COLS_FULL = [
       ['child_name', 'שם הילד/ה'], ['id_number', 'ת"ז'], ['birth_date', 'תאריך לידה'],
-      ['age_group', 'שכבת גיל'], ['verdict', 'מסקנה'], ['action', 'פעולה נדרשת'],
+      ['age_group', 'שכבת גיל'], ['age_at_start', 'גיל ב־1.9'], ['age_months', 'חודשים ב־1.9'],
+      ['placed_group', 'שובץ ידנית ל'], ['verdict', 'מסקנה'], ['action', 'פעולה נדרשת'],
       ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
       ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
@@ -595,7 +600,7 @@ async function exportReconcile(req, res, next) {
     ];
     const COLS_CONTACT = [
       ['child_name', 'שם הילד/ה'], ['id_number', 'ת"ז'], ['age_group', 'שכבת גיל'],
-      ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
+      ['age_at_start', 'גיל ב־1.9'], ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['email', 'מייל'], ['address', 'כתובת'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],
@@ -628,6 +633,40 @@ async function exportReconcile(req, res, next) {
   }
 }
 
+/**
+ * DELETE /api/tmt/data?branch=&year=  — undo a whole upload.
+ *
+ * The ministry's portal is per-מעון and the file carries no branch, so the one
+ * mistake that is easy to make is downloading inside one gan's account and
+ * uploading it under another. That files a whole cohort against the wrong
+ * branch, and no row-by-row edit fixes it. So the unit of undo is the unit of
+ * the mistake: every approval for one branch and one year, and the upload
+ * history with it, deleted together and re-uploaded clean.
+ *
+ * Nothing downstream depends on an approval — it creates no registration and
+ * no child — so unlike the ClickTac side there is nothing here to refuse.
+ */
+async function deleteData(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
+    if (!canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    const academicYear = normalizeYear(req.query.year || '');
+    if (!/^\d{4}-\d{4}$/.test(academicYear)) return res.status(400).json({ error: 'יש לבחור שנת לימודים' });
+
+    const { deletedCount } = await TmtApproval.deleteMany({
+      branch_id: branchId, academic_year: academicYear,
+    });
+    const batches = await EnrollmentImport.deleteMany({
+      source: 'tmt', branch_id: branchId, academic_year: academicYear,
+    });
+
+    res.json({ deleted: deletedCount, batches_deleted: batches.deletedCount });
+  } catch (error) {
+    next(error);
+  }
+}
+
 /** DELETE /api/tmt/approvals/:id — a row uploaded against the wrong branch. */
 async function removeApproval(req, res, next) {
   try {
@@ -641,5 +680,5 @@ async function removeApproval(req, res, next) {
 
 module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
-  exportReconcile, removeApproval, isTmtSupervised,
+  exportReconcile, removeApproval, deleteData, isTmtSupervised,
 };

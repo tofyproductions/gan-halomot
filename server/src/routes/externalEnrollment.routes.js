@@ -19,9 +19,16 @@ router.get('/classroom-plan', ctrl.classroomPlan);
 router.post('/classrooms', requireRole('system_admin', 'accountant'), ctrl.createClassroom);
 router.post('/promote-bulk', requireRole('system_admin', 'accountant'), ctrl.promoteBulk);
 
+// Undoing a whole upload — a file put against the wrong branch. Refuses to
+// touch rows that already became registrations.
+router.delete('/data', requireRole('system_admin', 'accountant'), ctrl.deleteData);
+
 router.get('/', ctrl.list);
 router.get('/:id', ctrl.getOne);
 router.post('/:id/promote', requireRole('system_admin', 'accountant'), ctrl.promote);
 router.put('/:id/review', requireRole('system_admin', 'accountant'), ctrl.setReview);
+// Which group the child actually joins — the manager's call, and it beats
+// every age group in either file.
+router.put('/:id/placement', requireRole('system_admin', 'accountant', 'branch_manager'), ctrl.setPlacement);
 
 module.exports = router;

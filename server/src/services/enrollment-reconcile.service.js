@@ -22,6 +22,7 @@
 
 const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
+const { ageInMonths, ageGroupFor } = require('./clicktac.service');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -137,6 +138,46 @@ const ISSUES = {
 };
 
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
+
+/**
+ * How old the child will be on the day the year opens.
+ *
+ * The state's age group is a funding bracket, not a placement: a child the
+ * ministry calls פעוט can be put in בוגרים if that is where they belong in
+ * this gan, and that is the manager's call. But it cannot be made from a
+ * birth date alone — "21/10/2024" does not tell anyone whether the child will
+ * be walking in September. So the age is spelled out, in years and months and
+ * in plain months, next to whatever the two files claim.
+ *
+ * 1 September, always. Not today, and not the import date: a comparison run in
+ * July and again in August must not move a child between groups.
+ */
+function ageAtYearStart(birthDate, academicYear) {
+  if (!birthDate) return null;
+  const startYear = Number(String(academicYear).split('-')[0]);
+  if (!Number.isFinite(startYear)) return null;
+  const at = new Date(Date.UTC(startYear, 8, 1));
+  const months = ageInMonths(new Date(birthDate), at);
+  if (months == null) return null;
+
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  const yearPart = years === 0 ? '' : years === 1 ? 'שנה' : years === 2 ? 'שנתיים' : `${years} שנים`;
+  const monthPart = rest === 0 ? '' : rest === 1 ? 'חודש' : rest === 2 ? 'חודשיים' : `${rest} חודשים`;
+  const label = [yearPart, monthPart].filter(Boolean).join(' ו־') || 'פחות מחודש';
+
+  return {
+    months,
+    years,
+    months_remainder: rest,
+    // "שנה ו־3 חודשים (15 חודשים)" — the plain month count too, because the
+    // group boundaries (15 and 24 months) are counted in months. Under a year
+    // the label is already a month count, so it is not repeated.
+    label: years > 0 ? `${label} (${months} חודשים)` : label,
+    // What the boundaries alone would say. A suggestion, never a decision.
+    suggested_group: ageGroupFor(months),
+  };
+}
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL', { timeZone: 'UTC' }) : '—');
 const yesNo = (v) => (v == null ? '—' : (v ? 'כן' : 'לא'));
 
@@ -336,6 +377,15 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       birth_date: ct?.child?.birth_date || tmt?.child?.birth_date || null,
       age_group: canonicalAgeGroup(ct?.child?.age_group || tmt?.child?.age_group || ''),
       computed_age_group: ct?.computed?.age_group || '',
+      // תמ"ת first: on identity — the name, the ת"ז, the birth date — the
+      // ministry's record is the state's own and wins over a form a parent
+      // filled in. Where they disagree it is reported as a finding as well.
+      age_at_year_start: ageAtYearStart(
+        tmt?.child?.birth_date || ct?.child?.birth_date, academicYear,
+      ),
+      age_source: tmt?.child?.birth_date ? 'תמ"ת' : (ct?.child?.birth_date ? 'קליקטאק' : ''),
+      // The manager's own decision, when one has been made. It beats both files.
+      age_group_override: ct?.placement?.age_group_override || '',
       verdict,
       verdict_label: VERDICTS[verdict].label,
       verdict_action: VERDICTS[verdict].action,
@@ -424,12 +474,13 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       in_tmt: by(r => r.in_tmt),
       in_clicktac: by(r => r.in_clicktac),
       already_imported: by(r => r.clicktac?.review_status === 'imported'),
+      placed_by_hand: by(r => !!r.age_group_override),
       issues: issueCounts,
     },
   };
 }
 
 module.exports = {
-  reconcile, compareNames, issuesFor, verdictFor,
+  reconcile, compareNames, issuesFor, verdictFor, ageAtYearStart,
   VERDICTS, ISSUES, CANCELLED,
 };

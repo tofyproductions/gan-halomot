@@ -43,6 +43,9 @@ const VERDICT_STYLE = {
 
 const SEVERITY_COLOR = { critical: 'error', warning: 'warning', info: 'info', ok: 'default' };
 
+/** The three groups a child can be placed in. The state's brackets, our rooms. */
+const AGE_GROUPS = ['תינוק', 'פעוט', 'בוגר'];
+
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '—');
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('he-IL') : '—');
 
@@ -64,7 +67,13 @@ function StatCard({ label, value, color, onClick, active, hint }) {
   );
 }
 
-export default function TmtReconcile() {
+/**
+ * `embedded` — rendered inside רישום לאמונה, which owns the branch, the year
+ * and both uploads. The screen then drops its own copies of those controls.
+ */
+export default function TmtReconcile({
+  branchId: propBranch, year: propYear, embedded = false, reloadKey = 0,
+} = {}) {
   const years = getAcademicYears();
   // getAcademicYears() knows `current` and `next` only. The year before is
   // derived here — reading years.previous.range crashed the whole app to a
@@ -74,9 +83,13 @@ export default function TmtReconcile() {
     return `${start}-${start + 1}`;
   })();
   const YEAR_OPTIONS = [years.next.range, years.current.range, previousRange];
-  const [year, setYear] = useState(years.next.range);
+  const [ownYear, setOwnYear] = useState(years.next.range);
+  const year = embedded ? propYear : ownYear;
+  const setYear = setOwnYear;
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
+  const [ownBranchId, setOwnBranchId] = useState(localStorage.getItem('selectedBranch') || '');
+  const branchId = embedded ? propBranch : ownBranchId;
+  const setBranchId = setOwnBranchId;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -89,8 +102,10 @@ export default function TmtReconcile() {
   const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null });
   const [historyDlg, setHistoryDlg] = useState({ open: false, loading: false, imports: [] });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
+  const [saving, setSaving] = useState({});
 
   useEffect(() => {
+    if (embedded) return;   // the page above already chose the branch
     api.get('/branches')
       .then(res => {
         const all = res.data.branches || [];
@@ -102,10 +117,10 @@ export default function TmtReconcile() {
       })
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [embedded]);
 
   const fetchData = useCallback(() => {
-    if (!branchId) return;
+    if (!branchId || !year) return;
     setLoading(true);
     setError('');
     api.get('/tmt/reconcile', { params: { branch: branchId, year } })
@@ -115,7 +130,8 @@ export default function TmtReconcile() {
         setError(err.response?.data?.error || 'שגיאה בטעינת ההצלבה');
       })
       .finally(() => setLoading(false));
-  }, [branchId, year]);
+    // reloadKey: the page above uploaded a file or undid one.
+  }, [branchId, year, reloadKey]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -186,6 +202,32 @@ export default function TmtReconcile() {
     }
   };
 
+  /**
+   * Which group this child actually joins.
+   *
+   * The ministry's שכבת גיל is a funding bracket and ClickTac's is a form
+   * field. Neither is a placement — a child of 22 months can belong with the
+   * בוגרים in one gan and the צעירים in another, and that is the manager's
+   * call, made against the age on 1 September shown next to it. Once made it
+   * decides the fee column and the classroom at import, and it survives the
+   * next file.
+   */
+  const setPlacement = async (row, group) => {
+    if (!row.clicktac) {
+      return toast.info('אפשר לשבץ רק ילד/ה שנרשמו בקליקטאק — אין רשומה לשבץ');
+    }
+    setSaving(s => ({ ...s, [row.id_number]: true }));
+    try {
+      await api.put(`/external-enrollments/${row.clicktac.id}/placement`, { age_group: group });
+      toast.success(group ? `${row.child_name} שובץ/ה ל${group}` : `בוטל השיבוץ הידני של ${row.child_name}`);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשיבוץ');
+    } finally {
+      setSaving(s => ({ ...s, [row.id_number]: false }));
+    }
+  };
+
   const handleApply = async () => {
     setApplyDlg(d => ({ ...d, saving: true }));
     try {
@@ -203,37 +245,38 @@ export default function TmtReconcile() {
 
   return (
     <Box sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
-        <Typography variant="h5" fontWeight={700}>הצלבת תמ"ת מול קליקטאק</Typography>
-        <TextField
-          select size="small" label="סניף" value={branchId}
-          onChange={e => setBranchId(e.target.value)} sx={{ minWidth: 200 }}
-        >
-          {branches.map(b => (
-            <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          select size="small" label="שנת לימודים" value={year}
-          onChange={e => setYear(e.target.value)} sx={{ minWidth: 190 }}
-        >
-          {YEAR_OPTIONS.map(y => (
-            <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
-          ))}
-        </TextField>
-        <Box sx={{ flex: 1 }} />
-        <Button startIcon={<UploadFileIcon />} variant="contained"
-          onClick={() => setUploadDlg({ open: true, file: null, saving: false, result: null })}>
-          העלאת קובץ תמ"ת
-        </Button>
-        <Tooltip title="רענון"><span>
-          <IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
-        </span></Tooltip>
-      </Stack>
+      {!embedded && (
+        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
+          <Typography variant="h5" fontWeight={700}>הצלבת תמ"ת מול קליקטאק</Typography>
+          <TextField
+            select size="small" label="סניף" value={branchId}
+            onChange={e => setBranchId(e.target.value)} sx={{ minWidth: 200 }}
+          >
+            {branches.map(b => (
+              <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select size="small" label="שנת לימודים" value={year}
+            onChange={e => setYear(e.target.value)} sx={{ minWidth: 190 }}
+          >
+            {YEAR_OPTIONS.map(y => (
+              <MenuItem key={y} value={y}>{formatAcademicYear(y)}</MenuItem>
+            ))}
+          </TextField>
+          <Box sx={{ flex: 1 }} />
+          <Button startIcon={<UploadFileIcon />} variant="contained"
+            onClick={() => setUploadDlg({ open: true, file: null, saving: false, result: null })}>
+            העלאת קובץ תמ"ת
+          </Button>
+          <Tooltip title="רענון"><span>
+            <IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
+          </span></Tooltip>
+        </Stack>
+      )}
 
       <Alert severity="info" sx={{ mb: 2 }}>
         ילד נקלט לשנה הבאה רק אם הוא מופיע גם ברשימת האישורים של משרד התמ"ת וגם ברישום בקליקטאק.
-        סניף קפלן אינו תחת התמ"ת ואינו מופיע כאן.
       </Alert>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -263,6 +306,8 @@ export default function TmtReconcile() {
             <StatCard label='להזין תאריך כניסה בתמ"ת' value={summary.needs_absorption_date || 0} color="warning"
               active={issueFilter === 'needs_absorption_date'} hint={`${summary.absorbed || 0} כבר עם תאריך`}
               onClick={() => setIssueFilter(issueFilter === 'needs_absorption_date' ? '' : 'needs_absorption_date')} />
+            <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
+              hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
           </Stack>
 
@@ -322,7 +367,8 @@ export default function TmtReconcile() {
                   <TableCell>שם הילד/ה</TableCell>
                   <TableCell>ת״ז</TableCell>
                   <TableCell>תאריך לידה</TableCell>
-                  <TableCell>שכבה</TableCell>
+                  <TableCell>גיל ב־1.9</TableCell>
+                  <TableCell>שיבוץ לכיתה</TableCell>
                   <TableCell>מסקנה</TableCell>
                   <TableCell>חריגות</TableCell>
                   <TableCell>תמ"ת</TableCell>
@@ -335,8 +381,44 @@ export default function TmtReconcile() {
                   <TableRow key={r.id_number} hover>
                     <TableCell>{r.child_name}</TableCell>
                     <TableCell>{r.id_number}</TableCell>
-                    <TableCell>{fmtDate(r.birth_date)}</TableCell>
-                    <TableCell>{r.age_group}</TableCell>
+                    <TableCell>
+                      {fmtDate(r.birth_date)}
+                      {r.age_source && (
+                        <Typography variant="caption" color="text.disabled" display="block">
+                          לפי {r.age_source}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={600}>
+                        {r.age_at_year_start?.label || '—'}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        לפי הגיל: {r.age_at_year_start?.suggested_group || '—'}
+                        {r.age_group && r.age_group !== r.age_at_year_start?.suggested_group
+                          ? ` · בקבצים: ${r.age_group}` : ''}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <TextField
+                        select size="small" variant="standard"
+                        sx={{ minWidth: 110 }}
+                        disabled={!r.clicktac || !!saving[r.id_number]
+                          || r.clicktac?.review_status === 'imported'}
+                        value={r.age_group_override || ''}
+                        onChange={e => setPlacement(r, e.target.value)}
+                      >
+                        <MenuItem value="">
+                          לפי הגיל ({r.age_at_year_start?.suggested_group || '—'})
+                        </MenuItem>
+                        {AGE_GROUPS.map(g => <MenuItem key={g} value={g}>{g}</MenuItem>)}
+                      </TextField>
+                      {r.clicktac?.review_status === 'imported' && (
+                        <Typography variant="caption" color="text.disabled" display="block">
+                          נקלט/ה — משנים במסך הכיתות
+                        </Typography>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Chip size="small" label={VERDICT_STYLE[r.verdict]?.short || r.verdict}
                         color={VERDICT_STYLE[r.verdict]?.color || 'default'} />
@@ -367,7 +449,7 @@ export default function TmtReconcile() {
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={9} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={10} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">אין רשומות להצגה</Typography>
                   </TableCell></TableRow>
                 )}
@@ -449,6 +531,21 @@ export default function TmtReconcile() {
                   ))}
                 </Card>
               )}
+
+              <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                  גיל בפתיחת השנה
+                </Typography>
+                <Typography variant="body2">
+                  ב־1 בספטמבר: <b>{detail.age_at_year_start?.label || '—'}</b>
+                  {detail.age_source ? ` (לפי תאריך הלידה ב${detail.age_source})` : ''}
+                </Typography>
+                <Typography variant="body2">
+                  לפי הגיל בלבד: {detail.age_at_year_start?.suggested_group || '—'} ·
+                  {' '}בקבצים: {detail.age_group || '—'}
+                  {detail.age_group_override ? ` · שובץ ידנית ל${detail.age_group_override}` : ''}
+                </Typography>
+              </Card>
 
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
                 <Card variant="outlined" sx={{ p: 1.5, flex: 1 }}>
