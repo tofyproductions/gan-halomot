@@ -73,6 +73,9 @@ function StatCard({ label, value, color, onClick, active, hint }) {
  */
 export default function TmtReconcile({
   branchId: propBranch, year: propYear, embedded = false, reloadKey = 0,
+  // Acting is a narrower grant than seeing — the page above works them out and
+  // the server enforces the same split.
+  canImport = true, canPlace = true,
 } = {}) {
   // The intake year — fixed, never picked. See getEnrollmentYear().
   const year = embedded ? propYear : getEnrollmentYear();
@@ -313,10 +316,12 @@ export default function TmtReconcile({
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
             <Button size="small" startIcon={<ContactPhoneIcon />} onClick={openContacts}>דף קשר</Button>
             <Button size="small" startIcon={<DownloadIcon />} onClick={handleExport}>ייצוא לאקסל</Button>
-            <Button size="small" variant="outlined" color="warning" startIcon={<PlaylistAddCheckIcon />}
-              onClick={() => setApplyDlg({ open: true, saving: false, result: null })}>
-              החלת המסקנות
-            </Button>
+            {canImport && (
+              <Button size="small" variant="outlined" color="warning" startIcon={<PlaylistAddCheckIcon />}
+                onClick={() => setApplyDlg({ open: true, saving: false, result: null })}>
+                החלת המסקנות
+              </Button>
+            )}
           </Stack>
 
           {(lastTmt || lastCt) && (
@@ -386,7 +391,7 @@ export default function TmtReconcile({
                       <TextField
                         select size="small" variant="standard"
                         sx={{ minWidth: 110 }}
-                        disabled={!r.clicktac || !!saving[r.id_number]
+                        disabled={!canPlace || !r.clicktac || !!saving[r.id_number]
                           || r.clicktac?.review_status === 'imported'}
                         value={r.age_group_override || ''}
                         onChange={e => setPlacement(r, e.target.value)}

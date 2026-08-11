@@ -9,6 +9,7 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import GroupsIcon from '@mui/icons-material/Groups';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 import TmtReconcile from './TmtReconcile';
 import ClassPlacement from './ClassPlacement';
@@ -47,6 +48,19 @@ const SOURCES = {
   },
 };
 
+/**
+ * Who may act, as opposed to who may look.
+ *
+ * The tab grants the screen — that is how a back-office manager gets to read
+ * it. Uploading a ministry file, undoing one, or turning seventy children into
+ * registrations is a different thing, and until the app has a permission of
+ * its own for that it stays with the roles that always had it. The server
+ * enforces the same split; this only keeps the buttons off a screen that would
+ * answer them with 403.
+ */
+const CAN_IMPORT = ['system_admin', 'accountant'];
+const CAN_PLACE = ['system_admin', 'accountant', 'branch_manager'];
+
 export default function EmunahEnrollment() {
   /**
   * One year, and it is not chosen.
@@ -57,6 +71,10 @@ export default function EmunahEnrollment() {
   * they are simply not what this screen is for.
   */
   const year = getEnrollmentYear();
+
+  const { user } = useAuth();
+  const canImport = CAN_IMPORT.includes(user?.role);
+  const canPlace = CAN_PLACE.includes(user?.role);
 
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
@@ -132,7 +150,7 @@ export default function EmunahEnrollment() {
     }
   };
 
-  const shared = { branchId, year, embedded: true, reloadKey };
+  const shared = { branchId, year, embedded: true, reloadKey, canImport, canPlace };
 
   return (
     <Box dir="rtl" sx={{ p: 2 }}>
@@ -151,21 +169,29 @@ export default function EmunahEnrollment() {
 
         <Box sx={{ flex: 1 }} />
 
-        <Button size="small" variant="contained" startIcon={<UploadFileIcon />}
-          onClick={() => openUpload('clicktac')}>
-          קליטת קובץ קליקטאק
-        </Button>
-        <Button size="small" variant="contained" color="secondary" startIcon={<UploadFileIcon />}
-          disabled={!isTmtBranch} onClick={() => openUpload('tmt')}>
-          קליטת קובץ תמ״ת
-        </Button>
+        {canImport ? (
+          <>
+            <Button size="small" variant="contained" startIcon={<UploadFileIcon />}
+              onClick={() => openUpload('clicktac')}>
+              קליטת קובץ קליקטאק
+            </Button>
+            <Button size="small" variant="contained" color="secondary" startIcon={<UploadFileIcon />}
+              disabled={!isTmtBranch} onClick={() => openUpload('tmt')}>
+              קליטת קובץ תמ״ת
+            </Button>
+          </>
+        ) : (
+          <Chip color="default" variant="outlined" label="צפייה בלבד" />
+        )}
       </Stack>
 
       <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Button variant="contained" color="success" startIcon={<GroupsIcon />}
-          disabled={!isTmtBranch} onClick={() => setPlaceOpen(true)}>
-          שיבוץ לכיתות
-        </Button>
+        {canPlace && (
+          <Button variant="contained" color="success" startIcon={<GroupsIcon />}
+            disabled={!isTmtBranch} onClick={() => setPlaceOpen(true)}>
+            שיבוץ לכיתות
+          </Button>
+        )}
 
         {!isTmtBranch && (
           <Chip size="small" color="default" variant="outlined"
@@ -173,14 +199,18 @@ export default function EmunahEnrollment() {
         )}
 
         <Box sx={{ flex: 1 }} />
-        <Button size="small" color="error" startIcon={<DeleteForeverIcon />}
-          onClick={() => setWipe({ open: true, source: 'clicktac', saving: false, result: null, blocked: null })}>
-          מחיקת קובץ קליקטאק
-        </Button>
-        <Button size="small" color="error" disabled={!isTmtBranch} startIcon={<DeleteForeverIcon />}
-          onClick={() => setWipe({ open: true, source: 'tmt', saving: false, result: null, blocked: null })}>
-          מחיקת קובץ תמ״ת
-        </Button>
+        {canImport && (
+          <>
+            <Button size="small" color="error" startIcon={<DeleteForeverIcon />}
+              onClick={() => setWipe({ open: true, source: 'clicktac', saving: false, result: null, blocked: null })}>
+              מחיקת קובץ קליקטאק
+            </Button>
+            <Button size="small" color="error" disabled={!isTmtBranch} startIcon={<DeleteForeverIcon />}
+              onClick={() => setWipe({ open: true, source: 'tmt', saving: false, result: null, blocked: null })}>
+              מחיקת קובץ תמ״ת
+            </Button>
+          </>
+        )}
       </Stack>
 
       {isTmtBranch ? <TmtReconcile {...shared} /> : (

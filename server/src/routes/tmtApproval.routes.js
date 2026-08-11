@@ -2,11 +2,13 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const ctrl = require('../controllers/tmtApproval.controller');
-const { requireTab } = require('../middleware/auth');
+const { requireTabWrite } = require('../middleware/auth');
 
 // Everything here belongs to one screen — רישום לאמונה, tab id 'clicktac'.
-// Whoever the permissions screen granted that tab can do the work on it.
-const allow = (...roles) => requireTab('clicktac', ...roles);
+// Reading the screen follows the tab the permissions screen handed out.
+// ACTING on it still needs one of the roles below — a granted tab on its own
+// is read-only until the app grows a permission for the actions themselves.
+const allow = (...roles) => requireTabWrite('clicktac', ...roles);
 
 // 10MB is generous for a spreadsheet — the ministry's 74-row export is 31KB.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });

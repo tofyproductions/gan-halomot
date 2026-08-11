@@ -2,10 +2,11 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const ctrl = require('../controllers/externalEnrollment.controller');
-const { requireTab } = require('../middleware/auth');
+const { requireTabWrite } = require('../middleware/auth');
 
 // Same screen as tmtApproval.routes.js — רישום לאמונה, tab id 'clicktac'.
-const allow = (...roles) => requireTab('clicktac', ...roles);
+// The tab grants reading; these roles grant acting.
+const allow = (...roles) => requireTabWrite('clicktac', ...roles);
 
 // 10MB is generous for a spreadsheet — the 77-row export is 27KB.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });

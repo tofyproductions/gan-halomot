@@ -64,6 +64,33 @@ function requireTab(tabId, ...defaultRoles) {
 }
 
 /**
+ * Seeing a screen and acting on it are two different grants.
+ *
+ * requireTab above opens a screen to whoever the permissions screen handed it
+ * — which is what a back-office manager needs to READ רישום לאמונה. It is not
+ * what she should have to upload a ministry file, undo one, or turn seventy
+ * children into registrations. Until the app has a permission of its own for
+ * that, acting stays with the roles that always had it, and a granted tab
+ * without one of those roles is read-only.
+ *
+ * Both must pass: the tab (so revoking it revokes everything) and the role.
+ *
+ * Usage: requireTabWrite('clicktac', 'system_admin', 'accountant')
+ */
+function requireTabWrite(tabId, ...roles) {
+  const tabGate = requireTab(tabId, ...roles);
+  return (req, res, next) => tabGate(req, res, () => {
+    if (!roles.includes(req.user?.role)) {
+      return res.status(403).json({
+        error: 'יש לך הרשאת צפייה בלבד במסך זה',
+        code: 'READ_ONLY',
+      });
+    }
+    next();
+  });
+}
+
+/**
  * Role-based access control middleware factory
  * Usage: requireRole('system_admin', 'branch_manager')
  */
@@ -107,5 +134,6 @@ function requireBranchScope(req, res, next) {
 }
 
 module.exports = {
-  authMiddleware, optionalAuth, requireRole, requireTab, requireBranchScope,
+  authMiddleware, optionalAuth, requireRole, requireTab, requireTabWrite,
+  requireBranchScope,
 };
