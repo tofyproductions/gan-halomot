@@ -1,17 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Box, Stack, Typography, TextField, MenuItem, Button, Dialog, DialogTitle,
-  DialogContent, DialogActions, Alert, AlertTitle, ToggleButton, ToggleButtonGroup,
+  DialogContent, DialogActions, Alert, AlertTitle,
   Chip, List, ListItem, ListItemText, Divider,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
-import { useSearchParams } from 'react-router-dom';
+import GroupsIcon from '@mui/icons-material/Groups';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
-import ExternalEnrollments from './ExternalEnrollments';
 import TmtReconcile from './TmtReconcile';
+import ClassPlacement from './ClassPlacement';
 
 /**
  * רישום לאמונה — one intake, one page.
@@ -23,10 +23,11 @@ import TmtReconcile from './TmtReconcile';
  * at — pick משה דיין, read its ministry list, flip to ClickTac and you were
  * somewhere else entirely.
  *
- * So the branch and the year live HERE, once, and both views read them. Both
- * stay mounted and the inactive one is hidden rather than unmounted, so the
- * filters and the scroll position you left are still there when you come back.
- * Both uploads and both undos are on this bar, because they are the same job.
+ * So the branch and the year live HERE, once, and one table reads them. There
+ * used to be a second view listing the ClickTac file on its own; it showed the
+ * same children the comparison already shows, minus the half of the answer
+ * that decides anything, so it is gone. Both uploads, both undos, and the
+ * placement board hang off this one bar.
  */
 
 const SOURCES = {
@@ -57,15 +58,12 @@ export default function EmunahEnrollment() {
   */
   const year = getEnrollmentYear();
 
-  const [params, setParams] = useSearchParams();
-  const initialView = ['clicktac', 'tmt'].includes(params.get('view')) ? params.get('view') : 'clicktac';
-
-  const [view, setView] = useState(initialView);
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
   // Bumped after an upload or a delete: both views refetch, neither is remounted.
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [placeOpen, setPlaceOpen] = useState(false);
   const [upload, setUpload] = useState({ open: false, source: '', file: null, saving: false, result: null });
   const [wipe, setWipe] = useState({ open: false, source: '', saving: false, result: null, blocked: null });
 
@@ -91,15 +89,6 @@ export default function EmunahEnrollment() {
    * reason is on screen instead of the branch simply having fewer options.
    */
   const isTmtBranch = branch ? (branch.tmt_supervised ?? !/קפלן/.test(branch.name || '')) : true;
-
-  const changeView = useCallback((next) => {
-    setView(next);
-    setParams(next === 'clicktac' ? {} : { view: next }, { replace: true });
-  }, [setParams]);
-
-  useEffect(() => {
-    if (!isTmtBranch && view === 'tmt') changeView('clicktac');
-  }, [isTmtBranch, view, changeView]);
 
   const openUpload = (source) => setUpload({ open: true, source, file: null, saving: false, result: null });
 
@@ -173,11 +162,10 @@ export default function EmunahEnrollment() {
       </Stack>
 
       <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <ToggleButtonGroup size="small" exclusive value={view}
-          onChange={(_e, v) => v && changeView(v)}>
-          <ToggleButton value="clicktac">קליטה מקליקטאק</ToggleButton>
-          <ToggleButton value="tmt" disabled={!isTmtBranch}>הצלבת תמ״ת</ToggleButton>
-        </ToggleButtonGroup>
+        <Button variant="contained" color="success" startIcon={<GroupsIcon />}
+          disabled={!isTmtBranch} onClick={() => setPlaceOpen(true)}>
+          שיבוץ לכיתות
+        </Button>
 
         {!isTmtBranch && (
           <Chip size="small" color="default" variant="outlined"
@@ -195,14 +183,21 @@ export default function EmunahEnrollment() {
         </Button>
       </Stack>
 
-      {/* Both mounted, one shown. Unmounting the other is what used to throw
-          away the branch, the filters and the scroll on every switch. */}
-      <Box sx={{ display: view === 'clicktac' ? 'block' : 'none' }}>
-        <ExternalEnrollments {...shared} />
-      </Box>
-      <Box sx={{ display: view === 'tmt' ? 'block' : 'none' }}>
-        {isTmtBranch && <TmtReconcile {...shared} />}
-      </Box>
+      {isTmtBranch ? <TmtReconcile {...shared} /> : (
+        <Alert severity="info">
+          {branch?.name || 'הסניף'} אינו תחת משרד התמ"ת. הרישום בו מתבצע ישירות מולנו
+          ומנוהל במסך הרישום הרגיל.
+        </Alert>
+      )}
+
+      <ClassPlacement
+        open={placeOpen}
+        onClose={() => setPlaceOpen(false)}
+        branchId={branchId}
+        branchName={branch?.name || ''}
+        year={year}
+        onDone={() => setReloadKey(k => k + 1)}
+      />
 
       {/* ---------- upload ---------- */}
       <Dialog open={upload.open} dir="rtl" maxWidth="sm" fullWidth

@@ -19,6 +19,9 @@ router.get('/reconcile', ctrl.reconcileBranch);
 router.get('/approvals', ctrl.listApprovals);
 router.get('/contacts', ctrl.contacts);
 router.get('/imports', ctrl.listImports);
+// The placement board, and the confirm that turns it into real registrations.
+router.get('/placement', ctrl.placement);
+router.post('/placement/confirm', requireRole('system_admin', 'accountant', 'branch_manager'), ctrl.confirmPlacement);
 
 // Undoing a whole upload. Deliberately admin/accountant only: it removes the
 // ministry's answer for a whole gan and a whole year in one call.

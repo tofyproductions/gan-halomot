@@ -1,10 +1,15 @@
 const XLSX = require('xlsx');
 const {
-  TmtApproval, ExternalEnrollment, EnrollmentImport, Branch,
+  TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child,
+  BranchPricing,
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
-const { normalizeYear, enrollmentYear, formatAcademicYear } = require('../services/academic-year.service');
+const { AGE_GROUPS } = require('../services/clicktac.service');
+const { promoteOne, effectiveAgeGroup } = require('./externalEnrollment.controller');
+const {
+  normalizeYear, enrollmentYear, formatAcademicYear, hebrewYearForStart,
+} = require('../services/academic-year.service');
 
 /**
  * רישום תמ"ת — the ministry's approvals, and the reconciliation against them.
@@ -634,6 +639,260 @@ async function exportReconcile(req, res, next) {
 }
 
 /**
+ * ClickTac's age layer -> this system's classroom category.
+ *
+ * Classroom.category is the enum that survives renaming: a branch calls its
+ * rooms תינוקייה א and תינוקייה ב and both are the same category. Matching on
+ * the name would put half a cohort nowhere.
+ */
+const AGE_GROUP_TO_CATEGORY = {
+  'תינוק': 'תינוקייה',
+  'פעוט': 'צעירים',
+  'בוגר': 'בוגרים',
+};
+
+/** The group a child is actually placed in: the manager's call, then the age. */
+function placedGroup(row) {
+  return row.age_group_override
+    || row.age_at_year_start?.suggested_group
+    || row.computed_age_group
+    || row.age_group
+    || '';
+}
+
+/**
+ * GET /api/tmt/placement?branch=&year=
+ *
+ * The placement board: every child the comparison approved, arranged by the
+ * room they are going into, against how many places that room has and how many
+ * the ministry licensed the gan for.
+ *
+ * Two capacity numbers, deliberately not merged. `licensed_capacity` is the
+ * ministry's licence for the whole מעון, typed in by hand because nothing
+ * computes it; the sum of the rooms' own capacities is what the gan set up.
+ * They disagree in real life — rooms are often laid out for more places than
+ * the licence allows — so both are shown and the smaller one is named as the
+ * one that actually binds.
+ *
+ * Children already turned into registrations count as occupying their room, so
+ * "how many are left" means places left, not rows left in a queue.
+ */
+async function placement(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
+    const academicYear = normalizeYear(req.query.year || enrollmentYear());
+
+    const { result, error, status, code, branch } = await buildReconciliation({ branchId, academicYear, req });
+    if (error) return res.status(status).json({ error, code });
+
+    const [rooms, seated, pricing] = await Promise.all([
+      Classroom.find({ branch_id: branchId, academic_year: academicYear, is_active: true })
+        .select('name category capacity').lean(),
+      // Children already filed into a room for this year — places already taken.
+      Child.find({ academic_year: academicYear, is_active: true, classroom_id: { $ne: null } })
+        .select('classroom_id child_name').lean(),
+      BranchPricing.findOne({
+        branch_id: branchId,
+        $or: [
+          { academic_year: hebrewYearForStart(Number(academicYear.split('-')[0])) },
+          { academic_year: academicYear },
+        ],
+      }).lean(),
+    ]);
+
+    // A name with a replacement character in it is a corrupted row, not a room
+    // anybody should be able to pick.
+    const clean = rooms.filter(r => !/\uFFFD/.test(r.name));
+    const seatedByRoom = {};
+    for (const c of seated) {
+      const k = String(c.classroom_id);
+      seatedByRoom[k] = (seatedByRoom[k] || 0) + 1;
+    }
+
+    // Only children who can actually be placed: approved, registered with us,
+    // and not already imported.
+    const waiting = result.rows.filter(r => r.verdict === 'approved' && r.clicktac
+      && r.clicktac.review_status !== 'imported');
+    const done = result.rows.filter(r => r.clicktac?.review_status === 'imported');
+
+    const children = waiting.map(r => ({
+      id: r.clicktac.id,
+      id_number: r.id_number,
+      child_name: r.child_name,
+      birth_date: r.birth_date,
+      age_label: r.age_at_year_start?.label || '',
+      age_months: r.age_at_year_start?.months ?? null,
+      suggested_group: r.age_at_year_start?.suggested_group || '',
+      files_group: r.age_group || '',
+      group: placedGroup(r),
+      is_manual: !!r.age_group_override,
+      classroom_id: r.clicktac.classroom_id || null,
+      parent_name: r.clicktac.parent1_name || '',
+      parent_phone: r.clicktac.parent1_phone || '',
+      issues: r.issues.filter(i => i.severity !== 'info').map(i => i.label),
+    }));
+
+    const groups = Object.entries(AGE_GROUP_TO_CATEGORY).map(([group, category]) => {
+      const kids = children.filter(c => c.group === group);
+      const groupRooms = clean.filter(r => r.category === category);
+      return {
+        age_group: group,
+        category,
+        waiting: kids.length,
+        children: kids,
+        classrooms: groupRooms.map(r => ({
+          id: r._id,
+          name: r.name,
+          capacity: r.capacity || null,
+          seated: seatedByRoom[String(r._id)] || 0,
+          assigned: kids.filter(c => String(c.classroom_id) === String(r._id)).length,
+        })),
+      };
+    });
+
+    const roomCapacitySum = clean.reduce((n, r) => n + (r.capacity || 0), 0);
+    const seatedTotal = clean.reduce((n, r) => n + (seatedByRoom[String(r._id)] || 0), 0);
+    const licensed = branch.licensed_capacity ?? null;
+    // The binding number is the smaller of the two when both are known: a room
+    // laid out for thirty places does not make the licence thirty.
+    const binding = licensed != null && roomCapacitySum
+      ? Math.min(licensed, roomCapacitySum)
+      : (licensed ?? roomCapacitySum ?? 0);
+
+    res.json({
+      branch_name: branch.name,
+      academic_year: academicYear,
+      groups,
+      classrooms: clean.map(r => ({
+        id: r._id, name: r.name, category: r.category, capacity: r.capacity || null,
+        seated: seatedByRoom[String(r._id)] || 0,
+      })),
+      capacity: {
+        licensed,                       // משרד החינוך — typed in by hand
+        rooms_sum: roomCapacitySum,     // what the rooms were set up for
+        binding,                        // the one that actually limits intake
+        seated: seatedTotal,            // places already taken
+        waiting: children.length,       // approved and not yet placed
+        remaining: Math.max(0, binding - seatedTotal),
+        // How many more than the licence the approved list would put in.
+        over: Math.max(0, (seatedTotal + children.length) - binding),
+      },
+      already_imported: done.length,
+      // The price matrix, so the confirm step can offer the tiers instead of
+      // sending anyone to another screen mid-placement.
+      pricing: pricing ? {
+        pricing_type: pricing.pricing_type,
+        fixed_monthly_fee: pricing.fixed_monthly_fee,
+        age_groups: pricing.age_groups,
+        tiers: pricing.tiers,
+        one_time: pricing.one_time,
+      } : null,
+      age_group_order: AGE_GROUPS.map(g => g.name),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/tmt/placement/confirm
+ *   { branch_id, academic_year, assignments: [{ id, classroom_id }],
+ *     fees_by_age_group, registration_fee }
+ *
+ * אישור שיבוץ — the moment the board stops being a plan.
+ *
+ * Each child is written into the room chosen for them and then turned into a
+ * real registration: a Registration, a Child, and the collections row holding
+ * whatever ClickTac already receipted. From that point they are in the גן like
+ * any child registered here directly — which is the whole point, because it is
+ * the Child rows with a classroom_id that the dashboard counts.
+ *
+ * A room is required for every child being confirmed. Importing without one
+ * puts the child outside the classes screen, the attendance screen and the
+ * collections grouping — present in the database and invisible in the gan.
+ *
+ * Failures are per child and reported, never aborting the run: one child
+ * without a fee for their group must not leave half a cohort placed with
+ * nothing saying which half.
+ */
+async function confirmPlacement(req, res, next) {
+  try {
+    const branchId = req.body?.branch_id;
+    if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
+    if (!canAccessBranch(req, branchId)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    const academicYear = normalizeYear(req.body?.academic_year || enrollmentYear());
+
+    const assignments = Array.isArray(req.body?.assignments) ? req.body.assignments : [];
+    if (!assignments.length) return res.status(400).json({ error: 'לא נבחרו ילדים לשיבוץ' });
+
+    const fees = req.body?.fees_by_age_group || {};
+    const regFee = Number(req.body?.registration_fee) || 0;
+
+    const rooms = await Classroom.find({ branch_id: branchId, academic_year: academicYear })
+      .select('name category capacity').lean();
+    const roomById = new Map(rooms.map(r => [String(r._id), r]));
+    const categoryToGroup = Object.fromEntries(
+      Object.entries(AGE_GROUP_TO_CATEGORY).map(([g, c]) => [c, g]),
+    );
+
+    const placed = [];
+    const skipped = [];
+
+    for (const a of assignments) {
+      const doc = await ExternalEnrollment.findById(a.id);
+      if (!doc) { skipped.push({ id: a.id, error: 'רשומה לא נמצאה' }); continue; }
+      const name = doc.child?.full_name || '';
+      if (doc.review?.status === 'imported') { skipped.push({ id: a.id, child: name, error: 'כבר נקלט/ה' }); continue; }
+      if (String(doc.branch_id) !== String(branchId)) {
+        skipped.push({ id: a.id, child: name, error: 'שייך/ת לסניף אחר' }); continue;
+      }
+
+      const room = roomById.get(String(a.classroom_id));
+      if (!room) { skipped.push({ id: a.id, child: name, error: 'לא נבחרה כיתה' }); continue; }
+
+      // The room decides the group: a child put in a בוגרים room IS a בוגר,
+      // whatever the files said. That keeps the fee column and the room from
+      // ever disagreeing.
+      const group = categoryToGroup[room.category] || effectiveAgeGroup(doc.toObject());
+      const fee = Number(fees[group]);
+      if (!Number.isFinite(fee) || fee <= 0) {
+        skipped.push({ id: a.id, child: name, error: `אין שכר לימוד לשכבה "${group}"` });
+        continue;
+      }
+
+      doc.placement = {
+        age_group_override: group,
+        classroom_id: room._id,
+        decided_by: req.user?.id || null,
+        decided_at: new Date(),
+        note: doc.placement?.note || '',
+      };
+      await doc.save();
+
+      try {
+        const reg = await promoteOne(doc.toObject(), {
+          monthly_fee: fee,
+          registration_fee: regFee,
+          classroom_id: room._id,
+          userId: req.user?.id || null,
+        });
+        placed.push({
+          id: a.id, child: name, classroom: room.name, age_group: group,
+          monthly_fee: fee, registration_id: reg._id,
+        });
+      } catch (e) {
+        skipped.push({ id: a.id, child: name, error: e.message });
+      }
+    }
+
+    res.json({ placed: placed.length, skipped, details: placed });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * DELETE /api/tmt/data?branch=&year=  — undo a whole upload.
  *
  * The ministry's portal is per-מעון and the file carries no branch, so the one
@@ -680,5 +939,6 @@ async function removeApproval(req, res, next) {
 
 module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
-  exportReconcile, removeApproval, deleteData, isTmtSupervised,
+  exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
+  isTmtSupervised,
 };

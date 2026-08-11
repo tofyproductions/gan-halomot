@@ -34,6 +34,18 @@ const branchSchema = new mongoose.Schema({
    */
   tmt_supervised: { type: Boolean, default: null },
 
+  /**
+   * How many children this gan is licensed to hold — the ministry's number,
+   * not ours.
+   *
+   * It is handed to the operator and typed in here; nothing computes it. It is
+   * kept apart from the sum of the classrooms' own capacities because the two
+   * are different facts and they do disagree: the rooms can be set up for more
+   * places than the licence allows, and the placement screen has to be able to
+   * say so rather than quietly average them.
+   */
+  licensed_capacity: { type: Number, default: null },
+
   // Attendance / TIMEDOX replacement — per-branch clock integration
   clock_ip: { type: String, default: '' },           // e.g. "10.0.0.3"
   clock_port: { type: Number, default: 4370 },

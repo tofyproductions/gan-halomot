@@ -57,7 +57,9 @@ async function create(req, res, next) {
 async function update(req, res, next) {
   try {
     const { id } = req.params;
-    const { name, address, color, tmt_supervised } = req.body;
+    const {
+      name, address, color, tmt_supervised, licensed_capacity,
+    } = req.body;
 
     const branch = await Branch.findById(id);
     if (!branch) {
@@ -71,6 +73,13 @@ async function update(req, res, next) {
     // fallback that reads it off the branch name is a stopgap for old rows.
     if (tmt_supervised !== undefined) {
       branch.tmt_supervised = tmt_supervised === null ? null : !!tmt_supervised;
+    }
+    // The ministry's licensed head count. Empty clears it — "not told yet" and
+    // "licensed for zero" are different answers.
+    if (licensed_capacity !== undefined) {
+      const n = Number(licensed_capacity);
+      branch.licensed_capacity = (licensed_capacity === null || licensed_capacity === '' || !Number.isFinite(n))
+        ? null : Math.max(0, Math.round(n));
     }
     await branch.save();
 

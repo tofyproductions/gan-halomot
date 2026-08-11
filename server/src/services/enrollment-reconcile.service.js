@@ -426,6 +426,7 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
         continuing: !!ct.enrollment?.continuing,
         registered_at: ct.enrollment?.registered_at || null,
         review_status: ct.review?.status || 'pending',
+        classroom_id: ct.placement?.classroom_id || null,
         imported_registration_id: ct.review?.imported_registration_id || null,
         parent1_name: `${ct.parent1?.first_name || ''} ${ct.parent1?.last_name || ''}`.trim(),
         parent1_phone: ct.parent1?.phone || '',

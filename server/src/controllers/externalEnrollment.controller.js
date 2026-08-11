@@ -867,4 +867,7 @@ async function contacts(req, res, next) {
 module.exports = {
   importFile, list, getOne, pricing, promote, promoteBulk, setReview, contacts,
   classroomPlan, createClassroom, setPlacement, deleteData, effectiveAgeGroup,
+  // Used by the placement board's confirm step, which is the same act of
+  // creating a registration seen from the other end.
+  promoteOne,
 };
