@@ -24,6 +24,16 @@ const env = {
 
   // Cloudflare R2
 
+  // SMS — one-time codes for parent account activation and password reset.
+  // SMS_USER is the phone number the SMS4Free account was registered with,
+  // SMS_SENDER the name a parent sees as the sender. Absent these, every send
+  // throws rather than silently doing nothing (services/sms.service.js).
+  SMS_PROVIDER: process.env.SMS_PROVIDER || 'sms4free',
+  SMS_KEY: process.env.SMS_KEY,
+  SMS_USER: process.env.SMS_USER,
+  SMS_PASS: process.env.SMS_PASS,
+  SMS_SENDER: process.env.SMS_SENDER,
+
   // Google Sheets (migration only)
   GOOGLE_SHEETS_ID: process.env.GOOGLE_SHEETS_ID,
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,

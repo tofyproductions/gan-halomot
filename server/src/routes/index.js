@@ -33,6 +33,11 @@ router.use('/gan-events', require('./ganEvents.routes'));
 // Leads (פניות הורים) — manager side; the public inquiry form lives under /public.
 router.use('/leads', require('./leads.routes'));
 
+// Parent portal. Its own accounts, its own signing key, its own guard — a
+// parent's token cannot satisfy the staff middleware below and a staff token
+// cannot satisfy this one. Mounted here, above that middleware, deliberately.
+router.use('/parent', require('./parent.routes'));
+
 // Everything below requires a logged-in user.
 //
 // This was `optionalAuth` — "backward compatible, works without login too" —

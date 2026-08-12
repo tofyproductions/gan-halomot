@@ -63,6 +63,7 @@ const ExternalEnrollment = require('./ExternalEnrollment');
 const TmtApproval = require('./TmtApproval');
 const EnrollmentImport = require('./EnrollmentImport');
 const ScannedAttachment = require('./ScannedAttachment');
+const ParentAccount = require('./ParentAccount');
 
 module.exports = {
   User,
@@ -129,4 +130,5 @@ module.exports = {
   TmtApproval,
   EnrollmentImport,
   ScannedAttachment,
+  ParentAccount,
 };
