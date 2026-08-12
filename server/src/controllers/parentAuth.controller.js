@@ -10,6 +10,23 @@ const {
 const MIN_PASSWORD_LENGTH = 8;
 
 /**
+ * The sender ID on the message is the company's, not the gan's — one SMS
+ * account serves several businesses, so a parent sees a name that means
+ * nothing to them. The message has to introduce itself, and it has to do it
+ * on the first line: a phone's notification preview shows that line and
+ * often nothing else, which is where the decision to ignore it gets made.
+ *
+ * Hebrew SMS is billed in 70-character units, so the whole thing is kept
+ * inside one. At six digits of code it lands near 55 — the room left over is
+ * the margin for a longer gan name later, not spare space to fill.
+ */
+const ORG_NAME = 'גן החלומות';
+
+function codeMessage(code) {
+  return `${ORG_NAME}\nקוד הכניסה שלך: ${code}\nהקוד תקף ל-5 דקות.`;
+}
+
+/**
  * Activation and reset are the same three steps: prove the phone, choose a
  * password, sign in. They are one flow here because they are one risk — both
  * end with somebody who can read the account, and the only thing standing in
@@ -73,10 +90,7 @@ async function start(req, res) {
   // Send first, save second. A provider failure must not leave the account
   // holding a code nobody received while the previous one is already gone.
   try {
-    await sendSms({
-      to: parent.phone,
-      text: `קוד הכניסה שלך לגן החלומות: ${code}\nהקוד תקף ל-5 דקות.`,
-    });
+    await sendSms({ to: parent.phone, text: codeMessage(code) });
   } catch (err) {
     console.error('[parent-auth] SMS send failed:', err.message);
     return res.status(502).json({
