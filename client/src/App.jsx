@@ -1,6 +1,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import LoginPage from './components/layout/LoginPage';
+import ParentLogin from './components/parent-portal/ParentLogin';
+import ParentPortal from './components/parent-portal/ParentPortal';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import Dashboard from './components/dashboard/Dashboard';
 import { useAuth } from './hooks/useAuth';
@@ -68,6 +70,12 @@ function AppRoutes() {
       {/* Public new-parent inquiry (marketed link). Standalone, outside the shell. */}
       <Route path="/lead" element={<LeadForm />} />
       <Route path="/lead/:branchId" element={<LeadForm />} />
+      {/* Parent portal. Standalone like the rest of this block — it has its own
+          accounts, its own token key and its own HTTP client, so mounting the
+          management shell around it would fire staff API calls with a token
+          that cannot satisfy them and bounce the parent to the staff login. */}
+      <Route path="/parents/login" element={<ParentLogin />} />
+      <Route path="/parents" element={<ParentPortal />} />
 
       {/* Protected admin routes — the management providers wrap ONLY this shell. */}
       <Route path="/" element={

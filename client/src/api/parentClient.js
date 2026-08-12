@@ -1,0 +1,54 @@
+import axios from 'axios';
+
+/**
+ * The parent portal's own HTTP client, sharing nothing with the staff one.
+ *
+ * api/client.js reads `localStorage.token` and attaches it to every request,
+ * and on a 401 it clears that key and sends the browser to /login. Both are
+ * right for staff and wrong here. A gan employee who is also a parent uses
+ * one browser: with a single key the second login silently evicts the first,
+ * and a parent's expired session would land on the staff login screen asking
+ * for a name and an employee ID they do not have.
+ *
+ * So: a different storage key, a different redirect, and a token that the
+ * staff API would reject anyway — the server signs the two with different
+ * keys (server/src/middleware/parentAuth.js). Nothing here can be pointed at
+ * a staff route by accident, and nothing there can be pointed here.
+ */
+
+export const PARENT_TOKEN_KEY = 'gan_parent_token';
+
+const parentApi = axios.create({
+  baseURL: '/api/parent',
+  timeout: 30000,
+});
+
+parentApi.interceptors.request.use((config) => {
+  const token = localStorage.getItem(PARENT_TOKEN_KEY);
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+parentApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Only an expired session should bounce. A 401 from the login screen
+    // itself is "wrong password", and reloading the page over it would wipe
+    // the message the parent needs to read.
+    const isAuthCall = error.config?.url?.includes('/auth/');
+    if (error.response?.status === 401 && !isAuthCall) {
+      localStorage.removeItem(PARENT_TOKEN_KEY);
+      if (window.location.pathname !== '/parents/login') {
+        window.location.href = '/parents/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+/** The server's Hebrew message when it sent one, and something honest if not. */
+export function parentApiError(err, fallback = 'שגיאה. נסו שוב.') {
+  return err?.response?.data?.error || fallback;
+}
+
+export default parentApi;
