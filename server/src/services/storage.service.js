@@ -15,8 +15,10 @@ const env = require('../config/env');
  * would be a database that cannot be backed up and a gallery that loads
  * through it.
  *
- * So photographs go to object storage — Cloudflare R2, which speaks the S3
- * protocol — and the database keeps only the key.
+ * So photographs go to object storage and the database keeps only the key.
+ * Which storage is configuration: Supabase, Cloudflare R2 and S3 all speak the
+ * same protocol, so the gan can use the Supabase it already pays for rather
+ * than open a second account.
  *
  * The bucket is PRIVATE. Nothing here ever returns a public URL: reads are
  * short-lived signed links, minted per request for a parent the server has
@@ -30,28 +32,51 @@ const READ_URL_TTL_S = 60 * 30; // long enough to scroll a gallery, short
 
 let client = null;
 
-function isConfigured() {
-  return Boolean(
-    env.R2_ACCOUNT_ID && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY && env.R2_BUCKET
-  );
+/**
+ * Where the bucket actually is.
+ *
+ * Deliberately not tied to one vendor. Cloudflare R2 and Supabase Storage both
+ * speak the S3 protocol, and so does S3 itself — which means the choice is an
+ * endpoint and a pair of keys, not a rewrite. The gan already pays for
+ * Supabase; being able to use that instead of opening a second account is
+ * worth the one function this costs.
+ *
+ * R2 gets a shortcut because its endpoint is derivable from an account id, and
+ * that is the only vendor-specific line in this file.
+ */
+function endpointConfig() {
+  if (env.STORAGE_ENDPOINT) {
+    return { endpoint: env.STORAGE_ENDPOINT, region: env.STORAGE_REGION || 'auto' };
+  }
+  if (env.R2_ACCOUNT_ID) {
+    return { endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, region: 'auto' };
+  }
+  return null;
 }
 
-/**
- * Built once, on first use. R2 presents itself as S3 in one region ('auto'),
- * addressed by account id.
- */
+const accessKey = () => env.STORAGE_ACCESS_KEY_ID || env.R2_ACCESS_KEY_ID;
+const secretKey = () => env.STORAGE_SECRET_ACCESS_KEY || env.R2_SECRET_ACCESS_KEY;
+const bucketName = () => env.STORAGE_BUCKET || env.R2_BUCKET;
+
+function isConfigured() {
+  return Boolean(endpointConfig() && accessKey() && secretKey() && bucketName());
+}
+
+/** Built once, on first use. */
 function getClient() {
   if (!isConfigured()) {
-    throw new Error('אחסון התמונות אינו מוגדר (R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET)');
+    throw new Error('אחסון התמונות אינו מוגדר (STORAGE_ENDPOINT / STORAGE_ACCESS_KEY_ID / STORAGE_SECRET_ACCESS_KEY / STORAGE_BUCKET)');
   }
   if (!client) {
+    const { endpoint, region } = endpointConfig();
     client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
+      region,
+      endpoint,
+      // Supabase and R2 both address buckets by path rather than by
+      // subdomain; the SDK defaults to the subdomain form and would sign a
+      // request for a host that does not exist.
+      forcePathStyle: true,
+      credentials: { accessKeyId: accessKey(), secretAccessKey: secretKey() },
     });
   }
   return client;
@@ -92,7 +117,7 @@ function makeKey(prefix, ext = 'jpg') {
 
 async function putObject({ key, body, contentType }) {
   await getClient().send(new PutObjectCommand({
-    Bucket: env.R2_BUCKET,
+    Bucket: bucketName(),
     Key: key,
     Body: body,
     ContentType: contentType || 'application/octet-stream',
@@ -110,14 +135,14 @@ async function putObject({ key, body, contentType }) {
 function signedReadUrl(key, ttlSeconds = READ_URL_TTL_S) {
   return getSignedUrl(
     getClient(),
-    new GetObjectCommand({ Bucket: env.R2_BUCKET, Key: key }),
+    new GetObjectCommand({ Bucket: bucketName(), Key: key }),
     { expiresIn: ttlSeconds }
   );
 }
 
 async function deleteObject(key) {
   if (!key) return;
-  await getClient().send(new DeleteObjectCommand({ Bucket: env.R2_BUCKET, Key: key }));
+  await getClient().send(new DeleteObjectCommand({ Bucket: bucketName(), Key: key }));
 }
 
 module.exports = {

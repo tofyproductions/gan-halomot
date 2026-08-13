@@ -22,10 +22,20 @@ const env = {
   GAS_EMAIL_URL: process.env.GAS_EMAIL_URL,
   GAS_EMAIL_SECRET: process.env.GAS_EMAIL_SECRET,
 
-  // Cloudflare R2 — object storage for photographs. Everything else in this
-  // system is base64 inside a Mongo document, which is fine for a PDF and
-  // impossible for a year of photos. The bucket is private; reads are signed
-  // links minted per request (services/storage.service.js).
+  // Object storage for photographs. Everything else in this system is base64
+  // inside a Mongo document, which is fine for a PDF and impossible for a year
+  // of photos. The bucket is private; reads are signed links minted per
+  // request (services/storage.service.js).
+  //
+  // Any S3-compatible bucket: Supabase Storage, Cloudflare R2, S3 itself. The
+  // gan already pays for Supabase, so the endpoint is configuration rather
+  // than a vendor baked into the code.
+  STORAGE_ENDPOINT: process.env.STORAGE_ENDPOINT,
+  STORAGE_REGION: process.env.STORAGE_REGION,
+  STORAGE_ACCESS_KEY_ID: process.env.STORAGE_ACCESS_KEY_ID,
+  STORAGE_SECRET_ACCESS_KEY: process.env.STORAGE_SECRET_ACCESS_KEY,
+  STORAGE_BUCKET: process.env.STORAGE_BUCKET,
+  // R2 shortcut: its endpoint is derivable from the account id.
   R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
   R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
   R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
