@@ -22,7 +22,14 @@ const env = {
   GAS_EMAIL_URL: process.env.GAS_EMAIL_URL,
   GAS_EMAIL_SECRET: process.env.GAS_EMAIL_SECRET,
 
-  // Cloudflare R2
+  // Cloudflare R2 — object storage for photographs. Everything else in this
+  // system is base64 inside a Mongo document, which is fine for a PDF and
+  // impossible for a year of photos. The bucket is private; reads are signed
+  // links minted per request (services/storage.service.js).
+  R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+  R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+  R2_BUCKET: process.env.R2_BUCKET,
 
   // Boot the API without the scheduled jobs. For running against the (single,
   // production) database from a laptop without syncing sheets, queueing work
