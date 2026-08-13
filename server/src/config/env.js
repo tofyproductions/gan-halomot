@@ -24,6 +24,11 @@ const env = {
 
   // Cloudflare R2
 
+  // Boot the API without the scheduled jobs. For running against the (single,
+  // production) database from a laptop without syncing sheets, queueing work
+  // to the Pi agents or paying for an AI scan. Never set in production.
+  DISABLE_JOBS: process.env.DISABLE_JOBS === '1',
+
   // SMS — one-time codes for parent account activation and password reset.
   // SMS_USER is the phone number the SMS4Free account was registered with,
   // SMS_SENDER the name a parent sees as the sender. Absent these, every send

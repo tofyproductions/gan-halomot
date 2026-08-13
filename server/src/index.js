@@ -128,6 +128,20 @@ connectDB().then(() => {
   app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
 
+    // There is one database, so a developer running this on a laptop is
+    // running it against production — and booting used to mean a Google
+    // Sheets sync writing rows, a legacy backfill stamping doc_types, work
+    // queued to the branches' Pi agents, mailboxes read, and a טופס 101 scan
+    // spending real money at an AI. All from pressing run to look at a screen.
+    //
+    // DISABLE_JOBS=1 boots the API and nothing else: the routes serve, the
+    // schedule stays asleep. Never set in production, where every one of
+    // these is the point.
+    if (env.DISABLE_JOBS) {
+      console.log('⏸  DISABLE_JOBS=1 — scheduled jobs are off (API only)');
+      return;
+    }
+
     // A distribution job that died with the old process (OOM/deploy restart)
     // must not show "running" forever — close it out with an error entry.
     require('./controllers/payslipAudit.controller').finalizeStaleDistributionLogs();
