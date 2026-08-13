@@ -227,13 +227,17 @@ async function me(req, res) {
     full_name: account.full_name || parent.full_name || '',
     phone_hint: maskPhone(account.phone),
     has_passkey: (account.webauthn_credentials || []).length > 0,
-    children: parent.children.map(c => ({
-      id: c._id,
-      name: c.child_name,
-      birth_date: c.birth_date,
-      classroom: c.classroom_id?.name || null,
-      classroom_category: c.classroom_id?.category || null,
-      academic_year: c.academic_year,
+    // One entry per child, not per enrolment. A family in its second year has
+    // two rows per child and listing them raw showed a parent the same son
+    // twice, under the same name.
+    children: parent.groups.map(g => ({
+      id: g.current._id,
+      name: g.current.child_name,
+      birth_date: g.current.birth_date,
+      classroom: g.current.classroom_id?.name || null,
+      classroom_category: g.current.classroom_id?.category || null,
+      academic_year: g.current.academic_year,
+      years: g.years.length,
     })),
   });
 }

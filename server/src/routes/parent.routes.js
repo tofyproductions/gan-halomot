@@ -24,4 +24,11 @@ router.post('/auth/login', auth.login);
 router.use(parentAuthMiddleware);
 router.get('/me', auth.me);
 
+// Every one of these resolves the parent's children afresh and refuses an id
+// that is not among them — see parentPortal.controller.
+const portal = require('../controllers/parentPortal.controller');
+router.get('/children/:childId', portal.childDetails);
+router.get('/children/:childId/contracts', portal.childContracts);
+router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
+
 module.exports = router;

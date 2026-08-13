@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
+import ChildDetails from './ChildDetails';
 
 /**
  * What a parent sees after signing in.
@@ -101,28 +102,9 @@ export default function ParentPortal() {
         )}
 
         {!loading && !error && child && (
-          <Card>
-            <CardContent>
-              <Stack spacing={2}>
-                <Box>
-                  <Typography variant="h6" fontWeight={700}>{child.name}</Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap" useFlexGap>
-                    {child.classroom && <Chip size="small" label={child.classroom} />}
-                    {child.classroom_category && (
-                      <Chip size="small" variant="outlined" label={child.classroom_category} />
-                    )}
-                    {child.academic_year && (
-                      <Chip size="small" variant="outlined" label={`שנת ${child.academic_year}`} />
-                    )}
-                  </Stack>
-                </Box>
-
-                <Alert severity="info">
-                  בקרוב כאן: החוזה, הקבלות ותמונות הילד.
-                </Alert>
-              </Stack>
-            </CardContent>
-          </Card>
+          // Keyed by child so switching siblings remounts rather than showing
+          // one child's details under another's name while the fetch runs.
+          <ChildDetails key={child.id} childId={child.id} />
         )}
       </Box>
     </Box>

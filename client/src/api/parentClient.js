@@ -46,6 +46,30 @@ parentApi.interceptors.response.use(
   }
 );
 
+/**
+ * Open a file the portal serves as bytes.
+ *
+ * The contract route sits behind the bearer token, so an <a href> or a
+ * window.open arrives with no Authorization header and gets a 401 — the file
+ * simply fails to open, with nothing on screen to say why. Fetch it with the
+ * token and hand the browser a blob instead.
+ */
+export async function openParentFile(path, fallbackName = 'document.pdf') {
+  const res = await parentApi.get(path, { responseType: 'blob' });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement('a');
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  a.download = fallbackName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Revoked on a delay: released synchronously, Safari cancels the download
+  // it was in the middle of starting.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 /** The server's Hebrew message when it sent one, and something honest if not. */
 export function parentApiError(err, fallback = 'שגיאה. נסו שוב.') {
   return err?.response?.data?.error || fallback;

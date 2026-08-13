@@ -30,6 +30,7 @@
 
 const { Child, Registration } = require('../models');
 const { normalizePhone } = require('./sms.service');
+const { normalizeChildName } = require('./academic-year.service');
 
 /** Digits only. Typed ID numbers arrive with hyphens, spaces and stray marks. */
 function normalizeIdNumber(raw) {
@@ -63,7 +64,9 @@ async function childrenOfParent(idNumber) {
     ],
   })
     .populate('classroom_id', 'name category branch_id')
-    .populate('registration_id', 'parent_name parent_phone parent_id_number')
+    // The parent fields answer "is this ID this child's parent, and how do we
+    // reach them"; the dates are what the portal shows about the enrolment.
+    .populate('registration_id', 'parent_name parent_phone parent_id_number start_date end_date')
     .sort({ academic_year: -1, child_name: 1 })
     .lean();
 
@@ -100,6 +103,75 @@ function contactFromChild(child, id) {
 }
 
 /**
+ * The identity of a child, across the years.
+ *
+ * There is one Child row per child PER ACADEMIC YEAR, so a family enrolled two
+ * years running has four rows for two children — and the portal listed all
+ * four, showing a parent their son twice under the same name. Which reads as a
+ * broken application, not as a record of two enrolments.
+ *
+ * Name and birth date are what identify the same child across those rows;
+ * household.service already groups registrations the same way.
+ */
+function childBirth(child) {
+  if (!child.birth_date) return '';
+  const d = new Date(child.birth_date);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+}
+
+function childIdentityKey(child) {
+  return `${normalizeChildName(child.child_name)}|${childBirth(child)}`;
+}
+
+/**
+ * One entry per child, newest enrolment first, each carrying every year's row.
+ *
+ * `current` is what the screen shows; `years` is every enrolment behind it,
+ * which is where the earlier contracts live. The caller gets both rather than
+ * having to choose between "show the child once" and "show all their
+ * contracts".
+ */
+function groupByChild(children) {
+  // Name first, birth date only as a splitter.
+  //
+  // Keying on name+birth_date directly does not work, because birth_date is
+  // filled in on some years and not others: the same child came back as two
+  // children, which is the bug this function exists to prevent. So rows are
+  // gathered by name, and split apart only when two of them both carry a
+  // birth date and the dates disagree — which is the only evidence available
+  // that one family really does have two children of the same name.
+  const byName = new Map();
+  for (const child of children) {
+    const name = normalizeChildName(child.child_name);
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push(child);
+  }
+
+  const groups = [];
+  for (const rows of byName.values()) {
+    const buckets = [];
+    for (const child of rows) {
+      const birth = childBirth(child);
+      // Join the first bucket this row does not contradict: same date, or
+      // either side silent.
+      const bucket = buckets.find(b => !b.birth || !birth || b.birth === birth);
+      if (bucket) {
+        bucket.years.push(child);
+        if (!bucket.birth && birth) bucket.birth = birth;
+      } else {
+        buckets.push({ birth, years: [child] });
+      }
+    }
+    // children arrive sorted by academic_year descending, so each bucket's
+    // first row is its newest enrolment.
+    for (const b of buckets) {
+      groups.push({ key: childIdentityKey(b.years[0]), current: b.years[0], years: b.years });
+    }
+  }
+  return groups;
+}
+
+/**
  * The parent themselves, as the enrolment data knows them.
  *
  * Returns { id_number, full_name, phone, children } or null when the ID number
@@ -128,7 +200,7 @@ async function findParent(idNumber) {
     if (fullName && phone) break;
   }
 
-  return { id_number: id, full_name: fullName, phone, children };
+  return { id_number: id, full_name: fullName, phone, children, groups: groupByChild(children) };
 }
 
 /**
@@ -141,4 +213,7 @@ function maskPhone(phone) {
   return `${p.slice(0, 2)}${'•'.repeat(6)}${p.slice(-2)}`;
 }
 
-module.exports = { findParent, childrenOfParent, normalizeIdNumber, maskPhone, contactFromChild };
+module.exports = {
+  findParent, childrenOfParent, normalizeIdNumber, maskPhone, contactFromChild,
+  childIdentityKey, groupByChild,
+};
