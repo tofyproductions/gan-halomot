@@ -58,25 +58,47 @@ export default function ParentPortal() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar position="static" color="default" elevation={1}>
-        <Toolbar>
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography variant="h6" fontWeight={700}>גן החלומות</Typography>
+      {/* Sticky, because the way out and the sibling switcher are the two
+          things a parent reaches for from halfway down a long day. */}
+      <AppBar position="sticky" color="default" elevation={0}
+        sx={{ borderBottom: 1, borderColor: 'divider' }}>
+        <Toolbar sx={{ minHeight: 60 }}>
+          <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+            <Typography variant="subtitle1" fontWeight={800} lineHeight={1.2}>
+              גן החלומות
+            </Typography>
             {data?.full_name && (
-              <Typography variant="caption" color="text.secondary">
-                שלום {data.full_name}
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {data.full_name}
               </Typography>
             )}
           </Box>
-          <Button size="small" startIcon={<LogoutIcon />} onClick={logout}>
+          <Button size="small" color="inherit" startIcon={<LogoutIcon />} onClick={logout}>
             יציאה
           </Button>
         </Toolbar>
+
+        {/* Siblings live in the bar, not in the page: they are a property of
+            the account, and scrolling them away made a parent think the app
+            had forgotten the other child. */}
+        {!loading && !error && children.length > 1 && (
+          <Tabs
+            value={selected}
+            onChange={(_, v) => setSelected(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+            sx={{ borderTop: 1, borderColor: 'divider', minHeight: 44 }}
+          >
+            {children.map((c) => (
+              <Tab key={c.id} label={c.name} sx={{ minHeight: 44, fontWeight: 700 }} />
+            ))}
+          </Tabs>
+        )}
       </AppBar>
 
-      <Box sx={{ p: 2, maxWidth: 720, mx: 'auto' }}>
+      <Box sx={{ p: 2, maxWidth: 760, mx: 'auto' }}>
         {loading && (
-          <Stack alignItems="center" sx={{ py: 6 }}>
+          <Stack alignItems="center" sx={{ py: 8 }}>
             <CircularProgress />
           </Stack>
         )}
@@ -87,18 +109,6 @@ export default function ParentPortal() {
           <Alert severity="info">
             לא רשומים אצלנו ילדים פעילים עבורך. לבירור יש לפנות לגן.
           </Alert>
-        )}
-
-        {!loading && !error && children.length > 1 && (
-          <Tabs
-            value={selected}
-            onChange={(_, v) => setSelected(v)}
-            variant="scrollable"
-            scrollButtons="auto"
-            sx={{ mb: 2 }}
-          >
-            {children.map((c) => <Tab key={c.id} label={c.name} />)}
-          </Tabs>
         )}
 
         {!loading && !error && child && (
