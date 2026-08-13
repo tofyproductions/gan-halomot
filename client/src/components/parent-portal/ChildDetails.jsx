@@ -253,8 +253,8 @@ export default function ChildDetails({ childId }) {
   if (loading) {
     return (
       <Stack spacing={2}>
-        <Skeleton variant="rounded" height={140} sx={{ borderRadius: 5 }} />
-        <Skeleton variant="rounded" height={240} sx={{ borderRadius: 5 }} />
+        <Skeleton variant="rounded" height={140} sx={{ borderRadius: '20px' }} />
+        <Skeleton variant="rounded" height={240} sx={{ borderRadius: '20px' }} />
       </Stack>
     );
   }
@@ -396,7 +396,7 @@ export default function ChildDetails({ childId }) {
                   key={c.id}
                   sx={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: 4,
+                    gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: '14px',
                     border: 1, borderColor: 'divider', bgcolor: 'background.default',
                   }}
                 >

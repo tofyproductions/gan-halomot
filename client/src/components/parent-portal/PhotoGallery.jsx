@@ -59,7 +59,7 @@ function Row({ title, subtitle, photos, onOpen, empty }) {
             onClick={() => onOpen(p)}
             sx={{
               flex: '0 0 auto', width: 142, height: 142,
-              borderRadius: 4, overflow: 'hidden', cursor: 'pointer',
+              borderRadius: '16px', overflow: 'hidden', cursor: 'pointer',
               scrollSnapAlign: 'start', bgcolor: 'action.hover',
               border: '1px solid', borderColor: 'divider',
               transition: 'transform .18s cubic-bezier(.22,1,.36,1)',

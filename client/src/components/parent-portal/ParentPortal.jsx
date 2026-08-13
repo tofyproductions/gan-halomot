@@ -33,9 +33,9 @@ function initial(name) {
 function Loading() {
   return (
     <Stack spacing={2} sx={{ pt: 1 }}>
-      <Skeleton variant="rounded" height={148} sx={{ borderRadius: 5 }} />
-      <Skeleton variant="rounded" height={96} sx={{ borderRadius: 5 }} />
-      <Skeleton variant="rounded" height={220} sx={{ borderRadius: 5 }} />
+      <Skeleton variant="rounded" height={148} sx={{ borderRadius: '20px' }} />
+      <Skeleton variant="rounded" height={96} sx={{ borderRadius: '20px' }} />
+      <Skeleton variant="rounded" height={220} sx={{ borderRadius: '20px' }} />
     </Stack>
   );
 }

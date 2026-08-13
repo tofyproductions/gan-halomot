@@ -10,19 +10,24 @@ import { createTheme } from '@mui/material/styles';
  * whether their baby ate, and four times a week to look at photographs of
  * them — it should read as an album somebody keeps, not a console.
  *
- * So the ground is warm paper rather than blue-grey, headings are set in a
- * Hebrew serif with an actual voice, and the brand amber is deepened to a
- * clay that white text can legally sit on. The old #f59e0b behind white
- * failed contrast at 2.2:1 on every contained button in the app.
+ * So the ground is warm paper rather than blue-grey, the type is round and
+ * soft-cornered, and the brand amber is deepened to a clay that white text
+ * can legally sit on. The old #f59e0b behind white failed contrast at 2.2:1
+ * on every contained button in the app.
  *
  * Scoped deliberately: it wraps the parent routes only, so nothing here can
  * move a pixel in the staff screens.
  */
 
-// Kept out of the palette because it is a typeface stack, not a colour, and
-// three components need it by name.
-export const DISPLAY = '"Frank Ruhl Libre", "Assistant", Georgia, serif';
-const BODY = '"Assistant", system-ui, -apple-system, "Segoe UI", sans-serif';
+// One family, headings and body alike. Rubik: rounded terminals, open
+// counters, a full weight range, and — not incidentally — the face the gan's
+// previous system used for years, so it is what these parents already read
+// every morning. A serif was tried here and read as a printed form.
+//
+// Still exported by name because a few places set it explicitly rather than
+// going through a typography variant.
+export const DISPLAY = '"Rubik", "Assistant", system-ui, sans-serif';
+const BODY = '"Rubik", "Assistant", system-ui, -apple-system, sans-serif';
 
 // Warm neutrals. Every grey is tinted toward the brand hue — a flat grey next
 // to cream paper looks like a rendering fault rather than a choice.
@@ -62,8 +67,8 @@ const parentTheme = createTheme({
   // Steps are at least 1.15 apart so hierarchy survives without colour.
   typography: {
     fontFamily: BODY,
-    h1: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '2rem', lineHeight: 1.2 },
-    h2: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.625rem', lineHeight: 1.25 },
+    h1: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '2rem', lineHeight: 1.2, letterSpacing: '-0.01em' },
+    h2: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.625rem', lineHeight: 1.25, letterSpacing: '-0.01em' },
     h3: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.375rem', lineHeight: 1.3 },
     h4: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.25rem', lineHeight: 1.3 },
     h5: { fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.125rem', lineHeight: 1.35 },
@@ -175,7 +180,7 @@ const parentTheme = createTheme({
     },
     MuiDialogTitle: {
       styleOverrides: {
-        root: { fontFamily: DISPLAY, fontSize: '1.25rem', fontWeight: 700, paddingBottom: 4 },
+        root: { fontSize: '1.25rem', fontWeight: 700, paddingBottom: 4 },
       },
     },
     // A scrim you can see through is a scrim that leaves the page behind
@@ -213,7 +218,7 @@ const parentTheme = createTheme({
     },
 
     MuiAvatar: {
-      styleOverrides: { root: { fontFamily: DISPLAY, fontWeight: 700 } },
+      styleOverrides: { root: { fontWeight: 700 } },
     },
   },
 });

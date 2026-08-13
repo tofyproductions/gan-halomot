@@ -5,6 +5,13 @@ import {
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
+import WbSunnyIcon from '@mui/icons-material/WbSunny';
+import EmojiFoodBeverageIcon from '@mui/icons-material/EmojiFoodBeverage';
+import DonutSmallIcon from '@mui/icons-material/DonutSmall';
+import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import EditIcon from '@mui/icons-material/Edit';
+import SendIcon from '@mui/icons-material/Send';
 import parentApi, { parentApiError } from '../../api/parentClient';
 
 /**
@@ -34,6 +41,38 @@ function Row({ label, value, empty = '—' }) {
   );
 }
 
+/**
+ * One fact of the morning, as a labelled tile.
+ *
+ * The shape the gan's previous system used, and kept on purpose: parents read
+ * it every morning for years, and a form that stays open after it has been
+ * submitted gives them no way to tell at a glance whether this morning's
+ * update actually went in.
+ */
+function Tile({ icon, label, value, wide = false }) {
+  return (
+    <Box
+      sx={{
+        gridColumn: wide ? 'span 2' : 'auto',
+        p: 1.5, borderRadius: '12px',
+        bgcolor: 'background.default',
+        border: 1, borderColor: 'rgba(180,84,10,0.16)',
+      }}
+    >
+      <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.25 }}>
+        <Box sx={{ color: 'primary.main', display: 'flex', '& svg': { fontSize: 16 } }}>{icon}</Box>
+        <Typography variant="caption" color="text.secondary">{label}</Typography>
+      </Stack>
+      <Typography
+        variant="body1" fontWeight={700}
+        sx={{ whiteSpace: 'pre-wrap', color: value ? 'text.primary' : 'text.disabled' }}
+      >
+        {value || '—'}
+      </Typography>
+    </Box>
+  );
+}
+
 /** "09:30 - 11:00", or "מ-09:30 (עדיין ישן)" while the nap is still running. */
 function napLabel(nap = {}) {
   if (!nap.start && !nap.end) return '';
@@ -48,6 +87,9 @@ export default function NurseryDay({ childId }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Null until the first load decides. A family who already sent this morning
+  // sees the summary; everybody else sees the form, open and ready.
+  const [editing, setEditing] = useState(null);
 
   const [wake, setWake] = useState('');
   const [mealTime, setMealTime] = useState('');
@@ -63,6 +105,7 @@ export default function NurseryDay({ childId }) {
       setMealTime(home.meal_time || '');
       setMealAmount(home.meal_amount || '');
       setNote(home.parent_note || '');
+      setEditing(!(home.wake_time || home.meal_time || home.meal_amount || home.parent_note));
     } catch (err) {
       setError(parentApiError(err, 'לא הצלחנו לטעון את היום'));
     } finally {
@@ -83,7 +126,8 @@ export default function NurseryDay({ childId }) {
         'home.parent_note': note,
       });
       setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      setEditing(false);
+      setTimeout(() => setSaved(false), 4000);
       load();
     } catch (err) {
       setError(parentApiError(err, 'השמירה נכשלה'));
@@ -125,36 +169,69 @@ export default function NurseryDay({ childId }) {
             הצוות רואה את זה לפני שהילד מגיע לכיתה.
           </Typography>
 
-          <Stack spacing={2} sx={{ mt: 2 }}>
-            <Stack direction="row" spacing={2}>
+          {editing === false ? (
+            /* Sent. The old system collapsed the form into exactly this, and
+               it was right to: the answer to "did I send it this morning" has
+               to be readable without re-reading four half-filled inputs. */
+            <>
+              <Stack
+                direction="row" alignItems="center" justifyContent="center"
+                spacing={0.75} sx={{ mt: 2, mb: 2, color: 'success.dark' }}
+              >
+                <CheckCircleIcon fontSize="small" />
+                <Typography variant="subtitle1" color="success.dark">
+                  {saved ? 'העדכון נשלח לצוות' : 'העדכון של הבוקר נשלח'}
+                </Typography>
+              </Stack>
+
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
+                <Tile icon={<WbSunnyIcon />} label="התעורר/ה" value={wake} />
+                <Tile icon={<EmojiFoodBeverageIcon />} label="אכל/ה בבית" value={mealTime} />
+                <Tile icon={<DonutSmallIcon />} label="כמות ארוחה" value={mealAmount} wide />
+                {note && (
+                  <Tile icon={<ChatBubbleOutlineIcon />} label="הערה לצוות" value={note} wide />
+                )}
+              </Box>
+
+              <Stack alignItems="center" sx={{ mt: 2 }}>
+                <Button size="small" variant="outlined" startIcon={<EditIcon />}
+                  onClick={() => setEditing(true)}>
+                  עדכון/שינוי הפרטים
+                </Button>
+              </Stack>
+            </>
+          ) : (
+            <Stack spacing={2} sx={{ mt: 2 }}>
+              <Stack direction="row" spacing={2}>
+                <TextField
+                  label="שעת התעוררות" type="time" size="small" fullWidth
+                  value={wake} onChange={(e) => setWake(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="שעת ארוחה" type="time" size="small" fullWidth
+                  value={mealTime} onChange={(e) => setMealTime(e.target.value)}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Stack>
               <TextField
-                label="שעת התעוררות" type="time" size="small" fullWidth
-                value={wake} onChange={(e) => setWake(e.target.value)}
-                InputLabelProps={{ shrink: true }}
+                label="כמה אכל" size="small" fullWidth
+                value={mealAmount} onChange={(e) => setMealAmount(e.target.value)}
+                placeholder="למשל: 120 מ״ל, חצי מנה"
               />
               <TextField
-                label="שעת ארוחה" type="time" size="small" fullWidth
-                value={mealTime} onChange={(e) => setMealTime(e.target.value)}
-                InputLabelProps={{ shrink: true }}
+                label="הערה לצוות" size="small" fullWidth multiline minRows={2}
+                value={note} onChange={(e) => setNote(e.target.value)}
+                placeholder="כל מה שחשוב שהצוות ידע הבוקר"
               />
-            </Stack>
-            <TextField
-              label="כמה אכל" size="small" fullWidth
-              value={mealAmount} onChange={(e) => setMealAmount(e.target.value)}
-              placeholder="למשל: 120 מ״ל, חצי מנה"
-            />
-            <TextField
-              label="הערה לצוות" size="small" fullWidth multiline minRows={2}
-              value={note} onChange={(e) => setNote(e.target.value)}
-              placeholder="כל מה שחשוב שהצוות ידע הבוקר"
-            />
-            <Stack direction="row" spacing={1} alignItems="center" justifyContent="flex-end">
-              {saved && <Typography variant="caption" color="success.main">נשמר</Typography>}
-              <Button variant="contained" onClick={save} disabled={saving}>
-                {saving ? 'שומר…' : 'שליחה לצוות'}
+              <Button
+                variant="contained" fullWidth startIcon={<SendIcon />}
+                onClick={save} disabled={saving}
+              >
+                {saving ? 'שולח…' : 'שליחת עדכון'}
               </Button>
             </Stack>
-          </Stack>
+          )}
         </CardContent>
       </Card>
 
@@ -193,7 +270,7 @@ export default function NurseryDay({ childId }) {
               )}
 
               {log.staff_note && (
-                <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: 'action.hover' }}>
+                <Box sx={{ mt: 1.5, p: 1.5, borderRadius: '12px', bgcolor: 'action.hover' }}>
                   <Typography variant="caption" color="primary" fontWeight={700}>הערת הצוות</Typography>
                   <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{log.staff_note}</Typography>
                 </Box>

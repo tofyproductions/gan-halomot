@@ -186,7 +186,7 @@ export default function GiftPicker({ childId, childName }) {
                 {chosenPhotos.map(p => (
                   <Box key={p.id} component="img" src={p.thumb_url} alt=""
                     sx={{
-                      width: 76, height: 76, objectFit: 'cover', borderRadius: 3,
+                      width: 76, height: 76, objectFit: 'cover', borderRadius: '14px',
                       border: '2px solid', borderColor: 'success.main',
                     }} />
                 ))}
@@ -223,7 +223,7 @@ export default function GiftPicker({ childId, childName }) {
             <Box
               onClick={() => !uploading && fileInput.current?.click()}
               sx={{
-                aspectRatio: '1', borderRadius: 2, cursor: 'pointer',
+                aspectRatio: '1', borderRadius: '14px', cursor: 'pointer',
                 border: '2px dashed', borderColor: 'primary.main',
                 display: 'flex', flexDirection: 'column',
                 alignItems: 'center', justifyContent: 'center', gap: 0.5,
@@ -241,7 +241,7 @@ export default function GiftPicker({ childId, childName }) {
                   key={p.id}
                   onClick={() => toggle(p.id)}
                   sx={{
-                    position: 'relative', aspectRatio: '1', borderRadius: 2, overflow: 'hidden',
+                    position: 'relative', aspectRatio: '1', borderRadius: '14px', overflow: 'hidden',
                     cursor: 'pointer', outline: on ? '3px solid' : '1px solid',
                     outlineColor: on ? 'primary.main' : 'divider',
                   }}
