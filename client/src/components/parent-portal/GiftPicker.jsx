@@ -128,20 +128,27 @@ export default function GiftPicker({ childId, childName }) {
     <>
       <Card
         sx={{
-          // Loud while something is required of the family, quiet once it is
-          // done. Colour is doing the work here, so it changes when the state
-          // does.
-          borderInlineStart: '6px solid',
-          borderColor: campaign.open && !done ? 'warning.main' : 'success.main',
-          bgcolor: campaign.open && !done ? 'warning.light' : undefined,
+          // The whole surface changes, not a stripe down its edge. Loud while
+          // something is required of the family, quiet once it is done: a
+          // demand that stays loud after it has been met is a demand people
+          // learn to ignore.
+          bgcolor: campaign.open && !done ? 'warning.light' : 'background.paper',
+          borderColor: campaign.open && !done ? '#EFD3A6' : 'divider',
         }}
       >
         <CardContent>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-            {done
-              ? <CheckCircleIcon color="success" />
-              : <CardGiftcardIcon color={campaign.open ? 'warning' : 'action'} />}
-            <Typography variant="subtitle1" fontWeight={800}>{campaign.name}</Typography>
+          <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 0.75 }}>
+            <Box
+              sx={{
+                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+                display: 'grid', placeItems: 'center',
+                bgcolor: done ? 'success.light' : campaign.open ? 'primary.main' : 'action.hover',
+                color: done ? 'success.dark' : campaign.open ? '#fff' : 'text.secondary',
+              }}
+            >
+              {done ? <CheckCircleIcon /> : <CardGiftcardIcon />}
+            </Box>
+            <Typography variant="h5">{campaign.name}</Typography>
           </Stack>
 
           {campaign.product && (
@@ -158,7 +165,13 @@ export default function GiftPicker({ childId, childName }) {
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                 הצוות יבחר מתוכן את זו שמתאימה למתנה. אם לא תבחרו — הגן יבחר עבורכם.
               </Typography>
-              <Button variant="contained" color="warning" sx={{ mt: 2 }} onClick={begin}>
+              {/* The one primary action on this card, and sized like it. */}
+              <Button
+                variant="contained" color="primary" size="large"
+                startIcon={<CardGiftcardIcon />}
+                sx={{ mt: 2, width: { xs: '100%', sm: 'auto' } }}
+                onClick={begin}
+              >
                 בחירת תמונות
               </Button>
             </>
@@ -172,7 +185,10 @@ export default function GiftPicker({ childId, childName }) {
               <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
                 {chosenPhotos.map(p => (
                   <Box key={p.id} component="img" src={p.thumb_url} alt=""
-                    sx={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 2 }} />
+                    sx={{
+                      width: 76, height: 76, objectFit: 'cover', borderRadius: 3,
+                      border: '2px solid', borderColor: 'success.main',
+                    }} />
                 ))}
               </Stack>
               <Button size="small" sx={{ mt: 1 }} onClick={begin}>שינוי הבחירה</Button>

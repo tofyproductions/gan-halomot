@@ -119,7 +119,7 @@ export default function NurseryDay({ childId }) {
         <CardContent>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
             <HomeIcon fontSize="small" color="success" />
-            <Typography variant="subtitle1" fontWeight={700}>הבוקר שלנו בבית</Typography>
+            <Typography variant="h5">הבוקר שלנו בבית</Typography>
           </Stack>
           <Typography variant="caption" color="text.secondary">
             הצוות רואה את זה לפני שהילד מגיע לכיתה.
@@ -160,7 +160,7 @@ export default function NurseryDay({ childId }) {
 
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>היום בגן</Typography>
+          <Typography variant="h5" sx={{ mb: 1.5 }}>היום בגן</Typography>
 
           {!log && (
             <Alert severity="info">הצוות עוד לא עדכן היום.</Alert>
@@ -208,7 +208,7 @@ export default function NurseryDay({ childId }) {
           <CardContent>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
               <RestaurantIcon fontSize="small" color="primary" />
-              <Typography variant="subtitle1" fontWeight={700}>מה אכלנו היום</Typography>
+              <Typography variant="h5">מה אכלנו היום</Typography>
             </Stack>
             <Stack spacing={1.5}>
               {data.menu.map(meal => (

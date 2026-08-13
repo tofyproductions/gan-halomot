@@ -57,7 +57,7 @@ export default function EditableCard({
     <Card>
       <CardContent>
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-          <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
+          <Typography variant="h5">{title}</Typography>
           {!editing && (
             <Button size="small" startIcon={<EditIcon />} onClick={begin}>עריכה</Button>
           )}

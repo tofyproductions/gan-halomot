@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  Card, CardContent, Typography, Stack, Alert, CircularProgress, Chip,
-  Button, Box, Tabs, Tab, Avatar,
+  Card, CardContent, Typography, Stack, Alert, Chip, Skeleton,
+  Button, Box, Tabs, Tab, Avatar, BottomNavigation, BottomNavigationAction, Paper,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
@@ -11,6 +11,7 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import FolderIcon from '@mui/icons-material/Folder';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
+import { DISPLAY } from '../../theme/parentTheme';
 import EditableCard from './EditableCard';
 import NurseryDay from './NurseryDay';
 import PhotoGallery from './PhotoGallery';
@@ -19,7 +20,7 @@ import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
 /**
- * One child, in tabs.
+ * One child, in sections.
  *
  * It was one long scroll, and the scroll had the wrong thing on top for
  * whoever was looking. An infant's parent opens this several times a day for
@@ -27,9 +28,12 @@ import SecondParentDialog from './SecondParentDialog';
  * phone that meant scrolling past a year of paperwork to find out whether
  * their baby had eaten.
  *
- * So: the day, the details, the documents — and the tab that opens first is
- * the one this parent came for. A child with no daily board has no day tab at
- * all, rather than an empty one.
+ * The sections now live in a bar at the BOTTOM of the phone screen rather
+ * than in tabs at the top. That is where the thumb already is — a parent
+ * holding a baby in one arm and the phone in the other hand cannot reach the
+ * top of a six-inch screen — and it is what every app they use all day does.
+ * On a wide screen the same sections are tabs, because a bar pinned to the
+ * bottom of a desktop browser is nobody's habit.
  *
  * Empty sections still say so in words. A health box that renders nothing when
  * there are no allergies looks identical to one that failed to load, and the
@@ -39,9 +43,12 @@ import SecondParentDialog from './SecondParentDialog';
 function Field({ label, value, empty = 'לא רשום' }) {
   const has = value !== null && value !== undefined && String(value).trim() !== '';
   return (
-    <Stack direction="row" spacing={1} justifyContent="space-between" alignItems="baseline">
-      <Typography variant="body2" color="text.secondary">{label}</Typography>
-      <Typography variant="body2" fontWeight={has ? 500 : 400}
+    <Stack
+      direction="row" spacing={2} justifyContent="space-between" alignItems="baseline"
+      sx={{ py: 0.75, borderBottom: 1, borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}
+    >
+      <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
+      <Typography variant="body2" fontWeight={has ? 600 : 400}
         sx={{ textAlign: 'left', color: has ? 'text.primary' : 'text.disabled' }}>
         {has ? String(value) : empty}
       </Typography>
@@ -61,9 +68,88 @@ function initial(name) {
   return s ? s[0] : '•';
 }
 
+/**
+ * The child, at the top, with their own face on it.
+ *
+ * The photograph the gan tagged them in is used twice: once blurred and
+ * darkened as the ground, once sharp and round on top of it. When there is no
+ * photograph yet the ground is a plain warm wash — deliberately a finished
+ * design rather than an empty frame, because most families will spend their
+ * first fortnight here before a single picture is tagged.
+ */
+function Hero({ name, classroom, year, photo }) {
+  return (
+    <Card sx={{ overflow: 'hidden', position: 'relative' }}>
+      <Box sx={{ position: 'relative', minHeight: 140, display: 'flex', alignItems: 'flex-end' }}>
+        {photo ? (
+          <>
+            <Box
+              component="img" src={photo} alt="" aria-hidden
+              sx={{
+                position: 'absolute', inset: 0, width: '100%', height: '100%',
+                objectFit: 'cover', filter: 'blur(16px) saturate(1.15)',
+                transform: 'scale(1.2)',
+              }}
+            />
+            <Box sx={{
+              position: 'absolute', inset: 0,
+              background: 'linear-gradient(180deg, rgba(43,33,25,0.25) 0%, rgba(43,33,25,0.66) 100%)',
+            }} />
+          </>
+        ) : (
+          <Box sx={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(140deg, #C9702A 0%, #8A3F06 100%)',
+          }} />
+        )}
+
+        <Stack
+          direction="row" spacing={1.75} alignItems="center"
+          sx={{ position: 'relative', p: 2.25, width: '100%', minWidth: 0 }}
+        >
+          <Avatar
+            src={photo || undefined}
+            sx={{
+              width: 68, height: 68, fontSize: '1.75rem',
+              bgcolor: 'rgba(255,255,255,0.22)', color: '#fff',
+              border: '3px solid rgba(255,255,255,0.85)',
+              flexShrink: 0,
+            }}
+          >
+            {initial(name)}
+          </Avatar>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              component="h1"
+              sx={{
+                fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.5rem', lineHeight: 1.2,
+                color: '#fff', textShadow: '0 1px 8px rgba(43,33,25,0.45)',
+              }}
+              noWrap
+            >
+              {name}
+            </Typography>
+            <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 0.75 }}>
+              {classroom && (
+                <Chip size="small" label={classroom}
+                  sx={{ bgcolor: 'rgba(255,255,255,0.9)', color: '#2B2119', fontWeight: 700 }} />
+              )}
+              {year && (
+                <Chip size="small" label={year}
+                  sx={{ bgcolor: 'rgba(255,255,255,0.22)', color: '#fff', fontWeight: 600 }} />
+              )}
+            </Stack>
+          </Box>
+        </Stack>
+      </Box>
+    </Card>
+  );
+}
+
 export default function ChildDetails({ childId }) {
   const [data, setData] = useState(null);
   const [contracts, setContracts] = useState(null);
+  const [heroPhoto, setHeroPhoto] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
@@ -98,17 +184,25 @@ export default function ChildDetails({ childId }) {
     setError('');
     setData(null);
     setContracts(null);
+    setHeroPhoto('');
     setTab('');
 
     (async () => {
       try {
-        const [d, c] = await Promise.all([
+        const [d, c, p] = await Promise.all([
           parentApi.get(`/children/${childId}`),
           parentApi.get(`/children/${childId}/contracts`),
+          // Decoration, so it is allowed to fail: object storage being down
+          // must not cost the parent the details of their child.
+          parentApi.get(`/children/${childId}/photos`).catch(() => null),
         ]);
         if (cancelled) return;
         setData(d.data);
         setContracts(c.data.contracts || []);
+        // Only a photograph of THIS child. A classroom picture has other
+        // people's children in it and has no business being their portrait.
+        const mine = p?.data?.mine || [];
+        if (mine.length) setHeroPhoto(mine[0].thumb_url || mine[0].url || '');
       } catch (err) {
         if (!cancelled) setError(parentApiError(err, 'לא הצלחנו לטעון את הפרטים'));
       } finally {
@@ -122,13 +216,13 @@ export default function ChildDetails({ childId }) {
   const tabs = useMemo(() => {
     if (!data) return [];
     const list = [];
-    if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon fontSize="small" /> });
+    if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon /> });
     // Second, not last: photographs are the other thing a parent opens the app
     // for, and burying them behind the paperwork would be the same mistake the
     // single scroll made.
-    list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon fontSize="small" /> });
-    list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon fontSize="small" /> });
-    list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon fontSize="small" /> });
+    list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon /> });
+    list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon /> });
+    list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon /> });
     return list;
   }, [data]);
 
@@ -157,14 +251,20 @@ export default function ChildDetails({ childId }) {
   };
 
   if (loading) {
-    return <Stack alignItems="center" sx={{ py: 6 }}><CircularProgress /></Stack>;
+    return (
+      <Stack spacing={2}>
+        <Skeleton variant="rounded" height={140} sx={{ borderRadius: 5 }} />
+        <Skeleton variant="rounded" height={240} sx={{ borderRadius: 5 }} />
+      </Stack>
+    );
   }
   if (error && !data) return <Alert severity="error">{error}</Alert>;
   if (!data) return null;
 
   return (
-    <Stack spacing={2}>
-      {error && <Alert severity="error">{error}</Alert>}
+    <>
+    <Stack spacing={2} sx={{ animation: 'riseIn .35s cubic-bezier(.22,1,.36,1) both' }}>
+      {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
 
       <PhoneChangeDialog
         open={phoneOpen}
@@ -180,42 +280,29 @@ export default function ChildDetails({ childId }) {
         onAdded={refresh}
       />
 
-      {/* Above the tabs and therefore on every one of them. A deadline a parent
-          has to act on cannot live inside a tab they may never open. */}
+      <Hero
+        name={data.child.name}
+        classroom={data.child.classroom}
+        year={data.child.academic_year}
+        photo={heroPhoto}
+      />
+
+      {/* Above the sections and therefore visible from every one of them. A
+          deadline a parent has to act on cannot live inside a section they may
+          never open. */}
       <GiftPicker childId={childId} childName={data.child.name} />
 
-      {/* The child, once, above the tabs — so switching tabs never leaves you
-          wondering whose screen you are on. */}
-      <Card>
-        <CardContent sx={{ pb: 1 }}>
-          <Stack direction="row" spacing={1.5} alignItems="center">
-            <Avatar sx={{ bgcolor: 'primary.main', width: 48, height: 48, fontWeight: 700 }}>
-              {initial(data.child.name)}
-            </Avatar>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography variant="h6" fontWeight={700} noWrap>{data.child.name}</Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-                {data.child.classroom && <Chip size="small" label={data.child.classroom} />}
-                {data.child.academic_year && (
-                  <Chip size="small" variant="outlined" label={data.child.academic_year} />
-                )}
-              </Stack>
-            </Box>
-          </Stack>
-        </CardContent>
-
-        <Tabs
-          value={active}
-          onChange={(_, v) => setTab(v)}
-          variant="fullWidth"
-          sx={{ borderTop: 1, borderColor: 'divider', minHeight: 48 }}
-        >
-          {tabs.map(t => (
-            <Tab key={t.key} value={t.key} label={t.label} icon={t.icon} iconPosition="start"
-              sx={{ minHeight: 48, fontWeight: 600 }} />
-          ))}
-        </Tabs>
-      </Card>
+      {/* Wide screens only. The same choices are a thumb-height bar at the
+          bottom of a phone. */}
+      <Box sx={{ display: { xs: 'none', md: 'block' } }}>
+        <Card>
+          <Tabs value={active} onChange={(_, v) => setTab(v)} variant="fullWidth">
+            {tabs.map(t => (
+              <Tab key={t.key} value={t.key} label={t.label} icon={t.icon} iconPosition="start" />
+            ))}
+          </Tabs>
+        </Card>
+      </Box>
 
       {active === 'day' && <NurseryDay childId={childId} />}
 
@@ -227,8 +314,8 @@ export default function ChildDetails({ childId }) {
         <Stack spacing={2}>
           <Card>
             <CardContent>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>הילד</Typography>
-              <Stack spacing={1}>
+              <Typography variant="h5" sx={{ mb: 1 }}>הילד</Typography>
+              <Stack>
                 <Field label="תאריך לידה" value={formatDate(data.child.birth_date)} />
                 <Field label="תעודת זהות" value={data.child.id_number} />
                 {data.registration?.start_date && (
@@ -243,14 +330,14 @@ export default function ChildDetails({ childId }) {
 
           <Card>
             <CardContent>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>ההורה</Typography>
-              <Stack spacing={1}>
+              <Typography variant="h5" sx={{ mb: 1 }}>ההורה</Typography>
+              <Stack>
                 <Field label="שם" value={data.contact.parent_name} />
                 <Field label="טלפון" value={data.contact.phone} />
                 {data.second_parent && <Field label="הורה נוסף" value={data.second_parent} />}
               </Stack>
               <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
-                <Button size="small" startIcon={<PhoneIphoneIcon />}
+                <Button size="small" variant="outlined" startIcon={<PhoneIphoneIcon />}
                   onClick={() => setPhoneOpen(true)}>
                   שינוי מספר טלפון
                 </Button>
@@ -259,7 +346,7 @@ export default function ChildDetails({ childId }) {
                     them where that person's login codes are sent, goes through
                     the gan. */}
                 {!data.second_parent && (
-                  <Button size="small" startIcon={<PersonAddAlt1Icon />}
+                  <Button size="small" variant="outlined" startIcon={<PersonAddAlt1Icon />}
                     onClick={() => setSecondOpen(true)}>
                     הוספת הורה נוסף
                   </Button>
@@ -295,7 +382,7 @@ export default function ChildDetails({ childId }) {
       {active === 'docs' && (
         <Card>
           <CardContent>
-            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>חוזים</Typography>
+            <Typography variant="h5" sx={{ mb: 1.5 }}>חוזים</Typography>
 
             {contracts && contracts.length === 0 && (
               <Alert severity="info">
@@ -309,12 +396,12 @@ export default function ChildDetails({ childId }) {
                   key={c.id}
                   sx={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    gap: 1, flexWrap: 'wrap', p: 1.25, borderRadius: 2,
-                    border: 1, borderColor: 'divider',
+                    gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: 4,
+                    border: 1, borderColor: 'divider', bgcolor: 'background.default',
                   }}
                 >
                   <Box>
-                    <Typography variant="body2" fontWeight={600}>
+                    <Typography variant="body2" fontWeight={700}>
                       {c.academic_year ? `חוזה ${c.academic_year}` : c.file_name}
                     </Typography>
                     {c.signed_at && (
@@ -338,6 +425,38 @@ export default function ChildDetails({ childId }) {
           </CardContent>
         </Card>
       )}
+
     </Stack>
+
+      {/* The navigation, on a phone. Fixed, thumb-height, labels always shown —
+          an icon-only bar is a guessing game the first time somebody uses it.
+
+          Deliberately OUTSIDE the animated stack above. An element running a
+          transform animation becomes the containing block for anything fixed
+          inside it, which quietly turns this bar into a strip sitting at the
+          bottom of the PAGE rather than the screen — it scrolled away and
+          nothing looked broken enough to notice. */}
+      <Paper
+        elevation={0}
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          position: 'fixed', bottom: 0, insetInline: 0, zIndex: 1200,
+          borderTop: 1, borderColor: 'divider',
+          bgcolor: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)',
+          pb: 'env(safe-area-inset-bottom)',
+        }}
+      >
+        <BottomNavigation
+          value={active}
+          onChange={(_, v) => setTab(v)}
+          showLabels
+          sx={{ maxWidth: 760, mx: 'auto', bgcolor: 'transparent', height: 62 }}
+        >
+          {tabs.map(t => (
+            <BottomNavigationAction key={t.key} value={t.key} label={t.label} icon={t.icon} />
+          ))}
+        </BottomNavigation>
+      </Paper>
+    </>
   );
 }

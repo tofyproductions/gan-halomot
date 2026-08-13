@@ -2,8 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Card, CardContent, Typography, TextField, Button, Stack, Alert, Link,
+  CssBaseline,
 } from '@mui/material';
+import { ThemeProvider } from '@mui/material/styles';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
+import parentTheme, { DISPLAY } from '../../theme/parentTheme';
 import Ltr from './Ltr';
 
 /**
@@ -165,20 +168,39 @@ export default function ParentLogin() {
   };
 
   return (
-    <Box sx={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      p: 2,
-      bgcolor: 'background.default',
-    }}>
-      <Card sx={{ width: '100%', maxWidth: 420 }}>
-        <CardContent sx={{ p: 4 }}>
-          <Stack spacing={1} alignItems="center" sx={{ mb: 3 }}>
-            <Typography variant="h5" fontWeight={700}>גן החלומות</Typography>
-            <Typography variant="body2" color="text.secondary">אזור אישי להורים</Typography>
-          </Stack>
+    <ThemeProvider theme={parentTheme}>
+      <CssBaseline />
+      <Box sx={{
+        minHeight: '100dvh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        p: 2,
+        bgcolor: 'background.default',
+        // A single warm wash behind the card. The first screen of the app is
+        // the only promise a parent has about the rest of it.
+        backgroundImage:
+          'radial-gradient(120% 70% at 50% 0%, #FFF1DC 0%, rgba(255,241,220,0) 60%)',
+      }}>
+        <Card sx={{ width: '100%', maxWidth: 420 }}>
+          <CardContent sx={{ p: 4 }}>
+            <Stack spacing={0.5} alignItems="center" sx={{ mb: 3 }}>
+              <Box
+                aria-hidden
+                sx={{
+                  width: 56, height: 56, borderRadius: '50%', mb: 1,
+                  display: 'grid', placeItems: 'center',
+                  bgcolor: 'primary.main', color: '#fff',
+                  fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.6rem',
+                }}
+              >
+                ג
+              </Box>
+              <Typography sx={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.5rem' }}>
+                גן החלומות
+              </Typography>
+              <Typography variant="body2" color="text.secondary">אזור אישי להורים</Typography>
+            </Stack>
 
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           {notice && <Alert severity="info" sx={{ mb: 2 }}>{notice}</Alert>}
@@ -302,8 +324,9 @@ export default function ParentLogin() {
               </Stack>
             </form>
           )}
-        </CardContent>
-      </Card>
-    </Box>
+          </CardContent>
+        </Card>
+      </Box>
+    </ThemeProvider>
   );
 }

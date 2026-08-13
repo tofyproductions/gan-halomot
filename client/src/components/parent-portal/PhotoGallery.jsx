@@ -30,7 +30,7 @@ function Row({ title, subtitle, photos, onOpen, empty }) {
   if (!photos.length) {
     return (
       <Box>
-        <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
+        <Typography variant="h5">{title}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{empty}</Typography>
       </Box>
     );
@@ -38,14 +38,14 @@ function Row({ title, subtitle, photos, onOpen, empty }) {
 
   return (
     <Box>
-      <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
+      <Typography variant="h5">{title}</Typography>
       {subtitle && (
         <Typography variant="caption" color="text.secondary">{subtitle}</Typography>
       )}
       <Box
         ref={scroller}
         sx={{
-          display: 'flex', gap: 1, mt: 1, pb: 1,
+          display: 'flex', gap: 1.25, mt: 1.5, pb: 1,
           overflowX: 'auto',
           // Each thumbnail snaps into place, so a swipe lands on a photograph
           // rather than halfway between two.
@@ -58,9 +58,12 @@ function Row({ title, subtitle, photos, onOpen, empty }) {
             key={p.id}
             onClick={() => onOpen(p)}
             sx={{
-              flex: '0 0 auto', width: 132, height: 132,
-              borderRadius: 2, overflow: 'hidden', cursor: 'pointer',
+              flex: '0 0 auto', width: 142, height: 142,
+              borderRadius: 4, overflow: 'hidden', cursor: 'pointer',
               scrollSnapAlign: 'start', bgcolor: 'action.hover',
+              border: '1px solid', borderColor: 'divider',
+              transition: 'transform .18s cubic-bezier(.22,1,.36,1)',
+              '&:active': { transform: 'scale(0.96)' },
             }}
           >
             <Box
@@ -157,9 +160,11 @@ export default function PhotoGallery({ childId, childName }) {
             />
             <Button
               size="small"
+              variant="outlined"
               startIcon={<AddPhotoAlternateIcon />}
               disabled={uploading}
               onClick={() => fileInput.current?.click()}
+              sx={{ flexShrink: 0 }}
             >
               {uploading ? 'מעלה…' : 'הוספת תמונה'}
             </Button>
