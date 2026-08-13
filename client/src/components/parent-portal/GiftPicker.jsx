@@ -1,34 +1,44 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Card, CardContent, Typography, Stack, Box, Button, Alert, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions, CircularProgress,
+  Dialog, DialogTitle, DialogContent, DialogActions, LinearProgress,
 } from '@mui/material';
 import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
-import parentApi, { parentApiError } from '../../api/parentClient';
+import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
 
 /**
  * Choosing the photograph that goes on this year's gift.
  *
- * It sits at the top of the photographs tab and only when a round is running,
- * because it is a deadline: a card that is always there is a card nobody
- * reads, and this one has a date on it.
+ * It sits ABOVE the tabs, not inside the photographs tab, and that is the
+ * whole point: it is a deadline with a date on it, and a parent who never
+ * opens the photographs tab would have missed it entirely. Once the family has
+ * chosen it collapses into a quiet confirmation — a demand that stays loud
+ * after it has been met is a demand people learn to ignore.
  *
- * The choice is made in a dialog rather than by turning the gallery into a
- * selection mode. A parent scrolling their child's photographs and a parent
- * deciding which two go on a mug are doing different things, and a gallery that
- * silently becomes a form is a gallery where somebody picks a photograph by
- * accident.
- *
- * Only the child's own photographs are offered — the server enforces it, and
- * the screen never shows the classroom gallery here. A group photograph on a
- * gift would put other families' children on it.
+ * Uploading lives INSIDE the picker. A parent who opens it and finds nothing
+ * they like has to be able to add one without leaving, going to another tab,
+ * uploading, and coming back to find their place. The photograph they add is
+ * selected immediately, because adding one during this dialog is not an
+ * ambiguous act.
  */
+
+/** "תמונה אחת" reads; "1 תמונות" does not. */
+function photoCount(n) {
+  if (n === 1) return 'תמונה אחת';
+  if (n === 2) return 'שתי תמונות';
+  return `${n} תמונות`;
+}
+
 export default function GiftPicker({ childId, childName }) {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const fileInput = useRef(null);
 
   const load = async () => {
     try {
@@ -45,6 +55,8 @@ export default function GiftPicker({ childId, childName }) {
 
   const { campaign, chosen = [], photos = [], finalised } = data;
   const chosenPhotos = photos.filter(p => chosen.includes(p.id));
+  const needed = campaign.picks_required;
+  const done = chosen.length > 0;
 
   const begin = () => {
     setDraft(chosen);
@@ -56,11 +68,41 @@ export default function GiftPicker({ childId, childName }) {
     setDraft(d => {
       if (d.includes(id)) return d.filter(x => x !== id);
       // Replacing the oldest rather than refusing: told "you already have two",
-      // a parent has to work out which to remove before they can pick the one
-      // they wanted.
-      if (d.length >= campaign.picks_required) return [...d.slice(1), id];
+      // a parent has to work out which to drop before they can pick the one
+      // they actually wanted.
+      if (d.length >= needed) return [...d.slice(1), id];
       return [...d, id];
     });
+  };
+
+  const pickFile = (e) => {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    if (files.length) upload(files);
+  };
+
+  const upload = async (files) => {
+    setUploading(true);
+    setError('');
+    try {
+      const form = new FormData();
+      files.slice(0, 5).forEach(f => form.append('photos', f));
+      await parentApi.post(`/children/${childId}/photos`, form, { timeout: UPLOAD_TIMEOUT_MS });
+
+      // Re-read and select whatever is new, so the photograph the parent just
+      // added is the one they are choosing.
+      const before = new Set(photos.map(p => p.id));
+      const res = await parentApi.get(`/children/${childId}/gift`);
+      setData(res.data);
+      const added = (res.data.photos || []).filter(p => !before.has(p.id)).map(p => p.id);
+      if (added.length) {
+        setDraft(d => [...d, ...added].slice(-needed));
+      }
+    } catch (err) {
+      setError(parentApiError(err, 'ההעלאה נכשלה'));
+    } finally {
+      setUploading(false);
+    }
   };
 
   const save = async () => {
@@ -84,11 +126,22 @@ export default function GiftPicker({ childId, childName }) {
 
   return (
     <>
-      <Card sx={{ borderInlineStart: '4px solid', borderColor: 'primary.main' }}>
+      <Card
+        sx={{
+          // Loud while something is required of the family, quiet once it is
+          // done. Colour is doing the work here, so it changes when the state
+          // does.
+          borderInlineStart: '6px solid',
+          borderColor: campaign.open && !done ? 'warning.main' : 'success.main',
+          bgcolor: campaign.open && !done ? 'warning.light' : undefined,
+        }}
+      >
         <CardContent>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-            <CardGiftcardIcon color="primary" fontSize="small" />
-            <Typography variant="subtitle1" fontWeight={700}>{campaign.name}</Typography>
+            {done
+              ? <CheckCircleIcon color="success" />
+              : <CardGiftcardIcon color={campaign.open ? 'warning' : 'action'} />}
+            <Typography variant="subtitle1" fontWeight={800}>{campaign.name}</Typography>
           </Stack>
 
           {campaign.product && (
@@ -97,51 +150,74 @@ export default function GiftPicker({ childId, childName }) {
             </Typography>
           )}
 
-          {campaign.open ? (
-            <Typography variant="body2" sx={{ mt: 1 }}>
-              בחרו עד {campaign.picks_required} תמונות של {childName} עד {deadline}.
-              הצוות יבחר מתוכן את זו שמתאימה למתנה.
-            </Typography>
-          ) : (
+          {campaign.open && !done && (
+            <>
+              <Typography variant="body1" fontWeight={700} sx={{ mt: 1 }}>
+                צריך לבחור {photoCount(needed)} של {childName} עד {deadline}.
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                הצוות יבחר מתוכן את זו שמתאימה למתנה. אם לא תבחרו — הגן יבחר עבורכם.
+              </Typography>
+              <Button variant="contained" color="warning" sx={{ mt: 2 }} onClick={begin}>
+                בחירת תמונות
+              </Button>
+            </>
+          )}
+
+          {campaign.open && done && (
+            <>
+              <Typography variant="body2" sx={{ mt: 1 }}>
+                הבחירה נשמרה. אפשר לשנות עד {deadline}.
+              </Typography>
+              <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                {chosenPhotos.map(p => (
+                  <Box key={p.id} component="img" src={p.thumb_url} alt=""
+                    sx={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 2 }} />
+                ))}
+              </Stack>
+              <Button size="small" sx={{ mt: 1 }} onClick={begin}>שינוי הבחירה</Button>
+            </>
+          )}
+
+          {!campaign.open && (
             <Alert severity="info" sx={{ mt: 1 }}>
               מועד הבחירה הסתיים{finalised ? '. הגן בחר תמונה למתנה.' : '.'}
-            </Alert>
-          )}
-
-          {chosenPhotos.length > 0 && (
-            <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-              {chosenPhotos.map(p => (
-                <Box key={p.id} component="img" src={p.thumb_url} alt=""
-                  sx={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 2 }} />
-              ))}
-            </Stack>
-          )}
-
-          {campaign.open && (
-            <Button variant={chosen.length ? 'outlined' : 'contained'} size="small" sx={{ mt: 2 }}
-              onClick={begin} disabled={photos.length === 0}>
-              {chosen.length ? 'שינוי הבחירה' : 'בחירת תמונות'}
-            </Button>
-          )}
-
-          {campaign.open && photos.length === 0 && (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              עדיין אין תמונות של {childName} לבחירה. אפשר להעלות תמונה למטה, או להמתין שהגן יסמן.
             </Alert>
           )}
         </CardContent>
       </Card>
 
-      <Dialog open={open} onClose={saving ? undefined : () => setOpen(false)} fullWidth maxWidth="sm">
+      <Dialog open={open} onClose={saving || uploading ? undefined : () => setOpen(false)}
+        fullWidth maxWidth="sm">
         <DialogTitle>
           בחירת תמונות למתנה
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            נבחרו {draft.length} מתוך {campaign.picks_required}
+            נבחרו {draft.length} מתוך {needed}
           </Typography>
         </DialogTitle>
         <DialogContent>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {uploading && <LinearProgress sx={{ mb: 2 }} />}
+          {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+
+          <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={pickFile} />
+
           <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(3, 1fr)' }}>
+            {/* First tile, always. A parent who finds nothing they like must be
+                able to add one without leaving this dialog. */}
+            <Box
+              onClick={() => !uploading && fileInput.current?.click()}
+              sx={{
+                aspectRatio: '1', borderRadius: 2, cursor: 'pointer',
+                border: '2px dashed', borderColor: 'primary.main',
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 0.5,
+                color: 'primary.main',
+              }}
+            >
+              <AddPhotoAlternateIcon />
+              <Typography variant="caption" fontWeight={700}>העלאת תמונה</Typography>
+            </Box>
+
             {photos.map(p => {
               const on = draft.includes(p.id);
               return (
@@ -164,10 +240,16 @@ export default function GiftPicker({ childId, childName }) {
               );
             })}
           </Box>
+
+          {photos.length === 0 && !uploading && (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              אין עדיין תמונות של {childName}. אפשר להעלות תמונה כאן, או להמתין שהגן יסמן תמונה.
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOpen(false)} disabled={saving}>ביטול</Button>
-          <Button variant="contained" onClick={save} disabled={saving}>
+          <Button onClick={() => setOpen(false)} disabled={saving || uploading}>ביטול</Button>
+          <Button variant="contained" onClick={save} disabled={saving || uploading}>
             {saving ? 'שומר…' : 'שמירת הבחירה'}
           </Button>
         </DialogActions>

@@ -14,6 +14,7 @@ import parentApi, { parentApiError, openParentFile } from '../../api/parentClien
 import EditableCard from './EditableCard';
 import NurseryDay from './NurseryDay';
 import PhotoGallery from './PhotoGallery';
+import GiftPicker from './GiftPicker';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
@@ -178,6 +179,10 @@ export default function ChildDetails({ childId }) {
         onClose={() => setSecondOpen(false)}
         onAdded={refresh}
       />
+
+      {/* Above the tabs and therefore on every one of them. A deadline a parent
+          has to act on cannot live inside a tab they may never open. */}
+      <GiftPicker childId={childId} childName={data.child.name} />
 
       {/* The child, once, above the tabs — so switching tabs never leaves you
           wondering whose screen you are on. */}
