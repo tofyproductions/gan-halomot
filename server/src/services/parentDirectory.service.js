@@ -124,6 +124,38 @@ function childIdentityKey(child) {
 }
 
 /**
+ * Which of a child's enrolments is the one happening now.
+ *
+ * NOT simply the newest. Families register for next year months before it
+ * starts — in August a child has a row for the year they are living and a row
+ * for the year beginning in September — so "newest" showed a parent next
+ * year's classroom, next year's dates, and next year's room category, all
+ * presented as the present. A parent whose baby is in the תינוקייה today was
+ * told they were in צעירים, and the daily board disappeared from their screen
+ * on the day the following year's registration was filed.
+ *
+ * So: the enrolment whose registration covers today wins. Failing that — a
+ * gap between years, or dates missing — the newest is still the best guess,
+ * and it is a guess about a boundary rather than about the middle of a term.
+ */
+function currentEnrolment(rows) {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0); // midday, so a date-only boundary is unambiguous
+
+  const covers = rows.find((r) => {
+    const reg = r.registration_id;
+    if (!reg || typeof reg !== 'object') return false;
+    const start = reg.start_date ? new Date(reg.start_date) : null;
+    const end = reg.end_date ? new Date(reg.end_date) : null;
+    if (!start || !end) return false;
+    return start <= today && today <= end;
+  });
+
+  // rows arrive sorted by academic_year descending, so [0] is the newest.
+  return covers || rows[0];
+}
+
+/**
  * One entry per child, newest enrolment first, each carrying every year's row.
  *
  * `current` is what the screen shows; `years` is every enrolment behind it,
@@ -162,10 +194,12 @@ function groupByChild(children) {
         buckets.push({ birth, years: [child] });
       }
     }
-    // children arrive sorted by academic_year descending, so each bucket's
-    // first row is its newest enrolment.
     for (const b of buckets) {
-      groups.push({ key: childIdentityKey(b.years[0]), current: b.years[0], years: b.years });
+      groups.push({
+        key: childIdentityKey(b.years[0]),
+        current: currentEnrolment(b.years),
+        years: b.years,
+      });
     }
   }
   return groups;
@@ -215,5 +249,5 @@ function maskPhone(phone) {
 
 module.exports = {
   findParent, childrenOfParent, normalizeIdNumber, maskPhone, contactFromChild,
-  childIdentityKey, groupByChild,
+  childIdentityKey, groupByChild, currentEnrolment,
 };

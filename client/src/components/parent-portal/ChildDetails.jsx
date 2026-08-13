@@ -7,6 +7,7 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import EditableCard from './EditableCard';
+import NurseryDay from './NurseryDay';
 import PhoneChangeDialog from './PhoneChangeDialog';
 
 /**
@@ -128,6 +129,11 @@ export default function ChildDetails({ childId }) {
           setData(fresh.data);
         }}
       />
+
+      {/* The day comes first for an infant's parent: it is what they open the
+          app for, several times a day. The contract and the address are things
+          they look at once a year. */}
+      {data.is_nursery && <NurseryDay childId={childId} />}
 
       <Card>
         <CardContent>

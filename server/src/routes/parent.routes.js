@@ -30,6 +30,10 @@ const portal = require('../controllers/parentPortal.controller');
 router.get('/editable-fields', portal.editableFields);
 router.get('/children/:childId', portal.childDetails);
 router.patch('/children/:childId', portal.updateChild);
+// The תינוקייה's day. Read by any parent of an infant; written only for the
+// four fields describing the morning at home, and only for today.
+router.get('/children/:childId/day', portal.childDay);
+router.patch('/children/:childId/day', portal.updateChildDay);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
 

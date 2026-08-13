@@ -1,4 +1,5 @@
-const { ParentAccount, Contract, Registration, Child } = require('../models');
+const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu } = require('../models');
+const nursery = require('../services/nursery.service');
 const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
 const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
 const { normalizePhone, sendSms } = require('../services/sms.service');
@@ -126,7 +127,153 @@ async function childDetails(req, res) {
     // parent's ID number and phone are their details, not this parent's.
     second_parent: otherParentName(child, parent.id_number, me.name),
     registration: reg ? { start_date: reg.start_date, end_date: reg.end_date } : null,
+    // Whether this child's screen should carry the daily board at all. Only
+    // the infant rooms keep one; a three-year-old's parent has no bottle log
+    // to read and should not be shown an empty one.
+    is_nursery: nursery.isNurseryClassroom(child.classroom_id),
   });
+}
+
+/**
+ * The child's day, as their parent sees it.
+ *
+ * One screen rather than the old system's two. That system had a "live" page
+ * and a "daily report" page holding the same values, differing only in when
+ * you opened them — so a parent who opened the wrong one at the wrong hour got
+ * either a half-empty report or a live view they thought was final. Here it is
+ * the same page all day: incomplete in the morning because the day is
+ * incomplete, and finished by evening because the day is.
+ *
+ * Read-only, all of it. What the parent may write goes through updateChildDay
+ * below, and it is four fields.
+ */
+async function childDay(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const { child } = own;
+  if (!nursery.isNurseryClassroom(child.classroom_id)) {
+    return res.status(400).json({ error: 'הלוח היומי קיים לתינוקייה בלבד' });
+  }
+
+  const today = nursery.todayKey();
+  const date = nursery.normalizeDateKey(req.query.date) || today;
+  // A parent may look back, never forward: a future date would show an empty
+  // day that reads as "the gan recorded nothing" rather than "it hasn't
+  // happened".
+  if (date > today) return res.status(400).json({ error: 'תאריך עתידי' });
+
+  const branchId = child.classroom_id?.branch_id || null;
+  const [log, menuDoc, menu] = await Promise.all([
+    DailyLog.findOne({ child_id: child._id, date }).lean(),
+    branchId ? DailyMenu.findOne({ branch_id: branchId, date }).lean() : null,
+    nursery.getMenu(),
+  ]);
+
+  // Only the dishes actually chosen, resolved to their Hebrew labels. Handing
+  // over the whole menu and letting the screen work out what was served would
+  // publish every dish the gan has ever offered.
+  const served = [];
+  for (const [mealKey, meal] of Object.entries(menu)) {
+    const categories = [];
+    for (const category of Object.keys(meal.categories || {})) {
+      const dishes = menuDoc?.selections?.[`${mealKey}.${category}`] || [];
+      if (dishes.length) categories.push({ category, dishes });
+    }
+    if (categories.length) served.push({ meal: mealKey, label: meal.label, categories });
+  }
+
+  return res.json({
+    date,
+    today,
+    is_today: date === today,
+    child: { id: child._id, name: child.child_name },
+    // Absent means nobody has recorded anything yet, which the screen must say
+    // differently from "the child was marked away".
+    log: log ? {
+      attendance: log.attendance || '',
+      home: log.home || {},
+      meals: log.meals || {},
+      sleep: log.sleep || {},
+      diapers: log.diapers || '',
+      missing: log.missing || [],
+      staff_note: log.staff_note || '',
+      updated_at: log.updated_at || null,
+    } : null,
+    menu: served,
+  });
+}
+
+/**
+ * What a parent may write about their child's day: how the morning went at
+ * home, before the gan saw them.
+ *
+ * Four fields, and only today's. Yesterday has already been read by the staff
+ * and acted on — a parent editing it changes a record of something that is
+ * over, and the teacher who read "slept badly" this morning has no way to
+ * learn it later said otherwise.
+ *
+ * Nothing the staff record is writable here. Not by omission — the whitelist
+ * below is the entire surface, so a request naming meals or sleep writes
+ * nothing rather than being trusted because it came from a logged-in parent.
+ */
+const PARENT_DAY_FIELDS = {
+  'home.wake_time': (v) => {
+    const s = String(v ?? '').trim().slice(0, 5);
+    return s === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : null;
+  },
+  'home.meal_time': (v) => {
+    const s = String(v ?? '').trim().slice(0, 5);
+    return s === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(s) ? s : null;
+  },
+  'home.meal_amount': (v) => String(v ?? '').trim().slice(0, 60),
+  'home.parent_note': (v) => String(v ?? '').trim().slice(0, 500),
+};
+
+async function updateChildDay(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const { child } = own;
+  if (!nursery.isNurseryClassroom(child.classroom_id)) {
+    return res.status(400).json({ error: 'הלוח היומי קיים לתינוקייה בלבד' });
+  }
+
+  const today = nursery.todayKey();
+  const date = nursery.normalizeDateKey(req.body?.date) || today;
+  if (date !== today) {
+    return res.status(400).json({ error: 'אפשר לעדכן רק את היום הנוכחי' });
+  }
+
+  const set = {};
+  for (const [path, parse] of Object.entries(PARENT_DAY_FIELDS)) {
+    if (!(path in (req.body || {}))) continue;
+    const value = parse(req.body[path]);
+    if (value === null) return res.status(400).json({ error: 'שעה לא תקינה' });
+    set[path] = value;
+  }
+  if (Object.keys(set).length === 0) return res.json({ ok: true, changed: 0 });
+
+  // Written on insert only. A parent's first update of the morning may well
+  // create the row before any teacher has touched it, and the row still has to
+  // know which child and which room it belongs to for the staff board to find
+  // it.
+  const log = await DailyLog.findOneAndUpdate(
+    { child_id: child._id, date },
+    {
+      $set: set,
+      $setOnInsert: {
+        child_id: child._id,
+        date,
+        child_name: child.child_name,
+        classroom_id: child.classroom_id?._id || null,
+        branch_id: child.classroom_id?.branch_id || null,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  return res.json({ ok: true, changed: Object.keys(set).length, home: log.home || {} });
 }
 
 /**
@@ -396,4 +543,5 @@ function editableFields(_req, res) {
 module.exports = {
   childDetails, childContracts, contractFile,
   updateChild, startPhoneChange, confirmPhoneChange, editableFields,
+  childDay, updateChildDay,
 };
