@@ -4,6 +4,7 @@ import {
   Box, Card, CardContent, Typography, TextField, Button, Stack, Alert, Link,
 } from '@mui/material';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
+import Ltr from './Ltr';
 
 /**
  * One screen, four states.
@@ -231,7 +232,11 @@ export default function ParentLogin() {
             <form onSubmit={handleVerify}>
               <Stack spacing={2}>
                 <Typography variant="body2">
-                  שלחנו קוד בן 6 ספרות למספר {phoneHint || 'הרשום אצלנו'}.
+                  {/* Isolated: the mask contains neutral characters, and inside
+                      Hebrew prose they drag the whole number into RTL — the
+                      parent was shown their phone backwards. */}
+                  שלחנו קוד בן 6 ספרות למספר{' '}
+                  {phoneHint ? <Ltr>{phoneHint}</Ltr> : 'הרשום אצלנו'}.
                 </Typography>
                 <TextField
                   inputRef={codeRef}

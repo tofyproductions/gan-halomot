@@ -32,7 +32,11 @@ async function listCampaigns(_req, res) {
   return res.json({
     today,
     categories: Classroom.CATEGORIES || [],
-    campaigns: rows.map(c => ({ ...c, open_for_parents: gifts.isOpenForParents(c, today) })),
+    campaigns: rows.map(c => ({
+      ...c,
+      open_for_parents: gifts.isOpenForParents(c, today),
+      state: gifts.campaignState(c, today),
+    })),
   });
 }
 
@@ -161,7 +165,11 @@ async function progress(req, res) {
   });
 
   return res.json({
-    campaign: { ...campaign, open_for_parents: gifts.isOpenForParents(campaign) },
+    campaign: {
+      ...campaign,
+      open_for_parents: gifts.isOpenForParents(campaign),
+      state: gifts.campaignState(campaign),
+    },
     totals: {
       children: rows.length,
       parents_chose: rows.filter(r => r.chosen_at).length,

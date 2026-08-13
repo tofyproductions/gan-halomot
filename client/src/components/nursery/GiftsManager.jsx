@@ -25,6 +25,10 @@ import { useAuth } from '../../hooks/useAuth';
 
 const LEVELS = ['תינוקייה', 'צעירים', 'בוגרים'];
 
+// Three states, not two: a round that has not started is not a round that is
+// over, and calling both "סגור" is what confused the first real campaign.
+const STATE_LABEL = { upcoming: 'טרם התחיל', open: 'פתוח', closed: 'הסתיים' };
+
 function fmt(d) {
   if (!d) return '';
   const x = new Date(d);
@@ -173,7 +177,7 @@ export default function GiftsManager() {
             onChange={(e) => setSelected(e.target.value)}>
             {campaigns.map(c => (
               <MenuItem key={c._id} value={String(c._id)}>
-                {c.name} {c.open_for_parents ? '· פתוח' : '· סגור'}
+                {c.name} · {STATE_LABEL[c.state] || ''}
               </MenuItem>
             ))}
           </TextField>
@@ -198,7 +202,9 @@ export default function GiftsManager() {
                 color={progress.totals.missing ? 'error' : 'success'} />
             </Stack>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              עד {fmt(progress.campaign.closes_on)} · {progress.campaign.open_for_parents ? 'ההורים עדיין יכולים לבחור' : 'הבחירה סגורה להורים'}
+              {progress.campaign.state === 'upcoming'
+                ? `נפתח להורים ב-${fmt(progress.campaign.opens_on)}`
+                : `עד ${fmt(progress.campaign.closes_on)} · ${progress.campaign.state === 'open' ? 'ההורים עדיין יכולים לבחור' : 'הבחירה סגורה להורים'}`}
             </Typography>
           </CardContent>
         </Card>

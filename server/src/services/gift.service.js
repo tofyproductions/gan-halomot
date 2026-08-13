@@ -25,19 +25,41 @@ function isLowResolution(photo) {
   return longEdge > 0 && longEdge < MIN_PRINT_EDGE;
 }
 
+/**
+ * Where a round is in its life: upcoming, open, or closed.
+ *
+ * Three states rather than a boolean, because "not open" was being read as
+ * "over" — and a round starting in September announced to families that its
+ * deadline had passed.
+ */
+function campaignState(campaign, today = nursery.todayKey()) {
+  if (!campaign) return 'closed';
+  if (today < campaign.opens_on) return 'upcoming';
+  if (!campaign.is_open || today > campaign.closes_on) return 'closed';
+  return 'open';
+}
+
 /** Open for parents: the switch is on AND today is inside the window. */
 function isOpenForParents(campaign, today = nursery.todayKey()) {
   if (!campaign || !campaign.is_open) return false;
   return campaign.opens_on <= today && today <= campaign.closes_on;
 }
 
+/** How long a finished round stays on the family's screen. */
+const SHOW_AFTER_CLOSE_DAYS = 30;
+
 /**
- * The campaign a parent should be shown.
+ * The campaign a parent should be shown, or nothing.
  *
- * The one whose window covers today. Failing that, the most recent one still
- * marked open — a deadline that passed this morning should still show the
- * family what they chose, rather than making the round vanish the moment it
- * closed.
+ * The one whose window covers today. Failing that, one that has recently
+ * ENDED — a deadline that passed this morning should still show the family
+ * what they chose rather than vanishing the moment it closed.
+ *
+ * Never one that has not started. The fallback used to be "the most recent
+ * one still marked open", which returned a round opening in September and the
+ * screen announced that its deadline had passed — a date in the future,
+ * labelled as over. A round the gan is still preparing is not the family's
+ * business until it opens.
  */
 async function currentCampaign(today = nursery.todayKey()) {
   const live = await GiftCampaign.findOne({
@@ -47,7 +69,13 @@ async function currentCampaign(today = nursery.todayKey()) {
   }).sort({ closes_on: 1 }).lean();
   if (live) return live;
 
-  return GiftCampaign.findOne({ is_open: true }).sort({ closes_on: -1 }).lean();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - SHOW_AFTER_CLOSE_DAYS);
+  const since = nursery.todayKey(cutoff);
+
+  return GiftCampaign.findOne({
+    closes_on: { $lt: today, $gte: since },
+  }).sort({ closes_on: -1 }).lean();
 }
 
 /**
@@ -68,6 +96,6 @@ async function selectablePhotos(childIds, parentAccountId) {
 }
 
 module.exports = {
-  isLowResolution, isOpenForParents, currentCampaign, selectablePhotos,
-  MIN_PRINT_EDGE,
+  isLowResolution, isOpenForParents, campaignState, currentCampaign, selectablePhotos,
+  MIN_PRINT_EDGE, SHOW_AFTER_CLOSE_DAYS,
 };

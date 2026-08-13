@@ -4,6 +4,7 @@ import {
   Stack, Alert, Typography,
 } from '@mui/material';
 import parentApi, { parentApiError } from '../../api/parentClient';
+import Ltr from './Ltr';
 
 /**
  * Changing the phone, in the only order that is safe.
@@ -80,7 +81,7 @@ export default function PhoneChangeDialog({ open, currentPhone, onClose, onChang
           {step === 'phone' && (
             <>
               <Typography variant="body2" color="text.secondary">
-                המספר הרשום כעת: {currentPhone || 'לא ידוע'}
+                המספר הרשום כעת: {currentPhone ? <Ltr>{currentPhone}</Ltr> : 'לא ידוע'}
               </Typography>
               <TextField
                 label="מספר חדש"
@@ -99,7 +100,7 @@ export default function PhoneChangeDialog({ open, currentPhone, onClose, onChang
           {step === 'code' && (
             <>
               <Typography variant="body2">
-                שלחנו קוד למספר {phone}.
+                שלחנו קוד למספר <Ltr>{phone}</Ltr>.
               </Typography>
               <TextField
                 label="קוד"
