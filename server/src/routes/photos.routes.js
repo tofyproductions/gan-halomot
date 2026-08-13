@@ -26,6 +26,8 @@ const upload = multer({
  */
 const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant');
 
+// Diagnostic: which of the four things an upload needs is actually broken.
+router.get('/selftest', allow, ctrl.selftest);
 router.get('/', allow, ctrl.list);
 router.post('/upload', allow, upload.array('photos', 30), ctrl.upload);
 router.patch('/:id', allow, ctrl.tag);

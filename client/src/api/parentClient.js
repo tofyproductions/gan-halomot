@@ -70,9 +70,28 @@ export async function openParentFile(path, fallbackName = 'document.pdf') {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+/**
+ * How long an upload is allowed to take.
+ *
+ * The default 30s is for JSON. An upload is several megabytes to the server,
+ * a resize, and two writes to object storage in another country — on an
+ * instance that has just woken up, comfortably more. Cut off at 30s the
+ * browser reports no response at all, which surfaced as a generic "failed"
+ * and hid a request that was still working.
+ */
+export const UPLOAD_TIMEOUT_MS = 180000;
+
 /** The server's Hebrew message when it sent one, and something honest if not. */
 export function parentApiError(err, fallback = 'שגיאה. נסו שוב.') {
-  return err?.response?.data?.error || fallback;
+  const said = err?.response?.data?.error;
+  if (said) return said;
+
+  // No response at all is a different failure from a rejected one, and saying
+  // so is the difference between "try a smaller photo" and "call the gan".
+  if (err?.code === 'ECONNABORTED') return 'הבקשה נקטעה. ייתכן שהקובץ גדול או שהחיבור איטי — נסו שוב.';
+  if (!err?.response) return 'אין תשובה מהשרת. בדקו את החיבור ונסו שוב.';
+  if (err.response.status === 413) return 'הקובץ גדול מדי.';
+  return `${fallback} (שגיאה ${err.response.status})`;
 }
 
 export default parentApi;

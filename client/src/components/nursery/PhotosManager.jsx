@@ -7,7 +7,7 @@ import {
 } from '@mui/material';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
-import api from '../../api/client';
+import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 
 /**
  * The gan's photographs, staff side.
@@ -33,6 +33,7 @@ export default function PhotosManager() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [tagging, setTagging] = useState(null);
+  const [diag, setDiag] = useState(null);
   const [draftIds, setDraftIds] = useState([]);
   const fileInput = useRef(null);
 
@@ -45,7 +46,7 @@ export default function PhotosManager() {
         setClassrooms(res.data.classrooms || []);
         setClassroomId(String(res.data.classroom?.id || ''));
       } catch (err) {
-        setError(err.response?.data?.error || 'לא הצלחנו לטעון את הכיתות');
+        setError(apiError(err, 'לא הצלחנו לטעון את הכיתות'));
         setLoading(false);
       }
     })();
@@ -61,7 +62,7 @@ export default function PhotosManager() {
       const res = await api.get('/photos', { params });
       setData(res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'לא הצלחנו לטעון את התמונות');
+      setError(apiError(err, 'לא הצלחנו לטעון את התמונות'));
     } finally {
       setLoading(false);
     }
@@ -82,14 +83,32 @@ export default function PhotosManager() {
       const form = new FormData();
       files.slice(0, 30).forEach(f => form.append('photos', f));
       form.append('classroom_id', classroomId);
-      const res = await api.post('/photos/upload', form);
+      const res = await api.post('/photos/upload', form, { timeout: UPLOAD_TIMEOUT_MS });
       setToast(`${res.data.saved} תמונות הועלו`);
       if (res.data.failed?.length) setError(`${res.data.failed.length} קבצים לא נקלטו`);
       await load();
     } catch (err) {
-      setError(err.response?.data?.error || 'ההעלאה נכשלה');
+      setError(apiError(err, 'ההעלאה נכשלה'));
     } finally {
       setUploading(false);
+    }
+  };
+
+  /**
+   * Which of the four things an upload needs is broken.
+   *
+   * "ההעלאה נכשלה" hides the answer: configuration, the image library, the
+   * write and the signed read all look identical from here. This asks the
+   * server to try each in order against a tiny generated image and say where
+   * it stopped.
+   */
+  const runSelftest = async () => {
+    setDiag({ running: true });
+    try {
+      const res = await api.get('/photos/selftest', { timeout: 60000 });
+      setDiag(res.data);
+    } catch (err) {
+      setDiag({ ok: false, steps: [{ name: 'בדיקה', ok: false, detail: apiError(err) }] });
     }
   };
 
@@ -104,7 +123,7 @@ export default function PhotosManager() {
       setTagging(null);
       await load();
     } catch (err) {
-      setError(err.response?.data?.error || 'השמירה נכשלה');
+      setError(apiError(err, 'השמירה נכשלה'));
     }
   };
 
@@ -116,7 +135,7 @@ export default function PhotosManager() {
       setTagging(null);
       await load();
     } catch (err) {
-      setError(err.response?.data?.error || 'המחיקה נכשלה');
+      setError(apiError(err, 'המחיקה נכשלה'));
     }
   };
 
@@ -157,7 +176,32 @@ export default function PhotosManager() {
       </Stack>
 
       {uploading && <LinearProgress sx={{ mb: 2 }} />}
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
+      {error && (
+        <Alert
+          severity="error" sx={{ mb: 2 }} onClose={() => setError('')}
+          action={<Button size="small" onClick={runSelftest}>בדיקת אחסון</Button>}
+        >
+          {error}
+        </Alert>
+      )}
+
+      {diag && (
+        <Alert
+          severity={diag.running ? 'info' : diag.ok ? 'success' : 'error'}
+          sx={{ mb: 2 }}
+          onClose={() => setDiag(null)}
+        >
+          {diag.running ? 'בודק…' : (
+            <Stack spacing={0.5}>
+              {(diag.steps || []).map((st, i) => (
+                <Typography key={i} variant="body2">
+                  {st.ok ? '✓' : '✗'} {st.name}{st.detail ? ` — ${st.detail}` : ''}
+                </Typography>
+              ))}
+            </Stack>
+          )}
+        </Alert>
+      )}
 
       <Alert severity="info" sx={{ mb: 2 }}>
         כל תמונה שמועלית נראית להורי הכיתה. סימון מי בתמונה מוסיף אותה גם לגלריה האישית של אותו ילד.

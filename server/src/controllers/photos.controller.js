@@ -180,4 +180,61 @@ async function remove(req, res) {
   return res.json({ ok: true });
 }
 
-module.exports = { upload, list, tag, remove, visibleClassrooms };
+/**
+ * Does the storage actually work, and if not, why.
+ *
+ * "ההעלאה נכשלה" is a message that hides the answer. An upload touches four
+ * things that can each fail on their own — configuration, the image library,
+ * the write, the signed read — and from the outside all four look identical.
+ *
+ * So this runs them in order against a tiny generated image and reports where
+ * it stopped, with the provider's own words. It is a diagnostic rather than a
+ * guess, and it costs one 8x8 pixel object that it deletes on the way out.
+ */
+async function selftest(_req, res) {
+  const steps = [];
+  const step = (name, ok, detail = '') => steps.push({ name, ok, detail });
+
+  const configured = storage.isConfigured();
+  step('הגדרות אחסון', configured, configured ? '' : 'חסרים משתני סביבה');
+  if (!configured) return res.json({ ok: false, steps });
+
+  let buf;
+  try {
+    const sharp = require('sharp');
+    buf = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 1, g: 2, b: 3 } } })
+      .jpeg().toBuffer();
+    step('עיבוד תמונה', true, `sharp ${require('sharp/package.json').version}`);
+  } catch (err) {
+    step('עיבוד תמונה', false, err.message);
+    return res.json({ ok: false, steps });
+  }
+
+  const key = storage.makeKey('selftest', 'jpg');
+  try {
+    await storage.putObject({ key, body: buf, contentType: 'image/jpeg' });
+    step('כתיבה לאחסון', true, key);
+  } catch (err) {
+    step('כתיבה לאחסון', false, `${err.name || ''}: ${err.message}`);
+    return res.json({ ok: false, steps });
+  }
+
+  try {
+    const url = await storage.signedReadUrl(key, 60);
+    const head = await fetch(url, { method: 'GET' });
+    step('קריאה בקישור חתום', head.ok, head.ok ? '' : `HTTP ${head.status}`);
+  } catch (err) {
+    step('קריאה בקישור חתום', false, err.message);
+  }
+
+  try {
+    await storage.deleteObject(key);
+    step('מחיקה', true);
+  } catch (err) {
+    step('מחיקה', false, err.message);
+  }
+
+  return res.json({ ok: steps.every(s => s.ok), steps });
+}
+
+module.exports = { upload, list, tag, remove, selftest, visibleClassrooms };

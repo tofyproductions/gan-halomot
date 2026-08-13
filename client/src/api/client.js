@@ -39,6 +39,31 @@ api.interceptors.response.use(
   }
 );
 
+/**
+ * How long an upload is allowed to take.
+ *
+ * The default 30s is for JSON. An upload is megabytes to the server, a resize,
+ * and two writes to object storage abroad — on an instance that has just woken
+ * up, comfortably more. Cut off there, the browser reports no response at all,
+ * which reads as "failed" while the request is in fact still working.
+ */
+export const UPLOAD_TIMEOUT_MS = 180000;
+
+/**
+ * What actually went wrong, in words somebody can act on.
+ *
+ * A rejected request and a request that never got an answer are different
+ * failures, and the difference decides what to do next.
+ */
+export function apiError(err, fallback = 'שגיאה. נסו שוב.') {
+  const said = err?.response?.data?.error;
+  if (said) return said;
+  if (err?.code === 'ECONNABORTED') return 'הבקשה נקטעה. ייתכן שהקובץ גדול או שהחיבור איטי — נסו שוב.';
+  if (!err?.response) return 'אין תשובה מהשרת. בדקו את החיבור ונסו שוב.';
+  if (err.response.status === 413) return 'הקובץ גדול מדי.';
+  return `${fallback} (שגיאה ${err.response.status})`;
+}
+
 export default api;
 
 /**

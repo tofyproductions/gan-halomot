@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
-import parentApi, { parentApiError } from '../../api/parentClient';
+import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
 
 /**
  * The week, in photographs.
@@ -112,7 +112,7 @@ export default function PhotoGallery({ childId, childName }) {
     try {
       const form = new FormData();
       files.slice(0, 5).forEach(f => form.append('photos', f));
-      const res = await parentApi.post(`/children/${childId}/photos`, form);
+      const res = await parentApi.post(`/children/${childId}/photos`, form, { timeout: UPLOAD_TIMEOUT_MS });
       setToast(res.data.saved === 1 ? 'התמונה נשמרה' : `${res.data.saved} תמונות נשמרו`);
       if (res.data.failed?.length) {
         setError(`${res.data.failed.length} קבצים לא נקלטו`);
