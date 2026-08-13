@@ -15,3 +15,7 @@ data/
 # Never commit it.
 server/cibus-capture/
 cibus-capture/
+
+# Backups of .env are still .env — the plain ".env" rule above does not catch them.
+.env.backup*
+.env.*.backup
