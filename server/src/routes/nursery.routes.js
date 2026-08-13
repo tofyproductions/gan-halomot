@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/nursery.controller');
-const { requireTab } = require('../middleware/auth');
+const { requireTab, requireRole } = require('../middleware/auth');
 
 /**
  * The תינוקייה board. Mounted below the staff auth middleware, so everything
@@ -21,5 +21,13 @@ const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_lea
 router.get('/board', allow, ctrl.board);
 router.patch('/log/:childId', allow, ctrl.updateLog);
 router.put('/menu', allow, ctrl.setMenu);
+
+// The lists and the menu behind the board. Reading them is part of using the
+// screen; CHANGING them is not — one edit reshapes the board for every branch
+// at once, so it stays with the people who answer for that.
+const allowEdit = requireRole('system_admin', 'branch_manager');
+router.get('/settings', allow, ctrl.settings);
+router.put('/settings/options', allow, allowEdit, ctrl.saveOptions);
+router.put('/settings/menu', allow, allowEdit, ctrl.saveMenu);
 
 module.exports = router;

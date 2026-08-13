@@ -1,4 +1,4 @@
-const { Child, Classroom, DailyLog, DailyMenu } = require('../models');
+const { Child, Classroom, DailyLog, DailyMenu, Setting } = require('../models');
 const nursery = require('../services/nursery.service');
 
 /**
@@ -224,4 +224,143 @@ async function setMenu(req, res) {
   return res.json({ ok: true, selections: clean });
 }
 
-module.exports = { board, updateLog, setMenu };
+/**
+ * The lists the board offers, and the menu it offers them from.
+ *
+ * These came from a sheet tab the gan edited itself, and they have to stay
+ * that way: the bottle sizes, the what-to-bring list and the dishes are the
+ * kitchen's business, not the code's. Everything below exists to let them be
+ * edited without letting a mistyped screen take the board down for every
+ * branch at once.
+ */
+
+const LIST_KEYS = ['meal_amounts', 'formula_amounts', 'diapers', 'missing'];
+const HOUR_KEYS = ['home_wake', 'home_meal', 'sleep_morning', 'sleep_noon'];
+
+/** Trimmed, de-duplicated, empty entries dropped, and capped. */
+function cleanList(value, { maxItems = 60, maxLen = 40 } = {}) {
+  if (!Array.isArray(value)) return null;
+  const out = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+    const s = String(raw).trim().slice(0, maxLen);
+    if (s && !out.includes(s)) out.push(s);
+  }
+  return out.slice(0, maxItems);
+}
+
+async function settings(_req, res) {
+  const [options, menu] = await Promise.all([nursery.getOptions(), nursery.getMenu()]);
+  return res.json({ options, menu, meal_keys: Object.keys(nursery.DEFAULT_MENU) });
+}
+
+/**
+ * Save the option lists.
+ *
+ * Only the keys the board reads, and an empty list is refused rather than
+ * saved: a field whose picker offers nothing is a field the staff cannot fill
+ * in, and they would find that out mid-morning with a baby in one arm.
+ */
+async function saveOptions(req, res) {
+  const current = await nursery.getOptions();
+  const next = { ...current, hours: { ...current.hours } };
+  const errors = [];
+
+  for (const key of LIST_KEYS) {
+    if (!(key in (req.body || {}))) continue;
+    const list = cleanList(req.body[key], { maxLen: key === 'missing' ? 40 : 20 });
+    if (!list) { errors.push(`${key}: ערך לא תקין`); continue; }
+    if (list.length === 0) { errors.push(`${key}: הרשימה לא יכולה להיות ריקה`); continue; }
+    next[key] = list;
+  }
+
+  if (req.body?.hours && typeof req.body.hours === 'object') {
+    for (const key of HOUR_KEYS) {
+      if (!(key in req.body.hours)) continue;
+      const list = cleanList(req.body.hours[key], { maxItems: 24, maxLen: 2 });
+      if (!list || list.some(h => !/^([01]\d|2[0-3])$/.test(h))) {
+        errors.push(`שעות ${key}: ערך לא תקין`);
+        continue;
+      }
+      if (list.length === 0) { errors.push(`שעות ${key}: הרשימה לא יכולה להיות ריקה`); continue; }
+      next.hours[key] = list.sort();
+    }
+  }
+
+  if ('minutes' in (req.body || {})) {
+    const list = cleanList(req.body.minutes, { maxItems: 60, maxLen: 2 });
+    if (!list || list.length === 0 || list.some(m => !/^[0-5]\d$/.test(m))) {
+      errors.push('דקות: ערך לא תקין');
+    } else {
+      next.minutes = list.sort();
+    }
+  }
+
+  if (errors.length) return res.status(400).json({ error: errors.join('. ') });
+
+  await Setting.updateOne(
+    { key: nursery.OPTIONS_KEY },
+    { $set: { key: nursery.OPTIONS_KEY, value: next } },
+    { upsert: true }
+  );
+  return res.json({ ok: true, options: next });
+}
+
+/**
+ * Save the menu.
+ *
+ * The three meals are structural — the child card lays out breakfast, lunch
+ * and the four o'clock, and the parent's screen names them — so their keys are
+ * fixed and only their labels, categories and dishes are editable. Letting the
+ * screen invent a fourth meal would produce a menu nothing renders.
+ *
+ * A category with no dishes is dropped rather than saved: it would render as a
+ * heading with nothing under it on every screen that reads the menu.
+ */
+async function saveMenu(req, res) {
+  const incoming = req.body?.menu;
+  if (!incoming || typeof incoming !== 'object') {
+    return res.status(400).json({ error: 'תפריט לא תקין' });
+  }
+
+  const current = await nursery.getMenu();
+  const next = {};
+  const errors = [];
+
+  for (const mealKey of Object.keys(nursery.DEFAULT_MENU)) {
+    const src = incoming[mealKey];
+    const fallback = current[mealKey] || nursery.DEFAULT_MENU[mealKey];
+    if (!src || typeof src !== 'object') { next[mealKey] = fallback; continue; }
+
+    const label = String(src.label ?? fallback.label ?? mealKey).trim().slice(0, 40);
+    if (!label) { errors.push(`${mealKey}: חסר שם לארוחה`); continue; }
+
+    const categories = {};
+    const rawCats = src.categories && typeof src.categories === 'object' ? src.categories : {};
+    for (const [rawName, dishes] of Object.entries(rawCats)) {
+      const name = String(rawName).trim().slice(0, 30);
+      if (!name) continue;
+      const list = cleanList(dishes, { maxItems: 60, maxLen: 40 });
+      if (!list) { errors.push(`${label} / ${name}: ערך לא תקין`); continue; }
+      if (list.length === 0) continue; // a heading with nothing under it
+      categories[name] = list;
+    }
+
+    if (Object.keys(categories).length === 0) {
+      errors.push(`${label}: צריכה להיות לפחות קטגוריה אחת עם מנות`);
+      continue;
+    }
+    next[mealKey] = { label, categories };
+  }
+
+  if (errors.length) return res.status(400).json({ error: errors.join('. ') });
+
+  await Setting.updateOne(
+    { key: nursery.MENU_KEY },
+    { $set: { key: nursery.MENU_KEY, value: next } },
+    { upsert: true }
+  );
+  return res.json({ ok: true, menu: next });
+}
+
+module.exports = { board, updateLog, setMenu, settings, saveOptions, saveMenu };

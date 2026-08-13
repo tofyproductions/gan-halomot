@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import LoginPage from './components/layout/LoginPage';
 import NurseryBoard from './components/nursery/NurseryBoard';
+import NurserySettings from './components/nursery/NurserySettings';
 import ParentChanges from './components/admin/ParentChanges';
 import ParentLogin from './components/parent-portal/ParentLogin';
 import ParentPortal from './components/parent-portal/ParentPortal';
@@ -151,6 +152,13 @@ function AppRoutes() {
         {/* לוח תינוקייה — infant rooms only; the controller narrows it again
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />
+        {/* Editing the lists reshapes the board for every branch, so it stays
+            with the people who answer for that. The server enforces the same. */}
+        <Route path="nursery/settings" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+            <NurserySettings />
+          </ProtectedRoute>
+        } />
         <Route path="parent-changes" element={<ParentChanges />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />

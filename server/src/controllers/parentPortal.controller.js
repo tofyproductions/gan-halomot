@@ -170,18 +170,40 @@ async function childDay(req, res) {
     nursery.getMenu(),
   ]);
 
-  // Only the dishes actually chosen, resolved to their Hebrew labels. Handing
-  // over the whole menu and letting the screen work out what was served would
-  // publish every dish the gan has ever offered.
-  const served = [];
-  for (const [mealKey, meal] of Object.entries(menu)) {
-    const categories = [];
-    for (const category of Object.keys(meal.categories || {})) {
-      const dishes = menuDoc?.selections?.[`${mealKey}.${category}`] || [];
-      if (dishes.length) categories.push({ category, dishes });
-    }
-    if (categories.length) served.push({ meal: mealKey, label: meal.label, categories });
+  // Only the dishes actually chosen. Handing over the whole menu and letting
+  // the screen work out what was served would publish every dish the gan has
+  // ever offered.
+  //
+  // Built from what that DAY stored, not from the menu as it stands now. The
+  // menu is configuration the gan edits — renaming a category or dropping a
+  // dish is a Tuesday afternoon decision — and reading the day through the
+  // current shape would quietly empty every past day that used the old one.
+  // What was served in March does not change because the kitchen reorganised
+  // in June.
+  const byMeal = new Map();
+  for (const [key, dishes] of Object.entries(menuDoc?.selections || {})) {
+    if (!Array.isArray(dishes) || dishes.length === 0) continue;
+    const sep = key.indexOf('.');
+    if (sep < 1) continue;
+    const mealKey = key.slice(0, sep);
+    const category = key.slice(sep + 1);
+    if (!byMeal.has(mealKey)) byMeal.set(mealKey, []);
+    byMeal.get(mealKey).push({ category, dishes });
   }
+
+  // Ordered by the menu the gan keeps, so breakfast comes before lunch; a meal
+  // that has since been removed still appears, at the end, under its own key.
+  const order = Object.keys(menu);
+  const served = [...byMeal.entries()]
+    .sort((a, b) => {
+      const ia = order.indexOf(a[0]); const ib = order.indexOf(b[0]);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    })
+    .map(([mealKey, categories]) => ({
+      meal: mealKey,
+      label: menu[mealKey]?.label || mealKey,
+      categories,
+    }));
 
   return res.json({
     date,

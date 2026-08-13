@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Stack, Typography, Card, CardContent, TextField, MenuItem, Alert,
   CircularProgress, Accordion, AccordionSummary, AccordionDetails, Chip,
@@ -6,7 +7,9 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
+import SettingsIcon from '@mui/icons-material/Settings';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import ChildDayCard from './ChildDayCard';
 
 /**
@@ -29,6 +32,9 @@ import ChildDayCard from './ChildDayCard';
  * working the same room overwrite a value rather than each other's day.
  */
 export default function NurseryBoard() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const mayEditSettings = ['system_admin', 'branch_manager'].includes(user?.role);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -110,7 +116,14 @@ export default function NurseryBoard() {
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
-      <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>לוח תינוקייה</Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={700}>לוח תינוקייה</Typography>
+        {mayEditSettings && (
+          <Button size="small" startIcon={<SettingsIcon />} onClick={() => navigate('/nursery/settings')}>
+            הגדרות
+          </Button>
+        )}
+      </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
         <TextField
