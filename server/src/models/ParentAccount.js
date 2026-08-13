@@ -65,6 +65,25 @@ const parentAccountSchema = new mongoose.Schema({
   otp_sends_in_window: { type: Number, default: 0 },
   otp_window_started_at: { type: Date, default: null },
 
+  // --- Changing the phone ---
+  //
+  // Its own code, with its own expiry and its own counters, deliberately not
+  // the fields above. They are the same shape and they cannot be the same
+  // storage: a parent asking to change their number while a password reset is
+  // in flight would overwrite the reset code with one sent to a different
+  // phone. And this code must go to the NEW number — proving the parent holds
+  // it — which is the entire security of the operation, since the number is
+  // where every future code will be sent.
+  phone_change: {
+    new_phone: { type: String, default: null },
+    otp_hash: { type: String, default: null },
+    otp_expires_at: { type: Date, default: null },
+    otp_attempts: { type: Number, default: 0 },
+    otp_sent_at: { type: Date, default: null },
+    otp_sends_in_window: { type: Number, default: 0 },
+    otp_window_started_at: { type: Date, default: null },
+  },
+
   // Set by staff. The only thing that closes an account: no date, no
   // automatic expiry, so the gap between one school year and the next never
   // locks a parent out mid-enrolment.

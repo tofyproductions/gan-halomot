@@ -27,8 +27,15 @@ router.get('/me', auth.me);
 // Every one of these resolves the parent's children afresh and refuses an id
 // that is not among them — see parentPortal.controller.
 const portal = require('../controllers/parentPortal.controller');
+router.get('/editable-fields', portal.editableFields);
 router.get('/children/:childId', portal.childDetails);
+router.patch('/children/:childId', portal.updateChild);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
+
+// Changing the phone is its own two-step flow, because the code has to go to
+// the new number — see parentPortal.controller.
+router.post('/phone/start', portal.startPhoneChange);
+router.post('/phone/confirm', portal.confirmPhoneChange);
 
 module.exports = router;

@@ -4,7 +4,10 @@ import {
   Divider, Button, Box,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
+import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
+import EditableCard from './EditableCard';
+import PhoneChangeDialog from './PhoneChangeDialog';
 
 /**
  * One child: who the gan has them down as, and the contracts behind it.
@@ -42,6 +45,24 @@ export default function ChildDetails({ childId }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
+  const [phoneOpen, setPhoneOpen] = useState(false);
+
+  /**
+   * Send a correction and re-read the child.
+   *
+   * Re-reading rather than patching the local copy: the server decides what
+   * actually changed (it ignores no-op edits), and a screen that showed a
+   * value the database rejected would be lying about a record the gan acts on.
+   */
+  const save = async (changed) => {
+    try {
+      await parentApi.patch(`/children/${childId}`, changed);
+      const fresh = await parentApi.get(`/children/${childId}`);
+      setData(fresh.data);
+    } catch (err) {
+      throw new Error(parentApiError(err, 'השמירה נכשלה'));
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -98,6 +119,16 @@ export default function ChildDetails({ childId }) {
     <Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
 
+      <PhoneChangeDialog
+        open={phoneOpen}
+        currentPhone={data.contact.phone}
+        onClose={() => setPhoneOpen(false)}
+        onChanged={async () => {
+          const fresh = await parentApi.get(`/children/${childId}`);
+          setData(fresh.data);
+        }}
+      />
+
       <Card>
         <CardContent>
           <Typography variant="h6" fontWeight={700}>{data.child.name}</Typography>
@@ -125,30 +156,40 @@ export default function ChildDetails({ childId }) {
 
       <Card>
         <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>פרטי קשר</Typography>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>ההורה</Typography>
           <Stack spacing={1}>
-            <Field label="שם ההורה" value={data.contact.parent_name} />
+            <Field label="שם" value={data.contact.parent_name} />
             <Field label="טלפון" value={data.contact.phone} />
-            <Field label="כתובת" value={data.contact.address} />
-            <Field label="איש קשר לחירום" value={data.contact.emergency_contact} />
-            <Field label="טלפון לחירום" value={data.contact.emergency_phone} />
             {data.second_parent && <Field label="הורה נוסף" value={data.second_parent} />}
           </Stack>
+          <Button size="small" startIcon={<PhoneIphoneIcon />} sx={{ mt: 2 }}
+            onClick={() => setPhoneOpen(true)}>
+            שינוי מספר טלפון
+          </Button>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1.5 }}>בריאות</Typography>
-          <Stack spacing={1}>
-            <Field label="אלרגיות" value={data.health.allergies} empty="לא רשמו אלרגיות" />
-            <Field label="הערות רפואיות" value={data.health.medical_alerts} empty="אין" />
-          </Stack>
-          <Alert severity="info" sx={{ mt: 2 }}>
-            משהו כאן לא נכון? יש לפנות לגן לעדכון.
-          </Alert>
-        </CardContent>
-      </Card>
+      <EditableCard
+        title="פרטי קשר"
+        fields={[
+          { name: 'address', label: 'כתובת' },
+          { name: 'emergency_contact', label: 'איש קשר לחירום' },
+          { name: 'emergency_phone', label: 'טלפון לחירום', numeric: true },
+        ]}
+        values={data.contact}
+        onSave={save}
+      />
+
+      <EditableCard
+        title="בריאות"
+        fields={[
+          { name: 'allergies', label: 'אלרגיות', multiline: true, empty: 'לא רשמו אלרגיות' },
+          { name: 'medical_alerts', label: 'הערות רפואיות', multiline: true, empty: 'אין' },
+        ]}
+        values={data.health}
+        warning={'הצוות והמטבח עובדים לפי מה שרשום כאן. מחיקת אלרגיה נכנסת לתוקף מיד.'}
+        onSave={save}
+      />
 
       <Card>
         <CardContent>

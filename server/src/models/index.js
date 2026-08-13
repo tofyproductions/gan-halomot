@@ -64,6 +64,7 @@ const TmtApproval = require('./TmtApproval');
 const EnrollmentImport = require('./EnrollmentImport');
 const ScannedAttachment = require('./ScannedAttachment');
 const ParentAccount = require('./ParentAccount');
+const ParentPortalChange = require('./ParentPortalChange');
 
 module.exports = {
   User,
@@ -131,4 +132,5 @@ module.exports = {
   EnrollmentImport,
   ScannedAttachment,
   ParentAccount,
+  ParentPortalChange,
 };

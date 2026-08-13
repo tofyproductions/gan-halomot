@@ -1,5 +1,8 @@
-const { ParentAccount, Contract, Registration } = require('../models');
-const { findParent, contactFromChild } = require('../services/parentDirectory.service');
+const { ParentAccount, Contract, Registration, Child } = require('../models');
+const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
+const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
+const { normalizePhone, sendSms } = require('../services/sms.service');
+const otp = require('../services/parentOtp.service');
 
 /**
  * Everything a parent may look at, and the one rule that keeps it theirs.
@@ -232,4 +235,165 @@ async function contractFile(req, res) {
   return res.send(buf);
 }
 
-module.exports = { childDetails, childContracts, contractFile };
+/**
+ * Apply a parent's corrections to their child's record.
+ *
+ * Written to the CURRENT year's row only. The older rows are what the gan
+ * agreed to at the time; rewriting them would quietly restate history, and
+ * nobody reads them anyway — the staff work from this year.
+ *
+ * The record of the change is written FIRST. If that write fails the edit does
+ * not happen, which is the correct order for the one field where the record is
+ * the safety mechanism rather than an audit trail.
+ */
+async function updateChild(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const { account, child } = own;
+  const { updates, byCategory, errors } = diffEditable(req.body, child);
+
+  if (errors.length) return res.status(400).json({ error: errors.join('. ') });
+  if (Object.keys(updates).length === 0) {
+    return res.json({ ok: true, changed: 0 });
+  }
+
+  for (const [category, changes] of Object.entries(byCategory)) {
+    await recordChange({ account, child, category, changes });
+  }
+  await Child.updateOne({ _id: child._id }, { $set: updates });
+
+  return res.json({ ok: true, changed: Object.keys(updates).length });
+}
+
+/**
+ * Step 1 of changing the phone: send a code to the NEW number.
+ *
+ * Sending it to the old one would prove nothing — whoever is asking is
+ * already inside the session. Sending it to the new one proves they hold the
+ * phone they are about to redirect every future login code to, which is the
+ * only thing that makes this safe to expose at all.
+ *
+ * Nothing is written to the enrolment records here. Until the code comes back
+ * the new number is a claim.
+ */
+async function startPhoneChange(req, res) {
+  const account = await ParentAccount.findById(req.parent.pid);
+  if (!account || !account.is_active) {
+    return res.status(403).json({ error: 'החשבון סגור. לבירור יש לפנות לגן.' });
+  }
+
+  const next = normalizePhone(req.body?.phone);
+  if (!next) return res.status(400).json({ error: 'יש להזין מספר טלפון נייד תקין' });
+  if (next === normalizePhone(account.phone)) {
+    return res.status(400).json({ error: 'זה המספר הרשום כבר' });
+  }
+
+  account.phone_change = account.phone_change || {};
+  const gate = otp.canSend(account.phone_change);
+  if (!gate.ok) {
+    return res.status(429).json({
+      error: 'נשלח כבר קוד. יש להמתין לפני שליחה נוספת.',
+      retry_after_seconds: gate.retryAfterSeconds,
+    });
+  }
+
+  account.phone_change.new_phone = next;
+  const code = otp.issueCode(account.phone_change);
+
+  try {
+    await sendSms({
+      to: next,
+      text: `קוד לאישור מספר הטלפון החדש שלך ב״גן החלומות״: ${code}`,
+    });
+  } catch (err) {
+    console.error('[parent-portal] phone-change SMS failed:', err.message);
+    return res.status(502).json({ error: 'שליחת הקוד נכשלה. נסו שוב בעוד רגע.' });
+  }
+
+  account.markModified('phone_change');
+  await account.save();
+  return res.json({ ok: true });
+}
+
+/**
+ * Step 2: the code came back, so the number is theirs.
+ *
+ * The phone is written wherever this parent's number lives — every child row
+ * and registration where this ID is the parent — because that is where
+ * parentDirectory reads it from when the next login code is sent. Writing it
+ * only onto the account would leave the account saying one thing and the
+ * records another, and the records would win.
+ */
+async function confirmPhoneChange(req, res) {
+  const account = await ParentAccount.findById(req.parent.pid);
+  if (!account || !account.is_active) {
+    return res.status(403).json({ error: 'החשבון סגור. לבירור יש לפנות לגן.' });
+  }
+
+  const pending = account.phone_change || {};
+  if (!pending.new_phone) {
+    return res.status(400).json({ error: 'לא התחלת שינוי מספר. יש להתחיל מחדש.' });
+  }
+
+  const result = otp.verifyCode(pending, req.body?.code);
+  account.markModified('phone_change');
+
+  if (!result.ok) {
+    await account.save();
+    const messages = {
+      no_code: 'לא נשלח קוד. יש להתחיל מחדש.',
+      expired: 'הקוד פג תוקף. יש לבקש קוד חדש.',
+      too_many_attempts: 'יותר מדי ניסיונות. יש לבקש קוד חדש.',
+      wrong: 'הקוד שגוי.',
+    };
+    return res.status(400).json({ error: messages[result.reason] || 'הקוד שגוי.', code: result.reason });
+  }
+
+  const parent = await findParent(account.id_number);
+  if (!parent) {
+    return res.status(403).json({ error: 'החשבון סגור. לבירור יש לפנות לגן.' });
+  }
+
+  const before = normalizePhone(account.phone) || '';
+  const next = pending.new_phone;
+  const id = normalizeIdNumber(account.id_number);
+
+  // Every place this parent's number is stored. Which slot they occupy differs
+  // per child — see parentDirectory.contactFromChild for why all three exist.
+  for (const child of parent.children) {
+    const set = {};
+    if (normalizeIdNumber(child.parent_id_number) === id) set.phone = next;
+    if (normalizeIdNumber(child.parent2_id_number) === id) set.parent2_phone = next;
+    if (Object.keys(set).length) await Child.updateOne({ _id: child._id }, { $set: set });
+
+    const reg = child.registration_id;
+    if (reg && typeof reg === 'object' && normalizeIdNumber(reg.parent_id_number) === id) {
+      await Registration.updateOne({ _id: reg._id }, { $set: { parent_phone: next } });
+    }
+  }
+
+  await recordChange({
+    account,
+    child: parent.groups[0]?.current || null,
+    category: 'phone',
+    changes: [{ field: 'phone', label: 'טלפון', before: before || null, after: next }],
+  });
+
+  account.phone = next;
+  account.phone_change = { new_phone: null };
+  account.markModified('phone_change');
+  await account.save();
+
+  return res.json({ ok: true, phone: next });
+}
+
+/** Which fields a parent may edit, so the screen is built from the same list. */
+function editableFields(_req, res) {
+  return res.json({ editable: EDITABLE });
+}
+
+module.exports = {
+  childDetails, childContracts, contractFile,
+  updateChild, startPhoneChange, confirmPhoneChange, editableFields,
+};
