@@ -63,6 +63,9 @@ router.use('/collections', require('./collections.routes'));
 router.use('/archives', require('./archive.routes'));
 router.use('/contacts', require('./contacts.routes'));
 router.use('/classrooms', require('./classroom.routes'));
+// לוח עדכונים יומי — the תינוקייה's day: meals, bottles, naps, what to bring
+// tomorrow. Infant rooms only; the older rooms have no use for it.
+router.use('/nursery', require('./nursery.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/activities', require('./activity.routes'));

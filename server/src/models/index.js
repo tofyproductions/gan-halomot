@@ -65,6 +65,8 @@ const EnrollmentImport = require('./EnrollmentImport');
 const ScannedAttachment = require('./ScannedAttachment');
 const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
+const DailyLog = require('./DailyLog');
+const DailyMenu = require('./DailyMenu');
 
 module.exports = {
   User,
@@ -133,4 +135,6 @@ module.exports = {
   ScannedAttachment,
   ParentAccount,
   ParentPortalChange,
+  DailyLog,
+  DailyMenu,
 };
