@@ -63,6 +63,17 @@ async function start(req, res) {
     return res.status(403).json({ error: 'החשבון סגור. לבירור יש לפנות לגן.' });
   }
 
+  // A second parent nominated through the portal by the other parent waits for
+  // the gan. Said plainly, because the alternative — a generic failure — sends
+  // someone who has been told "I added you" into a loop of retrying a code
+  // that will never be sent.
+  if (account && !account.access_approved) {
+    return res.status(403).json({
+      error: 'הגישה שלך ממתינה לאישור הגן. נעדכן אותך כשהיא תיפתח.',
+      code: 'AWAITING_APPROVAL',
+    });
+  }
+
   // The phone is taken from the enrolment record every time, never from the
   // account — so a number corrected by the office takes effect immediately,
   // and a stale one on the account can never outlive the correction.

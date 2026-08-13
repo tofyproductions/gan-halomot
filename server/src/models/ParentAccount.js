@@ -84,6 +84,27 @@ const parentAccountSchema = new mongoose.Schema({
     otp_window_started_at: { type: Date, default: null },
   },
 
+  // --- May this person activate at all ---
+  //
+  // True for everybody the gan itself entered: a parent on a registration, or
+  // a second parent typed in by the office, has already been vouched for by
+  // somebody who works here.
+  //
+  // False only for a second parent added by the OTHER parent through the
+  // portal. That is a person nominating a second person to see a child's
+  // records, and the gan gets to decide — otherwise the portal would let one
+  // parent hand access to anyone whose ID number they know, and a separated
+  // family is exactly where that goes wrong.
+  //
+  // Separate from is_active because they answer different questions and are
+  // set by different people: this one is "was this claim ever accepted", and
+  // is_active is "is the account open now".
+  access_approved: { type: Boolean, default: true },
+  invited_by: { type: mongoose.Schema.Types.ObjectId, ref: 'ParentAccount', default: null },
+  invited_at: { type: Date, default: null },
+  access_approved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  access_approved_at: { type: Date, default: null },
+
   // Set by staff. The only thing that closes an account: no date, no
   // automatic expiry, so the gap between one school year and the next never
   // locks a parent out mid-enrolment.

@@ -39,6 +39,11 @@ const parentPortalChangeSchema = new mongoose.Schema({
   child_name: { type: String, default: '' },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null, index: true },
 
+  // For a second_parent row: the account waiting on this decision. Held as an
+  // id rather than parsed back out of the `after` text, which is a sentence
+  // written for a human to read and a terrible thing to act on.
+  related_account_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ParentAccount', default: null },
+
   category: {
     type: String,
     enum: ['contact', 'health', 'phone', 'second_parent'],

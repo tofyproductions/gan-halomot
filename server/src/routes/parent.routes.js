@@ -30,6 +30,9 @@ const portal = require('../controllers/parentPortal.controller');
 router.get('/editable-fields', portal.editableFields);
 router.get('/children/:childId', portal.childDetails);
 router.patch('/children/:childId', portal.updateChild);
+// Adding the child's other parent. Only ever adds, and grants nothing — the
+// account it creates waits for the gan (see parentPortal.controller).
+router.post('/children/:childId/second-parent', portal.addSecondParent);
 // The תינוקייה's day. Read by any parent of an infant; written only for the
 // four fields describing the morning at home, and only for today.
 router.get('/children/:childId/day', portal.childDay);

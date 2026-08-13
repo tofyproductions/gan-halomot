@@ -535,6 +535,100 @@ async function confirmPhoneChange(req, res) {
   return res.json({ ok: true, phone: next });
 }
 
+/**
+ * Add the child's other parent.
+ *
+ * A registration carries one parent — whoever filled the form — so most
+ * children in this system know of only one, and the second is a person the
+ * gan has a phone number for on paper and nothing for in the database. This
+ * lets the parent who is already here fill that in.
+ *
+ * Two rules make it safe, and both are refusals rather than warnings.
+ *
+ * It only ADDS. A second parent already on the record cannot be edited or
+ * replaced from here: changing their phone would redirect the one-time codes
+ * for somebody else's account to a number this parent chose, which is the
+ * takeover the whole login design exists to prevent. Corrections go through
+ * the office.
+ *
+ * And it grants nothing. The details land immediately — the gan needs a second
+ * contact for a child today, not after a queue is read — but the account is
+ * created unapproved, so nobody can see a child's records until the staff say
+ * so. One parent naming a second person is not the same as the gan agreeing to
+ * it, and a separated family is exactly where the difference matters.
+ */
+async function addSecondParent(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const { account, parent, group } = own;
+
+  const name = String(req.body?.name ?? '').trim().slice(0, 80);
+  const idNumber = normalizeIdNumber(req.body?.id_number);
+  const phone = normalizePhone(req.body?.phone);
+
+  if (!name) return res.status(400).json({ error: 'יש להזין שם' });
+  if (idNumber.length < 8 || idNumber.length > 9) {
+    return res.status(400).json({ error: 'מספר תעודת זהות אינו תקין' });
+  }
+  if (!phone) return res.status(400).json({ error: 'יש להזין מספר טלפון נייד תקין' });
+  if (idNumber === normalizeIdNumber(account.id_number)) {
+    return res.status(400).json({ error: 'זו תעודת הזהות שלך' });
+  }
+
+  // Already recorded — on any of the child's years, since they are one family
+  // across all of them.
+  const existing = group.years.find(y => normalizeIdNumber(y.parent2_id_number)
+    || (normalizeIdNumber(y.parent_id_number) && normalizeIdNumber(y.parent_id_number) !== normalizeIdNumber(account.id_number)));
+  if (existing) {
+    return res.status(409).json({
+      error: 'רשום כבר הורה נוסף לילד זה. לשינוי יש לפנות לגן.',
+      code: 'ALREADY_SET',
+    });
+  }
+
+  // Written onto every year of this child, so the record agrees with itself
+  // and a login resolves the same family whichever year it lands on.
+  await Child.updateMany(
+    { _id: { $in: group.years.map(y => y._id) } },
+    { $set: { parent2_name: name, parent2_id_number: idNumber, parent2_phone: phone } }
+  );
+
+  // Created unapproved — unless this person already has an account of their
+  // own, in which case they are an existing parent here and downgrading them
+  // would lock them out of a child they already have.
+  let invited = await ParentAccount.findOne({ id_number: idNumber });
+  if (!invited) {
+    invited = await ParentAccount.create({
+      id_number: idNumber,
+      full_name: name,
+      phone,
+      access_approved: false,
+      invited_by: account._id,
+      invited_at: new Date(),
+    });
+  }
+
+  await recordChange({
+    account,
+    child: group.current,
+    category: 'second_parent',
+    relatedAccountId: invited._id,
+    changes: [{
+      field: 'parent2',
+      label: 'הורה נוסף',
+      before: null,
+      after: `${name} · ${idNumber} · ${phone}`,
+    }],
+  });
+
+  return res.json({
+    ok: true,
+    second_parent: { name, phone },
+    awaiting_approval: !invited.access_approved,
+  });
+}
+
 /** Which fields a parent may edit, so the screen is built from the same list. */
 function editableFields(_req, res) {
   return res.json({ editable: EDITABLE });
@@ -543,5 +637,5 @@ function editableFields(_req, res) {
 module.exports = {
   childDetails, childContracts, contractFile,
   updateChild, startPhoneChange, confirmPhoneChange, editableFields,
-  childDay, updateChildDay,
+  childDay, updateChildDay, addSecondParent,
 };

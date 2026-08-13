@@ -19,5 +19,8 @@ const allow = requireTab('parent_changes', 'system_admin', 'branch_manager', 'ac
 router.get('/', allow, ctrl.list);
 router.get('/unseen-count', allow, ctrl.unseenCount);
 router.post('/:id/seen', allow, ctrl.markSeen);
+// Opening the door for a second parent the other parent nominated. A decision,
+// unlike the rest of this screen — see the controller.
+router.post('/:id/approve-access', allow, ctrl.approveAccess);
 
 module.exports = router;

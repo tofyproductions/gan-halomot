@@ -5,10 +5,12 @@ import {
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import EditableCard from './EditableCard';
 import NurseryDay from './NurseryDay';
 import PhoneChangeDialog from './PhoneChangeDialog';
+import SecondParentDialog from './SecondParentDialog';
 
 /**
  * One child: who the gan has them down as, and the contracts behind it.
@@ -47,6 +49,7 @@ export default function ChildDetails({ childId }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [phoneOpen, setPhoneOpen] = useState(false);
+  const [secondOpen, setSecondOpen] = useState(false);
 
   /**
    * Send a correction and re-read the child.
@@ -130,6 +133,17 @@ export default function ChildDetails({ childId }) {
         }}
       />
 
+      <SecondParentDialog
+        open={secondOpen}
+        childId={childId}
+        childName={data.child.name}
+        onClose={() => setSecondOpen(false)}
+        onAdded={async () => {
+          const fresh = await parentApi.get(`/children/${childId}`);
+          setData(fresh.data);
+        }}
+      />
+
       {/* The day comes first for an infant's parent: it is what they open the
           app for, several times a day. The contract and the address are things
           they look at once a year. */}
@@ -168,10 +182,22 @@ export default function ChildDetails({ childId }) {
             <Field label="טלפון" value={data.contact.phone} />
             {data.second_parent && <Field label="הורה נוסף" value={data.second_parent} />}
           </Stack>
-          <Button size="small" startIcon={<PhoneIphoneIcon />} sx={{ mt: 2 }}
-            onClick={() => setPhoneOpen(true)}>
-            שינוי מספר טלפון
-          </Button>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+            <Button size="small" startIcon={<PhoneIphoneIcon />}
+              onClick={() => setPhoneOpen(true)}>
+              שינוי מספר טלפון
+            </Button>
+            {/* Offered only when the records know of nobody. Adding is all a
+                parent may do — correcting somebody else's details, and with
+                them where that person's login codes are sent, goes through the
+                gan. */}
+            {!data.second_parent && (
+              <Button size="small" startIcon={<PersonAddAlt1Icon />}
+                onClick={() => setSecondOpen(true)}>
+                הוספת הורה נוסף
+              </Button>
+            )}
+          </Stack>
         </CardContent>
       </Card>
 

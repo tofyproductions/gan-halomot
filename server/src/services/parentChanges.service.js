@@ -91,7 +91,7 @@ function diffEditable(body, current) {
  * Write the record of a change. Called before the change is applied, so a
  * write that fails here does not become a silent edit.
  */
-async function recordChange({ account, child, category, changes }) {
+async function recordChange({ account, child, category, changes, relatedAccountId }) {
   if (!changes.length) return null;
   return ParentPortalChange.create({
     parent_account_id: account._id,
@@ -103,6 +103,7 @@ async function recordChange({ account, child, category, changes }) {
     category,
     severity: SEVERITY[category] || 'normal',
     changes,
+    related_account_id: relatedAccountId || null,
   });
 }
 

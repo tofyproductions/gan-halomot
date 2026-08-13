@@ -1,4 +1,4 @@
-const { ParentPortalChange } = require('../models');
+const { ParentPortalChange, ParentAccount } = require('../models');
 
 /**
  * What parents changed about their own children, for the staff to read.
@@ -58,6 +58,14 @@ async function list(req, res) {
 
   const unseen = await ParentPortalChange.countDocuments({ ...query, seen_at: null });
 
+  // Which of the nominated accounts are still waiting. Asked once for the page
+  // rather than per row.
+  const relatedIds = rows.map(r => r.related_account_id).filter(Boolean);
+  const stillShut = relatedIds.length
+    ? await ParentAccount.find({ _id: { $in: relatedIds }, access_approved: false }).select('_id').lean()
+    : [];
+  const pendingAccess = new Set(stillShut.map(a => String(a._id)));
+
   return res.json({
     unseen,
     changes: rows.map(r => ({
@@ -70,6 +78,11 @@ async function list(req, res) {
       created_at: r.created_at,
       seen_at: r.seen_at,
       seen_by_name: r.seen_by_name || '',
+      // Only a second_parent row carries a decision, and only while the
+      // account it points at is still shut.
+      awaiting_access: r.category === 'second_parent'
+        && !!r.related_account_id
+        && pendingAccess.has(String(r.related_account_id)),
     })),
   });
 }
@@ -108,4 +121,55 @@ async function markSeen(req, res) {
   return res.json({ ok: true, seen_at: row.seen_at, seen_by_name: row.seen_by_name });
 }
 
-module.exports = { list, unseenCount, markSeen };
+/**
+ * Open the door for a second parent the other parent nominated.
+ *
+ * The details have been on the child since the moment they were typed — the
+ * gan needs a second contact for a child today, not once a queue is read. What
+ * waits here is only ACCESS: the right to open the portal and read the
+ * contract, the payments and the day.
+ *
+ * Which is why it is a decision and not an acknowledgement. One parent naming
+ * a second person is a claim about a family, and the gan is the one that knows
+ * whether it holds.
+ *
+ * Refusing is not a button. An account left unapproved simply stays shut, and
+ * a change that turns out to be wrong is a conversation with the family and a
+ * correction in the office — not a rejection recorded against a parent by
+ * whoever happened to open this screen.
+ */
+async function approveAccess(req, res) {
+  const row = await ParentPortalChange.findById(req.params.id);
+  if (!row) return res.status(404).json({ error: 'לא נמצא' });
+  if (row.category !== 'second_parent' || !row.related_account_id) {
+    return res.status(400).json({ error: 'לשורה זו אין גישה לאשר' });
+  }
+
+  const scope = branchScope(req.user);
+  if (scope && row.branch_id && !scope.includes(String(row.branch_id))) {
+    return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+  }
+
+  const account = await ParentAccount.findById(row.related_account_id);
+  if (!account) return res.status(404).json({ error: 'החשבון לא נמצא' });
+
+  if (!account.access_approved) {
+    account.access_approved = true;
+    account.access_approved_by = req.user.id;
+    account.access_approved_at = new Date();
+    await account.save();
+  }
+
+  // Approving is also reading it. Asking for two taps on one decision only
+  // teaches people to tap twice.
+  if (!row.seen_at) {
+    row.seen_at = new Date();
+    row.seen_by = req.user.id;
+    row.seen_by_name = req.user.full_name || '';
+    await row.save();
+  }
+
+  return res.json({ ok: true, access_approved: true, seen_at: row.seen_at });
+}
+
+module.exports = { list, unseenCount, markSeen, approveAccess };

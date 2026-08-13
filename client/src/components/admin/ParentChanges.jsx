@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import DoneIcon from '@mui/icons-material/Done';
+import LockOpenIcon from '@mui/icons-material/LockOpen';
 import api from '../../api/client';
 
 /**
@@ -70,6 +71,18 @@ export default function ParentChanges() {
 
   useEffect(() => { load('unseen'); /* eslint-disable-next-line */ }, []);
 
+  const approveAccess = async (id) => {
+    setBusy(id);
+    try {
+      await api.post(`/parent-changes/${id}/approve-access`);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.error || 'האישור נכשל');
+    } finally {
+      setBusy('');
+    }
+  };
+
   const markSeen = async (id) => {
     setBusy(id);
     try {
@@ -134,7 +147,19 @@ export default function ParentChanges() {
                       {row.parent_name || 'הורה'} · {CATEGORY_LABEL[row.category] || row.category} · {when(row.created_at)}
                     </Typography>
                   </Box>
-                  {!row.seen_at && (
+                  {/* A second parent waiting on a decision gets the decision
+                      button instead of the acknowledgement one. Approving is
+                      also reading it, so offering both would be asking for two
+                      taps on one act. */}
+                  {row.awaiting_access ? (
+                    <Button
+                      size="small" variant="contained" startIcon={<LockOpenIcon />}
+                      disabled={busy === row.id}
+                      onClick={() => approveAccess(row.id)}
+                    >
+                      {busy === row.id ? '…' : 'אישור גישה'}
+                    </Button>
+                  ) : !row.seen_at && (
                     <Button
                       size="small"
                       variant={critical ? 'contained' : 'outlined'}
@@ -147,6 +172,13 @@ export default function ParentChanges() {
                     </Button>
                   )}
                 </Stack>
+
+                {row.awaiting_access && (
+                  <Alert severity="warning" sx={{ mb: 1.5 }}>
+                    הורה זה ממתין לאישורכם כדי להיכנס לאפליקציה ולראות את נתוני הילד.
+                    הפרטים כבר נשמרו ומשמשים כאיש קשר.
+                  </Alert>
+                )}
 
                 {critical && !row.seen_at && (
                   <Alert severity="error" sx={{ mb: 1.5 }}>
