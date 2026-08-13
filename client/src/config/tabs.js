@@ -54,6 +54,10 @@ export const TAB_GROUPS = [
       // room — a teacher needs it more than anyone, and a board filled in by
       // management is a board filled in by somebody who was not there.
       { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      // Parents correct their own details and the change is live at once; this
+      // is where the gan finds out. A class leader is on the list because an
+      // allergy is their business before it is management's.
+      { id: 'parent_changes', label: 'עדכונים מהורים', path: '/parent-changes', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },

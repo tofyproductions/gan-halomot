@@ -50,6 +50,10 @@ const parentPortalChangeSchema = new mongoose.Schema({
   // Acknowledgement, not approval: the change is already live. This only
   // records that somebody at the gan has seen it.
   seen_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  // Snapshot alongside the id, like the parent and child names above: the list
+  // is read long after the fact and "מי ראה את זה" should not depend on the
+  // employee still existing.
+  seen_by_name: { type: String, default: '' },
   seen_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
