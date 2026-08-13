@@ -1,5 +1,7 @@
-const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu } = require('../models');
+const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo } = require('../models');
 const nursery = require('../services/nursery.service');
+const storage = require('../services/storage.service');
+const photoService = require('../services/photo.service');
 const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
 const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
 const { normalizePhone, sendSms } = require('../services/sms.service');
@@ -651,6 +653,129 @@ async function addSecondParent(req, res) {
   });
 }
 
+/**
+ * The photographs a parent may see.
+ *
+ * Two streams, and the difference between them is the whole design.
+ *
+ * `mine` — every photograph the staff tagged this child in, plus whatever the
+ * parent uploaded themselves. This is the one they came for.
+ *
+ * `classroom` — the week the room had. The gan chose a class gallery, so a
+ * parent sees what happened rather than only the frames their own child
+ * happens to be in. Staff photographs only: a photograph another parent
+ * uploaded is that family's, and this system cannot know who else is in it.
+ *
+ * `source: 'staff'` on the classroom query is therefore not a filter, it is
+ * the rule. Written as part of the query rather than applied afterwards,
+ * because a photograph that reaches the wrong family cannot be recalled.
+ */
+const CLASSROOM_WINDOW_DAYS = 7;
+const MINE_LIMIT = 60;
+
+async function childPhotos(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+  if (!storage.isConfigured()) {
+    return res.json({ mine: [], classroom: [], storage_ready: false });
+  }
+
+  const { group, child } = own;
+  const childIds = group.years.map(y => y._id);
+  const classroomId = child.classroom_id?._id || child.classroom_id || null;
+
+  const since = new Date();
+  since.setDate(since.getDate() - CLASSROOM_WINDOW_DAYS);
+  const sinceKey = nursery.todayKey(since);
+
+  const [mine, classroom] = await Promise.all([
+    // Across every year of this child, so a photograph from last term does not
+    // vanish the day the new year's row is created.
+    Photo.find({
+      $or: [
+        { child_ids: { $in: childIds } },
+        { source: 'parent', uploaded_by_parent: own.account._id, child_ids: { $in: childIds } },
+      ],
+    }).sort({ date: -1, created_at: -1 }).limit(MINE_LIMIT).lean(),
+
+    classroomId
+      ? Photo.find({ classroom_id: classroomId, source: 'staff', date: { $gte: sinceKey } })
+        .sort({ date: -1, created_at: -1 }).limit(60).lean()
+      : [],
+  ]);
+
+  const shape = (rows) => rows.map(r => ({
+    id: r._id,
+    date: r.date,
+    caption: r.caption || '',
+    source: r.source,
+    width: r.width,
+    height: r.height,
+    url: r.url,
+    thumb_url: r.thumb_url,
+  }));
+
+  return res.json({
+    storage_ready: true,
+    window_days: CLASSROOM_WINDOW_DAYS,
+    mine: shape(await photoService.withUrls(mine)),
+    classroom: shape(await photoService.withUrls(classroom)),
+  });
+}
+
+/**
+ * A parent adds a photograph of their own child.
+ *
+ * Tagged to their child and to nobody else, and visible to them and the staff
+ * alone. The system cannot know who is in a photograph a parent sends — a
+ * birthday picture carries four other children whose families agreed to
+ * nothing — so it is never shown to another family, whatever it turns out to
+ * contain. Its purpose is choosing a photograph for a gift, and that needs no
+ * audience.
+ */
+async function uploadChildPhoto(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+  if (!storage.isConfigured()) {
+    return res.status(503).json({ error: 'אחסון התמונות אינו זמין כרגע.' });
+  }
+
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ error: 'לא נבחרה תמונה' });
+
+  const { child, account } = own;
+  const date = nursery.todayKey();
+  const prefix = `parent/${account._id}/${date}`;
+
+  const saved = [];
+  const failed = [];
+  for (const file of files) {
+    if (!photoService.isAcceptable(file)) {
+      failed.push({ name: file.originalname, error: 'קובץ שאינו תמונה, או גדול מדי' });
+      continue;
+    }
+    try {
+      const stored = await photoService.storeUpload({ buffer: file.buffer, prefix });
+      const row = await Photo.create({
+        ...stored,
+        source: 'parent',
+        branch_id: child.classroom_id?.branch_id || null,
+        classroom_id: child.classroom_id?._id || child.classroom_id || null,
+        child_ids: [child._id],
+        date,
+        uploaded_by_parent: account._id,
+        uploaded_by_name: account.full_name || '',
+      });
+      saved.push(row);
+    } catch (err) {
+      console.error('[parent-photos] upload failed:', err.message);
+      failed.push({ name: file.originalname, error: 'לא הצלחנו לעבד את הקובץ' });
+    }
+  }
+
+  return res.json({ ok: true, saved: saved.length, failed });
+}
+
 /** Which fields a parent may edit, so the screen is built from the same list. */
 function editableFields(_req, res) {
   return res.json({ editable: EDITABLE });
@@ -660,4 +785,5 @@ module.exports = {
   childDetails, childContracts, contractFile,
   updateChild, startPhoneChange, confirmPhoneChange, editableFields,
   childDay, updateChildDay, addSecondParent,
+  childPhotos, uploadChildPhoto,
 };

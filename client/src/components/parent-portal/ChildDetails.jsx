@@ -9,9 +9,11 @@ import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import TodayIcon from '@mui/icons-material/Today';
 import BadgeIcon from '@mui/icons-material/Badge';
 import FolderIcon from '@mui/icons-material/Folder';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import EditableCard from './EditableCard';
 import NurseryDay from './NurseryDay';
+import PhotoGallery from './PhotoGallery';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
@@ -120,6 +122,10 @@ export default function ChildDetails({ childId }) {
     if (!data) return [];
     const list = [];
     if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon fontSize="small" /> });
+    // Second, not last: photographs are the other thing a parent opens the app
+    // for, and burying them behind the paperwork would be the same mistake the
+    // single scroll made.
+    list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon fontSize="small" /> });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon fontSize="small" /> });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon fontSize="small" /> });
     return list;
@@ -207,6 +213,10 @@ export default function ChildDetails({ childId }) {
       </Card>
 
       {active === 'day' && <NurseryDay childId={childId} />}
+
+      {active === 'photos' && (
+        <PhotoGallery childId={childId} childName={data.child.name} />
+      )}
 
       {active === 'details' && (
         <Stack spacing={2}>

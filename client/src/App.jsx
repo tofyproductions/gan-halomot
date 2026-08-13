@@ -3,6 +3,7 @@ import Layout from './components/layout/Layout';
 import LoginPage from './components/layout/LoginPage';
 import NurseryBoard from './components/nursery/NurseryBoard';
 import NurserySettings from './components/nursery/NurserySettings';
+import PhotosManager from './components/nursery/PhotosManager';
 import ParentChanges from './components/admin/ParentChanges';
 import ParentLogin from './components/parent-portal/ParentLogin';
 import ParentPortal from './components/parent-portal/ParentPortal';
@@ -152,6 +153,7 @@ function AppRoutes() {
         {/* לוח תינוקייה — infant rooms only; the controller narrows it again
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />
+        <Route path="photos" element={<PhotosManager />} />
         {/* Editing the lists reshapes the board for every branch, so it stays
             with the people who answer for that. The server enforces the same. */}
         <Route path="nursery/settings" element={

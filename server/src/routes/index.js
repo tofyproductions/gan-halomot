@@ -66,6 +66,9 @@ router.use('/classrooms', require('./classroom.routes'));
 // לוח עדכונים יומי — the תינוקייה's day: meals, bottles, naps, what to bring
 // tomorrow. Infant rooms only; the older rooms have no use for it.
 router.use('/nursery', require('./nursery.routes'));
+// The gan's photographs. Bytes in object storage, permission in the row —
+// a staff photo belongs to the classroom, a parent's belongs to the family.
+router.use('/photos', require('./photos.routes'));
 // עדכונים מהורים — what parents corrected about their own children. An
 // acknowledgement queue, not an approval one: the changes are already live.
 router.use('/parent-changes', require('./parentChanges.routes'));

@@ -58,6 +58,9 @@ export const TAB_GROUPS = [
       // is where the gan finds out. A class leader is on the list because an
       // allergy is their business before it is management's.
       { id: 'parent_changes', label: 'עדכונים מהורים', path: '/parent-changes', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader'] },
+      // Whoever takes the photographs uploads them. Requiring a manager means
+      // they are uploaded a week later, or not at all.
+      { id: 'photos', label: 'תמונות', path: '/photos', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },

@@ -1,0 +1,183 @@
+const { Photo, Child, Classroom } = require('../models');
+const storage = require('../services/storage.service');
+const photos = require('../services/photo.service');
+const nursery = require('../services/nursery.service');
+
+/**
+ * The gan's photographs, from the staff side.
+ *
+ * Uploading is deliberately separate from tagging. A teacher comes in from the
+ * garden with thirty photographs and wants them off her phone; deciding who is
+ * in each one is a different task, done sitting down, and forcing them into one
+ * step means either the upload waits or the tagging never happens.
+ *
+ * So an untagged photograph is a normal state, not an error. It is already
+ * visible to the classroom's parents — the gan chose a class gallery — and
+ * tagging only adds it to "photographs of my child".
+ */
+
+/** Which classrooms this user may act on. Same rule as the daily board. */
+async function visibleClassrooms(user) {
+  const rooms = await Classroom.find({ is_active: true }).populate('branch_id', 'name').lean();
+  if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
+
+  const managed = (user.managed_branch_ids || []).map(String);
+  const own = user.branch_id ? [String(user.branch_id)] : [];
+  const allowed = new Set([...managed, ...own].filter(Boolean));
+  if (allowed.size === 0) return rooms;
+  return rooms.filter(r => allowed.has(String(r.branch_id?._id || r.branch_id)));
+}
+
+async function assertRoom(user, classroomId) {
+  const rooms = await visibleClassrooms(user);
+  return rooms.find(r => String(r._id) === String(classroomId)) || null;
+}
+
+/**
+ * Upload one or more photographs to a classroom.
+ *
+ * Each file is processed on its own and a failure is reported per file rather
+ * than failing the batch: thirty photographs from a phone will occasionally
+ * include one the camera never finished writing, and losing the other
+ * twenty-nine to it would be absurd.
+ */
+async function upload(req, res) {
+  if (!storage.isConfigured()) {
+    return res.status(503).json({ error: 'אחסון התמונות אינו מוגדר. יש לפנות למנהל המערכת.' });
+  }
+
+  const room = await assertRoom(req.user, req.body?.classroom_id);
+  if (!room) return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
+
+  const files = req.files || [];
+  if (files.length === 0) return res.status(400).json({ error: 'לא נבחרו תמונות' });
+
+  const date = nursery.normalizeDateKey(req.body?.date) || nursery.todayKey();
+  const branchId = room.branch_id?._id || room.branch_id;
+  const prefix = `gan/${branchId}/${date}`;
+
+  const saved = [];
+  const failed = [];
+
+  for (const file of files) {
+    if (!photos.isAcceptable(file)) {
+      failed.push({ name: file.originalname, error: 'קובץ שאינו תמונה, או גדול מדי' });
+      continue;
+    }
+    try {
+      const stored = await photos.storeUpload({ buffer: file.buffer, prefix });
+      const row = await Photo.create({
+        ...stored,
+        source: 'staff',
+        branch_id: branchId,
+        classroom_id: room._id,
+        date,
+        uploaded_by_user: req.user.id,
+        uploaded_by_name: req.user.full_name || '',
+      });
+      saved.push(row);
+    } catch (err) {
+      console.error('[photos] upload failed:', err.message);
+      failed.push({ name: file.originalname, error: 'לא הצלחנו לעבד את הקובץ' });
+    }
+  }
+
+  return res.json({
+    ok: true,
+    saved: saved.length,
+    failed,
+    photos: await photos.withUrls(saved.map(r => r.toObject())),
+  });
+}
+
+/**
+ * A classroom's photographs, newest first.
+ *
+ * Staff see everything the gan took. A parent's own upload is NOT in this list
+ * by default — it belongs to that family and appears here only when explicitly
+ * asked for, so the everyday screen is the gan's own photographs.
+ */
+async function list(req, res) {
+  const room = await assertRoom(req.user, req.query.classroom);
+  if (!room) return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
+
+  const query = { classroom_id: room._id };
+  query.source = req.query.include_parent === '1' ? { $in: ['staff', 'parent'] } : 'staff';
+  if (req.query.date) {
+    const d = nursery.normalizeDateKey(req.query.date);
+    if (d) query.date = d;
+  }
+  if (req.query.untagged === '1') query.child_ids = { $size: 0 };
+
+  const rows = await Photo.find(query)
+    .sort({ date: -1, created_at: -1 })
+    .limit(200)
+    .lean();
+
+  const children = await Child.find({ classroom_id: room._id, is_active: true })
+    .select('child_name').sort({ child_name: 1 }).lean();
+
+  return res.json({
+    classroom: { id: room._id, name: room.name, branch: room.branch_id?.name || '' },
+    children: children.map(c => ({ id: c._id, name: c.child_name })),
+    photos: storage.isConfigured() ? await photos.withUrls(rows) : rows,
+  });
+}
+
+/**
+ * Say who is in a photograph.
+ *
+ * Only children of that classroom, checked against the roster rather than
+ * trusted from the request — a tag is what puts a photograph into a family's
+ * "my child" gallery, so an id from elsewhere would be a photograph delivered
+ * to a family it has nothing to do with.
+ */
+async function tag(req, res) {
+  const photo = await Photo.findById(req.params.id);
+  if (!photo) return res.status(404).json({ error: 'לא נמצא' });
+
+  const room = await assertRoom(req.user, photo.classroom_id);
+  if (!room) return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
+
+  if (Array.isArray(req.body?.child_ids)) {
+    const roster = await Child.find({ classroom_id: room._id, is_active: true }).select('_id').lean();
+    const allowed = new Set(roster.map(c => String(c._id)));
+    photo.child_ids = req.body.child_ids
+      .map(String)
+      .filter(id => allowed.has(id))
+      .slice(0, 40);
+  }
+  if (typeof req.body?.caption === 'string') {
+    photo.caption = req.body.caption.trim().slice(0, 200);
+  }
+  await photo.save();
+
+  return res.json({ ok: true, child_ids: photo.child_ids, caption: photo.caption });
+}
+
+/**
+ * Remove a photograph, bytes and all.
+ *
+ * The row goes whether or not the object does. A storage failure that left the
+ * row behind would show the staff a photograph they had just deleted, and the
+ * orphaned object is invisible to everyone — the wrong half to keep.
+ */
+async function remove(req, res) {
+  const photo = await Photo.findById(req.params.id);
+  if (!photo) return res.status(404).json({ error: 'לא נמצא' });
+
+  const room = await assertRoom(req.user, photo.classroom_id);
+  if (!room) return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
+
+  try {
+    await storage.deleteObject(photo.key);
+    if (photo.thumb_key) await storage.deleteObject(photo.thumb_key);
+  } catch (err) {
+    console.error('[photos] storage delete failed:', err.message);
+  }
+  await photo.deleteOne();
+
+  return res.json({ ok: true });
+}
+
+module.exports = { upload, list, tag, remove, visibleClassrooms };

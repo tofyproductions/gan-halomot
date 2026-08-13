@@ -1,6 +1,16 @@
 const router = require('express').Router();
 const auth = require('../controllers/parentAuth.controller');
+const multer = require('multer');
 const { parentAuthMiddleware } = require('../middleware/parentAuth');
+const { MAX_UPLOAD_BYTES } = require('../services/photo.service');
+
+// In memory: every upload is resized and forwarded to object storage at once,
+// and Render's disk is ephemeral. Five at a time — a parent picking a photo
+// for a gift, not emptying a camera roll.
+const photoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 5 },
+});
 
 /**
  * The parent portal, mounted ABOVE the staff `authMiddleware` in routes/index.
@@ -37,6 +47,10 @@ router.post('/children/:childId/second-parent', portal.addSecondParent);
 // four fields describing the morning at home, and only for today.
 router.get('/children/:childId/day', portal.childDay);
 router.patch('/children/:childId/day', portal.updateChildDay);
+// Photographs. Two streams on the way out — the child's own, and the
+// classroom's week — and a parent's upload is only ever their own child's.
+router.get('/children/:childId/photos', portal.childPhotos);
+router.post('/children/:childId/photos', photoUpload.array('photos', 5), portal.uploadChildPhoto);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
 

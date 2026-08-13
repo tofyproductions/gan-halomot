@@ -67,6 +67,7 @@ const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
 const DailyLog = require('./DailyLog');
 const DailyMenu = require('./DailyMenu');
+const Photo = require('./Photo');
 
 module.exports = {
   User,
@@ -137,4 +138,5 @@ module.exports = {
   ParentPortalChange,
   DailyLog,
   DailyMenu,
+  Photo,
 };
