@@ -16,14 +16,16 @@ const MIN_PASSWORD_LENGTH = 8;
  * on the first line: a phone's notification preview shows that line and
  * often nothing else, which is where the decision to ignore it gets made.
  *
- * Hebrew SMS is billed in 70-character units, so the whole thing is kept
- * inside one. At six digits of code it lands near 55 — the room left over is
- * the margin for a longer gan name later, not spare space to fill.
+ * Hebrew SMS is billed in 70-character units and this wording lands at 67.
+ * Three characters of headroom: a longer gan name, a seventh digit, or one
+ * more word of politeness splits every code into two messages and doubles
+ * the cost of the whole portal's messaging. Measure before editing this
+ * string — it is closer to the edge than it looks.
  */
 const ORG_NAME = 'גן החלומות';
 
 function codeMessage(code) {
-  return `${ORG_NAME}\nקוד הכניסה שלך: ${code}\nהקוד תקף ל-5 דקות.`;
+  return `קוד הכניסה שלך למערכת של ״${ORG_NAME}״ הוא: ${code}\nהקוד תקף ל-5 דקות`;
 }
 
 /**
