@@ -60,11 +60,30 @@ function isConfigured() {
 }
 
 /**
- * SMS4Free answers with a bare number, not a status object: a positive value
- * is how many messages it accepted, and anything else is a failure code. The
- * codes are documented in the account panel; they are surfaced verbatim so a
- * failure in the log names itself instead of arriving as "false".
+ * Read whatever SMS4Free answered with.
+ *
+ * It answers in two shapes. The account panel documents a bare number — a
+ * positive value being how many messages were accepted and anything else a
+ * failure code — and the live endpoint returns
+ * {"status":1,"message":"Succeeded"}. The first real send went out and was
+ * reported here as a failure, because the parser only knew about the number.
+ *
+ * Both are read, and the sign means the same thing in both: positive is
+ * accepted, zero or negative is not. The provider's own message is carried
+ * out with the failure so a rejection in the log names itself instead of
+ * arriving as a bare code to be looked up.
  */
+function readProviderReply(body) {
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed && typeof parsed === 'object' && parsed.status !== undefined) {
+      return { code: Number(parsed.status), message: parsed.message || '' };
+    }
+  } catch {
+    // Not JSON — the documented bare-number form.
+  }
+  return { code: Number(body), message: '' };
+}
 async function sendViaSms4Free({ to, text }) {
   const res = await fetch(SMS4FREE_SEND_URL, {
     method: 'POST',
@@ -85,15 +104,15 @@ async function sendViaSms4Free({ to, text }) {
     throw new Error(`SMS provider HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const code = Number(body);
+  const { code, message } = readProviderReply(body);
   if (!Number.isFinite(code)) {
     throw new Error(`SMS provider returned unparseable response: ${body.slice(0, 200)}`);
   }
   if (code <= 0) {
-    throw new Error(`SMS provider rejected the message (code ${code})`);
+    throw new Error(`SMS provider rejected the message (code ${code}${message ? `: ${message}` : ''})`);
   }
 
-  return { sent: code };
+  return { status: code, message };
 }
 
 /**
@@ -123,8 +142,8 @@ async function sendSms({ to, text }) {
 
   const result = await sendViaSms4Free({ to: recipient, text });
   // Deliberately no message body in the log — it carries the one-time code.
-  console.log(`[sms] sent to ${recipient} (${result.sent})`);
-  return { to: recipient, sent: result.sent };
+  console.log(`[sms] sent to ${recipient} (${result.status})`);
+  return { to: recipient, status: result.status };
 }
 
 /**
