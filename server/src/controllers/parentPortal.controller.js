@@ -1,7 +1,8 @@
-const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo } = require('../models');
+const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo, GiftSelection } = require('../models');
 const nursery = require('../services/nursery.service');
 const storage = require('../services/storage.service');
 const photoService = require('../services/photo.service');
+const giftService = require('../services/gift.service');
 const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
 const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
 const { normalizePhone, sendSms } = require('../services/sms.service');
@@ -776,6 +777,125 @@ async function uploadChildPhoto(req, res) {
   return res.json({ ok: true, saved: saved.length, failed });
 }
 
+/**
+ * The gift round, as the family sees it.
+ *
+ * Returns the round, what they have already chosen, and the photographs they
+ * may choose from — which is their child's stream and never the classroom
+ * gallery. A gift is the child's, and letting a parent pick a group photograph
+ * would put other people's children on a mug they never agreed to.
+ *
+ * A closed round still returns what was chosen. The deadline stops the
+ * choosing, not the family's ability to see what they picked.
+ */
+async function childGift(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const campaign = await giftService.currentCampaign();
+  if (!campaign) return res.json({ campaign: null });
+
+  const { group, child, account } = own;
+  const childIds = group.years.map(y => y._id);
+
+  const [selection, photos] = await Promise.all([
+    GiftSelection.findOne({ campaign_id: campaign._id, child_id: { $in: childIds } }).lean(),
+    storage.isConfigured() ? giftService.selectablePhotos(childIds, account._id) : [],
+  ]);
+
+  const withUrls = photos.length ? await photoService.withUrls(photos) : [];
+  const open = giftService.isOpenForParents(campaign);
+
+  return res.json({
+    campaign: {
+      id: campaign._id,
+      name: campaign.name,
+      closes_on: campaign.closes_on,
+      picks_required: campaign.picks_required,
+      open,
+      // Resolved rather than read: Classroom.category is set on one room in
+      // thirty-eight, so reading it would tell almost every family the gan has
+      // no gift for them.
+      product: (() => {
+        const category = nursery.classroomCategory(child.classroom_id);
+        return category ? (campaign.products?.[category] || '') : '';
+      })(),
+    },
+    chosen: (selection?.parent_photo_ids || []).map(String),
+    chosen_at: selection?.chosen_at || null,
+    // Whether the gan has already settled on one. Shown so a family that
+    // missed the deadline can see their child was not forgotten.
+    finalised: Boolean(selection?.final_photo_id),
+    photos: withUrls.map(p => ({
+      id: String(p._id),
+      url: p.url,
+      thumb_url: p.thumb_url,
+      date: p.date,
+      source: p.source,
+    })),
+  });
+}
+
+/**
+ * The family's choice.
+ *
+ * Replaces the whole set rather than adding one at a time: choosing is "these
+ * two", and a per-photo toggle would let a half-finished pair sit in the
+ * record looking like a decision.
+ *
+ * Every id is checked against the child's own photographs. A parent sending an
+ * id from the classroom gallery — or from nowhere — writes nothing.
+ */
+async function setChildGift(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const campaign = await giftService.currentCampaign();
+  if (!campaign) return res.status(400).json({ error: 'אין כרגע מבצע מתנות' });
+  if (!giftService.isOpenForParents(campaign)) {
+    return res.status(400).json({ error: 'מועד הבחירה הסתיים. לבירור יש לפנות לגן.' });
+  }
+
+  const { group, child, account } = own;
+  const childIds = group.years.map(y => y._id);
+
+  const allowed = await giftService.selectablePhotos(childIds, account._id);
+  const allowedIds = new Set(allowed.map(p => String(p._id)));
+
+  const requested = Array.isArray(req.body?.photo_ids) ? req.body.photo_ids.map(String) : [];
+  const picks = [...new Set(requested)].filter(id => allowedIds.has(id));
+
+  if (picks.length > campaign.picks_required) {
+    return res.status(400).json({
+      error: `אפשר לבחור עד ${campaign.picks_required} תמונות`,
+    });
+  }
+  if (requested.length !== picks.length) {
+    return res.status(400).json({ error: 'אחת התמונות אינה של הילד' });
+  }
+
+  const room = child.classroom_id;
+  await GiftSelection.findOneAndUpdate(
+    { campaign_id: campaign._id, child_id: child._id },
+    {
+      $set: {
+        parent_photo_ids: picks,
+        chosen_at: picks.length ? new Date() : null,
+        chosen_by_parent: account._id,
+        child_name: child.child_name,
+        classroom_id: room?._id || room || null,
+        classroom_name: room?.name || '',
+        classroom_category: nursery.classroomCategory(room) || '',
+        branch_id: room?.branch_id || null,
+      },
+      $setOnInsert: { campaign_id: campaign._id, child_id: child._id },
+    },
+    { upsert: true, setDefaultsOnInsert: true }
+  );
+
+  return res.json({ ok: true, chosen: picks });
+}
+
 /** Which fields a parent may edit, so the screen is built from the same list. */
 function editableFields(_req, res) {
   return res.json({ editable: EDITABLE });
@@ -786,4 +906,5 @@ module.exports = {
   updateChild, startPhoneChange, confirmPhoneChange, editableFields,
   childDay, updateChildDay, addSecondParent,
   childPhotos, uploadChildPhoto,
+  childGift, setChildGift,
 };

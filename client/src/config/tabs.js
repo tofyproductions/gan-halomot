@@ -61,6 +61,11 @@ export const TAB_GROUPS = [
       // Whoever takes the photographs uploads them. Requiring a manager means
       // they are uploaded a week later, or not at all.
       { id: 'photos', label: 'תמונות', path: '/photos', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      // Choosing the photograph that goes on the gift. The person who knows
+      // which one looks like the child is in the room, not the office — but
+      // OPENING a round sets dates for every branch, so the server keeps that
+      // to management.
+      { id: 'gifts', label: 'מתנות', path: '/gifts', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },

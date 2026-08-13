@@ -20,6 +20,36 @@ const { Classroom, Setting } = require('../models');
 const NURSERY_CATEGORY = 'תינוקייה';
 const NURSERY_NAME_RE = /תינוקי/;
 
+/**
+ * A classroom's level — תינוקייה, צעירים or בוגרים — however we can get it.
+ *
+ * `Classroom.category` is the right field and it is filled in on ONE classroom
+ * out of thirty-eight. The names are filled in on all of them and say what the
+ * room is. So the category decides when it is set and the name decides
+ * otherwise, and this lives in one function because more than one feature now
+ * depends on the answer: the daily board is infant-only, and a gift round
+ * assigns a product per level. Answered separately in two places, the two would
+ * disagree the day somebody finally fills the field in.
+ *
+ * Returns null when neither says anything, and callers must treat that as
+ * "unknown" rather than as a level.
+ */
+const NAME_TO_CATEGORY = [
+  [/תינוקי/, 'תינוקייה'],
+  [/צעיר/, 'צעירים'],
+  [/בוגר/, 'בוגרים'],
+];
+
+function classroomCategory(classroom) {
+  if (!classroom) return null;
+  if (classroom.category) return classroom.category;
+  const name = String(classroom.name || '');
+  for (const [re, category] of NAME_TO_CATEGORY) {
+    if (re.test(name)) return category;
+  }
+  return null;
+}
+
 /** Is this classroom an infant room? */
 function isNurseryClassroom(classroom) {
   if (!classroom) return false;
@@ -135,7 +165,7 @@ function normalizeDateKey(raw) {
 }
 
 module.exports = {
-  isNurseryClassroom, nurseryClassrooms,
+  isNurseryClassroom, nurseryClassrooms, classroomCategory,
   getOptions, getMenu, todayKey, normalizeDateKey,
   DEFAULT_OPTIONS, DEFAULT_MENU, OPTIONS_KEY, MENU_KEY,
   NURSERY_CATEGORY,

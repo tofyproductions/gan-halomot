@@ -51,6 +51,10 @@ router.patch('/children/:childId/day', portal.updateChildDay);
 // classroom's week — and a parent's upload is only ever their own child's.
 router.get('/children/:childId/photos', portal.childPhotos);
 router.post('/children/:childId/photos', photoUpload.array('photos', 5), portal.uploadChildPhoto);
+// The gift round: what the family chose, and the photographs they may choose
+// from — their child's own, never the classroom gallery.
+router.get('/children/:childId/gift', portal.childGift);
+router.put('/children/:childId/gift', portal.setChildGift);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
 

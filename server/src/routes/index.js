@@ -69,6 +69,9 @@ router.use('/nursery', require('./nursery.routes'));
 // The gan's photographs. Bytes in object storage, permission in the row —
 // a staff photo belongs to the classroom, a parent's belongs to the family.
 router.use('/photos', require('./photos.routes'));
+// מבצעי מתנות — a round of gifts, the family's picks and the staff's final
+// choice, ending in one file for the supplier.
+router.use('/gifts', require('./gifts.routes'));
 // עדכונים מהורים — what parents corrected about their own children. An
 // acknowledgement queue, not an approval one: the changes are already live.
 router.use('/parent-changes', require('./parentChanges.routes'));

@@ -6,6 +6,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
+import GiftPicker from './GiftPicker';
 
 /**
  * The week, in photographs.
@@ -136,6 +137,10 @@ export default function PhotoGallery({ childId, childName }) {
   return (
     <Stack spacing={2}>
       {error && <Alert severity="error" onClose={() => setError('')}>{error}</Alert>}
+
+      {/* Only while a round is running. A deadline card that is always on
+          screen is a card nobody reads. */}
+      <GiftPicker childId={childId} childName={childName} />
 
       <Card>
         <CardContent>
