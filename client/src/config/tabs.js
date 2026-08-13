@@ -50,6 +50,10 @@ export const TAB_GROUPS = [
   {
     label: 'תפעול',
     items: [
+      // The infant rooms' daily board. Open to the people actually in the
+      // room — a teacher needs it more than anyone, and a board filled in by
+      // management is a board filled in by somebody who was not there.
+      { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },

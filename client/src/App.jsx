@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/layout/Layout';
 import LoginPage from './components/layout/LoginPage';
+import NurseryBoard from './components/nursery/NurseryBoard';
 import ParentLogin from './components/parent-portal/ParentLogin';
 import ParentPortal from './components/parent-portal/ParentPortal';
 import ProtectedRoute from './components/layout/ProtectedRoute';
@@ -146,6 +147,9 @@ function AppRoutes() {
         <Route path="salary-table" element={<Navigate to="/payroll?tab=summary" replace />} />
         <Route path="payslip-audit" element={<Navigate to="/payroll?tab=audit" replace />} />
         <Route path="holidays" element={<HolidayManager />} />
+        {/* לוח תינוקייה — infant rooms only; the controller narrows it again
+            by branch scope. */}
+        <Route path="nursery" element={<NurseryBoard />} />
         <Route path="gantt" element={<GanttCalendar />} />
         <Route path="gantt/edit" element={<GanttEditor />} />
         <Route path="classes" element={<ClassTrackingPage />} />
