@@ -383,12 +383,29 @@ export default function RegistrationTracker() {
     }
   };
 
-  const completedCount = registrations.filter(r => r.status === 'completed').length;
-  const pendingCount = registrations.filter(r => r.status !== 'completed').length;
-  const missingSigCount = registrations.filter(r => r.signature_missing).length;
-  const missingDocsCount = registrations.filter(r => r.documents_missing).length;
-  const duplicateCount = registrations.filter(r => r.duplicate_in_year).length;
-  const possibleDuplicateCount = registrations.filter(r => r.possible_duplicate_in_year).length;
+  /**
+   * The chips count the year on screen, not the whole database.
+   *
+   * They sit directly beside the year dropdown and were counted over every
+   * registration of every year, so "78 רישומים" above a תשפ"ז list meant 47
+   * children from תשפ"ו plus 31 from תשפ"ז — a number matching nothing on the
+   * page, nothing in the gan, and nothing on the board next door.
+   *
+   * Deliberately NOT narrowed by the other filters. Half of these chips are
+   * filters themselves: counting only their own selection would freeze each of
+   * them at its own number the instant it was clicked, and the point of the
+   * number is to say how much is left to deal with.
+   */
+  const inScope = yearFilter
+    ? registrations.filter(r => yearOf(r) === yearFilter)
+    : registrations;
+
+  const completedCount = inScope.filter(r => r.status === 'completed').length;
+  const pendingCount = inScope.filter(r => r.status !== 'completed').length;
+  const missingSigCount = inScope.filter(r => r.signature_missing).length;
+  const missingDocsCount = inScope.filter(r => r.documents_missing).length;
+  const duplicateCount = inScope.filter(r => r.duplicate_in_year).length;
+  const possibleDuplicateCount = inScope.filter(r => r.possible_duplicate_in_year).length;
 
   return (
     <Box dir="rtl">
@@ -396,7 +413,9 @@ export default function RegistrationTracker() {
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב רישום הורים</Typography>
           <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-            <Chip label={`${registrations.length} רישומים`} size="small" />
+            {/* Named when it is not one year, because a bare total beside a
+                year dropdown reads as that year's. */}
+            <Chip label={`${inScope.length} רישומים${yearFilter ? '' : ' · כל השנים'}`} size="small" />
             <Chip label={`${completedCount} הושלמו`} color="success" size="small" variant="outlined" />
             <Chip label={`${pendingCount} בתהליך`} color="warning" size="small" variant="outlined" />
             {missingSigCount > 0 && (
