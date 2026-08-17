@@ -898,9 +898,12 @@ async function confirmPlacement(req, res, next) {
       // whatever the files said. That keeps the fee column and the room from
       // ever disagreeing.
       const group = categoryToGroup[room.category] || effectiveAgeGroup(doc.toObject());
-      const fee = Number(fees[group]);
-      if (!Number.isFinite(fee) || fee <= 0) {
-        skipped.push({ id: a.id, child: name, error: `אין שכר לימוד לשכבה "${group}"` });
+      // Absent reads as zero, which enrols the child with the fee still open —
+      // the deliberate state, recorded as `fee_pending` in promoteOne. Only a
+      // negative or unparseable figure stops a child, because that is a typo.
+      const fee = Number(fees[group] ?? 0);
+      if (!Number.isFinite(fee) || fee < 0) {
+        skipped.push({ id: a.id, child: name, error: `שכר לימוד לא תקין לשכבה "${group}"` });
         continue;
       }
 

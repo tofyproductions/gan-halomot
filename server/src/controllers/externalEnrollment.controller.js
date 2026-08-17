@@ -572,6 +572,27 @@ async function promoteOne(doc, opts) {
     is_active: true,
   });
 
+  // A child absorbed before their fee is known.
+  //
+  // At the subsidised branches the monthly fee is a function of the family's
+  // income bracket — twelve tiers against three age groups, 938 to 3,936 at
+  // הרצליה — and the bracket appears in neither file: not in ClickTac, and not
+  // in the ministry's export, whose columns stop at the absorption date. So a
+  // cohort can be fully approved, fully registered and certain to attend, and
+  // still have no defensible number to bill.
+  //
+  // Enrolling them at zero is the honest version of that: it says the child is
+  // here and the money is not yet decided, where inventing a figure would put a
+  // number nobody agreed to onto a family's account. But zero is also what a
+  // fee of zero looks like, so the intent is recorded rather than left to be
+  // guessed from the amount — this is the list to work through against ClickTac
+  // when the brackets arrive.
+  if (!monthly_fee) {
+    await Registration.updateOne({ _id: registration._id }, {
+      $set: { 'configuration.external_source.fee_pending': true },
+    });
+  }
+
   // The registration fee was paid in ClickTac and has a receipt number. Filing
   // it means the collections table opens showing it paid rather than owed.
   if (doc.enrollment?.receipt_number) {
@@ -604,9 +625,11 @@ async function promote(req, res, next) {
     if (doc.review?.status === 'imported') {
       return res.status(409).json({ error: 'הרשומה כבר יובאה למערכת' });
     }
-    const monthlyFee = Number(req.body?.monthly_fee);
-    if (!Number.isFinite(monthlyFee) || monthlyFee <= 0) {
-      return res.status(400).json({ error: 'יש לקבוע שכר לימוד — הוא לא קיים בקובץ הייצוא' });
+    // Zero is allowed and means "not decided yet" — see promoteOne. A missing
+    // or negative figure is still refused: that is a mistake, not a decision.
+    const monthlyFee = Number(req.body?.monthly_fee ?? 0);
+    if (!Number.isFinite(monthlyFee) || monthlyFee < 0) {
+      return res.status(400).json({ error: 'שכר לימוד לא תקין' });
     }
     if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
       return res.status(409).json({
@@ -660,9 +683,9 @@ async function promoteBulk(req, res, next) {
         continue;
       }
       const group = effectiveAgeGroup(doc);
-      const fee = Number(fees[group]);
-      if (!Number.isFinite(fee) || fee <= 0) {
-        skipped.push({ id, child: doc.child.full_name, error: `אין שכר לימוד לשכבה "${group}"` });
+      const fee = Number(fees[group] ?? 0);
+      if (!Number.isFinite(fee) || fee < 0) {
+        skipped.push({ id, child: doc.child.full_name, error: `שכר לימוד לא תקין לשכבה "${group}"` });
         continue;
       }
       try {

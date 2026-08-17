@@ -156,9 +156,6 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
       .filter(([, room]) => !!room)
       .map(([id, classroom_id]) => ({ id, classroom_id }));
     if (!assignments.length) return toast.error('לא שובץ אף ילד/ה');
-    if (!Object.values(fees).some(v => Number(v) > 0)) {
-      return toast.error('יש לקבוע שכר לימוד — הוא לא קיים בקבצים');
-    }
     setSaving(true);
     try {
       const res = await api.post('/tmt/placement/confirm', {
@@ -391,6 +388,18 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                 שכר הלימוד אינו קיים באף אחד מהקבצים — דרגת הסבסוד היא נתון על הכנסת המשפחה
                 שלא מופיע בהם. נבחר כאן מתוך מחירון הסניף.
               </Alert>
+              {/* Leaving it empty is allowed and is a decision, so it is stated
+                  here beside the fields rather than blocking the button — a
+                  child certain to attend should not be kept out of the gan's
+                  own screens until an income bracket arrives. */}
+              {!Object.values(fees).some(v => Number(v) > 0) && (
+                <Alert severity="warning" sx={{ mb: 1.5 }}>
+                  <AlertTitle>לא הוזן שכר לימוד — הילדים ייקלטו עם 0 ₪</AlertTitle>
+                  הם ייכנסו לכיתות, לנוכחות ולכל שאר המסכים כרגיל, ובגבייה יופיעו כחייבים
+                  0 ₪ עד שיוזן סכום. הרישומים מסומנים כ״שכר לימוד טרם נקבע״ כדי שאפשר יהיה
+                  לאתר אותם ולעדכן בבת אחת.
+                </Alert>
+              )}
               <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
                 {!!data.pricing?.tiers?.length && (
                   <TextField select size="small" label="דרגה" sx={{ minWidth: 160 }}
