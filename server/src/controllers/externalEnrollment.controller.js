@@ -461,7 +461,14 @@ async function createClassroom(req, res, next) {
     if (!branch_id || !name || !academic_year) {
       return res.status(400).json({ error: 'חסרים סניף, שם כיתה או שנה' });
     }
-    if (category && !Classroom.CATEGORIES.includes(category)) {
+    // Required, not merely validated. A room with no age group is invisible to
+    // this very screen — see the note on categoryError in classroom.controller.
+    if (!category) {
+      return res.status(400).json({
+        error: 'יש לבחור קבוצת גיל לכיתה. בלי קבוצה הכיתה לא תוצע כאן ואי אפשר יהיה לשבץ אליה.',
+      });
+    }
+    if (!Classroom.CATEGORIES.includes(category)) {
       return res.status(400).json({ error: 'קטגוריית כיתה לא תקינה' });
     }
     const existing = await Classroom.findOne({ name, academic_year, branch_id });
@@ -469,7 +476,7 @@ async function createClassroom(req, res, next) {
       return res.status(409).json({ error: 'כיתה בשם זה כבר קיימת בסניף לשנה זו' });
     }
     const classroom = await Classroom.create({
-      name, category: category || null, academic_year, branch_id,
+      name, category, academic_year, branch_id,
       capacity: Number(capacity) || null,
     });
     res.status(201).json({ classroom: { ...classroom.toObject(), id: classroom._id } });

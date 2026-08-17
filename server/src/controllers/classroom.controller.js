@@ -38,6 +38,29 @@ async function getAll(req, res, next) {
   }
 }
 
+/**
+ * The age group is not optional, whatever the schema's default says.
+ *
+ * A room is matched to the children waiting for it through its category and
+ * nothing else — `AGE_GROUP_TO_CATEGORY` in the placement controller maps
+ * תינוק→תינוקייה, פעוט→צעירים, בוגר→בוגרים. A room with no category belongs to
+ * no group, so the placement screen never lists it and no child can be put in
+ * it. It is not a half-configured room; it is a room that does not exist to
+ * the one screen that matters, and it fails silently: the screen shows "אין
+ * כיתות לשנה זו" while the rooms sit right there in the branches screen.
+ *
+ * That is how this gan came to hold ten rooms for תשפ"ז and be unable to place
+ * a single child into any of them. So the field is refused at the door instead.
+ */
+function categoryError(category) {
+  if (!category) {
+    return 'יש לבחור קבוצת גיל לכיתה (תינוקייה / צעירים / בוגרים). '
+      + 'בלי קבוצה הכיתה לא תוצע במסך השיבוץ ואי אפשר יהיה לשבץ אליה ילדים.';
+  }
+  if (!Classroom.CATEGORIES.includes(category)) return 'קבוצת גיל לא תקינה';
+  return null;
+}
+
 async function create(req, res, next) {
   try {
     const { name, academic_year, capacity, category } = req.body;
@@ -45,9 +68,8 @@ async function create(req, res, next) {
       return res.status(400).json({ error: 'name and academic_year are required' });
     }
 
-    if (category && !Classroom.CATEGORIES.includes(category)) {
-      return res.status(400).json({ error: 'invalid category' });
-    }
+    const catErr = categoryError(category);
+    if (catErr) return res.status(400).json({ error: catErr });
 
     const { branch_id } = req.body;
     const normalizedYear = normalizeYear(academic_year);
@@ -58,7 +80,7 @@ async function create(req, res, next) {
 
     const classroom = await Classroom.create({
       name,
-      category: category || null,
+      category,
       academic_year: normalizedYear,
       capacity: capacity || null,
       branch_id: branch_id || null,
@@ -88,8 +110,13 @@ async function update(req, res, next) {
       updates.academic_year = normalizeYear(updates.academic_year);
     }
 
-    if (updates.category !== undefined && updates.category !== null && !Classroom.CATEGORIES.includes(updates.category)) {
-      return res.status(400).json({ error: 'invalid category' });
+    // Clearing it counts as setting it. The dropdown on the branches screen has
+    // a blank option, and choosing it used to quietly remove the room from the
+    // placement screen — an edit that looks like tidying and reads, downstream,
+    // as "this room no longer accepts children".
+    if (updates.category !== undefined) {
+      const catErr = categoryError(updates.category);
+      if (catErr) return res.status(400).json({ error: catErr });
     }
 
     const updated = await Classroom.findByIdAndUpdate(id, updates, { new: true }).lean();

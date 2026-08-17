@@ -271,6 +271,26 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
               )}
             </Card>
 
+            {/* Rooms of this year that belong to no age group.
+                They exist, they are active, and they appear on the branches
+                screen — but a room is matched to waiting children through its
+                category alone, so these are listed in none of the blocks below
+                and can receive nobody. Silently. A block reading "אין כיתות
+                לשנה זו" beside a branches screen showing four rooms is the
+                worst version of this, so name them here. */}
+            {(() => {
+              const orphans = (data.classrooms || []).filter(r => !r.category);
+              if (!orphans.length) return null;
+              return (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <AlertTitle>{orphans.length} כיתות ללא קבוצת גיל</AlertTitle>
+                  {orphans.map(r => r.name).join(', ')} — הכיתות האלה קיימות אבל לא
+                  מוצעות לשיבוץ, כי הן משויכות לילדים לפי קבוצת הגיל שלהן והיא ריקה.
+                  יש להגדיר להן קבוצה במסך הסניפים.
+                </Alert>
+              );
+            })()}
+
             {/* ---------- the board, one block per age group ---------- */}
             {(data.groups || []).map(g => (
               <Card key={g.age_group} variant="outlined" sx={{ p: 2, mb: 2 }}>

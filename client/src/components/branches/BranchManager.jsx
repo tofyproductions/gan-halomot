@@ -84,11 +84,15 @@ export default function BranchManager() {
   const handleSaveClass = async () => {
     const { branchId, name, capacity, category } = classDialog;
     if (!name.trim()) return toast.error('שם הכיתה חובה');
+    // A room without an age group is never offered on the placement screen, so
+    // it can hold no children — stopped here rather than created and wondered
+    // about later.
+    if (!category) return toast.error('יש לבחור קבוצת גיל — בלי זה אי אפשר לשבץ ילדים לכיתה');
     try {
       await api.post('/classrooms', {
         name: name.trim(),
         capacity: parseInt(capacity) || 35,
-        category: category || null,
+        category,
         academic_year: years.current.range,
         branch_id: branchId,
       });
@@ -102,7 +106,7 @@ export default function BranchManager() {
 
   const handleUpdateCategory = async (classroomId, newCategory) => {
     try {
-      await api.put(`/classrooms/${classroomId}`, { category: newCategory || null });
+      await api.put(`/classrooms/${classroomId}`, { category: newCategory });
       toast.success('קבוצה עודכנה');
       fetchClassrooms();
     } catch {
@@ -342,9 +346,14 @@ export default function BranchManager() {
                                   value={cls.category || ''}
                                   onChange={(e) => handleUpdateCategory(cid, e.target.value)}
                                   displayEmpty
+                                  error={!cls.category}
                                   sx={{ minWidth: 110, '.MuiSelect-select': { py: 0.5 } }}
                                 >
-                                  <MenuItem value=""><em>—</em></MenuItem>
+                                  {/* Shown only while a legacy room still has
+                                      none, and never selectable: clearing the
+                                      group removes the room from the placement
+                                      screen without saying so. */}
+                                  {!cls.category && <MenuItem value="" disabled><em>חסר —</em></MenuItem>}
                                   {CATEGORIES.map(cat => (
                                     <MenuItem key={cat} value={cat}>{cat}</MenuItem>
                                   ))}
@@ -517,9 +526,9 @@ export default function BranchManager() {
               value={classDialog.category}
               onChange={(e) => setClassDialog(prev => ({ ...prev, category: e.target.value }))}
               fullWidth
-              helperText="תינוקייה / צעירים / בוגרים"
+              required
+              helperText="חובה — הכיתה מוצעת לשיבוץ לפי הקבוצה הזו בלבד"
             >
-              <MenuItem value=""><em>ללא</em></MenuItem>
               {CATEGORIES.map(cat => (
                 <MenuItem key={cat} value={cat}>{cat}</MenuItem>
               ))}
