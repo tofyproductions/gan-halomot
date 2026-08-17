@@ -74,6 +74,11 @@ export const TAB_GROUPS = [
       { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
       { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
       { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },
+      // What the gan tells the families. A teacher writes it — she is the one
+      // who knows the trip is on Thursday — and only a branch manager publishes
+      // it, takes it to WhatsApp, or spends the SMS budget on it. The server
+      // enforces that split; this only decides who sees the screen.
+      { id: 'announcements', label: 'הודעות לגן', path: '/announcements', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },

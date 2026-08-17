@@ -75,6 +75,11 @@ router.use('/gifts', require('./gifts.routes'));
 // עדכונים מהורים — what parents corrected about their own children. An
 // acknowledgement queue, not an approval one: the changes are already live.
 router.use('/parent-changes', require('./parentChanges.routes'));
+// הודעות לגן — what the gan tells the families. A teacher writes, a branch
+// manager publishes; the portal is free, WhatsApp is a copy on her clipboard,
+// and SMS is capped per branch per month because one prepaid balance also
+// sends every parent's sign-in code.
+router.use('/announcements', require('./announcements.routes'));
 // גיוס עובדים — candidates from the website form, routed to the branch they
 // asked for. BELOW authMiddleware, deliberately: the controller decides what a
 // caller may see from req.user, so without one it computes an empty scope and

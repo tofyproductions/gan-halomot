@@ -197,6 +197,66 @@ function TodayCard({ day, childName, onOpen }) {
 }
 
 /**
+ * The newest thing the gan said.
+ *
+ * ONE, not a feed. This screen's job is to answer "did anything happen"; the
+ * full list is a tap away and a stack of five cards here would push the day and
+ * the photographs off the first screen — which are what the parent came for on
+ * the days when nothing happened, and that is most days.
+ *
+ * Coral when it is urgent, paper when it is not. The gan decides what urgent
+ * means, and a card that looks like an alarm every time teaches people to
+ * scroll past alarms.
+ */
+function AnnouncementCard({ latest, total, onOpen }) {
+  const urgent = latest.is_urgent;
+  return (
+    <DoorCard onClick={onOpen} label="הודעות מהגן">
+      <Card
+        sx={urgent ? {
+          border: 0,
+          bgcolor: (t) => t.playful.coral.bg,
+          color: (t) => t.playful.coral.on,
+        } : undefined}
+      >
+        <CardContent>
+          <Stack direction="row" alignItems="flex-start" sx={{ mb: 0.75 }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography
+                variant="caption"
+                sx={urgent ? { opacity: 0.92, fontWeight: 800 } : { color: 'text.secondary' }}
+              >
+                {urgent ? 'הודעה דחופה מהגן' : 'הודעה מהגן'}
+              </Typography>
+              <Typography
+                sx={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: '1.0625rem', lineHeight: 1.3 }}
+              >
+                {latest.title}
+              </Typography>
+            </Box>
+            <More text={total > 1 ? `עוד ${total - 1}` : 'לקריאה'} color={urgent ? 'inherit' : undefined} />
+          </Stack>
+          <Typography
+            variant="body2"
+            sx={{
+              opacity: urgent ? 0.95 : 1,
+              color: urgent ? 'inherit' : 'text.secondary',
+              // Two lines, then it stops. The whole text is one tap away and a
+              // card that grows with whatever was typed pushes everything else
+              // off the screen.
+              display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
+            {latest.body}
+          </Typography>
+        </CardContent>
+      </Card>
+    </DoorCard>
+  );
+}
+
+/**
  * The newest photographs, as a strip.
  *
  * Only the child's own — the classroom gallery has other people's children in
@@ -304,7 +364,10 @@ function PaymentsCard({ payments, onOpen }) {
  *                  rather than fetched again: two requests for one screen, on a
  *                  phone, on a server that may have just woken up.
  */
-export default function ParentHome({ childId, childName, isNursery, photos = [], payments = null, onOpen }) {
+export default function ParentHome({
+  childId, childName, isNursery,
+  photos = [], payments = null, announcements = [], onOpen,
+}) {
   const [day, setDay] = useState(null);
   const [loading, setLoading] = useState(isNursery);
 
@@ -342,6 +405,19 @@ export default function ParentHome({ childId, childName, isNursery, photos = [],
   // is no day to lead with and the photographs take the top of the screen
   // rather than sitting under a gap where a card used to be.
   const cards = [];
+  // ABOVE the day, and only when there is one. An announcement is the gan
+  // asking for something — a coat, a signature, a child kept at home tomorrow —
+  // and it is the one card here that is useless a day late.
+  if (announcements.length) {
+    cards.push(
+      <AnnouncementCard
+        key="news"
+        latest={announcements[0]}
+        total={announcements.length}
+        onOpen={() => onOpen('news')}
+      />,
+    );
+  }
   if (isNursery) {
     cards.push(
       <TodayCard key="day" day={day} childName={childName} onOpen={() => onOpen('day')} />,

@@ -14,6 +14,7 @@ import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
+import CampaignIcon from '@mui/icons-material/Campaign';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import { alpha } from '@mui/material/styles';
 import { DISPLAY } from '../../theme/parentTheme';
@@ -23,6 +24,7 @@ import PhotoGallery from './PhotoGallery';
 import GiftPicker from './GiftPicker';
 import ParentHome from './ParentHome';
 import Payments from './Payments';
+import ParentAnnouncements from './ParentAnnouncements';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
@@ -172,6 +174,7 @@ export default function ChildDetails({ childId }) {
   const [secondOpen, setSecondOpen] = useState(false);
   const [tab, setTab] = useState('');
   const [payments, setPayments] = useState(null);
+  const [news, setNews] = useState([]);
   const [moreOpen, setMoreOpen] = useState(false);
 
   const refresh = async () => {
@@ -205,11 +208,12 @@ export default function ChildDetails({ childId }) {
     setMyPhotos([]);
     setTab('');
     setPayments(null);
+    setNews([]);
     setMoreOpen(false);
 
     (async () => {
       try {
-        const [d, c, p, pay] = await Promise.all([
+        const [d, c, p, pay, ann] = await Promise.all([
           parentApi.get(`/children/${childId}`),
           parentApi.get(`/children/${childId}/contracts`),
           // Decoration, so it is allowed to fail: object storage being down
@@ -220,11 +224,15 @@ export default function ChildDetails({ childId }) {
           // the gan has not set yet gets no payments tab — an empty one, or a
           // total of ₪0, is a promise that will have to be broken in November.
           parentApi.get(`/children/${childId}/payments`).catch(() => null),
+          // Allowed to fail like the rest: an announcement that cannot load
+          // costs a parent a card, and the section still opens.
+          parentApi.get(`/children/${childId}/announcements`).catch(() => null),
         ]);
         if (cancelled) return;
         setData(d.data);
         setContracts(c.data.contracts || []);
         setPayments(pay?.data?.available ? pay.data : null);
+        setNews(ann?.data?.announcements || []);
         // Only photographs of THIS child. A classroom picture has other
         // people's children in it and has no business being their portrait,
         // or on the home screen.
@@ -261,6 +269,11 @@ export default function ChildDetails({ childId }) {
     list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon />, primary: true });
     // Only when the gan has actually set a fee for this child — see the fetch.
     if (payments) list.push({ key: 'payments', label: 'תשלומים', icon: <PaymentsIcon />, primary: true });
+    // Behind "עוד" on purpose, and not for lack of importance: the newest one
+    // is already the top card on the home screen, which is where a parent
+    // meets it. This is the archive — the thing they come back to looking for
+    // what the note about the trip actually said.
+    list.push({ key: 'news', label: 'הודעות מהגן', icon: <CampaignIcon />, primary: false });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
@@ -360,6 +373,7 @@ export default function ChildDetails({ childId }) {
           isNursery={data.is_nursery}
           photos={myPhotos}
           payments={payments}
+          announcements={news}
           onOpen={goTo}
         />
       )}
@@ -367,6 +381,8 @@ export default function ChildDetails({ childId }) {
       {active === 'day' && <NurseryDay childId={childId} />}
 
       {active === 'payments' && <Payments childId={childId} />}
+
+      {active === 'news' && <ParentAnnouncements announcements={news} />}
 
       {active === 'photos' && (
         <PhotoGallery childId={childId} childName={data.child.name} />

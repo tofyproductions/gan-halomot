@@ -4,6 +4,7 @@ import LoginPage from './components/layout/LoginPage';
 import NurseryBoard from './components/nursery/NurseryBoard';
 import NurserySettings from './components/nursery/NurserySettings';
 import PhotosManager from './components/nursery/PhotosManager';
+import Announcements from './components/announcements/Announcements';
 import GiftsManager from './components/nursery/GiftsManager';
 import ParentChanges from './components/admin/ParentChanges';
 import ParentLogin from './components/parent-portal/ParentLogin';
@@ -156,6 +157,10 @@ function AppRoutes() {
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />
         <Route path="photos" element={<PhotosManager />} />
+        <Route
+          path="announcements"
+          element={<ProtectedRoute tab="announcements"><Announcements /></ProtectedRoute>}
+        />
         <Route path="gifts" element={<GiftsManager />} />
         {/* Editing the lists reshapes the board for every branch, so it stays
             with the people who answer for that. The server enforces the same. */}

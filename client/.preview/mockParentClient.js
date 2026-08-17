@@ -75,11 +75,24 @@ const DETAILS = {
 
 const GIFT = { campaign: null, selection: null, photos: PHOTOS };
 
+const ANNOUNCEMENTS = [
+  { id: 'a1', title: 'מחר הגן סגור — תקלת מים', is_urgent: true, for_my_class: false,
+    published_at: new Date().toISOString(),
+    body: 'התגלתה נזילה בצנרת הראשית והתיקון יימשך את כל היום.\nהגן ייפתח כרגיל ביום רביעי.' },
+  { id: 'a2', title: 'טיול לחוות החי — יום חמישי', is_urgent: false, for_my_class: true,
+    published_at: '2026-08-15T09:00:00+03:00',
+    body: 'יוצאים ב-9:00 וחוזרים ב-13:00.\nלהביא: כובע, בקבוק מים, נעליים סגורות.\nמי שלא שלח אישור — נא לשלוח עד מחר.' },
+  { id: 'a3', title: 'שינוי בשעות האיסוף בחודש אוגוסט', is_urgent: false, for_my_class: false,
+    published_at: '2026-08-03T16:30:00+03:00',
+    body: 'במהלך אוגוסט הגן נסגר ב-16:00 במקום ב-16:30.' },
+];
+
 const parentApi = {
   get: async (url) => {
     if (url === '/me') return { data: ME };
     if (url.endsWith('/day')) return { data: DAY };
     if (url.endsWith('/payments')) return { data: PAYMENTS };
+    if (url.endsWith('/announcements')) return { data: { announcements: ANNOUNCEMENTS } };
     if (url.endsWith('/photos')) return { data: { mine: PHOTOS, classroom: [] } };
     if (url.endsWith('/contracts')) return { data: { contracts: [] } };
     if (url.endsWith('/gift')) return { data: GIFT };

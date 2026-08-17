@@ -55,6 +55,10 @@ router.post('/children/:childId/photos', photoUpload.array('photos', 5), portal.
 // from — their child's own, never the classroom gallery.
 router.get('/children/:childId/gift', portal.childGift);
 router.put('/children/:childId/gift', portal.setChildGift);
+// What the gan has told this family. Published only, unexpired only, and
+// scoped to this child's classroom or to the whole branch.
+const announcements = require('../controllers/parentAnnouncements.controller');
+router.get('/children/:childId/announcements', announcements.childAnnouncements);
 // What the family owes. Read-only — nothing in the parent portal moves money.
 const payments = require('../controllers/parentPayments.controller');
 router.get('/children/:childId/payments', payments.childPayments);

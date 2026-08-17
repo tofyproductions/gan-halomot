@@ -18,6 +18,8 @@ const Product = require('./Product');
 const Order = require('./Order');
 // Attendance / payroll (TIMEDOX replacement)
 const Amuta = require('./Amuta');
+const Announcement = require('./Announcement');
+const SmsBudget = require('./SmsBudget');
 const Employee = require('./Employee');
 const Punch = require('./Punch');
 const AgentCommand = require('./AgentCommand');
@@ -145,4 +147,6 @@ module.exports = {
   GiftCampaign,
   GiftSelection,
   Candidate,
+  Announcement,
+  SmsBudget,
 };
