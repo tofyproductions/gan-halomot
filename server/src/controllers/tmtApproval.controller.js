@@ -335,7 +335,10 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     academicYear,
     branchName: branch.name,
   });
-  return { result, branch };
+  // The size of each side, which the verdicts alone cannot tell you: a branch
+  // with no תמ"ת file and a branch whose every child was refused produce the
+  // same rows. Only the caller that WRITES needs to tell them apart.
+  return { result, branch, tmtCount: tmtDocs.length, ctCount: ctDocs.length };
 }
 
 /** GET /api/tmt/reconcile?branch=&year= */
@@ -412,6 +415,19 @@ async function listImports(req, res, next) {
  * standing order and freeing a classroom place — none of which should happen
  * as a side effect of uploading a spreadsheet. Those come back as a list for
  * a human to act on.
+ *
+ * A COMPARISON NEEDS TWO SIDES. It ran once at משה דיין in the six minutes
+ * between the ClickTac upload at 11:14 and the תמ"ת upload at 11:20 on
+ * 11.8.2026. With no approvals loaded yet, every one of the 77 registered
+ * children read as "נרשם אצלנו — אין אישור תמ"ת", and all 77 were marked out
+ * of the intake queue in one pass. Seventy-four of them match a תמ"ת approval
+ * by ת"ז today; not one of them should have been touched.
+ *
+ * Nothing about that was visible while it happened: an empty side is not an
+ * error, it is a comparison against nothing, and it produces a confident
+ * verdict on every row. So the emptiness is checked here rather than inferred
+ * from the verdicts, which cannot tell "the ministry refused them" apart from
+ * "the ministry's file is not loaded".
  */
 async function apply(req, res, next) {
   try {
@@ -419,12 +435,48 @@ async function apply(req, res, next) {
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף' });
     const academicYear = normalizeYear(req.body?.academic_year || enrollmentYear());
 
-    const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
+    const { result, error, status, code, tmtCount, ctCount } =
+      await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
+
+    if (!tmtCount) {
+      return res.status(409).json({
+        code: 'NO_TMT_DATA',
+        error: 'לא נטען קובץ תמ"ת לסניף ולשנה האלה. בלי הקובץ ההצלבה תסיק שלאף ילד '
+          + 'אין אישור ותפסול את כולם. יש להעלות את קובץ התמ"ת ואז להריץ שוב.',
+      });
+    }
+    if (!ctCount) {
+      return res.status(409).json({
+        code: 'NO_CLICKTAC_DATA',
+        error: 'לא נטען קובץ קליקטאק לסניף ולשנה האלה — אין רישומים להצליב מולם.',
+      });
+    }
 
     const wanted = Array.isArray(req.body?.verdicts) && req.body.verdicts.length
       ? req.body.verdicts
       : ['missing_approval', 'cancelled', 'not_approved', 'withdrawn'];
+
+    /**
+     * Both files present and the comparison still rejects every last child.
+     *
+     * That is what a תמ"ת file downloaded inside the wrong gan's account looks
+     * like — the ministry's portal is per-מעון and the file carries no branch,
+     * so the ids simply do not meet and nobody matches anybody. It is also
+     * what a genuine catastrophe looks like, which is why this asks instead of
+     * refusing: the operator can see the screen and knows which one it is.
+     */
+    const queue = result.rows.filter(r => r.clicktac && r.clicktac.review_status !== 'imported');
+    const wouldDrop = queue.filter(r => wanted.includes(r.verdict));
+    if (queue.length >= 5 && wouldDrop.length === queue.length && !req.body?.confirm_drop_all) {
+      return res.status(409).json({
+        code: 'WOULD_DROP_ALL',
+        error: `ההצלבה פוסלת את כל ${queue.length} הרשומות הממתינות — אף ילד לא נשאר. `
+          + 'זה מה שקורה כשקובץ התמ"ת שייך לסניף אחר. יש לוודא שהקובץ הנכון הועלה.',
+        would_drop: wouldDrop.length,
+        queue_size: queue.length,
+      });
+    }
 
     const dropped = [];
     const needsManual = [];

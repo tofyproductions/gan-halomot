@@ -92,7 +92,7 @@ export default function TmtReconcile({
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
   const [detail, setDetail] = useState(null);
-  const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null });
+  const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null, error: null });
   const [historyDlg, setHistoryDlg] = useState({ open: false, loading: false, imports: [] });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
   const [saving, setSaving] = useState({});
@@ -221,15 +221,36 @@ export default function TmtReconcile({
     }
   };
 
-  const handleApply = async () => {
-    setApplyDlg(d => ({ ...d, saving: true }));
+  /**
+   * `confirmDropAll` is passed only after the server has refused once and the
+   * operator has read what it refused over. It is deliberately not a checkbox
+   * sitting open on the dialog: the case it covers — every waiting child
+   * rejected at once — should be reached by being stopped, not by ticking past.
+   */
+  const handleApply = async (confirmDropAll = false) => {
+    setApplyDlg(d => ({ ...d, saving: true, error: null }));
     try {
-      const res = await api.post('/tmt/apply', { branch_id: branchId, academic_year: year });
-      setApplyDlg({ open: true, saving: false, result: res.data });
+      const res = await api.post('/tmt/apply', {
+        branch_id: branchId,
+        academic_year: year,
+        ...(confirmDropAll ? { confirm_drop_all: true } : {}),
+      });
+      setApplyDlg({ open: true, saving: false, result: res.data, error: null });
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בהחלת המסקנות');
-      setApplyDlg(d => ({ ...d, saving: false }));
+      const data = err.response?.data;
+      // Shown inside the dialog, not as a toast. These refusals explain why a
+      // cohort is about to be written off, and that does not belong in a
+      // message that disappears on its own after four seconds.
+      setApplyDlg(d => ({
+        ...d,
+        saving: false,
+        error: {
+          code: data?.code || '',
+          message: data?.error || 'שגיאה בהחלת המסקנות',
+          queueSize: data?.queue_size || 0,
+        },
+      }));
     }
   };
 
@@ -318,7 +339,7 @@ export default function TmtReconcile({
             <Button size="small" startIcon={<DownloadIcon />} onClick={handleExport}>ייצוא לאקסל</Button>
             {canImport && (
               <Button size="small" variant="outlined" color="warning" startIcon={<PlaylistAddCheckIcon />}
-                onClick={() => setApplyDlg({ open: true, saving: false, result: null })}>
+                onClick={() => setApplyDlg({ open: true, saving: false, result: null, error: null })}>
                 החלת המסקנות
               </Button>
             )}
@@ -607,9 +628,19 @@ export default function TmtReconcile({
       </Dialog>
 
       {/* ---- החלת המסקנות ---- */}
-      <Dialog open={applyDlg.open} onClose={() => setApplyDlg({ open: false, saving: false, result: null })} maxWidth="sm" fullWidth>
+      <Dialog open={applyDlg.open} onClose={() => setApplyDlg({ open: false, saving: false, result: null, error: null })} maxWidth="sm" fullWidth>
         <DialogTitle>החלת מסקנות ההצלבה</DialogTitle>
         <DialogContent>
+          {applyDlg.error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <AlertTitle>
+                {applyDlg.error.code === 'WOULD_DROP_ALL'
+                  ? 'ההצלבה פוסלת את כולם — נעצר'
+                  : 'לא ניתן להחיל את המסקנות'}
+              </AlertTitle>
+              {applyDlg.error.message}
+            </Alert>
+          )}
           {!applyDlg.result ? (
             <>
               <Alert severity="warning" sx={{ mb: 2 }}>
@@ -642,9 +673,15 @@ export default function TmtReconcile({
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setApplyDlg({ open: false, saving: false, result: null })}>סגירה</Button>
-          {!applyDlg.result && (
-            <Button variant="contained" color="warning" onClick={handleApply} disabled={applyDlg.saving}>
+          <Button onClick={() => setApplyDlg({ open: false, saving: false, result: null, error: null })}>סגירה</Button>
+          {!applyDlg.result && applyDlg.error?.code === 'WOULD_DROP_ALL' && (
+            <Button variant="outlined" color="error" disabled={applyDlg.saving}
+              onClick={() => handleApply(true)}>
+              {applyDlg.saving ? 'מחיל…' : `בדקתי — לפסול את כל ${applyDlg.error.queueSize}`}
+            </Button>
+          )}
+          {!applyDlg.result && applyDlg.error?.code !== 'WOULD_DROP_ALL' && (
+            <Button variant="contained" color="warning" onClick={() => handleApply()} disabled={applyDlg.saving}>
               {applyDlg.saving ? 'מחיל…' : 'החלה'}
             </Button>
           )}
