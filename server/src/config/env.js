@@ -56,6 +56,13 @@ const env = {
   SMS_PASS: process.env.SMS_PASS,
   SMS_SENDER: process.env.SMS_SENDER,
 
+  // mail-sorter — the one service that reads the mailboxes, for both
+  // businesses. גן takes the 101 forms from it instead of opening the inbox
+  // itself; the READING of a form stays here, because this side also
+  // establishes whether it is signed and who the employer is.
+  MAIL_SORTER_URL: process.env.MAIL_SORTER_URL,
+  MAIL_SORTER_TOKEN: process.env.MAIL_SORTER_TOKEN,
+
   // Google Sheets (migration only)
   GOOGLE_SHEETS_ID: process.env.GOOGLE_SHEETS_ID,
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,

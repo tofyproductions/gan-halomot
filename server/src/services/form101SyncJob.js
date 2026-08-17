@@ -21,6 +21,7 @@ const {
   Form101Sync, Form101Inbox, EmployeeDocument, ScannedAttachment,
 } = require('../models');
 const mailbox = require('./mailbox.service');
+const mailSorter = require('./mailSorter.service');
 const { scanForm101, gateIsForm101 } = require('./form101Scan');
 const { prefilter } = require('./form101Prefilter');
 const { newLedger } = require('./aiCost');
@@ -157,17 +158,45 @@ async function runOnce(trigger) {
 
   const since = new Date(Date.now() - (cfg.lookback_days || 30) * 864e5);
   let fetched;
-  try {
-    fetched = await mailbox.fetchForms({
-      fromContains: cfg.from_contains,
-      subjectContains: cfg.subject_contains,
-      mailbox: cfg.mailbox,
-      markSeen: cfg.mark_seen,
-      max: cfg.max_messages || 40,
-      since,
-    });
-  } catch (err) {
-    return record(cfg, { trigger, status: 'error', message: `קריאת תיבת הדואר נכשלה: ${err.message}` });
+  // Where the forms come from — said out loud in the run log, because two
+  // systems could read this mailbox and the whole point of the other one is
+  // that only it should. A run quietly served by the old path would hide that
+  // the arrangement is not in effect.
+  let source = 'mailbox';
+
+  // mail-sorter first. It reads this inbox anyway, for both businesses, and a
+  // second connection to the same account is the duplication worth removing.
+  //
+  // The fallback is not decoration: mail-sorter only knows a document is a 101
+  // if a sender rule says so, and until that rule exists it has nothing to
+  // offer. An empty answer taken at face value would look exactly like "no
+  // forms arrived", which is the one wrong answer this job can give — so zero
+  // results fall through to the mailbox, as does an unreachable service.
+  if (mailSorter.isConfigured()) {
+    try {
+      const viaSorter = await mailSorter.fetchFormsLikeMailbox({ max: cfg.max_messages || 40 });
+      if (viaSorter.configured && viaSorter.messages.length) {
+        fetched = viaSorter;
+        source = 'mail-sorter';
+      }
+    } catch {
+      /* asleep, unconfigured on the other side, or unreachable — the mailbox still works */
+    }
+  }
+
+  if (!fetched) {
+    try {
+      fetched = await mailbox.fetchForms({
+        fromContains: cfg.from_contains,
+        subjectContains: cfg.subject_contains,
+        mailbox: cfg.mailbox,
+        markSeen: cfg.mark_seen,
+        max: cfg.max_messages || 40,
+        since,
+      });
+    } catch (err) {
+      return record(cfg, { trigger, status: 'error', message: `קריאת תיבת הדואר נכשלה: ${err.message}` });
+    }
   }
 
   if (!fetched.configured) {
@@ -330,6 +359,10 @@ async function runOnce(trigger) {
 
   const status = attached + unmatched === 0 ? 'empty' : 'ok';
   const parts = [];
+  // Which service supplied the files. Two systems could read this inbox and
+  // only one of them should; a run served by the old path while everyone
+  // believes otherwise is the failure worth naming out loud.
+  parts.push(source === 'mail-sorter' ? 'מקור: מיון מיילים' : 'מקור: תיבת הדואר');
   if (attached) parts.push(`${attached} שויכו`);
   if (gated) parts.push(`${gated} עברו סינון מהיר, ${filesScanned} נקראו במלואם`);
   // The cost, in the sentence a person actually reads.
