@@ -32,9 +32,6 @@ router.use('/maintenance', require('./maintenance.routes'));
 router.use('/gan-events', require('./ganEvents.routes'));
 // Leads (פניות הורים) — manager side; the public inquiry form lives under /public.
 router.use('/leads', require('./leads.routes'));
-// גיוס עובדים — candidates from the website form, routed to the branch they
-// asked for. Read scoping is per-row in the controller, not by query param.
-router.use('/recruitment', require('./recruitment.routes'));
 
 // Parent portal. Its own accounts, its own signing key, its own guard — a
 // parent's token cannot satisfy the staff middleware below and a staff token
@@ -78,6 +75,12 @@ router.use('/gifts', require('./gifts.routes'));
 // עדכונים מהורים — what parents corrected about their own children. An
 // acknowledgement queue, not an approval one: the changes are already live.
 router.use('/parent-changes', require('./parentChanges.routes'));
+// גיוס עובדים — candidates from the website form, routed to the branch they
+// asked for. BELOW authMiddleware, deliberately: the controller decides what a
+// caller may see from req.user, so without one it computes an empty scope and
+// silently returns nothing — which is what it did while this sat above the
+// line, and it left /recruitment/pull reachable by anyone with the URL.
+router.use('/recruitment', require('./recruitment.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/activities', require('./activity.routes'));
