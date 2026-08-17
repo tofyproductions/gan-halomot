@@ -110,7 +110,12 @@ export default function ParentPortal() {
           overscrolls — and the keyframes this portal animates with are never
           injected at all. */}
       <CssBaseline />
-      <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
+      {/* The gap above the header on a wide screen is PADDING here, not a
+          margin on the header itself. A top margin on a first child with no
+          border or padding above it collapses straight out of its parent,
+          taking the parent's background with it — which showed as a pale strip
+          across the top of the page, and on the dark theme as a white one. */}
+      <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default', pt: { md: 3 } }}>
         {/* Not an AppBar. A parent needs the way out and the name of the gan,
             and neither of those is worth a floating bar that follows them down
             a screen already carrying a fixed navigation at the bottom.
@@ -127,7 +132,14 @@ export default function ParentPortal() {
             px: 2, pt: 'max(16px, env(safe-area-inset-top))', pb: 3.5,
             bgcolor: (t) => t.playful.coral.bg,
             color: (t) => t.playful.coral.on,
-            borderRadius: '0 0 26px 26px',
+            // On a phone it runs edge to edge and curves into the page. On a
+            // wide screen that same block became a banner across 1400px with
+            // its rounded corners out at the bezel, attached to nothing — so
+            // there it becomes a card at the top of the content column, the
+            // width of everything below it.
+            borderRadius: { xs: '0 0 26px 26px', md: '26px' },
+            maxWidth: { md: 760 },
+            mx: { md: 'auto' },
           }}
         >
           <Stack

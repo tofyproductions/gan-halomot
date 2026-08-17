@@ -358,7 +358,16 @@ export default function ChildDetails({ childId }) {
           bottom of a phone. */}
       <Box sx={{ display: { xs: 'none', md: 'block' } }}>
         <Card>
-          <Tabs value={active} onChange={(_, v) => setTab(v)} variant="fullWidth">
+          {/* Scrollable, not fullWidth. Six sections divided equally across the
+              column left "הודעות מהגן" two lines tall and colliding with its
+              own icon — fullWidth is right for four labels and wrong for six.
+              Sized to content, they simply scroll if they ever stop fitting. */}
+          <Tabs
+            value={active}
+            onChange={(_, v) => setTab(v)}
+            variant="scrollable"
+            scrollButtons="auto"
+          >
             {tabs.map(t => (
               <Tab key={t.key} value={t.key} label={t.label} icon={t.icon} iconPosition="start" />
             ))}

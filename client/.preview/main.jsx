@@ -12,8 +12,11 @@ localStorage.setItem(PARENT_TOKEN_KEY, 'preview');
  * One phone at a time, not two side by side: the colour preference lives in
  * localStorage, which both copies would share and overwrite for each other.
  */
+const SIZES = { phone: [400, 880], tablet: [820, 1000], desktop: [1440, 1000] };
+
 function App() {
   const [mode, setMode] = useState('light');
+  const [size, setSize] = useState('phone');
   const pick = (m) => {
     if (m === 'auto') localStorage.removeItem('gan_parent_theme');
     else localStorage.setItem('gan_parent_theme', m);
@@ -21,14 +24,21 @@ function App() {
   };
   return (
     <Box sx={{ p: 2, fontFamily: 'system-ui', bgcolor: '#EFEDEA', minHeight: '100vh' }}>
-      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2, flexWrap: 'wrap' }} useFlexGap>
         {['light', 'dark', 'auto'].map(m => (
           <Button key={m} variant={mode === m ? 'contained' : 'outlined'} onClick={() => pick(m)}>
             {m}
           </Button>
         ))}
+        {Object.keys(SIZES).map(sz => (
+          <Button key={sz} color="secondary"
+            variant={size === sz ? 'contained' : 'outlined'} onClick={() => setSize(sz)}>
+            {sz}
+          </Button>
+        ))}
       </Stack>
-      <Box sx={{ width: 400, height: 880, overflow: 'hidden', borderRadius: '30px',
+      <Box sx={{ width: SIZES[size][0], height: SIZES[size][1], overflow: 'hidden',
+                 borderRadius: size === 'phone' ? '30px' : '10px',
                  border: '10px solid #1a1a1a', boxShadow: '0 20px 50px rgba(0,0,0,.25)' }}>
         <Box sx={{ width: '100%', height: '100%', overflowY: 'auto' }}>
           <MemoryRouter key={mode} initialEntries={['/parents']}>
