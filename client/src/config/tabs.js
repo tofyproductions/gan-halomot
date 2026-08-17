@@ -31,6 +31,11 @@ export const TAB_GROUPS = [
     label: 'כוח אדם',
     items: [
       { id: 'employees',          label: 'עובדים',  path: '/employees',          defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      // Candidates from the website's recruitment form. A branch manager sees
+      // only the gans she holds — enforced per row on the server, not by the
+      // branch dropdown, because these are private phone numbers of people who
+      // do not work here.
+      { id: 'recruitment',        label: 'גיוס',    path: '/recruitment',        defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'branch_manager'] },
       // The salary table itself is accountant/admin. A branch manager files what
       // she knows from 'עדכוני שכר' instead — she has no business seeing every

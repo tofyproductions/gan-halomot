@@ -70,6 +70,7 @@ const DailyMenu = require('./DailyMenu');
 const Photo = require('./Photo');
 const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
+const Candidate = require('./Candidate');
 
 module.exports = {
   User,
@@ -143,4 +144,5 @@ module.exports = {
   Photo,
   GiftCampaign,
   GiftSelection,
+  Candidate,
 };

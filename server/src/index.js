@@ -202,6 +202,17 @@ connectDB().then(() => {
     const runForm101 = () => form101Job.tick().catch(e => console.error('[form101] tick failed:', e.message));
     setTimeout(runForm101, 4 * 60 * 1000);
     setInterval(runForm101, 6 * 60 * 60 * 1000);
+
+    // גיוס: pull the website form's applications out of mail-sorter and mail
+    // each manager what is waiting for her. Hourly and self-limiting — nothing
+    // before 10:00, nothing once the day's has gone — so a restart at 10:04
+    // does not cost a day, and nothing is sent on a morning with no applicants.
+    const recruitmentJob = require('./services/recruitmentDigestJob');
+    const runRecruitment = () => recruitmentJob.tick()
+      .then(r => { if (r?.total) console.log(`[recruitment] digest: ${r.total} candidates in ${r.sent.length} emails`); })
+      .catch(e => console.error('[recruitment] tick failed:', e.message));
+    setTimeout(runRecruitment, 2 * 60 * 1000);
+    setInterval(runRecruitment, 60 * 60 * 1000);
   });
 });
 

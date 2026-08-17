@@ -8,6 +8,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
 import CloseIcon from '@mui/icons-material/Close';
 import DashboardIcon from '@mui/icons-material/Dashboard';
+import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import PriceChangeIcon from '@mui/icons-material/PriceChange';
@@ -59,6 +60,7 @@ const ICON_BY_TAB = {
   classes: EventIcon,
   events: CelebrationIcon,
   leads: PersonAddIcon,
+  recruitment: PersonSearchIcon,
   maintenance: HandymanIcon,
   contacts: ContactsIcon,
   my_salary: AccountBalanceIcon,

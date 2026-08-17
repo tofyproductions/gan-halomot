@@ -32,6 +32,9 @@ router.use('/maintenance', require('./maintenance.routes'));
 router.use('/gan-events', require('./ganEvents.routes'));
 // Leads (פניות הורים) — manager side; the public inquiry form lives under /public.
 router.use('/leads', require('./leads.routes'));
+// גיוס עובדים — candidates from the website form, routed to the branch they
+// asked for. Read scoping is per-row in the controller, not by query param.
+router.use('/recruitment', require('./recruitment.routes'));
 
 // Parent portal. Its own accounts, its own signing key, its own guard — a
 // parent's token cannot satisfy the staff middleware below and a staff token

@@ -39,6 +39,7 @@ import EventsPage from './components/events/EventsPage';
 import EventSignup from './components/events/EventSignup';
 import LeadForm from './components/leads/LeadForm';
 import LeadsPage from './components/leads/LeadsPage';
+import RecruitmentPage from './components/recruitment/RecruitmentPage';
 import MySalaryPreview from './components/employee-portal/MySalaryPreview';
 import MyPayslips from './components/employee-portal/MyPayslips';
 import MyDocuments from './components/employee-portal/MyDocuments';
@@ -176,6 +177,11 @@ function AppRoutes() {
         <Route path="leads" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
             <LeadsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="recruitment" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+            <RecruitmentPage />
           </ProtectedRoute>
         } />
         {/* Employee portal */}
