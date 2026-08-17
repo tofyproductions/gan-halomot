@@ -5,6 +5,8 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, CircularProgress, Tooltip, IconButton,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
@@ -301,10 +303,12 @@ function AbsenceForm({ employee, month, onDone, canDecide }) {
 function PunchesForm({ employee, month, initial, onCounts }) {
   const [data, setData] = useState(initial || null);
   const [loading, setLoading] = useState(!initial);
-  const [fix, setFix] = useState(null);       // the day being completed
+  const [fix, setFix] = useState(null);       // the day being completed / added
   const [inTime, setInTime] = useState('');
   const [outTime, setOutTime] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(null); // one punch whose time is being changed
+  const [editTime, setEditTime] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -318,6 +322,40 @@ function PunchesForm({ employee, month, initial, onCounts }) {
 
   // The shell already fetched this to colour the tab; don't fetch it twice.
   useEffect(() => { if (!initial) load(); }, [employee.employee_id, month, initial]);
+
+  /**
+   * Change one punch's time.
+   *
+   * The server parks a manager's change on a punch that already counts and
+   * leaves the salary alone until the accountant decides. That is the whole
+   * reason this asks for a reason: the accountant is being shown a time she
+   * cannot check against anything, and "the clock in the גן was an hour fast"
+   * is the difference between approving it and ringing the branch.
+   */
+  const submitEdit = () => {
+    if (!editTime) return toast.error('יש להזין שעה');
+    setSaving(true);
+    api.patch(`/payroll/punches/${editing.punch.id}`, {
+      timestamp: `${editing.date}T${editTime}:00`,
+      manual_note: editing.note || '',
+    })
+      .then((res) => {
+        toast.success(res.data?.pending
+          ? 'השינוי נשלח לאישור הנהלת החשבונות — השעות לא ישתנו עד שיאושר'
+          : 'השעה עודכנה');
+        setEditing(null); setEditTime(''); load();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'))
+      .finally(() => setSaving(false));
+  };
+
+  const removePunch = (day, punch) => {
+    // eslint-disable-next-line no-alert, no-restricted-globals
+    if (!confirm(`למחוק את ההחתמה ${punch.time} בתאריך ${fmtDate(day.date)}?`)) return;
+    api.delete(`/payroll/punches/${punch.id}`)
+      .then(() => { toast.success('ההחתמה נמחקה'); load(); })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  };
 
   const submitFix = () => {
     if (!inTime && !outTime) return toast.error('יש להזין לפחות שעה אחת');
@@ -349,13 +387,22 @@ function PunchesForm({ employee, month, initial, onCounts }) {
           </Alert>
         )}
 
+      {/* A day with no punches at all does not appear in the table — there is
+          nothing to list. So adding one starts here rather than from a row. */}
+      <Stack direction="row" alignItems="center">
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" startIcon={<AddIcon />}
+          onClick={() => { setFix({ date: '', isNew: true }); setInTime(''); setOutTime(''); }}>
+          הוספת יום שלא הוחתם
+        </Button>
+      </Stack>
+
       <Table size="small">
         <TableHead>
           <TableRow>
             <TableCell sx={{ fontWeight: 700 }}>תאריך</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
-            <TableCell sx={{ fontWeight: 700 }} align="center">כניסה</TableCell>
-            <TableCell sx={{ fontWeight: 700 }} align="center">יציאה</TableCell>
+            <TableCell sx={{ fontWeight: 700 }}>החתמות</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>סטטוס</TableCell>
             <TableCell sx={{ fontWeight: 700 }} align="center">פעולה</TableCell>
           </TableRow>
@@ -365,8 +412,27 @@ function PunchesForm({ employee, month, initial, onCounts }) {
             <TableRow key={d.date} sx={d.has_problem ? { bgcolor: '#fef2f2' } : undefined}>
               <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(d.date)}</TableCell>
               <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>{d.branch || '—'}</TableCell>
-              <TableCell align="center">{d.in_time || '—'}</TableCell>
-              <TableCell align="center">{d.out_time || (d.incomplete ? '⚠' : '—')}</TableCell>
+              <TableCell>
+                {/* Each punch on its own, because a time cannot be changed
+                    without saying which of the day's records it is. */}
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">
+                  {(d.punches || []).map(pn => (
+                    <Chip
+                      key={pn.id}
+                      size="small"
+                      variant={pn.counts ? 'filled' : 'outlined'}
+                      color={pn.pending_time ? 'info' : (pn.counts ? 'default' : 'warning')}
+                      label={pn.pending_time ? `${pn.time} ← ${pn.pending_time}` : pn.time}
+                      onClick={() => { setEditing({ date: d.date, punch: pn, note: '' }); setEditTime(pn.time); }}
+                      onDelete={() => removePunch(d, pn)}
+                      deleteIcon={<DeleteOutlineIcon />}
+                      icon={<EditIcon sx={{ fontSize: 14 }} />}
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  ))}
+                  {!(d.punches || []).length && <Typography variant="caption" color="text.disabled">—</Typography>}
+                </Stack>
+              </TableCell>
               <TableCell>
                 {d.incomplete && <Chip size="small" color="error" label="החתמה חסרה" />}
                 {d.too_many && <Chip size="small" color="warning" label={`${d.times.length} החתמות`} />}
@@ -377,17 +443,24 @@ function PunchesForm({ employee, month, initial, onCounts }) {
                 {!d.has_problem && !d.pending_approval && <Typography variant="caption" color="text.disabled">תקין</Typography>}
               </TableCell>
               <TableCell align="center">
-                {d.incomplete && !d.pending_approval && (
+                {d.incomplete && !d.pending_approval ? (
                   <Button size="small" variant="outlined"
                     onClick={() => { setFix(d); setInTime(d.in_time || ''); setOutTime(''); }}>
                     השלם
                   </Button>
+                ) : (
+                  <Tooltip title="הוספת החתמה ליום הזה">
+                    <IconButton size="small"
+                      onClick={() => { setFix(d); setInTime(''); setOutTime(''); }}>
+                      <AddIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                 )}
               </TableCell>
             </TableRow>
           ))}
           {days.length === 0 && (
-            <TableRow><TableCell colSpan={6} align="center" sx={{ py: 3, color: 'text.secondary' }}>
+            <TableRow><TableCell colSpan={5} align="center" sx={{ py: 3, color: 'text.secondary' }}>
               אין החתמות לחודש זה
             </TableCell></TableRow>
           )}
@@ -395,12 +468,22 @@ function PunchesForm({ employee, month, initial, onCounts }) {
       </Table>
 
       <Dialog open={!!fix} onClose={() => setFix(null)} dir="rtl" maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>השלמת החתמה — {fix ? fmtDate(fix.date) : ''}</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {fix?.isNew ? 'הוספת יום' : `החתמה — ${fix ? fmtDate(fix.date) : ''}`}
+        </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
               הדיווח נרשם כהחתמה ידנית ועובר לאישור הנהלת החשבונות — הוא אינו משנה שעות בעצמו.
             </Typography>
+            {fix?.isNew && (
+              <TextField type="date" size="small" label="תאריך" value={fix.date}
+                onChange={e => setFix(f => ({ ...f, date: e.target.value }))}
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ min: `${month}-01`, max: `${month}-31` }}
+                helperText="בתוך החודש המוצג בלבד"
+                fullWidth />
+            )}
             <TextField type="time" size="small" label="שעת כניסה" value={inTime}
               onChange={e => setInTime(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
             <TextField type="time" size="small" label="שעת יציאה" value={outTime}
@@ -410,7 +493,41 @@ function PunchesForm({ employee, month, initial, onCounts }) {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setFix(null)} disabled={saving}>ביטול</Button>
-          <BusyButton variant="contained" loading={saving} loadingText="שולח…" onClick={submitFix}>שלח</BusyButton>
+          <BusyButton variant="contained" loading={saving} loadingText="שולח…"
+            disabled={!fix?.date} onClick={submitFix}>שלח</BusyButton>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!editing} onClose={() => setEditing(null)} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          שינוי שעה — {editing ? fmtDate(editing.date) : ''}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {editing?.punch?.counts && (
+              <Alert severity="warning">
+                ההחתמה הזו כבר נספרת בשכר. השינוי יישלח לאישור הנהלת החשבונות והשעות
+                יישארו כפי שהן עד שיאושר.
+              </Alert>
+            )}
+            {editing?.punch?.pending_time && (
+              <Alert severity="info">
+                כבר נשלח שינוי ל־{editing.punch.pending_time} וממתין לאישור. שליחה נוספת תחליף אותו.
+              </Alert>
+            )}
+            <TextField type="time" size="small" label="שעה" value={editTime}
+              onChange={e => setEditTime(e.target.value)} InputLabelProps={{ shrink: true }} fullWidth />
+            <TextField size="small" label="סיבה" value={editing?.note || ''}
+              onChange={e => setEditing(v => ({ ...v, note: e.target.value }))}
+              placeholder="למשל: השעון בגן הקדים בשעה"
+              helperText="הנהלת החשבונות רואה רק את השעה — הסיבה היא מה שמאפשר לאשר בלי טלפון"
+              fullWidth />
+            <UploadingBar show={saving} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditing(null)} disabled={saving}>ביטול</Button>
+          <BusyButton variant="contained" loading={saving} loadingText="שולח…" onClick={submitEdit}>שמירה</BusyButton>
         </DialogActions>
       </Dialog>
     </Stack>

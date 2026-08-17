@@ -65,6 +65,30 @@ const punchSchema = new mongoose.Schema({
   approval_decided_at: { type: Date, default: null },
   approval_decided_note: { type: String, default: '' },
 
+  /**
+   * A correction a branch manager has asked for on a punch that already counts.
+   *
+   * The manager may not simply rewrite a clock record. Everything else she can
+   * do to the hours — a forgotten punch, a missing side of a day — arrives at
+   * the accountant as a pending row and does not touch the salary until it is
+   * approved, and changing a time that IS already in the salary is the one with
+   * the largest effect of the lot.
+   *
+   * So the new time waits HERE and `timestamp` is left alone. The day keeps
+   * counting the hours it counted this morning until somebody with the
+   * authority says otherwise, and a rejection has something to fall back to —
+   * `prev_status` is what the punch was before the request, because a refused
+   * correction must leave a real clock punch counting exactly as it did, not
+   * 'rejected' and silently worth nothing.
+   */
+  pending_edit: {
+    timestamp: { type: Date, default: null },
+    prev_status: { type: String, default: '' },
+    requested_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    requested_at: { type: Date, default: null },
+    note: { type: String, default: '' },
+  },
+
   // Raw device state code (0=checkin, 1=checkout, 4/5=overtime in/out, etc.)
   // We do not trust this for pairing — pairing is computed from chronological order.
   state: { type: Number, default: 0 },

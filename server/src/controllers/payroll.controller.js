@@ -2421,7 +2421,17 @@ async function listPendingPunches(req, res, next) {
     // Stage 2 (accountant/admin): manager-approved or manager-created punches.
     let pending_accountant = [];
     if (isFinal) {
-      const f = { approval_status: 'pending_accountant' };
+      // Two different things wait here. A manual punch waits as a STATUS,
+      // because it does not count until it is approved. A correction to a
+      // punch that already counts waits as a pending_edit and keeps its
+      // status, because taking it out of the salary while somebody thinks
+      // about it would dock the employee for asking.
+      const f = {
+        $or: [
+          { approval_status: 'pending_accountant' },
+          { 'pending_edit.timestamp': { $ne: null } },
+        ],
+      };
       if (branchQ) f.branch_id = branchQ;
       pending_accountant = await load(f);
     }
@@ -2441,6 +2451,21 @@ async function approvePunch(req, res, next) {
     const isFinal = role === 'system_admin' || role === 'accountant';
     const isManager = role === 'branch_manager' || role === 'system_admin';
     const st = p.approval_status;
+
+    // A parked correction is decided on its own terms — the punch's status is
+    // whatever it was before the request, and approving means applying the new
+    // time and leaving it counting exactly as it was.
+    if (p.pending_edit?.timestamp && isFinal) {
+      p.timestamp = p.pending_edit.timestamp;
+      if (p.timestamp_source === 'fixed_schedule') p.schedule_edited = true;
+      p.approval_status = p.pending_edit.prev_status || 'approved';
+      p.pending_edit = undefined;
+      p.approval_decided_by = req.user.id;
+      p.approval_decided_at = new Date();
+      p.approval_decided_note = req.body?.note || '';
+      await p.save();
+      return res.json({ ok: true, punch: p, applied_edit: true });
+    }
 
     if ((st === 'pending_manager' || st === 'pending') && isManager) {
       // Stage 1 → forward to the accountant.
@@ -2469,6 +2494,19 @@ async function rejectPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Refusing a correction to a punch that was already counting means "keep
+    // the original", not "throw the day away". Marking a real clock record
+    // 'rejected' would remove hours the employee genuinely worked, which is
+    // the opposite of what saying no to a change should do.
+    if (p.pending_edit?.timestamp) {
+      p.approval_status = p.pending_edit.prev_status || p.approval_status;
+      p.pending_edit = undefined;
+      p.approval_decided_by = req.user.id;
+      p.approval_decided_at = new Date();
+      p.approval_decided_note = req.body?.note || '';
+      await p.save();
+      return res.json({ ok: true, punch: p, restored: true });
+    }
     p.approval_status = 'rejected';
     p.approval_decided_by = req.user.id;
     p.approval_decided_at = new Date();
@@ -2491,6 +2529,42 @@ async function editPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+
+    /**
+     * A branch manager changing a time that is ALREADY in the salary.
+     *
+     * Every other correction she can make waits for the accountant. This one —
+     * the one that moves hours already counted — used to be the exception that
+     * applied itself. The request is parked on the punch instead; the day keeps
+     * counting what it counted this morning, and a refusal leaves a real clock
+     * record exactly as the clock wrote it.
+     */
+    const COUNTS = ['auto', 'approved'];
+    const editorRole = req.user?.role;
+    const editorIsFinal = editorRole === 'system_admin' || editorRole === 'accountant';
+    if (req.body.timestamp && !editorIsFinal && COUNTS.includes(p.approval_status)) {
+      const wanted = new Date(req.body.timestamp);
+      if (Number.isNaN(wanted.getTime())) return res.status(400).json({ error: 'שעה לא תקינה' });
+      p.pending_edit = {
+        timestamp: wanted,
+        prev_status: p.approval_status,
+        requested_by: req.user?.id || null,
+        requested_at: new Date(),
+        note: String(req.body.manual_note || ''),
+      };
+      // approval_status is deliberately NOT touched. Moving it to
+      // pending_accountant would stop the punch counting the moment the
+      // request was made — an employee's hours would drop while she waits for
+      // a decision that has not been taken, which is a worse outcome than the
+      // wrong time and is caused by asking. The day goes on counting what the
+      // clock recorded; the request is a separate thing sitting beside it, and
+      // the accountant's queue picks it up on pending_edit rather than status.
+      p.manager_approved_by = req.user?.id || null;
+      p.manager_approved_at = new Date();
+      await p.save();
+      return res.json({ ok: true, punch: p, pending: true });
+    }
+
     if (req.body.timestamp) {
       const next = new Date(req.body.timestamp);
       // Correcting a generated row makes it a human decision. Mark it so the

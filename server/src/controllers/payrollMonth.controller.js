@@ -2623,10 +2623,25 @@ async function myUpdatePunches(req, res, next) {
     for (const p of punches) {
       const key = dayKey(new Date(p.timestamp));
       if (!byDate.has(key)) {
-        byDate.set(key, { date: key, times: [], branches: new Set(), pending: false, stage: null });
+        byDate.set(key, {
+          date: key, times: [], punches: [], branches: new Set(), pending: false, stage: null,
+        });
       }
       const day = byDate.get(key);
       day.times.push(timeHHMM(new Date(p.timestamp)));
+      // The individual records, so the screen can offer to change or remove
+      // one rather than only to complete a day. A time is not editable without
+      // knowing which of the day's punches it belongs to.
+      day.punches.push({
+        id: String(p._id),
+        time: timeHHMM(new Date(p.timestamp)),
+        source: p.timestamp_source,
+        status: p.approval_status,
+        counts: ['auto', 'approved'].includes(p.approval_status),
+        // A change already asked for and not yet decided — shown beside the
+        // current time so the manager does not ask for it twice.
+        pending_time: p.pending_edit?.timestamp ? timeHHMM(new Date(p.pending_edit.timestamp)) : null,
+      });
       day.branches.add(branchNames.get(String(p.branch_id)) || '');
       if (PENDING.has(p.approval_status)) {
         day.pending = true;
@@ -2643,6 +2658,7 @@ async function myUpdatePunches(req, res, next) {
       return {
         date: d.date,
         times: d.times,
+        punches: d.punches,
         in_time: d.times[0] || null,
         out_time: d.times.length >= 2 ? d.times[d.times.length - 1] : null,
         branch: [...d.branches].filter(Boolean).join(' + '),
