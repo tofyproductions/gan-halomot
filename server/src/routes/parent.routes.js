@@ -55,6 +55,9 @@ router.post('/children/:childId/photos', photoUpload.array('photos', 5), portal.
 // from — their child's own, never the classroom gallery.
 router.get('/children/:childId/gift', portal.childGift);
 router.put('/children/:childId/gift', portal.setChildGift);
+// What the family owes. Read-only — nothing in the parent portal moves money.
+const payments = require('../controllers/parentPayments.controller');
+router.get('/children/:childId/payments', payments.childPayments);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
 

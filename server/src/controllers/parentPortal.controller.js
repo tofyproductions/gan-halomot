@@ -902,6 +902,12 @@ function editableFields(_req, res) {
 }
 
 module.exports = {
+  // Exported for controllers/parentPayments, which must apply the same
+  // ownership test: the child id in the URL is only ever a lookup, and the
+  // parent's children are resolved fresh from the enrolment data on every
+  // request. A second implementation of that check is a second place for it
+  // to be wrong.
+  loadOwnChild,
   childDetails, childContracts, contractFile,
   updateChild, startPhoneChange, confirmPhoneChange, editableFields,
   childDay, updateChildDay, addSecondParent,

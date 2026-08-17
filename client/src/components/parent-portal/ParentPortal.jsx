@@ -5,9 +5,13 @@ import {
   CssBaseline,
 } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import BrightnessAutoIcon from '@mui/icons-material/BrightnessAuto';
 import { ThemeProvider } from '@mui/material/styles';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
-import parentTheme, { DISPLAY } from '../../theme/parentTheme';
+import { DISPLAY } from '../../theme/parentTheme';
+import useParentColorMode from '../../theme/useParentColorMode';
 import ChildDetails from './ChildDetails';
 
 /**
@@ -40,9 +44,21 @@ function Loading() {
   );
 }
 
+/**
+ * Auto → light → dark → auto.
+ *
+ * A cycle rather than a menu: three states is few enough to walk through, and
+ * the icon shows where you are. Auto is first and is the default, because a
+ * parent whose phone already turns dark in the evening has answered this
+ * question once and should not be asked again by every app.
+ */
+const NEXT_MODE = { auto: 'light', light: 'dark', dark: 'auto' };
+const MODE_LABEL = { auto: 'לפי המכשיר', light: 'בהיר', dark: 'כהה' };
+
 export default function ParentPortal() {
   const navigate = useNavigate();
   const token = localStorage.getItem(PARENT_TOKEN_KEY);
+  const { theme, preference, setPreference } = useParentColorMode();
 
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -76,7 +92,7 @@ export default function ParentPortal() {
   const child = children[selected] || null;
 
   return (
-    <ThemeProvider theme={parentTheme}>
+    <ThemeProvider theme={theme}>
       {/* Re-applied under THIS theme. The one at the app root was built with
           the staff palette, so without this the page keeps the management
           system's cold grey behind the content — visible the moment anybody
@@ -111,6 +127,17 @@ export default function ParentPortal() {
                 </Typography>
               )}
             </Box>
+            <Tooltip title={`תצוגה: ${MODE_LABEL[preference]}`}>
+              <IconButton
+                onClick={() => setPreference(NEXT_MODE[preference])}
+                aria-label={`תצוגה: ${MODE_LABEL[preference]}. החלפה`}
+                size="small"
+              >
+                {preference === 'auto' && <BrightnessAutoIcon fontSize="small" />}
+                {preference === 'light' && <LightModeIcon fontSize="small" />}
+                {preference === 'dark' && <DarkModeIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
             <Tooltip title="יציאה">
               <IconButton onClick={logout} aria-label="יציאה מהחשבון" size="small">
                 <LogoutIcon fontSize="small" />

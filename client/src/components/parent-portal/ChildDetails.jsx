@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Card, CardContent, Typography, Stack, Alert, Chip, Skeleton,
   Button, Box, Tabs, Tab, Avatar, BottomNavigation, BottomNavigationAction, Paper,
+  Drawer, List, ListItemButton, ListItemIcon, ListItemText, Divider,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PhoneIphoneIcon from '@mui/icons-material/PhoneIphone';
@@ -10,17 +11,23 @@ import TodayIcon from '@mui/icons-material/Today';
 import BadgeIcon from '@mui/icons-material/Badge';
 import FolderIcon from '@mui/icons-material/Folder';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
+import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
+import PaymentsIcon from '@mui/icons-material/Payments';
+import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
+import { alpha } from '@mui/material/styles';
 import { DISPLAY } from '../../theme/parentTheme';
 import EditableCard from './EditableCard';
 import NurseryDay from './NurseryDay';
 import PhotoGallery from './PhotoGallery';
 import GiftPicker from './GiftPicker';
+import ParentHome from './ParentHome';
+import Payments from './Payments';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
 /**
- * One child, in sections.
+ * One child, in sections, behind a home screen.
  *
  * It was one long scroll, and the scroll had the wrong thing on top for
  * whoever was looking. An infant's parent opens this several times a day for
@@ -38,6 +45,13 @@ import SecondParentDialog from './SecondParentDialog';
  * Empty sections still say so in words. A health box that renders nothing when
  * there are no allergies looks identical to one that failed to load, and the
  * difference matters most for exactly that field.
+ *
+ * The sections are now SIX and the bar holds five. That is not a layout
+ * problem to solve with smaller icons — a thumb is the width it is — so four
+ * of them earn a place and the rest live behind "עוד". What earns a place is
+ * whether a parent opens it in a given week: the day, the photographs and the
+ * money do; the contract and the address do not, and they are read once a year
+ * by somebody who is looking for them.
  */
 
 function Field({ label, value, empty = 'לא רשום' }) {
@@ -150,12 +164,15 @@ export default function ChildDetails({ childId }) {
   const [data, setData] = useState(null);
   const [contracts, setContracts] = useState(null);
   const [heroPhoto, setHeroPhoto] = useState('');
+  const [myPhotos, setMyPhotos] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [phoneOpen, setPhoneOpen] = useState(false);
   const [secondOpen, setSecondOpen] = useState(false);
   const [tab, setTab] = useState('');
+  const [payments, setPayments] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const refresh = async () => {
     const fresh = await parentApi.get(`/children/${childId}`);
@@ -185,23 +202,34 @@ export default function ChildDetails({ childId }) {
     setData(null);
     setContracts(null);
     setHeroPhoto('');
+    setMyPhotos([]);
     setTab('');
+    setPayments(null);
+    setMoreOpen(false);
 
     (async () => {
       try {
-        const [d, c, p] = await Promise.all([
+        const [d, c, p, pay] = await Promise.all([
           parentApi.get(`/children/${childId}`),
           parentApi.get(`/children/${childId}/contracts`),
           // Decoration, so it is allowed to fail: object storage being down
           // must not cost the parent the details of their child.
           parentApi.get(`/children/${childId}/photos`).catch(() => null),
+          // Asked here rather than inside the section, because the answer
+          // decides whether the section is offered at all. A child whose fee
+          // the gan has not set yet gets no payments tab — an empty one, or a
+          // total of ₪0, is a promise that will have to be broken in November.
+          parentApi.get(`/children/${childId}/payments`).catch(() => null),
         ]);
         if (cancelled) return;
         setData(d.data);
         setContracts(c.data.contracts || []);
-        // Only a photograph of THIS child. A classroom picture has other
-        // people's children in it and has no business being their portrait.
+        setPayments(pay?.data?.available ? pay.data : null);
+        // Only photographs of THIS child. A classroom picture has other
+        // people's children in it and has no business being their portrait,
+        // or on the home screen.
         const mine = p?.data?.mine || [];
+        setMyPhotos(mine);
         if (mine.length) setHeroPhoto(mine[0].thumb_url || mine[0].url || '');
       } catch (err) {
         if (!cancelled) setError(parentApiError(err, 'לא הצלחנו לטעון את הפרטים'));
@@ -213,23 +241,44 @@ export default function ChildDetails({ childId }) {
     return () => { cancelled = true; };
   }, [childId]);
 
+  /**
+   * Every section, and which four sit in the bar.
+   *
+   * `primary` is not importance in the abstract — it is how often a parent
+   * opens the thing. The day, the photographs and the money are opened weekly
+   * or daily; the contract and the address are read once and then looked for
+   * deliberately, which is exactly what a "עוד" sheet is for.
+   *
+   * At most four are ever primary, so the bar plus "עוד" is never more than
+   * five. An infant's parent loses `details` from the bar and nothing else.
+   */
   const tabs = useMemo(() => {
     if (!data) return [];
-    const list = [];
-    if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon /> });
-    // Second, not last: photographs are the other thing a parent opens the app
-    // for, and burying them behind the paperwork would be the same mistake the
-    // single scroll made.
-    list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon /> });
-    list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon /> });
-    list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon /> });
+    const list = [{ key: 'home', label: 'בית', icon: <HomeRoundedIcon />, primary: true }];
+    if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon />, primary: true });
+    // Photographs are the other thing a parent opens the app for, and burying
+    // them behind the paperwork would be the same mistake the single scroll made.
+    list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon />, primary: true });
+    // Only when the gan has actually set a fee for this child — see the fetch.
+    if (payments) list.push({ key: 'payments', label: 'תשלומים', icon: <PaymentsIcon />, primary: true });
+    list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
+    list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
-  }, [data]);
+  }, [data, payments]);
+
+  const primaryTabs = useMemo(() => tabs.filter(t => t.primary), [tabs]);
+  const moreTabs = useMemo(() => tabs.filter(t => !t.primary), [tabs]);
 
   // Falls back rather than showing nothing: a remembered tab that this child
-  // does not have (switching from an infant to an older sibling) would
-  // otherwise render an empty screen.
+  // does not have (switching from an infant to an older sibling, or to one
+  // whose fee is not set) would otherwise render an empty screen.
   const active = tab && tabs.some(t => t.key === tab) ? tab : (tabs[0]?.key || '');
+
+  // The bar highlights "עוד" while a section from behind it is open, rather
+  // than highlighting nothing — an unlit bar reads as a bar that lost track.
+  const barValue = primaryTabs.some(t => t.key === active) ? active : 'more';
+
+  const goTo = (key) => { setTab(key); setMoreOpen(false); };
 
   const openContract = async (c) => {
     setError('');
@@ -304,7 +353,20 @@ export default function ChildDetails({ childId }) {
         </Card>
       </Box>
 
+      {active === 'home' && (
+        <ParentHome
+          childId={childId}
+          childName={data.child.name}
+          isNursery={data.is_nursery}
+          photos={myPhotos}
+          payments={payments}
+          onOpen={goTo}
+        />
+      )}
+
       {active === 'day' && <NurseryDay childId={childId} />}
+
+      {active === 'payments' && <Payments childId={childId} />}
 
       {active === 'photos' && (
         <PhotoGallery childId={childId} childName={data.child.name} />
@@ -442,21 +504,64 @@ export default function ChildDetails({ childId }) {
           display: { xs: 'block', md: 'none' },
           position: 'fixed', bottom: 0, insetInline: 0, zIndex: 1200,
           borderTop: 1, borderColor: 'divider',
-          bgcolor: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)',
+          // Was a hardcoded white. On the dark theme that is a white strip
+          // pinned under a dark page — the one element that would have given
+          // the whole thing away. The paper colour with alpha follows the
+          // theme and keeps the blur.
+          bgcolor: (t) => alpha(t.palette.background.paper, 0.92),
+          backdropFilter: 'blur(12px)',
           pb: 'env(safe-area-inset-bottom)',
         }}
       >
         <BottomNavigation
-          value={active}
-          onChange={(_, v) => setTab(v)}
+          value={barValue}
+          onChange={(_, v) => (v === 'more' ? setMoreOpen(true) : setTab(v))}
           showLabels
           sx={{ maxWidth: 760, mx: 'auto', bgcolor: 'transparent', height: 62 }}
         >
-          {tabs.map(t => (
+          {primaryTabs.map(t => (
             <BottomNavigationAction key={t.key} value={t.key} label={t.label} icon={t.icon} />
           ))}
+          {moreTabs.length > 0 && (
+            <BottomNavigationAction value="more" label="עוד" icon={<MoreHorizIcon />} />
+          )}
         </BottomNavigation>
       </Paper>
+
+      {/* Everything that is not opened weekly. A sheet rather than a fifth and
+          sixth icon: the bar has room for five targets a thumb can hit, and
+          shrinking them to fit two more makes all seven harder to press. */}
+      <Drawer
+        anchor="bottom"
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        PaperProps={{ sx: { borderRadius: '24px 24px 0 0', pb: 'env(safe-area-inset-bottom)' } }}
+      >
+        <Box sx={{ maxWidth: 760, mx: 'auto', width: '100%', pt: 1.5, pb: 1 }}>
+          {/* The grab handle. Purely a signal that this sheet is dismissible
+              by dragging, which nothing else on the screen says. */}
+          <Box sx={{ width: 38, height: 4, borderRadius: 2, bgcolor: 'divider', mx: 'auto', mb: 1 }} />
+          <Divider />
+          <List sx={{ py: 0.5 }}>
+            {moreTabs.map(t => (
+              <ListItemButton
+                key={t.key}
+                selected={active === t.key}
+                onClick={() => goTo(t.key)}
+                sx={{ minHeight: 56 }}
+              >
+                <ListItemIcon sx={{ minWidth: 44, color: active === t.key ? 'primary.main' : 'text.secondary' }}>
+                  {t.icon}
+                </ListItemIcon>
+                <ListItemText
+                  primary={t.label}
+                  primaryTypographyProps={{ fontWeight: 700 }}
+                />
+              </ListItemButton>
+            ))}
+          </List>
+        </Box>
+      </Drawer>
     </>
   );
 }
