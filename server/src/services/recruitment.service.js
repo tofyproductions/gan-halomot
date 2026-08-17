@@ -23,6 +23,30 @@ function normalizePhone(raw) {
   return d;
 }
 
+/**
+ * One field out of an extracted record, whatever it is wrapped in.
+ *
+ * A parser may hand back "0544487880" or { value: "0544487880" }, and the
+ * difference is invisible to a truthiness check: an object is truthy, and
+ * String({}) is "[object Object]", which has no digits in it. That combination
+ * silently discarded seventy-five real applicants — every test passed and
+ * nobody was created.
+ *
+ * So a field is read rather than assumed, and anything that is still not a
+ * scalar afterwards is reported as unreadable instead of being stringified
+ * into nonsense.
+ */
+function pick(field) {
+  if (field == null) return '';
+  if (typeof field === 'string' || typeof field === 'number') return String(field).trim();
+  if (typeof field === 'object') {
+    for (const k of ['value', 'text', 'raw', 'content']) {
+      if (typeof field[k] === 'string' || typeof field[k] === 'number') return String(field[k]).trim();
+    }
+  }
+  return '';
+}
+
 /** The applicant chose "no particular gan" — the office routes these. */
 const OFFICE_LABELS = ['משרד', 'מענה כללי', 'לא סגור', 'כללי'];
 
@@ -146,34 +170,75 @@ async function intake({
  * Items with no parsed name or phone are CV attachments — a separate item with
  * no fields on it. They are counted and left alone; see Candidate.attachments.
  */
-async function pullFromMailSorter() {
+async function pullFromMailSorter({ debug = false } = {}) {
   if (!mailSorter.isConfigured()) {
-    return { configured: false, created: 0, reopened: 0, seen: 0, files: 0 };
+    return { configured: false, created: 0, reopened: 0, seen: 0, files: 0, skipped: {} };
   }
   const payload = await mailSorter.listDocuments('recruitment');
   const items = Array.isArray(payload) ? payload : (payload?.items || payload?.documents || []);
   const branches = await Branch.find({}).select('name').lean();
 
   let created = 0; let reopened = 0; let files = 0;
+  /**
+   * Why nothing happened, when nothing happens.
+   *
+   * The first real run read 125 items and created nobody, and the only thing
+   * the screen could say was "0". A pull that declines every row has to be
+   * able to say which test each row failed — otherwise the next person is
+   * reduced to guessing at a payload they cannot see.
+   */
+  const skipped = { no_extracted: 0, no_name: 0, no_phone: 0, phone_unparsable: 0, already_known: 0 };
+
   for (const item of items) {
-    const ex = item.extracted || {};
-    if (!ex.name || !ex.phone) { files += 1; continue; }
+    const ex = item.extracted || item.fields || item.data || {};
+    if (!Object.keys(ex).length) { skipped.no_extracted += 1; files += 1; continue; }
+    const name = pick(ex.name);
+    const phone = pick(ex.phone);
+    if (!name) { skipped.no_name += 1; files += 1; continue; }
+    if (!phone) { skipped.no_phone += 1; files += 1; continue; }
+    if (!normalizePhone(phone)) { skipped.phone_unparsable += 1; continue; }
+
     const res = await intake({
-      full_name: ex.name,
-      phone: ex.phone,
-      requested_branch: ex.branch,
-      message: ex.message || '',
-      at: item.received_at || item.created_at || new Date(),
+      full_name: name,
+      phone,
+      requested_branch: pick(ex.branch),
+      message: pick(ex.message),
+      at: item.received_at || item.created_at || item.date || new Date(),
       source: 'mail_sorter',
       source_ref: String(item.id ?? item._id ?? ''),
-      raw_subject: ex.raw_subject || item.subject || '',
+      raw_subject: pick(ex.raw_subject) || pick(item.subject),
     }, branches);
     if (res.created) created += 1;
-    if (res.reopened) reopened += 1;
+    else if (res.reopened) reopened += 1;
+    else skipped.already_known += 1;
   }
-  return { configured: true, created, reopened, seen: items.length, files };
+
+  const out = { configured: true, created, reopened, seen: items.length, files, skipped };
+
+  /**
+   * The shape, on request, as KEY NAMES ONLY.
+   *
+   * Enough to see where the fields actually live, and it cannot leak a phone
+   * number or a name into a log or a screenshot on the way.
+   */
+  if (debug) {
+    const shapeOf = (o) => (o && typeof o === 'object' ? Object.keys(o) : typeof o);
+    const withEx = items.find(i => Object.keys(i.extracted || i.fields || i.data || {}).length);
+    out.debug = {
+      payload_type: Array.isArray(payload) ? 'array' : `object(${Object.keys(payload || {}).join(',')})`,
+      item_keys: shapeOf(items[0]),
+      extracted_keys: shapeOf(items[0]?.extracted ?? items[0]?.fields ?? items[0]?.data),
+      first_with_fields_keys: withEx ? shapeOf(withEx.extracted || withEx.fields || withEx.data) : null,
+      // Types only — never the values.
+      field_types: withEx
+        ? Object.fromEntries(Object.entries(withEx.extracted || withEx.fields || withEx.data)
+          .map(([k, v]) => [k, v === null ? 'null' : typeof v]))
+        : null,
+    };
+  }
+  return out;
 }
 
 module.exports = {
-  normalizePhone, resolveBranches, retentionFrom, intake, pullFromMailSorter, OFFICE_LABELS,
+  normalizePhone, resolveBranches, retentionFrom, intake, pullFromMailSorter, OFFICE_LABELS, pick,
 };

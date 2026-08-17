@@ -182,14 +182,26 @@ async function counts(req, res, next) {
 /** POST /api/recruitment/pull — fetch from mail-sorter now, without waiting. */
 async function pull(req, res, next) {
   try {
-    const result = await recruitment.pullFromMailSorter();
+    const result = await recruitment.pullFromMailSorter({ debug: req.query.debug === '1' });
     if (!result.configured) {
       return res.status(503).json({ error: 'mail-sorter לא מוגדר — חסרים MAIL_SORTER_URL / MAIL_SORTER_TOKEN' });
     }
+    // When a pull creates nobody, the summary has to say why rather than
+    // report a zero and leave the reader to guess at a payload they cannot see.
+    const sk = result.skipped || {};
+    const reasons = [
+      sk.already_known && `${sk.already_known} כבר במערכת`,
+      sk.no_extracted && `${sk.no_extracted} בלי שדות כלל`,
+      sk.no_name && `${sk.no_name} בלי שם`,
+      sk.no_phone && `${sk.no_phone} בלי טלפון`,
+      sk.phone_unparsable && `${sk.phone_unparsable} טלפון לא קריא`,
+    ].filter(Boolean).join(' · ');
+
     res.json({
       ...result,
-      summary: `נבדקו ${result.seen} פריטים · ${result.created} מועמדים חדשים · ${result.reopened} חזרו לרשימה`
-        + (result.files ? ` · ${result.files} קבצים ללא שדות (קורות חיים)` : ''),
+      summary: `נבדקו ${result.seen} פריטים · ${result.created} מועמדים חדשים`
+        + (result.reopened ? ` · ${result.reopened} חזרו לרשימה` : '')
+        + (reasons ? ` · לא נקלטו: ${reasons}` : ''),
     });
   } catch (error) {
     next(error);
