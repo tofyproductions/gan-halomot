@@ -4,6 +4,7 @@ import {
 } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import SickIcon from '@mui/icons-material/Sick';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import parentApi from '../../api/parentClient';
 import { DISPLAY, INSET } from '../../theme/parentTheme';
 
@@ -468,13 +469,22 @@ export default function ParentHome({
   cards.push(
     <QuickActions
       key="do"
-      actions={[{
-        key: 'absence',
-        label: 'לא מגיעים לגן',
-        icon: <SickIcon />,
-        color: (t) => t.playful.coral.bg,
-        onClick: () => onOpen('absence'),
-      }]}
+      actions={[
+        {
+          key: 'absence',
+          label: 'לא מגיעים לגן',
+          icon: <SickIcon />,
+          color: (t) => t.playful.coral.bg,
+          onClick: () => onOpen('absence'),
+        },
+        {
+          key: 'pickup',
+          label: 'מי אוסף',
+          icon: <HowToRegIcon />,
+          color: (t) => t.playful.violet.bg,
+          onClick: () => onOpen('pickup'),
+        },
+      ]}
     />,
   );
 

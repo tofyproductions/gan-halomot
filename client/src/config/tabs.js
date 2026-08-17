@@ -83,6 +83,9 @@ export const TAB_GROUPS = [
       // opens the room: a teacher who finds out at 8am that a child is not
       // coming finds out when the child does not come.
       { id: 'absences', label: 'היעדרויות', path: '/absences', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher'] },
+      // Who may collect a child. SEEING it is wide on purpose — the person at
+      // the door is whoever is closing the room — and only a manager grants.
+      { id: 'pickup', label: 'מורשי איסוף', path: '/pickup', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },

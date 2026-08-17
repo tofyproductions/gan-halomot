@@ -59,6 +59,11 @@ router.put('/children/:childId/gift', portal.setChildGift);
 // scoped to this child's classroom or to the whole branch.
 const announcements = require('../controllers/parentAnnouncements.controller');
 router.get('/children/:childId/announcements', announcements.childAnnouncements);
+// Who else may collect the child. Adding waits for the gan; removing does not.
+const pickup = require('../controllers/parentPickup.controller');
+router.get('/children/:childId/pickup', pickup.list);
+router.post('/children/:childId/pickup', pickup.add);
+router.delete('/children/:childId/pickup/:id', pickup.revoke);
 // "לא מגיעה מחר". Today or later only — a report about a day that already
 // happened would be a family editing the gan's own record of it.
 const absence = require('../controllers/parentAbsence.controller');

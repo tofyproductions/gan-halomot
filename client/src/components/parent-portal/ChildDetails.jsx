@@ -16,6 +16,7 @@ import PaymentsIcon from '@mui/icons-material/Payments';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import CampaignIcon from '@mui/icons-material/Campaign';
 import SickIcon from '@mui/icons-material/Sick';
+import HowToRegIcon from '@mui/icons-material/HowToReg';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import { alpha } from '@mui/material/styles';
 import { DISPLAY } from '../../theme/parentTheme';
@@ -27,6 +28,7 @@ import ParentHome from './ParentHome';
 import Payments from './Payments';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentAbsence from './ParentAbsence';
+import ParentPickup from './ParentPickup';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
@@ -279,6 +281,7 @@ export default function ChildDetails({ childId }) {
     // An errand rather than a section: its front door is the tile at the
     // bottom of the home screen, and this is where it opens.
     list.push({ key: 'absence', label: 'לא מגיעים', icon: <SickIcon />, primary: false });
+    list.push({ key: 'pickup', label: 'מורשי איסוף', icon: <HowToRegIcon />, primary: false });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
@@ -400,6 +403,10 @@ export default function ChildDetails({ childId }) {
 
       {active === 'absence' && (
         <ParentAbsence childId={childId} childName={data.child.name} />
+      )}
+
+      {active === 'pickup' && (
+        <ParentPickup childId={childId} childName={data.child.name} />
       )}
 
       {active === 'photos' && (

@@ -92,6 +92,11 @@ const day = (off) => {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 };
 let ABSENCES = [{ id: 'x1', date: day(2), reason: 'ביקור רופא' }];
+let PICKUP = [
+  { id: 'p1', name: 'רותי כהן', phone: '0521112233', relation: 'סבתא', status: 'approved', reject_reason: '' },
+  { id: 'p2', name: 'נועה ברק', phone: '0549998877', relation: 'שכנה', status: 'pending', reject_reason: '' },
+  { id: 'p3', name: 'אבי לוי', phone: '', relation: 'דוד', status: 'rejected', reject_reason: 'לא הוצגה תעודה בגן' },
+];
 
 const parentApi = {
   get: async (url) => {
@@ -100,6 +105,7 @@ const parentApi = {
     if (url.endsWith('/payments')) return { data: PAYMENTS };
     if (url.endsWith('/announcements')) return { data: { announcements: ANNOUNCEMENTS } };
     if (url.endsWith('/absences')) return { data: { today: day(0), max_date: day(14), absences: ABSENCES } };
+    if (url.endsWith('/pickup')) return { data: { people: PICKUP } };
     if (url.endsWith('/photos')) return { data: { mine: PHOTOS, classroom: [] } };
     if (url.endsWith('/contracts')) return { data: { contracts: [] } };
     if (url.endsWith('/gift')) return { data: GIFT };
@@ -108,6 +114,10 @@ const parentApi = {
     return { data: {} };
   },
   post: async (url, payload) => {
+    if (url.endsWith('/pickup')) {
+      PICKUP = [{ id: 'n' + PICKUP.length, ...payload, status: 'pending', reject_reason: '' }, ...PICKUP];
+      return { data: { people: PICKUP } };
+    }
     if (url.endsWith('/absences')) {
       for (const d of payload.dates || []) {
         if (!ABSENCES.some(a => a.date === d)) ABSENCES.push({ id: d, date: d, reason: payload.reason || '' });
@@ -118,6 +128,11 @@ const parentApi = {
     return { data: {} };
   },
   delete: async (url) => {
+    if (url.includes('/pickup/')) {
+      const id = url.split('/').pop();
+      PICKUP = PICKUP.filter(p => p.id !== id);
+      return { data: { people: PICKUP } };
+    }
     const d = url.split('/').pop();
     ABSENCES = ABSENCES.filter(a => a.date !== d);
     return { data: { today: day(0), max_date: day(14), absences: ABSENCES } };
