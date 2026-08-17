@@ -4,7 +4,7 @@ import {
 } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import parentApi from '../../api/parentClient';
-import { DISPLAY } from '../../theme/parentTheme';
+import { DISPLAY, INSET } from '../../theme/parentTheme';
 
 /**
  * The screen a parent lands on, and the only one most of them will read.
@@ -145,7 +145,7 @@ function TodayCard({ day, childName, onOpen }) {
               <Typography sx={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: '1.15rem', lineHeight: 1.25 }}>
                 {absent ? `${childName} לא היה/תה היום בגן` : `היום של ${childName}`}
               </Typography>
-              <Typography variant="caption" sx={{ opacity: 0.85 }}>{todayLine()}</Typography>
+              <Typography variant="caption" sx={{ opacity: 0.92 }}>{todayLine()}</Typography>
             </Box>
             <More text="הכל" color="inherit" />
           </Stack>
@@ -162,7 +162,7 @@ function TodayCard({ day, childName, onOpen }) {
                   sx={{
                     flex: 1, minWidth: 0, textAlign: 'center',
                     px: 0.75, py: 1.25, borderRadius: '14px',
-                    bgcolor: 'rgba(255,255,255,0.16)',
+                    bgcolor: INSET,
                   }}
                 >
                   <Typography
@@ -171,7 +171,7 @@ function TodayCard({ day, childName, onOpen }) {
                   >
                     {s.value || '—'}
                   </Typography>
-                  <Typography variant="caption" sx={{ opacity: 0.85, fontSize: '0.7rem' }}>
+                  <Typography variant="caption" sx={{ opacity: 0.92, fontSize: '0.72rem' }}>
                     {s.label}
                   </Typography>
                 </Box>
@@ -186,7 +186,7 @@ function TodayCard({ day, childName, onOpen }) {
           )}
 
           {log?.updated_at && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 1.25, opacity: 0.75 }}>
+            <Typography variant="caption" sx={{ display: 'block', mt: 1.25, opacity: 0.9 }}>
               עודכן {new Date(log.updated_at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
             </Typography>
           )}

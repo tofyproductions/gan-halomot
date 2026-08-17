@@ -1,52 +1,41 @@
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ThemeProvider, CssBaseline, Box, Stack, Button } from '@mui/material';
-import { createParentTheme } from '../src/theme/parentTheme';
-import ParentHome from '../src/components/parent-portal/ParentHome';
-import Payments from '../src/components/parent-portal/Payments';
-import PAY from './mockParentClient';
+import { MemoryRouter } from 'react-router-dom';
+import { Box, Stack, Button } from '@mui/material';
+import ParentPortal from '../src/components/parent-portal/ParentPortal';
+import { PARENT_TOKEN_KEY } from './mockParentClient';
 
-const PHOTOS = [1, 2, 3, 4].map(i => ({
-  id: String(i),
-  thumb_url: `data:image/svg+xml;utf8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${['#E9A860','#8FBF9E','#B9A7D6','#F3C86A'][i-1]}"/><stop offset="1" stop-color="${['#C4682C','#4A7C59','#6C63B5','#DC8B3A'][i-1]}"/></linearGradient></defs><rect width="200" height="200" fill="url(#g)"/><circle cx="70" cy="70" r="26" fill="rgba(255,255,255,.5)"/></svg>`
-  )}`,
-}));
+// The portal bounces to /parents/login without one.
+localStorage.setItem(PARENT_TOKEN_KEY, 'preview');
 
-function Screen({ mode, nursery, view }) {
-  const theme = createParentTheme(mode);
-  return (
-    <ThemeProvider theme={theme}>
-      <Box sx={{ bgcolor: 'background.default', color: 'text.primary', p: 2, width: 380, borderRadius: 3, border: 1, borderColor: 'divider' }}>
-        <Box sx={{ fontSize: 12, opacity: .6, mb: 1 }}>{mode} · {view} · {nursery ? 'תינוקייה' : 'גן'}</Box>
-        {view === 'home'
-          ? <ParentHome childId="c1" childName="יהלי" isNursery={nursery} photos={PHOTOS} payments={PAY_DATA} onOpen={() => {}} />
-          : <Payments childId="c1" />}
-      </Box>
-    </ThemeProvider>
-  );
-}
-
-// the same payload the mock client serves
-const PAY_DATA = await PAY.get('/payments').then(r => r.data);
-
+/**
+ * One phone at a time, not two side by side: the colour preference lives in
+ * localStorage, which both copies would share and overwrite for each other.
+ */
 function App() {
-  const [nursery, setNursery] = useState(true);
-  const [view, setView] = useState('home');
+  const [mode, setMode] = useState('light');
+  const pick = (m) => {
+    if (m === 'auto') localStorage.removeItem('gan_parent_theme');
+    else localStorage.setItem('gan_parent_theme', m);
+    setMode(m);
+  };
   return (
-    <Box sx={{ p: 2, fontFamily: 'system-ui' }}>
+    <Box sx={{ p: 2, fontFamily: 'system-ui', bgcolor: '#EFEDEA', minHeight: '100vh' }}>
       <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-        <Button variant="outlined" onClick={() => setNursery(v => !v)}>
-          {nursery ? 'תינוקייה' : 'גן'}
-        </Button>
-        <Button variant="outlined" onClick={() => setView(v => (v === 'home' ? 'payments' : 'home'))}>
-          {view === 'home' ? 'מסך בית' : 'תשלומים'}
-        </Button>
+        {['light', 'dark', 'auto'].map(m => (
+          <Button key={m} variant={mode === m ? 'contained' : 'outlined'} onClick={() => pick(m)}>
+            {m}
+          </Button>
+        ))}
       </Stack>
-      <Stack direction="row" spacing={2} alignItems="flex-start">
-        <Screen mode="light" nursery={nursery} view={view} />
-        <Screen mode="dark" nursery={nursery} view={view} />
-      </Stack>
+      <Box sx={{ width: 400, height: 880, overflow: 'hidden', borderRadius: '30px',
+                 border: '10px solid #1a1a1a', boxShadow: '0 20px 50px rgba(0,0,0,.25)' }}>
+        <Box sx={{ width: '100%', height: '100%', overflowY: 'auto' }}>
+          <MemoryRouter key={mode} initialEntries={['/parents']}>
+            <ParentPortal />
+          </MemoryRouter>
+        </Box>
+      </Box>
     </Box>
   );
 }

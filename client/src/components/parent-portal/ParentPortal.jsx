@@ -28,6 +28,17 @@ import ChildDetails from './ChildDetails';
  * the management system it always was.
  */
 
+/**
+ * The name to greet somebody by.
+ *
+ * The first word of what the records hold. "היי, מיכל כהן לוי!" is a form
+ * letter; "היי, מיכל!" is somebody who knows her.
+ */
+function firstName(full) {
+  const s = String(full || '').trim();
+  return s ? s.split(/\s+/)[0] : '';
+}
+
 /** First letter of a name — a face for the avatar until there is a photograph. */
 function initial(name) {
   const s = String(name || '').trim();
@@ -102,36 +113,46 @@ export default function ParentPortal() {
       <Box sx={{ minHeight: '100dvh', bgcolor: 'background.default' }}>
         {/* Not an AppBar. A parent needs the way out and the name of the gan,
             and neither of those is worth a floating bar that follows them down
-            a screen already carrying a fixed navigation at the bottom. */}
+            a screen already carrying a fixed navigation at the bottom.
+
+            A FILLED BLOCK, not a white strip with a hairline under it. The
+            first version of this portal opened on paper-white and read as a
+            form; the top of the screen is the one place a colour costs nothing
+            and says everything, and this is the gan's own. It curves into the
+            page below it, which is the whole difference between an app and an
+            administrative system. */}
         <Box
           component="header"
           sx={{
-            px: 2, pt: 'max(14px, env(safe-area-inset-top))', pb: 1.5,
-            bgcolor: 'background.paper',
-            borderBottom: 1, borderColor: 'divider',
+            px: 2, pt: 'max(16px, env(safe-area-inset-top))', pb: 3.5,
+            bgcolor: (t) => t.playful.coral.bg,
+            color: (t) => t.playful.coral.on,
+            borderRadius: '0 0 26px 26px',
           }}
         >
           <Stack
-            direction="row" alignItems="center" spacing={1.5}
+            direction="row" alignItems="center" spacing={1}
             sx={{ maxWidth: 760, mx: 'auto' }}
           >
             <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              {/* Their name first, the institution's second. A parent opening
+                  this is not visiting an office. */}
               <Typography
-                sx={{ fontFamily: DISPLAY, fontWeight: 700, fontSize: '1.2rem', lineHeight: 1.2 }}
+                sx={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: '1.3rem', lineHeight: 1.2 }}
+                noWrap
               >
-                גן החלומות
+                {firstName(data?.full_name) ? `היי, ${firstName(data.full_name)}!` : 'גן החלומות'}
               </Typography>
-              {data?.full_name && (
-                <Typography variant="caption" color="text.secondary" noWrap component="div">
-                  {data.full_name}
-                </Typography>
-              )}
+              <Typography variant="caption" noWrap component="div" sx={{ opacity: 0.95 }}>
+                {firstName(data?.full_name) ? 'גן החלומות' : (data?.full_name || '')}
+              </Typography>
             </Box>
             <Tooltip title={`תצוגה: ${MODE_LABEL[preference]}`}>
               <IconButton
                 onClick={() => setPreference(NEXT_MODE[preference])}
                 aria-label={`תצוגה: ${MODE_LABEL[preference]}. החלפה`}
                 size="small"
+                sx={{ color: 'inherit', bgcolor: 'rgba(255,255,255,0.16)' }}
               >
                 {preference === 'auto' && <BrightnessAutoIcon fontSize="small" />}
                 {preference === 'light' && <LightModeIcon fontSize="small" />}
@@ -139,7 +160,10 @@ export default function ParentPortal() {
               </IconButton>
             </Tooltip>
             <Tooltip title="יציאה">
-              <IconButton onClick={logout} aria-label="יציאה מהחשבון" size="small">
+              <IconButton
+                onClick={logout} aria-label="יציאה מהחשבון" size="small"
+                sx={{ color: 'inherit', bgcolor: 'rgba(255,255,255,0.16)' }}
+              >
                 <LogoutIcon fontSize="small" />
               </IconButton>
             </Tooltip>
@@ -148,7 +172,13 @@ export default function ParentPortal() {
 
         <Box
           sx={{
-            px: 2, pt: 2,
+            px: 2,
+            // Pulled up ONTO the header's curve, so the first thing on the page
+            // overlaps it rather than floating in a gap beneath it. `relative`
+            // is what makes that work: without it the header paints last and
+            // takes a bite out of the sibling chips.
+            position: 'relative', zIndex: 1,
+            pt: 0, mt: -2.5,
             // Room for the fixed navigation, plus the gesture bar under it.
             // Wide screens have no such bar and should not carry its gap.
             pb: { xs: 'calc(96px + env(safe-area-inset-bottom))', md: 5 },
@@ -176,15 +206,36 @@ export default function ParentPortal() {
                 <Chip
                   key={c.id}
                   onClick={() => setSelected(i)}
-                  color={i === selected ? 'primary' : 'default'}
-                  variant={i === selected ? 'filled' : 'outlined'}
-                  avatar={
-                    <Avatar sx={{ bgcolor: i === selected ? 'primary.dark' : 'secondary.light' }}>
-                      {initial(c.name)}
-                    </Avatar>
-                  }
+                  variant="filled"
+                  avatar={<Avatar>{initial(c.name)}</Avatar>}
                   label={c.name}
-                  sx={{ height: 40, flex: '0 0 auto', fontSize: '0.9375rem', px: 0.5 }}
+                  // ONE sx. There were two on this element and the second
+                  // silently discarded the first — JSX keeps the last of a
+                  // repeated prop — which is why the chosen chip stayed the
+                  // default grey no matter what was written above it.
+                  //
+                  // Amber when chosen, paper when not: a border alone is too
+                  // quiet for the control that decides whose screen this is.
+                  sx={{
+                    height: 40, flex: '0 0 auto', fontSize: '0.9375rem', px: 0.5,
+                    fontWeight: 800,
+                    border: 2, borderStyle: 'solid',
+                    bgcolor: (t) => (i === selected ? t.playful.amber.bg : t.palette.background.paper),
+                    color: (t) => (i === selected ? t.playful.amber.on : t.palette.text.secondary),
+                    borderColor: (t) => (i === selected ? t.playful.amber.bg : t.palette.divider),
+                    '&:hover': {
+                      bgcolor: (t) => (i === selected ? t.playful.amber.bg : t.palette.background.paper),
+                    },
+                    // Chip styles its own avatar, and `.MuiChip-avatar { color }`
+                    // beat the colour set on the Avatar itself — the letter came
+                    // out MUI's default grey on both, at 1.2:1 against the teal.
+                    // Set from here, where the specificity is the Chip's own.
+                    '& .MuiChip-avatar': {
+                      bgcolor: (t) => (i === selected ? t.playful.amber.on : t.playful.teal.bg),
+                      color: (t) => (i === selected ? t.playful.amber.bg : t.playful.teal.on),
+                      fontWeight: 800,
+                    },
+                  }}
                 />
               ))}
             </Stack>

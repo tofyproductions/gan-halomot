@@ -46,21 +46,42 @@ const BODY = '"Rubik", "Assistant", system-ui, -apple-system, sans-serif';
  *
  * Each carries its own `on` — the text colour that is legible on it. Deriving
  * that per card is how a heading ends up dark grey on a dark teal.
+ *
+ * EVERY ONE OF THESE IS DARKER THAN IT WANTS TO BE, and measured rather than
+ * picked. The first set was the brighter coral and teal from the mock-ups, and
+ * white text on them came to 3.66:1 and 3.27:1 — fine for the headline, and
+ * failing for the small line under it, which is the line that actually says
+ * what happened. Amber is the exception and goes the other way: it carries
+ * dark text, so it stays bright.
  */
 export const PLAYFUL = {
   light: {
-    coral: { bg: '#E4572E', on: '#FFFFFF', soft: '#FDEBE5', softOn: '#8E2E12' },
-    teal: { bg: '#2E9E8F', on: '#FFFFFF', soft: '#E2F2EF', softOn: '#1B5D54' },
+    coral: { bg: '#C4441F', on: '#FFFFFF', soft: '#FDEBE5', softOn: '#8E2E12' },
+    teal: { bg: '#1F7A6D', on: '#FFFFFF', soft: '#E2F2EF', softOn: '#1B5D54' },
     amber: { bg: '#F4B942', on: '#3A2A08', soft: '#FEF3DC', softOn: '#6B4A00' },
-    violet: { bg: '#6C63B5', on: '#FFFFFF', soft: '#EDEBF7', softOn: '#413A7D' },
+    violet: { bg: '#514899', on: '#FFFFFF', soft: '#EDEBF7', softOn: '#413A7D' },
   },
   dark: {
-    coral: { bg: '#C4441F', on: '#FFF3EE', soft: '#33190F', softOn: '#FFB599' },
-    teal: { bg: '#248275', on: '#E9F7F4', soft: '#0F2A26', softOn: '#7FD3C6' },
+    coral: { bg: '#A93817', on: '#FFFFFF', soft: '#33190F', softOn: '#FFB599' },
+    teal: { bg: '#17564E', on: '#FFFFFF', soft: '#0F2A26', softOn: '#7FD3C6' },
     amber: { bg: '#C9922B', on: '#241900', soft: '#2C2210', softOn: '#F2CB74' },
-    violet: { bg: '#585092', on: '#F0EEFA', soft: '#1D1930', softOn: '#B0A8E8' },
+    violet: { bg: '#3F3878', on: '#FFFFFF', soft: '#1D1930', softOn: '#B0A8E8' },
   },
 };
+
+/**
+ * A panel inside a filled card — the three figures on the day card, and
+ * anything like them.
+ *
+ * DARKER than the card, never lighter, and that is the opposite of the obvious.
+ * A white wash at 16% is the usual way to raise a tile off a coloured block,
+ * and on every one of these colours it lifted the ground toward the white text
+ * sitting on it: the numbers measured 3.18:1 against their own tile while the
+ * heading beside them, on the plain card, passed. Tinting down moves the tile
+ * away from the text instead, so the panel still reads as a panel and the
+ * figures stay legible.
+ */
+export const INSET = 'rgba(0,0,0,0.17)';
 
 /**
  * The palette for one light.
@@ -133,7 +154,10 @@ function paletteFor(mode) {
 function cardElevation(mode) {
   return mode === 'dark'
     ? '0 0 0 1px rgba(255,255,255,0.04), 0 12px 30px -18px rgba(0,0,0,0.9)'
-    : '0 1px 2px rgba(43,33,25,0.04), 0 10px 26px -14px rgba(43,33,25,0.16)';
+    // Warmer and deeper than before. The previous shadow was tuned against a
+    // white page with a hairline header; under a filled coral block the cards
+    // flattened into the paper and the screen read as one sheet.
+    : '0 2px 4px rgba(120,60,20,0.05), 0 14px 30px -16px rgba(120,60,20,0.22)';
 }
 
 export function createParentTheme(mode = 'light') {

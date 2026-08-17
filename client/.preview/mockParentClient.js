@@ -46,12 +46,49 @@ const PAYMENTS = {
   has_shared_receipts: true,
 };
 
+
+const swatch = (a, b) => `data:image/svg+xml;utf8,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="240" height="240" fill="url(#g)"/><circle cx="86" cy="84" r="32" fill="rgba(255,255,255,.5)"/><circle cx="160" cy="150" r="46" fill="rgba(255,255,255,.28)"/></svg>`
+)}`;
+
+const PHOTOS = [
+  ['#E9A860', '#C4682C'], ['#8FBF9E', '#4A7C59'],
+  ['#B9A7D6', '#6C63B5'], ['#F3C86A', '#DC8B3A'],
+].map(([a, b], i) => ({ id: String(i + 1), url: swatch(a, b), thumb_url: swatch(a, b), taken_at: '2026-08-17' }));
+
+const ME = {
+  full_name: 'מיכל כהן לוי',
+  children: [{ id: 'c1', name: 'יהלי' }, { id: 'c2', name: 'אורי' }],
+};
+
+const DETAILS = {
+  id: 'c1',
+  child: { name: 'יהלי כהן', id_number: '312345678', birth_date: '2025-02-11',
+           classroom: 'פעוטות א׳', classroom_category: 'nursery', academic_year: '2026-2027' },
+  contact: { parent_name: 'מיכל כהן לוי', phone: '054-448-7880', address: 'הרצל 14, כפר סבא',
+             emergency_contact: 'דנה כהן', emergency_phone: '052-1112233' },
+  health: { allergies: 'אגוזים', medical_alerts: '' },
+  second_parent: 'יואב לוי',
+  registration: { start_date: '2026-09-01', end_date: '2027-08-31' },
+  is_nursery: true,
+};
+
+const GIFT = { campaign: null, selection: null, photos: PHOTOS };
+
 const parentApi = {
   get: async (url) => {
+    if (url === '/me') return { data: ME };
     if (url.endsWith('/day')) return { data: DAY };
     if (url.endsWith('/payments')) return { data: PAYMENTS };
+    if (url.endsWith('/photos')) return { data: { mine: PHOTOS, classroom: [] } };
+    if (url.endsWith('/contracts')) return { data: { contracts: [] } };
+    if (url.endsWith('/gift')) return { data: GIFT };
+    if (url === '/editable-fields') return { data: { editable: [] } };
+    if (/\/children\/[^/]+$/.test(url)) return { data: DETAILS };
     return { data: {} };
   },
+  post: async () => ({ data: {} }),
+  put: async () => ({ data: {} }),
   patch: async () => ({ data: {} }),
 };
 
