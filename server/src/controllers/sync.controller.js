@@ -3,18 +3,39 @@ const { Registration, Child, Collection, Classroom, Branch, Document } = require
 
 const SPREADSHEET_ID = '1H-pCIZQEIm6aXYfgZt_ZU6LXn6rUIfh7t1j6N0adpy0';
 
+/**
+ * Read a response body as UTF-8 — the whole body, decoded once.
+ *
+ * The sheet arrives as a stream of Buffers, and a Hebrew letter is two bytes in
+ * UTF-8. `text += chunk` decodes each chunk on its own, so a letter that
+ * happens to straddle a chunk boundary is decoded as two orphaned halves and
+ * comes out as U+FFFD. One mangled character per sheet, in a different place
+ * on every run.
+ *
+ * That is where "בוגר�ם" came from, and it mattered because the classroom
+ * lookup below was by name: a mangled name matched no room, so the sync
+ * created one, and created another the next run. Nineteen junk classrooms,
+ * every one of them counted in the dashboard's approved capacity.
+ */
+function readBody(res) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    res.on('data', c => chunks.push(c));
+    res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    res.on('error', reject);
+  });
+}
+
 function fetchCSV(sheetName) {
   const encoded = encodeURIComponent(sheetName);
   const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encoded}`;
   return new Promise((resolve, reject) => {
     https.get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        https.get(res.headers.location, (r2) => {
-          let d = ''; r2.on('data', c => d += c); r2.on('end', () => resolve(d));
-        }).on('error', reject);
+        https.get(res.headers.location, r2 => readBody(r2).then(resolve, reject)).on('error', reject);
         return;
       }
-      let d = ''; res.on('data', c => d += c); res.on('end', () => resolve(d));
+      readBody(res).then(resolve, reject);
     }).on('error', reject);
   });
 }
@@ -80,6 +101,31 @@ function buildSignatureMap(leads) {
   return map;
 }
 
+/**
+ * The room the sheet names, or nothing.
+ *
+ * This used to create the room when the name matched none. A sync has no
+ * business inventing classrooms: it knows a name and a capacity guess and
+ * nothing else, so what it created carried no age-group category — and a room
+ * without a category is never offered on the placement screen. That is how a
+ * gan ends up holding ten rooms for a year and unable to place one child into
+ * any of them.
+ *
+ * A name that matches nothing is reported back to whoever pressed סנכרון, and
+ * the registration is left without a room. "Not placed" is a state every
+ * screen already knows how to show; a room that exists only because of a typo
+ * is not.
+ */
+async function findClassroom(name, branchId, academicYear, unmatched) {
+  // The room of the child's own year first — a gan reuses room names every
+  // year, and matching on name alone hands next year's child last year's room.
+  const room = (academicYear && await Classroom.findOne({
+    name, branch_id: branchId, academic_year: academicYear, is_active: true,
+  })) || await Classroom.findOne({ name, branch_id: branchId, is_active: true });
+  if (!room) unmatched.add(name);
+  return room;
+}
+
 const driveView = (fileId) => `https://drive.google.com/file/d/${fileId}/view`;
 
 // Build a { parent-ת"ז → [{doc_type, file_name, external_url}] } map from the
@@ -108,6 +154,9 @@ function buildFilesMap(leads) {
 async function syncFromSheets(req, res, next) {
   try {
     const results = { registrations: 0, children: 0, collections: 0, updated: 0, signaturesAttached: 0, documentsAttached: 0 };
+    // Room names in the sheet that match no classroom we hold. Reported rather
+    // than conjured into existence — see findClassroom.
+    const unmatchedRooms = new Set();
 
     // Find kaplan branch
     const kaplan = await Branch.findOne({ name: /קפלן/ });
@@ -134,15 +183,7 @@ async function syncFromSheets(req, res, next) {
       const cls = row[3] || 'כללי';
       const startDate = parseDate(row[7]);
       const acadYear = getAcademicYear(startDate);
-      let classroom = await Classroom.findOne({ name: cls, branch_id: kaplan._id, is_active: true });
-      if (!classroom) {
-        try {
-          classroom = await Classroom.create({ name: cls, academic_year: acadYear || '2025-2026', branch_id: kaplan._id, capacity: 35 });
-        } catch (e) {
-          // Duplicate key - find existing
-          classroom = await Classroom.findOne({ name: cls, branch_id: kaplan._id });
-        }
-      }
+      const classroom = await findClassroom(cls, kaplan._id, acadYear, unmatchedRooms);
 
       const existing = await Registration.findOne({ unique_id: uniqueId });
       if (existing) {
@@ -153,7 +194,9 @@ async function syncFromSheets(req, res, next) {
           existing.agreement_signed = row[9] === 'כן';
           existing.card_completed = row[10] === 'כן';
           existing.monthly_fee = parseFloat(row[6]) || existing.monthly_fee;
-          existing.classroom_id = classroom._id;
+          // Only when we found one: a name that matched nothing must not
+          // erase a room somebody assigned by hand on the classes screen.
+          if (classroom) existing.classroom_id = classroom._id;
           await existing.save();
           results.updated++;
         }
@@ -162,7 +205,7 @@ async function syncFromSheets(req, res, next) {
 
       await Registration.create({
         unique_id: uniqueId, branch_id: kaplan._id,
-        child_name: row[2] || '', classroom_id: classroom._id,
+        child_name: row[2] || '', classroom_id: classroom?._id || null,
         parent_name: row[4] || '', parent_id_number: row[5] || '',
         parent_phone: config.phone || '', parent_email: config.parentEmail || '',
         monthly_fee: parseFloat(row[6]) || 0,
@@ -190,7 +233,9 @@ async function syncFromSheets(req, res, next) {
       if (existing) continue;
 
       const cls = row[1] || 'כללי';
-      const classroom = await Classroom.findOne({ name: cls, branch_id: kaplan._id, is_active: true });
+      const classroom = await findClassroom(
+        cls, kaplan._id, reg ? getAcademicYear(new Date(reg.start_date)) : null, unmatchedRooms,
+      );
 
       await Child.create({
         registration_id: reg?._id || null,
@@ -311,10 +356,20 @@ async function syncFromSheets(req, res, next) {
       }
     }
 
+    // Named last and separately: it is the one line that asks for a decision.
+    // A room name the sheet uses and we do not hold means somebody has to
+    // either open that room or fix the sheet, and the children on those rows
+    // are sitting unplaced until they do.
+    results.unmatchedRooms = [...unmatchedRooms];
+
+    const unmatchedNote = results.unmatchedRooms.length
+      ? ` · כיתות בגיליון שאין להן התאמה: ${results.unmatchedRooms.join(', ')} — הילדים בשורות האלה נשארו ללא שיבוץ`
+      : '';
+
     res.json({
       message: 'סנכרון הושלם',
       results,
-      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות, ${results.signaturesAttached} חתימות הושלמו, ${results.documentsAttached} מסמכים שוחזרו`,
+      summary: `${results.registrations} רישומים חדשים, ${results.updated} עודכנו, ${results.children} ילדים חדשים, ${results.collections} גביות חדשות, ${results.signaturesAttached} חתימות הושלמו, ${results.documentsAttached} מסמכים שוחזרו${unmatchedNote}`,
     });
   } catch (error) {
     next(error);
