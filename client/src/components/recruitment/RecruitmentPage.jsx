@@ -26,8 +26,19 @@ import api from '../../api/client';
 const VIEWS = [
   { key: 'due', label: 'לטיפול' },
   { key: 'scheduled', label: 'ראיונות' },
+  // Interviews that have already happened and nobody has said what came of
+  // them. Its own tab because it is its own job: the manager who invited them
+  // has finished, and somebody has to close the loop.
+  { key: 'interviewed', label: 'ממתין להחלטה' },
+  { key: 'decided', label: 'הוחלט' },
   { key: 'archived', label: 'ארכיון' },
 ];
+
+const OUTCOME_LABELS = {
+  hired: 'התקבל/ה',
+  rejected: 'לא התקבל/ה',
+  no_show: 'לא הגיע/ה',
+};
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '');
 const fmtWhen = (d) => (d
@@ -53,6 +64,8 @@ export default function RecruitmentPage() {
   const [invite, setInvite] = useState(null);
   const [reject, setReject] = useState(null);
   const [history, setHistory] = useState(null);
+  const [outcome, setOutcome] = useState(null);
+  const [move, setMove] = useState(null);
 
   const viewKey = VIEWS[view].key;
 
@@ -111,6 +124,44 @@ export default function RecruitmentPage() {
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בקביעת הראיון');
+    }
+  };
+
+  const saveOutcome = async () => {
+    try {
+      await api.post(`/recruitment/${outcome.row.id}/outcome`, {
+        result: outcome.result,
+        reason: outcome.reason,
+        future_relevant: outcome.future,
+        callback_at: outcome.future ? outcome.callback : null,
+      });
+      toast.success('נשמר');
+      setOutcome(null);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const noShow = async (row) => {
+    try {
+      const res = await api.post(`/recruitment/${row.id}/outcome`, { result: 'no_show' });
+      toast.info(res.data.status === 'archived'
+        ? `${row.full_name} לא הגיע/ה פעמיים — עבר/ה לארכיון`
+        : `${row.full_name} חזר/ה לרשימת הטיפול לתיאום ראיון חדש`);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const saveMove = async () => {
+    try {
+      const res = await api.post(`/recruitment/${move.row.id}/reschedule`, { at: move.at });
+      setMove({ ...move, saved: true, whatsapp_url: res.data.whatsapp_url });
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
     }
   };
 
@@ -184,6 +235,11 @@ export default function RecruitmentPage() {
                         label={`${row.application_count} פניות`} onClick={() => setHistory(row)} />
                     </Tooltip>
                   )}
+                  {row.status === 'hired' && <Chip size="small" color="success" label="התקבל/ה" />}
+                  {row.status === 'rejected' && <Chip size="small" color="error" variant="outlined" label="לא התקבל/ה" />}
+                  {row.no_show_count > 0 && (
+                    <Chip size="small" color="warning" variant="outlined" label={`לא הגיע/ה ×${row.no_show_count}`} />
+                  )}
                   {row.attempt_count > 0 && (
                     <Chip size="small" color="warning" variant="outlined" label={`${row.attempt_count} ניסיונות`} />
                   )}
@@ -218,6 +274,39 @@ export default function RecruitmentPage() {
                   <Alert severity={row.future_relevant ? 'info' : 'warning'} sx={{ mt: 1.5, py: 0.5 }}>
                     {row.future_relevant ? 'רלוונטי/ת לעתיד — ' : 'לא רלוונטי/ת — '}{row.close_reason}
                   </Alert>
+                )}
+
+                {row.awaiting_decision && (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                      <Typography variant="body2" color="text.secondary">מה קרה בראיון?</Typography>
+                      <Box sx={{ flex: 1 }} />
+                      <Button size="small" variant="contained" color="success"
+                        onClick={() => setOutcome({ row, result: 'hired', reason: '', future: false, callback: '' })}>
+                        התקבל/ה
+                      </Button>
+                      <Button size="small" variant="outlined" color="error"
+                        onClick={() => setOutcome({ row, result: 'rejected', reason: '', future: false, callback: '' })}>
+                        לא התקבל/ה
+                      </Button>
+                      <Button size="small" variant="outlined" color="warning" onClick={() => noShow(row)}>
+                        לא הגיע/ה
+                      </Button>
+                    </Stack>
+                  </>
+                )}
+
+                {viewKey === 'scheduled' && !row.awaiting_decision && (
+                  <>
+                    <Divider sx={{ my: 1.5 }} />
+                    <Stack direction="row" spacing={1}>
+                      <Box sx={{ flex: 1 }} />
+                      <Button size="small" onClick={() => setMove({ row, at: '', saved: false })}>
+                        שינוי מועד
+                      </Button>
+                    </Stack>
+                  </>
                 )}
 
                 {viewKey === 'due' && (
@@ -323,6 +412,98 @@ export default function RecruitmentPage() {
         </DialogActions>
       </Dialog>
 
+      {/* ---- תוצאת הראיון ---- */}
+      <Dialog open={!!outcome} onClose={() => setOutcome(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>
+          {OUTCOME_LABELS[outcome?.result]} — {outcome?.row.full_name}
+        </DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            {outcome?.result === 'hired' ? (
+              <>
+                <Alert severity="success">
+                  <AlertTitle>מסומן/ת כהתקבל/ה</AlertTitle>
+                  הפקת החוזה, אישור הנה״ח, החתימה ופתיחת המשתמש בשעון עדיין נעשים ידנית —
+                  החיבור האוטומטי אליהם הוא השלב הבא.
+                </Alert>
+                <TextField
+                  label="תנאים שסוכמו (לא חובה)" multiline minRows={2}
+                  value={outcome?.reason || ''}
+                  onChange={e => setOutcome(v => ({ ...v, reason: e.target.value }))}
+                  placeholder="תפקיד, היקף משרה, שכר, תאריך תחילה"
+                  fullWidth
+                />
+              </>
+            ) : (
+              <>
+                <TextField
+                  label="סיבה" multiline minRows={3} required
+                  value={outcome?.reason || ''}
+                  onChange={e => setOutcome(v => ({ ...v, reason: e.target.value }))}
+                  helperText="זה מה שיישאר למי שיפתח את הכרטיס בעוד חצי שנה"
+                  fullWidth
+                />
+                <FormControlLabel
+                  control={<Checkbox checked={!!outcome?.future}
+                    onChange={e => setOutcome(v => ({ ...v, future: e.target.checked }))} />}
+                  label="רלוונטי/ת לעתיד"
+                />
+                {outcome?.future && (
+                  <TextField
+                    type="date" label="תאריך לשיחה חוזרת" InputLabelProps={{ shrink: true }}
+                    value={outcome?.callback || ''}
+                    onChange={e => setOutcome(v => ({ ...v, callback: e.target.value }))}
+                    helperText="בתאריך הזה יחזור/תחזור לרשימת הטיפול"
+                    fullWidth
+                  />
+                )}
+              </>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOutcome(null)}>ביטול</Button>
+          <Button variant="contained" color={outcome?.result === 'hired' ? 'success' : 'error'}
+            onClick={saveOutcome}>
+            שמירה
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ---- שינוי מועד ---- */}
+      <Dialog open={!!move} onClose={() => setMove(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>שינוי מועד — {move?.row.full_name}</DialogTitle>
+        <DialogContent>
+          {move?.saved ? (
+            <Alert severity="success">
+              <AlertTitle>המועד עודכן</AlertTitle>
+              כדאי לעדכן את המועמד/ת — ההודעה מוכנה בכפתור.
+            </Alert>
+          ) : (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                המועד הנוכחי: {fmtWhen(move?.row.interview?.at)}
+              </Typography>
+              <TextField
+                type="datetime-local" label="מועד חדש" InputLabelProps={{ shrink: true }}
+                value={move?.at || ''} onChange={e => setMove(v => ({ ...v, at: e.target.value }))} fullWidth
+              />
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMove(null)}>סגירה</Button>
+          {move?.saved
+            ? (
+              <Button variant="contained" color="success" startIcon={<WhatsAppIcon />}
+                href={move.whatsapp_url} target="_blank" rel="noopener">
+                פתיחת ווטסאפ
+              </Button>
+            )
+            : <Button variant="contained" onClick={saveMove}>שמירה</Button>}
+        </DialogActions>
+      </Dialog>
+
       {/* ---- היסטוריה ---- */}
       <Dialog open={!!history} onClose={() => setHistory(null)} maxWidth="sm" fullWidth dir="rtl">
         <DialogTitle>{history?.full_name} — היסטוריה</DialogTitle>
@@ -346,6 +527,10 @@ export default function RecruitmentPage() {
                     not_relevant: 'לא רלוונטי/ת',
                     no_answer: 'לא ענה/תה',
                     archived: 'הועבר/ה לארכיון',
+                    interview_moved: 'מועד הראיון שונה',
+                    no_show: 'לא הגיע/ה לראיון',
+                    hired: 'התקבל/ה',
+                    rejected: 'לא התקבל/ה בראיון',
                   }[e.type] || e.type}</b>
                   {e.note ? ` — ${e.note}` : ''}
                   {e.by ? ` · ${e.by}` : ''}

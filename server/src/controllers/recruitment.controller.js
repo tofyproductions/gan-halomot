@@ -81,6 +81,9 @@ function shape(c, branchNames) {
     interview: c.interview?.at ? { at: c.interview.at, note: c.interview.note } : null,
     close_reason: c.close_reason,
     future_relevant: c.future_relevant,
+    no_show_count: c.no_show_count || 0,
+    awaiting_decision: c.status === 'interview_scheduled'
+      && !!c.interview?.at && new Date(c.interview.at) <= new Date(),
     message: c.applications?.[c.applications.length - 1]?.message || '',
     // Only the earlier ones — the current application is the row itself.
     history: (c.applications || []).slice(0, -1).map(a => ({ at: a.at, branch: a.requested_branch })),
@@ -112,7 +115,14 @@ async function list(req, res, next) {
         next_action_at: { $lte: new Date() },
       });
     } else if (view === 'scheduled') {
-      Object.assign(filter, { status: 'interview_scheduled' });
+      // Still ahead of us. The ones behind us are a different job.
+      Object.assign(filter, { status: 'interview_scheduled', 'interview.at': { $gt: new Date() } });
+    } else if (view === 'interviewed') {
+      // The interview has been and gone and nobody has said what happened.
+      // Derived from the clock rather than stored — see the note on STATUSES.
+      Object.assign(filter, { status: 'interview_scheduled', 'interview.at': { $lte: new Date() } });
+    } else if (view === 'decided') {
+      Object.assign(filter, { status: { $in: ['hired', 'rejected'] } });
     } else if (view === 'archived') {
       Object.assign(filter, { status: 'archived' });
     }
@@ -132,7 +142,9 @@ async function list(req, res, next) {
     }
 
     const rows = await Candidate.find(filter)
-      .sort(view === 'scheduled' ? { 'interview.at': 1 } : { next_action_at: 1 })
+      .sort(['scheduled', 'interviewed', 'decided'].includes(view)
+        ? { 'interview.at': view === 'scheduled' ? 1 : -1 }
+        : { next_action_at: 1 })
       .limit(500)
       .lean();
 
@@ -149,9 +161,11 @@ async function counts(req, res, next) {
   try {
     const base = await scopeFilter(req);
     const now = new Date();
-    const [due, scheduled, archived, stale] = await Promise.all([
+    const [due, scheduled, interviewed, decided, archived, stale] = await Promise.all([
       Candidate.countDocuments({ ...base, status: { $in: ['new', 'no_answer', 'not_relevant'] }, next_action_at: { $lte: now } }),
-      Candidate.countDocuments({ ...base, status: 'interview_scheduled' }),
+      Candidate.countDocuments({ ...base, status: 'interview_scheduled', 'interview.at': { $gt: now } }),
+      Candidate.countDocuments({ ...base, status: 'interview_scheduled', 'interview.at': { $lte: now } }),
+      Candidate.countDocuments({ ...base, status: { $in: ['hired', 'rejected'] } }),
       Candidate.countDocuments({ ...base, status: 'archived' }),
       Candidate.countDocuments({
         ...base,
@@ -159,7 +173,7 @@ async function counts(req, res, next) {
         next_action_at: { $lte: new Date(now.getTime() - STALE_HOURS * 3600000) },
       }),
     ]);
-    res.json({ due, scheduled, archived, stale, stale_hours: STALE_HOURS });
+    res.json({ due, scheduled, interviewed, decided, archived, stale, stale_hours: STALE_HOURS });
   } catch (error) {
     next(error);
   }
@@ -298,7 +312,127 @@ async function markNoAnswer(req, res, next) {
   }
 }
 
+/**
+ * POST /api/recruitment/:id/outcome  { result, reason?, future_relevant?, callback_at? }
+ *
+ * What the interview came to. Three answers, not two.
+ *
+ * `no_show` is its own outcome and not a rejection. A manager offered only
+ * עבר/לא עבר will press לא עבר for somebody whose bus broke down, and the
+ * reason field — the thing anybody reads six months later, and the thing that
+ * decides whether they are ever called again — will then say they failed an
+ * interview that never took place. It returns them to the call queue with the
+ * date cleared. Twice is a decision they have made for us.
+ *
+ * `hired` ends this file's job. The contract, accounting's approval, the
+ * signature and the clock user are phase 3, and EmploymentContract already
+ * holds draft→sent→signed→approved to be connected to rather than rebuilt.
+ */
+async function recordOutcome(req, res, next) {
+  try {
+    const { doc, error, status } = await loadScoped(req, req.params.id);
+    if (error) return res.status(status).json({ error });
+    if (doc.status !== 'interview_scheduled') {
+      return res.status(409).json({ error: 'אין ראיון פתוח למועמד/ת הזה/הזאת' });
+    }
+
+    const result = String(req.body?.result || '');
+    if (!['hired', 'rejected', 'no_show'].includes(result)) {
+      return res.status(400).json({ error: 'תוצאה לא תקינה' });
+    }
+
+    const now = new Date();
+    const reason = String(req.body?.reason || '').trim();
+
+    if (result === 'no_show') {
+      doc.no_show_count = (doc.no_show_count || 0) + 1;
+      doc.interview = { at: null, note: '', scheduled_by: null, scheduled_at: null };
+      if (doc.no_show_count >= 2) {
+        doc.status = 'archived';
+        doc.next_action_at = new Date('2999-01-01');
+        doc.close_reason = 'לא הגיע/ה לשני ראיונות';
+      } else {
+        // Back where they were before the invitation: on the list, today.
+        doc.status = 'new';
+        doc.next_action_at = now;
+      }
+      doc.events.push({
+        at: now, ...actor(req), type: 'no_show',
+        note: doc.no_show_count >= 2 ? 'פעם שנייה — לארכיון' : 'לחזור אליו/ה לתיאום חדש',
+      });
+      doc.retain_until = recruitment.retentionFrom(now, doc.retain_until);
+      await doc.save();
+      return res.json({ ok: true, status: doc.status, no_show_count: doc.no_show_count });
+    }
+
+    if (result === 'rejected') {
+      if (!reason) {
+        return res.status(400).json({ error: 'יש לכתוב סיבה — היא מה שיישאר למי שיפתח את הכרטיס בעוד חצי שנה' });
+      }
+      const future = !!req.body?.future_relevant;
+      const callback = future && req.body?.callback_at ? new Date(req.body.callback_at) : null;
+      if (future && (!callback || Number.isNaN(callback.getTime()))) {
+        return res.status(400).json({ error: 'סומן "רלוונטי לעתיד" — יש להזין תאריך לשיחה חוזרת' });
+      }
+      doc.status = 'rejected';
+      doc.close_reason = reason;
+      doc.future_relevant = future;
+      doc.next_action_at = callback || new Date('2999-01-01');
+      doc.events.push({ at: now, ...actor(req), type: 'rejected', note: reason });
+      doc.retain_until = recruitment.retentionFrom(now, callback);
+      await doc.save();
+      return res.json({ ok: true, status: doc.status, callback_at: callback });
+    }
+
+    doc.status = 'hired';
+    doc.close_reason = reason;
+    doc.next_action_at = new Date('2999-01-01');
+    doc.events.push({ at: now, ...actor(req), type: 'hired', note: reason });
+    doc.retain_until = recruitment.retentionFrom(now, doc.retain_until);
+    await doc.save();
+    res.json({ ok: true, status: doc.status });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/recruitment/:id/reschedule  { at, note }
+ *
+ * A moved interview, which is not a new decision about anybody. Kept apart
+ * from scheduleInterview so the event log says the date moved rather than
+ * showing a second invitation that never happened.
+ */
+async function reschedule(req, res, next) {
+  try {
+    const { doc, error, status } = await loadScoped(req, req.params.id);
+    if (error) return res.status(status).json({ error });
+    if (doc.status !== 'interview_scheduled') {
+      return res.status(409).json({ error: 'אין ראיון לשנות' });
+    }
+    const at = new Date(req.body?.at);
+    if (Number.isNaN(at.getTime())) return res.status(400).json({ error: 'יש להזין תאריך ושעה' });
+
+    const now = new Date();
+    const was = doc.interview?.at;
+    doc.interview.at = at;
+    if (req.body?.note != null) doc.interview.note = String(req.body.note);
+    doc.next_action_at = at;
+    doc.events.push({
+      at: now, ...actor(req), type: 'interview_moved',
+      note: `${fmtWhen(was)} ← ${fmtWhen(at)}`,
+    });
+    await doc.save();
+
+    const branches = await Branch.find({ _id: { $in: doc.branch_ids } }).select('name').lean();
+    res.json({ ok: true, whatsapp_url: interviewWhatsapp(doc, branches[0]?.name || '') });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   list, counts, pull, scheduleInterview, markNotRelevant, markNoAnswer,
+  recordOutcome, reschedule,
   STALE_HOURS, RETRY_DAYS, interviewWhatsapp,
 };

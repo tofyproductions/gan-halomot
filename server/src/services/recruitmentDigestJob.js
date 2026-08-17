@@ -42,8 +42,9 @@ const esc = (s) => String(s == null ? '' : s)
 
 const day = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '');
 
-function table(rows, { showWaiting = false } = {}) {
-  const head = ['שם', 'טלפון', 'סניף מבוקש', 'הגיע/ה', showWaiting ? 'ממתין/ה' : 'מצב'];
+function table(rows, { showWaiting = false, interview = false } = {}) {
+  const head = ['שם', 'טלפון', 'סניף מבוקש', 'הגיע/ה',
+    interview ? 'מועד הראיון' : (showWaiting ? 'ממתין/ה' : 'מצב')];
   return `<table cellpadding="8" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;font-size:14px">
   <tr style="background:#f3f4f6">${head.map(h => `<th align="right" style="border-bottom:1px solid #e5e7eb">${h}</th>`).join('')}</tr>
   ${rows.map(c => `<tr>
@@ -52,9 +53,12 @@ function table(rows, { showWaiting = false } = {}) {
     <td align="right" style="border-bottom:1px solid #f3f4f6">${esc(c.requested_branch)}</td>
     <td align="right" style="border-bottom:1px solid #f3f4f6">${day(c.applications?.[c.applications.length - 1]?.at || c.created_at)}</td>
     <td align="right" style="border-bottom:1px solid #f3f4f6">${esc(
-    showWaiting
-      ? `${Math.floor((Date.now() - new Date(c.next_action_at).getTime()) / 3600000)} שעות`
-      : ({ new: 'חדש/ה', no_answer: `לא ענה/תה (${(c.attempts || []).length})`, not_relevant: 'לשיחה חוזרת' }[c.status] || c.status),
+    // eslint-disable-next-line no-nested-ternary
+    interview
+      ? new Date(c.interview.at).toLocaleString('he-IL', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' })
+      : (showWaiting
+        ? `${Math.floor((Date.now() - new Date(c.next_action_at).getTime()) / 3600000)} שעות`
+        : ({ new: 'חדש/ה', no_answer: `לא ענה/תה (${(c.attempts || []).length})`, not_relevant: 'לשיחה חוזרת' }[c.status] || c.status)),
   )}</td>
   </tr>`).join('')}
 </table>`;
@@ -69,6 +73,22 @@ function page(title, intro, body) {
     הפעולות — זימון לראיון, לא רלוונטי, לא ענה — נמצאות במסך הגיוס במערכת.
   </p>
 </div>`;
+}
+
+/**
+ * Interviews that have been and gone with nothing recorded.
+ *
+ * The one thing in this pipeline nobody is prompted about by the phone
+ * ringing: the applicant has been seen, the manager knows what she thought,
+ * and the only person still waiting is the candidate. Derived from the clock
+ * rather than a status — see the note on STATUSES in the model.
+ */
+function awaitingDecisionFilter(branchIds) {
+  return {
+    branch_ids: { $in: branchIds },
+    status: 'interview_scheduled',
+    'interview.at': { $lte: new Date() },
+  };
 }
 
 /** Everyone a manager still has to call, for the branches she holds. */
@@ -116,18 +136,32 @@ async function send({ dryRun = false } = {}) {
   }
 
   for (const [address, branchIds] of byAddress) {
-    const rows = await Candidate.find(dueFilter(branchIds)).sort({ next_action_at: 1 }).lean();
-    if (!rows.length) continue;
+    const [rows, decide] = await Promise.all([
+      Candidate.find(dueFilter(branchIds)).sort({ next_action_at: 1 }).lean(),
+      Candidate.find(awaitingDecisionFilter(branchIds)).sort({ 'interview.at': 1 }).lean(),
+    ]);
+    if (!rows.length && !decide.length) continue;
+
     const names = branchIds.map(id => branchNames.get(String(id))).filter(Boolean).join(' · ');
-    const html = page(
-      `${rows.length} מועמדים ממתינים לשיחה`,
-      `${names} · ${new Date().toLocaleDateString('he-IL')}`,
-      table(rows),
-    );
-    if (!dryRun) {
-      await dispatchEmail({ to: address, subject: `גיוס עובדים — ${rows.length} ממתינים לשיחה`, html });
+    const parts = [];
+    if (rows.length) {
+      parts.push(`<h3 style="margin:8px 0 6px">${rows.length} ממתינים לשיחה</h3>${table(rows)}`);
     }
-    sent.push({ to: address, branches: names, count: rows.length });
+    if (decide.length) {
+      parts.push(`<h3 style="margin:20px 0 6px">${decide.length} ראיונות ללא החלטה</h3>
+        <p style="margin:0 0 8px;color:#6b7280;font-size:13px">הראיון כבר התקיים ולא נרשם מה הוחלט.</p>
+        ${table(decide, { interview: true })}`);
+    }
+
+    // The count in the subject line is the whole morning, not one section —
+    // a manager decides whether to open a mail from its subject.
+    const total = rows.length + decide.length;
+    const html = page(`גיוס עובדים — ${total} לטיפולך`,
+      `${names} · ${new Date().toLocaleDateString('he-IL')}`, parts.join(''));
+    if (!dryRun) {
+      await dispatchEmail({ to: address, subject: `גיוס עובדים — ${total} לטיפולך`, html });
+    }
+    sent.push({ to: address, branches: names, count: total });
   }
 
   // The office gets what belongs to nobody, plus what a manager has left

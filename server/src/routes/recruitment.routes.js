@@ -18,5 +18,7 @@ router.post('/pull', ctrl.pull);
 router.post('/:id/interview', ctrl.scheduleInterview);
 router.post('/:id/not-relevant', ctrl.markNotRelevant);
 router.post('/:id/no-answer', ctrl.markNoAnswer);
+router.post('/:id/reschedule', ctrl.reschedule);
+router.post('/:id/outcome', ctrl.recordOutcome);
 
 module.exports = router;

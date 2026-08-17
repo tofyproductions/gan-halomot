@@ -56,8 +56,15 @@ const STATUSES = [
   'new',                 // arrived, nobody has called
   'no_answer',           // called, no answer — comes back on next_action_at
   'interview_scheduled', // called, invited, date set
-  'not_relevant',        // called, closed. may still carry a callback date
-  'archived',            // three unanswered calls, or aged out. off the screen
+  // There is deliberately NO 'interviewed' status. "Waiting for a decision" is
+  // an interview whose date has passed, which the clock already knows: the
+  // screen asks for interview_scheduled with interview.at behind us. A stored
+  // status would need something to flip it, and a sweep that has not run yet
+  // is a manager looking at a screen that is quietly one tick out of date.
+  'hired',               // passed. phase 3 — contract, signature, clock user
+  'rejected',            // interviewed and not taken. reason required
+  'not_relevant',        // closed on the phone, before any interview
+  'archived',            // three unanswered calls, two no-shows, or aged out
 ];
 
 const candidateSchema = new mongoose.Schema({
@@ -107,6 +114,17 @@ const candidateSchema = new mongoose.Schema({
     scheduled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     scheduled_at: { type: Date, default: null },
   },
+
+  /**
+   * Didn't turn up.
+   *
+   * Its own outcome, and not a rejection. A manager with only פסל/עבר to pick
+   * from will press פסל for somebody whose bus broke down, and then the reason
+   * field — the thing anyone reads six months later — says "did not pass an
+   * interview that never happened". A no-show returns them to the call queue;
+   * twice is a decision they have made for us.
+   */
+  no_show_count: { type: Number, default: 0 },
 
   /** Why they were closed. Required by the screen, not by the schema. */
   close_reason: { type: String, default: '' },
