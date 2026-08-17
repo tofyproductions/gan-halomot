@@ -80,6 +80,9 @@ router.use('/parent-changes', require('./parentChanges.routes'));
 // and SMS is capped per branch per month because one prepaid balance also
 // sends every parent's sign-in code.
 router.use('/announcements', require('./announcements.routes'));
+// היעדרויות — what the families said in advance. Read-only: the parent reports
+// from the portal and the staff record attendance on the nursery board.
+router.use('/absences', require('./absences.routes'));
 // גיוס עובדים — candidates from the website form, routed to the branch they
 // asked for. BELOW authMiddleware, deliberately: the controller decides what a
 // caller may see from req.user, so without one it computes an empty scope and

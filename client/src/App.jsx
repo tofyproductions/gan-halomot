@@ -5,6 +5,7 @@ import NurseryBoard from './components/nursery/NurseryBoard';
 import NurserySettings from './components/nursery/NurserySettings';
 import PhotosManager from './components/nursery/PhotosManager';
 import Announcements from './components/announcements/Announcements';
+import Absences from './components/absences/Absences';
 import GiftsManager from './components/nursery/GiftsManager';
 import ParentChanges from './components/admin/ParentChanges';
 import ParentLogin from './components/parent-portal/ParentLogin';
@@ -160,6 +161,10 @@ function AppRoutes() {
         <Route
           path="announcements"
           element={<ProtectedRoute tab="announcements"><Announcements /></ProtectedRoute>}
+        />
+        <Route
+          path="absences"
+          element={<ProtectedRoute tab="absences"><Absences /></ProtectedRoute>}
         />
         <Route path="gifts" element={<GiftsManager />} />
         {/* Editing the lists reshapes the board for every branch, so it stays

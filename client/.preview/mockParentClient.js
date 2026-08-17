@@ -87,12 +87,19 @@ const ANNOUNCEMENTS = [
     body: 'במהלך אוגוסט הגן נסגר ב-16:00 במקום ב-16:30.' },
 ];
 
+const day = (off) => {
+  const d = new Date(); d.setDate(d.getDate() + off);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+let ABSENCES = [{ id: 'x1', date: day(2), reason: 'ביקור רופא' }];
+
 const parentApi = {
   get: async (url) => {
     if (url === '/me') return { data: ME };
     if (url.endsWith('/day')) return { data: DAY };
     if (url.endsWith('/payments')) return { data: PAYMENTS };
     if (url.endsWith('/announcements')) return { data: { announcements: ANNOUNCEMENTS } };
+    if (url.endsWith('/absences')) return { data: { today: day(0), max_date: day(14), absences: ABSENCES } };
     if (url.endsWith('/photos')) return { data: { mine: PHOTOS, classroom: [] } };
     if (url.endsWith('/contracts')) return { data: { contracts: [] } };
     if (url.endsWith('/gift')) return { data: GIFT };
@@ -100,7 +107,21 @@ const parentApi = {
     if (/\/children\/[^/]+$/.test(url)) return { data: DETAILS };
     return { data: {} };
   },
-  post: async () => ({ data: {} }),
+  post: async (url, payload) => {
+    if (url.endsWith('/absences')) {
+      for (const d of payload.dates || []) {
+        if (!ABSENCES.some(a => a.date === d)) ABSENCES.push({ id: d, date: d, reason: payload.reason || '' });
+      }
+      ABSENCES.sort((a, b) => a.date.localeCompare(b.date));
+      return { data: { today: day(0), max_date: day(14), absences: ABSENCES } };
+    }
+    return { data: {} };
+  },
+  delete: async (url) => {
+    const d = url.split('/').pop();
+    ABSENCES = ABSENCES.filter(a => a.date !== d);
+    return { data: { today: day(0), max_date: day(14), absences: ABSENCES } };
+  },
   put: async () => ({ data: {} }),
   patch: async () => ({ data: {} }),
 };

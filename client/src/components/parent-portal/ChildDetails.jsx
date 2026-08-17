@@ -15,6 +15,7 @@ import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
 import PaymentsIcon from '@mui/icons-material/Payments';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import CampaignIcon from '@mui/icons-material/Campaign';
+import SickIcon from '@mui/icons-material/Sick';
 import parentApi, { parentApiError, openParentFile } from '../../api/parentClient';
 import { alpha } from '@mui/material/styles';
 import { DISPLAY } from '../../theme/parentTheme';
@@ -25,6 +26,7 @@ import GiftPicker from './GiftPicker';
 import ParentHome from './ParentHome';
 import Payments from './Payments';
 import ParentAnnouncements from './ParentAnnouncements';
+import ParentAbsence from './ParentAbsence';
 import PhoneChangeDialog from './PhoneChangeDialog';
 import SecondParentDialog from './SecondParentDialog';
 
@@ -274,6 +276,9 @@ export default function ChildDetails({ childId }) {
     // meets it. This is the archive — the thing they come back to looking for
     // what the note about the trip actually said.
     list.push({ key: 'news', label: 'הודעות מהגן', icon: <CampaignIcon />, primary: false });
+    // An errand rather than a section: its front door is the tile at the
+    // bottom of the home screen, and this is where it opens.
+    list.push({ key: 'absence', label: 'לא מגיעים', icon: <SickIcon />, primary: false });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
@@ -392,6 +397,10 @@ export default function ChildDetails({ childId }) {
       {active === 'payments' && <Payments childId={childId} />}
 
       {active === 'news' && <ParentAnnouncements announcements={news} />}
+
+      {active === 'absence' && (
+        <ParentAbsence childId={childId} childName={data.child.name} />
+      )}
 
       {active === 'photos' && (
         <PhotoGallery childId={childId} childName={data.child.name} />

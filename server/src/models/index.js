@@ -19,6 +19,7 @@ const Order = require('./Order');
 // Attendance / payroll (TIMEDOX replacement)
 const Amuta = require('./Amuta');
 const Announcement = require('./Announcement');
+const Absence = require('./Absence');
 const SmsBudget = require('./SmsBudget');
 const Employee = require('./Employee');
 const Punch = require('./Punch');
@@ -149,4 +150,5 @@ module.exports = {
   Candidate,
   Announcement,
   SmsBudget,
+  Absence,
 };

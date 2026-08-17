@@ -59,6 +59,12 @@ router.put('/children/:childId/gift', portal.setChildGift);
 // scoped to this child's classroom or to the whole branch.
 const announcements = require('../controllers/parentAnnouncements.controller');
 router.get('/children/:childId/announcements', announcements.childAnnouncements);
+// "לא מגיעה מחר". Today or later only — a report about a day that already
+// happened would be a family editing the gan's own record of it.
+const absence = require('../controllers/parentAbsence.controller');
+router.get('/children/:childId/absences', absence.list);
+router.post('/children/:childId/absences', absence.create);
+router.delete('/children/:childId/absences/:date', absence.cancel);
 // What the family owes. Read-only — nothing in the parent portal moves money.
 const payments = require('../controllers/parentPayments.controller');
 router.get('/children/:childId/payments', payments.childPayments);

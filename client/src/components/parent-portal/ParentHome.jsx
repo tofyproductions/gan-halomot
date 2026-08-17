@@ -3,6 +3,7 @@ import {
   Card, CardContent, Typography, Stack, Box, Skeleton, ButtonBase, Chip,
 } from '@mui/material';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import SickIcon from '@mui/icons-material/Sick';
 import parentApi from '../../api/parentClient';
 import { DISPLAY, INSET } from '../../theme/parentTheme';
 
@@ -364,6 +365,41 @@ function PaymentsCard({ payments, onOpen }) {
  *                  rather than fetched again: two requests for one screen, on a
  *                  phone, on a server that may have just woken up.
  */
+/**
+ * The things a parent does, as opposed to reads.
+ *
+ * At the BOTTOM of the screen and not the top. Every card above is the gan
+ * telling the family something, which is why they opened the app; these are
+ * the two errands, and an errand at the top of a screen is an errand somebody
+ * taps by accident while reaching for the photographs.
+ */
+function QuickActions({ actions }) {
+  return (
+    <Box
+      sx={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${Math.min(actions.length, 2)}, 1fr)`,
+        gap: 1,
+      }}
+    >
+      {actions.map(a => (
+        <DoorCard key={a.key} onClick={a.onClick} label={a.label}>
+          <Card sx={{ height: '100%' }}>
+            <CardContent sx={{ textAlign: 'center', py: 2 }}>
+              <Box sx={{ color: a.color, display: 'flex', justifyContent: 'center', mb: 0.5 }}>
+                {a.icon}
+              </Box>
+              <Typography sx={{ fontWeight: 800, fontSize: '0.875rem', lineHeight: 1.3 }}>
+                {a.label}
+              </Typography>
+            </CardContent>
+          </Card>
+        </DoorCard>
+      ))}
+    </Box>
+  );
+}
+
 export default function ParentHome({
   childId, childName, isNursery,
   photos = [], payments = null, announcements = [], onOpen,
@@ -429,6 +465,18 @@ export default function ParentHome({
   if (payments) {
     cards.push(<PaymentsCard key="pay" payments={payments} onOpen={() => onOpen('payments')} />);
   }
+  cards.push(
+    <QuickActions
+      key="do"
+      actions={[{
+        key: 'absence',
+        label: 'לא מגיעים לגן',
+        icon: <SickIcon />,
+        color: (t) => t.playful.coral.bg,
+        onClick: () => onOpen('absence'),
+      }]}
+    />,
+  );
 
   return (
     <Stack spacing={2}>

@@ -79,6 +79,10 @@ export const TAB_GROUPS = [
       // it, takes it to WhatsApp, or spends the SMS budget on it. The server
       // enforces that split; this only decides who sees the screen.
       { id: 'announcements', label: 'הודעות לגן', path: '/announcements', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher'] },
+      // What the families reported in advance. Read-only, and open to whoever
+      // opens the room: a teacher who finds out at 8am that a child is not
+      // coming finds out when the child does not come.
+      { id: 'absences', label: 'היעדרויות', path: '/absences', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },
