@@ -2,6 +2,65 @@ const { Child, Registration, Classroom, Branch } = require('../models');
 const { getAcademicYears, normalizeYear, ACADEMIC_MONTHS } = require('../services/academic-year.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
+/**
+ * The bucket for a child this year has not actually placed.
+ *
+ * Two different situations land here and both mean the same thing on this
+ * board: no room at all, and a room belonging to a different year.
+ */
+const UNPLACED = 'ללא שיבוץ לשנה זו';
+
+/**
+ * A room whose name carries U+FFFD is a corrupted row, not a room.
+ *
+ * The sheet sync used to decode Google's CSV chunk by chunk and mangled a
+ * Hebrew letter every run; each mangled name looked like a new room and was
+ * created as one. Nineteen of them exist. They are excluded here for the same
+ * reason the placement screen excludes them — a room nobody can name is a room
+ * nobody can place a child into, and counting its 35 seats as approved
+ * capacity is how a gan reads 280 places where it has none.
+ */
+const isRealRoom = (room) => !/�/.test(room.name || '');
+
+/**
+ * Split a branch's rooms into "all of them" and "the ones for this year".
+ *
+ * These are two different questions and the board was asking only the first.
+ * Branch membership has to span every year — a child's only link to a gan is
+ * their room, so scoping to one year's rooms would orphan anyone placed in an
+ * older one. Whether a child is *placed for the year on screen* is the second
+ * question, and it has to be asked separately.
+ */
+async function roomsFor(targetYear, branchFilter) {
+  const all = await Classroom.find({ is_active: true, ...branchFilter })
+    .select('_id name academic_year').lean();
+  return {
+    branchRoomIds: all.map(c => c._id),
+    yearRoomIds: new Set(
+      all.filter(c => c.academic_year === targetYear && isRealRoom(c)).map(c => String(c._id)),
+    ),
+  };
+}
+
+/**
+ * The room to file a child under on a board headed by one year.
+ *
+ * A child carries their own academic_year and so does a room, and the two can
+ * disagree: קפלן registered next year's cohort into this year's rooms because
+ * next year's rooms did not exist yet. The board grouped those children under
+ * the stale room's name and printed the target year over the top, so 2026-2027
+ * showed classes running — 12 צעירים, 12 בוגרים — when not one child had been
+ * placed into a single 2026-2027 room.
+ *
+ * The child still counts for their year. What they no longer do is borrow a
+ * room from another one.
+ */
+function groupNameFor(child, yearRoomIds) {
+  const room = child.classroom_id;
+  if (!room || !yearRoomIds.has(String(room._id))) return UNPLACED;
+  return room.name;
+}
+
 async function getStats(req, res, next) {
   try {
     const { year } = req.query;
@@ -10,8 +69,7 @@ async function getStats(req, res, next) {
     const branchFilter = getBranchFilter(req);
 
     // Get classrooms for this branch
-    const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
-    const branchClassroomIds = branchClassrooms.map(c => c._id);
+    const { branchRoomIds, yearRoomIds } = await roomsFor(targetYear, branchFilter);
 
     /**
      * Children of THIS branch — by way of its classrooms.
@@ -24,7 +82,7 @@ async function getStats(req, res, next) {
      */
     const childFilter = { academic_year: targetYear, is_active: true };
     if (Object.keys(branchFilter).length > 0) {
-      childFilter.classroom_id = { $in: branchClassroomIds };
+      childFilter.classroom_id = { $in: branchRoomIds };
     }
 
     const children = await Child.find(childFilter)
@@ -34,7 +92,7 @@ async function getStats(req, res, next) {
 
     const classrooms = {};
     for (const child of children) {
-      const groupName = child.classroom_id?.name || 'ללא קבוצה';
+      const groupName = groupNameFor(child, yearRoomIds);
       if (!classrooms[groupName]) classrooms[groupName] = [];
       classrooms[groupName].push({
         id: child._id,
@@ -86,11 +144,11 @@ async function getStats(req, res, next) {
     const forecastNextYear = buildForecast(nextYearRegs, nextYear);
 
     // Classroom capacity info for occupancy chart
-    const classroomCapacity = await Classroom.find({
+    const classroomCapacity = (await Classroom.find({
       is_active: true,
       academic_year: targetYear,
       ...branchFilter,
-    }).select('name capacity').lean();
+    }).select('name capacity').lean()).filter(isRealRoom);
 
     // Total branch capacity (sum of all classroom capacities)
     const totalCapacity = classroomCapacity.reduce((sum, c) => sum + (c.capacity || 0), 0);
@@ -109,6 +167,10 @@ async function getStats(req, res, next) {
 
     res.json({
       classrooms,
+      // Said out loud rather than left to be inferred from a group's name: a
+      // cohort registered for the year and placed nowhere in it is the exact
+      // situation this board existed to make visible and was hiding.
+      unplaced: (classrooms[UNPLACED] || []).length,
       pendingLeads: formattedLeads,
       forecast,
       forecastNextYear,
@@ -189,14 +251,13 @@ async function getClassrooms(req, res, next) {
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
     const branchFilter = getBranchFilter(req);
 
-    const branchClassrooms = await Classroom.find({ is_active: true, ...branchFilter }).select('_id').lean();
-    const branchClassroomIds = branchClassrooms.map(c => c._id);
+    const { branchRoomIds, yearRoomIds } = await roomsFor(targetYear, branchFilter);
 
     // Same trapdoor as in getStats: a branch with no classrooms must return no
     // children, not every child in the network.
     const childFilter = { academic_year: targetYear, is_active: true };
     if (Object.keys(branchFilter).length > 0) {
-      childFilter.classroom_id = { $in: branchClassroomIds };
+      childFilter.classroom_id = { $in: branchRoomIds };
     }
 
     const children = await Child.find(childFilter)
@@ -206,11 +267,15 @@ async function getClassrooms(req, res, next) {
 
     const classrooms = {};
     for (const child of children) {
-      const groupName = child.classroom_id?.name || 'ללא קבוצה';
+      const groupName = groupNameFor(child, yearRoomIds);
       if (!classrooms[groupName]) {
+        // The unplaced bucket is not a room and must not carry a room's id or
+        // seats — a screen that lets somebody open it as a class would be
+        // offering to work with a group that does not exist.
+        const placed = groupName !== UNPLACED;
         classrooms[groupName] = {
-          classroom_id: child.classroom_id?._id,
-          capacity: child.classroom_id?.capacity,
+          classroom_id: placed ? child.classroom_id?._id : null,
+          capacity: placed ? child.classroom_id?.capacity : null,
           children: [],
         };
       }

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip, Stack } from '@mui/material';
+import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip, Stack, Alert, AlertTitle } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -115,6 +115,11 @@ export default function Dashboard() {
   // binds is the smaller one.
   const licensedCapacity = data?.licensedCapacity ?? null;
   const bindingCapacity = data?.bindingCapacity || 0;
+  // Children who belong to this year and are in no room of it — either no room
+  // at all, or one left over from a year that has ended. Counted apart because
+  // the board's job is to say so: a cohort sitting in last year's rooms looked
+  // exactly like a cohort that had been placed.
+  const unplaced = data?.unplaced || 0;
   const academicYear = data?.academicYear || '';
   const nextAcademicYear = data?.nextAcademicYear || '';
 
@@ -232,6 +237,14 @@ export default function Dashboard() {
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>
         כיתות - {academicYear}
       </Typography>
+      {unplaced > 0 && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          <AlertTitle>{unplaced} ילדים ללא שיבוץ לשנת {academicYear}</AlertTitle>
+          הם רשומים לשנה הזו אבל לא יושבים באף כיתה שלה — או שאין להם כיתה כלל, או
+          שהכיתה שלהם שייכת לשנה קודמת. עד שישובצו הם לא ייספרו בתפוסת הכיתות ולא
+          יופיעו במסכי הכיתות והנוכחות.
+        </Alert>
+      )}
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2, mb: 4 }}>
         {Object.entries(classrooms).map(([name, kids]) => {
           const capacity = data?.classroomCapacity?.find(c => c.name === name)?.capacity || 0;
