@@ -4,6 +4,7 @@ const {
   ACADEMIC_MONTHS, CAMP_MONTH,
 } = require('../services/academic-year.service');
 const { calculatePaymentStatus } = require('../services/prorate.service');
+const { buildRegistrationMonths } = require('../services/collection-view.service');
 const { buildHouseholds } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 
@@ -12,7 +13,6 @@ async function getAll(req, res, next) {
     const { year } = req.query;
     const academicYears = getAcademicYears();
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
-
     const branchFilter = getBranchFilter(req);
 
     // Include all registrations that have active children (not just status=completed)
@@ -71,68 +71,6 @@ async function getAll(req, res, next) {
       }).lean()).map(c => [String(c.branch_id), c]),
     );
 
-    /**
-     * The camp cell for one child, or null when her branch has no camp.
-     *
-     * The charge is flat — never prorated like a monthly fee — because the camp
-     * is a fixed-price product, not a month of care. Only a child who left the
-     * gan mid-year is skipped by default, and even she stays editable.
-     */
-    function buildCampCell(reg, existing) {
-      const camp = campByBranch.get(String(reg.branch_id));
-      if (!camp) return null;
-
-      // Deliberately NOT gated on the camp dates falling inside the child's
-      // registration. The school year runs Sept–July and the camp is in August,
-      // *after* it — so comparing the two excluded every child in the branch,
-      // which is exactly what happened: the whole column showed ₪0 and no cell
-      // could be opened. What actually decides is whether she left early, and
-      // the exit month already records that.
-      const exitM = collectionByReg[String(reg._id)]?.exit_month ?? null;
-      const leftEarly = exitM != null && exitM !== 7 && exitM !== 8;
-
-      // Attendance is per child. Two siblings, one camp — see
-      // Collection.camp_enrolled for why this is three-state.
-      const enrolled = collectionByReg[String(reg._id)]?.camp_enrolled ?? null;
-
-      const hasOverride = existing.fee_override != null;
-      const base = camp.amount || 0;
-      const expected = hasOverride
-        ? existing.fee_override
-        : (leftEarly || enrolled === false ? 0 : base);
-
-      let receiptNumber = existing.receipt_number || null;
-      // A camp receipt only travels between siblings who are BOTH in the camp.
-      // This is the line that marked a child as paid for a camp they never
-      // attended, and it could not be undone because nothing was stored.
-      if (!receiptNumber && enrolled === true) receiptNumber = findSiblingMonthReceipt(reg, CAMP_MONTH);
-      let paymentStatus = existing.payment_status || 'expected';
-      if (receiptNumber) paymentStatus = 'paid';
-      else if (enrolled === false) paymentStatus = 'exempt';
-
-      return {
-        month: CAMP_MONTH,
-        label: camp.label || 'קייטנה',
-        camp_enrolled: enrolled,
-        expected_amount: expected,
-        paid_amount: paymentStatus === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0),
-        discount_amount: 0,
-        receipt_number: receiptNumber,
-        payment_status: paymentStatus,
-        payment_date: existing.payment_date || null,
-        is_prorated: false,
-        // Never greyed out. A greyed cell is a cell the table refuses to open,
-        // and a receipt has to be enterable for any child — including one who
-        // left in March and came back just for the camp.
-        is_before_start: false,
-        left_early: !!leftEarly,
-        notes: existing.notes || null,
-        has_fee_override: hasOverride,
-        fee_override_reason: existing.fee_override_reason || null,
-        original_expected: hasOverride ? (leftEarly ? 0 : base) : null,
-      };
-    }
-
     // Build sibling map: household -> [reg, reg, ...]
     //
     // Keyed by household rather than by the parent who happened to sign. A
@@ -148,59 +86,14 @@ async function getAll(req, res, next) {
       const key = householdOf(reg);
       if (!key) continue;
       if (!siblingMap[key]) siblingMap[key] = [];
-      siblingMap[key].push(reg);
+      siblingMap[key].push({ reg, collection: collectionByReg[String(reg._id)] || null });
     }
 
-    // Helper: find sibling's reg fee receipt if current child doesn't have one
-    function findSiblingRegFee(reg) {
+    /** This child's siblings, never this child. */
+    function siblingsOf(reg) {
       const key = householdOf(reg);
-      if (!key) return null;
-      const siblings = siblingMap[key] || [];
-      for (const sib of siblings) {
-        if (String(sib._id) === String(reg._id)) continue;
-        const sibColl = collectionByReg[String(sib._id)];
-        if (sibColl?.registration_fee_receipt) {
-          return '-' + sibColl.registration_fee_receipt;
-        }
-      }
-      return null;
-    }
-
-    // Helper: find sibling's monthly receipt for shared payments
-    function findSiblingMonthReceipt(reg, monthNum) {
-      const key = householdOf(reg);
-      if (!key) return null;
-      const siblings = siblingMap[key] || [];
-      for (const sib of siblings) {
-        if (String(sib._id) === String(reg._id)) continue;
-        const sibColl = collectionByReg[String(sib._id)];
-        const sibMonth = sibColl?.months?.find(m => m.month_number === monthNum);
-        if (sibMonth?.receipt_number && !String(sibMonth.receipt_number).startsWith('-')) {
-          return '-' + sibMonth.receipt_number;
-        }
-      }
-      return null;
-    }
-
-    // Helper: calculate discount for a registration+month
-    function calcDiscount(regId, classroomId, monthNum, baseFee) {
-      let totalDiscount = 0;
-      for (const d of allDiscounts) {
-        // Check month match
-        if (d.month && d.month !== monthNum) continue;
-
-        // Check scope match
-        if (d.scope === 'child' && String(d.registration_id) !== String(regId)) continue;
-        if (d.scope === 'classroom' && String(d.classroom_id) !== String(classroomId)) continue;
-        // scope === 'branch' matches all
-
-        if (d.discount_type === 'percentage') {
-          totalDiscount += baseFee * (d.value / 100);
-        } else {
-          totalDiscount += d.value;
-        }
-      }
-      return Math.round(totalDiscount);
+      if (!key) return [];
+      return (siblingMap[key] || []).filter(s => String(s.reg._id) !== String(reg._id));
     }
 
     // Build grouped result
@@ -210,92 +103,20 @@ async function getAll(req, res, next) {
       if (!grouped[groupName]) grouped[groupName] = [];
 
       const collection = collectionByReg[String(reg._id)] || null;
-      const monthsMap = {};
-      if (collection) {
-        for (const m of (collection.months || [])) {
-          monthsMap[m.month_number] = m;
-        }
-      }
-
       const fee = parseFloat(reg.monthly_fee) || 0;
-      const classroomObjId = reg.classroom_id?._id || reg.classroom_id;
-      const endDate = collection?.exit_month
-        ? (() => {
-            const exitM = collection.exit_month;
-            const exitY = exitM >= 9 ? y1 : y2;
-            return new Date(exitY, exitM - 1, new Date(exitY, exitM, 0).getDate());
-          })()
-        : null;
-
-      // Parse fee_effective_from (YYYY-MM) into academic month number
-      let priceChangeMonth = null;
-      let oldFee = null;
-      if (reg.fee_effective_from && reg.previous_monthly_fee != null) {
-        const [, effMonth] = reg.fee_effective_from.split('-').map(Number);
-        if (effMonth >= 1 && effMonth <= 12) {
-          priceChangeMonth = effMonth;
-          oldFee = reg.previous_monthly_fee;
-        }
-      }
-
-      const { expectedFees, isBeforeStart } = calculatePaymentStatus(
-        oldFee != null ? oldFee : fee,
-        reg.start_date,
-        targetYear,
-        endDate ? endDate.toISOString().split('T')[0] : reg.end_date,
-        priceChangeMonth,
-        priceChangeMonth ? fee : undefined
-      );
-
       const child = childByReg[String(reg._id)];
 
-      // Detect registration fee receipts: use stored value or check sibling
-      let detectedRegFeeReceipt = collection?.registration_fee_receipt || null;
-      if (!detectedRegFeeReceipt) {
-        detectedRegFeeReceipt = findSiblingRegFee(reg);
-      }
-
-      const monthData = ACADEMIC_MONTHS.map(m => {
-        const existing = monthsMap[m] || {};
-        let expected = expectedFees[m] || 0;
-
-        // Apply discounts
-        const discount = expected > 0 ? calcDiscount(reg._id, classroomObjId, m, expected) : 0;
-        expected = Math.max(0, expected - discount);
-
-        // Apply per-child-per-month fee override
-        const hasFeeOverride = existing.fee_override != null;
-        const originalExpected = hasFeeOverride ? expected : null;
-        if (hasFeeOverride) {
-          expected = existing.fee_override;
-        }
-
-        // Get receipt - use existing, or check if it's a negative sibling receipt
-        let receiptNumber = existing.receipt_number || null;
-        let paymentStatus = existing.payment_status || (isBeforeStart[m] ? 'pending' : 'expected');
-
-        // If has receipt (even negative = sibling shared), mark as paid
-        if (receiptNumber) {
-          paymentStatus = 'paid';
-        }
-
-        const paid = paymentStatus === 'paid' ? expected : (parseFloat(existing.paid_amount) || 0);
-        return {
-          month: m,
-          expected_amount: expected,
-          paid_amount: paid,
-          discount_amount: discount,
-          receipt_number: receiptNumber,
-          payment_status: paymentStatus,
-          payment_date: existing.payment_date || null,
-          is_prorated: existing.is_prorated || false,
-          is_before_start: isBeforeStart[m] || false,
-          notes: existing.notes || null,
-          has_fee_override: hasFeeOverride,
-          fee_override_reason: existing.fee_override_reason || null,
-          original_expected: originalExpected,
-        };
-      });
+      // The arithmetic lives in services/collection-view — the parent portal
+      // shows these same figures and must not compute them a second way.
+      const { months: monthData, campCell, registration_fee_receipt: detectedRegFeeReceipt } =
+        buildRegistrationMonths({
+          reg,
+          academicYear: targetYear,
+          collection,
+          discounts: allDiscounts,
+          camp: campByBranch.get(String(reg.branch_id)) || null,
+          siblings: siblingsOf(reg),
+        });
 
       grouped[groupName].push({
         registration_id: reg._id,
@@ -311,7 +132,7 @@ async function getAll(req, res, next) {
         registration_fee: reg.registration_fee || 0,
         registration_fee_receipt: detectedRegFeeReceipt || null,
         months: monthData,
-        camp: buildCampCell(reg, monthsMap[CAMP_MONTH] || {}),
+        camp: campCell,
       });
     }
 
