@@ -4,6 +4,22 @@
  *
  *   node scripts/ganflow-platform.test.js
  */
+/**
+ * mongodb-memory-server is deliberately NOT a dependency of this package.
+ * Render runs `npm install` on every deploy and would download a MongoDB
+ * binary into the build of a gan that is serving families — a hundred
+ * megabytes and a new way for the deploy to fail, in exchange for a package
+ * only ever used on a laptop. Install it when you want to run the test:
+ *
+ *   npm install --no-save mongodb-memory-server
+ */
+try {
+  require.resolve('mongodb-memory-server');
+} catch {
+  console.error('\n\u274C  חסרה חבילת הבדיקה. הרץ:\n\n   npm install --no-save mongodb-memory-server\n');
+  process.exit(1);
+}
+
 const { MongoMemoryServer } = require('mongodb-memory-server');
 
 (async () => {
