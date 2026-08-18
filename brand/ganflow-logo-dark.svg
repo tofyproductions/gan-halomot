@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 96" width="420" height="96" role="img" aria-label="GanFlow">
+  <defs>
+    <linearGradient id="gf3" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3ED0BC"/>
+      <stop offset="1" stop-color="#4E9EE0"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="26" fill="url(#gf3)"/>
+  <g fill="none" stroke="#0E2233" stroke-linecap="round" stroke-width="8">
+    <path d="M18 34c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+    <path d="M18 50c9-8 19-8 28 0s19 8 28 0"/>
+    <path d="M18 66c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+  </g>
+  <text x="118" y="48" font-family="Inter, Assistant, Helvetica, Arial, sans-serif" font-size="38" fill="#F2F7FB">
+    <tspan font-weight="500">Gan</tspan><tspan font-weight="800" fill="#4ECFE0">Flow</tspan>
+  </text>
+  <text x="120" y="74" font-family="Assistant, Arial, sans-serif" font-size="17" fill="#93AABB" direction="rtl">ראש שקט לניהול הגן</text>
+</svg>
