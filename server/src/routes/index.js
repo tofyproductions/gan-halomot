@@ -1,6 +1,13 @@
 const router = require('express').Router();
 const { authMiddleware } = require('../middleware/auth');
 
+// GanFlow control plane — the customer registry, and the only place that knows
+// other customers exist. Mounted only when PLATFORM_MONGODB_URI is configured,
+// so a server without it (גן החלומות, today) does not gain a single route.
+if (require('../platform/connection').isEnabled()) {
+  router.use('/platform', require('../platform/routes'));
+}
+
 // Public routes (no auth required)
 router.use('/auth', require('./auth.routes'));
 router.use('/public', require('./public.routes'));

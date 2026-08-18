@@ -111,6 +111,13 @@ app.get('/api/pdf-pagetest', async (req, res) => {
 // API routes
 app.use('/api', routes);
 
+// The console — ours, not a customer's. Served only where the customer layer
+// is switched on, and mounted ABOVE the client's catch-all so that /console
+// does not fall through and get handed a gan's application shell.
+if (require('./platform/connection').isEnabled()) {
+  app.use('/console', express.static(path.join(__dirname, '../../console')));
+}
+
 // Serve static frontend in production
 if (env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));

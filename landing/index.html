@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GanFlow — ראש שקט לניהול הגן</title>
+<meta name="description" content="מערכת ניהול מלאה לגני ילדים ומעונות: רישום, גבייה מהורים, שכר עובדות, נוכחות ופורטל הורים. נבנתה בתוך גנים פעילים.">
+<meta property="og:title" content="GanFlow — ראש שקט לניהול הגן">
+<meta property="og:description" content="רישום, גבייה, שכר, נוכחות ופורטל הורים — במקום אחד.">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --ink:#16324A; --dim:#5B7387; --line:#E2EAF0; --bg:#fff; --soft:#F4F8FB;
+    --brand:#2E7BC4; --teal:#2BB6A3; --good:#1E9E6A;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:Assistant,-apple-system,Arial,sans-serif;color:var(--ink);background:var(--bg);font-size:17px;line-height:1.65}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 22px}
+  a{color:var(--brand)}
+  nav{position:sticky;top:0;background:#fffffff2;backdrop-filter:blur(8px);border-bottom:1px solid var(--line);z-index:20}
+  nav .wrap{display:flex;align-items:center;gap:12px;padding-top:13px;padding-bottom:13px}
+  .logo{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--teal),var(--brand));flex:none}
+  .brand{font-weight:800;font-size:19px}
+  nav .links{margin-inline-start:auto;display:flex;gap:22px;align-items:center;font-size:15px}
+  nav .links a{color:var(--dim);text-decoration:none}
+  .btn{display:inline-block;background:var(--brand);color:#fff;padding:13px 26px;border-radius:11px;font-weight:700;text-decoration:none;border:0;font:inherit;font-weight:700;cursor:pointer}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
+  header.hero{padding:76px 0 60px;background:linear-gradient(180deg,#F4FBFA,#fff)}
+  h1{font-size:clamp(30px,5.2vw,50px);line-height:1.15;margin:0 0 18px;letter-spacing:-.02em}
+  h1 .g{background:linear-gradient(135deg,var(--teal),var(--brand));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:20px;color:var(--dim);max-width:620px;margin:0 0 30px}
+  .cta-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .note{color:var(--dim);font-size:14px;margin-top:14px}
+  section{padding:62px 0;border-top:1px solid var(--line)}
+  h2{font-size:clamp(23px,3.4vw,32px);margin:0 0 14px;letter-spacing:-.01em}
+  .sub{color:var(--dim);max-width:640px;margin:0 0 34px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:18px}
+  .card{border:1px solid var(--line);border-radius:16px;padding:24px;background:#fff}
+  .card h3{margin:0 0 8px;font-size:17px}
+  .card p{margin:0;color:var(--dim);font-size:15px}
+  .card .ico{width:38px;height:38px;border-radius:11px;background:var(--soft);display:flex;align-items:center;justify-content:center;font-size:19px;margin-bottom:13px}
+  .band{background:var(--soft)}
+  .quote{font-size:21px;line-height:1.5;max-width:720px;margin:0}
+  .quote b{color:var(--brand)}
+  .price{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:stretch}
+  .price .card{display:flex;flex-direction:column}
+  .price .big{font-size:44px;font-weight:800;line-height:1;margin:8px 0 2px}
+  .price .per{color:var(--dim);font-size:15px;margin-bottom:16px}
+  ul.ticks{list-style:none;padding:0;margin:0 0 20px;font-size:15px}
+  ul.ticks li{padding:6px 0 6px 0;color:var(--dim)}
+  ul.ticks li::before{content:"✓";color:var(--good);font-weight:800;margin-inline-end:9px}
+  .faq details{border-bottom:1px solid var(--line);padding:16px 0}
+  .faq summary{cursor:pointer;font-weight:700;list-style:none}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"+";float:left;color:var(--dim);font-weight:400;font-size:22px;line-height:1}
+  .faq details[open] summary::after{content:"−"}
+  .faq p{color:var(--dim);margin:12px 0 0;font-size:16px}
+  form .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+  label{display:block;font-size:13px;color:var(--dim);margin-bottom:5px}
+  input,select{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff;color:inherit}
+  footer{padding:36px 0;color:var(--dim);font-size:14px;border-top:1px solid var(--line)}
+  .cmp{width:100%;border-collapse:collapse;font-size:15px;margin-top:8px}
+  .cmp th{text-align:right;padding:11px 12px;font-size:13px;color:var(--dim);border-bottom:1px solid var(--line)}
+  .cmp td{padding:12px;border-bottom:1px solid #F0F4F7}
+  .cmp td:first-child{font-weight:600}
+  .yes{color:var(--good);font-weight:800} .no{color:#C9D3DB;font-weight:800}
+  @media(max-width:720px){.price{grid-template-columns:1fr}form .row{grid-template-columns:1fr}nav .links a:not(.btn){display:none}}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <div class="logo"></div><div class="brand">GanFlow</div>
+  <div class="links">
+    <a href="#what">מה יש במערכת</a>
+    <a href="#price">מחיר</a>
+    <a href="#faq">שאלות</a>
+    <a href="#signup" class="btn">הרשמה מוקדמת</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <h1>ראש שקט<br><span class="g">לניהול הגן</span></h1>
+  <p class="lede">רישום, גבייה מהורים, שכר עובדות, נוכחות ופורטל הורים — במערכת אחת.
+    לא בנינו אותה בשביל גנים. בנינו אותה בשביל <b>הגנים שלנו</b>, ואז גנים אחרים ביקשו אותה.</p>
+  <div class="cta-row">
+    <a href="#signup" class="btn">הרשמה מוקדמת — 500 ₪</a>
+    <a href="#what" class="btn ghost">מה יש במערכת</a>
+  </div>
+  <p class="note">שלושת הנרשמים הראשונים נכנסים לפיילוט בנובמבר 2026 · מחיר נעול ל-3 שנים · לא עלינו לאוויר בזמן — המקדמה חוזרת במלואה</p>
+</div></header>
+
+<section id="what"><div class="wrap">
+  <h2>הגן לא נגמר בקשר עם ההורים</h2>
+  <p class="sub">יש אפליקציות שמצלמות את היום ושולחות להורים. הן עושות את זה יפה.
+    אבל הגבייה, השכר, החוזים והעובדות עדיין יושבים אצלכם באקסל ובראש. את זה אנחנו פותרים.</p>
+  <div class="grid">
+    <div class="card"><div class="ico">👶</div><h3>ילדים ורישום</h3>
+      <p>רישום מקוון, שיבוץ לכיתות, תיק ילד מלא, מעקב מקומות פנויים ורשימת המתנה.</p></div>
+    <div class="card"><div class="ico">💳</div><h3>גבייה מהורים</h3>
+      <p>מחירון לפי גיל וסניף, הנחות ואחים, הוראות קבע, מי שילם ומי לא — בטבלה אחת לכל השנה.</p></div>
+    <div class="card"><div class="ico">👩‍🏫</div><h3>עובדות ושכר</h3>
+      <p>תיק עובד, חוזי העסקה, טופס 101, נוכחות, חישוב שכר חודשי ותלושים.</p></div>
+    <div class="card"><div class="ico">⏰</div><h3>נוכחות</h3>
+      <p>שעון נוכחות פיזי בגן או החתמה מהטלפון. דוחות שעות מוכנים לרואה החשבון.</p></div>
+    <div class="card"><div class="ico">📱</div><h3>פורטל הורים</h3>
+      <p>ההורה מעדכן פרטים, מדווח היעדרות, רואה תשלומים, הודעות ותמונות — ומאשר מי רשאי לאסוף.</p></div>
+    <div class="card"><div class="ico">📦</div><h3>תפעול</h3>
+      <p>מלאי, ספקים, הזמנות, תפריטים, אחזקה, חוגים ואירועים.</p></div>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap">
+  <p class="quote">אנחנו לא חברת תוכנה שהחליטה להיכנס לגני ילדים.<br>
+    <b>אנחנו מפעילים גנים.</b> כל מסך כאן נבנה כי משהו אצלנו לא עבד,
+    ונבדק על ילדים אמיתיים, עובדות אמיתיות ומשכורות אמיתיות — לפני שהראינו אותו למישהו.</p>
+</div></section>
+
+<section><div class="wrap">
+  <h2>מה שאין במקומות אחרים</h2>
+  <p class="sub">רוב המערכות בשוק מתמקדות בקשר עם ההורים. זה חשוב, וזה גם אצלנו. אבל זה חצי מהעבודה.</p>
+  <table class="cmp">
+    <thead><tr><th>יכולת</th><th>אפליקציית תקשורת</th><th>GanFlow</th></tr></thead>
+    <tbody>
+      <tr><td>הודעות ותמונות להורים</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+      <tr><td>נוכחות ילדים</td><td class="yes">✓</td><td class="yes">✓</td></tr>
+      <tr><td>גבייה מהורים ומחירונים</td><td class="no">✕</td><td class="yes">✓</td></tr>
+      <tr><td>שכר עובדות ותלושים</td><td class="no">✕</td><td class="yes">✓</td></tr>
+      <tr><td>חוזי העסקה וטופס 101</td><td class="no">✕</td><td class="yes">✓</td></tr>
+      <tr><td>מלאי, ספקים והזמנות</td><td class="no">✕</td><td class="yes">✓</td></tr>
+      <tr><td>ניהול רשת, מחוזות וסניפים</td><td class="no">✕</td><td class="yes">✓</td></tr>
+    </tbody>
+  </table>
+</div></section>
+
+<section id="price" class="band"><div class="wrap">
+  <h2>מחיר אחד. הכול בפנים.</h2>
+  <p class="sub">בלי חבילות, בלי תוספות מפתיעות, בלי תשלום לפי מספר עובדות.</p>
+  <div class="price">
+    <div class="card">
+      <div style="color:var(--dim);font-size:14px">גן בודד</div>
+      <div class="big">50 ₪</div>
+      <div class="per">לילד רשום, לחודש · מינימום 400 ₪</div>
+      <ul class="ticks">
+        <li>כל המודולים, בלי יוצא מן הכלל</li>
+        <li>חודש ראשון ללא תשלום</li>
+        <li>הקמה, העברת נתונים והדרכה — כלולים</li>
+        <li>תמיכה בטלפון, לא בצ׳אט</li>
+        <li>בלי התחייבות</li>
+      </ul>
+      <a href="#signup" class="btn" style="margin-top:auto;text-align:center">הרשמה מוקדמת</a>
+    </div>
+    <div class="card">
+      <div style="color:var(--dim);font-size:14px">רשתות ומעונות מפוקחים</div>
+      <div class="big">בהתאמה</div>
+      <div class="per">מדרגות לפי מספר ילדים</div>
+      <ul class="ticks">
+        <li>ניהול רשת, מחוזות וסניפים</li>
+        <li>מסד נתונים ייעודי ונפרד לרשת</li>
+        <li>התאמת רישום מול תמ"ת וקליקטאק</li>
+        <li>ניהול עמותות מעסיקות</li>
+        <li>נספח עיבוד מידע וחוזה SLA</li>
+      </ul>
+      <a href="#signup" class="btn ghost" style="margin-top:auto;text-align:center">דברו איתנו</a>
+    </div>
+  </div>
+</div></section>
+
+<section id="faq" class="faq"><div class="wrap">
+  <h2>שאלות שנשאלנו</h2>
+  <details><summary>מתי המערכת עולה לאוויר?</summary>
+    <p>שלושת הגנים הראשונים שנרשמים נכנסים לפיילוט בנובמבר 2026, בליווי אישי שלנו. פתיחה לכולם בינואר 2027.
+       אם לא עמדנו בתאריך — המקדמה חוזרת במלואה, בלי לשאול שאלות.</p></details>
+  <details><summary>למה זה יקר יותר מאפליקציות אחרות?</summary>
+    <p>כי זה לא אותו מוצר. אפליקציית תקשורת מחליפה קבוצת ווטסאפ. GanFlow מחליפה את האקסל של הגבייה,
+       את חישוב השכר, את תיקי העובדות ואת ניהול המלאי. גן שמשלם לנו 2,000 ₪ בחודש בדרך כלל חוסך יותר מזה
+       בשעות של מנהלת ובגבייה שלא נשכחה.</p></details>
+  <details><summary>יש תיוג פנים אוטומטי בתמונות?</summary>
+    <p>יש תיוג. אוטומטי בזיהוי פנים — לא, וזו החלטה. זיהוי ביומטרי של ילדים מחייב הסכמת הורים מפורשת
+       ועמידה בתיקון 13 לחוק הגנת הפרטיות. לא נעשה את זה בקלות ראש עם הילדים שלכם.</p></details>
+  <details><summary>מה קורה למידע אם אנחנו עוזבים?</summary>
+    <p>הוא שלכם. מייצאים אותו בקובץ, בלי לבקש רשות ובלי תשלום. אם המנוי מופסק — המידע נשמר חצי שנה
+       ואז נמחק, וזה כתוב בתנאי השימוש.</p></details>
+  <details><summary>איפה המידע יושב, ומי רואה אותו?</summary>
+    <p>בשרתי ענן באירופה. לכל גן מסד נתונים נפרד משלו — לא טבלה משותפת עם גנים אחרים.
+       הצוות שלנו נכנס למערכת שלכם רק כשאתם מבקשים תמיכה, וכל כניסה כזו נרשמת ביומן שאתם יכולים לראות.</p></details>
+  <details><summary>יש לנו שעון נוכחות ישן. הוא ימשיך לעבוד?</summary>
+    <p>ברוב המקרים כן — אנחנו מתחברים לשעונים נפוצים בשוק. אם לא, יש לנו מכשיר משלנו (מכירה או השכרה),
+       או החתמה מהטלפון של הגננת בלי חומרה בכלל.</p></details>
+</div></section>
+
+<section id="signup" class="band"><div class="wrap">
+  <h2>הרשמה מוקדמת</h2>
+  <p class="sub">500 ₪ מקדמה. מקבלים מחיר נעול לשלוש שנים, חודש ראשון חינם, ומקום בתור.
+    לא עלינו לאוויר בתאריך שהבטחנו — הכסף חוזר.</p>
+  <form id="f">
+    <div class="row">
+      <div><label>שם הגן</label><input name="gan" required></div>
+      <div><label>שם מלא</label><input name="name" required></div>
+    </div>
+    <div class="row">
+      <div><label>טלפון</label><input name="phone" type="tel" required></div>
+      <div><label>אימייל</label><input name="email" type="email" required></div>
+    </div>
+    <div class="row">
+      <div><label>כמה ילדים בגן?</label><input name="children" type="number" min="1" required></div>
+      <div><label>כמה סניפים?</label>
+        <select name="branches"><option>1</option><option>2–5</option><option>6–20</option><option>21+</option></select></div>
+    </div>
+    <button class="btn" type="submit" style="width:100%">שלחו לי פרטי תשלום</button>
+    <p class="note" id="msg"></p>
+  </form>
+</div></section>
+
+<footer><div class="wrap">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <div class="logo" style="width:26px;height:26px;border-radius:8px"></div><b>GanFlow</b>
+  </div>
+  <div>ראש שקט לניהול הגן · <a href="mailto:hello@ganflow.co.il">hello@ganflow.co.il</a></div>
+  <div style="margin-top:8px;font-size:13px">מופעל על ידי חברים של טופי בע"מ</div>
+</div></footer>
+
+<script>
+// Until the payment link and the mailbox exist, the form must not pretend to
+// have sent anything — a lead that silently vanishes is worse than a form that
+// says it is not ready. Wired to a real endpoint before 31.8.
+document.getElementById('f').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const data = Object.fromEntries(new FormData(e.target));
+  console.log('signup', data);
+  document.getElementById('msg').textContent =
+    'תודה! נחזור אליכם בטלפון תוך יום עסקים עם קישור לתשלום. (הטופס עדיין לא מחובר — נחבר לפני 31.8)';
+});
+</script>
+</body>
+</html>
