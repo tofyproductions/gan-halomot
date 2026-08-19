@@ -1,0 +1,187 @@
+<title>דף מחיר והרשמה</title>
+<style>
+  :root{
+    --ground:#FFFFFF; --surface:#F3F8FB; --line:#CFDFE8;
+    --ink:#0E2A3D; --ink-soft:#3C5768; --dim:#6C8394;
+    --teal:#158A7B; --blue:#2668A8; --gold:#A6701D; --gold-bg:#FBF3E2;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0B1B26; --surface:#122635; --line:#23445A;
+      --ink:#EAF3F8; --ink-soft:#B4CBD9; --dim:#7E9AAC;
+      --teal:#3FCBB6; --blue:#66AAE8; --gold:#E0B45F; --gold-bg:#2A2113;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0B1B26; --surface:#122635; --line:#23445A;
+    --ink:#EAF3F8; --ink-soft:#B4CBD9; --dim:#7E9AAC;
+    --teal:#3FCBB6; --blue:#66AAE8; --gold:#E0B45F; --gold-bg:#2A2113;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:26px 16px;background:var(--ground);color:var(--ink);
+    font-family:"Assistant","Heebo",-apple-system,"Arial Hebrew",Arial,sans-serif;
+    direction:rtl;font-size:15px;line-height:1.6
+  }
+  .sheet{
+    max-width:760px;margin:0 auto 30px;background:var(--ground);
+    border:1px solid var(--line);border-radius:14px;padding:36px 40px
+  }
+  .head{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+  .mark{width:46px;height:46px;border-radius:12px;background:linear-gradient(135deg,var(--teal),var(--blue));flex:none;position:relative}
+  .mark svg{position:absolute;inset:0;width:100%;height:100%}
+  .name{font-size:26px;font-weight:800;letter-spacing:-.02em;line-height:1}
+  .tag{color:var(--dim);font-size:14px;margin-top:3px}
+  h2{font-size:21px;margin:30px 0 12px;font-weight:800;letter-spacing:-.01em}
+  h2:first-of-type{margin-top:26px}
+  .price-hero{
+    background:var(--surface);border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px;display:flex;align-items:baseline;gap:16px;flex-wrap:wrap
+  }
+  .price-hero .n{font-size:46px;font-weight:800;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+  .price-hero .u{color:var(--ink-soft);font-size:16px}
+  .price-hero .min{margin-inline-start:auto;color:var(--dim);font-size:14px;text-align:left}
+  ul.ticks{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:7px 22px}
+  ul.ticks li{color:var(--ink-soft);display:flex;gap:9px;align-items:baseline;font-size:14.5px}
+  ul.ticks li::before{content:"✓";color:var(--teal);font-weight:800;flex:none}
+  ul.ticks li b{color:var(--ink)}
+  .mods{display:grid;grid-template-columns:1fr 1fr;gap:8px 22px;margin:0;padding:0;list-style:none}
+  .mods li{font-size:14.5px;color:var(--ink-soft);padding:6px 0;border-bottom:1px solid var(--line)}
+  .mods li b{color:var(--ink);display:block;font-size:15px}
+  .offer{background:var(--gold-bg);border:1px solid var(--gold);border-radius:14px;padding:20px 24px;margin-top:26px}
+  .offer .t{color:var(--gold);font-weight:800;font-size:13px;letter-spacing:.1em;margin-bottom:9px}
+  .offer .h{font-size:20px;font-weight:800;margin-bottom:10px}
+  .offer p{margin:0;color:var(--ink-soft);font-size:14.5px}
+  .foot{margin-top:28px;padding-top:16px;border-top:1px solid var(--line);color:var(--dim);font-size:13px;display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+
+  /* ---- the form ---- */
+  .field{margin-bottom:15px}
+  .field label{display:block;font-size:12.5px;color:var(--dim);margin-bottom:5px;font-weight:600;letter-spacing:.03em}
+  .rule{border-bottom:1.4px solid var(--line);height:31px}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:15px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:15px}
+  .terms{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:22px 0;font-size:13.5px;color:var(--ink-soft)}
+  .terms ol{margin:0;padding-inline-start:19px;display:flex;flex-direction:column;gap:7px}
+  .terms b{color:var(--ink)}
+  .sign{display:grid;grid-template-columns:1.4fr 1fr;gap:26px;margin-top:24px}
+
+  @media(max-width:640px){ul.ticks,.mods,.row2,.row3,.sign{grid-template-columns:1fr}}
+
+  @media print{
+    body{padding:0;background:#fff;color:#000;font-size:11.5pt}
+    .sheet{border:0;border-radius:0;max-width:none;margin:0;padding:14mm 15mm;page-break-after:always}
+    .sheet:last-child{page-break-after:auto}
+    .noprint{display:none}
+    .price-hero,.terms,.offer{background:#fff;border-color:#999}
+    .mark{background:#1a6f8f}
+  }
+  .noprint{max-width:760px;margin:0 auto 20px;color:var(--dim);font-size:13.5px;text-align:center}
+</style>
+
+<p class="noprint">שני עמודים — מחירון וטופס הרשמה. הדפסה דו-צדדית, A4.</p>
+
+<!-- ============ page 1 ============ -->
+<div class="sheet">
+  <div class="head">
+    <div class="mark"><svg viewBox="0 0 96 96" aria-hidden="true"><g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8">
+      <path d="M18 34c9-8 19-8 28 0s19 8 28 0" opacity=".55"/><path d="M18 50c9-8 19-8 28 0s19 8 28 0"/>
+      <path d="M18 66c9-8 19-8 28 0s19 8 28 0" opacity=".55"/></g></svg></div>
+    <div><div class="name">GanFlow</div><div class="tag">ראש שקט לניהול הגן</div></div>
+  </div>
+
+  <h2>מחיר אחד. הכול בפנים.</h2>
+  <div class="price-hero">
+    <div class="n">50 ₪</div>
+    <div class="u">לילד רשום, לחודש</div>
+    <div class="min">מינימום 400 ₪ לגן<br>חודש ראשון ללא תשלום</div>
+  </div>
+
+  <h2>מה כלול</h2>
+  <ul class="ticks">
+    <li><b>כל המודולים</b> — בלי חבילות ובלי תוספות</li>
+    <li><b>הקמה והעברת נתונים</b> מהאקסלים הקיימים</li>
+    <li><b>הדרכה</b> לצוות הגן</li>
+    <li><b>תמיכה בטלפון</b>, לא בצ׳אט</li>
+    <li><b>עדכונים</b> ותכונות חדשות</li>
+    <li><b>בלי התחייבות</b> — עוזבים ולוקחים את המידע</li>
+  </ul>
+
+  <h2>מה יש במערכת</h2>
+  <ul class="mods">
+    <li><b>ילדים ורישום</b>רישום מקוון, שיבוץ לכיתות, תיק ילד, רשימת המתנה</li>
+    <li><b>גבייה מהורים</b>מחירון לפי גיל, הנחות אחים, הוראות קבע, מעקב חובות</li>
+    <li><b>עובדות ושכר</b>תיק עובד, חוזי העסקה, טופס 101, חישוב שכר ותלושים</li>
+    <li><b>נוכחות</b>שעון בגן או החתמה מהטלפון, דוחות שעות לרו"ח</li>
+    <li><b>פורטל הורים</b>היעדרויות, תשלומים, הודעות, תמונות, מורשי איסוף</li>
+    <li><b>תפעול</b>מלאי, ספקים, הזמנות, תפריטים, אחזקה, חוגים ואירועים</li>
+  </ul>
+
+  <div class="offer">
+    <div class="t">הצעת יום המעונות · 31.8.2026</div>
+    <div class="h">הרשמה מוקדמת — 500 ₪</div>
+    <p>מחיר נעול לשלוש שנים · שלושת הראשונים נכנסים לפיילוט בנובמבר 2026 בליווי אישי ·
+      פתיחה לכולם בינואר 2027 · <b>לא עלינו לאוויר בתאריך שהובטח — המקדמה מוחזרת במלואה.</b></p>
+  </div>
+
+  <div class="foot">
+    <div>ganflow.co.il · hello@ganflow.co.il</div>
+    <div>מופעל על ידי חברים של טופי בע"מ</div>
+  </div>
+</div>
+
+<!-- ============ page 2 ============ -->
+<div class="sheet">
+  <div class="head">
+    <div class="mark"><svg viewBox="0 0 96 96" aria-hidden="true"><g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8">
+      <path d="M18 34c9-8 19-8 28 0s19 8 28 0" opacity=".55"/><path d="M18 50c9-8 19-8 28 0s19 8 28 0"/>
+      <path d="M18 66c9-8 19-8 28 0s19 8 28 0" opacity=".55"/></g></svg></div>
+    <div><div class="name">טופס הרשמה מוקדמת</div><div class="tag">31 באוגוסט 2026 · כפר סבא</div></div>
+  </div>
+
+  <h2>פרטי הגן</h2>
+  <div class="row2">
+    <div class="field"><label>שם הגן</label><div class="rule"></div></div>
+    <div class="field"><label>יישוב</label><div class="rule"></div></div>
+  </div>
+  <div class="row3">
+    <div class="field"><label>מספר ילדים</label><div class="rule"></div></div>
+    <div class="field"><label>מספר סניפים</label><div class="rule"></div></div>
+    <div class="field"><label>מספר עובדות</label><div class="rule"></div></div>
+  </div>
+
+  <h2>איש קשר</h2>
+  <div class="row2">
+    <div class="field"><label>שם מלא</label><div class="rule"></div></div>
+    <div class="field"><label>תפקיד</label><div class="rule"></div></div>
+  </div>
+  <div class="row2">
+    <div class="field"><label>טלפון</label><div class="rule"></div></div>
+    <div class="field"><label>אימייל</label><div class="rule"></div></div>
+  </div>
+
+  <div class="field"><label>מה הכי כואב לכם היום בניהול הגן?</label><div class="rule"></div><div class="rule"></div></div>
+
+  <div class="terms">
+    <ol>
+      <li>המקדמה היא <b>500 ₪</b>, והיא מקוזזת מהתשלום הראשון.</li>
+      <li>המחיר <b>50 ₪ לילד לחודש</b> נעול לשלוש שנים ממועד תחילת השימוש, גם אם המחירון יעודכן.</li>
+      <li>שלושת הנרשמים הראשונים נכנסים לפיילוט ב<b>נובמבר 2026</b>. יתר הנרשמים — <b>ינואר 2027</b>.</li>
+      <li>החודש הראשון של שימוש בפועל — <b>ללא תשלום</b>.</li>
+      <li><b>לא עלינו לאוויר עד 31 בינואר 2027 — המקדמה מוחזרת במלואה, ללא תנאי.</b></li>
+      <li>ניתן לבטל בכל שלב ולקבל את המקדמה בחזרה, עד לתחילת השימוש בפועל.</li>
+      <li>אין התחייבות לתקופת שימוש. הנתונים שייכים לגן וניתנים לייצוא בכל עת.</li>
+    </ol>
+  </div>
+
+  <div class="sign">
+    <div class="field"><label>שם החותם/ת</label><div class="rule"></div></div>
+    <div class="field"><label>תאריך</label><div class="rule"></div></div>
+  </div>
+  <div class="field" style="margin-top:8px"><label>חתימה</label><div class="rule" style="height:44px"></div></div>
+
+  <div class="foot">
+    <div>ganflow.co.il · hello@ganflow.co.il</div>
+    <div>לשימוש פנימי: קבלה מס' ______</div>
+  </div>
+</div>

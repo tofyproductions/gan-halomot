@@ -1,0 +1,429 @@
+<title>מצגת יום המעונות</title>
+<style>
+  /* ---- tokens: light is the base, both dark states redefine only these ---- */
+  :root{
+    --ground:#FBFCFD;
+    --surface:#EEF4F8;
+    --surface-2:#E3EDF3;
+    --line:#D5E2EA;
+    --ink:#0E2A3D;
+    --ink-soft:#3C5768;
+    --dim:#6C8394;
+    --teal:#158A7B;
+    --blue:#2668A8;
+    --gold:#A6701D;
+    --gold-bg:#FBF2E0;
+    --shadow:0 1px 2px rgba(14,42,61,.05), 0 8px 28px rgba(14,42,61,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0B1B26;
+      --surface:#122635;
+      --surface-2:#183245;
+      --line:#23445A;
+      --ink:#EAF3F8;
+      --ink-soft:#B4CBD9;
+      --dim:#7E9AAC;
+      --teal:#3FCBB6;
+      --blue:#66AAE8;
+      --gold:#E0B45F;
+      --gold-bg:#2A2113;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.34);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0B1B26;
+    --surface:#122635;
+    --surface-2:#183245;
+    --line:#23445A;
+    --ink:#EAF3F8;
+    --ink-soft:#B4CBD9;
+    --dim:#7E9AAC;
+    --teal:#3FCBB6;
+    --blue:#66AAE8;
+    --gold:#E0B45F;
+    --gold-bg:#2A2113;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.34);
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--ground); color:var(--ink);
+    font-family:"Assistant","Heebo",-apple-system,"Arial Hebrew",Arial,sans-serif;
+    direction:rtl; overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- deck chrome ---- */
+  .rail{position:fixed;top:0;inset-inline:0;height:3px;background:transparent;z-index:30}
+  .rail i{display:block;height:100%;background:linear-gradient(90deg,var(--teal),var(--blue));transition:width .35s cubic-bezier(.4,0,.2,1)}
+  .hud{position:fixed;bottom:20px;inset-inline-start:24px;z-index:30;display:flex;gap:14px;align-items:center;
+       color:var(--dim);font-size:13px;font-variant-numeric:tabular-nums}
+  .hud button{all:unset;cursor:pointer;padding:6px 10px;border-radius:8px;color:var(--dim);font-size:13px}
+  .hud button:hover{background:var(--surface);color:var(--ink)}
+  .hud button:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+
+  /* ---- slides ---- */
+  .deck{height:100%;position:relative}
+  .slide{
+    position:absolute;inset:0;display:none;
+    padding:clamp(32px,6vh,72px) clamp(28px,7vw,110px);
+    overflow-y:auto;
+  }
+  .slide.on{display:flex;flex-direction:column;justify-content:center;animation:in .38s cubic-bezier(.2,.7,.3,1)}
+  @keyframes in{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.slide.on{animation:none}.rail i{transition:none}}
+
+  .eyebrow{
+    color:var(--teal);font-size:clamp(12px,1.3vw,14px);font-weight:700;
+    letter-spacing:.14em;margin:0 0 clamp(14px,2.4vh,22px)
+  }
+  h1{
+    font-size:clamp(38px,7.4vw,92px);line-height:1.02;margin:0;font-weight:800;
+    letter-spacing:-.03em;text-wrap:balance
+  }
+  h2{
+    font-size:clamp(28px,4.4vw,54px);line-height:1.1;margin:0 0 clamp(16px,2.6vh,26px);
+    font-weight:800;letter-spacing:-.025em;text-wrap:balance;max-width:16ch
+  }
+  h2.wide{max-width:22ch}
+  p.lede{font-size:clamp(17px,1.9vw,25px);line-height:1.55;color:var(--ink-soft);max-width:40ch;margin:0}
+  .big{font-size:clamp(44px,9vw,116px);font-weight:800;letter-spacing:-.04em;line-height:1;
+       font-variant-numeric:tabular-nums}
+
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:clamp(14px,1.8vw,22px)}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:16px;
+       padding:clamp(18px,2.2vw,26px);box-shadow:var(--shadow)}
+  .box h3{margin:0 0 7px;font-size:clamp(16px,1.7vw,20px);font-weight:700}
+  .box p{margin:0;color:var(--dim);font-size:clamp(14px,1.4vw,16px);line-height:1.5}
+
+  ul.plain{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:clamp(9px,1.4vh,15px)}
+  ul.plain li{font-size:clamp(16px,1.9vw,24px);color:var(--ink-soft);display:flex;gap:13px;align-items:baseline}
+  ul.plain li::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teal);flex:none;transform:translateY(-.35em)}
+  ul.plain li b{color:var(--ink)}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:clamp(14px,1.6vw,20px)}
+  table.cmp th{text-align:right;padding:12px 14px;color:var(--dim);font-size:clamp(12px,1.2vw,14px);
+               font-weight:700;letter-spacing:.06em;border-bottom:1px solid var(--line)}
+  table.cmp td{padding:clamp(11px,1.5vh,16px) 14px;border-bottom:1px solid var(--line)}
+  table.cmp td:first-child{font-weight:600;color:var(--ink)}
+  table.cmp td.mark{text-align:center;font-weight:800;font-size:1.1em}
+  .yes{color:var(--teal)} .no{color:var(--dim);opacity:.5}
+
+  .offer{background:var(--gold-bg);border:1px solid var(--gold);border-radius:20px;
+         padding:clamp(22px,3vw,38px)}
+  .offer .n{color:var(--gold)}
+
+  .two{display:grid;grid-template-columns:1.15fr 1fr;gap:clamp(24px,4vw,64px);align-items:center}
+  @media(max-width:880px){.two{grid-template-columns:1fr}h2{max-width:none}}
+
+  .mark{width:clamp(52px,6vw,76px);height:clamp(52px,6vw,76px);border-radius:22%;
+        background:linear-gradient(135deg,var(--teal),var(--blue));flex:none;position:relative;overflow:hidden}
+  .mark svg{position:absolute;inset:0;width:100%;height:100%}
+  .brandrow{display:flex;align-items:center;gap:18px;margin-bottom:clamp(26px,5vh,48px)}
+  .brandrow .name{font-size:clamp(26px,3.4vw,42px);font-weight:800;letter-spacing:-.02em}
+
+  .step{display:flex;gap:clamp(14px,2vw,22px);align-items:flex-start;padding:clamp(14px,2vh,20px) 0;border-bottom:1px solid var(--line)}
+  .step:last-child{border-bottom:0}
+  .step .when{color:var(--teal);font-weight:800;font-size:clamp(15px,1.6vw,19px);min-width:6.5em;font-variant-numeric:tabular-nums}
+  .step .what{font-size:clamp(15px,1.7vw,21px);color:var(--ink-soft)}
+  .step .what b{color:var(--ink)}
+
+  /* ---- presenter notes ---- */
+  .notes{
+    position:fixed;inset-inline:0;bottom:0;z-index:40;
+    background:var(--surface-2);border-top:1px solid var(--line);
+    padding:20px clamp(28px,7vw,110px) 26px;
+    font-size:16px;line-height:1.6;color:var(--ink-soft);
+    max-height:44vh;overflow-y:auto;display:none;box-shadow:0 -10px 30px rgba(0,0,0,.08)
+  }
+  body.notes-on .notes{display:block}
+  .notes b{color:var(--ink)}
+  .notes .k{color:var(--teal);font-weight:700;letter-spacing:.1em;font-size:12px;display:block;margin-bottom:8px}
+  .notes p{margin:0 0 10px}
+  .notes p:last-child{margin:0}
+</style>
+
+<div class="rail"><i id="rail"></i></div>
+
+<div class="deck" id="deck">
+
+  <!-- 1 -->
+  <section class="slide">
+    <div class="brandrow">
+      <div class="mark">
+        <svg viewBox="0 0 96 96" aria-hidden="true">
+          <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8">
+            <path d="M18 34c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+            <path d="M18 50c9-8 19-8 28 0s19 8 28 0"/>
+            <path d="M18 66c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+          </g>
+        </svg>
+      </div>
+      <div class="name">GanFlow</div>
+    </div>
+    <h1>ראש שקט<br>לניהול הגן</h1>
+    <p class="lede" style="margin-top:clamp(20px,3.4vh,34px)">
+      יום המעונות · כפר סבא · 31 באוגוסט 2026
+    </p>
+    <div class="notes">
+      <span class="k">פתיחה</span>
+      <p>אל תתחיל במוצר. תתחיל בשאלה: <b>"מי כאן עשה השבוע גבייה באקסל?"</b> — ותן לידיים לעלות.</p>
+      <p>שנייה של שקט אחרי זה. ואז תעבור לשקופית הבאה.</p>
+    </div>
+  </section>
+
+  <!-- 2 -->
+  <section class="slide">
+    <p class="eyebrow">מי אנחנו</p>
+    <h2 class="wide">אנחנו לא חברת תוכנה.<br>אנחנו מפעילים גנים.</h2>
+    <p class="lede">
+      בנינו את המערכת הזאת לעצמנו, כי שום דבר בשוק לא עשה את מה שהיינו צריכים.
+      כל מסך כאן נולד מבעיה אמיתית אצלנו — ונבדק על ילדים אמיתיים, עובדות אמיתיות
+      ומשכורות אמיתיות לפני שראיתם אותו.
+    </p>
+    <div class="notes">
+      <span class="k">הנקודה הכי חזקה שלך</span>
+      <p>זה הדבר היחיד שאף מתחרה לא יכול להגיד, ואי אפשר לחקות אותו. תישאר עליו שנייה יותר ממה שנוח לך.</p>
+      <p>אם שואלים כמה גנים — <b>תגיד את המספר האמיתי.</b> "אנחנו מפעילים כמה גנים, וחלקם תחת רשת מעונות אמונה."</p>
+    </div>
+  </section>
+
+  <!-- 3 -->
+  <section class="slide">
+    <p class="eyebrow">הבעיה</p>
+    <h2>הגן שלכם רץ על שבע מערכות שלא מדברות</h2>
+    <ul class="plain">
+      <li>הגבייה יושבת ב<b>אקסל</b>, ומי ששכח לעדכן — הגן מפסיד כסף</li>
+      <li>ההורים ב<b>ווטסאפ</b>, ומה שנשלח שם לא נשמר בשום מקום</li>
+      <li>הנוכחות של העובדות ב<b>שעון</b>, והשעות מגיעות לרו"ח בקובץ ידני</li>
+      <li>החוזים וטופסי 101 ב<b>קלסר</b></li>
+      <li>ומה שלא נמצא באף אחד מהם — <b>בראש של המנהלת</b></li>
+    </ul>
+    <div class="notes">
+      <span class="k">איך למסור</span>
+      <p>לאט. אחרי כל שורה תעצור חצי שנייה. הקהל צריך לזהות את עצמו, לא להתרשם ממך.</p>
+      <p>השורה האחרונה היא הפאנץ׳. <b>אל תמהר ממנה הלאה.</b></p>
+    </div>
+  </section>
+
+  <!-- 4 -->
+  <section class="slide">
+    <p class="eyebrow">מה כבר יש בשוק</p>
+    <h2 class="wide">האפליקציות הקיימות פותרות חצי מהעבודה</h2>
+    <div style="overflow-x:auto">
+      <table class="cmp">
+        <thead><tr><th>יכולת</th><th style="text-align:center">אפליקציית תקשורת</th><th style="text-align:center">GanFlow</th></tr></thead>
+        <tbody>
+          <tr><td>הודעות ותמונות להורים</td><td class="mark yes">✓</td><td class="mark yes">✓</td></tr>
+          <tr><td>נוכחות ילדים</td><td class="mark yes">✓</td><td class="mark yes">✓</td></tr>
+          <tr><td>גבייה מהורים ומחירונים</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
+          <tr><td>שכר עובדות ותלושים</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
+          <tr><td>חוזי העסקה וטופס 101</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
+          <tr><td>מלאי, ספקים והזמנות</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
+          <tr><td>ניהול רשת, מחוזות וסניפים</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="notes">
+      <span class="k">אל תזכיר שמות</span>
+      <p>אם מישהו יגיד "מותק" — <b>תשבח אותם.</b> "מותק עושים את התקשורת עם ההורים יפה מאוד. אנחנו לא מתחרים בזה. אנחנו פותרים את מה שנשאר לכם אחרי זה."</p>
+      <p>לרדת על מתחרה מול קהל גורם לך להיראות קטן. השבח גורם לך להיראות בטוח.</p>
+    </div>
+  </section>
+
+  <!-- 5 -->
+  <section class="slide">
+    <p class="eyebrow">המערכת</p>
+    <h2 class="wide">כל מה שהגן צריך, במקום אחד</h2>
+    <div class="cols">
+      <div class="box"><h3>ילדים ורישום</h3><p>רישום מקוון, שיבוץ לכיתות, תיק ילד, מקומות פנויים ורשימת המתנה.</p></div>
+      <div class="box"><h3>גבייה מהורים</h3><p>מחירון לפי גיל וסניף, הנחות אחים, הוראות קבע, ומי שילם — בטבלה אחת לכל השנה.</p></div>
+      <div class="box"><h3>עובדות ושכר</h3><p>תיק עובד, חוזי העסקה, טופס 101, חישוב שכר חודשי ותלושים.</p></div>
+      <div class="box"><h3>נוכחות</h3><p>שעון בגן או החתמה מהטלפון. דוחות שעות מוכנים לרואה החשבון.</p></div>
+      <div class="box"><h3>פורטל הורים</h3><p>עדכון פרטים, דיווח היעדרות, תשלומים, הודעות, תמונות ומורשי איסוף.</p></div>
+      <div class="box"><h3>תפעול</h3><p>מלאי, ספקים, הזמנות, תפריטים, אחזקה, חוגים ואירועים.</p></div>
+    </div>
+    <div class="notes">
+      <span class="k">שקופית מעבר</span>
+      <p>אל תקרא את הריבועים בקול. תן להם שתי שניות לסרוק ותגיד: <b>"אני לא הולך להקריא את זה. אני הולך להראות לכם."</b></p>
+      <p>ומיד לעבור להדגמה.</p>
+    </div>
+  </section>
+
+  <!-- 6 -->
+  <section class="slide" style="text-align:center;align-items:center">
+    <p class="eyebrow">עכשיו</p>
+    <h1 style="max-width:14ch">הדגמה חיה</h1>
+    <p class="lede" style="max-width:34ch;margin-top:24px">
+      גן אמיתי. שנה שלמה של נתונים. בלי מצגת.
+    </p>
+    <div class="notes">
+      <span class="k">סדר ההדגמה — 6 דקות, לא יותר</span>
+      <p><b>1.</b> טבלת הגבייה — מי שילם, מי לא, ומה חסר החודש. <b>זה המסך שמוכר.</b> תישאר בו הכי הרבה.</p>
+      <p><b>2.</b> תיק ילד — לוחצים על שם ורואים הכל.</p>
+      <p><b>3.</b> פורטל ההורים — מהטלפון שלך, לא מהמסך. תראה להם דיווח היעדרות.</p>
+      <p><b>4.</b> טבלת השכר — רק להראות שהיא קיימת. אל תיכנס לעומק.</p>
+      <p><b>אזהרה:</b> הנתונים בהדגמה משובשים בכוונה. אם מישהו שואל — "אלה נתוני הדגמה, שמות של ילדים אמיתיים לא יוצאים מהמערכת שלנו לעולם." <b>זו תשובה שמרשימה, לא מתנצלת.</b></p>
+    </div>
+  </section>
+
+  <!-- 7 -->
+  <section class="slide">
+    <div class="two">
+      <div>
+        <p class="eyebrow">מה זה שווה</p>
+        <h2>גן של 40 ילדים משלם 2,000 ₪ בחודש</h2>
+        <p class="lede">והשאלה היחידה שחשובה היא מה הוא מקבל בחזרה.</p>
+      </div>
+      <div>
+        <ul class="plain">
+          <li><b>גבייה שלא נשכחת.</b> תשלום אחד שנופל בחודש הוא כבר יותר מהמנוי</li>
+          <li><b>יום עבודה בחודש</b> שחוזר למנהלת מהאקסלים</li>
+          <li><b>שעות לרו"ח</b> מוכנות, בלי הקלדה חוזרת</li>
+          <li><b>הורים שמפסיקים להתקשר</b> כי הכל נמצא אצלם באפליקציה</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notes">
+      <span class="k">ההתנגדות שתקבל</span>
+      <p>"זה יקר יותר ממה שאני משלמת היום." — <b>אל תתגונן ואל תוריד מחיר.</b></p>
+      <p>תענה: "נכון, וזה לא אותו מוצר. שאלה — כמה זמן לקח לך החודש להכין את הגבייה? ומה שווה לך היום עבודה?"</p>
+      <p>ואז תשתוק. <b>מי שמדבר ראשון אחרי שאלה כזאת מפסיד.</b></p>
+    </div>
+  </section>
+
+  <!-- 8 -->
+  <section class="slide">
+    <p class="eyebrow">המחיר</p>
+    <div class="two">
+      <div>
+        <div class="big">50 ₪</div>
+        <p class="lede" style="margin-top:12px">לילד רשום, לחודש.<br>מינימום 400 ₪ לגן.</p>
+      </div>
+      <div>
+        <ul class="plain">
+          <li>כל המודולים. <b>בלי חבילות ובלי תוספות</b></li>
+          <li>חודש ראשון <b>ללא תשלום</b></li>
+          <li>הקמה, העברת נתונים והדרכה — <b>כלולים</b></li>
+          <li>תמיכה <b>בטלפון</b>, לא בצ׳אט</li>
+          <li><b>בלי התחייבות.</b> עוזבים — לוקחים את המידע</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notes">
+      <span class="k">אמור את המחיר בקול רגיל</span>
+      <p>בלי התנצלות, בלי "רק", בלי לגמגם. <b>מחיר שנאמר בביטחון נשמע הוגן.</b></p>
+      <p>אם שואלים על רשת — <b>אל תיתן מספר במקום.</b> "ברשת בסדר הגודל שלכם אנחנו עובדים במדרגות. תן לי מספר סניפים וילדים ואחזור אליך עם הצעה."</p>
+    </div>
+  </section>
+
+  <!-- 9 -->
+  <section class="slide">
+    <p class="eyebrow">ההצעה של היום בלבד</p>
+    <div class="offer">
+      <div class="big n">500 ₪</div>
+      <p class="lede" style="margin:14px 0 22px;color:var(--ink)">הרשמה מוקדמת. היום, כאן.</p>
+      <ul class="plain">
+        <li><b>מחיר נעול לשלוש שנים</b> — גם כשהמחירון יעלה</li>
+        <li>שלושת הראשונים נכנסים ל<b>פיילוט בנובמבר</b>, בליווי אישי שלנו</li>
+        <li><b>חודש ראשון חינם</b> מעבר לזה</li>
+        <li>לא עלינו לאוויר בזמן — <b>הכסף חוזר במלואו</b></li>
+      </ul>
+    </div>
+    <div class="notes">
+      <span class="k">זו השקופית שעליה עומד או נופל הערב</span>
+      <p><b>אמור את משפט ההחזר במפורש ובקול.</b> "אם לא עלינו לאוויר בתאריך שהבטחתי — אתם מקבלים את הכסף בחזרה, בלי לשאול שאלות." זה מוריד את כל הפחד.</p>
+      <p><b>"שלושת הראשונים"</b> — עצור אחריו. תן לזה לעבוד בחדר.</p>
+      <p>תביא טופס נייר וקישור תשלום. <b>מי שאומר "אני אחשוב על זה" לא יחזור.</b> תשאל: "מה צריך לקרות כדי שתירשמי היום?"</p>
+    </div>
+  </section>
+
+  <!-- 10 -->
+  <section class="slide">
+    <p class="eyebrow">מה קורה מכאן</p>
+    <h2 class="wide">התאריכים, בלי כוכביות</h2>
+    <div style="margin-top:8px">
+      <div class="step"><div class="when">היום</div><div class="what">נרשמים ומשלמים מקדמה. <b>מחיר נעול לשלוש שנים.</b></div></div>
+      <div class="step"><div class="when">ספטמבר</div><div class="what">אנחנו מתקשרים, לומדים איך הגן שלכם עובד, ומעבירים את הנתונים.</div></div>
+      <div class="step"><div class="when">נובמבר</div><div class="what"><b>שלושת הראשונים עולים לאוויר</b> בליווי צמוד.</div></div>
+      <div class="step"><div class="when">ינואר 2027</div><div class="what">פתיחה לכל הנרשמים. <b>חודש ראשון ללא תשלום.</b></div></div>
+    </div>
+    <div class="notes">
+      <span class="k">שקיפות היא כלי מכירה</span>
+      <p>רוב המוכרים מטשטשים תאריכים. <b>אתה נותן אותם מדויק ועם החזר כספי.</b> זה מה שמבדל אותך ממי שמבטיח "בקרוב".</p>
+      <p>אם שואלים למה לא ספטמבר — "כי אני לא מוכן לתת לכם מערכת חצי אפויה שמנהלת גבייה של ילדים. עדיף שתחכו חודשיים."</p>
+    </div>
+  </section>
+
+  <!-- 11 -->
+  <section class="slide" style="text-align:center;align-items:center">
+    <div class="mark" style="margin:0 auto clamp(22px,4vh,36px)">
+      <svg viewBox="0 0 96 96" aria-hidden="true">
+        <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="8">
+          <path d="M18 34c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+          <path d="M18 50c9-8 19-8 28 0s19 8 28 0"/>
+          <path d="M18 66c9-8 19-8 28 0s19 8 28 0" opacity=".55"/>
+        </g>
+      </svg>
+    </div>
+    <h1 style="max-width:13ch">ראש שקט<br>לניהול הגן</h1>
+    <p class="lede" style="max-width:30ch;margin-top:26px">
+      ganflow.co.il<br>hello@ganflow.co.il
+    </p>
+    <div class="notes">
+      <span class="k">סגירה</span>
+      <p>אל תסיים ב"תודה". תסיים ב<b>קריאה לפעולה</b>: "אני נשאר כאן עוד חצי שעה. מי שרוצה שאראה לו את המערכת על הגן שלו — בואו אליי."</p>
+      <p>ואז <b>תעמוד ליד השולחן עם הטופס.</b> אל תשב.</p>
+    </div>
+  </section>
+
+</div>
+
+<div class="hud">
+  <button id="prev" aria-label="שקופית קודמת">→ הקודם</button>
+  <span><span id="cur">1</span> / <span id="tot">11</span></span>
+  <button id="next" aria-label="שקופית הבאה">הבא ←</button>
+  <button id="ntoggle" aria-label="הצגת הערות מנחה">הערות (N)</button>
+</div>
+
+<script>
+  const slides = [...document.querySelectorAll('.slide')];
+  const rail = document.getElementById('rail');
+  const cur = document.getElementById('cur');
+  document.getElementById('tot').textContent = slides.length;
+
+  let i = 0;
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    rail.style.width = ((i + 1) / slides.length * 100) + '%';
+    cur.textContent = i + 1;
+    location.hash = i + 1;
+  }
+
+  document.getElementById('next').onclick = () => show(i + 1);
+  document.getElementById('prev').onclick = () => show(i - 1);
+  document.getElementById('ntoggle').onclick = () => document.body.classList.toggle('notes-on');
+
+  document.addEventListener('keydown', (e) => {
+    // Right-to-left: the left arrow moves forward, the way the text runs.
+    if (e.key === 'ArrowLeft' || e.key === ' ' || e.key === 'PageDown') { e.preventDefault(); show(i + 1); }
+    else if (e.key === 'ArrowRight' || e.key === 'PageUp') { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(slides.length - 1);
+    else if (e.key.toLowerCase() === 'n') document.body.classList.toggle('notes-on');
+  });
+
+  let x0 = null;
+  document.addEventListener('touchstart', (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 55) show(i + (dx > 0 ? 1 : -1));
+    x0 = null;
+  }, { passive: true });
+
+  show(Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+</script>
