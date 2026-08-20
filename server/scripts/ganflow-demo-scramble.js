@@ -533,6 +533,29 @@ function walk(collection, node, path = '', rootId = '') {
       $unset: { webauthn_credentials: '' },
     });
     console.log(`\n  \u{1F511} ${r.modifiedCount} משתמשים אופסו לסיסמה: Demo2026!`);
+
+    // A login worth saying out loud. Every other account in the demo is an
+    // invented name with a nine-digit number nobody can hold in their head,
+    // which is a poor thing to be typing while a room watches. This one is
+    // created by the build rather than by hand, so it survives the rebuild the
+    // night before instead of quietly disappearing with it.
+    const DEMO_LOGIN = { full_name: 'בן כהן', id_number: '123456789', password: 'demo2026' };
+    const anyBranch = await db.collection('branches').findOne({});
+    await db.collection('users').deleteMany({ id_number: DEMO_LOGIN.id_number });
+    await db.collection('users').insertOne({
+      full_name: DEMO_LOGIN.full_name,
+      id_number: DEMO_LOGIN.id_number,
+      email: 'demo@example.invalid',
+      role: 'system_admin',
+      position: 'מנהל/ת',
+      is_active: true,
+      password_set: true,
+      password_hash: await bcrypt.hash(DEMO_LOGIN.password, 10),
+      branch_id: anyBranch ? anyBranch._id : null,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    console.log(`  \u{1F464} משתמש הדגמה: ${DEMO_LOGIN.full_name} / ${DEMO_LOGIN.id_number} / ${DEMO_LOGIN.password}`);
   }
 
   console.log(`\n─── סיכום ───`);
