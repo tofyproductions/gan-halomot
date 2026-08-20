@@ -185,9 +185,9 @@ const NOT_A_PERSON = new Set([
 ]);
 
 const PHONE = new Set(['phone','parent_phone','parent2_phone','emergency_phone','aide_phone','delivery_contact_phone','new_phone','phone_raw','sms_recipients']);
-const ID_NUM = new Set(['id_number','child_id_number','parent_id_number','parent2_id_number','israeli_id','tax_id','signer_id_last4','device_user_id','unique_id']);
+const ID_NUM = new Set(['id_number','child_id_number','parent_id_number','parent2_id_number','israeli_id','tax_id','signer_id_last4','device_user_id','unique_id','employee_id','user_id','customer_id','parent1_id','parent2_id']);
 const EMAIL = new Set(['email','parent_email','parent2_email','contact_email','mail_from','payslip_sent_to','sent_to','manager_sent_to','mailbox']);
-const ADDRESS = new Set(['address','location']);
+const ADDRESS = new Set(['address','location','work_addr','work_address','zip','postal_code','city','street']);
 const BANK = new Set(['bank_account','bank_branch','bank_number','account','receipt_number','voucher_number','registration_fee_receipt','order_number']);
 const BIRTH = new Set(['birth_date','child_birth_date','gave_birth_date']);
 const CARD4 = new Set(['tuition_card_last4','registration_fee_card_last4']);
@@ -212,6 +212,12 @@ const FREE_TEXT = new Set([
   'fee_override_reason','extra_reason','waived_reason','ignored_reason','decision_note','approved_note',
   'decided_note','completed_note','review_note','scan_notes','message','body','content','subject',
   'raw_subject','mail_subject','caption','description','medical_alerts','allergies','allergy_detail','text',
+  'job','occupation','work_place','workplace',
+  // An audit trail records the OLD and NEW value of anything at all —
+  // a telephone number, a manager's name inside a sentence. There is no
+  // shape to match, so a demo does not carry them.
+  'before','after','actual','expected','old_value','new_value','was','now',
+  'hearing_before','hearing_by','present','findings_text',
 ]);
 
 const MONEY_FIELDS = new Set([
@@ -225,6 +231,26 @@ const MONEY_FACTOR = 0.93; // one factor everywhere, so every sum still adds up
 
 // Collections whose `name` field is a person; everywhere else `name` is left alone.
 const NAME_IS_PERSON = new Set(['users','employees','candidates','leads','parentaccounts']);
+
+// ---------------------------------------------- field names in two spellings
+//
+// The rule sets above are written in snake_case, because that is how the
+// mongoose schemas are written. The registration card is NOT: it is the raw
+// form body, stored as the parent's browser sent it, and it spells everything
+// camelCase — childName, parentEmail, parentId, firstName, workAddr.
+//
+// Matching on the literal key therefore missed the single richest source of
+// personal data in the database: 171 real names, 72 identity numbers and 7
+// handwritten signatures walked into the demo untouched. Normalising the key
+// before every lookup is what closes it, and it closes the whole class rather
+// than the instances that happened to be noticed.
+function norm(k) {
+  return String(k)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')   // childName  -> child_Name
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+}
+
 const NAME_IS_BRANCH = new Set(['branches']);
 const NAME_IS_AMUTA = new Set(['amutas','amutot']);
 
@@ -247,13 +273,29 @@ function record(map, key, before, after) {
 }
 
 function transform(collection, key, value, path, ctx) {
-  const k = String(key);
+  const k = norm(key);
+  const P = String(path);
+
+  // A bare `id` or `name` means nothing on its own. Inside the registration
+  // card it is a child's identity number and a parent's name; inside a list of
+  // attendees it is a member of staff. The path is what tells them apart.
+  const inCard   = /registration_?card|configuration/i.test(P);
+  const personAt = /(attendees|updated|contact|result|signer|guardian|pickup)\b/i.test(P);
 
   if (SECRET_NULL.has(k)) return { v: null };
   if (BLOB_NULL.has(k)) return { v: null };
+  if (k === 'signature' || k === 'contract_pdf_path') return { v: null };
+  // A Drive file id is a working link to the real signed contract.
+  if (k === 'id' && /\bfiles\b/i.test(P)) return { v: null };
 
   if (typeof value === 'number') {
     if (MONEY && MONEY_FIELDS.has(k)) return { v: Math.round(value * MONEY_FACTOR * 100) / 100 };
+    // An identity number stored as a NUMBER rather than a string used to walk
+    // straight out of here: every test below is a string test. punches held
+    // 50,000 of them under device_user_id.
+    if (ID_NUM.has(k) || /^\d{9}$/.test(String(value))) {
+      return { v: Number(israeliId(String(value)).slice(0, 9)) };
+    }
     return null;
   }
 
@@ -265,10 +307,29 @@ function transform(collection, key, value, path, ctx) {
   if (typeof value !== 'string' || !value.trim()) return null;
 
   if (PERSON_NAME.has(k) || (k.endsWith('_name') && !NOT_A_PERSON.has(k))) return { v: personName(value, ctx) };
-  if (k === 'name' && NAME_IS_PERSON.has(collection)) return { v: personName(value, ctx) };
+  if (k === 'name' && (NAME_IS_PERSON.has(collection) || inCard || personAt)) return { v: personName(value, ctx) };
+  if ((k === 'id' || k === 'parent_id' || k === 'child_id') && inCard) {
+    return { v: israeliId(value).slice(0, 9) };
+  }
+  // A filename carries the name it was saved under — a child, a branch, the
+  // amuta. Nothing in a demo needs the original, so none of them keep it.
+  // Every spelling of it: file_name, filename, medical_file_name, table_filename.
+  // A sick note is saved under the name of the person who was ill.
+  if (k.endsWith('file_name') || k.endsWith('filename')) {
+    const ext = (String(value).match(/\.[a-z0-9]{2,5}$/i) || [''])[0];
+    return { v: `מסמך-${h(`f:${value}`, 900) + 100}${ext}` };
+  }
+  if (k.endsWith('_address')) return { v: address(value) };
   if (k === 'name' && NAME_IS_BRANCH.has(collection)) return { v: branchLabel(value) };
   if (k === 'name' && NAME_IS_AMUTA.has(collection)) return { v: amutaLabel(value) };
-  if (k === 'branch_name' || k === 'requested_branch' || k === 'branch') return { v: branchLabel(value) };
+  // Every spelling a branch is written under — branch, branch_name,
+  // requested_branch, round_branch, __source_branch, branch_filter. A branch
+  // named after a real street in a small town is a puzzle a local solves in
+  // one move, so none of them may keep the original.
+  // Never an id (that would break the join) and never a bank branch (a number).
+  if (/branch/.test(k) && !k.endsWith('_id') && !BANK.has(k) && /[֐-׿]/.test(value)) {
+    return { v: branchLabel(value) };
+  }
   if (PHONE.has(k)) return { v: phone(value) };
   if (ID_NUM.has(k)) return { v: israeliId(value).slice(0, value.length <= 4 ? 4 : 9) };
   if (CARD4.has(k)) return { v: String(h(`c:${value}`, 10000)).padStart(4, '0') };
@@ -277,8 +338,35 @@ function transform(collection, key, value, path, ctx) {
   if (BANK.has(k)) return { v: bankNumber(value) };
   if (FREE_TEXT.has(k)) return { v: '' };
 
-  // Anything left that looks like a phone or an id, wherever it hides.
-  if (/^0(5\d|[2-4,8-9])-?\d{7}$/.test(value.replace(/[\s-]/g, ''))) return { v: phone(value) };
+  // A composite key glues real values together to match rows across two
+  // sources — "nm:<employee>::<branch>". It is not a name field and no name
+  // rule looks at it, so the name rode into the demo inside the join.
+  if ((k === 'key' || k === 'row_key' || k === 'match_key') && /[֐-׿]/.test(value)) {
+    return { v: `k:${h(`k:${value}`, 1e6)}` };
+  }
+
+  // ------------------------------------------------------------ safety net
+  //
+  // Rules keyed on a field name can only cover the fields somebody thought of,
+  // and the fields nobody thought of are exactly where a telephone number was
+  // found hiding. These last four tests read the VALUE and ignore what it is
+  // called, so a new field added next year is covered before anyone edits this
+  // file. They run last: a field with a real rule never reaches them.
+  // Values arrive wrapped in invisible right-to-left marks. A telephone number
+  // that reads as one on screen did not match any test until they came off.
+  const clean = value.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
+  const flat = clean.replace(/[\s-]/g, '');
+  if (/^0(5\d|[2-4,8-9])-?\d{7}$/.test(flat)) return { v: phone(clean) };
+  if (/^\d{9}$/.test(flat)) return { v: israeliId(clean).slice(0, 9) };
+  if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(clean.trim())) return { v: email(clean) };
+  if (/^data:[^;]+;base64,/.test(clean)) return { v: null };
+
+  // An identity number does not always sit alone in its field. "id:024073124"
+  // is a key built by joining, and the digits are just as real inside it.
+  if (/\d{9}/.test(clean) && !/^\d[\d.,]*$/.test(clean)) {
+    const swapped = clean.replace(/\d{9}/g, (m) => israeliId(m).slice(0, 9));
+    if (swapped !== clean) return { v: swapped };
+  }
 
   if (SHOW_UNKNOWN && value.length > 1 && !unknown.has(`${collection}.${path}`)) {
     unknown.set(`${collection}.${path}`, value.slice(0, 40));
