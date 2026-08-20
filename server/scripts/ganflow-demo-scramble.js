@@ -278,6 +278,14 @@ const DROP_COLLECTIONS = new Set([
 // schemas, and the next scramble hits this. So it is read from the database at
 // run time rather than assumed either way.
 const uniqueFields = new Map(); // collection -> Set(field)
+
+// Tokens of the customer's own name that appear inside FIELD NAMES rather than
+// values — payslip audits carry columns called `emuna_ks_global`, built from
+// the amuta's short_name and the town. Every rule in this file rewrites values;
+// nothing ever looked at a key, so the amuta rode into the demo spelled into
+// the shape of the data itself. Read from `amutas` at run time rather than
+// hardcoded, because the next customer will be called something else.
+const orgTokens = [];
 const touched = new Map();   // "collection.path" -> {count, before, after}
 const unknown = new Map();   // "collection.path" -> sample
 
@@ -402,6 +410,17 @@ function transform(collection, key, value, path, ctx, rootId) {
 
 const EMPTY_SET = new Set();
 
+// `emuna_ks_global` -> `org_ks_global`. The same key maps to the same new key
+// everywhere, so anything reading it by name still finds it.
+function renameKey(key) {
+  let out = key;
+  for (const t of orgTokens) {
+    const re = new RegExp(t, 'ig');
+    if (re.test(out)) out = out.replace(re, 'org');
+  }
+  return out;
+}
+
 function walk(collection, node, path = '', rootId = '') {
   if (Array.isArray(node)) {
     node.forEach((item, i) => walk(collection, item, `${path}[]`, rootId));
@@ -414,6 +433,18 @@ function walk(collection, node, path = '', rootId = '') {
 
   for (const key of Object.keys(node)) {
     if (key === '_id' || key.endsWith('_id') && node[key] && node[key]._bsontype) continue;
+
+    if (orgTokens.length) {
+      const renamed = renameKey(key);
+      if (renamed !== key && !(renamed in node)) {
+        node[renamed] = node[key];
+        delete node[key];
+        record(touched, `${collection}.<שם השדה> ${key}`, key, renamed);
+        walk(collection, node[renamed], path ? `${path}.${renamed}` : renamed, rootId);
+        continue;
+      }
+    }
+
     const p = path ? `${path}.${key}` : key;
     const out = transform(collection, key, node[key], p, ctx, id);
     if (out) {
@@ -433,6 +464,19 @@ function walk(collection, node, path = '', rootId = '') {
 
   await mongoose.connect(URI);
   const db = mongoose.connection.db;
+
+  // Read the customer's own identifiers BEFORE anything is rewritten — the
+  // amuta rows are scrambled later in this same run, and by then the token
+  // that has to be scrubbed out of field names is gone.
+  try {
+    for (const a of await db.collection('amutas').find({}).toArray()) {
+      const head = String(a.short_name || '').split(/[_\-]/)[0].toLowerCase();
+      if (head.length >= 4 && !orgTokens.includes(head)) orgTokens.push(head);
+    }
+  } catch { /* a demo of a system with no amutas is fine */ }
+  if (orgTokens.length) {
+    console.log(`  \u{1F50E} שמות שדות שמכילים את שם הלקוח יוחלפו: ${orgTokens.join(', ')} → org\n`);
+  }
   const collections = (await db.listCollections().toArray()).map((c) => c.name).sort();
 
   let scanned = 0;
