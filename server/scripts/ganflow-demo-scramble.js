@@ -182,6 +182,7 @@ const PERSON_NAME = new Set([
 const NOT_A_PERSON = new Set([
   'branch_name','classroom_name','file_name','photo_name','medical_file_name','sheet_name',
   'table_sheet_name','field_name','short_name','table_filename','product_name','supplier_name',
+  'portal','source_file',
 ]);
 
 const PHONE = new Set(['phone','parent_phone','parent2_phone','emergency_phone','aide_phone','delivery_contact_phone','new_phone','phone_raw','sms_recipients']);
@@ -315,7 +316,13 @@ function transform(collection, key, value, path, ctx) {
   // amuta. Nothing in a demo needs the original, so none of them keep it.
   // Every spelling of it: file_name, filename, medical_file_name, table_filename.
   // A sick note is saved under the name of the person who was ill.
-  if (k.endsWith('file_name') || k.endsWith('filename')) {
+  // The amuta names itself in places that are not a name field: the portal a
+  // registration arrived from ("מעונות אמונה - תשפ״ז"), the spreadsheet it was
+  // exported from ("Emunah Registrations Export.xlsx"), and its own short_name
+  // ("emuna_ks"). NOT_A_PERSON only meant "do not put a person's name here" —
+  // it was reading as "leave this alone".
+  if (k === 'portal' || k === 'short_name' || k === 'system_name') return { v: amutaLabel(value) };
+  if (k === 'source_file' || k.endsWith('file_name') || k.endsWith('filename')) {
     const ext = (String(value).match(/\.[a-z0-9]{2,5}$/i) || [''])[0];
     return { v: `מסמך-${h(`f:${value}`, 900) + 100}${ext}` };
   }
