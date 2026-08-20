@@ -102,16 +102,17 @@ function AppRoutes() {
         <Route path="registrations" element={<RegistrationTracker />} />
         <Route path="new-registration" element={<RegistrationWizard />} />
         <Route path="edit-registration/:id" element={<RegistrationWizard />} />
-        <Route path="emunah-enrollment" element={
+        <Route path="external-enrollment" element={
           <ProtectedRoute tab="clicktac">
             <EmunahEnrollment />
           </ProtectedRoute>
         } />
-        {/* The two screens used to be two menu entries. Anyone holding an old
-            link — or an old tab left open — lands on the merged page instead
-            of a blank one. */}
-        <Route path="external-enrollments" element={<Navigate to="/emunah-enrollment" replace />} />
-        <Route path="tmt-reconcile" element={<Navigate to="/emunah-enrollment?view=tmt" replace />} />
+        {/* The two screens used to be two menu entries, and the page used to be
+            named after the amuta. Anyone holding an old link — or an old tab
+            left open — lands on the merged page instead of a blank one. */}
+        <Route path="emunah-enrollment" element={<Navigate to="/external-enrollment" replace />} />
+        <Route path="external-enrollments" element={<Navigate to="/external-enrollment" replace />} />
+        <Route path="tmt-reconcile" element={<Navigate to="/external-enrollment?view=tmt" replace />} />
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="pricing" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>

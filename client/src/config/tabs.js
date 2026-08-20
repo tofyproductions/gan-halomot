@@ -16,12 +16,12 @@ export const TAB_GROUPS = [
       { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'branch_manager'] },
-      // The מעונות אמונה branches enroll in קליקטאק and are approved by משרד
+      // The supervised branches enroll in קליקטאק and are approved by משרד
       // התמ"ת, so their intake is two files rather than the registration flow —
       // and one page, because neither file answers anything on its own.
       // The id stays 'clicktac': per-user tab permissions are stored by id, and
       // renaming it would revoke the screen from whoever was granted it by hand.
-      { id: 'clicktac',       label: 'רישום לאמונה', path: '/emunah-enrollment', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },

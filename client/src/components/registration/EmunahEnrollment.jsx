@@ -15,7 +15,7 @@ import TmtReconcile from './TmtReconcile';
 import ClassPlacement from './ClassPlacement';
 
 /**
- * רישום לאמונה — one intake, one page.
+ * רישום חיצוני — one intake, one page.
  *
  * Enrolling a child in a ministry-supervised gan takes two files that decide
  * nothing on their own: קליקטאק says who registered with us, משרד התמ"ת says
@@ -36,7 +36,7 @@ const SOURCES = {
     label: 'קליקטאק',
     endpoint: '/external-enrollments',
     accept: '.xlsx,.xls',
-    note: 'עמודת "מוסד" בקובץ רושמת "כפר סבא" לכל השורות ואינה מבחינה בין משה דיין לקפלן. '
+    note: 'עמודת "מוסד" בקובץ רושמת את שם היישוב בלבד, ואינה מבחינה בין שני סניפים באותו יישוב. '
       + 'הסניף נקבע כאן ולא מהקובץ — בחירה שגויה תשייך את כל הקבוצה לגן הלא נכון.',
   },
   tmt: {
@@ -155,7 +155,7 @@ export default function EmunahEnrollment() {
   return (
     <Box dir="rtl" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>רישום לאמונה</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>רישום חיצוני</Typography>
 
         <TextField select size="small" label="סניף" value={branchId} sx={{ minWidth: 200 }}
           onChange={e => { setBranchId(e.target.value); localStorage.setItem('selectedBranch', e.target.value); }}>
