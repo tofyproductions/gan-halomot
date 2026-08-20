@@ -30,3 +30,46 @@ services:
       - key: CIBUS_MAIL_PASS
         sync: false
     healthCheckPath: /api/health
+
+  # ---------------------------------------------------------------------------
+  # GanFlow — the demo tonight, the platform later.
+  #
+  # This is a SECOND service on the same repository. It exists now to carry the
+  # scrambled demo for the sales evening, and it is the service that becomes the
+  # control plane once there is a second customer: the code for that is already
+  # merged and sits dormant until PLATFORM_MONGODB_URI is set, so upgrading it
+  # is adding one variable rather than deploying anything new.
+  #
+  # THE ONE RULE: MONGODB_URI HERE IS NEVER THE GAN'S DATABASE.
+  # This service is shown to competing gan managers. Pointing it at production
+  # hands them the names, telephone numbers and medical notes of children they
+  # may recognise. The database name must contain "demo" — the scrambler
+  # refuses any other name, and this is the same rule one layer up.
+  - type: web
+    name: ganflow
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: cd server && npm install && cd ../client && npm install && npm run build
+    startCommand: cd server && node --expose-gc --max-old-space-size=256 src/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # NOT OPTIONAL. Without it this server reads mailboxes, syncs Google
+      # Sheets — which WRITES — and spends real money on AI scans, from a
+      # machine nobody is watching, against whatever database it is pointed at.
+      - key: DISABLE_JOBS
+        value: "1"
+      # The DEMO database. Set in the dashboard, never copied from gan-halomot.
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      # Left unset on purpose. Setting it switches on the customer registry and
+      # the /console — the upgrade to a platform, not a demo. Nothing else has
+      # to change on that day.
+      # - key: PLATFORM_MONGODB_URI
+      #   sync: false
+    healthCheckPath: /api/health

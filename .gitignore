@@ -19,3 +19,8 @@ cibus-capture/
 # Backups of .env are still .env — the plain ".env" rule above does not catch them.
 .env.backup*
 .env.*.backup
+
+# The local demo database built by scripts/ganflow-demo-local.js. It is a whole
+# MongoDB on disk — scrambled, but there is no reason for it to be in the repo,
+# and a failed scramble would put real children here.
+server/.demo-data/
