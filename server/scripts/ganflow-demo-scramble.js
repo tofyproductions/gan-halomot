@@ -264,6 +264,20 @@ const DROP_COLLECTIONS = new Set([
 
 // --------------------------------------------------------------- the walker
 
+// Fields carrying a UNIQUE index, per collection.
+//
+// Emptying a secret is the right thing to do and it is also how this script
+// broke: `access_token` is nulled everywhere, and `ganevents.access_token` has
+// a unique index, so the second document collided with the first and the whole
+// run died — after the clone, leaving real children in a database that was
+// already reachable from the internet.
+//
+// The index is not always there to be seen. A demo built and scrambled before
+// any server touches it has no indexes at all, because the clone copies rows
+// and not indexes; the moment a server connects, mongoose builds them from the
+// schemas, and the next scramble hits this. So it is read from the database at
+// run time rather than assumed either way.
+const uniqueFields = new Map(); // collection -> Set(field)
 const touched = new Map();   // "collection.path" -> {count, before, after}
 const unknown = new Map();   // "collection.path" -> sample
 
@@ -273,9 +287,14 @@ function record(map, key, before, after) {
   map.set(key, e);
 }
 
-function transform(collection, key, value, path, ctx) {
+function transform(collection, key, value, path, ctx, rootId) {
   const k = norm(key);
   const P = String(path);
+
+  // A secret that must stay unique cannot simply be emptied. The value is still
+  // destroyed — this is derived from the document id, never from what was there.
+  const mustBeUnique = (uniqueFields.get(collection) || EMPTY_SET).has(key) && !P.includes('.');
+  const wipe = () => (mustBeUnique ? { v: `demo-${h(`u:${rootId}:${key}`, 1e12)}` } : { v: null });
 
   // A bare `id` or `name` means nothing on its own. Inside the registration
   // card it is a child's identity number and a parent's name; inside a list of
@@ -283,9 +302,9 @@ function transform(collection, key, value, path, ctx) {
   const inCard   = /registration_?card|configuration/i.test(P);
   const personAt = /(attendees|updated|contact|result|signer|guardian|pickup)\b/i.test(P);
 
-  if (SECRET_NULL.has(k)) return { v: null };
-  if (BLOB_NULL.has(k)) return { v: null };
-  if (k === 'signature' || k === 'contract_pdf_path') return { v: null };
+  if (SECRET_NULL.has(k)) return wipe();
+  if (BLOB_NULL.has(k)) return wipe();
+  if (k === 'signature' || k === 'contract_pdf_path') return wipe();
   // A Drive file id is a working link to the real signed contract.
   if (k === 'id' && /\bfiles\b/i.test(P)) return { v: null };
 
@@ -381,24 +400,27 @@ function transform(collection, key, value, path, ctx) {
   return null;
 }
 
-function walk(collection, node, path = '') {
+const EMPTY_SET = new Set();
+
+function walk(collection, node, path = '', rootId = '') {
   if (Array.isArray(node)) {
-    node.forEach((item, i) => walk(collection, item, `${path}[]`));
+    node.forEach((item, i) => walk(collection, item, `${path}[]`, rootId));
     return;
   }
   if (!node || typeof node !== 'object' || node instanceof Date || node._bsontype) return;
 
   const ctx = node.gender;
+  const id = rootId || (node._id ? String(node._id) : '');
 
   for (const key of Object.keys(node)) {
     if (key === '_id' || key.endsWith('_id') && node[key] && node[key]._bsontype) continue;
     const p = path ? `${path}.${key}` : key;
-    const out = transform(collection, key, node[key], p, ctx);
+    const out = transform(collection, key, node[key], p, ctx, id);
     if (out) {
       record(touched, `${collection}.${p}`, node[key], out.v);
       node[key] = out.v;
     } else {
-      walk(collection, node[key], p);
+      walk(collection, node[key], p, id);
     }
   }
 }
@@ -426,6 +448,15 @@ function walk(collection, node, path = '') {
     }
 
     const col = db.collection(name);
+
+    const uniq = new Set();
+    try {
+      for (const ix of await col.indexes()) {
+        if (ix.unique) Object.keys(ix.key).forEach((f) => uniq.add(f));
+      }
+    } catch { /* a collection with no indexes to report is fine */ }
+    uniqueFields.set(name, uniq);
+
     const docs = await col.find({}).toArray();
     if (!docs.length) continue;
     scanned += docs.length;
