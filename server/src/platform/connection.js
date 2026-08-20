@@ -68,7 +68,9 @@ async function controlPlane() {
  * customer reading another's children.
  */
 function bindModels(conn) {
-  const models = require('../models');
+  // The real models, not the per-request stand-ins — a stand-in has no schema
+  // to offer until a customer is in scope, and here there is not one yet.
+  const models = require('../models').__real || require('../models');
   const bound = { OrgUnit: conn.model('OrgUnit', orgUnitSchema) };
   for (const [name, Model] of Object.entries(models)) {
     if (!Model || !Model.schema) continue;
