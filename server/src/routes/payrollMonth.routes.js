@@ -16,6 +16,13 @@ router.use(authMiddleware);
 // Edits go through pending change-request flow (see /change-requests below).
 router.get('/',                               c.getMonth);
 
+// The same month, one row per unit reporting to the viewer instead of one row
+// per employee. Declared before the /:param routes below, and separate from
+// getMonth on purpose: a network director and a branch manager are asking two
+// different questions, and answering the director's with the branch manager's
+// query is what takes thirty seconds at four hundred branches.
+router.get('/rollup',                         require('../controllers/payrollRollup.controller').rollup);
+
 // Accountant contact list (recipients of the monthly send) + office copy address.
 // Literal paths — declared before the /:param routes below.
 router.get('/accountant-contacts',            requireRole('system_admin', 'accountant'), c.getAccountantContacts);

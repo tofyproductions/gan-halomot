@@ -89,6 +89,29 @@ async function seed(client, dbName, branches) {
   }
   await db.collection('branches').insertMany(branchDocs, bulkOpts);
 
+  // An org chart of the shape a real network has: a network over districts over
+  // branches. Districts are held near twenty because that is what a person can
+  // manage and therefore what a director's screen has to render — the point of
+  // the rollup is that this number, not the branch count, sets the cost.
+  const DISTRICTS = Math.max(1, Math.min(20, Math.ceil(branches / 20)));
+  const rootId = new ObjectId();
+  const units = [{ _id: rootId, name: 'הרשת', kind: 'network', parent_id: null, path: [], depth: 0, branch_id: null }];
+  const districtIds = [];
+  for (let d = 0; d < DISTRICTS; d++) {
+    const _id = new ObjectId();
+    districtIds.push(_id);
+    units.push({ _id, name: `מחוז ${d + 1}`, kind: 'district', parent_id: rootId, path: [rootId], depth: 1, branch_id: null });
+  }
+  branchIds.forEach((bid, i) => {
+    const parent = districtIds[i % DISTRICTS];
+    units.push({ _id: new ObjectId(), name: `סניף ${i + 1}`, kind: 'branch',
+      parent_id: parent, path: [rootId, parent], depth: 2, branch_id: bid });
+  });
+  await db.collection('orgunits').insertMany(units, bulkOpts);
+  await db.collection('orgunits').createIndex({ parent_id: 1 });
+  await db.collection('orgunits').createIndex({ path: 1 });
+  await db.collection('payrollrollups').createIndex({ month: 1, branch_id: 1 }, { unique: true });
+
   // The administrator this test logs in as.
   await db.collection('users').insertOne({
     full_name: 'מנהלת עומס', id_number: '900000009', email: 'scale@example.invalid',
@@ -101,7 +124,10 @@ async function seed(client, dbName, branches) {
 
   let employees = [], children = [], classrooms = [], punches = [];
   const employeeIds = [];
-  const punchesPerEmployee = Math.max(1, Math.round((PER_BRANCH.punches * PUNCH_SHARE) / PER_BRANCH.employees));
+  // A full month is about 26 clocked days. --punch-share shortens the month
+  // rather than breaking the in/out pairs, so a smaller run is still a run of
+  // real working days.
+  const workDays = Math.max(1, Math.round(26 * PUNCH_SHARE * 10));
 
   for (let b = 0; b < branches; b++) {
     const branch_id = branchIds[b];
@@ -113,15 +139,31 @@ async function seed(client, dbName, branches) {
     for (let e = 0; e < PER_BRANCH.employees; e++) {
       const _id = new ObjectId();
       employeeIds.push(_id);
+      // salary_type is a schema default, and a raw insert does not get defaults.
+      // Without it the calculator produces no pay at all, and the whole run
+      // measures the payroll screen deciding there is nothing to work out.
       employees.push({ _id, full_name: `עובדת ${b}-${e}`, id_number: String(200000000 + b * 100 + e),
-        branch_id, is_active: true, role_type: 'general', hourly_rate: 45, created_at: new Date() });
+        branch_id, is_active: true, role_type: 'general',
+        salary_type: 'hourly', hourly_rate: 45, receives_salary: true,
+        // The calculator reads the rate from amuta_distribution, not from
+        // employee.hourly_rate — that field is not what primaryRates() looks at.
+        amuta_distribution: [{ amuta_id: null, hourly_rate: 45, percent: 100 }],
+        created_at: new Date() });
 
-      for (let p = 0; p < punchesPerEmployee; p++) {
-        punches.push({
-          employee_id: _id, branch_id, israeli_id: String(200000000 + b * 100 + e),
-          timestamp: new Date(2026, 6, 1 + (p % 28), 7 + (p % 10), 0, 0),
-          year_month: MONTH, approval_status: 'approved', created_at: new Date(),
-        });
+      // Punches are raw clock readings; the system pairs them into a day. So
+      // they are seeded as PAIRS — in at 07:30, out at 16:30 — because a pile
+      // of unpaired timestamps produces no hours, and a month with no hours
+      // measures the payroll screen doing none of its work.
+      const israeli_id = String(200000000 + b * 100 + e);
+      for (let day = 1; day <= workDays; day++) {
+        const d = new Date(2026, 6, day);
+        if (d.getDay() === 6) continue;                 // Saturday
+        punches.push(
+          { employee_id: _id, branch_id, israeli_id, device_user_sn: e + 1,
+            timestamp: new Date(2026, 6, day, 7, 30), approval_status: 'approved', created_at: new Date() },
+          { employee_id: _id, branch_id, israeli_id, device_user_sn: e + 1,
+            timestamp: new Date(2026, 6, day, 16, 30), approval_status: 'approved', created_at: new Date() },
+        );
       }
       if (punches.length >= CHUNK) { await flush('punches', punches); punches = []; }
     }
@@ -168,6 +210,9 @@ const SCREENS = [
   // branch in the customer before they do anything else.
   ['שכר — כל הסניפים', `/api/payroll-month?month=${MONTH}`],
   ['נוכחות — סניף אחד', `/api/payroll/attendance?month=${MONTH}&branch=__BRANCH__`],
+  // Last on purpose: the rollup reads what the payroll screen above wrote, so
+  // measuring it first would measure an empty cache and flatter it.
+  ['שכר — סיכום למנהל', `/api/payroll-month/rollup?month=${MONTH}`],
 ];
 
 (async () => {
@@ -231,6 +276,32 @@ const SCREENS = [
         for (let i = 0; i < 3; i++) runs.push(await api(url, { tenant: slug, token: login.token }));
         const best = runs.reduce((a, b) => (a.ms < b.ms ? a : b));
         (table[label] ||= {})[size] = best;
+      }
+
+      // A fast wrong number is not an improvement. The director's total has to
+      // equal what the detailed screen shows, or the rollup is a second opinion
+      // about the payroll and the argument with the customer is unwinnable.
+      const H = { 'x-tenant': slug, Authorization: `Bearer ${login.token}` };
+      const [full, roll] = await Promise.all([
+        fetch(`${B}/api/payroll-month?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
+        fetch(`${B}/api/payroll-month/rollup?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
+      ]);
+      if (full && roll && Array.isArray(full.rows) && roll.total) {
+        const detailed = full.rows.reduce((a, r) => ({
+          employees: a.employees + 1,
+          hours: a.hours + (r.breakdown?.hours?.total || 0),
+          base: a.base + (r.breakdown?.components?.base_salary || 0),
+        }), { employees: 0, hours: 0, base: 0 });
+        const near = (a, b) => Math.abs(a - b) < 1;
+        const agree = detailed.employees === roll.total.employees
+          && near(detailed.hours, roll.total.hours) && near(detailed.base, roll.total.base);
+        console.log(`  ${agree ? '✅' : '❌'} הסיכום תואם את המסך המפורט` +
+          `  (${roll.total.employees}/${detailed.employees} עובדים, ` +
+          `${Math.round(roll.total.hours)}/${Math.round(detailed.hours)} שעות, ` +
+          `${Math.round(roll.total.base)}/${Math.round(detailed.base)} ש״ח, ` +
+          `${roll.rows.length} מחוזות, ${roll.missing} סניפים לא חושבו)`);
+      } else {
+        console.log('  ⚠️  לא הצלחתי להשוות סיכום מול מפורט');
       }
       console.log('');
     }

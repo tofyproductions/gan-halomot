@@ -1,4 +1,5 @@
 const User = require('./User');
+const PayrollRollup = require('./PayrollRollup');
 const Branch = require('./Branch');
 const Classroom = require('./Classroom');
 const Registration = require('./Registration');
@@ -77,6 +78,7 @@ const GiftSelection = require('./GiftSelection');
 const Candidate = require('./Candidate');
 
 const real = {
+  PayrollRollup,
   User,
   Branch,
   Classroom,

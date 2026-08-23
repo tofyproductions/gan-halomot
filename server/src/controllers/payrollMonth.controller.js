@@ -7,7 +7,7 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday, SpecialDay,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
-  User, PunchEntryTask,
+  User, PunchEntryTask, PayrollRollup,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
@@ -1315,6 +1315,39 @@ async function getMonth(req, res, next) {
       acc.base  += r.breakdown.components.base_salary || 0;
       return acc;
     }, { employees: 0, hours: 0, base: 0 });
+
+    // The same totals, split per branch and kept, so that anybody above a
+    // branch can be answered by addition instead of by this computation.
+    //
+    // Written from `rows` rather than recomputed: a district that disagrees
+    // with the branches under it is a wrong number nobody can explain, and two
+    // implementations of Israeli payroll maths kept in step by hand is how that
+    // happens. Whoever opens a branch pays for it once and everybody above them
+    // reads the result.
+    //
+    // Deliberately not awaited. This is a cache for somebody else's screen; it
+    // must never be the reason the branch screen is slower or fails.
+    try {
+      const perBranch = new Map();
+      for (const r of rows) {
+        const bid = r.branch_id;
+        if (!bid) continue;
+        const t = perBranch.get(bid) || { employees: 0, hours: 0, base: 0 };
+        t.employees += 1;
+        t.hours += r.breakdown?.hours?.total || 0;
+        t.base += r.breakdown?.components?.base_salary || 0;
+        perBranch.set(bid, t);
+      }
+      if (perBranch.size) {
+        PayrollRollup.bulkWrite([...perBranch].map(([bid, t]) => ({
+          updateOne: {
+            filter: { month, branch_id: bid },
+            update: { $set: { ...t, computed_at: new Date() } },
+            upsert: true,
+          },
+        })), { ordered: false }).catch(() => {});
+      }
+    } catch { /* a stale rollup is worse than none, but neither is worth a 500 */ }
 
     // Branches referenced by anyone's per_branch breakdown — these are the
     // column groups the UI should render (filter view scope + cross-branch hours).
