@@ -188,6 +188,12 @@ function renderCreate() {
     <div class="grid">
       <div><label>אימייל</label><input id="ae" type="email"></div>
       <div><label>שם מלא</label><input id="an"></div>
+      <!-- The identity the gan's own system logs in with: name AND id number
+           together are the credentials, and the email is not part of it. The
+           form asked for the email and not this, so the administrator it
+           created could never sign in to what had just been built. -->
+      <div><label>תעודת זהות</label><input id="aid" inputmode="numeric" autocomplete="off">
+        <div class="hint">איתה נכנסים למערכת, יחד עם השם המלא</div></div>
     </div>
     <h3>מבנה</h3>
     <div class="grid">
@@ -226,6 +232,7 @@ function renderCreate() {
         slug: m.querySelector('#slug').value.trim(),
         admin_email: m.querySelector('#ae').value.trim(),
         admin_name: m.querySelector('#an').value.trim(),
+        admin_id_number: m.querySelector('#aid').value.trim(),
         is_network: !!m.querySelector('#net').value,
         first_branch_name: m.querySelector('#fb').value.trim(),
         pricing: {
@@ -236,20 +243,36 @@ function renderCreate() {
         contact: { name: m.querySelector('#cn').value, phone: m.querySelector('#cp').value, email: m.querySelector('#ce').value },
       })});
       m.remove();
-      showPassword(r.tenant, r.temp_password);
+      showPassword(r.tenant, r.temp_password, r.login);
       loadList(); loadSummary();
     } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; b.disabled = false; }
   };
 }
 
-/** Shown once and never again — it is not stored anywhere readable. */
-function showPassword(tenant, pw) {
+/**
+ * Shown once and never again — the password is not stored anywhere readable.
+ *
+ * All THREE details, not just the password. The gan's system logs in on full
+ * name plus id number and then the password, so handing over the password
+ * alone hands over a third of what is needed — and the id number is the part
+ * whoever created the customer typed and has already forgotten.
+ */
+function showPassword(tenant, pw, login) {
+  const rows = [
+    ['שם מלא', (login && login.full_name) || ''],
+    ['תעודת זהות', (login && login.id_number) || ''],
+    ['סיסמה', pw],
+  ].filter(([, v]) => v).map(([k, v]) => `
+    <div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)">
+      <span class="hint" style="align-self:center">${esc(k)}</span>
+      <b class="mono" style="font-size:17px;letter-spacing:.03em">${esc(v)}</b>
+    </div>`).join('');
   const m = el(`<div class="modal"><div class="card">
     <h2>${esc(tenant.name)} הוקם</h2>
     <div class="ok">המערכת מוכנה בכתובת <b class="mono">${esc(tenant.slug)}.ganflow.co.il</b></div>
-    <p style="margin:0 0 8px">סיסמה זמנית למנהל — <b>מוצגת פעם אחת בלבד</b>. העתק אותה עכשיו ומסור אותה בטלפון, לא במייל.</p>
-    <div class="mono" style="background:#F4F7FA;border:1px solid var(--line);border-radius:9px;padding:14px;font-size:19px;text-align:center;letter-spacing:.05em">${esc(pw)}</div>
-    <p class="hint">המנהל יתבקש לבחור סיסמה משלו בכניסה הראשונה.</p>
+    <p style="margin:0 0 8px">פרטי הכניסה של המנהל/ת — <b>מוצגים פעם אחת בלבד</b>. העתק אותם עכשיו ומסור אותם בטלפון, לא במייל.</p>
+    <div style="background:#F4F7FA;border:1px solid var(--line);border-radius:9px;padding:6px 14px">${rows}</div>
+    <p class="hint">כדאי שהמנהל/ת יחליף/תחליף את הסיסמה אחרי הכניסה הראשונה.</p>
     <div style="height:14px"></div><button id="ok">סגור</button>
   </div></div>`);
   document.body.appendChild(m);
