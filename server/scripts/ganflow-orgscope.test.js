@@ -154,6 +154,24 @@ const waitFor = async (fn, ms = 40000) => {
     const none = await api(`/api/payroll-month/rollup?month=${MONTH}`, { tenant: 'net', token: orphan });
     ok(none.status === 403, `מנהלת בלי יחידה נדחית ולא מקבלת את הרשת (${none.status})`);
 
+    console.log('\n--- התקרה של המסך המפורט, והמחמם שמכסה עליה ---');
+    // The detailed screen refusing is what stops one click freezing everybody.
+    // But the summary is built from what that screen writes, so refusing alone
+    // would leave a director with an honest and empty page — the warm is the
+    // other half and neither is finished without the other.
+    const bigBranches = [];
+    for (let i = 0; i < 40; i++) bigBranches.push(new ObjectId());
+    await db.collection('branches').insertMany(bigBranches.map((_id, i) => ({
+      _id, name: `סניף גדול ${i}`, is_active: true, created_at: new Date(),
+    })));
+
+    const wide = await api(`/api/payroll-month?month=${MONTH}`, { tenant: 'net', token: director });
+    ok(wide.status === 413, `מסך עובד-עובד מסרב מעל 25 סניפים (${wide.status})`);
+    ok(Boolean(wide.json && wide.json.rollup_url), 'ומפנה לסיכום במקום להיעלם');
+
+    const oneBranch = await api(`/api/payroll-month?month=${MONTH}&branch=${branchIds[0]}`, { tenant: 'net', token: director });
+    ok(oneBranch.status === 200, `וסניף בודד ממשיך לעבוד כרגיל (${oneBranch.status})`);
+
     console.log(failures ? `\n❌  ${failures} בדיקות נכשלו\n` : '\n🎉 הכל עבר\n');
   } finally { await stop(); }
   process.exit(failures ? 1 : 0);

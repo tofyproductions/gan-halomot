@@ -322,6 +322,34 @@ async function getMonth(req, res, next) {
         rows: [], amutot: [], branches: [], branches_in_view: [], custom_columns: [], totals: {},
       });
     }
+    // ---------------------------------------------------------------- ceiling
+    //
+    // Below here every employee in scope has their pay worked out in this
+    // process, one at a time. Measured: 3s at 20 branches, 16s at 100, 90s at
+    // 400 — and Node runs one thing at a time, so those are not ninety seconds
+    // for the person who clicked. They are ninety seconds for EVERYONE. With
+    // 2000 branches seeded, a single one of these requests took the attendance
+    // screen from 211ms to over thirty seconds and the director's own summary
+    // from 7ms to over thirty. A carer trying to clock in waits behind it too.
+    //
+    // So the screen has a size it refuses at, and says what to open instead.
+    // Answering "everyone in the network" was never useful — nobody reads
+    // eighty thousand rows — and it is the one request that can take the whole
+    // customer down from inside.
+    //
+    // The limit is deliberately far above any real gan (production has four)
+    // and far below where the wait becomes an outage.
+    const MAX_BRANCHES_IN_ONE_VIEW = Number(process.env.PAYROLL_MAX_BRANCHES || 25);
+    if (branches.length > MAX_BRANCHES_IN_ONE_VIEW) {
+      return res.status(413).json({
+        error: `המסך הזה מציג עובד-עובד, ו-${branches.length} סניפים הם יותר מדי בבת אחת.`,
+        hint: 'פתחו את סיכום השכר לפי יחידות, או בחרו סניף אחד.',
+        rollup_url: `/api/payroll-month/rollup?month=${encodeURIComponent(month)}`,
+        branches: branches.length,
+        max_branches: MAX_BRANCHES_IN_ONE_VIEW,
+      });
+    }
+
     const branchIds = branches.map(b => b._id);
 
     // Fill in any missing fixed-hours punches for employees who don't clock in.
@@ -1339,7 +1367,11 @@ async function getMonth(req, res, next) {
         perBranch.set(bid, t);
       }
       if (perBranch.size) {
-        PayrollRollup.bulkWrite([...perBranch].map(([bid, t]) => ({
+        // Handed back on the request so a caller who NEEDS the write can wait
+        // for it. A person's screen must not — but the warm job exists only to
+        // produce these rows, and returning before they land is how it reported
+        // forty branches computed and left twelve of them missing.
+        req._rollupWrite = PayrollRollup.bulkWrite([...perBranch].map(([bid, t]) => ({
           updateOne: {
             filter: { month, branch_id: bid },
             update: { $set: { ...t, computed_at: new Date() } },

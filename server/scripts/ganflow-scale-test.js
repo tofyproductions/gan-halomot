@@ -50,18 +50,33 @@ const PER_BRANCH = { employees: 42, children: 40, punches: 12647 };
 const SLOW_MS = 1000;   // a screen a manager waits on
 const BAD_MS = 3000;    // a screen a manager gives up on
 
+// A screen that has already taken half a minute has answered the question, and
+// timing it precisely three more times just makes the run longer. Past the cap
+// it is recorded as "worse than this" and abandoned — which is also what a
+// manager does.
+const CAP_MS = Number(opt('cap', 30000));
+
+// --skip lets a screen be left out of a run. Node is single threaded, so a
+// screen that computes for ninety seconds does not only make itself slow — it
+// holds the event loop and everything measured after it queues behind. Leaving
+// it out is how that gets told apart from the screens being slow themselves.
+const SKIP = String(opt('skip', '')).split(',').map((x) => x.trim()).filter(Boolean);
+
 const api = async (pathname, { tenant, token } = {}) => {
   const headers = {};
   if (tenant) headers['x-tenant'] = tenant;
   if (token) headers.Authorization = `Bearer ${token}`;
   const t0 = process.hrtime.bigint();
-  let status = 0; let bytes = 0;
+  let status = 0; let bytes = 0; let capped = false;
   try {
-    const res = await fetch(B + pathname, { headers });
+    const res = await fetch(B + pathname, { headers, signal: AbortSignal.timeout(CAP_MS) });
     status = res.status;
     bytes = (await res.text()).length;
-  } catch (e) { status = -1; }
-  return { ms: Number(process.hrtime.bigint() - t0) / 1e6, status, bytes };
+  } catch (e) {
+    capped = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    status = capped ? 0 : -1;
+  }
+  return { ms: Number(process.hrtime.bigint() - t0) / 1e6, status, bytes, capped };
 };
 
 const waitFor = async (fn, ms = 60000) => {
@@ -270,8 +285,10 @@ const SCREENS = [
       const oneBranch = await client.db(dbName).collection('branches').findOne({});
 
       for (const [label, rawUrl] of SCREENS) {
+        if (SKIP.some((k) => label.includes(k))) continue;
         const url = rawUrl.replace('__BRANCH__', String(oneBranch && oneBranch._id));
-        await api(url, { tenant: slug, token: login.token });          // warm
+        const warm = await api(url, { tenant: slug, token: login.token });
+        if (warm.capped) { (table[label] ||= {})[size] = warm; continue; }
         const runs = [];
         for (let i = 0; i < 3; i++) runs.push(await api(url, { tenant: slug, token: login.token }));
         const best = runs.reduce((a, b) => (a.ms < b.ms ? a : b));
@@ -282,6 +299,21 @@ const SCREENS = [
       // equal what the detailed screen shows, or the rollup is a second opinion
       // about the payroll and the argument with the customer is unwinnable.
       const H = { 'x-tenant': slug, Authorization: `Bearer ${login.token}` };
+
+      // Past the ceiling the detailed screen refuses, which is the point of it
+      // — so there is nothing to compare against and saying so is the honest
+      // report. The rollup is checked for coverage instead: warmed or not, it
+      // must never quietly total a subset.
+      const probe = await api(`/api/payroll-month?month=${MONTH}`, { tenant: slug, token: login.token });
+      if (probe.status === 413) {
+        const roll = await fetch(`${B}/api/payroll-month/rollup?month=${MONTH}`, { headers: H })
+          .then((r) => r.json()).catch(() => null);
+        console.log(`  🛑 המסך המפורט מסרב ב-${size} סניפים (413) — כמתוכנן.` +
+          `  הסיכום מדווח ${roll?.missing ?? '?'} סניפים שלא חושבו`);
+        console.log('');
+        continue;
+      }
+
       const [full, roll] = await Promise.all([
         fetch(`${B}/api/payroll-month?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
         fetch(`${B}/api/payroll-month/rollup?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
@@ -314,6 +346,7 @@ const SCREENS = [
       const cells = SIZES.map((s) => {
         const r = bySize[s];
         if (!r) return '—'.padStart(11);
+        if (r.capped) return `>${Math.round(CAP_MS / 1000)}ש`.padStart(11);
         if (r.status !== 200) return `${r.status}`.padStart(11);
         const mark = r.ms > BAD_MS ? '!!' : r.ms > SLOW_MS ? '!' : '';
         return `${Math.round(r.ms)}ms${mark}`.padStart(11);
@@ -331,7 +364,7 @@ const SCREENS = [
       console.log(`מ-${small} ל-${big} סניפים הנתונים גדלו פי ${dataGrowth.toFixed(0)}:\n`);
       for (const [label, bySize] of Object.entries(table)) {
         const a = bySize[small]; const b = bySize[big];
-        if (!a || !b || a.status !== 200 || b.status !== 200) continue;
+        if (!a || !b || a.capped || b.capped || a.status !== 200 || b.status !== 200) continue;
         const grew = b.ms / Math.max(a.ms, 1);
         const verdict = grew > dataGrowth * 1.5 ? '⚠️  גרוע מליניארי — שינוי מבנה'
           : grew > dataGrowth * 0.5 ? 'ליניארי — חומרה תעזור'
