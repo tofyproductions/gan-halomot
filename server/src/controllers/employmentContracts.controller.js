@@ -9,6 +9,7 @@
 const { Employee, Branch, EmploymentContract, ContractAnnex, PayrollMonth, User } = require('../models');
 const tpl = require('../services/employmentContract');
 const terms = require('../services/employmentTerms');
+const storage = require('../services/storage.service');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
 const letterhead = require('../services/letterhead');
@@ -32,7 +33,11 @@ const SIGN_LINK_DAYS = 30;
  * client checks so nobody waits out a long upload to be refused at the end;
  * the server checks because the client is not the only way in.
  */
-const MAX_CONTRACT_FILE_BYTES = 11 * 1024 * 1024;
+const MAX_STORED_FILE_BYTES = 40 * 1024 * 1024;   // in the bucket: only the connection limits it
+const MAX_INLINE_FILE_BYTES = 11 * 1024 * 1024;   // in the document: MongoDB stops at 16MB
+
+const maxUploadBytes = () =>
+  (storage.isConfigured() ? MAX_STORED_FILE_BYTES : MAX_INLINE_FILE_BYTES);
 
 const base64Bytes = (s) => {
   const body = String(s).replace(/^data:[^;]+;base64,/, '');
@@ -42,12 +47,33 @@ const base64Bytes = (s) => {
 
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
 
-/** null when the file fits, an error sentence when it does not. */
-function tooLarge(fileData) {
-  const bytes = base64Bytes(fileData);
-  if (bytes <= MAX_CONTRACT_FILE_BYTES) return null;
-  return `הקובץ גדול מדי (${mb(bytes)}). המקסימום הוא ${mb(MAX_CONTRACT_FILE_BYTES)} — סרקו שוב באיכות נמוכה יותר או פצלו לקבצים.`;
+/**
+ * The filename as the person typed it, not as busboy guessed it.
+ *
+ * multipart field values arrive as bytes and busboy decodes them latin1 by
+ * default, so "חוזה חתום.pdf" reached us as "×××× ××ª××.pdf" and would have
+ * been shown that way in the contract list forever. Re-reading those bytes as
+ * UTF-8 restores it. Guarded, because a name that was already decoded
+ * correctly must not be mangled by decoding it twice.
+ */
+function uploadedName(raw) {
+  const name = String(raw || 'contract');
+  const reread = Buffer.from(name, 'latin1').toString('utf8');
+  return reread.includes('\uFFFD') ? name : reread;
 }
+
+/** null when the file fits, an error sentence when it does not. */
+function oversizeMessage(bytes) {
+  const max = maxUploadBytes();
+  if (bytes <= max) return null;
+  // "sorry, 11MB" is infuriating when the fix is one environment variable on
+  // the server rather than anything the person reading it did wrong.
+  return storage.isConfigured()
+    ? `הקובץ גדול מדי (${mb(bytes)}). המקסימום הוא ${mb(max)}.`
+    : `הקובץ גדול מדי (${mb(bytes)}). המקסימום הוא ${mb(max)}, כי אחסון קבצים חיצוני אינו מוגדר בשרת והקובץ נשמר בתוך בסיס הנתונים. סרקו באיכות נמוכה יותר, או הגדירו אחסון כדי להסיר את המגבלה.`;
+}
+
+const tooLarge = (fileData) => oversizeMessage(base64Bytes(fileData));
 
 function branchScopeOf(req) {
   const role = req.user?.role;
@@ -91,7 +117,7 @@ const publicShape = (d) => (d ? {
   waived_reason: d.waived_reason,
   waived_by_name: d.waived_by_name,
   waived_at: d.waived_at,
-  uploaded: !!d.uploaded_file?.data,
+  uploaded: !!(d.uploaded_file?.data || d.uploaded_file?.storage_key),
   uploaded_name: d.uploaded_file?.name || '',
   uploaded_at: d.uploaded_file?.uploaded_at || null,
   created_by_name: d.created_by_name,
@@ -318,25 +344,58 @@ async function waive(req, res, next) {
  */
 async function upload(req, res, next) {
   try {
+    // Two ways in: a multipart file field (what the dialog sends now) or the
+    // legacy `file_data` base64 string. Base64 inside JSON costs a third in
+    // transfer and is half of why the ceiling was 11MB.
     const { employee_id, file_data, file_name, file_mimetype } = req.body || {};
     const { emp, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
-    if (!file_data) return res.status(400).json({ error: 'יש לצרף קובץ' });
-    const oversize = tooLarge(file_data);
+
+    const part = req.file;
+    if (!part && !file_data) return res.status(400).json({ error: 'יש לצרף קובץ' });
+
+    const buffer = part ? part.buffer
+      : Buffer.from(String(file_data).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const name = part ? uploadedName(part.originalname) : (file_name || 'contract');
+    const mimetype = part ? part.mimetype : (file_mimetype || 'application/pdf');
+
+    const oversize = oversizeMessage(buffer.length);
     if (oversize) return res.status(413).json({ error: oversize });
+
+    const uploaded_file = {
+      name, mimetype,
+      size_bytes: buffer.length,
+      uploaded_by_name: req.user?.full_name || '',
+      uploaded_at: new Date(),
+      storage_key: null,
+      data: null,
+    };
+
+    if (storage.isConfigured()) {
+      const ext = (name.split('.').pop() || 'pdf').toLowerCase();
+      const key = storage.makeKey(`contracts/${emp.branch_id || 'misc'}`, ext);
+      try {
+        await storage.putObject({ key, body: buffer, contentType: mimetype });
+        uploaded_file.storage_key = key;
+      } catch (err) {
+        // Falling back to the document here would silently reinstate the 16MB
+        // ceiling for a file that may be well past it. Say what broke instead.
+        console.error('[contract] storage put failed:', err.message);
+        return res.status(502).json({
+          error: `העלאת הקובץ לאחסון נכשלה: ${err.message}. בדקו את הגדרות האחסון.`,
+        });
+      }
+    } else {
+      uploaded_file.data = buffer.toString('base64');
+    }
+
     const doc = await EmploymentContract.create({
       employee_id: emp._id,
       branch_id: emp.branch_id || null,
       variant: emp.salary_type === 'global' ? 'global' : 'hourly',
       status: 'uploaded',
       html: '',
-      uploaded_file: {
-        data: String(file_data).replace(/^data:[^;]+;base64,/, ''),
-        name: file_name || 'contract',
-        mimetype: file_mimetype || 'application/pdf',
-        uploaded_by_name: req.user?.full_name || '',
-        uploaded_at: new Date(),
-      },
+      uploaded_file,
       created_by: req.user?.id || null,
       created_by_name: req.user?.full_name || '',
     });
@@ -352,6 +411,17 @@ async function file(req, res, next) {
     const scope = branchScopeOf(req);
     if (scope && !scope.map(String).includes(String(doc.branch_id))) {
       return res.status(403).json({ error: 'אין הרשאה' });
+    }
+    // Streamed back through here rather than answered with a redirect: the
+    // dialog fetches this as a blob with the bearer token, and a cross-origin
+    // hop would need CORS on the bucket to work at all.
+    if (doc.uploaded_file?.storage_key) {
+      const signed = await storage.signedReadUrl(doc.uploaded_file.storage_key);
+      const upstream = await fetch(signed);
+      if (!upstream.ok) return res.status(502).json({ error: `שליפת הקובץ מהאחסון נכשלה (${upstream.status})` });
+      res.setHeader('Content-Type', doc.uploaded_file.mimetype || 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(doc.uploaded_file.name)}`);
+      return res.send(Buffer.from(await upstream.arrayBuffer()));
     }
     if (doc.uploaded_file?.data) {
       res.setHeader('Content-Type', doc.uploaded_file.mimetype || 'application/pdf');
@@ -679,7 +749,7 @@ async function saveTerms(req, res, next) {
 }
 
 module.exports = {
-  MAX_CONTRACT_FILE_BYTES,
+  MAX_STORED_FILE_BYTES, MAX_INLINE_FILE_BYTES, maxUploadBytes,
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
   listAnnexes, uploadAnnex, annexFile,
   termsHistory, previewTerms, saveTerms,

@@ -90,7 +90,10 @@ function getClient() {
  * groups a branch's objects together for anyone ever reading the bucket by
  * hand; the random part is what makes it unguessable.
  */
-const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'heic'];
+// Photographs were the first thing to live here, but not the last: a signed
+// contract is a scan, and a scan from a phone is routinely larger than the
+// 16MB a MongoDB document can hold. 'pdf' is on the list for that.
+const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'pdf'];
 
 function makeKey(prefix, ext = 'jpg') {
   // An allowlist, not a scrub. Stripping the punctuation out of

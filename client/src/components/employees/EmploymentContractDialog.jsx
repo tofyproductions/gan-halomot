@@ -137,33 +137,29 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
     finally { setBusy(false); }
   };
 
-  // Must match MAX_CONTRACT_FILE_BYTES on the server. The file is stored
-  // base64 inside the contract document and MongoDB stops at 16MB, so the real
-  // ceiling is about 11.5MB of PDF. Refused here so nobody uploads for a minute
-  // to be told no at the end.
-  const MAX_FILE_BYTES = 11 * 1024 * 1024;
-
+  /**
+   * Send the scan as a file, not as base64 inside JSON.
+   *
+   * The old shape read the file into a data URL and posted the string: a third
+   * more bytes over the wire, and every one of them buffered on the server
+   * before anything could look at it. The size ceiling now lives on the server,
+   * where it depends on whether object storage is configured — so this no
+   * longer guesses a number, it lets the server answer and shows what it said.
+   */
   const doUpload = async (file) => {
     if (!file) return;
-    if (file.size > MAX_FILE_BYTES) {
-      toast.error(`הקובץ גדול מדי (${(file.size / 1048576).toFixed(1)}MB). המקסימום הוא 11.0MB — סרקו שוב באיכות נמוכה יותר או פצלו לקבצים.`);
-      return;
-    }
     setBusy(true);
     try {
-      const b64 = await new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(String(r.result));
-        r.onerror = reject;
-        r.readAsDataURL(file);
+      const form = new FormData();
+      form.append('file', file);
+      form.append('employee_id', empId);
+      // An upload is megabytes over a home connection. The client default is
+      // 30s, meant for JSON; cut off there the browser reports no response at
+      // all, which surfaced as a bare "שגיאה בהעלאה" while the request was in
+      // fact still running.
+      const res = await api.post('/employment-contracts/upload', form, {
+        timeout: UPLOAD_TIMEOUT_MS,
       });
-      // An upload is megabytes over a home connection. The client's default 30s
-      // is a JSON timeout; cut off there the browser reports no response at
-      // all, which surfaced as a bare "שגיאה בהעלאה" while the request was
-      // still in flight.
-      const res = await api.post('/employment-contracts/upload', {
-        employee_id: empId, file_data: b64, file_name: file.name, file_mimetype: file.type,
-      }, { timeout: UPLOAD_TIMEOUT_MS });
       toast.success('החוזה הועלה וממתין לאישור הנהלת החשבונות');
       load(); onChanged && onChanged();
       // The terms step follows the upload rather than riding along inside it:
