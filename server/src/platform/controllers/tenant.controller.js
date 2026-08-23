@@ -102,9 +102,23 @@ exports.create = async (req, res, next) => {
     if (!req.body.name || !req.body.slug || !req.body.admin_email) {
       return res.status(400).json({ error: 'חסרים שם, כתובת או מייל מנהל' });
     }
+    // Checked here as well as in provision(), so the form says what is missing
+    // before a database is created and then thrown away.
+    if (!req.body.admin_id_number) {
+      return res.status(400).json({ error: 'חסרה תעודת זהות של המנהל/ת — איתה נכנסים למערכת' });
+    }
     const { tenant, tempPassword } = await createTenant(req.body, req.platformUser);
-    // Shown once, here, and never stored in readable form or emailed.
-    res.status(201).json({ tenant, temp_password: tempPassword });
+    // Shown once, here, and never stored in readable form or emailed. It is
+    // now the password the first login actually asks for, so losing it means
+    // resetting rather than shrugging.
+    res.status(201).json({
+      tenant,
+      temp_password: tempPassword,
+      login: {
+        full_name: req.body.admin_name || (req.body.contact && req.body.contact.name) || '',
+        id_number: String(req.body.admin_id_number).replace(/\D/g, ''),
+      },
+    });
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message });
     next(err);

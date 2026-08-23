@@ -31,6 +31,24 @@ async function createTenant(input, actor) {
   if (RESERVED.has(slug)) {
     throw Object.assign(new Error('הכתובת שמורה למערכת'), { status: 400 });
   }
+  // Checked with the other inputs, BEFORE anything is written. Validating
+  // after Tenant.create() left a half customer holding the address: the
+  // second attempt then failed with "the address is taken" by the first
+  // attempt's own wreckage.
+  // Name and id number together are the credentials, so neither can be blank —
+  // and a blank name would match every user with a blank name on the next
+  // customer built the same way.
+  const adminName = String(input.admin_name || input.contact?.name || '').trim();
+  if (!adminName) {
+    const e = new Error('צריך שם מלא של מנהל/ת — זה חצי מפרטי הכניסה');
+    e.status = 400; throw e;
+  }
+  const adminId = String(input.admin_id_number || '').replace(/\D/g, '');
+  if (adminId.length < 5 || adminId.length > 9) {
+    const e = new Error('צריך תעודת זהות של מנהל/ת (5–9 ספרות) — בלעדיה אי אפשר להיכנס למערכת');
+    e.status = 400; throw e;
+  }
+
   if (await Tenant.findOne({ slug })) {
     throw Object.assign(new Error('הכתובת כבר תפוסה'), { status: 409 });
   }
@@ -84,9 +102,18 @@ async function createTenant(input, actor) {
 
     await models.User.create({
       email: String(input.admin_email).toLowerCase().trim(),
+      // The identity the application actually logs in with. Without it the
+      // administrator this very function creates cannot sign in at all:
+      // findLoginUser() matches on name AND id number, and a customer was
+      // being handed a system nobody could open.
+      id_number: adminId,
       password_hash: await bcrypt.hash(tempPassword, 10),
-      password_set: false,          // forces a chosen password on first login
-      full_name: input.admin_name || input.contact?.name || '',
+      // password_set: false used to mean "forces a chosen password on first
+      // login". It does the opposite — step one of login issues a token
+      // outright when no password is set, so the temporary password was never
+      // asked for and a name plus an id number was the whole of the door.
+      password_set: true,
+      full_name: adminName,
       role: 'system_admin',
       branch_id: branch._id,
       is_active: true,

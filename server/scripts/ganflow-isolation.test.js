@@ -139,6 +139,72 @@ const waitFor = async (fn, ms = 40000) => {
       ok(!names(cross).includes(b.kid), `${a.slug} לא קיבל את הילד של ${b.slug}`);
     }
 
+    console.log('\n--- לקוח שהוקם דרך הקונסולה יכול להיכנס ---');
+    // The one that mattered: provisioning built a customer a database, an
+    // administrator and a temporary password, and the administrator had no id
+    // number — which is half of what login matches on. A customer was being
+    // handed a system nobody could open, and nothing failed while it happened.
+    const owner = await plat.collection('platformusers').insertOne({
+      email: 'owner@example.invalid', full_name: 'בעלים', role: 'owner',
+      // is_active is a schema default, and a raw insert does not get defaults —
+      // the console login filters on it, so without this the owner cannot log in.
+      is_active: true,
+      password_hash: await bcrypt.hash('console-password-long', 12), created_at: new Date(),
+    });
+    ok(Boolean(owner.insertedId), 'נוצר משתמש קונסולה');
+
+    const consoleLogin = await api('/api/platform/login', {
+      method: 'POST', body: { email: 'owner@example.invalid', password: 'console-password-long' },
+    });
+    const ctok = consoleLogin.json && consoleLogin.json.token;
+    ok(Boolean(ctok), 'הבעלים נכנס לקונסולה');
+
+    const noId = await api('/api/platform/tenants', {
+      method: 'POST', token: ctok,
+      body: { name: 'ללא תז', slug: 'noid', admin_email: 'x@example.invalid', admin_name: 'מנהלת' },
+    });
+    ok(noId.status === 400, `הקמה בלי תעודת זהות נדחית (${noId.status})`);
+
+    const short = await api('/api/platform/tenants', {
+      method: 'POST', token: ctok,
+      body: { name: 'תז קצרה', slug: 'shortid', admin_email: 'x@example.invalid', admin_name: 'מנהלת', admin_id_number: '12' },
+    });
+    ok(short.status === 400, `תעודת זהות קצרה נדחית (${short.status})`);
+    const afterBad = await plat.collection('tenants').countDocuments({ slug: { $in: ['noid', 'shortid'] } });
+    ok(afterBad === 0, 'הקמה שנדחתה לא משאירה לקוח חצי');
+
+    const made = await api('/api/platform/tenants', {
+      method: 'POST', token: ctok,
+      body: {
+        name: 'גני חדש', slug: 'chadash', db_uri: base,
+        admin_email: 'new@example.invalid', admin_name: 'מנהלת חדשה', admin_id_number: '333333334',
+      },
+    });
+    ok(made.status === 201, `הלקוח הוקם (${made.status})`);
+    const temp = made.json && made.json.temp_password;
+    ok(Boolean(temp), 'הוחזרה סיסמה זמנית');
+
+    const step1 = await api('/api/auth/login', {
+      tenant: 'chadash', method: 'POST', body: { full_name: 'מנהלת חדשה', id_number: '333333334' },
+    });
+    ok(step1.json && step1.json.needs_password === true, 'הכניסה דורשת סיסמה ולא מנפיקה אסימון');
+    ok(!(step1.json && step1.json.token), 'לא הונפק אסימון בלי סיסמה');
+
+    const wrong = await api('/api/auth/login-password', {
+      tenant: 'chadash', method: 'POST',
+      body: { full_name: 'מנהלת חדשה', id_number: '333333334', password: 'not-it' },
+    });
+    ok(wrong.status === 401, `סיסמה שגויה נדחית (${wrong.status})`);
+
+    const right = await api('/api/auth/login-password', {
+      tenant: 'chadash', method: 'POST',
+      body: { full_name: 'מנהלת חדשה', id_number: '333333334', password: temp },
+    });
+    ok(Boolean(right.json && right.json.token), 'המנהלת נכנסת עם הסיסמה הזמנית');
+
+    const hers = await api('/api/branches', { tenant: 'chadash', token: right.json && right.json.token });
+    ok(hers.status === 200, `והמערכת עונה לה (${hers.status})`);
+
     console.log('\n--- לקוח מושהה ---');
     await plat.collection('tenants').updateOne({ slug: 'bet' }, { $set: { status: 'suspended' } });
     const susp = await api('/api/children', { tenant: 'bet', token: tokens.bet });
