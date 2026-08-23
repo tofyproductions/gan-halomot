@@ -9,6 +9,7 @@
     "seed": "node scripts/seed-mongodb.js",
     "import": "node scripts/import-from-gsheets.js",
     "test:terms": "node scripts/employment-terms.test.js",
+    "test:contracts": "node scripts/contract-upload.test.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",

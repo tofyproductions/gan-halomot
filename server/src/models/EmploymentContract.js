@@ -61,7 +61,16 @@ const employmentContractSchema = new mongoose.Schema({
   waived_at: { type: Date, default: null },
 
   uploaded_file: {
-    data: { type: String, default: null },      // base64, no data: prefix
+    // Where the bytes are. A contract scanned on a phone is routinely larger
+    // than the 16MB a MongoDB document can hold, so new uploads go to object
+    // storage and this keeps only the key.
+    //
+    // `data` stays for every contract filed before that changed. Nothing is
+    // migrated: those files are small (they had to be) and rewriting historical
+    // records to move a working file is risk with no reader asking for it.
+    storage_key: { type: String, default: null },
+    size_bytes: { type: Number, default: 0 },
+    data: { type: String, default: null },      // legacy: base64, no data: prefix
     name: { type: String, default: '' },
     mimetype: { type: String, default: '' },
     uploaded_by_name: { type: String, default: '' },
