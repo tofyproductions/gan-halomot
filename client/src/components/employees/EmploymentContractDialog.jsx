@@ -13,7 +13,7 @@ import BlockIcon from '@mui/icons-material/Block';
 import PaidIcon from '@mui/icons-material/Paid';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import EmploymentTermsPanel from './EmploymentTermsPanel';
 
 /**
@@ -69,7 +69,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
         setValues(v => ({ ...c.data.context, ...v }));
         setHistory(h.data.contracts || []);
       })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינה'))
+      .catch(err => toast.error(apiError(err, 'שגיאה בטעינה')))
       .finally(() => setLoading(false));
   };
 
@@ -88,7 +88,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
     try {
       const res = await api.post('/employment-contracts/preview', { employee_id: empId, overrides: values });
       setPreviewHtml(res.data.html);
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
   };
 
@@ -102,7 +102,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       if (res.data.sign_url) setSignUrl(res.data.sign_url);
       load(); onChanged && onChanged();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה');
+      toast.error(apiError(err));
     } finally { setBusy(false); }
   };
 
@@ -113,7 +113,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       setSignUrl(res.data.sign_url);
       toast.success(res.data.emailed ? 'נשלח במייל וקישור נוצר' : 'קישור נוצר — אין מייל תקין, שלחו בוואטסאפ');
       load(); onChanged && onChanged();
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
   };
 
@@ -123,7 +123,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       await api.post(`/employment-contracts/${id}/approve`);
       toast.success('החוזה אושר');
       load(); onChanged && onChanged();
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
   };
 
@@ -133,12 +133,22 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       await api.post('/employment-contracts/waive', { employee_id: empId, reason: waiveReason });
       toast.success('סומן כללא חוזה');
       setMode('new'); load(); onChanged && onChanged();
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
   };
 
+  // Must match MAX_CONTRACT_FILE_BYTES on the server. The file is stored
+  // base64 inside the contract document and MongoDB stops at 16MB, so the real
+  // ceiling is about 11.5MB of PDF. Refused here so nobody uploads for a minute
+  // to be told no at the end.
+  const MAX_FILE_BYTES = 11 * 1024 * 1024;
+
   const doUpload = async (file) => {
     if (!file) return;
+    if (file.size > MAX_FILE_BYTES) {
+      toast.error(`הקובץ גדול מדי (${(file.size / 1048576).toFixed(1)}MB). המקסימום הוא 11.0MB — סרקו שוב באיכות נמוכה יותר או פצלו לקבצים.`);
+      return;
+    }
     setBusy(true);
     try {
       const b64 = await new Promise((resolve, reject) => {
@@ -147,9 +157,13 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
         r.onerror = reject;
         r.readAsDataURL(file);
       });
+      // An upload is megabytes over a home connection. The client's default 30s
+      // is a JSON timeout; cut off there the browser reports no response at
+      // all, which surfaced as a bare "שגיאה בהעלאה" while the request was
+      // still in flight.
       const res = await api.post('/employment-contracts/upload', {
         employee_id: empId, file_data: b64, file_name: file.name, file_mimetype: file.type,
-      });
+      }, { timeout: UPLOAD_TIMEOUT_MS });
       toast.success('החוזה הועלה וממתין לאישור הנהלת החשבונות');
       load(); onChanged && onChanged();
       // The terms step follows the upload rather than riding along inside it:
@@ -161,7 +175,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       } else {
         setMode('new');
       }
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בהעלאה'); }
+    } catch (err) { toast.error(apiError(err, 'שגיאה בהעלאה')); }
     finally { setBusy(false); }
   };
 

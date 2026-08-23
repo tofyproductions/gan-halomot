@@ -218,6 +218,31 @@ async function portIsFree() {
       const after = await api(`/api/employment-contracts/terms/${empId}`, { token: accountant });
       eq((after.json?.history || []).length, 2, 'ההיסטוריה לא גדלה');
     }
+    console.log('\n📎  חוזה סרוק — מה נכנס ומה נדחה\n');
+    {
+      // The file is stored base64 inside the contract document, and MongoDB
+      // stops at 16MB. Before the guard, an 12MB scan reached the driver and
+      // came back as an English sentence about byte counts; bigger than ~17MB
+      // never reached this code at all, and the manager saw a bare "שגיאה
+      // בהעלאה" with nothing to act on.
+      const pdf = (mb) => 'data:application/pdf;base64,'
+        + Buffer.alloc(Math.round(mb * 1024 * 1024), 0x41).toString('base64');
+
+      const small = await api('/api/employment-contracts/upload', {
+        token: accountant, method: 'POST',
+        body: { employee_id: String(empId), file_data: pdf(1), file_name: 'ok.pdf', file_mimetype: 'application/pdf' },
+      });
+      eq(small.status, 201, 'קובץ רגיל נשמר');
+
+      const big = await api('/api/employment-contracts/upload', {
+        token: accountant, method: 'POST',
+        body: { employee_id: String(empId), file_data: pdf(12), file_name: 'big.pdf', file_mimetype: 'application/pdf' },
+      });
+      eq(big.status, 413, 'קובץ מעל התקרה נדחה ב-413 ולא קורס');
+      ok(/גדול מדי/.test(big.json?.error || ''), 'וההסבר בעברית, עם הגודל והמקסימום');
+      ok(!/size in bytes|BSON|MongoServerError/i.test(big.json?.error || ''),
+        'ולא הודעת מנוע בסיס הנתונים');
+    }
   } catch (err) {
     console.error('💥 ', err);
     failures++;
