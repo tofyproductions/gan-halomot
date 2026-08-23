@@ -130,12 +130,67 @@ async function renderApp() {
         </div>
         <div id="list">טוען…</div>
       </div>
+
+      <!-- The log was being written and never read. Every action already lands
+           in it — who created a customer, who suspended one, who opened
+           somebody's system for support — and a record nobody can look at
+           answers no question. It is also the only honest reply to "who
+           switched us off on the 3rd". -->
+      <div class="card" style="margin-top:18px">
+        <div class="bar">
+          <h2 style="margin:0;flex:1">יומן פעולות</h2>
+          <button class="ghost" id="auditToggle">הצג</button>
+        </div>
+        <div id="audit" style="display:none">טוען…</div>
+      </div>
     </main>`;
   document.getElementById('out').onclick = () => { localStorage.removeItem('gf_token'); token=''; renderLogin(); };
   document.getElementById('new').onclick = renderCreate;
   document.getElementById('q').oninput = debounce(loadList, 250);
   document.getElementById('st').onchange = loadList;
+  // Collapsed by default and fetched only when opened — the log is for the
+  // moment somebody asks a question about it, not something to load on every
+  // visit to the customer list.
+  document.getElementById('auditToggle').onclick = () => {
+    const box = document.getElementById('audit');
+    const open = box.style.display === 'none';
+    box.style.display = open ? 'block' : 'none';
+    document.getElementById('auditToggle').textContent = open ? 'הסתר' : 'הצג';
+    if (open) loadAudit();
+  };
   loadSummary(); loadList();
+}
+
+/** What each action is called on screen. An unknown one shows its own key
+ *  rather than a blank — a new action added later must not read as nothing. */
+const ACTIONS = {
+  'tenant.create': 'הקמת לקוח',
+  'tenant.update': 'עדכון לקוח',
+  'tenant.suspend': 'השהיית לקוח',
+  'tenant.resume': 'החזרה לפעילות',
+  'tenant.impersonate': 'כניסה למערכת של לקוח',
+};
+
+async function loadAudit() {
+  const box = document.getElementById('audit');
+  try {
+    const rows = await api('/audit');
+    if (!rows.length) { box.innerHTML = '<div class="hint" style="padding:8px 0">אין עדיין פעולות רשומות.</div>'; return; }
+    box.innerHTML = `<table><thead><tr>
+        <th>מתי</th><th>מי</th><th>מה</th><th>לקוח</th><th>פרטים</th>
+      </tr></thead><tbody>${rows.map(r => `
+        <tr>
+          <td class="mono">${esc(new Date(r.at).toLocaleString('he-IL'))}</td>
+          <td>${esc(r.actor_email || '—')}</td>
+          <td>${esc(ACTIONS[r.action] || r.action)}</td>
+          <td>${esc(r.tenant_slug || '—')}</td>
+          <td class="hint">${esc(r.detail && typeof r.detail === 'object'
+            ? (r.detail.reason || Object.keys(r.detail).join(', '))
+            : (r.detail || ''))}</td>
+        </tr>`).join('')}</tbody></table>`;
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
 }
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
