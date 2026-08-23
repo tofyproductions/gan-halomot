@@ -380,6 +380,12 @@ async function renderTenant(id) {
       <div style="height:18px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button id="save">שמור</button>
+        <!-- Read-only, thirty minutes, and logged with a reason before the
+             token exists. The label says "צפייה" rather than "כניסה" because
+             what it actually grants is looking, and support who expect to be
+             able to fix something should find that out here and not inside
+             somebody's payroll. -->
+        <button class="ghost" id="support">צפייה במערכת של הלקוח</button>
         ${t.status === 'suspended'
           ? '<button class="ghost" id="resume">החזר לפעילות</button>'
           : '<button class="danger" id="susp">השהה מנוי</button>'}
@@ -387,6 +393,32 @@ async function renderTenant(id) {
       </div>`;
 
     m.querySelector('#close').onclick = () => m.remove();
+
+    m.querySelector('#support').onclick = async () => {
+      const reason = prompt(
+        `צפייה במערכת של "${t.name}".\n\n` +
+        'זו צפייה בלבד — אפשר לראות כל מסך ואי אפשר לשנות דבר.\n' +
+        'הכניסה נרשמת ביומן עם השם שלך ועם הסיבה, ופגה אחרי 30 דקות.\n\n' +
+        'בשביל מה נכנסים?',
+      );
+      if (!reason) return;
+      try {
+        const r = await api(`/tenants/${id}/impersonate`, { method: 'POST', body: JSON.stringify({ reason }) });
+        // Handed over rather than opened automatically: the token belongs to
+        // the customer's address, and this console has no business holding a
+        // session for their system in the same browser tab as everybody else's.
+        const url = `https://${t.slug}.ganflow.co.il`;
+        await navigator.clipboard.writeText(r.token).catch(() => {});
+        alert(
+          `נוצרה צפייה במערכת של ${r.tenant.name}.\n\n` +
+          `נכנסים בתור: ${r.as}\n` +
+          `תקף ל-${r.expires_in_minutes} דקות · צפייה בלבד\n` +
+          `הכתובת: ${url}\n\n` +
+          'האסימון הועתק ללוח.',
+        );
+        loadAudit();
+      } catch (e) { alert(e.message); }
+    };
 
     m.querySelector('#save').onclick = async () => {
       try {

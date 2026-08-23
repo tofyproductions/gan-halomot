@@ -30,6 +30,22 @@ function authMiddleware(req, res, next) {
     if (!sameTenant(req, decoded)) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
+
+    // A support session may look at everything and change nothing. Fixing a
+    // customer's payroll while signed in as one of their managers leaves a
+    // record saying the manager did it, and no support call is worth that —
+    // when something must change, the customer changes it while we watch.
+    //
+    // Enforced on the METHOD rather than on a list of routes, because a list
+    // is a thing somebody forgets to add to. Anything that is not a read is
+    // refused, and the message says why rather than looking like a bug.
+    if (decoded.support && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      return res.status(403).json({
+        error: 'זו כניסת תמיכה — אפשר לצפות בכל המסכים, אבל לא לשנות דבר.',
+        support_by: decoded.support_by || null,
+      });
+    }
+
     req.user = decoded;
     next();
   } catch (err) {

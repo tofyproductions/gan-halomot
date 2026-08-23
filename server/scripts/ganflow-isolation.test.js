@@ -181,6 +181,7 @@ const waitFor = async (fn, ms = 40000) => {
       },
     });
     ok(made.status === 201, `הלקוח הוקם (${made.status})`);
+    const madeId = made.json && made.json.tenant && made.json.tenant._id;
     const temp = made.json && made.json.temp_password;
     ok(Boolean(temp), 'הוחזרה סיסמה זמנית');
 
@@ -204,6 +205,41 @@ const waitFor = async (fn, ms = 40000) => {
 
     const hers = await api('/api/branches', { tenant: 'chadash', token: right.json && right.json.token });
     ok(hers.status === 200, `והמערכת עונה לה (${hers.status})`);
+
+    console.log('\n--- כניסת תמיכה ---');
+    // The feature that sells and the one a security review asks about first:
+    // our staff inside a customer's records. It is only defensible if it can
+    // look and cannot touch, so that is what is asserted — not that it works.
+    const noReason = await api(`/api/platform/tenants/${madeId}/impersonate`, {
+      method: 'POST', token: ctok, body: {},
+    });
+    ok(noReason.status === 400, `כניסה בלי סיבה נדחית (${noReason.status})`);
+
+    const imp = await api(`/api/platform/tenants/${madeId}/impersonate`, {
+      method: 'POST', token: ctok, body: { reason: 'בדיקה אוטומטית' },
+    });
+    ok(imp.status === 200 && Boolean(imp.json.token), `נוצרה כניסת תמיכה (${imp.status})`);
+    ok(imp.json?.read_only === true, 'ומסומנת כצפייה בלבד');
+
+    const stok = imp.json && imp.json.token;
+    const canRead = await api('/api/branches', { tenant: 'chadash', token: stok });
+    ok(canRead.status === 200, `התמיכה רואה את המסכים (${canRead.status})`);
+
+    const cannotWrite = await api('/api/branches', {
+      tenant: 'chadash', token: stok, method: 'POST', body: { name: 'סניף שהתמיכה ניסתה ליצור' },
+    });
+    ok(cannotWrite.status === 403, `אבל לא יכולה לכתוב (${cannotWrite.status})`);
+
+    const branchesAfter = await client.db('gf_chadash').collection('branches')
+      .countDocuments({ name: 'סניף שהתמיכה ניסתה ליצור' });
+    ok(branchesAfter === 0, 'ושום דבר לא נוצר במסד של הלקוח');
+
+    const elsewhere = await api('/api/branches', { tenant: 'alef', token: stok });
+    ok(elsewhere.status === 401, `ואסימון התמיכה לא עובד אצל לקוח אחר (${elsewhere.status})`);
+
+    const logged = await plat.collection('auditlogs')
+      .countDocuments({ action: 'tenant.impersonate', tenant_slug: 'chadash' });
+    ok(logged >= 1, `הכניסה נרשמה ביומן (${logged})`);
 
     console.log('\n--- לקוח מושהה ---');
     await plat.collection('tenants').updateOne({ slug: 'bet' }, { $set: { status: 'suspended' } });

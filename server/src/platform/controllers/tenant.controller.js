@@ -199,3 +199,82 @@ exports.audit = async (req, res, next) => {
     res.json(await AuditLog.find(q).sort({ at: -1 }).limit(200));
   } catch (err) { next(err); }
 };
+
+/**
+ * Open a customer's system, as support, to look at what they are looking at.
+ *
+ * This is the feature that sells — "call us and we'll go through it with you" —
+ * and it is the first thing a network's security review asks about, because it
+ * is also the most dangerous thing here: our staff, inside their records.
+ *
+ * FOUR THINGS MAKE IT DEFENSIBLE RATHER THAN ALARMING.
+ *
+ * It is READ ONLY. Support can see every screen and change nothing. Fixing a
+ * customer's payroll while signed in as one of their managers leaves a record
+ * that says the manager did it, and no support call is worth that. When
+ * something has to be changed, the customer changes it while we watch, or an
+ * owner does it through the console where it is logged as us.
+ *
+ * It expires in thirty minutes. A support session is a phone call, not an
+ * account; a token that outlives the call is a key left in a door.
+ *
+ * It is logged before it is issued, with who asked and why — the log is the
+ * only honest answer to "who was in our system on the 3rd", and a log written
+ * after the fact is a log that can be skipped when the request fails.
+ *
+ * And it carries the customer it was minted for, like every other token here,
+ * so it cannot be pointed at a different one.
+ */
+exports.impersonate = async (req, res, next) => {
+  try {
+    const { Tenant, AuditLog } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+    if (tenant.status === 'closed') return res.status(410).json({ error: 'המנוי נסגר' });
+
+    const reason = String(req.body?.reason || '').trim();
+    if (reason.length < 5) {
+      return res.status(400).json({ error: 'צריך לכתוב בשביל מה נכנסים — זה נרשם ביומן' });
+    }
+
+    const { tenantConnection } = require('../connection');
+    const { models } = await tenantConnection(tenant);
+    const admin = await models.User.findOne({ role: 'system_admin', is_active: true }).lean();
+    if (!admin) return res.status(409).json({ error: 'אין אצל הלקוח מנהל מערכת פעיל להיכנס בשמו' });
+
+    // Written BEFORE the token exists. A log written afterwards is one that
+    // gets skipped on the path where something goes wrong.
+    await AuditLog.create({
+      actor_id: req.platformUser._id,
+      actor_email: req.platformUser.email,
+      action: 'tenant.impersonate',
+      tenant_id: tenant._id,
+      tenant_slug: tenant.slug,
+      detail: { reason, as: admin.full_name, minutes: 30 },
+      ip: req.ip || '',
+    });
+
+    const token = jwt.sign({
+      id: admin._id,
+      email: admin.email,
+      full_name: admin.full_name,
+      role: admin.role,
+      branch_id: admin.branch_id || null,
+      org_unit_id: admin.org_unit_id ? String(admin.org_unit_id) : null,
+      tenant: tenant.slug,
+      // The two claims the application checks. `support` makes every screen
+      // reachable and every write refused; `support_by` is who to name on
+      // screen, so nobody in the gan sees an unexplained session.
+      support: true,
+      support_by: req.platformUser.email,
+    }, process.env.JWT_SECRET, { expiresIn: '30m' });
+
+    res.json({
+      token,
+      as: admin.full_name,
+      tenant: { slug: tenant.slug, name: tenant.name },
+      expires_in_minutes: 30,
+      read_only: true,
+    });
+  } catch (err) { next(err); }
+};
