@@ -3,15 +3,18 @@ import {
   Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField,
   MenuItem, Stack, Typography, Chip, Alert, Divider, LinearProgress, Paper,
   Table, TableHead, TableBody, TableRow, TableCell, IconButton, Tooltip,
+  Checkbox, FormControlLabel,
 } from '@mui/material';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SendIcon from '@mui/icons-material/Send';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import BlockIcon from '@mui/icons-material/Block';
+import PaidIcon from '@mui/icons-material/Paid';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import EmploymentTermsPanel from './EmploymentTermsPanel';
 
 /**
  * הסכם העסקה for one employee — generate, send for mobile signature, confirm.
@@ -43,7 +46,13 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   const [busy, setBusy] = useState(false);
   const [signUrl, setSignUrl] = useState('');
   const [waiveReason, setWaiveReason] = useState('');
-  const [mode, setMode] = useState('new'); // new | waive | upload
+  const [mode, setMode] = useState('new'); // new | waive | upload | terms
+  // Filing the paper is only half of what a new contract does — the pay it
+  // agreed to has to reach payroll too, or the signed page and the salary drift
+  // apart with nothing pointing it out. Off by default: most uploads are the
+  // backlog of contracts for people already being paid correctly.
+  const [alsoTerms, setAlsoTerms] = useState(false);
+  const [termsContractId, setTermsContractId] = useState(null);
 
   const empId = employee?.id || employee?._id;
 
@@ -65,7 +74,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   };
 
   useEffect(() => {
-    if (open) { setValues({}); setPreviewHtml(''); setSignUrl(''); setMode('new'); setWaiveReason(''); load(); }
+    if (open) { setValues({}); setPreviewHtml(''); setSignUrl(''); setMode('new'); setWaiveReason(''); setAlsoTerms(false); setTermsContractId(null); load(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, empId]);
 
@@ -138,11 +147,20 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
         r.onerror = reject;
         r.readAsDataURL(file);
       });
-      await api.post('/employment-contracts/upload', {
+      const res = await api.post('/employment-contracts/upload', {
         employee_id: empId, file_data: b64, file_name: file.name, file_mimetype: file.type,
       });
       toast.success('החוזה הועלה וממתין לאישור הנהלת החשבונות');
-      setMode('new'); load(); onChanged && onChanged();
+      load(); onChanged && onChanged();
+      // The terms step follows the upload rather than riding along inside it:
+      // the file is filed either way, and a mistake in the pay fields can then
+      // be fixed without re-uploading the contract.
+      if (alsoTerms && isApproverRole(role)) {
+        setTermsContractId(res.data?.contract?.id || null);
+        setMode('terms');
+      } else {
+        setMode('new');
+      }
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה בהעלאה'); }
     finally { setBusy(false); }
   };
@@ -254,6 +272,12 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
             startIcon={<UploadFileIcon />} onClick={() => setMode('upload')}>
             העלה חוזה עבודה
           </Button>
+          {isApproverRole(role) && (
+            <Button variant={mode === 'terms' ? 'contained' : 'outlined'} size="small" color="secondary"
+              startIcon={<PaidIcon />} onClick={() => { setTermsContractId(current?.id || null); setMode('terms'); }}>
+              תנאי העסקה
+            </Button>
+          )}
           <Button variant={mode === 'waive' ? 'contained' : 'outlined'} size="small" color="inherit"
             startIcon={<BlockIcon />} onClick={() => setMode('waive')}>
             התעלם מחוזה עבודה
@@ -280,12 +304,27 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
             <Alert severity="info" sx={{ mb: 1.5 }}>
               העלאת חוזה שנחתם על נייר. גם הוא יעבור לאישור הנהלת החשבונות.
             </Alert>
+            {isApproverRole(role) && (
+              <FormControlLabel
+                sx={{ display: 'block', mb: 1 }}
+                control={<Checkbox checked={alsoTerms} onChange={(e) => setAlsoTerms(e.target.checked)} />}
+                label="החוזה משנה את תנאי ההעסקה — לעדכן גם את השכר במערכת"
+              />
+            )}
             <Button variant="outlined" component="label" startIcon={<UploadFileIcon />}>
               בחר קובץ
               <input hidden type="file" accept="application/pdf,image/*"
                 onChange={(e) => doUpload(e.target.files?.[0])} />
             </Button>
           </Paper>
+        )}
+
+        {mode === 'terms' && isApproverRole(role) && (
+          <EmploymentTermsPanel
+            employeeId={empId}
+            contractId={termsContractId}
+            onSaved={() => onChanged && onChanged()}
+          />
         )}
 
         {mode === 'new' && ctx && (

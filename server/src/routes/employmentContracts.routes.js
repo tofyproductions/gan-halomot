@@ -14,6 +14,11 @@ router.get('/annexes', c.listAnnexes);
 router.post('/annexes', c.uploadAnnex);
 router.get('/annexes/:id/file', c.annexFile);
 router.get('/context/:employeeId', c.getContext);
+// תנאי העסקה — accountant/admin only, enforced in the controller (this router
+// deliberately admits branch managers so they can file their own hires).
+router.get('/terms/:employeeId', c.termsHistory);
+router.post('/terms/preview', c.previewTerms);
+router.post('/terms', c.saveTerms);
 router.post('/preview', c.preview);
 router.post('/waive', c.waive);
 router.post('/upload', c.upload);

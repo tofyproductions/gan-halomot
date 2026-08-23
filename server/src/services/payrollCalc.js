@@ -25,6 +25,8 @@
 
 const IL_TZ = 'Asia/Jerusalem';
 
+const { termsForMonth } = require('./employmentTerms');
+
 function israelDateKey(date) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: IL_TZ }).format(date);
 }
@@ -144,7 +146,19 @@ function bonusAmountThisMonth(bonus, { hoursWorked, daysWorked, refDate }) {
   }
 }
 
-function primaryRates(employee) {
+/**
+ * The rates to pay `monthYM` at.
+ *
+ * The card holds one rate and no date, so on its own it can only answer "what
+ * do we pay today" — and this function is asked about months in the past. A
+ * raise recorded through `terms_history` therefore wins for the months it
+ * covers, and the card answers only for employees who have no recorded change
+ * (which is everyone until the day somebody records one).
+ *
+ * The amuta stays the card's either way: `terms_history` records what is paid,
+ * not which legal entity pays it.
+ */
+function primaryRates(employee, monthYM) {
   const dist = Array.isArray(employee.amuta_distribution) ? employee.amuta_distribution : [];
   const first = dist.find(d => d.hourly_rate || d.global_salary) || dist[0] || {};
   // amuta_id may be either a raw ObjectId or a populated document — normalize to a string id.
@@ -152,12 +166,16 @@ function primaryRates(employee) {
   const amutaIdStr = rawAmutaId
     ? String(rawAmutaId._id || rawAmutaId)
     : null;
+  const dated = termsForMonth(employee, monthYM);
+  const src = dated || first;
   return {
-    hourly_rate:    Number(first.hourly_rate) || 0,
-    global_salary:  Number(first.global_salary) || 0,
-    global_ot_rate: Number(first.global_ot_rate) || 0,
-    required_hours: Number(first.required_hours) || 0,
+    salary_type:    dated ? dated.salary_type : (employee.salary_type === 'global' ? 'global' : 'hourly'),
+    hourly_rate:    Number(src.hourly_rate) || 0,
+    global_salary:  Number(src.global_salary) || 0,
+    global_ot_rate: Number(src.global_ot_rate) || 0,
+    required_hours: Number(src.required_hours) || 0,
     primary_amuta_id: amutaIdStr,
+    terms_effective_month: dated ? dated.effective_month : null,
   };
 }
 
@@ -263,7 +281,10 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const amutaBuckets = new Map();   // amutaIdStr → bucket
   const branchBuckets = new Map();  // branchIdStr → bucket
 
-  const rates = primaryRates(employee);
+  const rates = primaryRates(employee, monthYM);
+  // Which pay model applies is itself dated: an employee moved from hourly to
+  // תקן in September must still be summed as hourly for August.
+  const salaryType = rates.salary_type;
   // The committed hours from the employee's work-schedule (commitment) are the
   // source of truth for the teken hourly value — NOT a separately-stored
   // required_hours field, which can drift. When the caller supplies the month's
@@ -419,7 +440,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // --- Base pay ---
   let baseSalary = 0;
   const warnings = [];
-  if (employee.salary_type === 'hourly') {
+  if (salaryType === 'hourly') {
     // Sum per-branch hours × per-branch rate, so cross-branch employees with
     // different rates per branch get paid correctly. Falls back to the
     // primary rate when no override is defined.
@@ -501,7 +522,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   //     is an approval-gated supplement: paid only when opts.pay_excess_supplement
   //     is true (= branch manager AND accounting both approved). Default: unpaid.
   let tekenBreakdown = null;
-  if (employee.salary_type === 'global' && rates.required_hours > 0 && rates.global_salary > 0) {
+  if (salaryType === 'global' && rates.required_hours > 0 && rates.global_salary > 0) {
     const includeCompletion = opts.include_salary_completion !== false;
     const payExcess = opts.pay_excess_supplement === true;
     const S = rates.global_salary;
@@ -574,7 +595,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // The parts below ALWAYS sum to base_salary, so a consumer can show any subset
   // and reconcile the remainder without double-counting anything.
   const paySplit = { regular: 0, ot_125: 0, ot_150: 0, completion: 0, supplement: 0 };
-  if (employee.salary_type === 'hourly') {
+  if (salaryType === 'hourly') {
     if (branchBuckets.size > 0 && branchRateMap.size > 0) {
       for (const [bId, bk] of branchBuckets) {
         const r = rateForBranch(bId);
@@ -678,7 +699,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     month: monthYM,
     employee_id: employee._id || employee.id,
     employee_name: employee.full_name,
-    salary_type: employee.salary_type,
+    salary_type: salaryType,
     salary_is_net: !!employee.salary_is_net,
     force_full_global: forceFullGlobal,
     hours: {
