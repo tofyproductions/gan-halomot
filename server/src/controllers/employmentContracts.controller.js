@@ -18,6 +18,37 @@ const path = require('path');
 
 const SIGN_LINK_DAYS = 30;
 
+/**
+ * How big a scanned contract may be.
+ *
+ * The file is stored base64 INSIDE the contract document, and a MongoDB
+ * document stops at 16MB. Base64 costs a third on top, so the real ceiling is
+ * about 11.5MB of PDF — past it Mongo answers "object to insert too large" and
+ * the manager is shown a sentence in English about byte counts. Bigger still
+ * and express's own parser gives up around 17MB with a RangeError, before any
+ * of this code runs.
+ *
+ * So the limit is stated, checked, and explained in Hebrew, on both sides. The
+ * client checks so nobody waits out a long upload to be refused at the end;
+ * the server checks because the client is not the only way in.
+ */
+const MAX_CONTRACT_FILE_BYTES = 11 * 1024 * 1024;
+
+const base64Bytes = (s) => {
+  const body = String(s).replace(/^data:[^;]+;base64,/, '');
+  const padding = (body.endsWith('==') ? 2 : body.endsWith('=') ? 1 : 0);
+  return Math.max(0, Math.floor(body.length * 3 / 4) - padding);
+};
+
+const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+
+/** null when the file fits, an error sentence when it does not. */
+function tooLarge(fileData) {
+  const bytes = base64Bytes(fileData);
+  if (bytes <= MAX_CONTRACT_FILE_BYTES) return null;
+  return `הקובץ גדול מדי (${mb(bytes)}). המקסימום הוא ${mb(MAX_CONTRACT_FILE_BYTES)} — סרקו שוב באיכות נמוכה יותר או פצלו לקבצים.`;
+}
+
 function branchScopeOf(req) {
   const role = req.user?.role;
   if (role === 'system_admin' || role === 'accountant') return null;
@@ -291,6 +322,8 @@ async function upload(req, res, next) {
     const { emp, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
     if (!file_data) return res.status(400).json({ error: 'יש לצרף קובץ' });
+    const oversize = tooLarge(file_data);
+    if (oversize) return res.status(413).json({ error: oversize });
     const doc = await EmploymentContract.create({
       employee_id: emp._id,
       branch_id: emp.branch_id || null,
@@ -384,6 +417,8 @@ async function uploadAnnex(req, res, next) {
     }
     const { annex_key, title, part, file_name, file_data, mime_type, page_count } = req.body || {};
     if (!file_data || !file_name) return res.status(400).json({ error: 'יש לצרף קובץ' });
+    const oversizeAnnex = tooLarge(file_data);
+    if (oversizeAnnex) return res.status(413).json({ error: oversizeAnnex });
     const key = annex_key || 'c';
     const partNum = Number(part) || 1;
     await ContractAnnex.updateMany({ annex_key: key, part: partNum, is_active: true }, { is_active: false });
@@ -644,6 +679,7 @@ async function saveTerms(req, res, next) {
 }
 
 module.exports = {
+  MAX_CONTRACT_FILE_BYTES,
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
   listAnnexes, uploadAnnex, annexFile,
   termsHistory, previewTerms, saveTerms,

@@ -4,7 +4,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, Chip, LinearProgress,
 } from '@mui/material';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError } from '../../api/client';
 
 /**
  * תנאי העסקה with a date on them.
@@ -79,7 +79,7 @@ export default function EmploymentTermsPanel({ employeeId, contractId = null, on
           note: '',
         });
       })
-      .catch((err) => toast.error(err.response?.data?.error || 'שגיאה בטעינת תנאי העסקה'))
+      .catch((err) => toast.error(apiError(err, 'שגיאה בטעינת תנאי העסקה')))
       .finally(() => setLoading(false));
   }, [employeeId]);
 
@@ -98,7 +98,7 @@ export default function EmploymentTermsPanel({ employeeId, contractId = null, on
       setPlan(p);
     } catch (err) {
       setPlan(null);
-      setPlanError(err.response?.data?.error || 'שגיאה');
+      setPlanError(apiError(err));
     } finally { setBusy(false); }
   };
 
@@ -116,7 +116,7 @@ export default function EmploymentTermsPanel({ employeeId, contractId = null, on
       load();
       onSaved && onSaved(r);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+      toast.error(apiError(err, 'שגיאה בשמירה'));
     } finally { setBusy(false); }
   };
 
