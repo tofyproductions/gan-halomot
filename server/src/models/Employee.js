@@ -61,6 +61,56 @@ const amutaSplitSchema = new mongoose.Schema({
 }, { _id: false });
 
 /**
+ * A dated set of employment terms — what this employee was paid FROM a given
+ * month onwards.
+ *
+ * WHY THIS EXISTS. The salary shown for a month is recomputed on every read
+ * from whatever `amuta_distribution` says right now (see PayrollMonth's own
+ * comment: only a finalized month stops recomputing). So raising a rate from
+ * 52₪ to 60₪ used to raise every open month in the past to 60₪ as well —
+ * silently, with nothing in the UI admitting it happened. A rate with no date
+ * cannot describe a raise; it can only describe "always".
+ *
+ * So a raise writes a row here instead of only overwriting the card, and the
+ * calculator asks "what were the terms in THIS month" rather than "what is the
+ * rate today".
+ *
+ * `effective_month` is the canonical value and the one payroll reads.
+ * `effective_date` is the exact day the accountant picked — kept because that
+ * is what the signed contract says and what a person will ask about later, but
+ * a mid-month date pays the whole month at the new terms: the calculator sums
+ * a month's hours and multiplies once, and splitting that mid-month is a
+ * different feature with a much larger blast radius.
+ *
+ * The FIRST change on an employee also writes a baseline row for the terms
+ * that were already on the card, dated from before any payroll exists. Without
+ * it the months before the raise would find no row, fall back to the card —
+ * and the card now holds the NEW rate, which is the exact bug this prevents.
+ */
+const termsHistorySchema = new mongoose.Schema({
+  effective_month: { type: String, required: true },   // 'YYYY-MM' — what payroll reads
+  effective_date: { type: Date, default: null },       // the day actually agreed
+
+  salary_type: { type: String, enum: ['hourly', 'global'], default: 'hourly' },
+  hourly_rate: { type: Number, default: null },
+  global_salary: { type: Number, default: null },
+  global_ot_rate: { type: Number, default: null },
+  required_hours: { type: Number, default: null },
+
+  // 'baseline' — the terms that were on the card before anyone recorded a
+  // change; written automatically, never by a person.
+  // 'contract' — entered alongside a signed הסכם העסקה.
+  // 'manual'   — recorded on its own.
+  source: { type: String, enum: ['baseline', 'contract', 'manual'], default: 'manual' },
+  contract_id: { type: mongoose.Schema.Types.ObjectId, ref: 'EmploymentContract', default: null },
+  note: { type: String, default: '' },
+
+  created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  created_by_name: { type: String, default: '' },
+  created_at: { type: Date, default: Date.now },
+});
+
+/**
  * Per-branch rate override — used when an employee works across multiple
  * branches with different pay rates per branch. The `branch_id` field is the
  * branch where the employee can also be clocked in (in addition to her home
@@ -237,6 +287,10 @@ const employeeSchema = new mongoose.Schema({
   // distinction so payroll calculation can apply the correct tax treatment.
   salary_is_net: { type: Boolean, default: false },
   amuta_distribution: { type: [amutaSplitSchema], default: [] },
+  // Dated employment terms — see termsHistorySchema. Empty on every employee
+  // who has never had a recorded change, and the calculator then reads the
+  // card exactly as it always did.
+  terms_history: { type: [termsHistorySchema], default: [] },
   // Per-branch rate overrides for cross-branch workers. Empty by default.
   branch_rates: { type: [branchRateSchema], default: [] },
   // Personal per-branch hourly bonuses (individually agreed). Empty by default.

@@ -6,8 +6,9 @@
  * employed with no contract in the system, and without "התעלם" / "העלה" this
  * feature would mark every one of them as a problem on the day it ships.
  */
-const { Employee, Branch, EmploymentContract, ContractAnnex, User } = require('../models');
+const { Employee, Branch, EmploymentContract, ContractAnnex, PayrollMonth, User } = require('../models');
 const tpl = require('../services/employmentContract');
+const terms = require('../services/employmentTerms');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
 const letterhead = require('../services/letterhead');
@@ -528,8 +529,123 @@ async function publicSign(req, res, next) {
   } catch (err) { next(err); }
 }
 
+
+// ---------------------------------------------------------------------------
+// תנאי העסקה — the pay a signed contract actually agrees to.
+//
+// A contract used to be a document and nothing more: an accountant could file
+// one that says 60₪ while payroll kept paying 52₪, and no screen anywhere
+// noticed the two disagreed. These three endpoints let the pay be recorded at
+// the same moment as the paper, with a date on it.
+//
+// ACCOUNTANT AND ADMIN ONLY, all three — including the read. A branch manager
+// may file her own hire's contract (that is why the routes let her in at all)
+// but what anybody is paid is not hers to see or to set.
+// ---------------------------------------------------------------------------
+
+/** Months already closed cannot be moved — say which, rather than silently skipping them. */
+async function finalizedMonthsFrom(employeeId, fromMonth) {
+  const rows = await PayrollMonth.find({
+    employee_id: employeeId, status: 'finalized', month: { $gte: fromMonth },
+  }).select('month').sort({ month: 1 }).lean();
+  return rows.map((r) => r.month);
+}
+
+const termsRow = (r) => ({
+  id: String(r._id || ''),
+  effective_month: r.effective_month,
+  effective_date: r.effective_date,
+  salary_type: r.salary_type,
+  hourly_rate: r.hourly_rate,
+  global_salary: r.global_salary,
+  global_ot_rate: r.global_ot_rate,
+  required_hours: r.required_hours,
+  source: r.source,
+  note: r.note,
+  created_by_name: r.created_by_name,
+  created_at: r.created_at,
+});
+
+/** GET /api/employment-contracts/terms/:employeeId — current terms + every recorded change. */
+async function termsHistory(req, res, next) {
+  try {
+    if (!isApprover(req)) return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת' });
+    const emp = await Employee.findById(req.params.employeeId)
+      .select('full_name salary_type amuta_distribution terms_history start_date').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    const history = (emp.terms_history || [])
+      .slice()
+      .sort((a, b) => (b.effective_month || '').localeCompare(a.effective_month || '')
+        || new Date(b.created_at || 0) - new Date(a.created_at || 0));
+    res.json({
+      card: terms.termsFromCard(emp),
+      current: terms.termsForMonth(emp, terms.monthOf(new Date())) || terms.termsFromCard(emp),
+      history: history.map(termsRow),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/employment-contracts/terms/preview
+ * What the change would do, without doing it — so the dialog can show the
+ * before/after, the month it really starts, and which closed months it cannot
+ * reach, BEFORE the accountant commits to it.
+ */
+async function previewTerms(req, res, next) {
+  try {
+    if (!isApprover(req)) return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת' });
+    const emp = await Employee.findById(req.body?.employee_id)
+      .select('full_name salary_type amuta_distribution terms_history start_date').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const plan = terms.planTermsChange(emp, req.body || {});
+    if (plan.errors.length) return res.status(400).json({ error: plan.errors[0], errors: plan.errors });
+
+    res.json({
+      effective_month: plan.effective_month,
+      mid_month: plan.mid_month,
+      nothing_changed: plan.nothingChanged,
+      previous: plan.previous,
+      next: plan.next,
+      finalized_months: await finalizedMonthsFrom(emp._id, plan.effective_month),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /api/employment-contracts/terms
+ * Record the change. `contract_id` ties it to the הסכם it came from, which is
+ * what makes the history answer "why" and not only "what".
+ */
+async function saveTerms(req, res, next) {
+  try {
+    if (!isApprover(req)) return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת' });
+    const emp = await Employee.findById(req.body?.employee_id);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const plan = terms.applyTermsChange(emp, req.body || {}, {
+      id: req.user?.id || null, full_name: req.user?.full_name || '',
+    });
+    if (plan.errors.length) return res.status(400).json({ error: plan.errors[0], errors: plan.errors });
+
+    const finalized = await finalizedMonthsFrom(emp._id, plan.effective_month);
+    await emp.save();
+
+    res.status(201).json({
+      ok: true,
+      effective_month: plan.effective_month,
+      previous: plan.previous,
+      next: plan.next,
+      // Recorded, but those months are frozen and will keep paying the old
+      // rate until somebody reopens them. Reported, never done quietly.
+      finalized_months: finalized,
+    });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
   listAnnexes, uploadAnnex, annexFile,
+  termsHistory, previewTerms, saveTerms,
   publicGet, publicSign,
 };
