@@ -34,6 +34,20 @@ async function getAll(req, res, next) {
 
     const total = await Child.countDocuments(filter);
 
+    // Same ceiling as the employees list, and for the same reason: everything
+    // is right for a gan and fatal for a network. Refusing names the number and
+    // the way to ask again, rather than sending 80,000 rows to a browser that
+    // cannot draw them.
+    const MAX_UNPAGED = Number(process.env.LIST_MAX_UNPAGED || 5000);
+    if (!limit && total > MAX_UNPAGED) {
+      return res.status(413).json({
+        error: `${total.toLocaleString('he-IL')} ילדים הם יותר מדי להצגה בבת אחת.`,
+        hint: 'בחרו סניף או כיתה, חפשו, או בקשו עמוד (limit ו-page).',
+        total,
+        max_unpaged: MAX_UNPAGED,
+      });
+    }
+
     let query = Child.find(filter)
       .populate('classroom_id', 'name capacity')
       .sort({ child_name: 1 });

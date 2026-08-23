@@ -212,6 +212,22 @@ async function listEmployees(req, res, next) {
 
     const total = await Employee.countDocuments(filter);
 
+    // A caller that asked for no page gets everything, which is right for a gan
+    // and impossible for a network: 84,000 rows is a second on the server and a
+    // dead browser after it. So an unpaged request that would return more than
+    // this refuses and says how to ask again — the same shape as the payroll
+    // month's ceiling, and for the same reason. Far above any real branch
+    // (production's largest has 42), far below what a table can draw.
+    const MAX_UNPAGED = Number(process.env.LIST_MAX_UNPAGED || 5000);
+    if (!limit && total > MAX_UNPAGED) {
+      return res.status(413).json({
+        error: `${total.toLocaleString('he-IL')} עובדים הם יותר מדי להצגה בבת אחת.`,
+        hint: 'בחרו סניף, חפשו, או בקשו עמוד (limit ו-page).',
+        total,
+        max_unpaged: MAX_UNPAGED,
+      });
+    }
+
     let query = Employee.find(filter)
       .populate('branch_id', 'name')
       .populate('amuta_distribution.amuta_id', 'name short_name')
