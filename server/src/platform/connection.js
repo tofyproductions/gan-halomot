@@ -5,6 +5,7 @@ const tenantSchema = require('./models/Tenant');
 const platformUserSchema = require('./models/PlatformUser');
 const auditLogSchema = require('./models/AuditLog');
 const orgUnitSchema = require('./models/OrgUnit');
+const billingPeriodSchema = require('./models/BillingPeriod');
 
 /**
  * Connections, and which database each request is talking to.
@@ -54,6 +55,7 @@ async function controlPlane() {
     Tenant: conn.model('Tenant', tenantSchema),
     PlatformUser: conn.model('PlatformUser', platformUserSchema),
     AuditLog: conn.model('AuditLog', auditLogSchema),
+    BillingPeriod: conn.model('BillingPeriod', billingPeriodSchema),
   };
   return control;
 }

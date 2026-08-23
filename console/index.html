@@ -131,6 +131,20 @@ async function renderApp() {
         <div id="list">טוען…</div>
       </div>
 
+      <!-- What each customer owes for a month, frozen on the day it was worked
+           out. The console read the charge live everywhere else, which is right
+           for a screen and wrong for an invoice: March's bill must not change in
+           May because two children joined. -->
+      <div class="card" style="margin-top:18px">
+        <div class="bar">
+          <h2 style="margin:0;flex:1">חיוב חודשי</h2>
+          <input id="bmonth" type="month" style="width:auto">
+          <button class="ghost" id="bload">הצג</button>
+          <button id="brun">חשב חודש</button>
+        </div>
+        <div id="billing" class="hint">בחרו חודש והציגו.</div>
+      </div>
+
       <!-- The log was being written and never read. Every action already lands
            in it — who created a customer, who suspended one, who opened
            somebody's system for support — and a record nobody can look at
@@ -151,6 +165,11 @@ async function renderApp() {
   // Collapsed by default and fetched only when opened — the log is for the
   // moment somebody asks a question about it, not something to load on every
   // visit to the customer list.
+  const bm = document.getElementById('bmonth');
+  bm.value = new Date().toISOString().slice(0, 7);
+  document.getElementById('bload').onclick = () => loadBilling(bm.value);
+  document.getElementById('brun').onclick = () => runBilling(bm.value);
+
   document.getElementById('auditToggle').onclick = () => {
     const box = document.getElementById('audit');
     const open = box.style.display === 'none';
@@ -161,6 +180,66 @@ async function renderApp() {
   loadSummary(); loadList();
 }
 
+const BILL_STATUS = { draft: 'טיוטה', issued: 'נמסר', paid: 'שולם', void: 'בוטל' };
+
+async function loadBilling(month) {
+  const box = document.getElementById('billing');
+  box.textContent = 'טוען…';
+  try {
+    const { rows, total } = await api('/billing?month=' + encodeURIComponent(month));
+    if (!rows.length) {
+      box.innerHTML = `<div class="hint">לא חושב חודש ${esc(month)}. "חשב חודש" יבנה אותו.</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="ok">סה״כ ${money(total)} · ${rows.length} לקוחות</div>
+      <table><thead><tr>
+        <th>לקוח</th><th>ילדים</th><th>לילד</th><th>סכום</th><th>איך יצא</th><th>סטטוס</th><th></th>
+      </tr></thead><tbody>${rows.map(r => `
+        <tr>
+          <td><b>${esc(r.tenant_name || r.tenant_slug)}</b></td>
+          <td>${r.children}</td>
+          <td>${money(r.rate)}</td>
+          <td><b>${money(r.amount)}</b></td>
+          <td class="hint">${esc(r.breakdown || '')}</td>
+          <td>${esc(BILL_STATUS[r.status] || r.status)}</td>
+          <td>${r.status === 'draft'
+            ? `<button class="ghost" data-mark="${r._id}" data-to="issued">סמן כנמסר</button>`
+            : r.status === 'issued'
+              ? `<button class="ghost" data-mark="${r._id}" data-to="paid">סמן כשולם</button>`
+              : ''}</td>
+        </tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('[data-mark]').forEach((b) => {
+      b.onclick = async () => {
+        try {
+          await api('/billing/' + b.dataset.mark, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.to }) });
+          loadBilling(month); loadAudit();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { box.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function runBilling(month) {
+  // Shown before it is written, because "recompute" on a month somebody has
+  // already been given a number for is a conversation and not a button.
+  const dry = await api('/billing/run', { method: 'POST', body: JSON.stringify({ month, dry_run: true }) })
+    .catch((e) => { alert(e.message); return null; });
+  if (!dry) return;
+  const skipped = dry.rows.filter((r) => r.skipped).length;
+  if (!confirm(
+    `חישוב חודש ${month}:\n\n` +
+    `${dry.rows.length} לקוחות · סה״כ ₪${dry.total.toLocaleString('he-IL')}\n` +
+    (skipped ? `${skipped} חודשים כבר חושבו ולא ייגעו.\n` : '') +
+    (dry.failed.length ? `⚠️ ${dry.failed.length} לקוחות לא נגישים ולא יחויבו.\n` : '') +
+    '\nלכתוב?',
+  )) return;
+  try {
+    await api('/billing/run', { method: 'POST', body: JSON.stringify({ month }) });
+    loadBilling(month); loadAudit();
+  } catch (e) { alert(e.message); }
+}
+
 /** What each action is called on screen. An unknown one shows its own key
  *  rather than a blank — a new action added later must not read as nothing. */
 const ACTIONS = {
@@ -169,6 +248,10 @@ const ACTIONS = {
   'tenant.suspend': 'השהיית לקוח',
   'tenant.resume': 'החזרה לפעילות',
   'tenant.impersonate': 'כניסה למערכת של לקוח',
+  'billing.run': 'חישוב חודש חיוב',
+  'billing.issued': 'חיוב נמסר ללקוח',
+  'billing.paid': 'חיוב שולם',
+  'billing.void': 'חיוב בוטל',
 };
 
 async function loadAudit() {

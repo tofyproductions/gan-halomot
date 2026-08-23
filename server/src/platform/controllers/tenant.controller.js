@@ -278,3 +278,75 @@ exports.impersonate = async (req, res, next) => {
     });
   } catch (err) { next(err); }
 };
+
+/**
+ * The billing month: work it out, look at it, and mark it sent or paid.
+ *
+ * Computing is owner-only. Support looking at what a customer owes is a support
+ * call; support deciding what they owe is not.
+ */
+exports.billingRun = async (req, res, next) => {
+  try {
+    const { runMonth } = require('../billing');
+    const out = await runMonth({
+      month: req.body?.month,
+      recompute: Boolean(req.body?.recompute),
+      dryRun: Boolean(req.body?.dry_run),
+    });
+    const { AuditLog } = await controlPlane();
+    if (!out.dryRun) {
+      await AuditLog.create({
+        actor_id: req.platformUser._id,
+        actor_email: req.platformUser.email,
+        action: 'billing.run',
+        detail: { month: out.month, tenants: out.tenants, total: out.total, failed: out.failed.length },
+        ip: req.ip || '',
+      });
+    }
+    res.json(out);
+  } catch (err) {
+    if (err.message.includes('נדרש')) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+};
+
+exports.billingList = async (req, res, next) => {
+  try {
+    const { BillingPeriod } = await controlPlane();
+    const q = {};
+    if (req.query.month) q.month = req.query.month;
+    if (req.query.tenant_id) q.tenant_id = req.query.tenant_id;
+    const rows = await BillingPeriod.find(q).sort({ month: -1, tenant_name: 1 }).limit(500).lean();
+    const total = rows.filter((r) => r.status !== 'void').reduce((a, r) => a + (r.amount || 0), 0);
+    res.json({ rows, total });
+  } catch (err) { next(err); }
+};
+
+exports.billingMark = async (req, res, next) => {
+  try {
+    const { BillingPeriod, AuditLog } = await controlPlane();
+    const status = String(req.body?.status || '');
+    if (!['draft', 'issued', 'paid', 'void'].includes(status)) {
+      return res.status(400).json({ error: 'סטטוס לא מוכר' });
+    }
+    const row = await BillingPeriod.findById(req.params.id);
+    if (!row) return res.status(404).json({ error: 'חודש חיוב לא נמצא' });
+
+    row.status = status;
+    if (status === 'issued') row.issued_at = new Date();
+    if (status === 'paid') row.paid_at = new Date();
+    if (req.body?.note != null) row.note = String(req.body.note);
+    await row.save();
+
+    await AuditLog.create({
+      actor_id: req.platformUser._id,
+      actor_email: req.platformUser.email,
+      action: 'billing.' + status,
+      tenant_id: row.tenant_id,
+      tenant_slug: row.tenant_slug,
+      detail: { month: row.month, amount: row.amount },
+      ip: req.ip || '',
+    });
+    res.json(row);
+  } catch (err) { next(err); }
+};

@@ -11,6 +11,7 @@
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",
     "platform:orgscope": "node scripts/ganflow-orgscope.test.js",
+    "platform:billing": "node scripts/ganflow-billing.test.js",
     "platform:scale": "node scripts/ganflow-scale-test.js",
     "platform:cluster": "node scripts/ganflow-cluster-test.js",
     "tenant:export": "node scripts/ganflow-tenant-export.js",
