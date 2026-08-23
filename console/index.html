@@ -375,7 +375,17 @@ async function renderTenant(id) {
         <div><label>אימייל</label><input id="ce" value="${esc(t.contact?.email)}"></div>
       </div>
       <h3>הערות</h3><textarea id="notes" rows="3">${esc(t.notes)}</textarea>
-      ${t.status === 'suspended' && t.purge_after ? `<div class="err" style="margin-top:14px">מושהה מ-${date(t.suspended_at)}. המידע יימחק ב-${date(t.purge_after)}.</div>` : ''}
+      <!-- This used to say "המידע יימחק ב-<date>", and nothing deleted
+           anything — a promise the system did not keep, made to a customer
+           about their own records. Nothing here deletes on a timer ON PURPOSE:
+           unattended irreversible destruction of a gan's children's records is
+           the one job that must never run while nobody is watching. The date is
+           when it becomes ours to decide, and deciding is a person exporting
+           and then choosing. -->
+      ${t.status === 'suspended' && t.purge_after ? `<div class="err" style="margin-top:14px">
+          מושהה מ-${date(t.suspended_at)}. המידע נשמר.
+          מ-${date(t.purge_after)} אפשר למחוק אותו — ידנית, אחרי ייצוא.
+        </div>` : ''}
       <div id="err"></div>
       <div style="height:18px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -441,7 +451,7 @@ async function renderTenant(id) {
 
     const susp = m.querySelector('#susp');
     if (susp) susp.onclick = async () => {
-      const reason = prompt(`השהיית "${t.name}".\n\nהגן יאבד גישה מיד. המידע יישמר חצי שנה ואז יימחק.\n\nסיבה:`);
+      const reason = prompt(`השהיית "${t.name}".\n\nהגן יאבד גישה מיד. המידע נשמר במלואו ולא נמחק מעצמו.\nאחרי חצי שנה אפשר יהיה למחוק אותו ידנית, אחרי ייצוא.\n\nסיבה:`);
       if (reason === null) return;
       await api(`/tenants/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) });
       m.remove(); loadList(); loadSummary();

@@ -13,6 +13,7 @@
     "platform:orgscope": "node scripts/ganflow-orgscope.test.js",
     "platform:scale": "node scripts/ganflow-scale-test.js",
     "platform:cluster": "node scripts/ganflow-cluster-test.js",
+    "tenant:export": "node scripts/ganflow-tenant-export.js",
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js"
