@@ -53,9 +53,19 @@ export default function DirectPayslipDialog({ open, onClose, defaultMonth }) {
     if (!open) return;
     setFile(null); setBatch(null); setSel({}); setTestTo(''); setOtherMonths([]);
     setMonth(defaultMonth || '');
+    // Genuinely needs every branch: an uploaded payslip is matched to whoever
+    // it belongs to, and that person can be anywhere in the customer. On a
+    // network that roster is refused (413) rather than sent, so say what
+    // happened — an empty picker with no explanation reads as "there are no
+    // employees", which is the wrong thing to believe while holding a payslip.
     api.get('/payroll/employees', { params: { active: 'true', branch: 'all' } })
       .then(res => setEmployees(res.data.employees || []))
-      .catch(() => setEmployees([]));
+      .catch((err) => {
+        setEmployees([]);
+        if (err?.response?.status === 413) {
+          toast.error('יותר מדי עובדים להתאמה אוטומטית — בחרו סניף ונסו שוב');
+        }
+      });
   }, [open, defaultMonth]);
 
   const upload = () => {
