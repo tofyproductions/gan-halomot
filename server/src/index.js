@@ -149,9 +149,28 @@ connectDB().then(() => {
       return;
     }
 
+    // ------------------------------------------------------------------
+    // On a control plane every job below runs ONCE PER CUSTOMER, inside that
+    // customer's models. `each()` is the difference; on a single gan it is the
+    // identity and nothing changes.
+    //
+    // The jobs that read OUR mailbox, OUR spreadsheet or spend on OUR API key
+    // do not go through it at all. Run per customer they would read our inbox
+    // on somebody else's behalf and file the results in their database, so
+    // they stay off here until a customer can carry its own credentials.
+    const platformMode = require('./platform/connection').isEnabled();
+    const { perTenant } = require('./platform/jobs');
+    const each = platformMode ? (label, fn) => perTenant(label, fn) : (label, fn) => fn;
+    if (platformMode) {
+      console.log('🏢  מצב פלטפורמה — עבודות מתוזמנות ירוצו לכל לקוח בנפרד');
+      console.log('    כבויות: סנכרון גיליונות, סיבוס, טופס 101, דיג׳סט גיוס —');
+      console.log('    הן ניגשות לתיבת דואר ולמפתחות שלנו, לא של הלקוח.');
+    }
+
     // A distribution job that died with the old process (OOM/deploy restart)
     // must not show "running" forever — close it out with an error entry.
-    require('./controllers/payslipAudit.controller').finalizeStaleDistributionLogs();
+    each('stale-distribution', () =>
+      require('./controllers/payslipAudit.controller').finalizeStaleDistributionLogs())();
 
     // Auto-sync from Google Sheets every hour
     const { syncFromSheets } = require('./controllers/sync.controller');
@@ -167,23 +186,28 @@ connectDB().then(() => {
       });
     };
 
-    // First sync after 30 seconds, then every hour
-    setTimeout(runSync, 30000);
-    setInterval(runSync, 60 * 60 * 1000);
+    // First sync after 30 seconds, then every hour. Single-gan only — the
+    // spreadsheet it reads is this office's, not a customer's.
+    if (!platformMode) {
+      setTimeout(runSync, 30000);
+      setInterval(runSync, 60 * 60 * 1000);
+    }
 
     // Dead-agent watchdog: alert when a branch's attendance agent (Pi) goes
     // fully silent — the heartbeat-driven clock-down alert can't catch this.
     const { checkStaleAgents } = require('./controllers/agent.controller');
-    setTimeout(checkStaleAgents, 90000);           // first check after 90s
-    setInterval(checkStaleAgents, 60 * 60 * 1000); // then hourly
+    const staleAgents = each('stale-agents', checkStaleAgents);
+    setTimeout(staleAgents, 90000);           // first check after 90s
+    setInterval(staleAgents, 60 * 60 * 1000); // then hourly
 
     // Fingerprint mirroring: a cross-branch employee must be able to put her
     // finger on ANY of her branches' clocks. The sweep captures her template
     // once and pushes it to every branch she works at (no-op when nothing is
     // missing — work already queued is never queued twice).
     const fingerprintSync = require('./services/fingerprintSync');
-    setTimeout(() => fingerprintSync.sweep(), 3 * 60 * 1000);       // first pass after 3 min
-    setInterval(() => fingerprintSync.sweep(), 6 * 60 * 60 * 1000); // then every 6h
+    const sweep = each('fingerprints', () => fingerprintSync.sweep());
+    setTimeout(sweep, 3 * 60 * 1000);       // first pass after 3 min
+    setInterval(sweep, 6 * 60 * 60 * 1000); // then every 6h
 
     // Cibus: pull the scheduled monthly report out of the mailbox. The tick is
     // cheap and self-limiting — it does nothing before the configured day and
@@ -191,14 +215,16 @@ connectDB().then(() => {
     // a late email is picked up the same day it arrives.
     const cibusSyncJob = require('./services/cibusSyncJob');
     const runCibus = () => cibusSyncJob.tick().catch(e => console.error('[cibus] tick failed:', e.message));
-    setTimeout(runCibus, 90 * 1000);
-    setInterval(runCibus, 60 * 60 * 1000);
+    if (!platformMode) {
+      setTimeout(runCibus, 90 * 1000);
+      setInterval(runCibus, 60 * 60 * 1000);
+    }
 
     // טופס 101: the documents that only ever carried the number in their label
     // become typed rows, once. Idempotent — it only touches rows that have no
     // doc_type yet — so it costs a single indexed query on every later boot.
     const form101 = require('./services/form101');
-    form101.backfillLegacy()
+    if (!platformMode) form101.backfillLegacy()
       .then(r => { if (r.converted) console.log(`[form101] converted ${r.converted} legacy documents`); })
       .catch(e => console.error('[form101] backfill failed:', e.message));
 
@@ -207,8 +233,10 @@ connectDB().then(() => {
     // file never seen before), off until someone enables it.
     const form101Job = require('./services/form101SyncJob');
     const runForm101 = () => form101Job.tick().catch(e => console.error('[form101] tick failed:', e.message));
-    setTimeout(runForm101, 4 * 60 * 1000);
-    setInterval(runForm101, 6 * 60 * 60 * 1000);
+    if (!platformMode) {
+      setTimeout(runForm101, 4 * 60 * 1000);
+      setInterval(runForm101, 6 * 60 * 60 * 1000);
+    }
 
     // גיוס: pull the website form's applications out of mail-sorter and mail
     // each manager what is waiting for her. Hourly and self-limiting — nothing
@@ -218,8 +246,10 @@ connectDB().then(() => {
     const runRecruitment = () => recruitmentJob.tick()
       .then(r => { if (r?.total) console.log(`[recruitment] digest: ${r.total} candidates in ${r.sent.length} emails`); })
       .catch(e => console.error('[recruitment] tick failed:', e.message));
-    setTimeout(runRecruitment, 2 * 60 * 1000);
-    setInterval(runRecruitment, 60 * 60 * 1000);
+    if (!platformMode) {
+      setTimeout(runRecruitment, 2 * 60 * 1000);
+      setInterval(runRecruitment, 60 * 60 * 1000);
+    }
   });
 });
 
