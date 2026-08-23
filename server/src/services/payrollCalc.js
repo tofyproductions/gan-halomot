@@ -169,7 +169,11 @@ function primaryRates(employee, monthYM) {
   const dated = termsForMonth(employee, monthYM);
   const src = dated || first;
   return {
-    salary_type:    dated ? dated.salary_type : (employee.salary_type === 'global' ? 'global' : 'hourly'),
+    // NOT normalized when undated. The old code branched on `employee.salary_type`
+    // directly, so a card with a missing or odd value fell to the תקן path;
+    // coercing it to 'hourly' here would quietly move that employee's money.
+    // An employee with recorded terms has a value the enum already constrains.
+    salary_type:    dated ? dated.salary_type : employee.salary_type,
     hourly_rate:    Number(src.hourly_rate) || 0,
     global_salary:  Number(src.global_salary) || 0,
     global_ot_rate: Number(src.global_ot_rate) || 0,
