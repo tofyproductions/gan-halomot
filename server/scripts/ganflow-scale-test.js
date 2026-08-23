@@ -205,8 +205,14 @@ async function seed(client, dbName, branches) {
     { key: { employee_id: 1, timestamp: -1 } }, { key: { timestamp: 1 } },
   ]);
   await db.collection('employees').createIndex({ branch_id: 1 });
+  await db.collection('employees').createIndex({ full_name: 1 });
+  await db.collection('employees').createIndex({ branch_id: 1, full_name: 1 });
   await db.collection('children').createIndex({ branch_id: 1 });
   await db.collection('children').createIndex({ academic_year: 1 });
+  // A page of a sorted list is only cheap when the sort key is indexed —
+  // otherwise every matching row is read and sorted in memory to hand back
+  // fifty, and paging buys nothing.
+  await db.collection('children').createIndex({ academic_year: 1, child_name: 1 });
 
   const counts = {};
   for (const c of ['branches', 'employees', 'children', 'punches']) {
@@ -228,6 +234,11 @@ const SCREENS = [
   // Last on purpose: the rollup reads what the payroll screen above wrote, so
   // measuring it first would measure an empty cache and flatter it.
   ['שכר — סיכום למנהל', `/api/payroll-month/rollup?month=${MONTH}`],
+  // The same two lists, asking for a page. What a network's client would send
+  // once it knows the list is not forty rows long.
+  ['ילדים — עמוד', `/api/children?academic_year=${YEAR}&limit=50&page=1`],
+  ['עובדים — עמוד', '/api/payroll/employees?limit=50&page=1'],
+  ['עובדים — חיפוש', '/api/payroll/employees?q=עובדת%201-1&limit=50'],
 ];
 
 (async () => {

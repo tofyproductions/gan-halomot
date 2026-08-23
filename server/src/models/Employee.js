@@ -344,6 +344,14 @@ const employeeSchema = new mongoose.Schema({
 employeeSchema.index({ branch_id: 1, is_active: 1 });
 employeeSchema.index({ israeli_id: 1, is_active: 1 });
 
+// The employees list sorts by name and, at network size, asks for one page of
+// it. Without an index on the sort key Mongo has to read every matching
+// employee and sort them in memory before it can hand back the first fifty —
+// so a page costs the same as the whole list and paging buys nothing. The
+// branch is first because the list is nearly always scoped to one.
+employeeSchema.index({ branch_id: 1, full_name: 1 });
+employeeSchema.index({ full_name: 1 });
+
 /**
  * Pre-save normalization: Israeli IDs are exactly 9 digits. Users (and the
  * TIMEDOX clock!) sometimes strip the leading zero, leaving 8 digits. We
