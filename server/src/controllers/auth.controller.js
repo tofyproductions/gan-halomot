@@ -54,6 +54,11 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     role_tab_add: roleTabs.add || [],
     role_tab_remove: roleTabs.remove || [],
     password_set: !!user.password_set,
+    // Where this person stands in the customer's org chart, when there is one.
+    // It decides which screen they are given — districts, branches or people —
+    // and it is a ceiling on what they may ask for, so it is read from the
+    // account at login rather than sent by the client.
+    org_unit_id: user.org_unit_id ? String(user.org_unit_id._id || user.org_unit_id) : null,
     // Which customer this token was issued by. One signing key serves every
     // customer, so without this a token minted by one gan verifies perfectly
     // at another — and the resolver would then hand it that other gan's

@@ -22,6 +22,26 @@ const userSchema = new mongoose.Schema({
   // `[branch_id]` so single-branch managers don't need explicit setup.
   // system_admin ignores this field (always sees everything).
   managed_branch_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'Branch', default: [] },
+
+  /**
+   * Where this person stands in the customer's org chart — the node, not a
+   * rank. Null for a gan with no chart, which is most customers.
+   *
+   * `managed_branch_ids` answers "which branches may I see" and stops being
+   * usable at network size: a district head of forty branches maintained as a
+   * list of forty ids is forty chances to be wrong, and it says nothing about
+   * WHAT they should be shown. The node says both. Everything under it is one
+   * indexed query against the materialised `path`, and the level they sit at
+   * is what decides whether they get districts, branches, or people — a
+   * network director scrolling eighty thousand carers is not a slow screen,
+   * it is the wrong screen.
+   *
+   * The two live together on purpose. `managed_branch_ids` keeps working
+   * exactly as it does for every customer that has no tree, and nothing here
+   * widens what anybody may see: the node's subtree is a ceiling, never a
+   * grant.
+   */
+  org_unit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'OrgUnit', default: null, index: true },
   phone: { type: String, default: '' },
   id_number: { type: String, default: '', index: true },
   address: { type: String, default: '' },

@@ -10,6 +10,8 @@
     "import": "node scripts/import-from-gsheets.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",
+    "platform:orgscope": "node scripts/ganflow-orgscope.test.js",
+    "platform:scale": "node scripts/ganflow-scale-test.js",
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js"

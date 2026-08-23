@@ -37,15 +37,36 @@ async function rollup(req, res, next) {
       return res.status(501).json({ error: 'אין עץ ארגוני במערכת הזו' });
     }
 
-    // Where the viewer is standing. Without a node it is the top of the tree —
-    // and a customer with no tree at all gets told so rather than an empty page.
-    let node = null;
-    if (req.query.node) {
-      node = await OrgUnit.findById(req.query.node).lean();
-      if (!node) return res.status(404).json({ error: 'יחידה לא נמצאה' });
-    } else {
-      node = await OrgUnit.findOne({ parent_id: null }).lean();
-      if (!node) return res.status(404).json({ error: 'לא הוגדר עץ ארגוני' });
+    // Where the viewer STANDS — their own node, not the top of the tree. A
+    // district head opening this without asking for anything gets their
+    // district, because that is the screen they came for.
+    let home = null;
+    if (req.user && req.user.org_unit_id) {
+      home = await OrgUnit.findById(req.user.org_unit_id).lean();
+    }
+    if (!home) {
+      // No node on the user: only somebody who already sees the whole customer
+      // may stand at the root. Anyone else is told to be placed in the chart
+      // rather than quietly handed the network.
+      if (req.user && req.user.role !== 'system_admin') {
+        return res.status(403).json({ error: 'לא שויכת ליחידה בעץ הארגוני' });
+      }
+      home = await OrgUnit.findOne({ parent_id: null }).lean();
+      if (!home) return res.status(404).json({ error: 'לא הוגדר עץ ארגוני' });
+    }
+
+    // Drilling down is asking for a lower node — and it may only go DOWN.
+    // Without this check the id is a request parameter, which means a district
+    // head reads a neighbouring district by editing a URL. The subtree is a
+    // ceiling: `path` contains every ancestor, so "is this under me" is one
+    // comparison and not a walk.
+    let node = home;
+    if (req.query.node && String(req.query.node) !== String(home._id)) {
+      const asked = await OrgUnit.findById(req.query.node).lean();
+      if (!asked) return res.status(404).json({ error: 'יחידה לא נמצאה' });
+      const under = (asked.path || []).some((p) => String(p) === String(home._id));
+      if (!under) return res.status(403).json({ error: 'היחידה הזו אינה תחת האחריות שלך' });
+      node = asked;
     }
 
     const children = await OrgUnit.find({ parent_id: node._id })
@@ -134,6 +155,10 @@ async function rollup(req, res, next) {
     res.json({
       month,
       node: { id: String(node._id), name: node.name, kind: node.kind },
+      // Where the viewer stands, so the screen can offer a way back up without
+      // offering a way above them.
+      home: { id: String(home._id), name: home.name, kind: home.kind },
+      can_go_up: String(node._id) !== String(home._id),
       is_leaf: false,
       rows,
       total,
