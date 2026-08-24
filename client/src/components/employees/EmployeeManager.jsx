@@ -226,7 +226,11 @@ export default function EmployeeManager() {
       .then(res => setEmployees(res.data.employees || []))
       .catch((err) => {
         console.error(err);
-        toast.error('שגיאה בטעינת עובדים');
+        // 413 already produced a toast in the api client saying the list is too
+        // long and how to narrow it. Adding "שגיאה בטעינת עובדים" on top of it
+        // contradicts the advice — one message says do this, the other says the
+        // system is broken.
+        if (err?.response?.status !== 413) toast.error('שגיאה בטעינת עובדים');
       })
       .finally(() => setLoading(false));
   }, [selectedBranch, showArchived]);

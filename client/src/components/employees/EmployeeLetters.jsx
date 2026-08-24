@@ -72,7 +72,11 @@ export default function EmployeeLetters() {
         const wanted = params.get('employee');
         if (wanted && list.some(e => String(e.id || e._id) === wanted)) setEmpId(wanted);
       })
-      .catch(() => toast.error('שגיאה בטעינת עובדים'))
+      .catch((err) => {
+        // The api client already explained a 413; a second, vaguer message
+        // beside it just makes the advice look like noise.
+        if (err?.response?.status !== 413) toast.error('שגיאה בטעינת עובדים');
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
