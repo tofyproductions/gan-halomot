@@ -350,3 +350,23 @@ exports.billingMark = async (req, res, next) => {
     res.json(row);
   } catch (err) { next(err); }
 };
+
+/**
+ * The name and address customers are given.
+ *
+ * The console used to write the domain into eight places. An address that lives
+ * in two copies disagrees the day somebody edits one — and the copy that gets
+ * missed is the one printed on a contract. It also has to be the same domain
+ * the resolver reads customers out of, so it comes from here rather than from
+ * the page.
+ *
+ * Public on purpose: it is a brand name and a domain, not a secret, and
+ * requiring a login to render the login screen's own logo is a loop.
+ */
+exports.brand = (req, res) => {
+  res.json({
+    name: process.env.PLATFORM_BRAND || 'חלום',
+    tagline: process.env.PLATFORM_TAGLINE || 'מערכת לניהול גני ילדים',
+    domain: process.env.PLATFORM_DOMAIN || 'dreamgan.com',
+  });
+};

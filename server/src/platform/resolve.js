@@ -18,14 +18,29 @@ const { isEnabled, controlPlane, tenantConnection } = require('./connection');
 
 const RESERVED = new Set(['www', 'app', 'api', 'admin', 'console', 'status', 'mail', 'static', 'cdn']);
 
+/**
+ * ANCHORED ON OUR OWN DOMAIN, deliberately.
+ *
+ * The earlier version took the first label of any three-label host. That reads
+ * `dreamgan.onrender.com` as a customer called "dreamgan" — the platform's own
+ * Render address, which serves the console and the demo, would answer every
+ * request with "לקוח לא נמצא" the day the customer registry is switched on.
+ * The same trap waits behind any preview or staging host.
+ *
+ * So a customer is only named by a host that ends in the address we sell:
+ * `<slug>.dreamgan.com`. Anything else names no customer, and the caller
+ * decides whether that is an error.
+ */
 function slugFromHost(host) {
   if (!host) return null;
-  const name = host.split(':')[0].toLowerCase();
+  const name = host.split(':')[0].toLowerCase().replace(/\.$/, '');
   if (name === 'localhost' || /^\d+(\.\d+)*$/.test(name)) return null;
 
-  const labels = name.split('.');
-  if (labels.length < 3) return null;               // ganflow.co.il — no customer named
-  const first = labels[0];
+  const domain = String(process.env.PLATFORM_DOMAIN || 'dreamgan.com').toLowerCase();
+  if (!name.endsWith('.' + domain)) return null;    // our own Render host, a preview host, anything else
+
+  const first = name.slice(0, -(domain.length + 1));
+  if (!first || first.includes('.')) return null;   // dreamgan.com itself, or a deeper name
   if (RESERVED.has(first)) return null;
   return first;
 }

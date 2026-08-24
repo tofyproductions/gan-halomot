@@ -116,6 +116,20 @@ app.use('/api', routes);
 // does not fall through and get handed a gan's application shell.
 if (require('./platform/connection').isEnabled()) {
   app.use('/console', express.static(path.join(__dirname, '../../console')));
+
+  // The root address, dreamgan.com, is a shop window rather than an
+  // application. It has to point at Render — a wildcard certificate is not
+  // issued for a domain whose root points somewhere else — so the request
+  // arrives here naming no customer, and handing it a gan's login screen it
+  // cannot log into is the worst of the available answers.
+  //
+  // A host that DOES name a customer falls through untouched: this only
+  // catches the bare domain and the reserved names.
+  const { slugFromHost } = require('./platform/resolve');
+  app.get('/', (req, res, next) => {
+    if (slugFromHost(req.headers.host)) return next();
+    res.sendFile(path.join(__dirname, '../../landing/index.html'));
+  });
 }
 
 // Serve static frontend in production

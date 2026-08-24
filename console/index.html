@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GanFlow — קונסולת לקוחות</title>
+<title>חלום — קונסולת לקוחות</title>
 <style>
   :root{
     --bg:#F4F7FA; --card:#fff; --line:#E2EAF0; --ink:#16324A; --dim:#5B7387;
@@ -55,6 +55,19 @@
 <div id="app"></div>
 
 <script>
+/**
+ * The product's name and the domain customers are addressed at.
+ *
+ * Both were written out in eight places, so changing either meant finding all
+ * eight — and the one that gets missed is the one printed on a contract. The
+ * domain also has to match what the server resolves customers by, which is why
+ * it comes from the server rather than being repeated here: two copies of an
+ * address disagree the day somebody edits one.
+ */
+const BRAND = 'חלום';
+const BRAND_TAG = 'מערכת לניהול גני ילדים';
+let DOMAIN = 'dreamgan.com';   // replaced at load from /api/platform/brand
+
 const API = (localStorage.gf_api || '') + '/api/platform';
 let token = localStorage.gf_token || '';
 let me = null;
@@ -70,6 +83,19 @@ async function api(path, opts = {}) {
 }
 
 const el = (h) => { const d = document.createElement('div'); d.innerHTML = h.trim(); return d.firstElementChild; };
+
+// Asked for before the first screen paints, so the login does not flash a
+// placeholder domain and then correct itself. If it fails the built-in default
+// stands — a console that will not open because a brand name did not load is a
+// worse outcome than a stale name.
+async function loadBrand() {
+  try {
+    const r = await fetch(API + '/brand');
+    if (!r.ok) return;
+    const b = await r.json();
+    if (b.domain) DOMAIN = b.domain;
+  } catch { /* the default is good enough to work with */ }
+}
 const app = () => document.getElementById('app');
 const money = (n) => '₪' + Number(n || 0).toLocaleString('he-IL');
 const date = (d) => d ? new Date(d).toLocaleDateString('he-IL') : '—';
@@ -82,7 +108,7 @@ function renderLogin(err) {
     <div class="login">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
         <div style="width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#2BB6A3,#2E7BC4)"></div>
-        <div><div style="font-weight:800;font-size:18px">GanFlow</div><div style="color:#5B7387;font-size:12px">קונסולת לקוחות</div></div>
+        <div><div style="font-weight:800;font-size:18px">${BRAND}</div><div style="color:#5B7387;font-size:12px">קונסולת לקוחות</div></div>
       </div>
       <div class="card">
         ${err ? `<div class="err">${err}</div>` : ''}
@@ -113,7 +139,7 @@ async function renderApp() {
   app().innerHTML = `
     <header>
       <div class="logo"></div>
-      <h1>GanFlow — קונסולת לקוחות</h1>
+      <h1>${BRAND} — קונסולת לקוחות</h1>
       <div class="who">${me ? me.full_name || me.email : ''} · <a href="#" id="out" style="color:#5B7387">יציאה</a></div>
     </header>
     <main>
@@ -301,7 +327,7 @@ async function loadList() {
         <th>שם</th><th>כתובת</th><th>סטטוס</th><th>מחיר לילד</th><th>מינימום</th><th>נוצר</th></tr></thead>
       <tbody>${rows.map(t => `<tr class="row" data-id="${t._id}">
         <td><b>${esc(t.name)}</b></td>
-        <td class="mono">${esc(t.slug)}.ganflow.co.il</td>
+        <td class="mono">${esc(t.slug)}.${DOMAIN}</td>
         <td><span class="pill s-${t.status}">${STATUS[t.status]||t.status}</span></td>
         <td>${t.pricing?.tiers?.length ? 'מדרגות' : money(t.pricing?.price_per_child)}</td>
         <td>${money(t.pricing?.minimum_monthly)}</td>
@@ -320,7 +346,7 @@ function renderCreate() {
     <div class="grid">
       <div><label>שם הגן / הרשת</label><input id="name"></div>
       <div><label>כתובת (באנגלית)</label><input id="slug" class="mono" placeholder="shalhevet">
-        <div class="hint">shalhevet.ganflow.co.il — לא ניתן לשינוי אחר כך</div></div>
+        <div class="hint">${"shalhevet." + DOMAIN} — לא ניתן לשינוי אחר כך</div></div>
     </div>
     <h3>המנהל הראשון</h3>
     <div class="grid">
@@ -407,7 +433,7 @@ function showPassword(tenant, pw, login) {
     </div>`).join('');
   const m = el(`<div class="modal"><div class="card">
     <h2>${esc(tenant.name)} הוקם</h2>
-    <div class="ok">המערכת מוכנה בכתובת <b class="mono">${esc(tenant.slug)}.ganflow.co.il</b></div>
+    <div class="ok">המערכת מוכנה בכתובת <b class="mono">${esc(tenant.slug)}.${DOMAIN}</b></div>
     <p style="margin:0 0 8px">פרטי הכניסה של המנהל/ת — <b>מוצגים פעם אחת בלבד</b>. העתק אותם עכשיו ומסור אותם בטלפון, לא במייל.</p>
     <div style="background:#F4F7FA;border:1px solid var(--line);border-radius:9px;padding:6px 14px">${rows}</div>
     <p class="hint">כדאי שהמנהל/ת יחליף/תחליף את הסיסמה אחרי הכניסה הראשונה.</p>
@@ -434,7 +460,7 @@ async function renderTenant(id) {
         <h2 style="margin:0;flex:1">${esc(t.name)}</h2>
         <span class="pill s-${t.status}">${STATUS[t.status]||t.status}</span>
       </div>
-      <div class="mono" style="color:#5B7387;margin-bottom:18px">${esc(t.slug)}.ganflow.co.il · ${esc(t.db_name)}</div>
+      <div class="mono" style="color:#5B7387;margin-bottom:18px">${esc(t.slug)}.${DOMAIN} · ${esc(t.db_name)}</div>
       ${u?.error ? `<div class="err">${esc(u.error)}</div>` : `
       <div class="kpis">
         <div class="kpi"><div class="n">${u.children}</div><div class="l">ילדים</div></div>
@@ -500,7 +526,7 @@ async function renderTenant(id) {
         // Handed over rather than opened automatically: the token belongs to
         // the customer's address, and this console has no business holding a
         // session for their system in the same browser tab as everybody else's.
-        const url = `https://${t.slug}.ganflow.co.il`;
+        const url = `https://${t.slug}.${DOMAIN}`;
         await navigator.clipboard.writeText(r.token).catch(() => {});
         alert(
           `נוצרה צפייה במערכת של ${r.tenant.name}.\n\n` +
@@ -551,6 +577,9 @@ async function renderTenant(id) {
 
 // ------------------------------------------------------------------- start
 (async () => {
+  // Before the first paint, so no screen shows a placeholder domain and then
+  // corrects itself in front of somebody reading it.
+  await loadBrand();
   if (!token) return renderLogin();
   try { const s = await api('/summary'); me = null; renderApp(); }
   catch { localStorage.removeItem('gf_token'); token = ''; renderLogin(); }

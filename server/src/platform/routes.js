@@ -8,6 +8,9 @@ const c = require('./controllers/tenant.controller');
  */
 router.post('/login', c.login);
 
+// Before the login, deliberately: the login screen renders the brand.
+router.get('/brand', c.brand);
+
 router.use(c.platformAuth);
 
 router.get('/summary', c.summary);

@@ -157,6 +157,22 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   const tenantsNow = await Tenant.countDocuments();
   check('יצירה שנכשלה לא משאירה לקוח חצי', tenantsNow === 3);
 
+  // ------------------------------------------------------- the address itself
+  // Which customer a request belongs to is decided by the host name and
+  // nothing else, so the rule that reads it is worth an assertion. The one
+  // that matters is the Render host: it serves the console and the demo, and
+  // reading it as a customer breaks the platform's own address.
+  const { slugFromHost } = require('../src/platform/resolve');
+  process.env.PLATFORM_DOMAIN = 'dreamgan.com';
+  check('כתובת לקוח מזוהה', slugFromHost('shalhevet.dreamgan.com') === 'shalhevet');
+  check('אותיות גדולות ונקודה מסיימת לא מבלבלות', slugFromHost('Shalhevet.DreamGan.com.') === 'shalhevet');
+  check('פורט לא מבלבל', slugFromHost('shalhevet.dreamgan.com:8080') === 'shalhevet');
+  check('הכתובת של רנדר איננה לקוח', slugFromHost('dreamgan.onrender.com') === null);
+  check('הדומיין עצמו איננו לקוח', slugFromHost('dreamgan.com') === null && slugFromHost('www.dreamgan.com') === null);
+  check('שם שמור איננו לקוח', slugFromHost('console.dreamgan.com') === null);
+  check('דומיין זר איננו לקוח', slugFromHost('shalhevet.example.com') === null);
+  check('לוקאלהוסט ו-IP אינם לקוח', slugFromHost('localhost:5000') === null && slugFromHost('127.0.0.1') === null);
+
   const failed = results.filter(([, ok]) => !ok);
   console.log(failed.length ? `\n💥 ${failed.length} נכשלו\n` : '\n🎉 הכל עבר\n');
 

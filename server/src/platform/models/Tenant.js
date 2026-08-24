@@ -29,7 +29,7 @@ const tenantSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
 
   /**
-   * The subdomain: `shalhevet` serves shalhevet.ganflow.co.il.
+   * The subdomain: `shalhevet` serves shalhevet.dreamgan.com.
    *
    * Immutable once customers have been told their address, so it is not the
    * display name — a gan that rebrands changes `name` and keeps its logins.

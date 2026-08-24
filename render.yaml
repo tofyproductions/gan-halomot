@@ -69,6 +69,15 @@ services:
       # refuses rather than guessing.
       - key: PLATFORM_TENANT_URI
         sync: false
+      # The name and address customers see. In the environment rather than in
+      # the code, because the domain is bought after the software is written and
+      # a name that lives in eight files is a name somebody misses one of.
+      - key: PLATFORM_BRAND
+        value: חלום
+      - key: PLATFORM_TAGLINE
+        value: מערכת לניהול גני ילדים
+      - key: PLATFORM_DOMAIN
+        value: dreamgan.com
       - key: JWT_SECRET
         sync: false
       - key: FRONTEND_URL
