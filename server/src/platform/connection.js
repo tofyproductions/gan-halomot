@@ -5,6 +5,7 @@ const tenantSchema = require('./models/Tenant');
 const platformUserSchema = require('./models/PlatformUser');
 const auditLogSchema = require('./models/AuditLog');
 const orgUnitSchema = require('./models/OrgUnit');
+const billingPeriodSchema = require('./models/BillingPeriod');
 
 /**
  * Connections, and which database each request is talking to.
@@ -54,6 +55,7 @@ async function controlPlane() {
     Tenant: conn.model('Tenant', tenantSchema),
     PlatformUser: conn.model('PlatformUser', platformUserSchema),
     AuditLog: conn.model('AuditLog', auditLogSchema),
+    BillingPeriod: conn.model('BillingPeriod', billingPeriodSchema),
   };
   return control;
 }
@@ -68,7 +70,9 @@ async function controlPlane() {
  * customer reading another's children.
  */
 function bindModels(conn) {
-  const models = require('../models');
+  // The real models, not the per-request stand-ins — a stand-in has no schema
+  // to offer until a customer is in scope, and here there is not one yet.
+  const models = require('../models').__real || require('../models');
   const bound = { OrgUnit: conn.model('OrgUnit', orgUnitSchema) };
   for (const [name, Model] of Object.entries(models)) {
     if (!Model || !Model.schema) continue;
@@ -102,8 +106,34 @@ async function tenantConnection(tenant) {
     return cached;
   }
 
-  const baseUri = tenant.db_uri || env.MONGODB_URI;
+  /**
+   * WHERE A CUSTOMER'S DATABASE LIVES, AND WHY THE FALLBACK IS DANGEROUS.
+   *
+   * `db_uri` is empty for every customer the console creates — the form has no
+   * field for it — so this used to mean "whatever MONGODB_URI this process
+   * happens to have". Which process is not a detail: the platform server has
+   * the platform's, and a maintenance script run from `server/` has the one in
+   * `.env`, which is the gan's PRODUCTION cluster.
+   *
+   * Found by following the runbook from scratch: the import tool went looking
+   * for the new customer's branches inside production, found none, and stopped.
+   * It stopped by luck. Had that database had a branch in it, the tool would
+   * have written a customer's children into the gan's production cluster.
+   *
+   * So the fallback is now explicit rather than ambient. `PLATFORM_TENANT_URI`
+   * says, once, where customers live. Falling back to whatever this process was
+   * pointed at is exactly how one customer's data ends up somewhere nobody
+   * would have chosen, and the message says which customer and what to set.
+   */
+  const baseUri = tenant.db_uri || process.env.PLATFORM_TENANT_URI || env.MONGODB_URI;
   if (!baseUri) throw new Error(`tenant ${key} has no database uri`);
+  if (!tenant.db_uri && !process.env.PLATFORM_TENANT_URI) {
+    throw Object.assign(new Error(
+      `ללקוח "${key}" אין כתובת מסד משלו, ואין PLATFORM_TENANT_URI שיגיד איפה לקוחות יושבים.\n` +
+      '   בלי אחד מהם, הלקוח נופל למסד שהתהליך הזה מחובר אליו — וזה עלול להיות הייצור.\n' +
+      '   הגדר PLATFORM_TENANT_URI, או db_uri על הלקוח.',
+    ), { status: 500 });
+  }
 
   const conn = await mongoose.createConnection(withDbName(baseUri, tenant.db_name), {
     maxPoolSize: 5,           // 40 customers × 5 is already 200 sockets

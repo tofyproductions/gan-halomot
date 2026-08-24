@@ -27,6 +27,11 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   const base = mongod.getUri().replace(/\/$/, '');
 
   process.env.PLATFORM_MONGODB_URI = `${base}/gf_control`;
+  // Where customers' databases are opened. Required now, and this test failing
+  // without it is the point: it used to inherit whatever MONGODB_URI the
+  // process happened to carry, which for a script run from server/ is the gan's
+  // production cluster.
+  process.env.PLATFORM_TENANT_URI = base;
   process.env.MONGODB_URI = `${base}/unused_default`;
   process.env.NODE_ENV = 'test';
 
@@ -39,12 +44,12 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   // ---------------------------------------------------------------- create
   const a = await createTenant({
     name: 'גן שלהבת', slug: 'shalhevet', admin_email: 'a@shalhevet.test',
-    admin_name: 'מנהלת שלהבת', first_branch_name: 'שלהבת',
+    admin_name: 'מנהלת שלהבת', admin_id_number: '111111118', first_branch_name: 'שלהבת',
   }, { email: 'owner@ganflow.test' });
 
   const b = await createTenant({
     name: 'רשת מעונות אורים', slug: 'urim', admin_email: 'b@urim.test',
-    admin_name: 'מנהל רשת', is_network: true, first_branch_name: 'אורים מרכז',
+    admin_name: 'מנהל רשת', admin_id_number: '222222226', is_network: true, first_branch_name: 'אורים מרכז',
     pricing: { price_per_child: 12, minimum_monthly: 5000, tiers: [{ up_to: 500, price: 50 }, { up_to: null, price: 12 }] },
   }, { email: 'owner@ganflow.test' });
 
@@ -78,7 +83,12 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
   const aUsers = await A.User.find({});
   check('משתמש ראשון נוצר עם system_admin', aUsers.length === 1 && aUsers[0].role === 'system_admin');
-  check('המשתמש מחויב לבחור סיסמה', aUsers[0].password_set === false);
+  // This used to assert password_set === false, in the belief that it forced a
+  // password to be chosen at first login. It does the reverse: step one of
+  // login issues a token outright when no password is set, so the temporary
+  // password was never asked for and a name plus an id number opened the gan.
+  check('הכניסה הראשונה דורשת את הסיסמה הזמנית', aUsers[0].password_set === true);
+  check('למנהל/ת יש תעודת זהות להיכנס איתה', /^\d{5,9}$/.test(aUsers[0].id_number || ''));
 
   // -------------------------------------------------------------- org tree
   const network = await B.OrgUnit.findOne({ kind: 'network' });
@@ -141,7 +151,7 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
 
   // Typed with capitals, stored lowercase — the address is read down a
   // telephone and typed into a browser, both of which are case-blind.
-  const cased = await createTenant({ name: 'גן ההר', slug: 'Har-Habait', admin_email: 'c@har.test' }, {});
+  const cased = await createTenant({ name: 'גן ההר', slug: 'Har-Habait', admin_email: 'c@har.test', admin_name: 'מנהלת ההר', admin_id_number: '333333334' }, {});
   check('אותיות גדולות מתוקנות ולא נדחות', cased.tenant.slug === 'har-habait');
 
   const tenantsNow = await Tenant.countDocuments();

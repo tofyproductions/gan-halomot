@@ -7,7 +7,7 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday, SpecialDay,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
-  User, PunchEntryTask,
+  User, PunchEntryTask, PayrollRollup,
 } = require('../models');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
@@ -322,6 +322,34 @@ async function getMonth(req, res, next) {
         rows: [], amutot: [], branches: [], branches_in_view: [], custom_columns: [], totals: {},
       });
     }
+    // ---------------------------------------------------------------- ceiling
+    //
+    // Below here every employee in scope has their pay worked out in this
+    // process, one at a time. Measured: 3s at 20 branches, 16s at 100, 90s at
+    // 400 — and Node runs one thing at a time, so those are not ninety seconds
+    // for the person who clicked. They are ninety seconds for EVERYONE. With
+    // 2000 branches seeded, a single one of these requests took the attendance
+    // screen from 211ms to over thirty seconds and the director's own summary
+    // from 7ms to over thirty. A carer trying to clock in waits behind it too.
+    //
+    // So the screen has a size it refuses at, and says what to open instead.
+    // Answering "everyone in the network" was never useful — nobody reads
+    // eighty thousand rows — and it is the one request that can take the whole
+    // customer down from inside.
+    //
+    // The limit is deliberately far above any real gan (production has four)
+    // and far below where the wait becomes an outage.
+    const MAX_BRANCHES_IN_ONE_VIEW = Number(process.env.PAYROLL_MAX_BRANCHES || 25);
+    if (branches.length > MAX_BRANCHES_IN_ONE_VIEW) {
+      return res.status(413).json({
+        error: `המסך הזה מציג עובד-עובד, ו-${branches.length} סניפים הם יותר מדי בבת אחת.`,
+        hint: 'פתחו את סיכום השכר לפי יחידות, או בחרו סניף אחד.',
+        rollup_url: `/api/payroll-month/rollup?month=${encodeURIComponent(month)}`,
+        branches: branches.length,
+        max_branches: MAX_BRANCHES_IN_ONE_VIEW,
+      });
+    }
+
     const branchIds = branches.map(b => b._id);
 
     // Fill in any missing fixed-hours punches for employees who don't clock in.
@@ -1315,6 +1343,43 @@ async function getMonth(req, res, next) {
       acc.base  += r.breakdown.components.base_salary || 0;
       return acc;
     }, { employees: 0, hours: 0, base: 0 });
+
+    // The same totals, split per branch and kept, so that anybody above a
+    // branch can be answered by addition instead of by this computation.
+    //
+    // Written from `rows` rather than recomputed: a district that disagrees
+    // with the branches under it is a wrong number nobody can explain, and two
+    // implementations of Israeli payroll maths kept in step by hand is how that
+    // happens. Whoever opens a branch pays for it once and everybody above them
+    // reads the result.
+    //
+    // Deliberately not awaited. This is a cache for somebody else's screen; it
+    // must never be the reason the branch screen is slower or fails.
+    try {
+      const perBranch = new Map();
+      for (const r of rows) {
+        const bid = r.branch_id;
+        if (!bid) continue;
+        const t = perBranch.get(bid) || { employees: 0, hours: 0, base: 0 };
+        t.employees += 1;
+        t.hours += r.breakdown?.hours?.total || 0;
+        t.base += r.breakdown?.components?.base_salary || 0;
+        perBranch.set(bid, t);
+      }
+      if (perBranch.size) {
+        // Handed back on the request so a caller who NEEDS the write can wait
+        // for it. A person's screen must not — but the warm job exists only to
+        // produce these rows, and returning before they land is how it reported
+        // forty branches computed and left twelve of them missing.
+        req._rollupWrite = PayrollRollup.bulkWrite([...perBranch].map(([bid, t]) => ({
+          updateOne: {
+            filter: { month, branch_id: bid },
+            update: { $set: { ...t, computed_at: new Date() } },
+            upsert: true,
+          },
+        })), { ordered: false }).catch(() => {});
+      }
+    } catch { /* a stale rollup is worse than none, but neither is worth a 500 */ }
 
     // Branches referenced by anyone's per_branch breakdown — these are the
     // column groups the UI should render (filter view scope + cross-branch hours).

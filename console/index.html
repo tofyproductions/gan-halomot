@@ -130,12 +130,150 @@ async function renderApp() {
         </div>
         <div id="list">טוען…</div>
       </div>
+
+      <!-- What each customer owes for a month, frozen on the day it was worked
+           out. The console read the charge live everywhere else, which is right
+           for a screen and wrong for an invoice: March's bill must not change in
+           May because two children joined. -->
+      <div class="card" style="margin-top:18px">
+        <div class="bar">
+          <h2 style="margin:0;flex:1">חיוב חודשי</h2>
+          <input id="bmonth" type="month" style="width:auto">
+          <button class="ghost" id="bload">הצג</button>
+          <button id="brun">חשב חודש</button>
+        </div>
+        <div id="billing" class="hint">בחרו חודש והציגו.</div>
+      </div>
+
+      <!-- The log was being written and never read. Every action already lands
+           in it — who created a customer, who suspended one, who opened
+           somebody's system for support — and a record nobody can look at
+           answers no question. It is also the only honest reply to "who
+           switched us off on the 3rd". -->
+      <div class="card" style="margin-top:18px">
+        <div class="bar">
+          <h2 style="margin:0;flex:1">יומן פעולות</h2>
+          <button class="ghost" id="auditToggle">הצג</button>
+        </div>
+        <div id="audit" style="display:none">טוען…</div>
+      </div>
     </main>`;
   document.getElementById('out').onclick = () => { localStorage.removeItem('gf_token'); token=''; renderLogin(); };
   document.getElementById('new').onclick = renderCreate;
   document.getElementById('q').oninput = debounce(loadList, 250);
   document.getElementById('st').onchange = loadList;
+  // Collapsed by default and fetched only when opened — the log is for the
+  // moment somebody asks a question about it, not something to load on every
+  // visit to the customer list.
+  const bm = document.getElementById('bmonth');
+  bm.value = new Date().toISOString().slice(0, 7);
+  document.getElementById('bload').onclick = () => loadBilling(bm.value);
+  document.getElementById('brun').onclick = () => runBilling(bm.value);
+
+  document.getElementById('auditToggle').onclick = () => {
+    const box = document.getElementById('audit');
+    const open = box.style.display === 'none';
+    box.style.display = open ? 'block' : 'none';
+    document.getElementById('auditToggle').textContent = open ? 'הסתר' : 'הצג';
+    if (open) loadAudit();
+  };
   loadSummary(); loadList();
+}
+
+const BILL_STATUS = { draft: 'טיוטה', issued: 'נמסר', paid: 'שולם', void: 'בוטל' };
+
+async function loadBilling(month) {
+  const box = document.getElementById('billing');
+  box.textContent = 'טוען…';
+  try {
+    const { rows, total } = await api('/billing?month=' + encodeURIComponent(month));
+    if (!rows.length) {
+      box.innerHTML = `<div class="hint">לא חושב חודש ${esc(month)}. "חשב חודש" יבנה אותו.</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="ok">סה״כ ${money(total)} · ${rows.length} לקוחות</div>
+      <table><thead><tr>
+        <th>לקוח</th><th>ילדים</th><th>לילד</th><th>סכום</th><th>איך יצא</th><th>סטטוס</th><th></th>
+      </tr></thead><tbody>${rows.map(r => `
+        <tr>
+          <td><b>${esc(r.tenant_name || r.tenant_slug)}</b></td>
+          <td>${r.children}</td>
+          <td>${money(r.rate)}</td>
+          <td><b>${money(r.amount)}</b></td>
+          <td class="hint">${esc(r.breakdown || '')}</td>
+          <td>${esc(BILL_STATUS[r.status] || r.status)}</td>
+          <td>${r.status === 'draft'
+            ? `<button class="ghost" data-mark="${r._id}" data-to="issued">סמן כנמסר</button>`
+            : r.status === 'issued'
+              ? `<button class="ghost" data-mark="${r._id}" data-to="paid">סמן כשולם</button>`
+              : ''}</td>
+        </tr>`).join('')}</tbody></table>`;
+    box.querySelectorAll('[data-mark]').forEach((b) => {
+      b.onclick = async () => {
+        try {
+          await api('/billing/' + b.dataset.mark, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.to }) });
+          loadBilling(month); loadAudit();
+        } catch (e) { alert(e.message); }
+      };
+    });
+  } catch (e) { box.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function runBilling(month) {
+  // Shown before it is written, because "recompute" on a month somebody has
+  // already been given a number for is a conversation and not a button.
+  const dry = await api('/billing/run', { method: 'POST', body: JSON.stringify({ month, dry_run: true }) })
+    .catch((e) => { alert(e.message); return null; });
+  if (!dry) return;
+  const skipped = dry.rows.filter((r) => r.skipped).length;
+  if (!confirm(
+    `חישוב חודש ${month}:\n\n` +
+    `${dry.rows.length} לקוחות · סה״כ ₪${dry.total.toLocaleString('he-IL')}\n` +
+    (skipped ? `${skipped} חודשים כבר חושבו ולא ייגעו.\n` : '') +
+    (dry.failed.length ? `⚠️ ${dry.failed.length} לקוחות לא נגישים ולא יחויבו.\n` : '') +
+    '\nלכתוב?',
+  )) return;
+  try {
+    await api('/billing/run', { method: 'POST', body: JSON.stringify({ month }) });
+    loadBilling(month); loadAudit();
+  } catch (e) { alert(e.message); }
+}
+
+/** What each action is called on screen. An unknown one shows its own key
+ *  rather than a blank — a new action added later must not read as nothing. */
+const ACTIONS = {
+  'tenant.create': 'הקמת לקוח',
+  'tenant.update': 'עדכון לקוח',
+  'tenant.suspend': 'השהיית לקוח',
+  'tenant.resume': 'החזרה לפעילות',
+  'tenant.impersonate': 'כניסה למערכת של לקוח',
+  'billing.run': 'חישוב חודש חיוב',
+  'billing.issued': 'חיוב נמסר ללקוח',
+  'billing.paid': 'חיוב שולם',
+  'billing.void': 'חיוב בוטל',
+};
+
+async function loadAudit() {
+  const box = document.getElementById('audit');
+  try {
+    const rows = await api('/audit');
+    if (!rows.length) { box.innerHTML = '<div class="hint" style="padding:8px 0">אין עדיין פעולות רשומות.</div>'; return; }
+    box.innerHTML = `<table><thead><tr>
+        <th>מתי</th><th>מי</th><th>מה</th><th>לקוח</th><th>פרטים</th>
+      </tr></thead><tbody>${rows.map(r => `
+        <tr>
+          <td class="mono">${esc(new Date(r.at).toLocaleString('he-IL'))}</td>
+          <td>${esc(r.actor_email || '—')}</td>
+          <td>${esc(ACTIONS[r.action] || r.action)}</td>
+          <td>${esc(r.tenant_slug || '—')}</td>
+          <td class="hint">${esc(r.detail && typeof r.detail === 'object'
+            ? (r.detail.reason || Object.keys(r.detail).join(', '))
+            : (r.detail || ''))}</td>
+        </tr>`).join('')}</tbody></table>`;
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
 }
 
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -188,6 +326,12 @@ function renderCreate() {
     <div class="grid">
       <div><label>אימייל</label><input id="ae" type="email"></div>
       <div><label>שם מלא</label><input id="an"></div>
+      <!-- The identity the gan's own system logs in with: name AND id number
+           together are the credentials, and the email is not part of it. The
+           form asked for the email and not this, so the administrator it
+           created could never sign in to what had just been built. -->
+      <div><label>תעודת זהות</label><input id="aid" inputmode="numeric" autocomplete="off">
+        <div class="hint">איתה נכנסים למערכת, יחד עם השם המלא</div></div>
     </div>
     <h3>מבנה</h3>
     <div class="grid">
@@ -226,6 +370,7 @@ function renderCreate() {
         slug: m.querySelector('#slug').value.trim(),
         admin_email: m.querySelector('#ae').value.trim(),
         admin_name: m.querySelector('#an').value.trim(),
+        admin_id_number: m.querySelector('#aid').value.trim(),
         is_network: !!m.querySelector('#net').value,
         first_branch_name: m.querySelector('#fb').value.trim(),
         pricing: {
@@ -236,20 +381,36 @@ function renderCreate() {
         contact: { name: m.querySelector('#cn').value, phone: m.querySelector('#cp').value, email: m.querySelector('#ce').value },
       })});
       m.remove();
-      showPassword(r.tenant, r.temp_password);
+      showPassword(r.tenant, r.temp_password, r.login);
       loadList(); loadSummary();
     } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; b.disabled = false; }
   };
 }
 
-/** Shown once and never again — it is not stored anywhere readable. */
-function showPassword(tenant, pw) {
+/**
+ * Shown once and never again — the password is not stored anywhere readable.
+ *
+ * All THREE details, not just the password. The gan's system logs in on full
+ * name plus id number and then the password, so handing over the password
+ * alone hands over a third of what is needed — and the id number is the part
+ * whoever created the customer typed and has already forgotten.
+ */
+function showPassword(tenant, pw, login) {
+  const rows = [
+    ['שם מלא', (login && login.full_name) || ''],
+    ['תעודת זהות', (login && login.id_number) || ''],
+    ['סיסמה', pw],
+  ].filter(([, v]) => v).map(([k, v]) => `
+    <div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line)">
+      <span class="hint" style="align-self:center">${esc(k)}</span>
+      <b class="mono" style="font-size:17px;letter-spacing:.03em">${esc(v)}</b>
+    </div>`).join('');
   const m = el(`<div class="modal"><div class="card">
     <h2>${esc(tenant.name)} הוקם</h2>
     <div class="ok">המערכת מוכנה בכתובת <b class="mono">${esc(tenant.slug)}.ganflow.co.il</b></div>
-    <p style="margin:0 0 8px">סיסמה זמנית למנהל — <b>מוצגת פעם אחת בלבד</b>. העתק אותה עכשיו ומסור אותה בטלפון, לא במייל.</p>
-    <div class="mono" style="background:#F4F7FA;border:1px solid var(--line);border-radius:9px;padding:14px;font-size:19px;text-align:center;letter-spacing:.05em">${esc(pw)}</div>
-    <p class="hint">המנהל יתבקש לבחור סיסמה משלו בכניסה הראשונה.</p>
+    <p style="margin:0 0 8px">פרטי הכניסה של המנהל/ת — <b>מוצגים פעם אחת בלבד</b>. העתק אותם עכשיו ומסור אותם בטלפון, לא במייל.</p>
+    <div style="background:#F4F7FA;border:1px solid var(--line);border-radius:9px;padding:6px 14px">${rows}</div>
+    <p class="hint">כדאי שהמנהל/ת יחליף/תחליף את הסיסמה אחרי הכניסה הראשונה.</p>
     <div style="height:14px"></div><button id="ok">סגור</button>
   </div></div>`);
   document.body.appendChild(m);
@@ -297,11 +458,27 @@ async function renderTenant(id) {
         <div><label>אימייל</label><input id="ce" value="${esc(t.contact?.email)}"></div>
       </div>
       <h3>הערות</h3><textarea id="notes" rows="3">${esc(t.notes)}</textarea>
-      ${t.status === 'suspended' && t.purge_after ? `<div class="err" style="margin-top:14px">מושהה מ-${date(t.suspended_at)}. המידע יימחק ב-${date(t.purge_after)}.</div>` : ''}
+      <!-- This used to say "המידע יימחק ב-<date>", and nothing deleted
+           anything — a promise the system did not keep, made to a customer
+           about their own records. Nothing here deletes on a timer ON PURPOSE:
+           unattended irreversible destruction of a gan's children's records is
+           the one job that must never run while nobody is watching. The date is
+           when it becomes ours to decide, and deciding is a person exporting
+           and then choosing. -->
+      ${t.status === 'suspended' && t.purge_after ? `<div class="err" style="margin-top:14px">
+          מושהה מ-${date(t.suspended_at)}. המידע נשמר.
+          מ-${date(t.purge_after)} אפשר למחוק אותו — ידנית, אחרי ייצוא.
+        </div>` : ''}
       <div id="err"></div>
       <div style="height:18px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button id="save">שמור</button>
+        <!-- Read-only, thirty minutes, and logged with a reason before the
+             token exists. The label says "צפייה" rather than "כניסה" because
+             what it actually grants is looking, and support who expect to be
+             able to fix something should find that out here and not inside
+             somebody's payroll. -->
+        <button class="ghost" id="support">צפייה במערכת של הלקוח</button>
         ${t.status === 'suspended'
           ? '<button class="ghost" id="resume">החזר לפעילות</button>'
           : '<button class="danger" id="susp">השהה מנוי</button>'}
@@ -309,6 +486,32 @@ async function renderTenant(id) {
       </div>`;
 
     m.querySelector('#close').onclick = () => m.remove();
+
+    m.querySelector('#support').onclick = async () => {
+      const reason = prompt(
+        `צפייה במערכת של "${t.name}".\n\n` +
+        'זו צפייה בלבד — אפשר לראות כל מסך ואי אפשר לשנות דבר.\n' +
+        'הכניסה נרשמת ביומן עם השם שלך ועם הסיבה, ופגה אחרי 30 דקות.\n\n' +
+        'בשביל מה נכנסים?',
+      );
+      if (!reason) return;
+      try {
+        const r = await api(`/tenants/${id}/impersonate`, { method: 'POST', body: JSON.stringify({ reason }) });
+        // Handed over rather than opened automatically: the token belongs to
+        // the customer's address, and this console has no business holding a
+        // session for their system in the same browser tab as everybody else's.
+        const url = `https://${t.slug}.ganflow.co.il`;
+        await navigator.clipboard.writeText(r.token).catch(() => {});
+        alert(
+          `נוצרה צפייה במערכת של ${r.tenant.name}.\n\n` +
+          `נכנסים בתור: ${r.as}\n` +
+          `תקף ל-${r.expires_in_minutes} דקות · צפייה בלבד\n` +
+          `הכתובת: ${url}\n\n` +
+          'האסימון הועתק ללוח.',
+        );
+        loadAudit();
+      } catch (e) { alert(e.message); }
+    };
 
     m.querySelector('#save').onclick = async () => {
       try {
@@ -331,7 +534,7 @@ async function renderTenant(id) {
 
     const susp = m.querySelector('#susp');
     if (susp) susp.onclick = async () => {
-      const reason = prompt(`השהיית "${t.name}".\n\nהגן יאבד גישה מיד. המידע יישמר חצי שנה ואז יימחק.\n\nסיבה:`);
+      const reason = prompt(`השהיית "${t.name}".\n\nהגן יאבד גישה מיד. המידע נשמר במלואו ולא נמחק מעצמו.\nאחרי חצי שנה אפשר יהיה למחוק אותו ידנית, אחרי ייצוא.\n\nסיבה:`);
       if (reason === null) return;
       await api(`/tenants/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) });
       m.remove(); loadList(); loadSummary();

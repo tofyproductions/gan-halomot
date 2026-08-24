@@ -6,6 +6,19 @@ const { authMiddleware } = require('../middleware/auth');
 // so a server without it (גן החלומות, today) does not gain a single route.
 if (require('../platform/connection').isEnabled()) {
   router.use('/platform', require('../platform/routes'));
+
+  // Everything BELOW this line belongs to one customer, and runs holding that
+  // customer's models. Mounted under the control plane on purpose: the console
+  // is ours and is reached without a customer in the address.
+  //
+  // `required: true` is the load-bearing word. Without it a request that names
+  // no customer falls through to the default connection — which on a control
+  // plane is an empty database on a good day and somebody else's gan on a bad
+  // one. It refuses instead.
+  const { tenantResolver } = require('../platform/resolve');
+  const { runWith } = require('../platform/context');
+  router.use(tenantResolver({ required: true }));
+  router.use((req, res, next) => runWith(req.models, next));
 }
 
 // Public routes (no auth required)

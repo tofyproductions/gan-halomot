@@ -33,7 +33,7 @@ const ORIGIN = env.NODE_ENV === 'production'
   ? 'https://gan-halomot.onrender.com'
   : 'http://localhost:5173';
 
-function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }) {
+function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = null) {
   // Resolve managed_branch_ids: explicit value first, single-branch managers
   // fall back to [branch_id] so they don't need separate configuration.
   let managed = (user.managed_branch_ids || []).map(b => b?._id || b).filter(Boolean);
@@ -54,6 +54,16 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }) {
     role_tab_add: roleTabs.add || [],
     role_tab_remove: roleTabs.remove || [],
     password_set: !!user.password_set,
+    // Where this person stands in the customer's org chart, when there is one.
+    // It decides which screen they are given — districts, branches or people —
+    // and it is a ceiling on what they may ask for, so it is read from the
+    // account at login rather than sent by the client.
+    org_unit_id: user.org_unit_id ? String(user.org_unit_id._id || user.org_unit_id) : null,
+    // Which customer this token was issued by. One signing key serves every
+    // customer, so without this a token minted by one gan verifies perfectly
+    // at another — and the resolver would then hand it that other gan's
+    // children. Absent on a single-customer server, where it means nothing.
+    tenant: req && req.tenant ? req.tenant.slug : undefined,
   };
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
   return { token, user: payload };
@@ -98,7 +108,7 @@ async function login(req, res, next) {
       });
     }
 
-    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role));
+    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     result.password_prompt = true; // no password chosen yet → nag on the client
     res.json(result);
@@ -122,7 +132,7 @@ async function loginWithPassword(req, res, next) {
     if (!ok) {
       return res.status(401).json({ error: 'סיסמה שגויה' });
     }
-    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role));
+    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     res.json(result);
   } catch (error) {
@@ -331,7 +341,7 @@ async function webauthnAuthVerify(req, res, next) {
     user.webauthn_challenge = null;
     await user.save();
 
-    const result = makeToken(user, true, await roleTabOverrides(user.role)); // biometric = always remember
+    const result = makeToken(user, true, await roleTabOverrides(user.role), req); // biometric = always remember
     res.json(result);
   } catch (error) {
     next(error);

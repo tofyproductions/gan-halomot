@@ -34,6 +34,26 @@ api.interceptors.response.use(
         window.location.href = '/login';
       }
     }
+    /**
+     * 413 here does not mean an upload was too big. It means a screen asked for
+     * a list that is too long to send — every employee in a network, every
+     * registration across two thousand branches. The server refuses instead of
+     * spending a second building a reply the browser cannot draw.
+     *
+     * Handled centrally because five screens can hit it and each one would
+     * otherwise show a generic failure, which reads as "the system is broken"
+     * rather than "narrow this down". The server sends `hint` saying how; it is
+     * shown rather than swallowed. A screen that wants to say something better
+     * still can — it sees the error too.
+     */
+    if (error.response?.status === 413 && error.response?.data?.hint) {
+      const { error: msg, hint } = error.response.data;
+      // eslint-disable-next-line no-alert
+      console.warn('רשימה גדולה מדי:', msg, '—', hint);
+      import('react-toastify')
+        .then(({ toast }) => toast.warning(`${msg} ${hint}`, { autoClose: 9000 }))
+        .catch(() => {});
+    }
     console.error('API Error:', error.response?.status, error.response?.data?.error || error.message);
     return Promise.reject(error);
   }

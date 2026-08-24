@@ -27,4 +27,8 @@ const childSchema = new mongoose.Schema({
 childSchema.index({ registration_id: 1 });
 childSchema.index({ classroom_id: 1, academic_year: 1 });
 
+// Same reason as Employee: the list is filtered by year and sorted by name,
+// and an in-memory sort makes a page cost what the whole list costs.
+childSchema.index({ academic_year: 1, child_name: 1 });
+
 module.exports = mongoose.model('Child', childSchema);

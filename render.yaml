@@ -63,6 +63,12 @@ services:
       # The DEMO database. Set in the dashboard, never copied from gan-halomot.
       - key: MONGODB_URI
         sync: false
+      # Where CUSTOMERS' databases are opened. Without it a customer falls back
+      # to whatever database this process is pointed at, which is how one
+      # customer's children end up in somebody else's cluster — the server
+      # refuses rather than guessing.
+      - key: PLATFORM_TENANT_URI
+        sync: false
       - key: JWT_SECRET
         sync: false
       - key: FRONTEND_URL

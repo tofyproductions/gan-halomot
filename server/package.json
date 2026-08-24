@@ -11,6 +11,13 @@
     "test:terms": "node scripts/employment-terms.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
+    "platform:isolation": "node scripts/ganflow-isolation.test.js",
+    "platform:orgscope": "node scripts/ganflow-orgscope.test.js",
+    "platform:billing": "node scripts/ganflow-billing.test.js",
+    "platform:scale": "node scripts/ganflow-scale-test.js",
+    "platform:cluster": "node scripts/ganflow-cluster-test.js",
+    "tenant:export": "node scripts/ganflow-tenant-export.js",
+    "tenant:import": "node scripts/ganflow-tenant-import.js",
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js"

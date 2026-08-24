@@ -1,4 +1,5 @@
 const User = require('./User');
+const PayrollRollup = require('./PayrollRollup');
 const Branch = require('./Branch');
 const Classroom = require('./Classroom');
 const Registration = require('./Registration');
@@ -76,7 +77,8 @@ const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
 const Candidate = require('./Candidate');
 
-module.exports = {
+const real = {
+  PayrollRollup,
   User,
   Branch,
   Classroom,
@@ -154,3 +156,54 @@ module.exports = {
   Absence,
   PickupAuthorization,
 };
+
+
+// ---------------------------------------------------------------------------
+// One customer's models, or everyone's.
+//
+// With no PLATFORM_MONGODB_URI this file exports the real models compiled
+// against the ordinary connection, exactly as it always has. `real` is what
+// leaves, and nothing below runs.
+//
+// On a control plane it exports a stand-in per model instead. A controller
+// still writes `const { Child } = require('../models')` and still holds that
+// value forever — but `Child.find` is looked up when the query is made, and
+// answered from the customer the current request resolved to. The 95,000 lines
+// above this comment never learn that customers exist.
+//
+// Reaching a query with no customer in scope THROWS. It would be easy to fall
+// back to the default connection and it is the one thing that must not happen:
+// that is the shape of serving one gan the contents of another.
+const { platformMode, currentModels } = require('../platform/context');
+
+function standIn(name) {
+  const pick = () => {
+    const models = currentModels();
+    if (!models) {
+      throw new Error(
+        `נגישה למודל ${name} מחוץ להקשר של לקוח. ` +
+        'על שרת פלטפורמה כל שאילתה חייבת לרוץ בתוך בקשה שזוהה לה לקוח.'
+      );
+    }
+    const M = models[name];
+    if (!M) throw new Error(`המודל ${name} אינו קיים אצל הלקוח הנוכחי`);
+    return M;
+  };
+  return new Proxy(function () {}, {
+    get: (_t, prop) => (prop === '__isStandIn' ? true : pick()[prop]),
+    set: (_t, prop, value) => { pick()[prop] = value; return true; },
+    has: (_t, prop) => prop in pick(),
+    construct: (_t, args) => new (pick())(...args),
+    apply: (_t, thisArg, args) => pick().apply(thisArg, args),
+  });
+}
+
+const exported = platformMode()
+  ? Object.fromEntries(Object.keys(real).map((name) => [name, standIn(name)]))
+  : { ...real };
+
+// bindModels() needs the real schemas to compile a customer's copies, and a
+// stand-in cannot answer `.schema` — there is no customer yet when it asks.
+Object.defineProperty(exported, '__real', { value: real, enumerable: false });
+
+module.exports = exported;

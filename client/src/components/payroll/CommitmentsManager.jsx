@@ -312,7 +312,12 @@ export default function CommitmentsManager() {
     if (selectedBranch && !isAllBranches) params.branch = selectedBranch;
     Promise.all([
       api.get('/payroll/commitments', { params }),
-      api.get('/payroll/employees', { params: { active: 'true' } }),
+      // `params` already carries the selected branch — the commitments call
+      // uses it and this one did not, so choosing a branch narrowed half the
+      // screen and downloaded every employee in the customer for the other
+      // half. Harmless at four branches, and at two thousand it is the whole
+      // roster fetched to render one branch's table.
+      api.get('/payroll/employees', { params: { ...params, active: 'true' } }),
     ])
       .then(([cRes, eRes]) => {
         setCommitments(cRes.data.commitments || []);

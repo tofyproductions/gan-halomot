@@ -1,6 +1,23 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 
+/**
+ * A valid signature is not the same as "issued for this customer".
+ *
+ * Every customer's tokens are signed with the same key, so verify() alone says
+ * only that WE minted it — not for whom. Pointed at another customer's address
+ * the token still verifies, the resolver has already opened that customer's
+ * database, and the reply is somebody else's children. The claim is stamped at
+ * login and has to match the customer the request resolved to.
+ *
+ * On a single-customer server there is no tenant on the request and no claim in
+ * the token, and this is a pass-through.
+ */
+function sameTenant(req, decoded) {
+  if (!req.tenant) return true;
+  return decoded && decoded.tenant === req.tenant.slug;
+}
+
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
@@ -10,6 +27,25 @@ function authMiddleware(req, res, next) {
   try {
     const token = header.split(' ')[1];
     const decoded = jwt.verify(token, env.JWT_SECRET);
+    if (!sameTenant(req, decoded)) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+
+    // A support session may look at everything and change nothing. Fixing a
+    // customer's payroll while signed in as one of their managers leaves a
+    // record saying the manager did it, and no support call is worth that —
+    // when something must change, the customer changes it while we watch.
+    //
+    // Enforced on the METHOD rather than on a list of routes, because a list
+    // is a thing somebody forgets to add to. Anything that is not a read is
+    // refused, and the message says why rather than looking like a bug.
+    if (decoded.support && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      return res.status(403).json({
+        error: 'זו כניסת תמיכה — אפשר לצפות בכל המסכים, אבל לא לשנות דבר.',
+        support_by: decoded.support_by || null,
+      });
+    }
+
     req.user = decoded;
     next();
   } catch (err) {
@@ -27,7 +63,8 @@ function optionalAuth(req, res, next) {
   }
   try {
     const token = header.split(' ')[1];
-    req.user = jwt.verify(token, env.JWT_SECRET);
+    const decoded = jwt.verify(token, env.JWT_SECRET);
+    if (sameTenant(req, decoded)) req.user = decoded;
   } catch {}
   next();
 }

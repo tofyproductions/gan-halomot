@@ -18,10 +18,41 @@ async function getAll(req, res, next) {
       filter.classroom_id = classroom_id;
     }
 
-    const children = await Child.find(filter)
+    // Paging, on the same terms as the employees list: only when asked for, so
+    // a gan keeps getting its whole class and nothing is ever silently cut —
+    // a child missing from a list reads as a child who left. `total` is
+    // returned either way so a network's client can discover it should page.
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : null;
+    const page = Math.max(1, Number(req.query.page) || 1);
+
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.child_name = { $regex: safe, $options: 'i' };
+    }
+
+    const total = await Child.countDocuments(filter);
+
+    // Same ceiling as the employees list, and for the same reason: everything
+    // is right for a gan and fatal for a network. Refusing names the number and
+    // the way to ask again, rather than sending 80,000 rows to a browser that
+    // cannot draw them.
+    const MAX_UNPAGED = Number(process.env.LIST_MAX_UNPAGED || 5000);
+    if (!limit && total > MAX_UNPAGED) {
+      return res.status(413).json({
+        error: `${total.toLocaleString('he-IL')} ילדים הם יותר מדי להצגה בבת אחת.`,
+        hint: 'בחרו סניף או כיתה, חפשו, או בקשו עמוד (limit ו-page).',
+        total,
+        max_unpaged: MAX_UNPAGED,
+      });
+    }
+
+    let query = Child.find(filter)
       .populate('classroom_id', 'name capacity')
-      .sort({ child_name: 1 })
-      .lean();
+      .sort({ child_name: 1 });
+    if (limit) query = query.skip((page - 1) * limit).limit(limit);
+    const children = await query.lean();
 
     const result = children.map(c => ({
       ...c,
@@ -31,7 +62,13 @@ async function getAll(req, res, next) {
       classroom_id: c.classroom_id?._id || c.classroom_id,
     }));
 
-    res.json({ children: result });
+    res.json({
+      children: result,
+      total,
+      page: limit ? page : 1,
+      limit: limit || total,
+      has_more: limit ? page * limit < total : false,
+    });
   } catch (error) {
     next(error);
   }

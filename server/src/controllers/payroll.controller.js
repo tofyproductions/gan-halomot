@@ -184,11 +184,56 @@ async function listEmployees(req, res, next) {
       if (!filter.branch_id) filter.branch_id = { $in: allowed };
     }
 
-    const employees = await Employee.find(filter)
+    // ------------------------------------------------------------ paging
+    //
+    // Measured: 213ms at 400 branches, 1,028ms at 2000 — linear, and linear
+    // from a base that is already the whole table. A gan with forty employees
+    // wants all forty and always did; a network with eighty-four thousand
+    // wants a page, and would not survive being sent the rest even if the
+    // server were instant, because the browser has to draw them.
+    //
+    // NO DEFAULT LIMIT, deliberately. Truncating silently is how a manager
+    // concludes an employee left. Paging happens only when the caller asks,
+    // and `total` comes back either way so a client can find out it should.
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : null;
+    const page = Math.max(1, Number(req.query.page) || 1);
+
+    // Search belongs on the server for the same reason: a table that filters
+    // in the browser has to have been sent everything first.
+    const q = String(req.query.q || '').trim();
+    if (q) {
+      const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      filter.$or = [
+        { full_name: { $regex: safe, $options: 'i' } },
+        { id_number: { $regex: safe } },
+      ];
+    }
+
+    const total = await Employee.countDocuments(filter);
+
+    // A caller that asked for no page gets everything, which is right for a gan
+    // and impossible for a network: 84,000 rows is a second on the server and a
+    // dead browser after it. So an unpaged request that would return more than
+    // this refuses and says how to ask again — the same shape as the payroll
+    // month's ceiling, and for the same reason. Far above any real branch
+    // (production's largest has 42), far below what a table can draw.
+    const MAX_UNPAGED = Number(process.env.LIST_MAX_UNPAGED || 5000);
+    if (!limit && total > MAX_UNPAGED) {
+      return res.status(413).json({
+        error: `${total.toLocaleString('he-IL')} עובדים הם יותר מדי להצגה בבת אחת.`,
+        hint: 'בחרו סניף, חפשו, או בקשו עמוד (limit ו-page).',
+        total,
+        max_unpaged: MAX_UNPAGED,
+      });
+    }
+
+    let query = Employee.find(filter)
       .populate('branch_id', 'name')
       .populate('amuta_distribution.amuta_id', 'name short_name')
-      .sort({ full_name: 1 })
-      .lean();
+      .sort({ full_name: 1 });
+    if (limit) query = query.skip((page - 1) * limit).limit(limit);
+    const employees = await query.lean();
 
     // One pass for everyone who has a טופס 101 on file for this tax year, so
     // the per-employee check below stays a pure function over data in hand.
@@ -197,6 +242,14 @@ async function listEmployees(req, res, next) {
 
     res.json({
       tax_year: taxYear,
+      // Always reported, whether or not this caller asked for a page — a client
+      // that does not know the list is 84,000 long cannot decide to start
+      // paging, and the one thing it must never do is show 500 and imply that
+      // is all of them.
+      total,
+      page: limit ? page : 1,
+      limit: limit || total,
+      has_more: limit ? page * limit < total : false,
       employees: employees.map(e => ({
         ...e,
         id: e._id,

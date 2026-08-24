@@ -205,10 +205,30 @@ async function getAll(req, res, next) {
       }
     }
 
-    const registrations = await Registration.find(filter)
+    // The same ceiling the employees and children lists carry, and for the same
+    // reason: one registration per child means a network's "all branches" view
+    // is eighty thousand rows with a contract's worth of fields on each. A gan
+    // asking for its own is unaffected — production's whole history is 78.
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 500) : null;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const total = await Registration.countDocuments(filter);
+
+    const MAX_UNPAGED = Number(process.env.LIST_MAX_UNPAGED || 5000);
+    if (!limit && total > MAX_UNPAGED) {
+      return res.status(413).json({
+        error: `${total.toLocaleString('he-IL')} רישומים הם יותר מדי להצגה בבת אחת.`,
+        hint: 'בחרו סניף או שנה, או בקשו עמוד (limit ו-page).',
+        total,
+        max_unpaged: MAX_UNPAGED,
+      });
+    }
+
+    let regQuery = Registration.find(filter)
       .populate('classroom_id', 'name')
-      .sort({ created_at: -1 })
-      .lean();
+      .sort({ created_at: -1 });
+    if (limit) regQuery = regQuery.skip((page - 1) * limit).limit(limit);
+    const registrations = await regQuery.lean();
 
     // Which required documents each registration has (one query for the page).
     // Required for a signed contract: ID copy + payment proof.
@@ -302,7 +322,13 @@ async function getAll(req, res, next) {
       };
     });
 
-    res.json({ registrations: formatted });
+    res.json({
+      registrations: formatted,
+      total,
+      page: limit ? page : 1,
+      limit: limit || total,
+      has_more: limit ? page * limit < total : false,
+    });
   } catch (error) {
     next(error);
   }

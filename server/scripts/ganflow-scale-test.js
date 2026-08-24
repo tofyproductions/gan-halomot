@@ -1,0 +1,391 @@
+#!/usr/bin/env node
+/**
+ * How big can one customer get before the screens stop working.
+ *
+ * WHY THIS EXISTS. The application was built for a gan with four branches, and
+ * it is now being sold to networks. Fifteen places in the controllers load
+ * EVERY branch in one query, which is free at four and unknown at two thousand.
+ * Guessing which of them matters is how a week gets spent optimising the wrong
+ * one, so this measures instead: seed a customer at a given size, call the real
+ * endpoints over HTTP, and record milliseconds.
+ *
+ * IT MEASURES A CURVE, NOT A NUMBER. Run it at several sizes and read how the
+ * timings grow. Something that doubles when the data doubles is fine and can be
+ * paid for; something that quadruples is a design that has to change, and no
+ * amount of hardware buys its way out. One measurement at one size cannot tell
+ * those apart, which is the whole reason the sizes are a list.
+ *
+ *   node scripts/ganflow-scale-test.js --sizes 10,100,500
+ *   node scripts/ganflow-scale-test.js --sizes 2000 --keep    # leave the data
+ *
+ * Per branch it seeds the ratios measured in production on 20.08.2026:
+ * 42 employees and 12,647 punches. Children are seeded at 40 rather than the
+ * 18 production currently holds — that number is low because the year's intake
+ * has not been entered yet, and sizing a network on it would be sizing on a
+ * gap in the data rather than on a gan.
+ *
+ * Punches are the expensive part to generate, so --punch-share writes a
+ * fraction of them and the report says plainly that it did. A screen that is
+ * slow with a tenth of the punches is not going to be fast with all of them.
+ */
+try { require.resolve('mongodb-memory-server'); } catch {
+  console.error('\n❌  חסרה חבילת הבדיקה. הרץ:\n\n   npm install --no-save mongodb-memory-server\n');
+  process.exit(1);
+}
+
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const { MongoClient, ObjectId } = require('mongodb');
+const { spawn } = require('child_process');
+const bcrypt = require('bcryptjs');
+const path = require('path');
+
+const argv = process.argv.slice(2);
+const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i === -1 ? d : argv[i + 1]; };
+const SIZES = String(opt('sizes', '10,100,500')).split(',').map(Number).filter(Boolean);
+const PUNCH_SHARE = Number(opt('punch-share', 0.1));
+const PORT = Number(opt('port', 5401));
+const B = `http://localhost:${PORT}`;
+
+const PER_BRANCH = { employees: 42, children: 40, punches: 12647 };
+const SLOW_MS = 1000;   // a screen a manager waits on
+const BAD_MS = 3000;    // a screen a manager gives up on
+
+// A screen that has already taken half a minute has answered the question, and
+// timing it precisely three more times just makes the run longer. Past the cap
+// it is recorded as "worse than this" and abandoned — which is also what a
+// manager does.
+const CAP_MS = Number(opt('cap', 30000));
+
+// --skip lets a screen be left out of a run. Node is single threaded, so a
+// screen that computes for ninety seconds does not only make itself slow — it
+// holds the event loop and everything measured after it queues behind. Leaving
+// it out is how that gets told apart from the screens being slow themselves.
+const SKIP = String(opt('skip', '')).split(',').map((x) => x.trim()).filter(Boolean);
+
+const api = async (pathname, { tenant, token } = {}) => {
+  const headers = {};
+  if (tenant) headers['x-tenant'] = tenant;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const t0 = process.hrtime.bigint();
+  let status = 0; let bytes = 0; let capped = false;
+  try {
+    const res = await fetch(B + pathname, { headers, signal: AbortSignal.timeout(CAP_MS) });
+    status = res.status;
+    bytes = (await res.text()).length;
+  } catch (e) {
+    capped = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    status = capped ? 0 : -1;
+  }
+  return { ms: Number(process.hrtime.bigint() - t0) / 1e6, status, bytes, capped };
+};
+
+const waitFor = async (fn, ms = 60000) => {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    try { if (await fn()) return true; } catch { /* not up */ }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return false;
+};
+
+const YEAR = '2026-2027';
+const MONTH = '2026-07';
+
+async function seed(client, dbName, branches) {
+  const db = client.db(dbName);
+  const bulkOpts = { ordered: false };
+
+  const branchIds = [];
+  const branchDocs = [];
+  for (let i = 0; i < branches; i++) {
+    const _id = new ObjectId();
+    branchIds.push(_id);
+    branchDocs.push({ _id, name: `סניף ${i + 1}`, is_active: true, created_at: new Date() });
+  }
+  await db.collection('branches').insertMany(branchDocs, bulkOpts);
+
+  // An org chart of the shape a real network has: a network over districts over
+  // branches. Districts are held near twenty because that is what a person can
+  // manage and therefore what a director's screen has to render — the point of
+  // the rollup is that this number, not the branch count, sets the cost.
+  const DISTRICTS = Math.max(1, Math.min(20, Math.ceil(branches / 20)));
+  const rootId = new ObjectId();
+  const units = [{ _id: rootId, name: 'הרשת', kind: 'network', parent_id: null, path: [], depth: 0, branch_id: null }];
+  const districtIds = [];
+  for (let d = 0; d < DISTRICTS; d++) {
+    const _id = new ObjectId();
+    districtIds.push(_id);
+    units.push({ _id, name: `מחוז ${d + 1}`, kind: 'district', parent_id: rootId, path: [rootId], depth: 1, branch_id: null });
+  }
+  branchIds.forEach((bid, i) => {
+    const parent = districtIds[i % DISTRICTS];
+    units.push({ _id: new ObjectId(), name: `סניף ${i + 1}`, kind: 'branch',
+      parent_id: parent, path: [rootId, parent], depth: 2, branch_id: bid });
+  });
+  await db.collection('orgunits').insertMany(units, bulkOpts);
+  await db.collection('orgunits').createIndex({ parent_id: 1 });
+  await db.collection('orgunits').createIndex({ path: 1 });
+  await db.collection('payrollrollups').createIndex({ month: 1, branch_id: 1 }, { unique: true });
+
+  // The administrator this test logs in as.
+  await db.collection('users').insertOne({
+    full_name: 'מנהלת עומס', id_number: '900000009', email: 'scale@example.invalid',
+    role: 'system_admin', is_active: true, password_set: false,
+    branch_id: branchIds[0], created_at: new Date(),
+  });
+
+  const CHUNK = 5000;
+  const flush = async (col, rows) => { if (rows.length) await db.collection(col).insertMany(rows, bulkOpts); };
+
+  let employees = [], children = [], classrooms = [], punches = [];
+  const employeeIds = [];
+  // A full month is about 26 clocked days. --punch-share shortens the month
+  // rather than breaking the in/out pairs, so a smaller run is still a run of
+  // real working days.
+  const workDays = Math.max(1, Math.round(26 * PUNCH_SHARE * 10));
+
+  for (let b = 0; b < branches; b++) {
+    const branch_id = branchIds[b];
+
+    const roomId = new ObjectId();
+    classrooms.push({ _id: roomId, name: 'בוגרים', category: 'בוגרים', academic_year: YEAR,
+      capacity: 35, is_active: true, branch_id, created_at: new Date() });
+
+    for (let e = 0; e < PER_BRANCH.employees; e++) {
+      const _id = new ObjectId();
+      employeeIds.push(_id);
+      // salary_type is a schema default, and a raw insert does not get defaults.
+      // Without it the calculator produces no pay at all, and the whole run
+      // measures the payroll screen deciding there is nothing to work out.
+      employees.push({ _id, full_name: `עובדת ${b}-${e}`, id_number: String(200000000 + b * 100 + e),
+        branch_id, is_active: true, role_type: 'general',
+        salary_type: 'hourly', hourly_rate: 45, receives_salary: true,
+        // The calculator reads the rate from amuta_distribution, not from
+        // employee.hourly_rate — that field is not what primaryRates() looks at.
+        amuta_distribution: [{ amuta_id: null, hourly_rate: 45, percent: 100 }],
+        created_at: new Date() });
+
+      // Punches are raw clock readings; the system pairs them into a day. So
+      // they are seeded as PAIRS — in at 07:30, out at 16:30 — because a pile
+      // of unpaired timestamps produces no hours, and a month with no hours
+      // measures the payroll screen doing none of its work.
+      const israeli_id = String(200000000 + b * 100 + e);
+      for (let day = 1; day <= workDays; day++) {
+        const d = new Date(2026, 6, day);
+        if (d.getDay() === 6) continue;                 // Saturday
+        punches.push(
+          { employee_id: _id, branch_id, israeli_id, device_user_sn: e + 1,
+            timestamp: new Date(2026, 6, day, 7, 30), approval_status: 'approved', created_at: new Date() },
+          { employee_id: _id, branch_id, israeli_id, device_user_sn: e + 1,
+            timestamp: new Date(2026, 6, day, 16, 30), approval_status: 'approved', created_at: new Date() },
+        );
+      }
+      if (punches.length >= CHUNK) { await flush('punches', punches); punches = []; }
+    }
+
+    for (let c = 0; c < PER_BRANCH.children; c++) {
+      children.push({ child_name: `ילד ${b}-${c}`, academic_year: YEAR, is_active: true,
+        branch_id, classroom_id: roomId, birth_date: new Date(2023, c % 12, 1), created_at: new Date() });
+    }
+
+    if (employees.length >= CHUNK) { await flush('employees', employees); employees = []; }
+    if (children.length >= CHUNK) { await flush('children', children); children = []; }
+    if (classrooms.length >= CHUNK) { await flush('classrooms', classrooms); classrooms = []; }
+  }
+  await flush('employees', employees);
+  await flush('children', children);
+  await flush('classrooms', classrooms);
+  await flush('punches', punches);
+
+  // The indexes production has. Without them this measures a missing index
+  // rather than the shape of the code, which is a different and less useful
+  // finding — production already has these.
+  await db.collection('punches').createIndexes([
+    { key: { branch_id: 1 } }, { key: { employee_id: 1 } },
+    { key: { employee_id: 1, timestamp: -1 } }, { key: { timestamp: 1 } },
+  ]);
+  await db.collection('employees').createIndex({ branch_id: 1 });
+  await db.collection('employees').createIndex({ full_name: 1 });
+  await db.collection('employees').createIndex({ branch_id: 1, full_name: 1 });
+  await db.collection('children').createIndex({ branch_id: 1 });
+  await db.collection('children').createIndex({ academic_year: 1 });
+  // A page of a sorted list is only cheap when the sort key is indexed —
+  // otherwise every matching row is read and sorted in memory to hand back
+  // fifty, and paging buys nothing.
+  await db.collection('children').createIndex({ academic_year: 1, child_name: 1 });
+
+  const counts = {};
+  for (const c of ['branches', 'employees', 'children', 'punches']) {
+    counts[c] = await db.collection(c).countDocuments();
+  }
+  return counts;
+}
+
+const SCREENS = [
+  ['סניפים', '/api/branches'],
+  ['ילדים', `/api/children?academic_year=${YEAR}`],
+  ['עובדים', '/api/payroll/employees'],
+  ['לוח בקרה', `/api/dashboard/stats?academic_year=${YEAR}`],
+  ['גבייה', `/api/collections?academic_year=${YEAR}`],
+  // The two that matter most, and the reason this file exists: both load every
+  // branch in the customer before they do anything else.
+  ['שכר — כל הסניפים', `/api/payroll-month?month=${MONTH}`],
+  ['נוכחות — סניף אחד', `/api/payroll/attendance?month=${MONTH}&branch=__BRANCH__`],
+  // Last on purpose: the rollup reads what the payroll screen above wrote, so
+  // measuring it first would measure an empty cache and flatter it.
+  ['שכר — סיכום למנהל', `/api/payroll-month/rollup?month=${MONTH}`],
+  // The same two lists, asking for a page. What a network's client would send
+  // once it knows the list is not forty rows long.
+  ['ילדים — עמוד', `/api/children?academic_year=${YEAR}&limit=50&page=1`],
+  ['עובדים — עמוד', '/api/payroll/employees?limit=50&page=1'],
+  ['עובדים — חיפוש', '/api/payroll/employees?q=עובדת%201-1&limit=50'],
+];
+
+(async () => {
+  const mongo = await MongoMemoryServer.create();
+  const base = mongo.getUri();
+  const client = await MongoClient.connect(base);
+  const plat = client.db('gf_control');
+
+  await plat.collection('platformusers').insertOne({
+    email: 'scale@example.invalid', full_name: 'עומס', role: 'owner', is_active: true,
+    password_hash: await bcrypt.hash('scale-test-password', 12), created_at: new Date(),
+  });
+
+  const server = spawn(process.execPath, ['--max-old-space-size=1024', path.join(__dirname, '..', 'src', 'index.js')], {
+    env: { ...process.env,
+      MONGODB_URI: base + 'gf_unused', PLATFORM_MONGODB_URI: base + 'gf_control',
+      PLATFORM_JWT_SECRET: 'scale', JWT_SECRET: 'scale',
+      DISABLE_JOBS: '1', NODE_ENV: 'development', PORT: String(PORT) },
+    stdio: 'ignore',
+  });
+  const stop = async () => { server.kill('SIGTERM'); await client.close().catch(() => {}); await mongo.stop().catch(() => {}); };
+
+  try {
+    if (!await waitFor(async () => (await fetch(`${B}/api/health`)).ok)) {
+      console.error('\n❌  השרת לא עלה\n'); await stop(); process.exit(1);
+    }
+
+    console.log(`\nמדידת עומס — ${PUNCH_SHARE * 100}% מההחתמות האמיתיות לכל עובד\n`);
+    const table = {};
+
+    for (const size of SIZES) {
+      const slug = `scale${size}`;
+      const dbName = `gf_${slug}`;
+      await plat.collection('tenants').insertOne({
+        name: slug, slug, status: 'active', db_uri: base, db_name: dbName,
+        pricing: {}, entitlements: {}, created_at: new Date(),
+      });
+
+      process.stdout.write(`  זורע ${size} סניפים… `);
+      const t0 = Date.now();
+      const counts = await seed(client, dbName, size);
+      console.log(`${((Date.now() - t0) / 1000).toFixed(0)}ש  ` +
+        `(${counts.employees} עובדים, ${counts.children} ילדים, ${counts.punches} החתמות)`);
+
+      const login = await fetch(`${B}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-tenant': slug },
+        body: JSON.stringify({ full_name: 'מנהלת עומס', id_number: '900000009' }),
+      }).then((r) => r.json()).catch(() => ({}));
+
+      if (!login.token) { console.log(`  ⚠️  לא הצלחתי להיכנס ל-${slug} — מדלג\n`); continue; }
+
+      // One real branch id, for the screens a manager opens on their own branch
+      // rather than on the whole network.
+      const oneBranch = await client.db(dbName).collection('branches').findOne({});
+
+      for (const [label, rawUrl] of SCREENS) {
+        if (SKIP.some((k) => label.includes(k))) continue;
+        const url = rawUrl.replace('__BRANCH__', String(oneBranch && oneBranch._id));
+        const warm = await api(url, { tenant: slug, token: login.token });
+        if (warm.capped) { (table[label] ||= {})[size] = warm; continue; }
+        const runs = [];
+        for (let i = 0; i < 3; i++) runs.push(await api(url, { tenant: slug, token: login.token }));
+        const best = runs.reduce((a, b) => (a.ms < b.ms ? a : b));
+        (table[label] ||= {})[size] = best;
+      }
+
+      // A fast wrong number is not an improvement. The director's total has to
+      // equal what the detailed screen shows, or the rollup is a second opinion
+      // about the payroll and the argument with the customer is unwinnable.
+      const H = { 'x-tenant': slug, Authorization: `Bearer ${login.token}` };
+
+      // Past the ceiling the detailed screen refuses, which is the point of it
+      // — so there is nothing to compare against and saying so is the honest
+      // report. The rollup is checked for coverage instead: warmed or not, it
+      // must never quietly total a subset.
+      const probe = await api(`/api/payroll-month?month=${MONTH}`, { tenant: slug, token: login.token });
+      if (probe.status === 413) {
+        const roll = await fetch(`${B}/api/payroll-month/rollup?month=${MONTH}`, { headers: H })
+          .then((r) => r.json()).catch(() => null);
+        console.log(`  🛑 המסך המפורט מסרב ב-${size} סניפים (413) — כמתוכנן.` +
+          `  הסיכום מדווח ${roll?.missing ?? '?'} סניפים שלא חושבו`);
+        console.log('');
+        continue;
+      }
+
+      const [full, roll] = await Promise.all([
+        fetch(`${B}/api/payroll-month?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
+        fetch(`${B}/api/payroll-month/rollup?month=${MONTH}`, { headers: H }).then((r) => r.json()).catch(() => null),
+      ]);
+      if (full && roll && Array.isArray(full.rows) && roll.total) {
+        const detailed = full.rows.reduce((a, r) => ({
+          employees: a.employees + 1,
+          hours: a.hours + (r.breakdown?.hours?.total || 0),
+          base: a.base + (r.breakdown?.components?.base_salary || 0),
+        }), { employees: 0, hours: 0, base: 0 });
+        const near = (a, b) => Math.abs(a - b) < 1;
+        const agree = detailed.employees === roll.total.employees
+          && near(detailed.hours, roll.total.hours) && near(detailed.base, roll.total.base);
+        console.log(`  ${agree ? '✅' : '❌'} הסיכום תואם את המסך המפורט` +
+          `  (${roll.total.employees}/${detailed.employees} עובדים, ` +
+          `${Math.round(roll.total.hours)}/${Math.round(detailed.hours)} שעות, ` +
+          `${Math.round(roll.total.base)}/${Math.round(detailed.base)} ש״ח, ` +
+          `${roll.rows.length} מחוזות, ${roll.missing} סניפים לא חושבו)`);
+      } else {
+        console.log('  ⚠️  לא הצלחתי להשוות סיכום מול מפורט');
+      }
+      console.log('');
+    }
+
+    const head = SIZES.map((s) => String(s).padStart(11)).join('');
+    console.log('─'.repeat(22 + head.length));
+    console.log('מסך'.padEnd(22) + head);
+    console.log('─'.repeat(22 + head.length));
+    for (const [label, bySize] of Object.entries(table)) {
+      const cells = SIZES.map((s) => {
+        const r = bySize[s];
+        if (!r) return '—'.padStart(11);
+        if (r.capped) return `>${Math.round(CAP_MS / 1000)}ש`.padStart(11);
+        if (r.status !== 200) return `${r.status}`.padStart(11);
+        const mark = r.ms > BAD_MS ? '!!' : r.ms > SLOW_MS ? '!' : '';
+        return `${Math.round(r.ms)}ms${mark}`.padStart(11);
+      }).join('');
+      console.log(label.padEnd(22) + cells);
+    }
+    console.log('─'.repeat(22 + head.length));
+    console.log(`!  מעל ${SLOW_MS}ms      !!  מעל ${BAD_MS}ms      מספר = קוד שגיאה\n`);
+
+    // The growth rate is the finding. Timings that rise faster than the data
+    // are the screens that no bigger server will save.
+    if (SIZES.length >= 2) {
+      const [small, big] = [SIZES[0], SIZES[SIZES.length - 1]];
+      const dataGrowth = big / small;
+      console.log(`מ-${small} ל-${big} סניפים הנתונים גדלו פי ${dataGrowth.toFixed(0)}:\n`);
+      for (const [label, bySize] of Object.entries(table)) {
+        const a = bySize[small]; const b = bySize[big];
+        if (!a || !b || a.capped || b.capped || a.status !== 200 || b.status !== 200) continue;
+        const grew = b.ms / Math.max(a.ms, 1);
+        const verdict = grew > dataGrowth * 1.5 ? '⚠️  גרוע מליניארי — שינוי מבנה'
+          : grew > dataGrowth * 0.5 ? 'ליניארי — חומרה תעזור'
+          : 'קבוע — בסדר';
+        console.log(`  ${label.padEnd(20)} פי ${grew.toFixed(1)}   ${verdict}`);
+      }
+      console.log('');
+    }
+  } finally {
+    if (!argv.includes('--keep')) await stop();
+  }
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });
