@@ -376,6 +376,21 @@ function renderCreate() {
       <div><label>טלפון</label><input id="cp"></div>
       <div><label>אימייל</label><input id="ce"></div>
     </div>
+    <!-- Rarely used and easy to get wrong, so it is folded away rather than
+         sitting between the name and the price. Both fields are for a database
+         that already exists: the demo, a customer moved off a full cluster, a
+         customer restored from an export. Left empty, a customer is born with
+         a database of their own and none of this is visible. -->
+    <details style="margin-top:20px">
+      <summary style="cursor:pointer;color:var(--dim);font-size:13px">מסד נתונים קיים (למתקדמים)</summary>
+      <div class="grid" style="margin-top:12px">
+        <div><label>כתובת אשכול</label><input id="dburi" class="mono" placeholder="mongodb+srv://...">
+          <div class="hint">ריק = האשכול שהשרת מוגדר אליו</div></div>
+        <div><label>שם מסד קיים</label><input id="dbname" class="mono" placeholder="ganflow_demo">
+          <div class="hint">ריק = ייווצר מסד חדש. אם מולא — הלקוח מצביע על מה שכבר שם, ושום דבר קיים לא נמחק</div></div>
+      </div>
+    </details>
+
     <div style="height:20px"></div>
     <div style="display:flex;gap:10px"><button id="save">צור לקוח</button><button class="ghost" id="cancel">ביטול</button></div>
   </div></div>`);
@@ -405,6 +420,8 @@ function renderCreate() {
           free_until: free || null,
         },
         contact: { name: m.querySelector('#cn').value, phone: m.querySelector('#cp').value, email: m.querySelector('#ce').value },
+        db_uri: m.querySelector('#dburi').value.trim() || undefined,
+        adopt_db_name: m.querySelector('#dbname').value.trim() || undefined,
       })});
       m.remove();
       showPassword(r.tenant, r.temp_password, r.login);

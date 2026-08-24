@@ -53,10 +53,32 @@ async function createTenant(input, actor) {
     throw Object.assign(new Error('הכתובת כבר תפוסה'), { status: 409 });
   }
 
+  /**
+   * ADOPTING A DATABASE THAT ALREADY HAS PEOPLE IN IT.
+   *
+   * Normally a customer is born with their database, and everything below
+   * creates what a new gan needs. But a database can also arrive already full:
+   * the demo, a customer moved off a full cluster, a customer restored from an
+   * export. Naming it here means the customer points at what exists instead of
+   * at an empty `gf_<slug>` beside it.
+   *
+   * Two consequences, both load-bearing:
+   *   - nothing below overwrites what it finds. A branch, an org root and an
+   *     administrator are created only if they are MISSING.
+   *   - the rollback must not drop the database. It drops one it created; a
+   *     database that was handed to us belongs to somebody else, and a failed
+   *     provisioning must never be how a gan loses its children.
+   */
+  const adopting = Boolean(input.adopt_db_name);
+  const dbName = adopting ? String(input.adopt_db_name).trim() : dbNameFor(slug);
+  if (adopting && !/^[A-Za-z0-9_-]{1,63}$/.test(dbName)) {
+    throw Object.assign(new Error('שם מסד לא תקין — אותיות לועזיות, ספרות, קו תחתון ומקף בלבד'), { status: 400 });
+  }
+
   const tenant = await Tenant.create({
     name: input.name,
     slug,
-    db_name: dbNameFor(slug),
+    db_name: dbName,
     db_uri: input.db_uri || '',
     status: 'pending',
     pricing: input.pricing || undefined,
@@ -75,12 +97,14 @@ async function createTenant(input, actor) {
   try {
     const { models } = await tenantConnection(tenant);
 
-    const branch = await models.Branch.create({
-      name: input.first_branch_name || input.name,
-      is_active: true,
-    });
+    const branch = (adopting && await models.Branch.findOne({}).sort({ created_at: 1 }))
+      || await models.Branch.create({
+        name: input.first_branch_name || input.name,
+        is_active: true,
+      });
 
-    const root = await models.OrgUnit.create({
+    const existingRoot = adopting ? await models.OrgUnit.findOne({ parent_id: null }) : null;
+    const root = existingRoot || await models.OrgUnit.create({
       name: input.name,
       kind: input.is_network ? 'network' : 'branch',
       parent_id: null,
@@ -89,7 +113,7 @@ async function createTenant(input, actor) {
       branch_id: input.is_network ? null : branch._id,
     });
 
-    if (input.is_network) {
+    if (input.is_network && !existingRoot) {
       await models.OrgUnit.create({
         name: input.first_branch_name || 'סניף ראשון',
         kind: 'branch',
@@ -100,7 +124,11 @@ async function createTenant(input, actor) {
       });
     }
 
-    await models.User.create({
+    // An adopted database already has its people. Adding a second
+    // administrator with the same id number would collide, and adding one with
+    // a different id number hands out a key nobody asked for.
+    const alreadyIn = adopting && await models.User.findOne({ id_number: adminId });
+    if (!alreadyIn) await models.User.create({
       email: String(input.admin_email).toLowerCase().trim(),
       // The identity the application actually logs in with. Without it the
       // administrator this very function creates cannot sign in at all:
@@ -125,7 +153,10 @@ async function createTenant(input, actor) {
   } catch (err) {
     // Half a customer is worse than none — it holds the slug and cannot be
     // logged into, and the next attempt collides with it.
-    await rollback(tenant);
+    //
+    // THE DATABASE IS DROPPED ONLY IF THIS CALL CREATED IT. An adopted one was
+    // full before we touched it.
+    if (!adopting) await rollback(tenant);
     await Tenant.deleteOne({ _id: tenant._id });
     throw err;
   }
@@ -136,7 +167,7 @@ async function createTenant(input, actor) {
     action: 'tenant.create',
     tenant_id: tenant._id,
     tenant_slug: tenant.slug,
-    detail: { name: tenant.name, db_name: tenant.db_name },
+    detail: { name: tenant.name, db_name: tenant.db_name, adopted: adopting || undefined },
   });
 
   return { tenant, tempPassword };

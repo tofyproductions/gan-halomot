@@ -157,6 +157,48 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   const tenantsNow = await Tenant.countDocuments();
   check('יצירה שנכשלה לא משאירה לקוח חצי', tenantsNow === 3);
 
+  // ------------------------------------------------- adopting a full database
+  // A database that already has people in it — the demo, a customer moved off
+  // a full cluster, a customer restored from an export. The customer must
+  // point AT it, and provisioning must not overwrite or drop what it finds.
+  const donor = await createTenant({
+    name: 'גן התורם', slug: 'donor', admin_email: 'd@donor.test',
+    admin_name: 'מנהלת התורם', admin_id_number: '444444445',
+  }, {});
+  const donorModels = (await tenantConnection(donor.tenant)).models;
+  await donorModels.Child.create({ child_name: 'תמר לוי', academic_year: 'תשפ"ו', is_active: true,
+    registration_id: new (require('mongoose').Types.ObjectId)() });
+  const donorDbName = donor.tenant.db_name;
+  const donorUri = donor.tenant.db_uri || process.env.PLATFORM_TENANT_URI;
+  await Tenant.deleteOne({ _id: donor.tenant._id });     // the row goes; the database stays
+
+  const adopted = await createTenant({
+    name: 'גן המאומץ', slug: 'adopted', db_uri: donorUri, adopt_db_name: donorDbName,
+    admin_email: 'a@adopted.test', admin_name: 'מנהלת המאומץ', admin_id_number: '555555556',
+  }, {});
+  check('לקוח מאומץ מצביע על המסד הקיים', adopted.tenant.db_name === donorDbName);
+
+  const am = (await tenantConnection(adopted.tenant)).models;
+  check('הילדים שהיו במסד עדיין שם', await am.Child.countDocuments() === 1);
+  check('לא נוצר סניף שני', await am.Branch.countDocuments() === 1);
+  check('שורש העץ לא הוכפל', await am.OrgUnit.countDocuments({ parent_id: null }) === 1);
+
+  // The one that matters: a provisioning that fails midway must delete its own
+  // row and LEAVE THE DATABASE ALONE. `rollback()` drops databases.
+  await Tenant.deleteOne({ _id: adopted.tenant._id });
+  const boom = await createTenant({
+    name: 'ניסיון שנכשל', slug: 'doomed', db_uri: donorUri, adopt_db_name: donorDbName,
+    // Same email as the administrator already in there, different id number:
+    // the user is not recognised as present, and creating it collides.
+    admin_email: 'd@donor.test', admin_name: 'מישהו אחר', admin_id_number: '666666667',
+  }, {}).then(() => null).catch((e) => e);
+  check('אימוץ שנכשל נעצר', boom instanceof Error);
+  check('אימוץ שנכשל לא השאיר לקוח חצי', await Tenant.countDocuments({ slug: 'doomed' }) === 0);
+
+  const survivors = await (await tenantConnection({ slug: 'check-donor', db_name: donorDbName, db_uri: donorUri }))
+    .models.Child.countDocuments();
+  check('⚠️  אימוץ שנכשל לא מחק את המסד', survivors === 1);
+
   // ------------------------------------------------------- the address itself
   // Which customer a request belongs to is decided by the host name and
   // nothing else, so the rule that reads it is worth an assertion. The one

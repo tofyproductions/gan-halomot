@@ -149,6 +149,16 @@ connectDB().then(() => {
   app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
 
+    // Before anything else on a control plane: without a console account
+    // nobody can create the first customer, and there is no sign-up screen.
+    // A failure here must not stop the server — the customers already on it
+    // are served by a process whose console nobody can log into, which is bad;
+    // a process that exited would be worse.
+    if (require('./platform/connection').isEnabled()) {
+      require('./platform/bootstrap').seedOwnerFromEnv()
+        .catch((e) => console.error('⚠️  יצירת חשבון הבעלים נכשלה:', e.message));
+    }
+
     // There is one database, so a developer running this on a laptop is
     // running it against production — and booting used to mean a Google
     // Sheets sync writing rows, a legacy backfill stamping doc_types, work
