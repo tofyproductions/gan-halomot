@@ -27,6 +27,11 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   const base = mongod.getUri().replace(/\/$/, '');
 
   process.env.PLATFORM_MONGODB_URI = `${base}/gf_control`;
+  // Where customers' databases are opened. Required now, and this test failing
+  // without it is the point: it used to inherit whatever MONGODB_URI the
+  // process happened to carry, which for a script run from server/ is the gan's
+  // production cluster.
+  process.env.PLATFORM_TENANT_URI = base;
   process.env.MONGODB_URI = `${base}/unused_default`;
   process.env.NODE_ENV = 'test';
 
