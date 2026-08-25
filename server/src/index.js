@@ -155,6 +155,7 @@ connectDB().then(() => {
     // are served by a process whose console nobody can log into, which is bad;
     // a process that exited would be worse.
     if (require('./platform/connection').isEnabled()) {
+      require('./platform/bootstrap').checkConfig();
       require('./platform/bootstrap').seedOwnerFromEnv()
         .catch((e) => console.error('⚠️  יצירת חשבון הבעלים נכשלה:', e.message));
     }

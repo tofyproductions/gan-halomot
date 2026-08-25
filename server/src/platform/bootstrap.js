@@ -71,4 +71,27 @@ async function seedOwnerFromEnv() {
   return { seeded: true, email };
 }
 
-module.exports = { seedOwnerFromEnv };
+/**
+ * Everything the customer layer needs before anybody tries to use it.
+ *
+ * PLATFORM_JWT_SECRET has no default and is read at LOGIN rather than at boot,
+ * so a server missing it starts perfectly, serves the console, and fails at
+ * the one moment a person is typing a password — with an English exception on
+ * a Hebrew screen. Same shape as the silent seeder: a configuration mistake
+ * that only appears as a login that will not work.
+ *
+ * Checked out loud at boot instead, while somebody is still looking at the
+ * deploy log.
+ */
+function checkConfig() {
+  const missing = [];
+  if (!process.env.PLATFORM_JWT_SECRET) missing.push('PLATFORM_JWT_SECRET — מפתח החתימה של הקונסולה');
+  if (!process.env.PLATFORM_TENANT_URI) missing.push('PLATFORM_TENANT_URI — איפה נפתחים מסדי הלקוחות');
+  if (missing.length) {
+    console.error('⚠️  שכבת הלקוחות דלוקה אבל חסרים משתנים:');
+    for (const m of missing) console.error('    • ' + m);
+  }
+  return missing;
+}
+
+module.exports = { seedOwnerFromEnv, checkConfig };

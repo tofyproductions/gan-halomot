@@ -78,6 +78,11 @@ services:
         value: מערכת לניהול גני ילדים
       - key: PLATFORM_DOMAIN
         value: dreamgan.com
+      # The console's own signing key. Deliberately NOT JWT_SECRET: a gan's
+      # token and a console token must not be interchangeable, or a role string
+      # edited inside one customer's database is a way into every customer.
+      - key: PLATFORM_JWT_SECRET
+        generateValue: true
       - key: JWT_SECRET
         sync: false
       - key: FRONTEND_URL
