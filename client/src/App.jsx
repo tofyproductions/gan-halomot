@@ -56,6 +56,7 @@ import BranchPayslips from './components/payroll/BranchPayslips';
 import ContractSigning from './components/employees/ContractSigning';
 import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
+import MyAccount from './components/account/MyAccount';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
 import { BranchProvider } from './hooks/useBranch';
@@ -218,6 +219,14 @@ function AppRoutes() {
         <Route path="admin/permissions" element={
           <ProtectedRoute roles={['system_admin']}>
             <PermissionsManager />
+          </ProtectedRoute>
+        } />
+        {/* The gan's own commercial screen: what they pay and why. Read-only,
+            and system_admin only — this is the relationship with us, not
+            something their branch managers need. */}
+        <Route path="account" element={
+          <ProtectedRoute roles={['system_admin']}>
+            <MyAccount />
           </ProtectedRoute>
         } />
       </Route>

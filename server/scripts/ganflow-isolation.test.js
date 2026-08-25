@@ -227,6 +227,25 @@ const waitFor = async (fn, ms = 40000) => {
     });
     ok(again.status === 401, `הסיסמה הזמנית כבר לא עובדת (${again.status})`);
 
+    console.log('\n--- המנוי של הלקוח עצמו ---');
+    // The gan's own commercial screen. Scoped by host name alone, so there is
+    // no id in the request for anybody to change.
+    const mine = await api('/api/account', { tenant: 'chadash', token: chose.json && chose.json.token });
+    ok(mine.status === 200 && mine.json.name === 'גני חדש', `הלקוח רואה את המנוי שלו (${mine.status})`);
+    ok(mine.json.plan && typeof mine.json.plan.price_per_child === 'number', 'והתוכנית מוצגת');
+
+    // Ours, not theirs: where their database lives, what we wrote about them,
+    // and anything belonging to another customer.
+    const leaked = JSON.stringify(mine.json);
+    ok(!/db_uri|db_name|notes|purge_after/.test(leaked), '⚠️  לא דולפים שדות פנימיים');
+    ok(!/alef|bet|שלהבת|אורים/.test(leaked), '⚠️  לא דולף שום דבר של לקוח אחר');
+
+    const otherTenant = await api('/api/account', { tenant: 'alef', token: chose.json && chose.json.token });
+    ok(otherTenant.status === 401, `אסימון של לקוח אחד לא פותח מנוי של אחר (${otherTenant.status})`);
+
+    const anonAccount = await api('/api/account', { tenant: 'chadash' });
+    ok(anonAccount.status === 401, `בלי התחברות אין מנוי (${anonAccount.status})`);
+
     console.log('\n--- כניסת תמיכה ---');
     // The feature that sells and the one a security review asks about first:
     // our staff inside a customer's records. It is only defensible if it can
