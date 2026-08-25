@@ -157,6 +157,44 @@ const { MongoMemoryServer } = require('mongodb-memory-server');
   const tenantsNow = await Tenant.countDocuments();
   check('יצירה שנכשלה לא משאירה לקוח חצי', tenantsNow === 3);
 
+  // ---------------------------------------------- the first console account
+  // Seeded at boot from the environment, because the platform is switched on
+  // from a dashboard by somebody with no terminal. The rules that keep that
+  // safe are the ones worth asserting.
+  const { seedOwnerFromEnv } = require('../src/platform/bootstrap');
+  const { PlatformUser } = await controlPlane();
+  await PlatformUser.deleteMany({});
+
+  delete process.env.PLATFORM_OWNER_EMAIL;
+  delete process.env.PLATFORM_OWNER_PASSWORD;
+  check('בלי משתנים לא נוצר כלום', (await seedOwnerFromEnv()).seeded === false
+    && await PlatformUser.countDocuments() === 0);
+
+  process.env.PLATFORM_OWNER_EMAIL = 'owner@halom.test';
+  process.env.PLATFORM_OWNER_PASSWORD = 'short';
+  check('סיסמה קצרה נדחית', (await seedOwnerFromEnv()).seeded === false
+    && await PlatformUser.countDocuments() === 0);
+
+  // A value pasted into a dashboard field brings whatever came with it.
+  process.env.PLATFORM_OWNER_PASSWORD = '  a-long-enough-one  ';
+  check('נוצר בעלים', (await seedOwnerFromEnv()).seeded === true);
+  const owner = await PlatformUser.findOne({ email: 'owner@halom.test' });
+  check('התפקיד הוא בעלים', owner && owner.role === 'owner');
+  check('רווחים מסביב לסיסמה לא נשמרים',
+    await require('bcryptjs').compare('a-long-enough-one', owner.password_hash));
+
+  // The one that matters: an environment variable must not be a way in to a
+  // console that already has an owner.
+  process.env.PLATFORM_OWNER_EMAIL = 'intruder@halom.test';
+  process.env.PLATFORM_OWNER_PASSWORD = 'another-long-one';
+  check('⚠️  משתנה סביבה לא מוסיף בעלים לקונסולה קיימת',
+    (await seedOwnerFromEnv()).seeded === false
+    && await PlatformUser.countDocuments() === 1);
+
+  await PlatformUser.deleteMany({});
+  delete process.env.PLATFORM_OWNER_EMAIL;
+  delete process.env.PLATFORM_OWNER_PASSWORD;
+
   // ------------------------------------------------- adopting a full database
   // A database that already has people in it — the demo, a customer moved off
   // a full cluster, a customer restored from an export. The customer must
