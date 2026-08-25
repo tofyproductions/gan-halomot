@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const { controlPlane, isEnabled } = require('../connection');
+const { controlPlane, isEnabled, tenantConnection, forgetTenant } = require('../connection');
 const { createTenant, suspendTenant, resumeTenant, tenantUsage } = require('../provision');
 
 /**
@@ -152,6 +152,74 @@ exports.update = async (req, res, next) => {
       detail: { before, after: req.body },
     });
     res.json(tenant);
+  } catch (err) { next(err); }
+};
+
+/**
+ * Pointing a customer at a different database.
+ *
+ * `update` deliberately refuses this: renaming the database from the same form
+ * that edits a telephone number is how a working customer stops existing. But
+ * it does have to be possible, and until now it was not — which is a promise
+ * the runbook already made ("the 131st customer moves cluster") with nothing
+ * behind it, and it is also what a customer created against the wrong database
+ * needs, which is how it was found.
+ *
+ * So it is its own action, owner-only, and it LOOKS FIRST. `check` opens the
+ * target and reports what is in it without saving, because "did I type the
+ * right name" is the whole question and an empty gan looks exactly like a full
+ * one from the outside. Nothing here writes to either database: the old one is
+ * left as it was, and the new one is read.
+ */
+exports.setDatabase = async (req, res, next) => {
+  try {
+    const { Tenant, AuditLog } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+
+    const dbName = String(req.body.db_name || '').trim();
+    if (!/^[A-Za-z0-9_-]{1,63}$/.test(dbName)) {
+      return res.status(400).json({ error: 'שם מסד לא תקין — אותיות לועזיות, ספרות, קו תחתון ומקף בלבד' });
+    }
+    const dbUri = req.body.db_uri === undefined ? tenant.db_uri : String(req.body.db_uri).trim();
+
+    // Read the target through a throwaway tenant shape, so the customer's own
+    // cached connection is untouched while we are only looking.
+    let found;
+    try {
+      const probe = { slug: `__probe_${tenant.slug}`, db_name: dbName, db_uri: dbUri };
+      const { models, conn } = await tenantConnection(probe);
+      found = {
+        children: await models.Child.countDocuments(),
+        employees: await models.Employee.countDocuments(),
+        branches: await models.Branch.countDocuments(),
+        users: await models.User.countDocuments(),
+        collections: (await conn.db.listCollections().toArray()).length,
+      };
+      await forgetTenant(probe.slug);
+    } catch (err) {
+      return res.status(400).json({ error: `לא הצלחתי להתחבר למסד "${dbName}": ${err.message}` });
+    }
+
+    if (req.body.check) return res.json({ checked: true, db_name: dbName, found });
+
+    const before = { db_name: tenant.db_name, db_uri: tenant.db_uri };
+    tenant.db_name = dbName;
+    tenant.db_uri = dbUri;
+    await tenant.save();
+
+    // The cache is keyed on slug. Without this the customer keeps answering
+    // from the database they were on until the entry idles out, and the move
+    // looks like it did nothing.
+    await forgetTenant(tenant.slug);
+
+    await AuditLog.create({
+      actor_id: req.platformUser._id, actor_email: req.platformUser.email,
+      action: 'tenant.database', tenant_id: tenant._id, tenant_slug: tenant.slug,
+      detail: { before, after: { db_name: dbName, db_uri: dbUri }, found },
+    });
+
+    res.json({ tenant, found });
   } catch (err) { next(err); }
 };
 

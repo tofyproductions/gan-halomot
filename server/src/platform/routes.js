@@ -32,6 +32,10 @@ router.patch('/billing/:id', c.requireOwner, c.billingMark);
 // Creating, pricing and switching customers off is the owner's, not support's.
 router.post('/tenants', c.requireOwner, c.create);
 router.patch('/tenants/:id', c.requireOwner, c.update);
+// Where a customer's data lives. Its own action, not part of `update`:
+// changing a database from the form that edits a phone number is how a
+// working customer stops existing.
+router.patch('/tenants/:id/database', c.requireOwner, c.setDatabase);
 router.post('/tenants/:id/suspend', c.requireOwner, c.suspend);
 router.post('/tenants/:id/resume', c.requireOwner, c.resume);
 

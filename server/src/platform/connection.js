@@ -146,11 +146,27 @@ async function tenantConnection(tenant) {
   return entry;
 }
 
+/**
+ * Forget one customer's open connection.
+ *
+ * The cache is keyed on slug, so a customer whose database has just been
+ * changed would keep answering from the OLD one for up to half an hour — the
+ * move would appear to have done nothing, and the natural next move is to do
+ * it again. Called by whatever changes where a customer lives.
+ */
+async function forgetTenant(slug) {
+  const entry = tenants.get(slug);
+  if (!entry) return false;
+  tenants.delete(slug);
+  await entry.conn.close().catch(() => {});
+  return true;
+}
+
 async function closeAll() {
   for (const [, entry] of tenants) await entry.conn.close().catch(() => {});
   tenants.clear();
   if (control) { await control.conn.close().catch(() => {}); control = null; }
 }
 
-module.exports = { isEnabled, controlPlane, tenantConnection, bindModels, withDbName, closeAll,
+module.exports = { isEnabled, controlPlane, tenantConnection, bindModels, withDbName, closeAll, forgetTenant,
   _openCount: () => tenants.size };

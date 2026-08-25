@@ -241,6 +241,54 @@ const waitFor = async (fn, ms = 40000) => {
       .countDocuments({ action: 'tenant.impersonate', tenant_slug: 'chadash' });
     ok(logged >= 1, `הכניסה נרשמה ביומן (${logged})`);
 
+    console.log('\n--- העברת לקוח למסד אחר ---');
+    // A customer created against the wrong database is not a hypothetical —
+    // it is how this was found. What matters is that looking is separate from
+    // moving, and that the old database is left exactly as it was.
+    await client.db('gf_chadash').collection('children').insertOne({
+      child_name: 'ילדה במסד הישן', academic_year: 'תשפ"ו', is_active: true });
+    await client.db('donor_db').collection('children').insertMany([
+      { child_name: 'ילדה במסד החדש', academic_year: 'תשפ"ו', is_active: true },
+      { child_name: 'ילד במסד החדש', academic_year: 'תשפ"ו', is_active: true },
+    ]);
+
+    const peek = await api(`/api/platform/tenants/${madeId}/database`, {
+      method: 'PATCH', token: ctok, body: { db_name: 'donor_db', check: true },
+    });
+    ok(peek.status === 200 && peek.json.found.children === 2,
+      `בדיקה מראה מה יש במסד היעד (${peek.json && peek.json.found && peek.json.found.children})`);
+
+    // Read through the customer's own connection, which is what a move has to
+    // change — /api/children is scoped to the caller's branches and would say
+    // nothing about which database answered.
+    const usage = async () => {
+      const r = await api(`/api/platform/tenants/${madeId}`, { token: ctok });
+      return r.json && r.json.usage ? r.json.usage.children : -1;
+    };
+    ok(await usage() === 1, 'בדיקה בלבד לא מזיזה את הלקוח');
+
+    const bad = await api(`/api/platform/tenants/${madeId}/database`, {
+      method: 'PATCH', token: ctok, body: { db_name: 'has.a.dot' },
+    });
+    ok(bad.status === 400, `שם מסד לא תקין נדחה (${bad.status})`);
+
+    const moved = await api(`/api/platform/tenants/${madeId}/database`, {
+      method: 'PATCH', token: ctok, body: { db_name: 'donor_db' },
+    });
+    ok(moved.status === 200, `הלקוח הועבר (${moved.status})`);
+
+    // The cache is keyed on slug, so without eviction the customer would keep
+    // answering from the old database and the move would look like a no-op.
+    const nowCount = await usage();
+    ok(nowCount === 2, `⚠️  הלקוח רואה מיד את המסד החדש (${nowCount})`);
+
+    const oldIntact = await client.db('gf_chadash').collection('children').countDocuments();
+    ok(oldIntact === 1, 'המסד הישן נשאר כפי שהיה');
+
+    const dbLogged = await plat.collection('auditlogs')
+      .countDocuments({ action: 'tenant.database', tenant_slug: 'chadash' });
+    ok(dbLogged === 1, `ההעברה נרשמה ביומן (${dbLogged})`);
+
     console.log('\n--- לקוח מושהה ---');
     await plat.collection('tenants').updateOne({ slug: 'bet' }, { $set: { status: 'suspended' } });
     const susp = await api('/api/children', { tenant: 'bet', token: tokens.bet });

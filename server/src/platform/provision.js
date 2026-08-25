@@ -75,17 +75,39 @@ async function createTenant(input, actor) {
     throw Object.assign(new Error('שם מסד לא תקין — אותיות לועזיות, ספרות, קו תחתון ומקף בלבד'), { status: 400 });
   }
 
+  /**
+   * A free period is counted in DAYS HERE, not picked as a date in a browser.
+   *
+   * "45 days free" is the thing that gets agreed on the telephone, and asking
+   * for the date instead makes somebody count on a calendar and be one day out
+   * — in a field that decides whether a customer is billed. It is also a date
+   * computed in whatever timezone the laptop happens to be in.
+   *
+   * Both the free period and the trial's end are set from it, because they are
+   * the same promise seen from two sides: what they pay (nothing) and what the
+   * status says (trial).
+   */
+  const trialDays = Number(input.trial_days || 0);
+  let trialEnds = input.trial_ends_at || null;
+  const pricing = { ...(input.pricing || {}) };
+  if (trialDays > 0) {
+    const until = new Date();
+    until.setDate(until.getDate() + trialDays);
+    trialEnds = until;
+    pricing.free_until = until;
+  }
+
   const tenant = await Tenant.create({
     name: input.name,
     slug,
     db_name: dbName,
     db_uri: input.db_uri || '',
     status: 'pending',
-    pricing: input.pricing || undefined,
+    pricing: Object.keys(pricing).length ? pricing : undefined,
     contact: input.contact || undefined,
     billing: input.billing || undefined,
     branding: { display_name: input.name, ...(input.branding || {}) },
-    trial_ends_at: input.trial_ends_at || null,
+    trial_ends_at: trialEnds,
     notes: input.notes || '',
   });
 
@@ -147,7 +169,7 @@ async function createTenant(input, actor) {
       is_active: true,
     });
 
-    tenant.status = input.trial_ends_at ? 'trial' : 'active';
+    tenant.status = trialEnds ? 'trial' : 'active';
     tenant.activated_at = new Date();
     await tenant.save();
   } catch (err) {

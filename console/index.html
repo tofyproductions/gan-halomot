@@ -338,6 +338,159 @@ async function loadList() {
 
 const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));
 
+
+/**
+ * Money, in one place, because the create form and the customer's own screen
+ * have to mean the same thing by it.
+ *
+ * WHAT WAS WRONG WITH THE OLD ONE. Three numbers and a bare date field. The
+ * date decided whether a customer is billed at all and said nothing about it —
+ * empty read as "free forever" to some eyes and "paying" to others — and "45
+ * days free", which is the sentence actually said on the telephone, meant
+ * counting on a calendar and being one day out. The size bands the pricing
+ * already supported could only be entered as hand-written JSON, so in practice
+ * they could not be entered.
+ *
+ * Now the choice is made rather than implied, the day count is a button, and
+ * the sentence underneath says what the customer will actually pay — which is
+ * the only part anybody checks.
+ */
+function pricingFields(p = {}, opts = {}) {
+  const free = p.free_until ? new Date(p.free_until).toISOString().slice(0, 10) : '';
+  const tiered = Boolean(p.tiers && p.tiers.length);
+  return `
+    <h3>תמחור</h3>
+    <div class="grid">
+      <div><label>התחלה</label>
+        <select id="pstart">
+          <option value="pay" ${free ? '' : 'selected'}>משלם מהיום הראשון</option>
+          <option value="free" ${free ? 'selected' : ''}>חינם לתקופה</option>
+        </select>
+      </div>
+      <div id="pfreewrap" style="${free ? '' : 'display:none'}">
+        <label>חינם עד</label>
+        <input id="pfree" type="date" value="${free}">
+        <div class="hint" style="margin-top:6px">
+          <a href="#" data-days="30">30 יום</a> ·
+          <a href="#" data-days="45">45 יום</a> ·
+          <a href="#" data-days="60">60 יום</a> ·
+          <a href="#" data-days="90">90 יום</a>
+        </div>
+      </div>
+    </div>
+    <div class="grid" style="margin-top:14px">
+      <div><label>מחיר לילד</label><input id="ppc" type="number" min="0" value="${p.price_per_child ?? (opts.create ? 50 : '')}"></div>
+      <div><label>מינימום חודשי</label><input id="pmin" type="number" min="0" value="${p.minimum_monthly ?? (opts.create ? 400 : '')}"></div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer">
+      <input type="checkbox" id="ptiered" style="width:auto" ${tiered ? 'checked' : ''}>
+      <span>המחיר לילד יורד ככל שהרשת גדולה</span>
+    </label>
+    <div id="ptiers" style="${tiered ? '' : 'display:none'};margin-top:10px"></div>
+    <div class="hint" id="psum" style="margin-top:12px;font-size:13px"></div>`;
+}
+
+/**
+ * Wire it up, and hand back a read() that produces the pricing object.
+ * Returns { read, trialEnd } — trialEnd is what the customer's status is set
+ * from, and it is the same date the free period ends. One promise, two fields.
+ */
+function pricingWire(root, p = {}) {
+  const $ = (id) => root.querySelector('#' + id);
+  const rows = (p.tiers && p.tiers.length ? p.tiers : [{ up_to: 500, price: 50 }, { up_to: null, price: 25 }]).slice();
+
+  function drawTiers() {
+    $('ptiers').innerHTML = rows.map((t, i) => `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="color:#5B7387;font-size:13px;min-width:34px">${i === rows.length - 1 ? 'מעל' : 'עד'}</span>
+        <input type="number" min="1" data-up="${i}" value="${t.up_to ?? ''}"
+               placeholder="${i === rows.length - 1 ? 'כל השאר' : 'ילדים'}"
+               style="max-width:120px" ${i === rows.length - 1 ? 'disabled' : ''}>
+        <span style="color:#5B7387;font-size:13px">ילדים —</span>
+        <input type="number" min="0" data-price="${i}" value="${t.price ?? ''}" style="max-width:110px">
+        <span style="color:#5B7387;font-size:13px">₪ לילד</span>
+        ${rows.length > 2 && i < rows.length - 1 ? `<a href="#" data-del="${i}" style="color:#C43E3E;font-size:13px">הסר</a>` : ''}
+      </div>`).join('') + '<a href="#" id="paddtier" style="font-size:13px">+ מדרגה</a>';
+
+    $('ptiers').querySelectorAll('[data-up]').forEach((el) => {
+      el.oninput = () => { rows[+el.dataset.up].up_to = el.value === '' ? null : Number(el.value); summarise(); };
+    });
+    $('ptiers').querySelectorAll('[data-price]').forEach((el) => {
+      el.oninput = () => { rows[+el.dataset.price].price = Number(el.value); summarise(); };
+    });
+    $('ptiers').querySelectorAll('[data-del]').forEach((el) => {
+      el.onclick = (e) => { e.preventDefault(); rows.splice(+el.dataset.del, 1); drawTiers(); summarise(); };
+    });
+    $('paddtier').onclick = (e) => {
+      e.preventDefault();
+      rows.splice(rows.length - 1, 0, { up_to: null, price: 0 });
+      drawTiers(); summarise();
+    };
+  }
+
+  function priceSentence() {
+    if ($('ptiered').checked) {
+      return rows.map((t, i) => i === rows.length - 1
+        ? `מעל — ₪${t.price || 0} לילד`
+        : `עד ${t.up_to || '?'} ילדים ₪${t.price || 0}`).join(', ');
+    }
+    return `₪${Number($('ppc').value || 0)} לילד`;
+  }
+
+  function summarise() {
+    const min = Number($('pmin').value || 0);
+    const minPart = min ? `, מינימום ₪${min} בחודש` : '';
+    if ($('pstart').value === 'free' && $('pfree').value) {
+      const d = new Date($('pfree').value);
+      const days = Math.round((d - new Date()) / 86400000);
+      $('psum').innerHTML = `חינם עד <b>${d.toLocaleDateString('he-IL')}</b> (${days} ימים מהיום), ואז ${priceSentence()}${minPart}.`;
+    } else if ($('pstart').value === 'free') {
+      $('psum').innerHTML = '<span style="color:#C4622E">בחרת "חינם לתקופה" ולא נבחר תאריך — הלקוח יחויב מיד.</span>';
+    } else {
+      $('psum').innerHTML = `משלם מהחודש הראשון: ${priceSentence()}${minPart}.`;
+    }
+  }
+
+  $('pstart').onchange = () => {
+    $('pfreewrap').style.display = $('pstart').value === 'free' ? '' : 'none';
+    summarise();
+  };
+  $('ptiered').onchange = () => {
+    $('ptiers').style.display = $('ptiered').checked ? '' : 'none';
+    summarise();
+  };
+  root.querySelectorAll('[data-days]').forEach((a) => {
+    a.onclick = (e) => {
+      e.preventDefault();
+      const d = new Date();
+      d.setDate(d.getDate() + Number(a.dataset.days));
+      $('pfree').value = d.toISOString().slice(0, 10);
+      summarise();
+    };
+  });
+  ['pfree', 'ppc', 'pmin'].forEach((id) => { $(id).oninput = summarise; });
+  drawTiers();
+  summarise();
+
+  return {
+    read() {
+      const freeUntil = $('pstart').value === 'free' ? ($('pfree').value || null) : null;
+      return {
+        pricing: {
+          price_per_child: Number($('ppc').value || 0),
+          minimum_monthly: Number($('pmin').value || 0),
+          free_until: freeUntil,
+          tiers: $('ptiered').checked
+            ? rows.map((t, i) => ({ up_to: i === rows.length - 1 ? null : (t.up_to ?? null), price: Number(t.price || 0) }))
+            : [],
+        },
+        // The status follows the money: free for a period IS a trial.
+        trial_ends_at: freeUntil,
+      };
+    },
+  };
+}
+
 // ------------------------------------------------------------------ create
 function renderCreate() {
   const m = el(`<div class="modal"><div class="card">
@@ -346,7 +499,10 @@ function renderCreate() {
     <div class="grid">
       <div><label>שם הגן / הרשת</label><input id="name"></div>
       <div><label>כתובת (באנגלית)</label><input id="slug" class="mono" placeholder="shalhevet">
-        <div class="hint">${"shalhevet." + DOMAIN} — לא ניתן לשינוי אחר כך</div></div>
+        <!-- Showed a fixed example, so the form told every customer they were
+             about to be shalhevet.dreamgan.com. The address cannot be changed
+             afterwards; it has to show the one being made. -->
+        <div class="hint"><b id="slughint">shalhevet</b>.${DOMAIN} — לא ניתן לשינוי אחר כך</div></div>
     </div>
     <h3>המנהל הראשון</h3>
     <div class="grid">
@@ -364,12 +520,7 @@ function renderCreate() {
       <div><label>סוג</label><select id="net"><option value="">גן בודד</option><option value="1">רשת עם סניפים</option></select></div>
       <div><label>שם הסניף הראשון</label><input id="fb"></div>
     </div>
-    <h3>תמחור</h3>
-    <div class="grid3">
-      <div><label>מחיר לילד</label><input id="ppc" type="number" value="50"></div>
-      <div><label>מינימום חודשי</label><input id="min" type="number" value="400"></div>
-      <div><label>חינם עד</label><input id="free" type="date"></div>
-    </div>
+    ${pricingFields({}, { create: true })}
     <h3>איש קשר</h3>
     <div class="grid3">
       <div><label>שם</label><input id="cn"></div>
@@ -396,15 +547,18 @@ function renderCreate() {
   </div></div>`);
   document.body.appendChild(m);
   m.querySelector('#cancel').onclick = () => m.remove();
+  const price = pricingWire(m, {});
+  const hint = () => { m.querySelector('#slughint').textContent = m.querySelector('#slug').value || 'shalhevet'; };
   m.querySelector('#name').oninput = (e) => {
     const s = m.querySelector('#slug');
     if (!s.dataset.touched) s.value = translit(e.target.value);
+    hint();
   };
-  m.querySelector('#slug').oninput = (e) => { e.target.dataset.touched = '1'; };
+  m.querySelector('#slug').oninput = (e) => { e.target.dataset.touched = '1'; hint(); };
 
   m.querySelector('#save').onclick = async () => {
     const b = m.querySelector('#save'); b.disabled = true;
-    const free = m.querySelector('#free').value;
+    const money = price.read();
     try {
       const r = await api('/tenants', { method: 'POST', body: JSON.stringify({
         name: m.querySelector('#name').value.trim(),
@@ -414,11 +568,8 @@ function renderCreate() {
         admin_id_number: m.querySelector('#aid').value.trim(),
         is_network: !!m.querySelector('#net').value,
         first_branch_name: m.querySelector('#fb').value.trim(),
-        pricing: {
-          price_per_child: Number(m.querySelector('#ppc').value),
-          minimum_monthly: Number(m.querySelector('#min').value),
-          free_until: free || null,
-        },
+        pricing: money.pricing,
+        trial_ends_at: money.trial_ends_at,
         contact: { name: m.querySelector('#cn').value, phone: m.querySelector('#cp').value, email: m.querySelector('#ce').value },
         db_uri: m.querySelector('#dburi').value.trim() || undefined,
         adopt_db_name: m.querySelector('#dbname').value.trim() || undefined,
@@ -485,15 +636,28 @@ async function renderTenant(id) {
         <div class="kpi"><div class="n">${u.employees}</div><div class="l">עובדים</div></div>
         <div class="kpi"><div class="n">${money(u.monthly_charge)}</div><div class="l">חיוב חודשי</div></div>
       </div>`}
-      <h3>תמחור</h3>
-      <div class="grid3">
-        <div><label>מחיר לילד</label><input id="ppc" type="number" value="${t.pricing?.price_per_child ?? ''}"></div>
-        <div><label>מינימום חודשי</label><input id="min" type="number" value="${t.pricing?.minimum_monthly ?? ''}"></div>
-        <div><label>חינם עד</label><input id="free" type="date" value="${t.pricing?.free_until ? new Date(t.pricing.free_until).toISOString().slice(0,10) : ''}"></div>
-      </div>
-      <div style="margin-top:12px"><label>מדרגות לרשתות — JSON, ריק = מחיר אחיד</label>
-        <input id="tiers" class="mono" value='${esc(JSON.stringify(t.pricing?.tiers || []))}'>
-        <div class="hint">[{"up_to":500,"price":50},{"up_to":null,"price":12}]</div></div>
+      ${pricingFields(t.pricing || {})}
+
+      <!-- Changing where a customer's data lives. Folded away, because it is
+           rare and because it is the one field here that can make a working
+           customer look empty. Checking reads the target and says what is in
+           it BEFORE anything is saved — "did I type the right name" is the
+           whole question, and a wrong database answers it silently. -->
+      <details style="margin-top:20px">
+        <summary style="cursor:pointer;color:var(--dim);font-size:13px">מסד הנתונים של הלקוח</summary>
+        <div style="margin-top:12px">
+          <div class="hint" style="margin-bottom:8px">כרגע: <span class="mono">${esc(t.db_name)}</span></div>
+          <div class="grid">
+            <div><label>שם מסד</label><input id="dbname" class="mono" value="${esc(t.db_name)}"></div>
+            <div><label>כתובת אשכול</label><input id="dburi" class="mono" value="${esc(t.db_uri || '')}" placeholder="ריק = ברירת המחדל של השרת"></div>
+          </div>
+          <div id="dbfound" class="hint" style="margin-top:10px"></div>
+          <div style="display:flex;gap:10px;margin-top:10px">
+            <button class="ghost" id="dbcheck">בדוק מה יש שם</button>
+            <button class="ghost" id="dbmove">העבר את הלקוח למסד הזה</button>
+          </div>
+        </div>
+      </details>
       <h3>איש קשר</h3>
       <div class="grid3">
         <div><label>שם</label><input id="cn" value="${esc(t.contact?.name)}"></div>
@@ -556,23 +720,51 @@ async function renderTenant(id) {
       } catch (e) { alert(e.message); }
     };
 
+    const price = pricingWire(m, t.pricing || {});
+
     m.querySelector('#save').onclick = async () => {
       try {
-        let tiers = [];
-        try { tiers = JSON.parse(m.querySelector('#tiers').value || '[]'); }
-        catch { throw new Error('מדרגות — JSON לא תקין'); }
+        const money = price.read();
         await api('/tenants/' + id, { method: 'PATCH', body: JSON.stringify({
-          pricing: {
-            price_per_child: Number(m.querySelector('#ppc').value),
-            minimum_monthly: Number(m.querySelector('#min').value),
-            free_until: m.querySelector('#free').value || null,
-            tiers,
-          },
+          pricing: money.pricing,
+          trial_ends_at: money.trial_ends_at,
           contact: { name: m.querySelector('#cn').value, phone: m.querySelector('#cp').value, email: m.querySelector('#ce').value },
           notes: m.querySelector('#notes').value,
         })});
         m.remove(); loadList(); loadSummary();
       } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    };
+
+    // ------------------------------------------------ moving the database
+    const found = m.querySelector('#dbfound');
+    const dbBody = () => JSON.stringify({
+      db_name: m.querySelector('#dbname').value.trim(),
+      db_uri: m.querySelector('#dburi').value.trim(),
+    });
+    const describe = (f) => `נמצאו שם: ${f.children} ילדים · ${f.employees} עובדים · ${f.branches} סניפים · ${f.users} משתמשים (${f.collections} אוספים)`;
+
+    m.querySelector('#dbcheck').onclick = async () => {
+      found.textContent = 'בודק…';
+      try {
+        const r = await api(`/tenants/${id}/database`, { method: 'PATCH',
+          body: JSON.stringify({ ...JSON.parse(dbBody()), check: true }) });
+        found.innerHTML = describe(r.found);
+      } catch (e) { found.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; }
+    };
+
+    m.querySelector('#dbmove').onclick = async () => {
+      const name = m.querySelector('#dbname').value.trim();
+      if (name === t.db_name && m.querySelector('#dburi').value.trim() === (t.db_uri || '')) {
+        found.textContent = 'זה כבר המסד הנוכחי.';
+        return;
+      }
+      if (!confirm(`להעביר את "${t.name}" למסד "${name}"?\n\nמכאן והלאה הלקוח יראה את מה שיש שם.\nהמסד הנוכחי (${t.db_name}) לא נמחק ולא משתנה.`)) return;
+      found.textContent = 'מעביר…';
+      try {
+        const r = await api(`/tenants/${id}/database`, { method: 'PATCH', body: dbBody() });
+        found.innerHTML = `הועבר. ${describe(r.found)}`;
+        loadList();
+      } catch (e) { found.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; }
     };
 
     const susp = m.querySelector('#susp');
