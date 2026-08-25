@@ -18,7 +18,11 @@
  *   node scripts/vacation-calendar.test.js
  */
 
-const { CALENDAR_5787, YEAR_5787, toDocument, statusOn } = require('../src/services/vacationCalendar');
+const {
+  CALENDAR_5787, YEAR_5787, YEAR_5787_HEBREW,
+  toDocument, statusOn, calendarFor, normalizeYearKey,
+} = require('../src/services/vacationCalendar');
+const { getAcademicYears } = require('../src/services/academic-year.service');
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -46,6 +50,26 @@ console.log('\n🗂️  כל יום מסווג נכון — וזה מה שקוב
     eq(e?.kind, kind, `${e?.name || key} — ${kind}`);
   }
   eq(CALENDAR_5787.length, Object.keys(expected).length, 'ואין שורות עודפות או חסרות');
+}
+
+
+console.log('\n🔑  מפתח השנה זהה למה שכל המערכת משתמשת בו\n');
+{
+  // This is the bug that shipped: the calendar was keyed by the Hebrew name
+  // while Classroom, Child and Holiday all store the Gregorian range, so the
+  // import refused every branch with "אין לוח חופשות מוגדר".
+  const systemYear = getAcademicYears().current.range;
+  ok(/^\d{4}-\d{4}$/.test(systemYear), `המערכת עובדת עם טווח לועזי (${systemYear})`);
+  eq(YEAR_5787, '2026-2027', 'והלוח מפתוח באותה צורה');
+
+  ok(!!calendarFor('2026-2027'), 'טווח לועזי — נמצא');
+  ok(!!calendarFor(YEAR_5787_HEBREW), 'שם עברי — נמצא גם הוא');
+  ok(!!calendarFor('2026-2027 תשפ״ז'), 'וגם הצורה המשולבת שמוצגת במסך');
+  ok(calendarFor('2030-2031') === null, 'שנה שאין לה לוח — לא נמצא');
+
+  eq(normalizeYearKey(YEAR_5787_HEBREW), '2026-2027', 'שם עברי נשמר תחת הטווח');
+  eq(normalizeYearKey('2026-2027 תשפ״ז'), '2026-2027', 'וגם הצורה המשולבת');
+  eq(normalizeYearKey('2027-2028'), '2027-2028', 'שנה אחרת נשמרת כמו שהיא');
 }
 
 console.log('\n📅  התאריכים נופלים על ימי השבוע שפורסמו\n');

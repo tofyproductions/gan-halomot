@@ -138,11 +138,14 @@ async function copyFromBranch(req, res, next) {
  */
 async function importYear(req, res, next) {
   try {
-    const academicYear = req.body?.academic_year || vacationCalendar.YEAR_5787;
-    const calendar = vacationCalendar.calendarFor(academicYear);
+    const requested = req.body?.academic_year || vacationCalendar.YEAR_5787;
+    const calendar = vacationCalendar.calendarFor(requested);
     if (!calendar) {
-      return res.status(400).json({ error: `אין לוח חופשות מוגדר לשנת ${academicYear}` });
+      return res.status(400).json({ error: `אין לוח חופשות מוגדר לשנת ${requested}` });
     }
+    // Stored under the key the rest of the system uses, whatever the caller
+    // called it — otherwise the rows are written where nothing looks for them.
+    const academicYear = vacationCalendar.normalizeYearKey(requested);
 
     const branches = await Branch.find({}).select('_id name').lean();
     if (!branches.length) return res.status(400).json({ error: 'לא נמצאו סניפים' });
@@ -186,7 +189,7 @@ async function calendar(req, res, next) {
   try {
     const branchId = req.query.branch;
     if (!branchId) return res.status(400).json({ error: 'יש לציין סניף' });
-    const year = req.query.year || vacationCalendar.YEAR_5787;
+    const year = vacationCalendar.normalizeYearKey(req.query.year || vacationCalendar.YEAR_5787);
     res.json(await vacationCalendar.readCalendar(branchId, year));
   } catch (error) { next(error); }
 }

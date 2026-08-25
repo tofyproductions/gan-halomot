@@ -19,7 +19,19 @@
  * and they agree.
  */
 
-const YEAR_5787 = 'תשפ״ז';
+/**
+ * The year's key, in the form the REST OF THE SYSTEM uses.
+ *
+ * `Classroom.academic_year`, `Child.academic_year` and `Holiday.academic_year`
+ * all hold the Gregorian range — '2026-2027'. Keying this file by the Hebrew
+ * name instead made the import refuse every branch with "אין לוח חופשות
+ * מוגדר", because nothing else in the application ever asks for 'תשפ״ז'.
+ *
+ * The Hebrew name is kept as an alias: it is what a person says out loud, and
+ * a caller that passes it should be understood rather than corrected.
+ */
+const YEAR_5787 = '2026-2027';
+const YEAR_5787_HEBREW = 'תשפ״ז';
 
 const CALENDAR_5787 = [
   {
@@ -107,9 +119,32 @@ const CALENDAR_5787 = [
 /** The note every parent sees under the list. */
 const FOOTER_5787 = 'בימים של מסיבות בגן — הגן מסתיים בשעה 13:00';
 
-const CALENDARS = { [YEAR_5787]: { entries: CALENDAR_5787, footer: FOOTER_5787 } };
+const CALENDARS = {
+  [YEAR_5787]: { entries: CALENDAR_5787, footer: FOOTER_5787 },
+  [YEAR_5787_HEBREW]: { entries: CALENDAR_5787, footer: FOOTER_5787 },
+};
 
-const calendarFor = (academicYear) => CALENDARS[academicYear] || null;
+/**
+ * Tolerant on the way in, exact on the way out.
+ *
+ * The year turns up in three shapes depending on who is asking: '2026-2027',
+ * 'תשפ״ז', and the display form '2026-2027 תשפ״ז' that formatAcademicYear
+ * builds. All three mean one year, and refusing two of them is how a button
+ * ends up telling a manager the year does not exist.
+ */
+function calendarFor(academicYear) {
+  const raw = String(academicYear || '').trim();
+  if (CALENDARS[raw]) return CALENDARS[raw];
+  const range = raw.split(/\s+/)[0];
+  return CALENDARS[range] || null;
+}
+
+/** The stored key for whatever the caller called the year. */
+function normalizeYearKey(academicYear) {
+  const raw = String(academicYear || '').trim();
+  if (raw === YEAR_5787_HEBREW) return YEAR_5787;
+  return raw.split(/\s+/)[0] || YEAR_5787;
+}
 
 /**
  * Turn one calendar row into the document that actually stores it.
@@ -212,7 +247,11 @@ async function readCalendar(branchId, academicYear) {
   // By date, because that is the order a person reads a year in. sort_order
   // only decides ties, which is what two rows on the same day need.
   rows.sort((a, b) => a.start.localeCompare(b.start) || (a.sort_order - b.sort_order));
-  return { academic_year: academicYear, footer: (calendarFor(academicYear) || {}).footer || '', entries: rows };
+  return {
+    academic_year: academicYear,
+    footer: (calendarFor(academicYear) || {}).footer || '',
+    entries: rows,
+  };
 }
 
 /** Is the gan closed on `ymd`, and if it is open late-starting, until when? */
@@ -226,6 +265,6 @@ function statusOn(calendar, ymd) {
 }
 
 module.exports = {
-  YEAR_5787, CALENDAR_5787, FOOTER_5787,
-  calendarFor, toDocument, readCalendar, statusOn,
+  YEAR_5787, YEAR_5787_HEBREW, CALENDAR_5787, FOOTER_5787,
+  calendarFor, normalizeYearKey, toDocument, readCalendar, statusOn,
 };

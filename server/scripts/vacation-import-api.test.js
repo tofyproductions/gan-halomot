@@ -31,7 +31,11 @@ const jwt = require('jsonwebtoken');
 const PORT = 5425;
 const B = `http://localhost:${PORT}`;
 const SECRET = 'vacation-import-secret';
-const YEAR = 'תשפ״ז';
+// The year is asked for BY ITS HEBREW NAME and must be stored under the
+// Gregorian range — the shape Classroom, Child and Holiday all use. Keying it
+// by the Hebrew name is the bug that made the import refuse every branch.
+const YEAR_REQUESTED = 'תשפ״ז';
+const YEAR = '2026-2027';
 let failures = 0;
 
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -120,8 +124,9 @@ async function portIsFree() {
   try {
     console.log('\n📤  ייבוא ראשון — כל סניף מקבל את השנה\n');
     {
-      const r = await api('/api/holidays/import-year', { token: admin, method: 'POST', body: { academic_year: YEAR } });
-      eq(r.status, 200, 'הייבוא הצליח');
+      const r = await api('/api/holidays/import-year', { token: admin, method: 'POST', body: { academic_year: YEAR_REQUESTED } });
+      eq(r.status, 200, 'הייבוא הצליח — גם כשמבקשים בשם העברי');
+      eq(r.json?.academic_year, YEAR, 'ונשמר תחת הטווח הלועזי שכל המערכת משתמשת בו');
       eq((r.json?.branches || []).length, 2, 'שני הסניפים טופלו');
       ok((r.json?.branches || []).every((b) => b.created > 0), 'ובשניהם נוצרו שורות');
 
