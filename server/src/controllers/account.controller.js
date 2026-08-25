@@ -83,7 +83,7 @@ exports.myAccount = async (req, res, next) => {
       },
       history,
       support: {
-        email: process.env.SUPPORT_EMAIL || 'hello@dreamgan.com',
+        email: process.env.SUPPORT_EMAIL || 'halom.dreamgan@gmail.com',
         phone: process.env.SUPPORT_PHONE || '',
       },
     });
