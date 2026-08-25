@@ -35,7 +35,23 @@ process.on('uncaughtException', (err) => { console.error('UNCAUGHT EXCEPTION:', 
 const app = express();
 
 // Security & parsing
-app.use(helmet({ contentSecurityPolicy: false }));
+app.use(helmet({
+  // A full policy would have to name every origin the application talks to,
+  // and getting one of them wrong takes a working screen off the air for a gan
+  // that is open. These four cost nothing and are not about that: they stop
+  // the page being framed by somebody else's site, stop a plugin being
+  // embedded, stop an injected <base> redirecting every relative link, and
+  // stop a form being posted somewhere we did not write.
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      'frame-ancestors': ["'none'"],
+      'object-src': ["'none'"],
+      'base-uri': ["'self'"],
+      'form-action': ["'self'"],
+    },
+  },
+}));
 app.use(cors({ origin: env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -126,16 +142,27 @@ if (require('./platform/connection').isEnabled()) {
   // A host that DOES name a customer falls through untouched: this only
   // catches the bare domain and the reserved names.
   const { slugFromHost } = require('./platform/resolve');
-  app.get('/', (req, res, next) => {
+  const landing = (file) => (req, res, next) => {
     if (slugFromHost(req.headers.host)) return next();
-    res.sendFile(path.join(__dirname, '../../landing/index.html'));
-  });
+    res.sendFile(path.join(__dirname, '../../landing', file));
+  };
+  app.get('/', landing('index.html'));
+  // The two documents a network's lawyer asks for before signing anything.
+  // On the bare domain only — a customer's own address is their system.
+  app.get('/privacy', landing('privacy.html'));
+  app.get('/terms', landing('terms.html'));
 }
 
 // Serve static frontend in production
 if (env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../../client/dist')));
   app.get('*', (req, res) => {
+    // A request for a file that is not there is not a page. The catch-all was
+    // answering /assets/anything.map with the application's HTML and a 200,
+    // which tells anybody probing for source maps that something is there.
+    if (/^\/assets\//.test(req.path) || /\.(map|js|css|json|txt|xml|ico|png|jpg|svg|woff2?)$/i.test(req.path)) {
+      return res.status(404).type('text/plain').send('Not found');
+    }
     res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
   });
 }
