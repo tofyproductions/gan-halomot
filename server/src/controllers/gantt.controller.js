@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { GanttMonth, Holiday, Classroom } = require('../models');
+const pv = require('../services/parentVisibility');
 
 const DEFAULT_ROWS = [
   { key: 'meeting', label: 'מפגש' },
@@ -190,4 +191,59 @@ function generateWeeks(month, year) {
   return weeks;
 }
 
-module.exports = { get, save, approve, getArchive };
+
+// ---------------------------------------------------------------------------
+// מה ההורים רואים — one switch per branch per week, for the gantt and the menu.
+//
+// The gan asked to decide week by week rather than once and for all, because
+// a week that is still being written is not a week anybody wants read.
+// ---------------------------------------------------------------------------
+
+/** GET /api/gantt/visibility?branch=<id>&weeks=8 — this week and the next few. */
+async function getVisibility(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
+
+    const count = Math.min(Math.max(Number(req.query.weeks) || 8, 1), 26);
+    const today = pv.ymdOf(new Date());
+    const start = new Date(`${pv.weekStart(today)}T12:00:00.000Z`);
+
+    const weeks = [];
+    for (let i = 0; i < count; i += 1) {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i * 7);
+      const ymd = d.toISOString().slice(0, 10);
+      const state = await pv.visibilityFor(branchId, pv.weekKey(ymd));
+      weeks.push({ ...state, start: ymd, dates: pv.weekDates(ymd) });
+    }
+    res.json({ weeks });
+  } catch (error) { next(error); }
+}
+
+/** PUT /api/gantt/visibility   { branch_id, week, gantt?, menu? } */
+async function setVisibility(req, res, next) {
+  try {
+    const { ParentVisibility } = require('../models');
+    const { branch_id: branchId, week } = req.body || {};
+    if (!branchId || !week) return res.status(400).json({ error: 'יש לציין סניף ושבוע' });
+
+    // Only the switches actually sent are written, so a screen that shows one
+    // of them cannot silently reset the other.
+    const set = {
+      set_by: req.user?.id || null,
+      set_by_name: req.user?.full_name || '',
+    };
+    if (req.body.gantt !== undefined) set.gantt = !!req.body.gantt;
+    if (req.body.menu !== undefined) set.menu = !!req.body.menu;
+
+    await ParentVisibility.findOneAndUpdate(
+      { branch_id: branchId, week },
+      { $set: set },
+      { upsert: true, new: true },
+    );
+    res.json(await pv.visibilityFor(branchId, week));
+  } catch (error) { next(error); }
+}
+
+module.exports = { get, save, approve, getArchive, getVisibility, setVisibility };

@@ -41,7 +41,7 @@ export const TAB_GROUPS = [
       // she knows from 'עדכוני שכר' instead — she has no business seeing every
       // employee's rate and net in order to record a bonus.
       { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant'] },
-      { id: 'payroll_updates',    label: 'עדכוני שכר', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      { id: 'payroll_updates',    label: 'עדכוני שכר חודשי', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       // A payslip that was already SENT to the employee, unlike the salary
       // table above it. It is the document her staff bring to her when they
       // think a month is wrong, so she can answer without the accountant.
@@ -59,6 +59,9 @@ export const TAB_GROUPS = [
       // room — a teacher needs it more than anyone, and a board filled in by
       // management is a board filled in by somebody who was not there.
       { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      // Same gate as the board: the person who notices the wipes ran out is in
+      // the room, not the office.
+      { id: 'supplies',   label: 'מה חסר',      path: '/supplies', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       // Parents correct their own details and the change is live at once; this
       // is where the gan finds out. A class leader is on the list because an
       // allergy is their business before it is management's.

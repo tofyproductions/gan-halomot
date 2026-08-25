@@ -244,6 +244,10 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
   const worked = workedDates instanceof Set ? workedDates : new Set(workedDates || []);
   const result = { total: 0, details: [], worked_on_holiday: [] };
   for (const h of holidays) {
+    // A short day is a day the gan RAN and finished early. She worked it and is
+    // paid for the hours she punched; charging her a vacation day on top would
+    // make her pay for a day she was present.
+    if (h.kind === 'short_day') continue;
     const start = new Date(h.start_date);
     const end = new Date(h.end_date);
     const endYmd = end.toISOString().slice(0, 10);

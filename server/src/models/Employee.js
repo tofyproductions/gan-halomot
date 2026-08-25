@@ -278,6 +278,28 @@ const employeeSchema = new mongoose.Schema({
 
   // Role
   position: { type: String, default: '' },                  // e.g. גננת / סייעת / מנהלת
+
+  /**
+   * Which room this person works in.
+   *
+   * WHY IT LIVES HERE. A classroom already had a `lead_teacher_id`, and it
+   * points at a User — a login. Most of the staff have no login: the גננות,
+   * הסייעות and המטפלות exist as Employee cards and nothing else, so the room
+   * could only ever name the handful of people who happen to sign in. The
+   * assignment has to hang off the card that everybody has.
+   *
+   * ONE PRIMARY, BY CONSTRUCTION. "A second room is only ever additional" is
+   * not a rule that has to be enforced if there is exactly one field that can
+   * hold the primary. `extra_classroom_ids` is where she also helps out, and
+   * nothing reads it as responsibility.
+   *
+   * Optional in the schema on purpose: a cook, a bookkeeper and a branch
+   * manager have no room. The requirement is per-position and lives in the
+   * controller, where it can say WHICH positions and be changed without a
+   * migration.
+   */
+  primary_classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null, index: true },
+  extra_classroom_ids: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Classroom' }], default: [] },
   start_date: { type: Date, default: null },
 
   // Salary configuration

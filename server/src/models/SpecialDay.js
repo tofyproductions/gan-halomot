@@ -36,6 +36,16 @@ const specialDaySchema = new mongoose.Schema({
   hourly_hours: { type: Number, default: 0 },
 
   note: { type: String, default: '' },
+
+  // --- What the calendar shows -------------------------------------------
+  // Display only, and the same three fields a Holiday carries, so one merged
+  // calendar can be built without the reader caring which model a row came from.
+  hebrew: { type: String, default: '' },
+  return_note: { type: String, default: '' },
+  emoji: { type: String, default: '' },
+  color: { type: String, default: '' },
+  sort_order: { type: Number, default: 0 },
+  academic_year: { type: String, default: '' },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   created_by_name: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

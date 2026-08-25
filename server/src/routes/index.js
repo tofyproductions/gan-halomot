@@ -115,6 +115,7 @@ router.use('/pickup', require('./pickup.routes'));
 // line, and it left /recruitment/pull reachable by anyone with the URL.
 router.use('/recruitment', require('./recruitment.routes'));
 router.use('/documents', require('./documents.routes'));
+router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/activities', require('./activity.routes'));
 router.use('/gantt', require('./gantt.routes'));

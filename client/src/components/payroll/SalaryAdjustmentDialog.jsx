@@ -83,7 +83,7 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
       <DialogTitle>
-        עדכוני שכר — {row.full_name}
+        עדכוני שכר חודשי — {row.full_name}
         <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary' }}>
           {row.branch_name} • חודש {month}
         </Typography>
@@ -98,7 +98,7 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
         {/* List of existing */}
         <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>עדכונים קיימים</Typography>
         {loading ? <Typography variant="caption" color="text.secondary">טוען…</Typography> : list.length === 0 ? (
-          <Typography variant="caption" color="text.disabled">אין עדכוני שכר לחודש זה.</Typography>
+          <Typography variant="caption" color="text.disabled">אין עדכוני שכר חודשי לחודש זה.</Typography>
         ) : (
           <List dense sx={{ bgcolor: 'grey.50', borderRadius: 2, mb: 2 }}>
             {list.map(adj => (

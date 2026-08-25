@@ -9,6 +9,7 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import EventRepeatIcon from '@mui/icons-material/EventRepeat';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -39,6 +40,34 @@ export default function HolidayManager() {
   }, [academicYear]);
 
   useEffect(() => { fetchHolidays(); }, [fetchHolidays]);
+
+  /**
+   * Publish the year into EVERY branch at once.
+   *
+   * Confirmed first because it writes to every branch, and stated plainly:
+   * "safe to run again" is the fact that decides whether somebody dares press
+   * it, and it is true — rows are matched on their date, and anything the
+   * office edited by hand is left alone.
+   */
+  const [importing, setImporting] = useState(false);
+  const importYear = async () => {
+    if (!window.confirm(
+      `להזין את לוח החופשות של ${academicYear} לכל הסניפים?\n\n`
+      + 'בטוח להרצה חוזרת — חופשה שכבר קיימת תתעדכן ולא תיווצר פעמיים, '
+      + 'וחופשה שערכתם ידנית לא תשתנה.',
+    )) return;
+    setImporting(true);
+    try {
+      const res = await api.post('/holidays/import-year', { academic_year: academicYear });
+      const branches = res.data.branches || [];
+      const created = branches.reduce((n, b) => n + b.created, 0);
+      const updated = branches.reduce((n, b) => n + b.updated, 0);
+      toast.success(`הוזן ל-${branches.length} סניפים · ${created} חדשות, ${updated} עודכנו`, { autoClose: 8000 });
+      fetchHolidays();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בייבוא');
+    } finally { setImporting(false); }
+  };
 
   const handleSave = async () => {
     const { mode, data } = dialog;
@@ -105,6 +134,11 @@ export default function HolidayManager() {
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>חופשות וחגים - {academicYear}</Typography>
         <Stack direction="row" spacing={1}>
+          <Button variant="outlined" color="secondary" startIcon={<EventRepeatIcon />}
+            onClick={importYear} disabled={importing}
+          >
+            הזן לוח שנתי לכל הסניפים
+          </Button>
           <Button variant="outlined" startIcon={<ContentCopyIcon />}
             onClick={() => setCopyDialog({ open: true, sourceBranch: '' })}
           >

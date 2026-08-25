@@ -43,6 +43,17 @@ const POSITION_PAIRS = [
   { f: 'אחר', m: 'אחר' },
 ];
 const positionsFor = (gender) => POSITION_PAIRS.map(p => (gender === 'male' ? p.m : p.f));
+
+/**
+ * Which job titles must have a room. Mirrors the same list on the server —
+ * kept here only so the field can be marked red before a save is attempted;
+ * the server is what actually enforces it.
+ */
+const CLASSROOM_REQUIRED_PREFIXES = ['גננ', 'גנן', 'סייע', 'מטפל'];
+const needsClassroom = (position) => {
+  const p = String(position || '').trim();
+  return !!p && CLASSROOM_REQUIRED_PREFIXES.some(prefix => p.startsWith(prefix));
+};
 /** The same title in the other gender, or the value untouched if unrecognised. */
 const translatePosition = (value, gender) => {
   const pair = POSITION_PAIRS.find(p => p.f === value || p.m === value);
@@ -60,6 +71,8 @@ const EMPTY_FORM = {
   // for the exceptions, rather than leaving every new hire ungendered.
   gender: 'female',
   position: '',
+  primary_classroom_id: '',
+  extra_classroom_ids: [],
   start_date: '',
   salary_type: 'hourly',
   salary_is_net: false,
@@ -193,6 +206,9 @@ export default function EmployeeManager() {
   const canManage = isManager || isAccountant;
   const { branches, selectedBranch, selectedBranchName, isAllBranches } = useBranch();
   const [employees, setEmployees] = useState([]);
+  // Every room in the network, fetched once. The picker narrows to the
+  // employee's own branch, which is why the branch is in each row.
+  const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
@@ -206,6 +222,22 @@ export default function EmployeeManager() {
       .catch(() => {});
   }, []);
   useEffect(() => { fetchContractStatuses(); }, [fetchContractStatuses]);
+
+  const roomsForBranch = useCallback((branchId) => {
+    if (!branchId) return classrooms;
+    return classrooms.filter(c => String(c.branch_id?._id || c.branch_id || '') === String(branchId));
+  }, [classrooms]);
+  const roomName = useCallback((id) => {
+    const c = classrooms.find(x => String(x.id || x._id) === String(id));
+    return c?.name || '—';
+  }, [classrooms]);
+
+  // The rooms, fetched once. The picker narrows to the employee's own branch.
+  useEffect(() => {
+    api.get('/classrooms')
+      .then(res => setClassrooms(res.data.classrooms || []))
+      .catch(() => { /* the picker stays empty; nothing else depends on it */ });
+  }, []);
 
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
   const [changeReqOpen, setChangeReqOpen] = useState(false);
@@ -265,6 +297,8 @@ export default function EmployeeManager() {
         email: emp.email || '',
         gender: emp.gender || '',
         position: emp.position || '',
+        primary_classroom_id: emp.primary_classroom_id ? String(emp.primary_classroom_id) : '',
+        extra_classroom_ids: (emp.extra_classroom_ids || []).map(String),
         start_date: emp.start_date ? new Date(emp.start_date).toISOString().slice(0, 10) : '',
         salary_type: emp.salary_type || 'hourly',
         salary_is_net: !!emp.salary_is_net,
@@ -362,6 +396,11 @@ export default function EmployeeManager() {
         global_ot_rate: br.global_ot_rate === '' ? null : Number(br.global_ot_rate),
         required_hours: br.required_hours === '' ? null : Number(br.required_hours),
       }));
+    // The room she works in. Sent as-is; the server owns the rule about which
+    // job titles must have one, so the two can never drift apart.
+    payload.primary_classroom_id = data.primary_classroom_id || null;
+    payload.extra_classroom_ids = (data.extra_classroom_ids || []).filter(Boolean);
+
     // Personal per-branch hourly bonuses.
     payload.hourly_bonuses = (data.hourly_bonuses || [])
       .filter(hb => hb.branch_id && Number(hb.rate) > 0)
@@ -814,6 +853,52 @@ export default function EmployeeManager() {
                 )}
               </TextField>
               <TextField label="תאריך התחלה" type="date" value={dialog.data.start_date || ''} onChange={e => updateField('start_date', e.target.value)} fullWidth InputLabelProps={{ shrink: true }} />
+            </Stack>
+
+            {/* Which room she works in.
+
+                Only the rooms of her own branch: a גננת in כפר סבא assigned to
+                a room in הרצליה is a typo nobody catches, and the list is long
+                enough across the network that it would be an easy one to make.
+
+                The primary is responsibility — the contact sheet prints it and
+                a parent is told about it. The additional rooms are where she
+                also helps out, and are deliberately a separate control so the
+                two can never be confused for each other. */}
+            <Stack direction="row" spacing={2}>
+              <TextField
+                label="כיתה ראשית" select fullWidth
+                value={dialog.data.primary_classroom_id || ''}
+                onChange={e => updateField('primary_classroom_id', e.target.value)}
+                helperText={
+                  needsClassroom(dialog.data.position) && !dialog.data.primary_classroom_id
+                    ? `לתפקיד ${dialog.data.position} חובה לשייך כיתה`
+                    : 'האחראית על הילדים בכיתה'
+                }
+                error={needsClassroom(dialog.data.position) && !dialog.data.primary_classroom_id}
+              >
+                <MenuItem value="">—</MenuItem>
+                {roomsForBranch(dialog.data.branch_id).map(c => (
+                  <MenuItem key={c.id || c._id} value={String(c.id || c._id)}>{c.name}</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="כיתות נוספות" select fullWidth
+                SelectProps={{
+                  multiple: true,
+                  renderValue: (sel) => sel.map(id => roomName(id)).join(', '),
+                }}
+                value={dialog.data.extra_classroom_ids || []}
+                onChange={e => updateField('extra_classroom_ids', e.target.value)}
+                helperText="עוזרת גם בכיתות אלה — לא אחראית עליהן"
+                disabled={!dialog.data.primary_classroom_id}
+              >
+                {roomsForBranch(dialog.data.branch_id)
+                  .filter(c => String(c.id || c._id) !== String(dialog.data.primary_classroom_id))
+                  .map(c => (
+                    <MenuItem key={c.id || c._id} value={String(c.id || c._id)}>{c.name}</MenuItem>
+                  ))}
+              </TextField>
             </Stack>
             <Stack direction="row" spacing={2}>
               {(isAdmin || isAllBranches) && (
