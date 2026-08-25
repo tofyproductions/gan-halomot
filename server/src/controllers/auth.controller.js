@@ -54,6 +54,10 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     role_tab_add: roleTabs.add || [],
     role_tab_remove: roleTabs.remove || [],
     password_set: !!user.password_set,
+    // Carried in the token so every request can be refused without a database
+    // lookup. Cleared the moment a password is chosen — and the new token
+    // issued there is what lifts the restriction.
+    must_change_password: !!user.must_change_password,
     // Where this person stands in the customer's org chart, when there is one.
     // It decides which screen they are given — districts, branches or people —
     // and it is a ceiling on what they may ask for, so it is read from the
@@ -151,8 +155,12 @@ async function setPassword(req, res, next) {
     if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });
     user.password_hash = await bcrypt.hash(String(password), 10);
     user.password_set = true;
+    user.must_change_password = false;
     await user.save();
-    res.json({ ok: true, password_set: true });
+    // A fresh token, because the old one still says the password must change
+    // and would keep refusing every other request. Without this the person
+    // chooses a password and is locked out by the choice.
+    res.json({ ok: true, password_set: true, ...makeToken(user, false, await roleTabOverrides(user.role), req) });
   } catch (error) {
     next(error);
   }

@@ -118,21 +118,46 @@ async function updateUserTabs(req, res, next) {
  * in with name+ID again and is prompted to choose a new password. Optionally a
  * temporary password can be provided to hand the employee.
  */
+/**
+ * Issuing a new password for an employee who lost theirs.
+ *
+ * WHAT THIS USED TO DO, AND WHY IT WAS WRONG. It set `password_set: false`,
+ * and its own comment said the quiet part: with no password set, step one of
+ * login issues a token on a name and an id number alone. So "reset the
+ * password" REMOVED the password — and both of the things it removed it in
+ * favour of are printed on the staff list. Anyone who could read that list
+ * could then sign in as whoever they liked, and the screen said the reset had
+ * worked.
+ *
+ * Now it issues a real temporary password, shown to the administrator once,
+ * and flags the account: that password opens exactly one screen — the one that
+ * replaces it — and nothing else until it has been replaced.
+ */
 async function resetPassword(req, res, next) {
   try {
     const { temp_password } = req.body || {};
-    const update = { password_set: false };
-    if (temp_password && String(temp_password).length >= 4) {
-      // Give them a known temp password AND keep password_set=false so they are
-      // still nagged to replace it (temp works as the step-2 password meanwhile
-      // is NOT enforced since password_set=false → name+ID logs in). We simply
-      // store the hash so a later "set your own" flow has something to compare.
-      update.password_hash = await bcrypt.hash(String(temp_password), 10);
-    }
-    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true })
-      .select('full_name password_set');
+
+    // Readable down a telephone: no l/I/0/O, and grouped.
+    const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const pick = (n) => Array.from(require('crypto').randomBytes(n))
+      .map((b) => alphabet[b % alphabet.length]).join('');
+    const password = temp_password && String(temp_password).length >= 4
+      ? String(temp_password)
+      : `${pick(4)}-${pick(4)}`;
+
+    const user = await User.findByIdAndUpdate(req.params.id, {
+      password_hash: await bcrypt.hash(password, 10),
+      password_set: true,
+      must_change_password: true,
+    }, { new: true }).select('full_name id_number password_set');
     if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });
-    res.json({ ok: true, full_name: user.full_name, password_set: user.password_set });
+
+    res.json({
+      ok: true,
+      full_name: user.full_name,
+      id_number: user.id_number || '',
+      temp_password: password,
+    });
   } catch (err) { next(err); }
 }
 

@@ -59,8 +59,15 @@ export function AuthProvider({ children }) {
   };
 
   // User chooses/changes their own login password, then refresh the profile.
+  //
+  // The response carries a NEW token. It matters when the password being
+  // replaced was a temporary one: the old token says the password must change,
+  // and every request other than this one is refused while it is held — so
+  // without swapping it the person chooses a password and stays locked out by
+  // the choice.
   const setPassword = async (password) => {
-    await api.post('/auth/set-password', { password });
+    const { data } = await api.post('/auth/set-password', { password });
+    if (data && data.token) applyAuth(data);
     const me = await api.get('/auth/me');
     setUser(me.data.user);
   };

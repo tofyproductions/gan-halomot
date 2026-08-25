@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { controlPlane, isEnabled, tenantConnection, forgetTenant } = require('../connection');
 const { createTenant, suspendTenant, resumeTenant, tenantUsage } = require('../provision');
 
@@ -220,6 +221,82 @@ exports.setDatabase = async (req, res, next) => {
     });
 
     res.json({ tenant, found });
+  } catch (err) { next(err); }
+};
+
+/**
+ * The people inside a customer who can actually log in.
+ *
+ * Not everybody — a gan with ninety employees would return ninety rows, and
+ * the question being asked is always about the two or three who hold a
+ * management account. Read-only, and it never returns a password hash.
+ */
+exports.tenantUsers = async (req, res, next) => {
+  try {
+    const { Tenant } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+
+    const { models } = await tenantConnection(tenant);
+    const users = await models.User.find({
+      role: { $in: ['system_admin', 'accountant', 'branch_manager'] },
+      is_active: true,
+    }).select('full_name id_number email role password_set must_change_password').limit(50).lean();
+
+    res.json({ users });
+  } catch (err) { next(err); }
+};
+
+/**
+ * Issuing a new password for somebody inside a customer.
+ *
+ * WHY THIS EXISTS. A manager who forgets her password has, until now, no way
+ * back in at all: the gan's login is a name, an id number and a password, and
+ * nothing anywhere could replace the third. The account is simply lost.
+ *
+ * WHAT IT DELIBERATELY IS NOT. It does not show us their password — nobody
+ * has it, it is a hash. It mints a new temporary one, shows it ONCE, and
+ * flags the account so that the temporary password buys exactly one thing:
+ * choosing a real one. That matters because this password travels through a
+ * telephone call or a text message, and both of those keep a copy. After the
+ * person chooses, the one that travelled is dead.
+ *
+ * Logged with who did it and for whom, because resetting somebody's password
+ * is indistinguishable from taking their account, and the difference has to be
+ * written down somewhere.
+ */
+exports.resetUserPassword = async (req, res, next) => {
+  try {
+    const { Tenant, AuditLog } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+
+    const { models } = await tenantConnection(tenant);
+    const user = await models.User.findById(req.body.user_id);
+    if (!user) return res.status(404).json({ error: 'משתמש לא נמצא אצל הלקוח' });
+
+    // Readable down a telephone: no l/I/0/O, and grouped.
+    const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
+    const pick = (n) => Array.from(crypto.randomBytes(n))
+      .map((b) => alphabet[b % alphabet.length]).join('');
+    const tempPassword = `${pick(4)}-${pick(4)}`;
+
+    user.password_hash = await bcrypt.hash(tempPassword, 10);
+    user.password_set = true;
+    user.must_change_password = true;
+    await user.save();
+
+    await AuditLog.create({
+      actor_id: req.platformUser._id, actor_email: req.platformUser.email,
+      action: 'tenant.reset_password', tenant_id: tenant._id, tenant_slug: tenant.slug,
+      detail: { user_id: String(user._id), full_name: user.full_name, role: user.role },
+    });
+
+    res.json({
+      full_name: user.full_name,
+      id_number: user.id_number || '',
+      temp_password: tempPassword,
+    });
   } catch (err) { next(err); }
 };
 

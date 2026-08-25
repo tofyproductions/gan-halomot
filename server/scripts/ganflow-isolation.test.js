@@ -203,8 +203,29 @@ const waitFor = async (fn, ms = 40000) => {
     });
     ok(Boolean(right.json && right.json.token), 'המנהלת נכנסת עם הסיסמה הזמנית');
 
-    const hers = await api('/api/branches', { tenant: 'chadash', token: right.json && right.json.token });
-    ok(hers.status === 200, `והמערכת עונה לה (${hers.status})`);
+    const tempToken = right.json && right.json.token;
+    ok(right.json && right.json.user && right.json.user.must_change_password === true,
+      'האסימון אומר שהסיסמה זמנית');
+
+    // The whole point: a password somebody else chose buys ONE thing.
+    const blocked = await api('/api/branches', { tenant: 'chadash', token: tempToken });
+    ok(blocked.status === 403, `⚠️  עם סיסמה זמנית אי אפשר לעשות דבר (${blocked.status})`);
+
+    const chose = await api('/api/auth/set-password', {
+      tenant: 'chadash', method: 'POST', token: tempToken, body: { password: 'shelah-1234' },
+    });
+    ok(chose.status === 200 && Boolean(chose.json.token), 'אבל אפשר לבחור סיסמה');
+
+    // The new token is what lifts it. Without one she would choose a password
+    // and be locked out by the choice.
+    const hers = await api('/api/branches', { tenant: 'chadash', token: chose.json && chose.json.token });
+    ok(hers.status === 200, `ואז המערכת עונה לה (${hers.status})`);
+
+    const again = await api('/api/auth/login-password', {
+      tenant: 'chadash', method: 'POST',
+      body: { full_name: 'מנהלת חדשה', id_number: '333333334', password: temp },
+    });
+    ok(again.status === 401, `הסיסמה הזמנית כבר לא עובדת (${again.status})`);
 
     console.log('\n--- כניסת תמיכה ---');
     // The feature that sells and the one a security review asks about first:

@@ -53,6 +53,9 @@ function effectiveMap(user, roleTabs = {}) {
 }
 
 function RoleDialog({ open, user, branches, onClose, onSaved }) {
+  // The temporary password, held only until the administrator closes the
+  // dialog. Never stored — a hash is all that exists after this.
+  const [tempPassword, setTempPassword] = useState(null);
   const [role, setRole] = useState('');
   const [managed, setManaged] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -211,10 +214,14 @@ export default function PermissionsManager() {
   }
 
   async function resetPassword(user) {
-    if (!window.confirm(`לאפס את הסיסמה של ${user.full_name || user.email}?\nהעובד/ת יוכל/תוכל להיכנס עם שם+ת"ז ויתבקש/תתבקש לבחור סיסמה חדשה.`)) return;
+    if (!window.confirm(`להנפיק סיסמה חדשה ל${user.full_name || user.email}?\n\nהסיסמה הנוכחית תפסיק לעבוד מיד. תוצג סיסמה זמנית להעברה בטלפון, והעובד/ת יידרש/תידרש לבחור סיסמה משלו/ה בכניסה הבאה.`)) return;
     try {
-      await api.post(`/admin/users/${user._id}/reset-password`, {});
-      toast.success('הסיסמה אופסה');
+      const { data } = await api.post(`/admin/users/${user._id}/reset-password`, {});
+      // Shown once and not stored anywhere readable, so it has to be put in
+      // front of whoever is about to read it out — a toast that fades while
+      // they are still looking for a pen is how the call ends with the person
+      // still locked out.
+      setTempPassword(data);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
     }
@@ -300,6 +307,35 @@ export default function PermissionsManager() {
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 } }}>
+      {/* Shown once. All three details, because logging in needs the full name
+          AND the id number AND the password — handing over the password alone
+          ends the call with the person still locked out. */}
+      <Dialog open={Boolean(tempPassword)} onClose={() => setTempPassword(null)} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle>סיסמה זמנית — מוצגת פעם אחת</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            למסור <b>בטלפון</b>. הסיסמה לא נשמרת ואי אפשר יהיה לראות אותה שוב.
+          </Alert>
+          <Table size="small">
+            <TableBody>
+              <TableRow><TableCell>שם מלא</TableCell><TableCell><b>{tempPassword?.full_name}</b></TableCell></TableRow>
+              <TableRow><TableCell>תעודת זהות</TableCell><TableCell dir="ltr">{tempPassword?.id_number || '—'}</TableCell></TableRow>
+              <TableRow>
+                <TableCell>סיסמה זמנית</TableCell>
+                <TableCell dir="ltr"><Typography sx={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 700 }}>{tempPassword?.temp_password}</Typography></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+            בכניסה הבאה המערכת תדרוש מהם לבחור סיסמה משלהם. עד שיבחרו, הסיסמה הזמנית
+            לא מאפשרת לעשות שום דבר אחר.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setTempPassword(null)}>העתקתי, סגור</Button>
+        </DialogActions>
+      </Dialog>
+
       {/* Role-wide permissions — one click applies to EVERY user of that role */}
       <Paper variant="outlined" sx={{ p: 2, mb: 2, borderRadius: 3, bgcolor: '#fafbff' }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>

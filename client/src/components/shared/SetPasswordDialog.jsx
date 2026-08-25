@@ -12,7 +12,7 @@ import { useAuth } from '../../hooks/useAuth';
  * via `allowSkip`) and from the user menu. On success the auth profile refreshes
  * so password_set becomes true and the nag stops.
  */
-export default function SetPasswordDialog({ open, onClose, allowSkip = false }) {
+export default function SetPasswordDialog({ open, onClose, allowSkip = false, forced = false }) {
   const { setPassword } = useAuth();
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -24,7 +24,7 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false }) 
     setSaving(true);
     try {
       await setPassword(pw);
-      toast.success('הסיסמה נקבעה — בכניסה הבאה תתבקש/י להזין אותה');
+      toast.success(forced ? 'הסיסמה נקבעה — אפשר להמשיך' : 'הסיסמה נקבעה — בכניסה הבאה תתבקש/י להזין אותה');
       setPw(''); setPw2('');
       onClose(true);
     } catch (err) {
@@ -37,13 +37,20 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false }) 
   return (
     <Dialog open={open} onClose={allowSkip ? () => onClose(false) : undefined} dir="rtl" maxWidth="xs" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LockIcon color="primary" /> בחירת סיסמה למערכת
+        <LockIcon color="primary" /> {forced ? 'בחירת סיסמה חדשה' : 'בחירת סיסמה למערכת'}
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <Alert severity="info" sx={{ py: 0.5 }}>
-            לאבטחת המידע — מומלץ לבחור סיסמה אישית. לאחר בחירתה, כל כניסה תדרוש אותה.
-          </Alert>
+          {forced ? (
+            <Alert severity="warning" sx={{ py: 0.5 }}>
+              נכנסת עם סיסמה זמנית שהונפקה עבורך. כדי להמשיך צריך לבחור סיסמה משלך —
+              מרגע שתיבחר, הזמנית תפסיק לעבוד.
+            </Alert>
+          ) : (
+            <Alert severity="info" sx={{ py: 0.5 }}>
+              לאבטחת המידע — מומלץ לבחור סיסמה אישית. לאחר בחירתה, כל כניסה תדרוש אותה.
+            </Alert>
+          )}
           <TextField label="סיסמה חדשה" type="password" value={pw} autoFocus
             onChange={e => setPw(e.target.value)} fullWidth inputProps={{ dir: 'ltr' }} />
           <TextField label="אימות סיסמה" type="password" value={pw2}

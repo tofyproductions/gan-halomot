@@ -36,6 +36,11 @@ router.patch('/tenants/:id', c.requireOwner, c.update);
 // changing a database from the form that edits a phone number is how a
 // working customer stops existing.
 router.patch('/tenants/:id/database', c.requireOwner, c.setDatabase);
+// Who inside a customer can log in, and issuing one of them a new password.
+// Owner-only: this is the one action here that hands somebody a way into a
+// gan's own system.
+router.get('/tenants/:id/users', c.requireOwner, c.tenantUsers);
+router.post('/tenants/:id/reset-password', c.requireOwner, c.resetUserPassword);
 router.post('/tenants/:id/suspend', c.requireOwner, c.suspend);
 router.post('/tenants/:id/resume', c.requireOwner, c.resume);
 

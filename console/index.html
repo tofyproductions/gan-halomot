@@ -491,6 +491,31 @@ function pricingWire(root, p = {}) {
   };
 }
 
+/**
+ * Shown once. All three details, because the gan's own login is a full name
+ * AND an id number AND a password — handing over the password alone hands over
+ * a third of the way in, and the call ends with somebody still locked out.
+ */
+function showTempPassword(r) {
+  const m = el(`<div class="modal"><div class="card">
+    <h2>סיסמה חדשה — מוצגת פעם אחת</h2>
+    <div class="ok">מסרו את שלושת הפרטים <b>בטלפון</b>. מייל נשאר בתיבה לנצח.</div>
+    <table><tbody>
+      <tr><td style="color:#5B7387">שם מלא</td><td><b>${esc(r.full_name)}</b></td></tr>
+      <tr><td style="color:#5B7387">תעודת זהות</td><td class="mono">${esc(r.id_number || '—')}</td></tr>
+      <tr><td style="color:#5B7387">סיסמה זמנית</td><td class="mono" style="font-size:19px"><b>${esc(r.temp_password)}</b></td></tr>
+    </tbody></table>
+    <div class="hint" style="margin-top:14px">
+      בכניסה הראשונה המערכת תדרוש מהם לבחור סיסמה משלהם, ורק אז תיפתח.
+      עד שיבחרו, הסיסמה הזמנית לא מאפשרת לעשות שום דבר אחר.
+    </div>
+    <div style="height:18px"></div>
+    <button id="done">העתקתי, סגור</button>
+  </div></div>`);
+  document.body.appendChild(m);
+  m.querySelector('#done').onclick = () => m.remove();
+}
+
 // ------------------------------------------------------------------ create
 function renderCreate() {
   const m = el(`<div class="modal"><div class="card">
@@ -649,6 +674,20 @@ async function renderTenant(id) {
       </div>`}
       ${pricingFields(t.pricing || {})}
 
+      <!-- Getting somebody back into their own system. Folded away because it
+           is rare, and next to the database because both are things done FOR a
+           customer rather than to their record. -->
+      <details style="margin-top:20px">
+        <summary style="cursor:pointer;color:var(--dim);font-size:13px">מישהו אצל הלקוח שכח סיסמה</summary>
+        <div style="margin-top:12px">
+          <div class="hint" style="margin-bottom:10px">
+            אין לנו את הסיסמה שלהם ואי אפשר לראות אותה. אפשר להנפיק חדשה —
+            היא תוצג פעם אחת, ומי שיקבל אותה יידרש לבחור סיסמה משלו בכניסה הראשונה.
+          </div>
+          <div id="userlist" class="hint">טוען…</div>
+        </div>
+      </details>
+
       <!-- Changing where a customer's data lives. Folded away, because it is
            rare and because it is the one field here that can make a working
            customer look empty. Checking reads the target and says what is in
@@ -746,6 +785,35 @@ async function renderTenant(id) {
         m.remove(); loadList(); loadSummary();
       } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
     };
+
+    // ------------------------------------------------- forgotten passwords
+    const ulist = m.querySelector('#userlist');
+    const ROLE = { system_admin: 'מנהל/ת מערכת', accountant: 'הנהלת חשבונות', branch_manager: 'מנהל/ת סניף' };
+    api(`/tenants/${id}/users`).then(({ users }) => {
+      if (!users.length) { ulist.textContent = 'אין אצל הלקוח משתמשי ניהול.'; return; }
+      ulist.innerHTML = `<table><tbody>${users.map((u) => `
+        <tr>
+          <td>${esc(u.full_name)}</td>
+          <td class="mono">${esc(u.id_number || '—')}</td>
+          <td>${ROLE[u.role] || u.role}</td>
+          <td>${u.must_change_password ? '<span class="pill s-trial">ממתין לבחירת סיסמה</span>' : ''}</td>
+          <td style="text-align:left"><button class="ghost" data-reset="${u._id}">הנפק סיסמה</button></td>
+        </tr>`).join('')}</tbody></table>`;
+
+      ulist.querySelectorAll('[data-reset]').forEach((b) => {
+        b.onclick = async () => {
+          const row = b.closest('tr');
+          const who = row.firstElementChild.textContent;
+          if (!confirm(`להנפיק סיסמה חדשה ל"${who}"?\n\nהסיסמה הנוכחית שלהם תפסיק לעבוד מיד.`)) return;
+          b.disabled = true;
+          try {
+            const r = await api(`/tenants/${id}/reset-password`, {
+              method: 'POST', body: JSON.stringify({ user_id: b.dataset.reset }) });
+            showTempPassword(r);
+          } catch (e) { alert(e.message); b.disabled = false; }
+        };
+      });
+    }).catch((e) => { ulist.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; });
 
     // ------------------------------------------------ moving the database
     const found = m.querySelector('#dbfound');

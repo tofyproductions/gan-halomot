@@ -46,6 +46,30 @@ function authMiddleware(req, res, next) {
       });
     }
 
+    /**
+     * A password somebody else chose is good for exactly one thing: choosing
+     * one. Until then every other request is refused.
+     *
+     * A client-side prompt would be a screen with a close button, and the
+     * temporary password — read down a telephone, or sent in a text message
+     * that stays in an inbox — would go on working. Whitelisted by route
+     * rather than by method, because the whole point is that this token may
+     * write ONE thing.
+     */
+    if (decoded.must_change_password) {
+      // originalUrl, not req.path: this middleware runs inside many routers and
+      // req.path is relative to whichever one mounted it, so a '/me' somewhere
+      // else would let the restriction slip.
+      const path = (req.originalUrl || '').split('?')[0];
+      const allowed = ['/api/auth/set-password', '/api/auth/me', '/api/auth/logout'].includes(path);
+      if (!allowed) {
+        return res.status(403).json({
+          error: 'הסיסמה הזו זמנית — צריך לבחור סיסמה חדשה לפני שממשיכים.',
+          must_change_password: true,
+        });
+      }
+    }
+
     req.user = decoded;
     next();
   } catch (err) {

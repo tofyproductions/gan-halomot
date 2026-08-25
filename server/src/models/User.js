@@ -9,6 +9,16 @@ const userSchema = new mongoose.Schema({
   // REQUIRED to log in. Admin "reset" flips this back to false (never reveals a
   // plaintext password — bcrypt only).
   password_set: { type: Boolean, default: false },
+  /**
+   * A password somebody else chose. Set when an administrator issues a new one
+   * — the person it was handed to has to replace it before doing anything, so
+   * that a password which travelled through a telephone call or a text message
+   * stops working the moment it has been used once.
+   *
+   * Enforced in the auth middleware rather than by asking the client nicely:
+   * a screen that can be closed is not a requirement.
+   */
+  must_change_password: { type: Boolean, default: false },
   full_name: { type: String, default: '' },
   role: {
     type: String,

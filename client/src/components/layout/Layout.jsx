@@ -89,15 +89,24 @@ export default function Layout() {
 function SetPasswordGate() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
+
+  // A password somebody else issued. Not a nag — the server refuses every
+  // request but this one while it is held, so a dialog that could be closed
+  // would leave the person looking at screens that will not load.
+  const mustChange = Boolean(user && user.must_change_password);
+
   useEffect(() => {
+    if (mustChange) { setOpen(true); return; }
     if (user && user.password_set === false && !sessionStorage.getItem('pw_nag_dismissed')) {
       setOpen(true);
     }
-  }, [user]);
-  if (!user || user.password_set !== false) return null;
+  }, [user, mustChange]);
+
+  if (!user || (!mustChange && user.password_set !== false)) return null;
   return (
     <SetPasswordDialog
-      open={open} allowSkip
+      open={open} allowSkip={!mustChange}
+      forced={mustChange}
       onClose={(saved) => { if (!saved) sessionStorage.setItem('pw_nag_dismissed', '1'); setOpen(false); }}
     />
   );

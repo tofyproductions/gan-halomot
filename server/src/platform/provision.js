@@ -163,6 +163,10 @@ async function createTenant(input, actor) {
       // outright when no password is set, so the temporary password was never
       // asked for and a name plus an id number was the whole of the door.
       password_set: true,
+      // This password is read down a telephone and written on somebody's pad.
+      // It opens exactly one screen — the one that replaces it — and after
+      // that the copy on the pad is worthless.
+      must_change_password: true,
       full_name: adminName,
       role: 'system_admin',
       branch_id: branch._id,
