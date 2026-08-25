@@ -69,6 +69,8 @@ router.use('/parent', require('./parent.routes'));
 // and all four are mounted ABOVE this line.
 router.use(authMiddleware);
 router.use('/branches', require('./branch.routes'));
+// The customer's own subscription — what they pay and why. Read-only.
+router.use('/account', require('./account.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
 router.use('/registrations', require('./registration.routes'));

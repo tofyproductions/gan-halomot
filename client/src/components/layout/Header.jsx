@@ -267,6 +267,13 @@ export default function Header() {
                   </IconButton>
                 </Tooltip>
               )}
+              {isAdmin && (
+                <Tooltip title="המנוי שלי">
+                  <IconButton size="small" onClick={() => navigate('/account')} sx={{ color: '#1E9E6A' }}>
+                    <ReceiptLongIcon sx={{ fontSize: '1rem' }} />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="הגדר כניסה ביומטרית">
                 <IconButton size="small" onClick={handleSetupBiometric} sx={{ color: '#7c3aed' }}>
                   <FingerprintIcon sx={{ fontSize: '1rem' }} />
@@ -399,6 +406,14 @@ export default function Header() {
               <ListItemButton onClick={() => goto('/admin/permissions')} sx={{ minHeight: 48 }}>
                 <ListItemIcon sx={{ minWidth: 40, color: '#0ea5e9' }}><AdminPanelSettingsIcon /></ListItemIcon>
                 <ListItemText primary="ניהול הרשאות" />
+              </ListItemButton>
+            </ListItem>
+          )}
+          {isAdmin && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => goto('/account')} sx={{ minHeight: 48 }}>
+                <ListItemIcon sx={{ minWidth: 40, color: '#1E9E6A' }}><ReceiptLongIcon /></ListItemIcon>
+                <ListItemText primary="המנוי שלי" />
               </ListItemButton>
             </ListItem>
           )}
