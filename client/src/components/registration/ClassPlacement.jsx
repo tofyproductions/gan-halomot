@@ -6,6 +6,8 @@ import {
   IconButton, Divider,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
+import OpenYearClassrooms from './OpenYearClassrooms';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EditIcon from '@mui/icons-material/Edit';
 import { toast } from 'react-toastify';
@@ -55,6 +57,7 @@ function CapacityBar({ used, total, label }) {
 }
 
 export default function ClassPlacement({ open, onClose, branchId, branchName, year, onDone }) {
+  const [openYear, setOpenYear] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [assign, setAssign] = useState({});      // enrollmentId -> classroomId
@@ -186,7 +189,15 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="lg" fullWidth>
       <DialogTitle sx={{ fontWeight: 800 }}>
-        שיבוץ לכיתות — {branchName}
+        <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+          <Box sx={{ flex: 1 }}>שיבוץ לכיתות — {branchName}</Box>
+          {/* The way out of an empty year. Reachable from here because this is
+              the screen that tells you the year has no rooms. */}
+          <Button size="small" variant="outlined" startIcon={<AutoAwesomeMotionIcon />}
+            onClick={() => setOpenYear(true)}>
+            פתיחת שנה — כיתות לכל הסניפים
+          </Button>
+        </Stack>
       </DialogTitle>
       <DialogContent>
         {loading && <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>}
@@ -468,6 +479,15 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
           <Button variant="contained" onClick={createRoom}>יצירה</Button>
         </DialogActions>
       </Dialog>
+
+      <OpenYearClassrooms
+        open={openYear}
+        onClose={() => setOpenYear(false)}
+        academicYear={year}
+        previousYear={year ? `${Number(String(year).split('-')[0]) - 1}-${Number(String(year).split('-')[0])}` : ''}
+        onDone={() => { setOpenYear(false); load(); }}
+      />
+
     </Dialog>
   );
 }

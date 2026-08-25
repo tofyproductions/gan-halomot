@@ -13,6 +13,7 @@
     "test:rooms": "node scripts/staff-classrooms.test.js",
     "test:vacations": "node scripts/vacation-calendar.test.js",
     "test:supplies": "node scripts/supplies-visibility.test.js",
+    "test:classrooms": "node scripts/classroom-planner.test.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",
     "platform:orgscope": "node scripts/ganflow-orgscope.test.js",

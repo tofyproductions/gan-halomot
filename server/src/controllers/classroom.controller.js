@@ -1,5 +1,6 @@
-const { Classroom, Child } = require('../models');
+const { Classroom, Child, Branch } = require('../models');
 const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
+const planner = require('../services/classroomPlanner');
 const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
@@ -172,4 +173,112 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { getAll, create, update, remove, cleanupGarbled };
+
+// ---------------------------------------------------------------------------
+// פתיחת שנה — the year's classrooms, for every branch, in one press.
+//
+// A child absorbed with no classroom is absorbed into nothing: no rooms
+// screen, no attendance, no collections, no supplies list. Until the rooms
+// exist the whole intake is stuck, and creating them one dialog at a time
+// across four branches and three age groups is twenty presses.
+// ---------------------------------------------------------------------------
+
+/** Which branches this request covers, honouring the caller's scope. */
+async function targetBranches(req) {
+  const asked = req.body?.branch_ids;
+  const scope = getBranchFilter(req);
+  const filter = { ...scope };
+  if (Array.isArray(asked) && asked.length) filter._id = { $in: asked };
+  return Branch.find(filter).select('_id name').sort({ name: 1 }).lean();
+}
+
+/**
+ * Work out what would be created, per branch, without creating it.
+ *
+ * A preview rather than a confirmation dialog that says "are you sure": across
+ * four branches this writes dozens of rows, and "sure about what" is a fair
+ * question. The same function then does the writing, so the two cannot
+ * disagree about what was promised.
+ */
+async function buildPlan(req) {
+  const academicYear = normalizeYear(req.body?.academic_year || getAcademicYears().current.range);
+  const mode = req.body?.mode === 'copy' ? 'copy' : 'create';
+  const fromYear = req.body?.from_year ? normalizeYear(req.body.from_year) : null;
+
+  const branches = await targetBranches(req);
+  const out = [];
+
+  for (const branch of branches) {
+    const existing = await Classroom.find({
+      branch_id: branch._id, academic_year: academicYear, is_active: true,
+    }).select('name').lean();
+    const existingNames = existing.map((r) => r.name);
+
+    let planned;
+    if (mode === 'copy') {
+      const source = await Classroom.find({
+        branch_id: branch._id, academic_year: fromYear, is_active: true,
+      }).select('name category capacity').sort({ name: 1 }).lean();
+      planned = planner.planCopy(source, existingNames);
+      planned.source_count = source.length;
+    } else {
+      planned = planner.planCreate(existingNames, req.body?.plan);
+    }
+
+    out.push({
+      branch_id: String(branch._id),
+      branch_name: branch.name,
+      existing_count: existingNames.length,
+      ...planned,
+    });
+  }
+
+  return { academic_year: academicYear, mode, from_year: fromYear, branches: out };
+}
+
+/** POST /api/classroom/bulk/preview — what would happen. */
+async function bulkPreview(req, res, next) {
+  try {
+    res.json(await buildPlan(req));
+  } catch (error) { next(error); }
+}
+
+/** POST /api/classroom/bulk — do it. */
+async function bulkCreate(req, res, next) {
+  try {
+    const plan = await buildPlan(req);
+    let total = 0;
+
+    for (const branch of plan.branches) {
+      if (!branch.create.length) continue;
+      // insertMany rather than a loop of create(): one round trip per branch,
+      // and `ordered: false` so one bad row cannot abandon the rest of a gan's
+      // year half-open.
+      const docs = branch.create.map((room) => ({
+        name: room.name,
+        category: room.category || null,
+        capacity: room.capacity || null,
+        academic_year: plan.academic_year,
+        branch_id: branch.branch_id,
+        is_active: true,
+      }));
+      try {
+        const written = await Classroom.insertMany(docs, { ordered: false });
+        branch.created = written.length;
+        total += written.length;
+      } catch (err) {
+        // A duplicate that slipped in between the plan and the write is not a
+        // failure — it is the thing the plan was trying to avoid, arriving
+        // late. Anything else is reported on the branch rather than thrown,
+        // so the branches that worked still stand.
+        branch.created = err?.result?.result?.nInserted ?? 0;
+        branch.error = err.message;
+        total += branch.created;
+      }
+    }
+
+    res.json({ ...plan, total_created: total });
+  } catch (error) { next(error); }
+}
+
+module.exports = { getAll, create, update, remove, cleanupGarbled, bulkPreview, bulkCreate };

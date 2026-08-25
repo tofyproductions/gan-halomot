@@ -14,6 +14,11 @@ router.put('/:id', classroomController.update);
 // DELETE /api/classroom/:id
 router.delete('/:id', classroomController.remove);
 
+// Opening a year across branches. Preview first — this writes dozens of rows
+// and "are you sure" is not an answer to "sure about what".
+router.post('/bulk/preview', classroomController.bulkPreview);
+router.post('/bulk', classroomController.bulkCreate);
+
 // POST /api/classrooms/cleanup-garbled — deactivate classrooms with corrupted names
 router.post('/cleanup-garbled', classroomController.cleanupGarbled);
 
