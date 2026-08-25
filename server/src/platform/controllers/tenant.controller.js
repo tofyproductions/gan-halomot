@@ -216,13 +216,41 @@ exports.setDatabase = async (req, res, next) => {
     // looks like it did nothing.
     await forgetTenant(tenant.slug);
 
+    /**
+     * A moved-into database has everything the gan ever had and nothing
+     * provisioning would have added. The org chart's root is the one that
+     * bites: it is created when a customer is born, so a database that was
+     * born elsewhere has none, and the screens that stand on it answer "לא
+     * הוגדר עץ ארגוני" — which reads like a bug rather than a missing row.
+     * Found on the demo, immediately after moving it.
+     *
+     * Created only if absent, and nothing else is touched.
+     */
+    let addedRoot = false;
+    try {
+      const { models } = await tenantConnection(tenant);
+      if (!(await models.OrgUnit.findOne({ parent_id: null }))) {
+        const firstBranch = await models.Branch.findOne({}).sort({ created_at: 1 }).lean();
+        const many = await models.Branch.countDocuments() > 1;
+        await models.OrgUnit.create({
+          name: tenant.name,
+          kind: many ? 'network' : 'branch',
+          parent_id: null,
+          path: [],
+          depth: 0,
+          branch_id: many ? null : (firstBranch ? firstBranch._id : null),
+        });
+        addedRoot = true;
+      }
+    } catch { /* the move itself succeeded; this is a convenience */ }
+
     await AuditLog.create({
       actor_id: req.platformUser._id, actor_email: req.platformUser.email,
       action: 'tenant.database', tenant_id: tenant._id, tenant_slug: tenant.slug,
       detail: { before, after: { db_name: dbName, db_uri: dbUri }, found },
     });
 
-    res.json({ tenant, found });
+    res.json({ tenant, found, added_root: addedRoot });
   } catch (err) { next(err); }
 };
 
