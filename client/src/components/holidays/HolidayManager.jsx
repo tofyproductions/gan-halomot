@@ -25,6 +25,10 @@ export default function HolidayManager() {
   const { selectedBranch, branches } = useBranch();
   const { years } = useAcademicYear();
   const [holidays, setHolidays] = useState([]);
+  // Employer closures — the staff day, the parties. Stored apart because
+  // they cost something different, shown here because the question this
+  // screen answers is "is the gan open", and that is one question.
+  const [specialDays, setSpecialDays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: {} });
   const [copyDialog, setCopyDialog] = useState({ open: false, sourceBranch: '' });
@@ -34,7 +38,10 @@ export default function HolidayManager() {
   const fetchHolidays = useCallback(() => {
     setLoading(true);
     api.get('/holidays', { params: { year: academicYear } })
-      .then(res => setHolidays(res.data.holidays || []))
+      .then(res => {
+        setHolidays(res.data.holidays || []);
+        setSpecialDays(res.data.special_days || []);
+      })
       .catch(() => toast.error('שגיאה בטעינת חופשות'))
       .finally(() => setLoading(false));
   }, [academicYear]);
@@ -186,6 +193,15 @@ export default function HolidayManager() {
                 <TableRow key={h._id || h.id} hover>
                   <TableCell sx={{ fontWeight: 600 }}>
                     {h.name}
+                    {/* A short day is one the gan RAN and finished early. It
+                        draws no vacation day, and a manager reading this table
+                        needs to see that without opening the row. */}
+                    {h.kind === 'short_day' && (
+                      <Chip
+                        label={`יום מקוצר — עד ${h.end_time || ''}`.trim()}
+                        size="small" color="warning" sx={{ ml: 1, fontWeight: 700 }}
+                      />
+                    )}
                     {h.is_custom && <Chip label="מותאם" size="small" variant="outlined" sx={{ ml: 1 }} />}
                     {h.is_half_day && (
                       <Chip
@@ -224,7 +240,32 @@ export default function HolidayManager() {
                 </TableRow>
               );
             })}
-            {holidays.length === 0 && (
+
+            {/* Employer closures. The gan is shut, but nothing comes out of
+                anybody's balance, so they are marked rather than blended in —
+                and they are edited where their pay rules live, on the salary
+                screen, which the row says rather than leaving it to be found. */}
+            {specialDays.map(d => (
+              <TableRow key={d.id || d._id} hover sx={{ bgcolor: 'action.hover' }}>
+                <TableCell sx={{ fontWeight: 600 }}>
+                  {d.name}
+                  <Chip
+                    label="יום מיוחד — לא יורד יום חופש"
+                    size="small" color="info" sx={{ ml: 1, fontWeight: 700 }}
+                  />
+                </TableCell>
+                <TableCell>{formatDate(d.date)}</TableCell>
+                <TableCell>{formatDate(d.date)}</TableCell>
+                <TableCell align="center"><Chip label={1} size="small" /></TableCell>
+                <TableCell align="center">
+                  <Typography variant="caption" color="text.secondary">
+                    נערך במסך השכר
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ))}
+
+            {holidays.length === 0 && specialDays.length === 0 && (
               <TableRow><TableCell colSpan={5} sx={{ textAlign: 'center', py: 4 }}>אין חופשות מוגדרות. לחץ על חג למעלה או הוסף ידנית.</TableCell></TableRow>
             )}
           </TableBody>

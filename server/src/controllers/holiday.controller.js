@@ -13,7 +13,26 @@ async function getAll(req, res, next) {
       .sort({ start_date: 1 })
       .lean();
 
-    res.json({ holidays: holidays.map(h => ({ ...h, id: h._id })) });
+    /*
+     * The year's employer closures come back too.
+     *
+     * They live in SpecialDay because they cost something different — nothing
+     * is drawn from anybody's balance — but that is a payroll distinction, and
+     * the person looking at "חופשות וחגים" is asking a calendar question: is
+     * the gan open. Splitting the answer across two screens meant the import
+     * wrote יום המשפחה and מסיבת סיום and this table showed neither, so they
+     * read as "not imported" when they were sitting one collection away.
+     */
+    const specialFilter = { academic_year: filter.academic_year };
+    if (filter.branch_id) specialFilter.$or = [{ branch_id: null }, { branch_id: filter.branch_id }];
+    const specialDays = filter.academic_year
+      ? await SpecialDay.find(specialFilter).populate('branch_id', 'name').sort({ date: 1 }).lean()
+      : [];
+
+    res.json({
+      holidays: holidays.map(h => ({ ...h, id: h._id })),
+      special_days: specialDays.map(d => ({ ...d, id: d._id })),
+    });
   } catch (error) { next(error); }
 }
 

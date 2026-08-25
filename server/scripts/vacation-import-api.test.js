@@ -171,6 +171,28 @@ async function portIsFree() {
       eq(pesachRows, 1, 'ולא נוצרה שורה כפולה לצידה');
     }
 
+    console.log('\n👓  מסך החופשות מראה גם את הימים המיוחדים\n');
+    {
+      // The bug this pins: the import wrote יום המשפחה, מסיבת סיום and the
+      // staff Friday into SpecialDay, and the holidays screen read only
+      // Holiday — so three of the thirteen published days looked like they had
+      // never been imported at all.
+      const r = await api(`/api/holidays?year=${encodeURIComponent(YEAR)}`, { token: admin });
+      eq(r.status, 200, 'המסך נטען');
+      const special = (r.json?.special_days || []).map((d) => d.name);
+      ok(special.includes('יום המשפחה · קטיף תותים'), 'יום המשפחה מגיע למסך');
+      ok(special.includes('מסיבת סיום הגן'), 'מסיבת סיום מגיעה');
+      ok(special.some((n) => n === 'יום גיבוש צוות'), 'ושישי של הגיבוש מגיע');
+
+      const holidayNames = (r.json?.holidays || []).map((h) => h.name);
+      ok(holidayNames.includes('פסח'), 'והחופשות עדיין שם');
+      eq((r.json?.holidays || []).length + (r.json?.special_days || []).length, 26,
+        '13 שורות × 2 סניפים — כל השנה נראית');
+
+      const short = (r.json?.holidays || []).filter((h) => h.kind === 'short_day');
+      eq(short.length, 4, 'וארבעת הימים המקוצרים מסומנים ככאלה');
+    }
+
     console.log('\n📅  הלוח המאוחד נקרא נכון\n');
     {
       const r = await api(`/api/holidays/calendar?branch=${branchB}&year=${encodeURIComponent(YEAR)}`, { token: admin });
