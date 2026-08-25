@@ -41,6 +41,14 @@ router.patch('/tenants/:id/database', c.requireOwner, c.setDatabase);
 // gan's own system.
 router.get('/tenants/:id/users', c.requireOwner, c.tenantUsers);
 router.post('/tenants/:id/reset-password', c.requireOwner, c.resetUserPassword);
+
+// The standing charge at iCount. Owner-only — this is where money is set up
+// and changed. Sending is never the default: both sync routes are a dry run
+// unless the request says confirm.
+router.get('/tenants/:id/subscription', c.requireOwner, c.subscription);
+router.post('/tenants/:id/subscription', c.requireOwner, c.openSubscription);
+router.post('/tenants/:id/subscription/sync', c.requireOwner, c.syncSubscription);
+router.post('/billing/sync-all', c.requireOwner, c.syncAllSubscriptions);
 router.post('/tenants/:id/suspend', c.requireOwner, c.suspend);
 router.post('/tenants/:id/resume', c.requireOwner, c.resume);
 

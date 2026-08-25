@@ -91,6 +91,34 @@ const tenantSchema = new mongoose.Schema({
     address: { type: String, default: '' },
     // Networks are invoiced and pay by transfer; a single gan is charged a card.
     method: { type: String, enum: ['card', 'invoice', ''], default: '' },
+
+    /**
+     * The standing arrangement at iCount.
+     *
+     * `hk_id` is the whole of it — an integer meaning "the arrangement iCount
+     * has with this customer". THE PAYMENT DETAILS ARE NOT HERE AND MUST NOT
+     * BE: a card is captured by iCount and never reaches us, and a bank
+     * account is passed through on the way to them. Losing this database must
+     * not be losing anybody's card.
+     *
+     * `last_sync` records the monthly rewrite of the charge, INCLUDING when it
+     * failed. A sync that failed silently is a customer charged last month's
+     * amount with nobody aware of it.
+     */
+    icount: {
+      hk_id: { type: Number, default: null },
+      hk_type: { type: String, enum: ['cc', 'bank', ''], default: '' },
+      client_id: { type: Number, default: null },
+      opened_at: { type: Date, default: null },
+      last_sync: {
+        month: { type: String, default: '' },
+        children: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+        at: { type: Date, default: null },
+        ok: { type: Boolean, default: true },
+        error: { type: String, default: '' },
+      },
+    },
   },
 
   // The parent portal wears the gan's own name, not ours.

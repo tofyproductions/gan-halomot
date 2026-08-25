@@ -674,6 +674,11 @@ async function renderTenant(id) {
       </div>`}
       ${pricingFields(t.pricing || {})}
 
+      <!-- The standing charge. Above the two folded sections because it is the
+           one somebody opens on purpose rather than when something is wrong. -->
+      <h3>מנוי וחיוב</h3>
+      <div id="subbox" class="hint">טוען…</div>
+
       <!-- Getting somebody back into their own system. Folded away because it
            is rare, and next to the database because both are things done FOR a
            customer rather than to their record. -->
@@ -785,6 +790,103 @@ async function renderTenant(id) {
         m.remove(); loadList(); loadSummary();
       } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
     };
+
+    // ------------------------------------------------------- the standing charge
+    const subbox = m.querySelector('#subbox');
+
+    async function drawSub() {
+      subbox.innerHTML = 'טוען…';
+      let s;
+      try { s = await api(`/tenants/${id}/subscription`); }
+      catch (e) { subbox.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; return; }
+
+      const next = s.next_charge;
+      // What it is about to charge, in the same words the invoice will carry.
+      const nextLine = next
+        ? `<div style="margin-bottom:10px">החיוב הבא (${esc(s.month)}): <b>${money(next.amount)}</b>
+             <span style="color:var(--dim)">· ${next.children} ילדים · ${esc(next.breakdown)}</span></div>`
+        : `<div class="err">${esc(s.error || 'לא ניתן לחשב את החיוב')}</div>`;
+
+      if (!s.connected) {
+        subbox.innerHTML = `
+          ${nextLine}
+          <div style="color:var(--dim);margin-bottom:12px">אין הוראת קבע ב-iCount. הלקוח לא מחויב.</div>
+          ${s.icount_configured ? `
+          <div class="grid">
+            <div><label>אמצעי גבייה</label>
+              <select id="hktype">
+                <option value="cc">כרטיס אשראי (טוקן מ-iCount)</option>
+                <option value="bank">הוראת קבע בנקאית</option>
+              </select></div>
+            <div id="hkfields"></div>
+          </div>
+          <div style="margin-top:10px"><button class="ghost" id="hkopen">פתח הוראת קבע</button></div>
+          <div class="hint" style="margin-top:8px">
+            פרטי הכרטיס נקלטים אצל iCount ולא עוברים דרכנו. כאן מזינים רק את מזהה הטוקן שהם החזירו.
+          </div>`
+          : `<div class="err">iCount לא מחובר לשרת — חסר ICOUNT_API_TOKEN</div>`}`;
+
+        if (!s.icount_configured) return;
+
+        const fields = () => {
+          const cc = subbox.querySelector('#hktype').value === 'cc';
+          subbox.querySelector('#hkfields').innerHTML = cc
+            ? '<label>מזהה טוקן</label><input id="tok" class="mono" inputmode="numeric">'
+            : `<label>בנק / סניף / חשבון</label>
+               <div style="display:flex;gap:6px">
+                 <input id="bnk" class="mono" placeholder="בנק" style="max-width:80px">
+                 <input id="brn" class="mono" placeholder="סניף" style="max-width:90px">
+                 <input id="acc" class="mono" placeholder="חשבון">
+               </div>`;
+        };
+        subbox.querySelector('#hktype').onchange = fields;
+        fields();
+
+        subbox.querySelector('#hkopen').onclick = async () => {
+          const cc = subbox.querySelector('#hktype').value === 'cc';
+          const body = cc
+            ? { hk_type: 'cc', cc_token_id: Number(subbox.querySelector('#tok').value) }
+            : { hk_type: 'bank',
+                bank_number: Number(subbox.querySelector('#bnk').value),
+                bank_branch: Number(subbox.querySelector('#brn').value),
+                bank_account: Number(subbox.querySelector('#acc').value) };
+          if (!confirm(`לפתוח הוראת קבע ל"${t.name}"?\n\nמכאן והלאה הלקוח יחויב ${money(next ? next.amount : 0)} בחודש, לפי מספר הילדים בפועל.`)) return;
+          try { await api(`/tenants/${id}/subscription`, { method: 'POST', body: JSON.stringify(body) }); drawSub(); loadList(); }
+          catch (e) { alert(e.message); }
+        };
+        return;
+      }
+
+      const ls = s.last_sync || {};
+      const syncLine = ls.at
+        ? (ls.ok
+          ? `<span style="color:var(--good)">סונכרן ${date(ls.at)} — ${ls.children} ילדים, ${money(ls.amount)}</span>`
+          : `<span style="color:var(--bad)">הסנכרון האחרון נכשל (${date(ls.at)}): ${esc(ls.error)}</span>`)
+        : '<span style="color:var(--dim)">טרם סונכרן</span>';
+
+      subbox.innerHTML = `
+        ${nextLine}
+        <div style="margin-bottom:10px">
+          <span class="pill s-active">${s.hk_type === 'cc' ? 'אשראי' : 'הוראת קבע בנקאית'}</span>
+          <span class="mono" style="color:var(--dim);margin-inline-start:8px">iCount #${s.hk_id}</span>
+        </div>
+        <div style="margin-bottom:12px">${syncLine}</div>
+        <button class="ghost" id="hksync">עדכן את הסכום ב-iCount</button>`;
+
+      subbox.querySelector('#hksync').onclick = async () => {
+        try {
+          // Always previewed first. The confirmation shows the actual number
+          // rather than asking whether to run something unnamed.
+          const dry = await api(`/tenants/${id}/subscription/sync`, {
+            method: 'POST', body: JSON.stringify({ month: s.month }) });
+          if (!confirm(`לעדכן את החיוב של "${t.name}" ל-${money(dry.amount)}?\n\n${dry.children} ילדים · ${dry.breakdown}\n\nמכאן iCount יחייב את הסכום הזה.`)) return;
+          await api(`/tenants/${id}/subscription/sync`, {
+            method: 'POST', body: JSON.stringify({ month: s.month, confirm: true }) });
+          drawSub();
+        } catch (e) { alert(e.message); }
+      };
+    }
+    drawSub();
 
     // ------------------------------------------------- forgotten passwords
     const ulist = m.querySelector('#userlist');
