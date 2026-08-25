@@ -560,6 +560,17 @@ function renderCreate() {
     const b = m.querySelector('#save'); b.disabled = true;
     const money = price.read();
     try {
+      // Same two fields, same one-field-to-the-left mistake as the customer
+      // screen — a name typed into the address field. Caught before the
+      // customer is created rather than after it half exists.
+      const advUri = m.querySelector('#dburi').value.trim();
+      const advName = m.querySelector('#dbname').value.trim();
+      if (advUri && !/^mongodb(\+srv)?:\/\//.test(advUri)) {
+        throw new Error(`"${advUri}" הוא שם מסד, לא כתובת אשכול — הוא שייך לשדה "שם מסד קיים".`);
+      }
+      if (/^mongodb(\+srv)?:\/\//.test(advName)) {
+        throw new Error('בשדה "שם מסד קיים" יש כתובת אשכול. שם המסד הוא החלק שאחרי הלוכסן האחרון.');
+      }
       const r = await api('/tenants', { method: 'POST', body: JSON.stringify({
         name: m.querySelector('#name').value.trim(),
         slug: m.querySelector('#slug').value.trim(),
@@ -647,10 +658,11 @@ async function renderTenant(id) {
         <summary style="cursor:pointer;color:var(--dim);font-size:13px">מסד הנתונים של הלקוח</summary>
         <div style="margin-top:12px">
           <div class="hint" style="margin-bottom:8px">כרגע: <span class="mono">${esc(t.db_name)}</span></div>
-          <div class="grid">
-            <div><label>שם מסד</label><input id="dbname" class="mono" value="${esc(t.db_name)}"></div>
-            <div><label>כתובת אשכול</label><input id="dburi" class="mono" value="${esc(t.db_uri || '')}" placeholder="ריק = ברירת המחדל של השרת"></div>
-          </div>
+          <div><label>שם מסד</label><input id="dbname" class="mono" value="${esc(t.db_name)}">
+            <div class="hint">שם בלבד, למשל <span class="mono">ganflow_demo</span></div></div>
+          <div style="margin-top:12px"><label>כתובת אשכול — רק אם הלקוח יושב על אשכול אחר</label>
+            <input id="dburi" class="mono" value="${esc(t.db_uri || '')}" placeholder="ריק = האשכול של השרת">
+            <div class="hint">מתחיל ב-<span class="mono">mongodb+srv://</span>. כמעט תמיד נשאר ריק</div></div>
           <div id="dbfound" class="hint" style="margin-top:10px"></div>
           <div style="display:flex;gap:10px;margin-top:10px">
             <button class="ghost" id="dbcheck">בדוק מה יש שם</button>
@@ -737,22 +749,39 @@ async function renderTenant(id) {
 
     // ------------------------------------------------ moving the database
     const found = m.querySelector('#dbfound');
-    const dbBody = () => JSON.stringify({
-      db_name: m.querySelector('#dbname').value.trim(),
-      db_uri: m.querySelector('#dburi').value.trim(),
-    });
+    /**
+     * The two fields sit next to each other and hold different kinds of thing:
+     * a name and an address. Typing the name into the address field produced
+     * "unrecognised mongodb uri", which is true and is no help at all — the
+     * value is right, it is one field to the left. So say that instead, before
+     * anything is sent.
+     */
+    const dbBody = () => {
+      const name = m.querySelector('#dbname').value.trim();
+      const uri = m.querySelector('#dburi').value.trim();
+      if (uri && !/^mongodb(\+srv)?:\/\//.test(uri)) {
+        throw new Error(`"${uri}" הוא שם מסד, לא כתובת אשכול — הוא שייך לשדה שמעליו. את "כתובת אשכול" להשאיר ריק.`);
+      }
+      if (/^mongodb(\+srv)?:\/\//.test(name)) {
+        throw new Error('בשדה "שם מסד" יש כתובת אשכול. שם המסד הוא החלק שאחרי הלוכסן האחרון, למשל ganflow_demo.');
+      }
+      return JSON.stringify({ db_name: name, db_uri: uri });
+    };
     const describe = (f) => `נמצאו שם: ${f.children} ילדים · ${f.employees} עובדים · ${f.branches} סניפים · ${f.users} משתמשים (${f.collections} אוספים)`;
 
     m.querySelector('#dbcheck').onclick = async () => {
-      found.textContent = 'בודק…';
       try {
-        const r = await api(`/tenants/${id}/database`, { method: 'PATCH',
-          body: JSON.stringify({ ...JSON.parse(dbBody()), check: true }) });
+        const body = { ...JSON.parse(dbBody()), check: true };
+        found.textContent = 'בודק…';
+        const r = await api(`/tenants/${id}/database`, { method: 'PATCH', body: JSON.stringify(body) });
         found.innerHTML = describe(r.found);
       } catch (e) { found.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; }
     };
 
     m.querySelector('#dbmove').onclick = async () => {
+      let body;
+      try { body = dbBody(); }
+      catch (e) { found.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; return; }
       const name = m.querySelector('#dbname').value.trim();
       if (name === t.db_name && m.querySelector('#dburi').value.trim() === (t.db_uri || '')) {
         found.textContent = 'זה כבר המסד הנוכחי.';
@@ -761,7 +790,7 @@ async function renderTenant(id) {
       if (!confirm(`להעביר את "${t.name}" למסד "${name}"?\n\nמכאן והלאה הלקוח יראה את מה שיש שם.\nהמסד הנוכחי (${t.db_name}) לא נמחק ולא משתנה.`)) return;
       found.textContent = 'מעביר…';
       try {
-        const r = await api(`/tenants/${id}/database`, { method: 'PATCH', body: dbBody() });
+        const r = await api(`/tenants/${id}/database`, { method: 'PATCH', body });
         found.innerHTML = `הועבר. ${describe(r.found)}`;
         loadList();
       } catch (e) { found.innerHTML = `<span style="color:#C43E3E">${esc(e.message)}</span>`; }
