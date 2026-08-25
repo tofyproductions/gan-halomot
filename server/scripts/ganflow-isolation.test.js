@@ -306,6 +306,13 @@ const waitFor = async (fn, ms = 40000) => {
     const oldIntact = await client.db('gf_chadash').collection('children').countDocuments();
     ok(oldIntact === 1, 'המסד הישן נשאר כפי שהיה');
 
+    // A database that was born elsewhere has no org root, and the screens that
+    // stand on it then answer "no org chart" — which reads as a bug. Found on
+    // the demo right after moving it.
+    const rootAfter = await client.db('donor_db').collection('orgunits')
+      .countDocuments({ parent_id: null });
+    ok(rootAfter === 1, `⚠️  מסד שהועבר מקבל שורש לעץ הארגוני (${rootAfter})`);
+
     const dbLogged = await plat.collection('auditlogs')
       .countDocuments({ action: 'tenant.database', tenant_slug: 'chadash' });
     ok(dbLogged === 1, `ההעברה נרשמה ביומן (${dbLogged})`);

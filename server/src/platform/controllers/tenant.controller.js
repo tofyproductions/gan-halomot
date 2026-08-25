@@ -3,6 +3,8 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { controlPlane, isEnabled, tenantConnection, forgetTenant } = require('../connection');
 const { createTenant, suspendTenant, resumeTenant, tenantUsage } = require('../provision');
+const sub = require('../subscription');
+const icount = require('../icount');
 
 /**
  * The console: the handful of screens where a customer is created, priced,
@@ -214,13 +216,41 @@ exports.setDatabase = async (req, res, next) => {
     // looks like it did nothing.
     await forgetTenant(tenant.slug);
 
+    /**
+     * A moved-into database has everything the gan ever had and nothing
+     * provisioning would have added. The org chart's root is the one that
+     * bites: it is created when a customer is born, so a database that was
+     * born elsewhere has none, and the screens that stand on it answer "לא
+     * הוגדר עץ ארגוני" — which reads like a bug rather than a missing row.
+     * Found on the demo, immediately after moving it.
+     *
+     * Created only if absent, and nothing else is touched.
+     */
+    let addedRoot = false;
+    try {
+      const { models } = await tenantConnection(tenant);
+      if (!(await models.OrgUnit.findOne({ parent_id: null }))) {
+        const firstBranch = await models.Branch.findOne({}).sort({ created_at: 1 }).lean();
+        const many = await models.Branch.countDocuments() > 1;
+        await models.OrgUnit.create({
+          name: tenant.name,
+          kind: many ? 'network' : 'branch',
+          parent_id: null,
+          path: [],
+          depth: 0,
+          branch_id: many ? null : (firstBranch ? firstBranch._id : null),
+        });
+        addedRoot = true;
+      }
+    } catch { /* the move itself succeeded; this is a convenience */ }
+
     await AuditLog.create({
       actor_id: req.platformUser._id, actor_email: req.platformUser.email,
       action: 'tenant.database', tenant_id: tenant._id, tenant_slug: tenant.slug,
       detail: { before, after: { db_name: dbName, db_uri: dbUri }, found },
     });
 
-    res.json({ tenant, found });
+    res.json({ tenant, found, added_root: addedRoot });
   } catch (err) { next(err); }
 };
 
@@ -298,6 +328,69 @@ exports.resetUserPassword = async (req, res, next) => {
       temp_password: tempPassword,
     });
   } catch (err) { next(err); }
+};
+
+/**
+ * The standing charge at iCount.
+ *
+ * Reading it is a dry run of this month's sync — what WOULD be sent — beside
+ * what iCount currently holds. "What is it about to charge them" is the only
+ * question worth answering before a run that moves money.
+ */
+exports.subscription = async (req, res, next) => {
+  try {
+    const { Tenant } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+
+    const link = tenant.billing?.icount || {};
+    const month = req.query.month || new Date().toISOString().slice(0, 7);
+
+    let next_charge = null;
+    let error = null;
+    try { next_charge = await sub.preview(tenant, { month }); }
+    catch (e) { error = e.message; }
+
+    res.json({
+      connected: Boolean(link.hk_id),
+      icount_configured: icount.enabled(),
+      hk_id: link.hk_id || null,
+      hk_type: link.hk_type || '',
+      opened_at: link.opened_at || null,
+      last_sync: link.last_sync || null,
+      month,
+      next_charge,
+      error,
+    });
+  } catch (err) { next(err); }
+};
+
+exports.openSubscription = async (req, res, next) => {
+  try {
+    res.json(await sub.openProfile(req.params.id, req.body || {}, { actor: req.platformUser }));
+  } catch (err) { err.status ? res.status(err.status).json({ error: err.message }) : next(err); }
+};
+
+exports.syncSubscription = async (req, res, next) => {
+  try {
+    res.json(await sub.syncOne(req.params.id, {
+      month: req.body?.month,
+      // Sending is the exception, not the default: a request that forgot to
+      // say which it wanted must not be the one that changes what people pay.
+      dryRun: req.body?.confirm !== true,
+      actor: req.platformUser,
+    }));
+  } catch (err) { err.status ? res.status(err.status).json({ error: err.message }) : next(err); }
+};
+
+exports.syncAllSubscriptions = async (req, res, next) => {
+  try {
+    res.json(await sub.syncAll({
+      month: req.body?.month,
+      dryRun: req.body?.confirm !== true,
+      actor: req.platformUser,
+    }));
+  } catch (err) { err.status ? res.status(err.status).json({ error: err.message }) : next(err); }
 };
 
 exports.suspend = async (req, res, next) => {
