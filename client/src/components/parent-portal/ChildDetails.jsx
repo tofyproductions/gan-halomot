@@ -11,6 +11,8 @@ import TodayIcon from '@mui/icons-material/Today';
 import BadgeIcon from '@mui/icons-material/Badge';
 import FolderIcon from '@mui/icons-material/Folder';
 import EventBusyIcon from '@mui/icons-material/EventBusy';
+import ChecklistIcon from '@mui/icons-material/Checklist';
+import ViewWeekIcon from '@mui/icons-material/ViewWeek';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
 import PaymentsIcon from '@mui/icons-material/Payments';
@@ -27,6 +29,8 @@ import PhotoGallery from './PhotoGallery';
 import GiftPicker from './GiftPicker';
 import ParentHome from './ParentHome';
 import ParentVacations from './ParentVacations';
+import ParentSupplies from './ParentSupplies';
+import ParentGantt from './ParentGantt';
 import Payments from './Payments';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentAbsence from './ParentAbsence';
@@ -285,6 +289,8 @@ export default function ChildDetails({ childId }) {
     list.push({ key: 'absence', label: 'לא מגיעים', icon: <SickIcon />, primary: false });
     list.push({ key: 'pickup', label: 'מורשי איסוף', icon: <HowToRegIcon />, primary: false });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
+    list.push({ key: 'supplies', label: 'מה להביא', icon: <ChecklistIcon />, primary: false });
+    list.push({ key: 'plan', label: 'תוכנית שבועית', icon: <ViewWeekIcon />, primary: false });
     list.push({ key: 'vacations', label: 'לוח חופשות', icon: <EventBusyIcon />, primary: false });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
@@ -411,6 +417,10 @@ export default function ChildDetails({ childId }) {
       {active === 'pickup' && (
         <ParentPickup childId={childId} childName={data.child.name} />
       )}
+
+      {active === 'supplies' && <ParentSupplies childId={childId} childName={data.child.name} />}
+
+      {active === 'plan' && <ParentGantt childId={childId} />}
 
       {active === 'vacations' && <ParentVacations childId={childId} />}
 

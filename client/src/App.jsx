@@ -35,6 +35,8 @@ import PayslipAudit from './components/payroll/PayslipAudit';
 import PayrollPage from './components/payroll/PayrollPage';
 import HolidayManager from './components/holidays/HolidayManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
+import SuppliesBoard from './components/supplies/SuppliesBoard';
+import ParentVisibilityPanel from './components/gantt/ParentVisibilityPanel';
 import GanttEditor from './components/gantt/GanttEditor';
 import ClassTrackingPage from './components/classes/ClassTrackingPage';
 import MaintenancePage from './components/maintenance/MaintenancePage';
@@ -159,6 +161,8 @@ function AppRoutes() {
         {/* לוח תינוקייה — infant rooms only; the controller narrows it again
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />
+        <Route path="supplies" element={<SuppliesBoard />} />
+        <Route path="gantt/parents" element={<ParentVisibilityPanel />} />
         <Route path="photos" element={<PhotosManager />} />
         <Route
           path="announcements"

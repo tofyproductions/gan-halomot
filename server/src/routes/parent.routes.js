@@ -72,6 +72,12 @@ router.post('/children/:childId/absences', absence.create);
 router.delete('/children/:childId/absences/:date', absence.cancel);
 // What the family owes. Read-only — nothing in the parent portal moves money.
 const payments = require('../controllers/parentPayments.controller');
+// גאנט — only for a week the gan published, and only once approved.
+router.get('/children/:childId/gantt', portal.childGantt);
+
+// מה חסר — read-only; only the room can see the shelf.
+router.get('/children/:childId/supplies', portal.childSupplies);
+
 // לוח חופשות — read-only, and the same merged view the office sees.
 router.get('/children/:childId/vacations', portal.childVacations);
 

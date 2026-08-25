@@ -4,6 +4,8 @@ const Branch = require('./Branch');
 const Classroom = require('./Classroom');
 const Registration = require('./Registration');
 const Child = require('./Child');
+const ParentVisibility = require('./ParentVisibility');
+const ChildSupplies = require('./ChildSupplies');
 const Collection = require('./Collection');
 const Archive = require('./Archive');
 const Document = require('./Document');
@@ -84,6 +86,8 @@ const real = {
   Classroom,
   Registration,
   Child,
+  ChildSupplies,
+  ParentVisibility,
   Collection,
   Archive,
   Document,

@@ -1,5 +1,6 @@
 const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo, GiftSelection } = require('../models');
 const vacationCalendar = require('../services/vacationCalendar');
+const parentVisibility = require('../services/parentVisibility');
 const nursery = require('../services/nursery.service');
 const storage = require('../services/storage.service');
 const photoService = require('../services/photo.service');
@@ -168,6 +169,9 @@ async function childDay(req, res) {
   if (date > today) return res.status(400).json({ error: 'תאריך עתידי' });
 
   const branchId = child.classroom_id?.branch_id || null;
+  const menuVisible = branchId
+    ? (await parentVisibility.visibilityFor(branchId, parentVisibility.weekKey(date))).menu
+    : true;
   const [log, menuDoc, menu] = await Promise.all([
     DailyLog.findOne({ child_id: child._id, date }).lean(),
     branchId ? DailyMenu.findOne({ branch_id: branchId, date }).lean() : null,
@@ -226,7 +230,11 @@ async function childDay(req, res) {
       staff_note: log.staff_note || '',
       updated_at: log.updated_at || null,
     } : null,
-    menu: served,
+    // The gan decides, week by week, whether the kitchen's day is published.
+    // Default ON — parents see this today, and switching it off by default
+    // would take something away without anybody choosing to.
+    menu: menuVisible ? served : [],
+    menu_hidden: !menuVisible,
   });
 }
 
@@ -937,6 +945,81 @@ async function childVacations(req, res) {
   });
 }
 
+
+/**
+ * GET /api/parent/children/:childId/supplies
+ *
+ * What the gan is waiting for. Read-only on purpose: a parent ticking "brought
+ * it" from home would leave the shelf empty and the list clean, and the person
+ * who can see the shelf is the one in the room.
+ */
+async function childSupplies(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+
+  const { ChildSupplies } = require('../models');
+  const suppliesService = require('../services/supplies');
+
+  const row = await ChildSupplies.findOne({ child_id: own.child?._id || req.params.childId }).lean();
+  res.json({
+    missing: (row?.missing || []).map(suppliesService.decorate),
+    note: suppliesService.CATALOGUE_NOTE,
+    updated_at: row?.updated_at || null,
+  });
+}
+
+
+/**
+ * GET /api/parent/children/:childId/gantt
+ *
+ * The room's plan for a week, and only when the gan has published that week.
+ * Default is hidden: these plans were written on the assumption nobody outside
+ * the room reads them, and publishing them all at once because a feature
+ * shipped is not the gan's decision to have made for it.
+ */
+async function childGantt(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+
+  const { GanttMonth } = require('../models');
+  const room = own.child?.classroom_id;
+  const branchId = room?.branch_id?._id || room?.branch_id;
+  const roomId = room?._id || room;
+  if (!branchId || !roomId) return res.json({ visible: false, weeks: [] });
+
+  const date = parentVisibility.normalizeRequestedDate(req.query.date);
+  const week = parentVisibility.weekKey(date);
+  const state = await parentVisibility.visibilityFor(branchId, week);
+  if (!state.gantt) return res.json({ visible: false, week, weeks: [] });
+
+  const [yy, mm] = [Number(date.slice(0, 4)), Number(date.slice(5, 7))];
+  const doc = await GanttMonth.findOne({
+    branch_id: branchId, classroom_id: roomId, year: yy, month: mm,
+  }).lean();
+
+  // Only an APPROVED month. A draft is a plan somebody is still arguing about.
+  if (!doc || doc.status !== 'approved') return res.json({ visible: true, week, weeks: [] });
+
+  const dates = parentVisibility.weekDates(date);
+  const inWeek = (doc.weeks || []).filter((w) => {
+    const start = new Date(w.start_date).toISOString().slice(0, 10);
+    return dates.includes(start);
+  });
+
+  res.json({
+    visible: true,
+    week,
+    dates,
+    rows: doc.row_definitions || [],
+    weeks: inWeek.map((w) => ({
+      topic: w.topic || '',
+      cells: (w.cells || []).map((c) => ({
+        row_key: c.row_key, day_index: c.day_index, content: c.content || '', color: c.color || '',
+      })),
+    })),
+  });
+}
+
 module.exports = {
   // Exported for controllers/parentPayments, which must apply the same
   // ownership test: the child id in the URL is only ever a lookup, and the
@@ -949,5 +1032,5 @@ module.exports = {
   childDay, updateChildDay, addSecondParent,
   childPhotos, uploadChildPhoto,
   childGift, setChildGift,
-  childVacations,
+  childVacations, childSupplies, childGantt,
 };
