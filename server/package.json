@@ -11,6 +11,7 @@
     "test:terms": "node scripts/employment-terms.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",
+    "test:vacations": "node scripts/vacation-calendar.test.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",
     "platform:orgscope": "node scripts/ganflow-orgscope.test.js",

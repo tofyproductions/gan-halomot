@@ -1,4 +1,5 @@
 const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo, GiftSelection } = require('../models');
+const vacationCalendar = require('../services/vacationCalendar');
 const nursery = require('../services/nursery.service');
 const storage = require('../services/storage.service');
 const photoService = require('../services/photo.service');
@@ -901,6 +902,41 @@ function editableFields(_req, res) {
   return res.json({ editable: EDITABLE });
 }
 
+
+/**
+ * GET /api/parent/children/:childId/vacations
+ *
+ * The year, as this child's branch will actually run it. Read through the same
+ * function the office screen uses, so the two can never tell a family different
+ * things about whether the gan is open.
+ *
+ * Only rows from today onwards: a parent opening this in June does not need
+ * last September, and burying the next closure under nine past ones is how it
+ * gets missed.
+ */
+async function childVacations(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+
+  const branchId = own.child?.branch_id?._id || own.child?.branch_id;
+  if (!branchId) return res.json({ entries: [], footer: '' });
+
+  const year = own.child?.academic_year || vacationCalendar.YEAR_5787;
+  const calendar = await vacationCalendar.readCalendar(branchId, year);
+
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
+  const upcoming = calendar.entries.filter((e) => e.end >= today);
+
+  res.json({
+    academic_year: calendar.academic_year,
+    footer: calendar.footer,
+    entries: upcoming,
+    // Kept so a parent can still reach the whole year deliberately.
+    past_count: calendar.entries.length - upcoming.length,
+    all: calendar.entries,
+  });
+}
+
 module.exports = {
   // Exported for controllers/parentPayments, which must apply the same
   // ownership test: the child id in the URL is only ever a lookup, and the
@@ -913,4 +949,5 @@ module.exports = {
   childDay, updateChildDay, addSecondParent,
   childPhotos, uploadChildPhoto,
   childGift, setChildGift,
+  childVacations,
 };

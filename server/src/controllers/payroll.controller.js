@@ -1036,7 +1036,12 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
         };
         // Kindergarten closures (holidays) → name.
         const holidayName = new Map();
-        for (const h of await Holiday.find({ branch_id: emp.branch_id?._id || emp.branch_id }).lean()) {
+        // Short days are excluded: the gan was open and she was there, so
+        // labelling the date "חופשת גן" in her absence report would be false.
+        for (const h of await Holiday.find({
+          branch_id: emp.branch_id?._id || emp.branch_id,
+          kind: { $ne: 'short_day' },
+        }).lean()) {
           for (const k of expand(h.start_date, h.end_date)) if (!holidayName.has(k)) holidayName.set(k, h.name || 'חופשת גן');
         }
         // Approved sick / vacation requests → type + reason.

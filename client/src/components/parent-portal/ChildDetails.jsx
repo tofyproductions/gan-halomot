@@ -10,6 +10,7 @@ import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import TodayIcon from '@mui/icons-material/Today';
 import BadgeIcon from '@mui/icons-material/Badge';
 import FolderIcon from '@mui/icons-material/Folder';
+import EventBusyIcon from '@mui/icons-material/EventBusy';
 import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
 import PaymentsIcon from '@mui/icons-material/Payments';
@@ -25,6 +26,7 @@ import NurseryDay from './NurseryDay';
 import PhotoGallery from './PhotoGallery';
 import GiftPicker from './GiftPicker';
 import ParentHome from './ParentHome';
+import ParentVacations from './ParentVacations';
 import Payments from './Payments';
 import ParentAnnouncements from './ParentAnnouncements';
 import ParentAbsence from './ParentAbsence';
@@ -283,6 +285,7 @@ export default function ChildDetails({ childId }) {
     list.push({ key: 'absence', label: 'לא מגיעים', icon: <SickIcon />, primary: false });
     list.push({ key: 'pickup', label: 'מורשי איסוף', icon: <HowToRegIcon />, primary: false });
     list.push({ key: 'details', label: 'פרטים', icon: <BadgeIcon />, primary: false });
+    list.push({ key: 'vacations', label: 'לוח חופשות', icon: <EventBusyIcon />, primary: false });
     list.push({ key: 'docs', label: 'מסמכים', icon: <FolderIcon />, primary: false });
     return list;
   }, [data, payments]);
@@ -408,6 +411,8 @@ export default function ChildDetails({ childId }) {
       {active === 'pickup' && (
         <ParentPickup childId={childId} childName={data.child.name} />
       )}
+
+      {active === 'vacations' && <ParentVacations childId={childId} />}
 
       {active === 'photos' && (
         <PhotoGallery childId={childId} childName={data.child.name} />

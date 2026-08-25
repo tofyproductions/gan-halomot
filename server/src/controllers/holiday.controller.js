@@ -1,4 +1,5 @@
-const { Holiday, Branch } = require('../models');
+const { Holiday, SpecialDay, Branch } = require('../models');
+const vacationCalendar = require('../services/vacationCalendar');
 const { getBranchFilter } = require('../utils/branch-filter');
 
 async function getAll(req, res, next) {
@@ -123,4 +124,71 @@ async function copyFromBranch(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, create, update, remove, copyFromBranch };
+
+/**
+ * POST /api/holidays/import-year   { academic_year }
+ *
+ * Write the published year into every branch. Idempotent by (branch, year,
+ * name, start date): running it twice updates rather than duplicates, which
+ * matters because the obvious way to fix a typo in the published list is to
+ * correct the source and run it again.
+ *
+ * A row the office has since edited by hand is left alone — `is_custom` is the
+ * flag for "a person decided this", and an import must not undo a decision.
+ */
+async function importYear(req, res, next) {
+  try {
+    const academicYear = req.body?.academic_year || vacationCalendar.YEAR_5787;
+    const calendar = vacationCalendar.calendarFor(academicYear);
+    if (!calendar) {
+      return res.status(400).json({ error: `אין לוח חופשות מוגדר לשנת ${academicYear}` });
+    }
+
+    const branches = await Branch.find({}).select('_id name').lean();
+    if (!branches.length) return res.status(400).json({ error: 'לא נמצאו סניפים' });
+
+    const report = [];
+    for (const branch of branches) {
+      let created = 0; let updated = 0; let skipped = 0;
+      for (const entry of calendar.entries) {
+        const { model, doc } = vacationCalendar.toDocument(entry, branch._id, academicYear);
+
+        if (model === 'SpecialDay') {
+          const existing = await SpecialDay.findOne({
+            branch_id: branch._id, date: doc.date, academic_year: academicYear,
+          });
+          if (existing) { await SpecialDay.updateOne({ _id: existing._id }, doc); updated += 1; }
+          else { await SpecialDay.create(doc); created += 1; }
+          continue;
+        }
+
+        // Matched on the DATE, not the name. A row the office renamed —
+        // which is the most likely hand-edit there is — would otherwise not be
+        // recognised, and the import would helpfully add the original back
+        // beside it. Two closures never share a start date in a published year.
+        const existing = await Holiday.findOne({
+          branch_id: branch._id, academic_year: academicYear,
+          start_date: doc.start_date,
+        });
+        if (existing?.is_custom) { skipped += 1; continue; }
+        if (existing) { await Holiday.updateOne({ _id: existing._id }, doc); updated += 1; }
+        else { await Holiday.create(doc); created += 1; }
+      }
+      report.push({ branch: branch.name, created, updated, skipped });
+    }
+
+    res.json({ ok: true, academic_year: academicYear, branches: report });
+  } catch (error) { next(error); }
+}
+
+/** GET /api/holidays/calendar?branch=<id>&year=<תשפ״ז> — the merged year. */
+async function calendar(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId) return res.status(400).json({ error: 'יש לציין סניף' });
+    const year = req.query.year || vacationCalendar.YEAR_5787;
+    res.json(await vacationCalendar.readCalendar(branchId, year));
+  } catch (error) { next(error); }
+}
+
+module.exports = { getAll, create, update, remove, copyFromBranch, importYear, calendar };
