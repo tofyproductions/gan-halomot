@@ -158,11 +158,11 @@ export default function Header() {
               sx={{
                 minWidth: { xs: 100, md: 140 }, fontWeight: 800, fontSize: '0.8rem',
                 bgcolor: selectedMarker?.strip || '#f8fafc',
-                color: selectedMarker?.stripText || 'inherit',
+                color: selectedMarker?.stripText || 'text.primary',
                 borderRadius: 2,
                 display: { xs: 'none', md: 'flex' },
                 '& .MuiSelect-select': { py: 0.5, px: 1.5 },
-                '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'inherit' },
+                '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'text.primary' },
                 '& .MuiOutlinedInput-notchedOutline': { borderColor: selectedMarker?.accent || '#e2e8f0' },
               }}
             >
@@ -329,8 +329,8 @@ export default function Header() {
                 sx={{
                   mt: 0.5, fontWeight: 800,
                   bgcolor: selectedMarker?.strip || '#fff',
-                  color: selectedMarker?.stripText || 'inherit',
-                  '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'inherit' },
+                  color: selectedMarker?.stripText || 'text.primary',
+                  '& .MuiSvgIcon-root': { color: selectedMarker?.stripText || 'text.primary' },
                 }}
               >
                 {branches.map((b) => {
