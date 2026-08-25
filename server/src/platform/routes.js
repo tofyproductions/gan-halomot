@@ -45,6 +45,9 @@ router.post('/tenants/:id/reset-password', c.requireOwner, c.resetUserPassword);
 // The standing charge at iCount. Owner-only — this is where money is set up
 // and changed. Sending is never the default: both sync routes are a dry run
 // unless the request says confirm.
+// The agreement, filled in from the customer's own record. A page, not a file:
+// it is styled for A4 and the browser's own "save as PDF" makes the document.
+router.get('/tenants/:id/agreement', c.requireOwner, c.agreement);
 router.get('/tenants/:id/subscription', c.requireOwner, c.subscription);
 router.post('/tenants/:id/subscription', c.requireOwner, c.openSubscription);
 router.post('/tenants/:id/subscription/sync', c.requireOwner, c.syncSubscription);

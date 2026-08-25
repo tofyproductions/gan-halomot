@@ -678,6 +678,10 @@ async function renderTenant(id) {
            one somebody opens on purpose rather than when something is wrong. -->
       <h3>מנוי וחיוב</h3>
       <div id="subbox" class="hint">טוען…</div>
+      <div style="margin-top:12px">
+        <button class="ghost" id="agreement">הסכם לחתימה</button>
+        <span class="hint" style="margin-inline-start:8px">נפתח מלא בפרטי הלקוח ומוכן להדפסה</span>
+      </div>
 
       <!-- Getting somebody back into their own system. Folded away because it
            is rare, and next to the database because both are things done FOR a
@@ -789,6 +793,27 @@ async function renderTenant(id) {
         })});
         m.remove(); loadList(); loadSummary();
       } catch (e) { m.querySelector('#err').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+    };
+
+    // ----------------------------------------------------------- the agreement
+    // Fetched with the token and opened as a blob rather than linked: a new tab
+    // carries no Authorization header, so a plain link would land on the login
+    // screen — and this is the one button somebody presses while a customer is
+    // sitting in front of them.
+    m.querySelector('#agreement').onclick = async () => {
+      const b = m.querySelector('#agreement');
+      b.disabled = true;
+      try {
+        const r = await fetch(`${API}/tenants/${id}/agreement`, {
+          headers: { Authorization: 'Bearer ' + token },
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'שגיאה');
+        const url = URL.createObjectURL(await r.blob());
+        window.open(url, '_blank');
+        // Kept alive long enough for the new tab to load it, then released.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } catch (e) { alert(e.message); }
+      b.disabled = false;
     };
 
     // ------------------------------------------------------- the standing charge

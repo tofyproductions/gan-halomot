@@ -5,6 +5,7 @@ const { controlPlane, isEnabled, tenantConnection, forgetTenant } = require('../
 const { createTenant, suspendTenant, resumeTenant, tenantUsage } = require('../provision');
 const sub = require('../subscription');
 const icount = require('../icount');
+const { buildAgreement } = require('../agreement');
 
 /**
  * The console: the handful of screens where a customer is created, priced,
@@ -391,6 +392,32 @@ exports.syncAllSubscriptions = async (req, res, next) => {
       actor: req.platformUser,
     }));
   } catch (err) { err.status ? res.status(err.status).json({ error: err.message }) : next(err); }
+};
+
+/**
+ * The agreement, as a page that prints.
+ *
+ * Generated from the customer's own record rather than typed separately, so
+ * the price on the paper and the price the system charges are the same row.
+ * A contract kept in a word processor is a second copy of those numbers, and
+ * the day they disagree the signed one wins and the system is wrong.
+ */
+exports.agreement = async (req, res, next) => {
+  try {
+    const { Tenant } = await controlPlane();
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) return res.status(404).json({ error: 'לקוח לא נמצא' });
+
+    const html = buildAgreement(tenant, {
+      legal_name: process.env.COMPANY_LEGAL_NAME || '',
+      tax_id: process.env.COMPANY_TAX_ID || '',
+      address: process.env.COMPANY_ADDRESS || '',
+      phone: process.env.COMPANY_PHONE || process.env.SUPPORT_PHONE || '',
+      email: process.env.SUPPORT_EMAIL || 'halom.dreamgan@gmail.com',
+      jurisdiction: process.env.COMPANY_JURISDICTION || '',
+    });
+    res.type('html').send(html);
+  } catch (err) { next(err); }
 };
 
 exports.suspend = async (req, res, next) => {
