@@ -45,6 +45,12 @@ app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: false,
     directives: {
+      // helmet 8 REFUSES to build a policy without a default-src and throws at
+      // require time — which is a boot crash, not a warning, and takes the
+      // whole service down rather than one screen. Saying "no default-src, on
+      // purpose" is exactly what this symbol is for, and it keeps the policy
+      // the four directives below and nothing else, as intended.
+      'default-src': helmet.contentSecurityPolicy.dangerouslyDisableDefaultSrc,
       'frame-ancestors': ["'none'"],
       'object-src': ["'none'"],
       'base-uri': ["'self'"],
