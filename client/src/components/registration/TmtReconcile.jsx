@@ -207,15 +207,17 @@ export default function TmtReconcile({
    */
   const setPlacement = async (row, group) => {
     if (!row.clicktac) {
-      return toast.info('אפשר לשבץ רק ילד/ה שנרשמו בקליקטאק — אין רשומה לשבץ');
+      return toast.info('אפשר לקבוע שכבת גיל רק לילד/ה שנרשמו בקליקטאק');
     }
     setSaving(s => ({ ...s, [row.id_number]: true }));
     try {
       await api.put(`/external-enrollments/${row.clicktac.id}/placement`, { age_group: group });
-      toast.success(group ? `${row.child_name} שובץ/ה ל${group}` : `בוטל השיבוץ הידני של ${row.child_name}`);
+      toast.success(group
+        ? `${row.child_name} — שכבת הגיל נקבעה ל${group}`
+        : `${row.child_name} — חזרה לשכבה לפי הגיל`);
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בשיבוץ');
+      toast.error(err.response?.data?.error || 'שגיאה בקביעת שכבת הגיל');
     } finally {
       setSaving(s => ({ ...s, [row.id_number]: false }));
     }
@@ -377,7 +379,13 @@ export default function TmtReconcile({
                   <TableCell>ת״ז</TableCell>
                   <TableCell>תאריך לידה</TableCell>
                   <TableCell>גיל ב־1.9</TableCell>
-                  <TableCell>שיבוץ לכיתה</TableCell>
+                  {/* NOT a classroom. This column sets תינוק/פעוט/בוגר — the
+                      funding bracket that decides which fee column applies —
+                      and the request it sends carries `age_group` and nothing
+                      else. Calling it "שיבוץ לכיתה" made a manager reasonably
+                      ask why the gan has no classrooms yet the screen let her
+                      place children: she was placing them in a price band. */}
+                  <TableCell>שכבת גיל</TableCell>
                   <TableCell>מסקנה</TableCell>
                   <TableCell>חריגות</TableCell>
                   <TableCell>תמ"ת</TableCell>
