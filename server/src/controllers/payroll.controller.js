@@ -13,6 +13,7 @@ const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const fixedSchedule = require('../services/fixedSchedule');
 const fingerprintSync = require('../services/fingerprintSync');
+const staffClassrooms = require('../services/staffClassrooms');
 const userSync = require('../services/userSync');
 const form101 = require('../services/form101');
 const { scanForm101 } = require('../services/form101Scan');
@@ -346,6 +347,20 @@ async function createEmployee(req, res, next) {
       return res.status(400).json({ error: 'יש לבחור סניף תקין' });
     }
     payload.amuta_distribution = await resolveAmutaDistribution(payload.amuta_distribution, payload.branch_id);
+
+    // A new card starts empty, so the plan is computed against a blank one —
+    // which is what makes "a גננת must have a room" refuse the creation rather
+    // than letting a teacher exist unassigned and be discovered later.
+    const rooms = staffClassrooms.planAssignment(
+      { primary_classroom_id: null, extra_classroom_ids: [], position: payload.position },
+      payload, { position: payload.position },
+    );
+    if (rooms?.error) return res.status(400).json({ error: rooms.error });
+    if (rooms) {
+      payload.primary_classroom_id = rooms.primary_classroom_id;
+      payload.extra_classroom_ids = rooms.extra_classroom_ids;
+    }
+
     const emp = await Employee.create(payload);
 
     // Give her a login, with the role her job title implies (userSync owns the
@@ -443,6 +458,21 @@ async function updateEmployee(req, res, next) {
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
       'is_pregnant', 'due_date', 'gave_birth_date', 'on_pregnancy_bedrest',
     ];
+    // Which room she works in is NOT payroll, and does not go through the
+    // accountant's approval queue with the rest of the card. It is the branch
+    // manager's own daily work — a סייעת moved between rooms on Sunday cannot
+    // wait for bookkeeping to agree — so it is applied here, before the fork
+    // below, and deliberately kept out of `fields`.
+    const rooms = staffClassrooms.planAssignment(emp, req.body, { position: req.body.position });
+    if (rooms?.error) return res.status(400).json({ error: rooms.error });
+    if (rooms) {
+      emp.primary_classroom_id = rooms.primary_classroom_id;
+      emp.extra_classroom_ids = rooms.extra_classroom_ids;
+      // A branch manager's request below may contain nothing else at all; the
+      // rooms still have to survive that early return.
+      if (req.user?.role === 'branch_manager') await emp.save();
+    }
+
     // Branch managers may not write the employee card directly — every field
     // they change is captured as a pending request for the accountant/admin.
     if (req.user?.role === 'branch_manager') {

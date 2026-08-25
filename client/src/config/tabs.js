@@ -41,7 +41,7 @@ export const TAB_GROUPS = [
       // she knows from 'עדכוני שכר' instead — she has no business seeing every
       // employee's rate and net in order to record a bonus.
       { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant'] },
-      { id: 'payroll_updates',    label: 'עדכוני שכר', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      { id: 'payroll_updates',    label: 'עדכוני שכר חודשי', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       // A payslip that was already SENT to the employee, unlike the salary
       // table above it. It is the document her staff bring to her when they
       // think a month is wrong, so she can answer without the accountant.

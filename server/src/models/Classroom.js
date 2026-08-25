@@ -8,6 +8,21 @@ const classroomSchema = new mongoose.Schema({
   academic_year: { type: String, required: true },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   capacity: { type: Number, default: null },
+  /**
+   * The room's lead, twice, because they answer different questions.
+   *
+   * `lead_employee_id` is who is RESPONSIBLE for the children — a staff card,
+   * which is what almost every גננת actually is. This is the one the contact
+   * sheet prints and the one a parent is told about.
+   *
+   * `lead_teacher_id` is a LOGIN, and it exists because the class-tracking
+   * screen grants "the lead may answer for her own room" off it. Kept rather
+   * than migrated: it is a live permission, most staff have no login to move
+   * it to, and the two can disagree without either being wrong — the person
+   * responsible for the room and the person who signs in to report on it are
+   * not always the same person.
+   */
+  lead_employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   lead_teacher_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

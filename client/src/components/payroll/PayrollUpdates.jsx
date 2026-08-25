@@ -230,7 +230,7 @@ export default function PayrollUpdates() {
     <Box dir="rtl" sx={{ p: { xs: 2, md: 3 } }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
         <EditNoteIcon color="primary" />
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>עדכוני שכר</Typography>
+        <Typography variant="h5" sx={{ fontWeight: 800 }}>עדכוני שכר חודשי</Typography>
         <Box sx={{ flex: 1 }} />
         <TextField label="חודש" type="month" size="small" value={month}
           onChange={e => setMonth(e.target.value)} InputLabelProps={{ shrink: true }} sx={{ width: 170 }} />

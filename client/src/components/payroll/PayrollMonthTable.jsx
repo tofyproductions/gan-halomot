@@ -1835,7 +1835,7 @@ export default function PayrollMonthTable() {
                   ><DeleteOutlineIcon sx={{ fontSize: 14 }} /></IconButton>
                 </TableCell>
               ))}
-              <TableCell align="center" sx={{ fontWeight: 700 }}>עדכוני שכר</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>עדכוני שכר חודשי</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>הערות</TableCell>
             </TableRow>
           </TableHead>
