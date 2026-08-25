@@ -929,7 +929,7 @@ async function childVacations(req, res) {
   const branchId = own.child?.branch_id?._id || own.child?.branch_id;
   if (!branchId) return res.json({ entries: [], footer: '' });
 
-  const year = own.child?.academic_year || vacationCalendar.YEAR_5787;
+  const year = vacationCalendar.normalizeYearKey(own.child?.academic_year || vacationCalendar.YEAR_5787);
   const calendar = await vacationCalendar.readCalendar(branchId, year);
 
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date());
