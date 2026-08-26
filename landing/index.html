@@ -65,6 +65,11 @@
   .cmp td{padding:12px;border-bottom:1px solid #F0F4F7}
   .cmp td:first-child{font-weight:600}
   .yes{color:var(--good);font-weight:800} .no{color:#C9D3DB;font-weight:800}
+  .hp{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+  .note.ok{color:var(--good);font-weight:700}
+  .note.bad{color:#C4441F;font-weight:700}
+  button[disabled]{opacity:.6;cursor:progress}
+  textarea{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff;color:inherit;resize:vertical;min-height:70px}
   @media(max-width:720px){.price{grid-template-columns:1fr}form .row{grid-template-columns:1fr}nav .links a:not(.btn){display:none}}
 </style>
 </head>
@@ -208,6 +213,11 @@
       <div><label>כמה סניפים?</label>
         <select name="branches"><option>1</option><option>2–5</option><option>6–20</option><option>21+</option></select></div>
     </div>
+    <div style="margin-bottom:14px">
+      <label>משהו שכדאי שנדע? (לא חובה)</label>
+      <textarea name="note" rows="2" placeholder="למשל: יש לנו שעון נוכחות של TIMEDOX, או — אנחנו עמותה"></textarea>
+    </div>
+    <input class="hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button class="btn" type="submit" style="width:100%">שלחו לי פרטי תשלום</button>
     <p class="note" id="msg"></p>
   </form>
@@ -223,16 +233,62 @@
 </div></footer>
 
 <script>
-// Until the payment link and the mailbox exist, the form must not pretend to
-// have sent anything — a lead that silently vanishes is worse than a form that
-// says it is not ready. Wired to a real endpoint before 31.8.
-document.getElementById('f').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
-  console.log('signup', data);
-  document.getElementById('msg').textContent =
-    'תודה! נחזור אליכם בטלפון תוך יום עסקים עם קישור לתשלום. (הטופס עדיין לא מחובר — נחבר לפני 31.8)';
-});
+// The form used to log to the console and tell the visitor it was not
+// connected. It posts for real now: the lead is written to the control plane
+// and an email goes out to us. Kept deliberately plain — no framework on a page
+// whose whole job is to load fast on a phone in a car park.
+(function () {
+  var form = document.getElementById('f');
+  var msg  = document.getElementById('msg');
+  var btn  = form.querySelector('button[type=submit]');
+  var sent = false;
+
+  // Where they came from, so we know which channel is worth anything.
+  // ?src=conference on the QR code at the stand; utm_source otherwise.
+  var params = new URLSearchParams(location.search);
+  var source = params.get('src') || params.get('utm_source') || '';
+
+  function say(text, cls) {
+    msg.textContent = text;
+    msg.className = 'note' + (cls ? ' ' + cls : '');
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    // Pressing the button twice must not create two leads and must not look
+    // like nothing happened.
+    if (sent || btn.disabled) return;
+
+    var data = Object.fromEntries(new FormData(form));
+    data.source = source;
+
+    btn.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = 'שולח…';
+    say('');
+
+    fetch('/api/platform/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.body.error || 'משהו השתבש');
+        sent = true;
+        form.reset();
+        btn.textContent = 'נשלח ✓';
+        say('תודה! קיבלנו את הפרטים. נחזור אליכם בטלפון תוך יום עסקים עם קישור לתשלום. אם זה דחוף — halom.dreamgan@gmail.com', 'ok');
+      })
+      .catch(function (err) {
+        // The lead is worth more than the form's dignity: if the POST failed,
+        // give them an address that does not depend on this page working.
+        btn.disabled = false;
+        btn.textContent = original;
+        say((err.message || 'משהו השתבש') + ' — אפשר גם לכתוב לנו ל-halom.dreamgan@gmail.com', 'bad');
+      });
+  });
+})();
 </script>
 </body>
 </html>

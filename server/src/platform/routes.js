@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const c = require('./controllers/tenant.controller');
+const signups = require('./controllers/signup.controller');
 
 /**
  * Mounted above the application's own auth, because none of this is reached
@@ -11,12 +12,22 @@ router.post('/login', c.login);
 // Before the login, deliberately: the login screen renders the brand.
 router.get('/brand', c.brand);
 
+// The marketing page's form. Public, like the page it is on — the person
+// filling it in has no account yet, and creating one for them is the thing
+// they are asking for. Above platformAuth for that reason and no other.
+router.post('/signup', signups.create);
+
 router.use(c.platformAuth);
 
 router.get('/summary', c.summary);
 router.get('/tenants', c.list);
 router.get('/tenants/:id', c.get);
 router.get('/audit', c.audit);
+
+// Who asked to become a customer. Support's business as much as the owner's —
+// the whole point is that somebody calls them back today.
+router.get('/signups', signups.list);
+router.patch('/signups/:id', signups.update);
 
 // Support opening a customer's system. NOT requireOwner — this is exactly what
 // support is for, and making it owner-only would mean the owner does every

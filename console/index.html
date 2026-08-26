@@ -171,6 +171,17 @@ async function renderApp() {
         <div id="billing" class="hint">בחרו חודש והציגו.</div>
       </div>
 
+      <!-- Who filled in the form on the marketing page. Above the audit log
+           deliberately: one of these is a person who paid a deposit and is
+           waiting for the phone to ring, and the log is never that. -->
+      <div class="card" style="margin-top:18px">
+        <div class="bar">
+          <h2 style="margin:0;flex:1">נרשמים מהאתר <span id="sgcount" class="hint" style="font-weight:400"></span></h2>
+          <button class="ghost" id="sgReload">רענן</button>
+        </div>
+        <div id="signups">טוען…</div>
+      </div>
+
       <!-- The log was being written and never read. Every action already lands
            in it — who created a customer, who suspended one, who opened
            somebody's system for support — and a record nobody can look at
@@ -195,6 +206,9 @@ async function renderApp() {
   bm.value = new Date().toISOString().slice(0, 7);
   document.getElementById('bload').onclick = () => loadBilling(bm.value);
   document.getElementById('brun').onclick = () => runBilling(bm.value);
+
+  document.getElementById('sgReload').onclick = loadSignups;
+  loadSignups();
 
   document.getElementById('auditToggle').onclick = () => {
     const box = document.getElementById('audit');
@@ -279,6 +293,57 @@ const ACTIONS = {
   'billing.paid': 'חיוב שולם',
   'billing.void': 'חיוב בוטל',
 };
+
+/* The pipeline a signup walks: somebody filled the form, somebody called them,
+ * they paid or they did not. Four words, because a longer pipeline is one
+ * nobody keeps up to date. */
+const SIGNUP_STATUS = { new: 'חדש', contacted: 'דיברנו', paid: 'שילם', declined: 'לא רלוונטי' };
+
+async function loadSignups() {
+  const box = document.getElementById('signups');
+  const count = document.getElementById('sgcount');
+  try {
+    const rows = await api('/signups');
+    const open = rows.filter(r => r.status === 'new').length;
+    count.textContent = rows.length ? `· ${open} ממתינים לשיחה מתוך ${rows.length}` : '';
+    if (!rows.length) {
+      box.innerHTML = '<div class="hint" style="padding:8px 0">עוד לא נרשם אף אחד מהאתר.</div>';
+      return;
+    }
+    box.innerHTML = `<table><thead><tr>
+        <th>מתי</th><th>הגן</th><th>איש קשר</th><th>טלפון</th><th>אימייל</th><th>ילדים</th><th>סניפים</th><th>סטטוס</th>
+      </tr></thead><tbody>${rows.map(r => `
+        <tr${r.status === 'new' ? ' style="background:#F7FBFE"' : ''}>
+          <td class="mono">${esc(new Date(r.created_at).toLocaleDateString('he-IL'))}</td>
+          <td><b>${esc(r.gan_name)}</b>${r.note ? `<div class="hint" style="font-size:12px">${esc(r.note)}</div>` : ''}</td>
+          <td>${esc(r.full_name)}</td>
+          <td class="mono"><a href="tel:${esc(r.phone)}" style="color:#2E7BC4">${esc(r.phone)}</a></td>
+          <td class="mono"><a href="mailto:${esc(r.email)}" style="color:#2E7BC4">${esc(r.email)}</a></td>
+          <td>${r.children ?? '—'}</td>
+          <td>${esc(r.branches || '—')}</td>
+          <td><select data-sg="${r._id}" style="width:auto;font-size:13px">
+            ${Object.entries(SIGNUP_STATUS).map(([k, v]) =>
+              `<option value="${k}"${r.status === k ? ' selected' : ''}>${v}</option>`).join('')}
+          </select></td>
+        </tr>
+        ${r.notify_error ? `<tr><td colspan="8" class="err" style="font-size:13px">
+          ההתראה במייל על הפנייה הזו לא נשלחה (${esc(r.notify_error)}) — הפנייה עצמה נשמרה, אבל אף אחד לא קיבל הודעה עליה.
+        </td></tr>` : ''}`).join('')}</tbody></table>`;
+
+    box.querySelectorAll('select[data-sg]').forEach(sel => {
+      sel.onchange = async () => {
+        const prev = sel.dataset.prev || '';
+        try {
+          await api('/signups/' + sel.dataset.sg, { method: 'PATCH', body: JSON.stringify({ status: sel.value }) });
+          loadSignups();
+        } catch (e) { alert(e.message); if (prev) sel.value = prev; }
+      };
+      sel.dataset.prev = sel.value;
+    });
+  } catch (e) {
+    box.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
 
 async function loadAudit() {
   const box = document.getElementById('audit');
