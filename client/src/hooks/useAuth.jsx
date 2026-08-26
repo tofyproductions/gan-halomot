@@ -51,6 +51,25 @@ export function AuthProvider({ children }) {
     return res.data;
   };
 
+  /**
+   * Forgotten password, in two calls: text a code to the phone we already hold,
+   * then swap the code for a new password.
+   *
+   * The second call signs them in — the server hands back a token exactly as a
+   * login does. Sending somebody back to a login screen to type the password
+   * they chose four seconds ago is a step that only loses people.
+   */
+  const requestResetCode = async (full_name, id_number) => {
+    const res = await api.post('/auth/forgot-password', { full_name, id_number });
+    return res.data;                    // { ok, phone_hint, expires_in_minutes }
+  };
+
+  const resetWithCode = async (full_name, id_number, code, password, rememberMe = false) => {
+    const res = await api.post('/auth/reset-with-code', { full_name, id_number, code, password, rememberMe });
+    applyAuth(res.data);
+    return res.data;
+  };
+
   // Step 2 (when the user has a password set).
   const loginWithPassword = async (full_name, id_number, password, rememberMe = false) => {
     const res = await api.post('/auth/login-password', { full_name, id_number, password, rememberMe });
@@ -88,7 +107,7 @@ export function AuthProvider({ children }) {
   const canSeeAllBranches = isAdmin || isAccountant || (user?.managed_branch_ids?.length || 0) > 1;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
       {children}
     </AuthContext.Provider>
   );

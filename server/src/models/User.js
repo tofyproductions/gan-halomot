@@ -70,6 +70,25 @@ const userSchema = new mongoose.Schema({
     created_at: { type: Date, default: Date.now },
   }],
   webauthn_challenge: { type: String, default: null },
+
+  /**
+   * The one-time code behind "שכחתי סיסמה".
+   *
+   * Same shape as ParentAccount's, and read by the same service — a code is a
+   * code, and two implementations of an expiry rule is one implementation that
+   * is wrong. Stored hashed: a database dump is then dead hashes rather than
+   * live codes.
+   *
+   * These are cleared the moment a code is used, expires, or is guessed wrong
+   * too many times, so a row carrying them is a reset in flight and nothing
+   * else.
+   */
+  otp_hash: { type: String, default: null },
+  otp_expires_at: { type: Date, default: null },
+  otp_attempts: { type: Number, default: 0 },
+  otp_sent_at: { type: Date, default: null },
+  otp_window_started_at: { type: Date, default: null },
+  otp_sends_in_window: { type: Number, default: 0 },
   // Tab access overrides on top of role defaults.
   // tab_overrides_add: tab IDs the user gets even though their role wouldn't.
   // tab_overrides_remove: tab IDs the user is denied even though their role would.

@@ -73,6 +73,156 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
   return { token, user: payload };
 }
 
+/* ------------------------------------------------------------------ *
+ *  "שכחתי סיסמה" — a code to the phone we already hold for them.
+ *
+ *  Before this, a forgotten password was a telephone call to whoever has
+ *  system_admin, who issued a temporary one from the permissions screen. That
+ *  works at four branches and stops working at forty, it only works during
+ *  office hours, and it puts a live password into a phone call.
+ *
+ *  The code, its expiry, its attempt cap and its send throttles are the parent
+ *  portal's — the same service, unchanged. A one-time code is a one-time code,
+ *  and two implementations of an expiry rule is one implementation that is
+ *  wrong.
+ *
+ *  The phone is never taken from the request. It is read from the record we
+ *  already have, because a reset that texts a number the caller supplied is
+ *  not a reset, it is a way in.
+ * ------------------------------------------------------------------ */
+
+const otp = require('../services/parentOtp.service');
+const { sendSms, normalizePhone, isConfigured: smsConfigured } = require('../services/sms.service');
+
+const ORG_NAME = 'גן החלומות';
+
+/** Kept under 70 characters: Hebrew SMS is billed in 70-character units. */
+function resetMessage(code) {
+  return `קוד לאיפוס הסיסמה שלך ב״${ORG_NAME}״: ${code}\nתקף ל-5 דקות`;
+}
+
+function maskPhone(phone) {
+  const p = normalizePhone(phone);
+  if (!p) return null;
+  return `${p.slice(0, 2)}${'•'.repeat(6)}${p.slice(-2)}`;
+}
+
+/**
+ * The number to text.
+ *
+ * The login user carries one, but it is optional and often empty — the row
+ * that always has it is the employee card, matched on the same national id
+ * the person just typed. Falling back to it is the difference between the
+ * feature working for everybody and working for whoever happened to have a
+ * phone typed into the user record.
+ */
+async function phoneForUser(user) {
+  const direct = normalizePhone(user.phone);
+  if (direct) return direct;
+
+  const { Employee } = require('../models');
+  const emp = await Employee.findOne({ israeli_id: user.id_number }).select('phone').lean();
+  return normalizePhone(emp?.phone);
+}
+
+/** Step 1 — text a code. POST /api/auth/forgot-password */
+async function forgotPassword(req, res, next) {
+  try {
+    const { full_name, id_number } = req.body;
+    if (!full_name || !id_number) {
+      return res.status(400).json({ error: 'שם ותעודת זהות נדרשים' });
+    }
+
+    const user = await findLoginUser(full_name, id_number);
+    // The same words the login screen uses for the same mistake. A different
+    // sentence here would say "this person exists, your name is just wrong".
+    if (!user) return res.status(401).json({ error: 'שם או תעודת זהות שגויים' });
+
+    if (!smsConfigured()) {
+      return res.status(503).json({
+        error: 'שליחת הודעות אינה מוגדרת במערכת. פנו למנהל/ת המערכת לקבלת סיסמה זמנית.',
+      });
+    }
+
+    const phone = await phoneForUser(user);
+    if (!phone) {
+      return res.status(400).json({
+        error: 'אין אצלנו מספר נייד עבורך, ולכן אי אפשר לשלוח קוד. פנו למנהל/ת המערכת.',
+      });
+    }
+
+    const allowed = otp.canSend(user);
+    if (!allowed.ok) {
+      return res.status(429).json({
+        error: `כבר נשלח קוד. אפשר לנסות שוב בעוד ${Math.ceil(allowed.retryAfterSeconds / 60)} דקות.`,
+        retry_after_seconds: allowed.retryAfterSeconds,
+      });
+    }
+
+    const code = otp.issueCode(user);
+
+    // Texted BEFORE the code is committed. The other order overwrites a
+    // working code with one that was never delivered, and the person is left
+    // holding a code that cannot work and no way back to the one that could.
+    try {
+      await sendSms({ to: phone, text: resetMessage(code) });
+    } catch (err) {
+      console.error('[auth] reset SMS failed:', err.message);
+      return res.status(502).json({ error: 'שליחת ההודעה נכשלה. נסו שוב בעוד רגע, או פנו למנהל/ת המערכת.' });
+    }
+
+    await user.save();
+    res.json({ ok: true, phone_hint: maskPhone(phone), expires_in_minutes: Math.round(otp.TTL_MS / 60000) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** Step 2 — code + a new password. POST /api/auth/reset-with-code */
+async function resetWithCode(req, res, next) {
+  try {
+    const { full_name, id_number, code, password, rememberMe } = req.body;
+    if (!full_name || !id_number || !code) {
+      return res.status(400).json({ error: 'שם, תעודת זהות וקוד נדרשים' });
+    }
+    // The same floor `setPassword` uses. Two different minimums on the same
+    // password is a rule nobody can state.
+    if (!password || String(password).length < 4) {
+      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 4 תווים' });
+    }
+
+    const user = await findLoginUser(full_name, id_number);
+    if (!user) return res.status(401).json({ error: 'שם או תעודת זהות שגויים' });
+
+    const result = otp.verifyCode(user, code);
+    if (!result.ok) {
+      // Saved even on failure: a wrong guess has to be counted, or the attempt
+      // cap is decoration.
+      await user.save();
+      const says = {
+        no_code: 'לא נשלח קוד, או שהוא כבר נוצל. בקשו קוד חדש.',
+        expired: 'הקוד פג. בקשו קוד חדש.',
+        too_many_attempts: 'יותר מדי ניסיונות. בקשו קוד חדש.',
+        wrong: 'הקוד שגוי.',
+      };
+      return res.status(400).json({ error: says[result.reason] || 'הקוד שגוי.' });
+    }
+
+    user.password_hash = await bcrypt.hash(String(password), 10);
+    user.password_set = true;
+    // They chose this one themselves, so nothing is pending — unlike a
+    // password an administrator issued, which must be changed on first use.
+    user.must_change_password = false;
+    await user.save();
+
+    // Signed in on the spot. Sending them back to a login screen to type the
+    // password they chose four seconds ago is a step that only loses people.
+    res.json({ ok: true, ...makeToken(user, rememberMe, await roleTabOverrides(user.role), req) });
+  } catch (error) {
+    next(error);
+  }
+}
+
 // Locate the login user by name + national id (the credentials pair).
 async function findLoginUser(full_name, id_number) {
   const cleanedId = String(id_number || '').replace(/\D/g, '').trim();
@@ -358,6 +508,7 @@ async function webauthnAuthVerify(req, res, next) {
 
 module.exports = {
   login, loginWithPassword, setPassword, logout, me,
+  forgotPassword, resetWithCode,
   webauthnRegisterOptions, webauthnRegisterVerify,
   webauthnAuthOptions, webauthnAuthVerify,
 };

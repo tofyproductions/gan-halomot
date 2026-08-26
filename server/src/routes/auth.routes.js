@@ -10,6 +10,13 @@ router.post('/login-password', authController.loginWithPassword);
 // POST /api/auth/set-password (auth) — user chooses/changes their login password
 router.post('/set-password', authMiddleware, authController.setPassword);
 
+// Forgotten password, without a telephone call to an administrator.
+// Public, because somebody who cannot log in cannot be asked to log in first.
+// POST /api/auth/forgot-password — texts a code to the phone we already hold
+router.post('/forgot-password', authController.forgotPassword);
+// POST /api/auth/reset-with-code — code + a new password, and they are in
+router.post('/reset-with-code', authController.resetWithCode);
+
 // POST /api/auth/logout (public)
 router.post('/logout', authController.logout);
 

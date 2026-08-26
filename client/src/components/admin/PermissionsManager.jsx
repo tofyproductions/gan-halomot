@@ -53,9 +53,6 @@ function effectiveMap(user, roleTabs = {}) {
 }
 
 function RoleDialog({ open, user, branches, onClose, onSaved }) {
-  // The temporary password, held only until the administrator closes the
-  // dialog. Never stored — a hash is all that exists after this.
-  const [tempPassword, setTempPassword] = useState(null);
   const [role, setRole] = useState('');
   const [managed, setManaged] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -138,6 +135,15 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
 }
 
 export default function PermissionsManager() {
+  // The temporary password, held only until the administrator closes the
+  // dialog. Never stored — a hash is all that exists after this.
+  //
+  // It lives HERE and not in RoleDialog, which is where it was declared: the
+  // dialog that shows it is in this component's own JSX, so every render of
+  // this screen was reading a name that is not in its scope. That is a
+  // ReferenceError on the first paint, which React reports as a blank white
+  // page — the permissions screen has been unreachable since it was written.
+  const [tempPassword, setTempPassword] = useState(null);
   const [users, setUsers] = useState([]);
   // Active employees with no login at all — they can't appear in the table
   // below, so they get their own callout instead of vanishing silently.

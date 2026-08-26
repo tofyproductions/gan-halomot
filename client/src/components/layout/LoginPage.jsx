@@ -15,14 +15,20 @@ const SAVED_USER_ID_KEY = 'gan_biometric_user_id';
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { login, loginWithPassword } = useAuth();
+  const { login, loginWithPassword, requestResetCode, resetWithCode } = useAuth();
   const [fullName, setFullName] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [hasBiometric, setHasBiometric] = useState(false);
-  const [step, setStep] = useState('creds'); // 'creds' | 'password'
+  const [step, setStep] = useState('creds'); // 'creds' | 'password' | 'reset'
+  // The forgotten-password leg. `phoneHint` is a masked number, so the person
+  // can tell which of their phones to go and look at.
+  const [phoneHint, setPhoneHint] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [sending, setSending] = useState(false);
   const [password, setPassword] = useState('');
   const [bioForStep2, setBioForStep2] = useState(false); // user has fingerprint set
 
@@ -138,6 +144,31 @@ export default function LoginPage() {
     }
   };
 
+  // Name and id are already typed and already verified by step 1, so the link
+  // sends the code straight away rather than asking for them a second time.
+  const handleForgot = async () => {
+    setError(''); setSending(true);
+    try {
+      const data = await requestResetCode(fullName, idNumber);
+      setPhoneHint(data.phone_hint || '');
+      setPassword('');
+      setStep('reset');
+    } catch (err) {
+      setError(err.response?.data?.error || 'שליחת הקוד נכשלה');
+    } finally { setSending(false); }
+  };
+
+  const handleResetSubmit = async (e) => {
+    e.preventDefault();
+    setError(''); setLoading(true);
+    try {
+      await resetWithCode(fullName, idNumber, resetCode, newPassword, rememberMe);
+      navigate('/');
+    } catch (err) {
+      setError(err.response?.data?.error || 'איפוס הסיסמה נכשל');
+    } finally { setLoading(false); }
+  };
+
   return (
     <Box
       dir="rtl"
@@ -194,7 +225,42 @@ export default function LoginPage() {
                     </Button>
                   </>
                 )}
+                <Button variant="text" size="small" onClick={handleForgot} disabled={sending}>
+                  {sending ? 'שולח קוד…' : 'שכחתי סיסמה'}
+                </Button>
                 <Button variant="text" size="small" onClick={() => { setStep('creds'); setPassword(''); setError(''); }}>
+                  חזרה
+                </Button>
+              </Stack>
+            </Box>
+          ) : step === 'reset' ? (
+            <Box component="form" onSubmit={handleResetSubmit}>
+              <Stack spacing={2.5}>
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  שלחנו קוד בהודעת SMS{phoneHint ? ` למספר ${phoneHint}` : ''}.
+                  הקוד תקף לחמש דקות.
+                </Alert>
+                <TextField
+                  label="הקוד מההודעה" value={resetCode} autoFocus
+                  onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  fullWidth required
+                  inputProps={{ dir: 'ltr', inputMode: 'numeric', autoComplete: 'one-time-code',
+                    style: { letterSpacing: '0.4em', fontSize: 22, textAlign: 'center' } }}
+                />
+                <TextField
+                  label="סיסמה חדשה" type="password" value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)} fullWidth required
+                  helperText="לפחות 4 תווים" inputProps={{ dir: 'ltr' }}
+                />
+                <Button type="submit" variant="contained" size="large" fullWidth
+                        disabled={loading || resetCode.length < 6} startIcon={<LoginIcon />}>
+                  {loading ? 'מאפס…' : 'שמירה וכניסה'}
+                </Button>
+                <Button variant="text" size="small" onClick={handleForgot} disabled={sending}>
+                  {sending ? 'שולח…' : 'לא קיבלתי — שלחו שוב'}
+                </Button>
+                <Button variant="text" size="small"
+                        onClick={() => { setStep('creds'); setResetCode(''); setNewPassword(''); setError(''); }}>
                   חזרה
                 </Button>
               </Stack>
