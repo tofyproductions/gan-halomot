@@ -112,6 +112,14 @@ const THEME_ALIASES = {
   'א ביב': 'אביב',                    // a stray space inside the word
   'טו שבט': 'ט"ו בשבט',
   'חמשת החושים': 'החושים',
+  'חחנוכה': 'חנוכה',                  // a doubled ח, one sheet, one year
+  // The definite article, written or not, by different hands. There is no
+  // blanket rule to apply here — the gan's own canonical form is sometimes
+  // with the ה ("הגינה", "החושים") and sometimes without ("אביב", "פרדס") —
+  // so each pair is named rather than derived.
+  'האביב': 'אביב',
+  'הפרדס': 'פרדס',
+  'המשפחה': 'יום המשפחה',
 };
 
 function canonicalTheme(t) {
