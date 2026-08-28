@@ -27,6 +27,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const XLSX = require('xlsx');
 
 // The five row labels the gan actually writes, mapped onto the gantt's own row
@@ -37,9 +38,27 @@ const CATEGORIES = {
   'יצירה': 'creation',
   'סיפור': 'story',
   'שונות': 'misc',
+
+  // משה דיין writes its craft as two learning stations, "מוקד 1" / "מוקד 2",
+  // where the other branches write "יצירה". Dropping the label because it is
+  // unfamiliar threw away 797 cells — and reading them settles what they are:
+  // גואש, בצק, חימר, גזירה, צבעי ידיים, קצף. That is the יצירה row under
+  // another name, so it is banked as one rather than as a sixth category no
+  // other gan has a row for.
+  'מוקד 1': 'creation',
+  'מוקד 2': 'creation',
+  'מוקד': 'creation',
 };
 
 const WEEK_HEADER = 'תוכן';
+
+// The craft-station table's own rows, and the subject they are banked under —
+// the heading the gan itself puts above that table.
+const STATION_LABELS = new Set(['מוקד 1', 'מוקד 2', 'מוקד']);
+const STATION_THEME = 'התנסות בחומרים';
+
+// Room names, which are the station table's left column — never a subject.
+const ROOMS = new Set(['תינוקייה', 'תינוקיה', 'צעירים', 'בוגרים']);
 
 /**
  * Theme names as typed by hand over six years: "שבוע 2 ראש השנה",
@@ -50,30 +69,62 @@ const WEEK_HEADER = 'תוכן';
 function normalizeTheme(raw) {
   if (!raw) return '';
   let t = String(raw).replace(/\s+/g, ' ').trim();
-  // "שבוע 4 סוכות" / "שבווע 20 ט"ו בשבט" (sic) -> drop the scaffolding.
-  // The lookahead matters: without it "שבועות" — the festival, a theme in its
-  // own right — is eaten down to "ת".
-  t = t.replace(/^שבו{0,1}וע(?=[\s\d]|$)\s*/u, '');
-  t = t.replace(/^\d+\s*/u, '');             // the week number
-  t = t.replace(/^נושא\s+/u, '');            // "נושא הגינה" -> "הגינה"
-  t = t.replace(/^ה(גינה|ספר)$/u, 'ה$1');    // keep the article where it reads right
+  t = t.replace(/^נושא\s*[-:־]?\s*/u, '');   // "נושא שבועי חנוכה" / "נושא הגינה"
+
+  // "שבוע 4 סוכות", "שבווע 20 ט"ו בשבט" (sic), "שבועי- יום העצמאות",
+  // "שבועי: קיץ" — every branch scaffolds the cell differently and none of it
+  // is the subject.
+  //
+  // The lookahead is load-bearing twice over: without it "שבועות" — the
+  // festival, a subject in its own right — is eaten down to "ת", and
+  // "שבועי" (the blank template's own heading) must reduce to nothing so the
+  // caller can drop it.
+  t = t.replace(/^שבו{1,2}עי?(?=[\s\d\-:־]|$)[\s\-:־]*/u, '');
+  t = t.replace(/^\d+\s*[-:־]?\s*/u, '');    // the week number
+  // Again, because "נושא שבועי נושא הגינה" is a real cell and one pass leaves
+  // the second "נושא" standing as part of the subject name.
+  t = t.replace(/^נושא\s*[-:־]?\s*/u, '');
   t = t.replace(/["'׳״]/gu, '"');            // ט"ו בשבט spelled four ways
   return t.trim();
 }
 
-/** Themes that are the same subject under different spellings. */
+/**
+ * The same subject, spelled differently by different branches and years.
+ *
+ * Keys are POST-normalisation, so they carry the ASCII quote normalizeTheme
+ * leaves behind. Without this the picker offers "ט"ו בשבט", "טו בשבט" and
+ * "טוב בשבט" as three separate subjects, each holding a third of the ideas —
+ * which is worse than not grouping at all, because it looks complete.
+ */
 const THEME_ALIASES = {
-  'ט"ו בשבט': 'ט"ו בשבט',
   'טו בשבט': 'ט"ו בשבט',
-  'הגינה': 'הגינה',
+  'טוב בשבט': 'ט"ו בשבט',            // a real typo, in a real workbook
   'גינה': 'הגינה',
   'הספר': 'שבוע הספר',
   'ספר': 'שבוע הספר',
+  'לג בעומר': 'ל"ג בעומר',
+  'עצמאות': 'יום העצמאות',
+  'חושים': 'החושים',
+  'חג שבועות': 'שבועות',
+  'חיים נחמן ביאליק': 'ביאליק',
+  'הגוף שלי': 'אני וגופי',
+  ';הירות בדרכים': 'זהירות בדרכים',  // ז typed on an English layout
 };
 
 function canonicalTheme(t) {
   return THEME_ALIASES[t] || t;
 }
+
+/**
+ * Column A does not always hold a subject. On some sheets it holds the room —
+ * "בוגרים", "תינוקייה" — and on the unused week blocks at the foot of a sheet
+ * it holds the blank template's own heading. Neither is something a gananet
+ * would ever search by, and both looked like real subjects in the picker.
+ */
+const NOT_A_THEME = new Set([
+  '', 'שבועי', 'שבוע', 'תוכן', 'נושא',
+  'תינוקייה', 'תינוקיה', 'צעירים', 'בוגרים',
+]);
 
 /**
  * What a gananet has to physically put on the table to run this.
@@ -175,9 +226,13 @@ const NOT_CONTENT = [
  * and fails towards leaking.
  */
 const PERSONAL = [
-  /^(תינוקי[יה]?ה|צעירים|בוגרים)\s*[:：]/u,
-  /^(אבא|אמא|ילד|ילדת|ילדי)\s+של\s+שבת\s*[:：]/u,
-  /^יום הולדת\s*[:：]/u,
+  /^(תינוקי[יה]?ה|צעירים|בוגרים)\s*[:：+]/u,
+  /(אבא|אמא|ילד|ילדת|ילדי)\s+של\s+שבת/u,
+  // Every birthday line in every workbook is "יום הולדת ל<שם של ילד>". There is
+  // no version of it that is not a named four-year-old, so the whole phrase
+  // goes — not just the colon form. 109 of them were in the first build.
+  /יום הולדת/u,
+  /מזל טוב/u,
 ];
 
 function isContent(text) {
@@ -195,7 +250,12 @@ function cellText(ws, r, c) {
   const ref = XLSX.utils.encode_cell({ r: r - 1, c: c - 1 });
   const cell = ws[ref];
   if (!cell || cell.v == null) return '';
-  return String(cell.v).replace(/\s+/g, ' ').trim();
+  return String(cell.v)
+    // Includes the non-breaking spaces a paste from Word leaves behind, which
+    // are invisible and made "ציור + בצק" bank three times as three ideas.
+    .replace(/[\s\u00a0\u200f\u200e]+/gu, ' ')
+    .replace(/\s*([+/])\s*/gu, ' $1 ')
+    .trim();
 }
 
 function parseWorkbook(filePath) {
@@ -213,26 +273,46 @@ function parseWorkbook(filePath) {
     const lastCol = Math.min(range.e.c + 1, 12);
 
     let theme = '';
+    let group = '';   // the room the התנסות בחומרים table is currently on
+
     for (let r = 1; r <= lastRow; r += 1) {
       const b = cellText(ws, r, 2);
       if (b === WEEK_HEADER) continue;      // week/date header row
+
+      const a = cellText(ws, r, 1);
+      // The room names only ever appear as the left column of the התנסות
+      // בחומרים table, so they are its group rather than a subject.
+      if (ROOMS.has(a)) group = a;
+
       const key = CATEGORIES[b];
       if (!key) continue;
 
-      const a = cellText(ws, r, 1);
-      if (a) theme = canonicalTheme(normalizeTheme(a));
-      // "שבוע" and "נושא שבועי" are the blank template's own column heading,
-      // left behind on every unused week block at the foot of a sheet.
-      if (!theme || theme === 'שבועי') continue;
+      const isStation = STATION_LABELS.has(b);
+
+      if (!isStation) {
+        if (a) theme = canonicalTheme(normalizeTheme(a));
+        if (NOT_A_THEME.has(theme)) continue;
+      }
+
+      // "מוקד 1" / "מוקד 2" are not part of the weekly plan at all. They are a
+      // second table further down the sheet — "התנסות בחומרים - תוכנית שבועית"
+      // — a standing rota of craft stations per room, with no subject attached
+      // to any of it. Filing them under whatever subject happened to be in
+      // scope would attach גזירת פלסטלינה to פסח for no reason, and dropping
+      // them threw away 797 cells of exactly the row the bank is thinnest on.
+      // So they are banked under the gan's own name for that table, and the
+      // room in its left column is a better age group than the file name.
+      const rowTheme = isStation ? STATION_THEME : theme;
+      const rowAge = isStation ? (group || ageGroup) : ageGroup;
 
       for (let c = 3; c <= lastCol; c += 1) {
         const text = cellText(ws, r, c);
         if (!isContent(text)) continue;
         out.push({
-          theme,
+          theme: rowTheme,
           category: key,
           title: text,
-          age_group: ageGroup,
+          age_group: rowAge,
           branch,
           month_sheet: sheetName.trim(),
           source: fileName,
@@ -273,9 +353,22 @@ function main() {
   }
 
   let all = [];
+  // The same workbook downloaded twice arrives as "... (1).xlsx". Parsing both
+  // would not add an idea — it would double its `uses`, and `uses` is what
+  // decides which idea is offered first. An idea must not look established
+  // because somebody clicked download twice.
+  const seenFiles = new Map();
+
   for (const f of files) {
     if (!fs.existsSync(f)) { console.error(`דילוג, לא נמצא: ${f}`); continue; }
     try {
+      const hash = crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+      if (seenFiles.has(hash)) {
+        console.log(`${path.basename(f)}: עותק זהה של ${seenFiles.get(hash)} — דילוג`);
+        continue;
+      }
+      seenFiles.set(hash, path.basename(f));
+
       const rows = parseWorkbook(f);
       console.log(`${path.basename(f)}: ${rows.length} רשומות`);
       all = all.concat(rows);
@@ -291,7 +384,7 @@ function main() {
   // would be built locally, work locally, and simply not exist on the server.
   const outPath = path.join(__dirname, '..', 'src', 'content-bank', 'seed.json');
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, `${JSON.stringify({ generated_from: files.map(f => path.basename(f)), themes, items }, null, 1)}\n`);
+  fs.writeFileSync(outPath, `${JSON.stringify({ generated_from: [...seenFiles.values()], themes, items }, null, 1)}\n`);
 
   console.log(`\nסה"כ ${all.length} רשומות -> ${items.length} פריטים ייחודיים, ${themes.length} נושאים`);
   console.log(`נכתב: ${path.relative(process.cwd(), outPath)}`);

@@ -52,6 +52,11 @@ console.log('\n🔤  חילוץ מהגאנטים\n');
   ok(!isContent('תינוקיה : גפן .ס. + שקד .ש.'), 'שמות עם ראשי תיבות של משפחה נפסלים');
   ok(!isContent('צעירים:עידן'), 'שם בודד אחרי שם חדר, בלי רווח, נפסל');
   ok(!isContent('אבא של שבת : אביב'), 'אבא של שבת נפסל');
+  // Found only once the משה דיין workbooks were added: the birthday line has
+  // no colon, so the colon-shaped filter let 109 named children through.
+  ok(!isContent('יום הולדת לרפאל'), 'יום הולדת ללא נקודתיים נפסל');
+  ok(!isContent('יום הולדת לגפן'), 'יום הולדת עם שם ילד נפסל');
+  ok(!isContent('צעירים + כפיר + מאור'), 'שמות אחרי שם חדר עם פלוס נפסלים');
   ok(isContent('קבלת שבת'), 'קבלת שבת עצמה כן נשמרת');
   ok(!isContent('12'), 'מספר בלבד נפסל');
   ok(!isContent('---'), 'קו מפריד נפסל');
@@ -59,6 +64,18 @@ console.log('\n🔤  חילוץ מהגאנטים\n');
 }
 
 console.log('\n📅  שמות נושאים\n');
+{
+  // Every branch scaffolds column A differently, and each of these is a real
+  // cell from a real workbook.
+  eq(canonicalTheme(normalizeTheme('נושא שבועי חנוכה')), 'חנוכה', '"נושא שבועי" יורד');
+  eq(canonicalTheme(normalizeTheme('נושא שבועי נושא הגינה')), 'הגינה', '"נושא" כפול יורד');
+  eq(canonicalTheme(normalizeTheme('שבועי- יום העצמאות')), 'יום העצמאות', 'מקף אחרי "שבועי" יורד');
+  eq(canonicalTheme(normalizeTheme('שבועי: קיץ')), 'קיץ', 'נקודתיים אחרי "שבועי" יורדות');
+  eq(canonicalTheme(normalizeTheme('שבועי טוב בשבט')), 'ט"ו בשבט', 'שגיאת כתיב מתאחדת עם החג');
+  eq(canonicalTheme(normalizeTheme('שבועי ;הירות בדרכים')), 'זהירות בדרכים', 'ז שהוקלד באנגלית מתוקן');
+  eq(canonicalTheme(normalizeTheme('שבועי חג שבועות')), 'שבועות', '"חג שבועות" ו"שבועות" הם נושא אחד');
+  eq(canonicalTheme(normalizeTheme('שבועי הגוף שלי')), 'אני וגופי', '"הגוף שלי" מתאחד עם "אני וגופי"');
+}
 {
   eq(normalizeTheme('שבוע 4 סוכות '), 'סוכות', 'מספר השבוע יורד');
   eq(normalizeTheme('שבוע 1 הסתגלות\n'), 'הסתגלות', 'ירידת שורה יורדת');
@@ -104,6 +121,15 @@ console.log('\n📦  הבנק המצורף\n');
   eq(named.map(i => i.title), [], 'אין שמות ילדים בבנק המצורף');
   ok(bank.SEED_THEMES.includes('שבועות'), 'שבועות בבנק, ולא "ת"');
   ok(!bank.SEED_THEMES.includes('שבועי'), 'כותרת התבנית הריקה לא נכנסה כנושא');
+  // Room names sit in column A of the התנסות בחומרים table. They looked like
+  // subjects and were offered as three of them in the picker.
+  for (const room of ['בוגרים', 'צעירים', 'תינוקייה', 'תינוקיה']) {
+    ok(!bank.SEED_THEMES.includes(room), `"${room}" הוא שם חדר ולא נושא`);
+  }
+  // The craft-station table, banked under the gan's own name for it.
+  ok(bank.SEED_THEMES.includes('התנסות בחומרים'), 'מוקדי ההתנסות בחומרים נשמרו');
+  ok(bank.SEED_ITEMS.some(i => i.theme === 'התנסות בחומרים' && i.category === 'creation'),
+    'והם יושבים על שורת יצירה');
 
   const cats = new Set(bank.SEED_ITEMS.map(i => i.category));
   eq([...cats].sort(), ['activity', 'creation', 'meeting', 'misc', 'story'], 'כל חמש השורות מיוצגות');
