@@ -119,6 +119,9 @@ router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));
 router.use('/activities', require('./activity.routes'));
 router.use('/gantt', require('./gantt.routes'));
+// בנק תוכן — the ideas a week is built from, indexed by its subject. Feeds the
+// gantt editor; ships with the system and is added to per gan.
+router.use('/content-bank', require('./contentBank.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/products', require('./product.routes'));
 router.use('/orders', require('./order.routes'));

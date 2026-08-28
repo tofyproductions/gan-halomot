@@ -15,10 +15,12 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import PaletteIcon from '@mui/icons-material/Palette';
 import MergeIcon from '@mui/icons-material/CallMerge';
 import SportsIcon from '@mui/icons-material/FitnessCenter';
+import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -89,6 +91,7 @@ export default function GanttEditor() {
   const [classSessions, setClassSessions] = useState([]); // read-only reflection from מעקב חוגים
   const [colorMenu, setColorMenu] = useState({ anchor: null, weekIdx: null, rowKey: null, dayIdx: null });
   const [showBank, setShowBank] = useState(false);
+  const [showContentBank, setShowContentBank] = useState(false);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
   // Merge selection
@@ -233,6 +236,62 @@ export default function GanttEditor() {
     if (act) setDraggingActivity(act);
   };
 
+  /**
+   * Drop a whole week of proposed content into the plan.
+   *
+   * Three rules, and each one is there because the opposite would lose work:
+   *
+   *   - a box the gananet has already written in is never overwritten. She may
+   *     be filling the gaps around three days she already planned, and a
+   *     "fill week" that wipes them is a button nobody presses twice.
+   *   - Friday is skipped. It is קבלת שבת and the parent-of-the-week fields,
+   *     and the editor renders it specially — content written there is invisible.
+   *   - a row the proposal uses but this month's plan does not have is added.
+   *     Gantts saved before יצירה existed have four rows, and the creation
+   *     ideas would otherwise be written into cells that are never drawn.
+   */
+  const fillWeekFromBank = (weekIdx, proposal, theme) => {
+    const cells = proposal?.cells || [];
+    if (!cells.length) return;
+
+    let added = 0;
+    let skipped = 0;
+
+    setGantt(prev => {
+      const rows = [...(prev.row_definitions || [])];
+      for (const key of [...new Set(cells.map(c => c.row_key))]) {
+        if (rows.some(r => r.key === key)) continue;
+        const known = BANK_ROWS.find(r => r.key === key);
+        rows.push({ key, label: known?.label || key });
+      }
+
+      const weeks = [...(prev.weeks || [])];
+      const week = weeks[weekIdx];
+      if (!week) return prev;
+
+      const next = [...(week.cells || [])];
+      for (const c of cells) {
+        if (c.day_index > 4) continue;                    // Friday is not ours
+        const idx = next.findIndex(x => x.row_key === c.row_key && x.day_index === c.day_index);
+        if (idx >= 0 && String(next[idx].content || '').trim()) { skipped += 1; continue; }
+
+        const base = { row_key: c.row_key, day_index: c.day_index, content: '', color: '', col_span: 1, row_span: 1 };
+        const merged = { ...base, ...(idx >= 0 ? next[idx] : {}), content: c.content };
+        if (idx >= 0) next[idx] = merged; else next.push(merged);
+        added += 1;
+      }
+
+      weeks[weekIdx] = { ...week, cells: next, topic: week.topic || theme || '' };
+      return { ...prev, row_definitions: rows, weeks };
+    });
+
+    toast.success(
+      skipped
+        ? `שובצו ${added} תאים. ${skipped} תאים שכבר היה בהם תוכן לא נדרסו`
+        : `שובצו ${added} תאים. לא לשכוח לשמור`,
+    );
+  };
+
   const addRow = () => { const l = prompt('שם:'); if (l) setGantt(prev => ({ ...prev, row_definitions: [...(prev.row_definitions||[]), { key: 'c_'+Date.now(), label: l }] })); };
   const removeRow = (k) => setGantt(prev => ({ ...prev, row_definitions: (prev.row_definitions||[]).filter(r => r.key !== k) }));
 
@@ -286,6 +345,8 @@ export default function GanttEditor() {
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
             <Button size="small" startIcon={<PrintIcon />} onClick={() => window.print()}>הדפסה</Button>
+            <Button size="small" variant="contained" startIcon={<AutoStoriesIcon />}
+              onClick={() => setShowContentBank(true)} color="primary">בנק תוכן</Button>
             <Button size="small" startIcon={<SportsIcon />} onClick={() => setShowBank(true)} color="secondary">בנק חוגים</Button>
             <Button size="small" startIcon={<AddIcon />} onClick={addRow}>שורה</Button>
             <Button size="small" startIcon={<MergeIcon />} color={mergeMode ? 'warning' : 'inherit'}
@@ -474,6 +535,15 @@ export default function GanttEditor() {
             </MenuItem>
           ))}
         </Menu>
+
+        {/* בנק תוכן — ideas by weekly subject, and whole-week fill */}
+        <ContentBankPanel
+          open={showContentBank}
+          onClose={() => setShowContentBank(false)}
+          ageGroup={classroomCategory}
+          weeks={gantt.weeks || []}
+          onFillWeek={fillWeekFromBank}
+        />
 
         {/* Activity Bank Drawer */}
         <Drawer anchor="left" open={showBank} onClose={() => setShowBank(false)}>

@@ -16,6 +16,7 @@ const Holiday = require('./Holiday');
 const Activity = require('./Activity');
 const Discount = require('./Discount');
 const GanttMonth = require('./GanttMonth');
+const ContentBankItem = require('./ContentBankItem');
 const Supplier = require('./Supplier');
 const Product = require('./Product');
 const Order = require('./Order');
@@ -98,6 +99,7 @@ const real = {
   Activity,
   Discount,
   GanttMonth,
+  ContentBankItem,
   Supplier,
   Product,
   Order,

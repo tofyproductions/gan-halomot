@@ -1,0 +1,5984 @@
+{
+ "generated_from": [
+  "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+ ],
+ "themes": [
+  "אביב",
+  "אני וגופי",
+  "הגינה",
+  "הסתגלות",
+  "חברות",
+  "חורף",
+  "חנוכה",
+  "ט\"ו בשבט",
+  "יום המשפחה",
+  "כיפור",
+  "סוכות",
+  "סתיו",
+  "פירות הדר",
+  "פסח",
+  "צבעים",
+  "צורות",
+  "ראש השנה",
+  "שבוע הספר",
+  "שבועות"
+ ],
+ "items": [
+  {
+   "theme": "סוכות",
+   "category": "meeting",
+   "title": "חויות מחג הסוכות",
+   "materials": [],
+   "uses": 6,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "activity",
+   "title": "פעילות עם מטפחות",
+   "materials": [],
+   "uses": 6,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "creation",
+   "title": "ציור + בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים",
+    "צבעים",
+    "דפי ציור",
+    "טושים"
+   ],
+   "uses": 6,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "story",
+   "title": "הצב של אורן",
+   "materials": [],
+   "uses": 6,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 4,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "חנן הגנן",
+   "materials": [],
+   "uses": 4,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 4,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "טיפול השקיית הגינה",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נשקה ונטפל בגינה",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "דף צביעה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "דבק והדבקה",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "זרע של צנונית",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "שישה בשקיק אחד",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "סיפור בהמחשה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "story",
+   "title": "אלה והפרה",
+   "materials": [],
+   "uses": 3,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "הגינה - ירקות הגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "מהזרע לירק",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "הנבטה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "כלי העבודה בגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נכיר נמיין ונכין סלט",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נכיר סוגי זרעים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "ננביט זרעים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נכיר את כלי הגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "מדבקות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "הדבקת מגזרות",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "מגזרות מוכנות"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "המולה בגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "חתונה בגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "מי הכי חשוב לגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "misc",
+   "title": "נכין את הגינה לשתילה",
+   "materials": [
+    "שתילים",
+    "אדמה",
+    "עציצים",
+    "כלי גינון"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "זריעה ושתילה",
+   "materials": [
+    "שתילים",
+    "אדמה",
+    "עציצים",
+    "כלי גינון",
+    "זרעים",
+    "כוסות שתילה"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "הירקן",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "הדחליל",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "יום כתום",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נצא לירקן לקנות ירקות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נכין דחליל לגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "הכנת מרק כתום",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "צבעי ידיים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "יצירה כתומה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "הסל שגדל",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "אליעזר והגזר (הצגה)",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "misc",
+   "title": "נעמיד את הדחליל בגינה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "misc",
+   "title": "הילדים באים לבושים בכתום",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "story",
+   "title": "מפתח הלב",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "creation",
+   "title": "כפפות טוש טוש",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "story",
+   "title": "נרקיס מלך הביצה",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "פירות יבשים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "שקדיה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "גואש עם קיסמים",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים",
+    "מגש מים",
+    "כלי מדידה"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "העץ הוא חבר",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "ט\"ו בשבט",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "יצירת עץ בגואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "סוגי משפחות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "הכנת חמסה",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "לכל משפחה סיפור משלה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "story",
+   "title": "הפרדס",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "story",
+   "title": "מתנות מהפרדס",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "סיפור יציאת מצרים",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "צביעה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "אגוז של זהב",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "כוסו של אליהו",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "ניקיון",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "צבעי ידיים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "אביב",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "misc",
+   "title": "הדבקת סימלי החג",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "שלושת הפרפרים",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "החלב ומוצריו",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "story",
+   "title": "השועל והלחם",
+   "materials": [],
+   "uses": 2,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "האביב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "הפרח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "סוגי פרחים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "הפרפר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "החיפושית",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "activity",
+   "title": "מאפייני מזג האויר",
+   "materials": [
+    "חומרי אפייה",
+    "קערות",
+    "תבניות",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "activity",
+   "title": "מבנה הפרח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "activity",
+   "title": "מיון קטיף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "activity",
+   "title": "מבנה הגוף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "creation",
+   "title": "יצירת פרפר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "creation",
+   "title": "גואש פרחים",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "creation",
+   "title": "הדבקת פרח",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "creation",
+   "title": "הכנת משקפי פרפרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "creation",
+   "title": "הכנת חיפושית",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "story",
+   "title": "שלושה פרפרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "story",
+   "title": "נרקיס מלך הביצה",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "story",
+   "title": "שלוםו פרחי האביב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "story",
+   "title": "הזחל הרעב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "story",
+   "title": "מושית השבע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "misc",
+   "title": "סיור בחצר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אביב",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "הגוף שלנו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "הידיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "הרגליים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "הפנים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "חמשת החושים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "activity",
+   "title": "הכרות עם איברי הגוף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "activity",
+   "title": "מה עושים על הידיים?",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "activity",
+   "title": "איברי הפנים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "activity",
+   "title": "משחקי חושים",
+   "materials": [
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "creation",
+   "title": "בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "creation",
+   "title": "צבעי אצבעות",
+   "materials": [
+    "צבעי אצבעות",
+    "בריסטול",
+    "סינרים",
+    "מגבונים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "creation",
+   "title": "מסלול חושים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "creation",
+   "title": "מדבקות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "creation",
+   "title": "דבק",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "story",
+   "title": "הגוף שלנו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "story",
+   "title": "איפה ברחה גברת זרת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "story",
+   "title": "אני",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "story",
+   "title": "לפעמים",
+   "materials": [
+    "מגש מים",
+    "כלי מדידה",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "story",
+   "title": "סיר הסירים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "misc",
+   "title": "גזירה",
+   "materials": [
+    "מספריים לילדים",
+    "דפי גזירה",
+    "דבק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "אני וגופי",
+   "category": "misc",
+   "title": "טביעות רגליים בגועש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "meeting",
+   "title": "חויות מחג הסוכות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "פעילות עם מטפחות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "ציור + בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים",
+    "צבעים",
+    "דפי ציור",
+    "טושים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "הצב של אורן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "misc",
+   "title": "חנן הגנן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נזרע ונשתול בגינה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "story",
+   "title": "הדחליל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "creation",
+   "title": "חימר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הגינה",
+   "category": "activity",
+   "title": "נשתול ונזרע בגינה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "הכירות עם הצוות והחברים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "חוקי הגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "ראש השנה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "כרטיסי ברכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "הדואר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "activity",
+   "title": "העקבות- ילד קטן הלך לגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "activity",
+   "title": "מהי התחלה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "activity",
+   "title": "למי כותבים?",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "activity",
+   "title": "נשלח את כרטיס הברכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "creation",
+   "title": "ציור+בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים",
+    "צבעים",
+    "דפי ציור",
+    "טושים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "creation",
+   "title": "צביעה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "creation",
+   "title": "ציור והדבקה",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "צבעים",
+    "דפי ציור",
+    "טושים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "creation",
+   "title": "הכנת כרטיס ברכה",
+   "materials": [
+    "בריסטול צבעוני",
+    "טושים",
+    "מדבקות",
+    "דבק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "creation",
+   "title": "ניצור\\ר יונת שלום",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "story",
+   "title": "ילד קטן הלך לגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "story",
+   "title": "הגמד המרגיע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "story",
+   "title": "שירי ראש השנה",
+   "materials": [
+    "רמקול",
+    "מוזיקה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "story",
+   "title": "ליאת מקבלת את פני השנה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "הסתגלות",
+   "category": "story",
+   "title": "בחלון יונה ויין",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "חברות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "התנהגות בחברה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "חברים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "התננהגות בגן לחפצים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "התנהגות בגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "meeting",
+   "title": "קטיף משפחות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "activity",
+   "title": "שיח שיתופי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "activity",
+   "title": "כללי התנהגות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "activity",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "activity",
+   "title": "סיפור בהמחשה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "creation",
+   "title": "הכנת כפות ידיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "creation",
+   "title": "חימר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "creation",
+   "title": "צבעי ידיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "creation",
+   "title": "איילת מטיילת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "story",
+   "title": "בחיר הלב שלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "story",
+   "title": "מיץ פטל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חברות",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "בגדי חורף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "חורף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "עננים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "פרחי חורף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "מאכלי חורף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "activity",
+   "title": "ארגז החורף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "activity",
+   "title": "יום הולדת לגל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "activity",
+   "title": "יום הולדת לישראל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "activity",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "activity",
+   "title": "הכנת מרק",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "creation",
+   "title": "מגפיים גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "creation",
+   "title": "פרחים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "creation",
+   "title": "כובע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "story",
+   "title": "אפריים מגפיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "story",
+   "title": "אפרייםפ מגפיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "story",
+   "title": "סבא בישל מרק",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חורף",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "הסיפור ההיסטורי",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "החנוכיה",
+   "materials": [
+    "חנוכייה",
+    "נרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "נרות",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "כד השמן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "השמן ושימושיו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "activity",
+   "title": "שמות החג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "activity",
+   "title": "סוגי נרות",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "activity",
+   "title": "סוגי נרות וההבדלים",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "activity",
+   "title": "נכתוש זיתים לשמן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "creation",
+   "title": "מדבקות זוהרות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "creation",
+   "title": "צביעה חנוכיה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה",
+    "חנוכייה",
+    "נרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "creation",
+   "title": "יצירת כד וצביעה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "creation",
+   "title": "יצירה בגירים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "story",
+   "title": "חנוכה של אור",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "story",
+   "title": "מאירים את חנוכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "story",
+   "title": "גברת קרש ומר מערוך",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "story",
+   "title": "הלביבה שהתגלגלה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "חנוכה",
+   "category": "misc",
+   "title": "הפכים - אור וחושך",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "חלקי העץ",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "העץ",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "יום הולדת לליב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "סיפור בהמחשה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "יום הולדת לליה בגאיו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "הכנת עץ השקדיה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "הדבקה",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "הכנת עוגה בצורת עץ",
+   "materials": [
+    "חומרי אפייה",
+    "קערות",
+    "תבניות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "איך זה להיות עץ",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "שקדיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "הפרח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "meeting",
+   "title": "יום הולדת לאילן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "יום הולדת למיה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "ניסוי פירות יבשים",
+   "materials": [
+    "כלי ניסוי",
+    "מגשים",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "חגיגות ט\"ו בשבט בגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "activity",
+   "title": "נחגוג יום הולדת לעץ",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "הכנת עוגיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "חימר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "creation",
+   "title": "הכנת כדורי תמרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "אשכול הענבים הקטן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ט\"ו בשבט",
+   "category": "story",
+   "title": "יום הולדת לאילן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "משפחה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "הבית",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "הבית שלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "משפחת החיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "סיפור בהמחשה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "יום הולדת לפלג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "הכרות הבית",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "התאמת אמא וגור",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "הכנת בית משותף",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "כף היד שלי - משפחה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "הכנת שלט לדלת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "משפחות עם משפחות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "הבית שלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "אני ומשפחתי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "סוגי בתים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "כיבוד הורים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "עץ המשפחה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "meeting",
+   "title": "משפחות בעלי חיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "משחקי דמיון",
+   "materials": [
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "הכנת בתים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "נקשט את העץ",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "activity",
+   "title": "משחק התאמה",
+   "materials": [
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "מדבקות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "צבעי ידיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "גזירה",
+   "materials": [
+    "מספריים לילדים",
+    "דפי גזירה",
+    "דבק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "הכנת ברכות למשפחות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "creation",
+   "title": "בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "משפחת הפילפילים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "הבית של יעל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "הלו אבא",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "גלגלים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "יום המשפחה",
+   "category": "story",
+   "title": "מעשה באפרוח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "meeting",
+   "title": "סיכום ראש השנה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "meeting",
+   "title": "יום כיפור",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "meeting",
+   "title": "חברות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "meeting",
+   "title": "השופר",
+   "materials": [
+    "שופר"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "activity",
+   "title": "חויות מהחג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "activity",
+   "title": "בקשת סליחה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "activity",
+   "title": "סוגי שופרות",
+   "materials": [
+    "שופר"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "creation",
+   "title": "צבעי אצבעות",
+   "materials": [
+    "צבעי אצבעות",
+    "בריסטול",
+    "סינרים",
+    "מגבונים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "creation",
+   "title": "משחקי קצף",
+   "materials": [
+    "קצף גילוח",
+    "משטח רחיץ",
+    "סינרים",
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "creation",
+   "title": "בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "creation",
+   "title": "צביעה והדבקה - שופר",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה",
+    "שופר"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "story",
+   "title": "מותק של כפית",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "story",
+   "title": "איך מתפייסים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "story",
+   "title": "ליפעמים קשה לסלוח",
+   "materials": [
+    "מגש מים",
+    "כלי מדידה",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "story",
+   "title": "השופר שרצה להודיע",
+   "materials": [
+    "שופר"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "כיפור",
+   "category": "misc",
+   "title": "שיום כיפור הגיע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "meeting",
+   "title": "ערב יום כיפור",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "meeting",
+   "title": "חג סוכות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "meeting",
+   "title": "אושפזין",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "meeting",
+   "title": "הסוכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "activity",
+   "title": "הסיפור ההיסטורי",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "activity",
+   "title": "עורכים שולחן לאורחים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "activity",
+   "title": "ארבעת המינים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "creation",
+   "title": "הכנת קישוטים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "creation",
+   "title": "הדבקת מגזרות",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "מגזרות מוכנות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "story",
+   "title": "סכך לסוכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "story",
+   "title": "הסוכה של הגמד",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סוכות",
+   "category": "story",
+   "title": "ארבעה אורחים לסוכה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "מאפייני הסתיו",
+   "materials": [
+    "חומרי אפייה",
+    "קערות",
+    "תבניות",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "מזג האויר - הרוח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "עננים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "שלכת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "הצומח בסתיו - חצב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "סיור בחצר הגן - סימני הסתיו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "פעילות בתנועה - מטפחות",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "גברת עננה ומר ענן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "איסוף עלי שלכת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "פעילות עם עלי שלכת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "משחק קצף",
+   "materials": [
+    "קצף גילוח",
+    "משטח רחיץ",
+    "סינרים",
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "הכנת שבשבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "הכנת עננים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "הדבקת עלי שלכת",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "הדבקה וצביעה",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "אדון שבלול וצב יאו לטיול",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "\"רוח פוח:",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "הענן של ערן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "מעשה בחמישה עלי שלכת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "החצב הקטן שהיה עקשן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "בעלי חיים בסתיו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "החילזון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "יום שבתון בחירות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "הנחניאלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "meeting",
+   "title": "ציפורים נודדות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "תמונות של בעלי חיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "תצפית על החילזון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "נכיר את הנחניאלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "activity",
+   "title": "לאן הציפורים עפות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "צבעי אצבעות",
+   "materials": [
+    "צבעי אצבעות",
+    "בריסטול",
+    "סינרים",
+    "מגבונים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "טוש טושים חילזון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "צביעה - נחניאלי",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "creation",
+   "title": "קצף",
+   "materials": [
+    "קצף גילוח",
+    "משטח רחיץ",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "יואב החילזון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "שולי שבלולי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "אלי שלומיאלי והנחניאלי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "סתיו",
+   "category": "story",
+   "title": "מדוע לנחניאלי סינר שחור?",
+   "materials": [
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "הכרת הפירות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "הלימון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "התפוז",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "פירות הדר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "הקלמנטינה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "activity",
+   "title": "נריח נמשש נטעם",
+   "materials": [
+    "מזון לטעימה",
+    "צלחות חד-פעמיות",
+    "מפיות",
+    "פריטי ריח",
+    "מגש חושים",
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "activity",
+   "title": "יום הולדת לשחר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "activity",
+   "title": "הכנת עוגת תפוזים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "activity",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "activity",
+   "title": "הכנת ריבה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "creation",
+   "title": "קוטפים מהעץ הגדול",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "creation",
+   "title": "הכנת לימונדה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "creation",
+   "title": "צבעי ידיים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "creation",
+   "title": "חותמות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "creation",
+   "title": "קצף",
+   "materials": [
+    "קצף גילוח",
+    "משטח רחיץ",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פירות הדר",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "שמות החג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "סימלי החג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "קערת הסדר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "הכנת חרוסת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "דף צביעה",
+   "materials": [
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "הכנת פירמידה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "הדבקת סימלי החג",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "משחקי קצף",
+   "materials": [
+    "קצף גילוח",
+    "משטח רחיץ",
+    "סינרים",
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "משה בתיבה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "יציאת מצריים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "מר מצה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "אגוזים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "המצה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "חגיגות פסח, יש להגיע בחולצה לבנה",
+   "materials": [
+    "חול",
+    "מגש חושים",
+    "כלי חפירה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "פעילות באגוזים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "הכנת מצות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "מנקים את הגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "מדבקות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "המצה שלא מצאה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "מר ניקיון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "meeting",
+   "title": "חויות מהחג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "activity",
+   "title": "סיפורי החויות",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "בצק",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "creation",
+   "title": "הדבקת מדבקות",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "מעשה בשלושה פרפרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "האריה הרעמתן והגירפה גם",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "פסח",
+   "category": "story",
+   "title": "לציפי ברח הפיפי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "הצבע האדום",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "הצבע הכחול",
+   "materials": [
+    "חול",
+    "מגש חושים",
+    "כלי חפירה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "בחירות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "הצבע הצהוב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "meeting",
+   "title": "יום צבעוני",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "activity",
+   "title": "הכנת מרק אדום",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "activity",
+   "title": "משחק התאמות",
+   "materials": [
+    "משחקי קופסה",
+    "אביזרי משחק"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "activity",
+   "title": "ערבוב צבעים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "creation",
+   "title": "גואש אדום",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "creation",
+   "title": "בצק כחול",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים",
+    "חול",
+    "מגש חושים",
+    "כלי חפירה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "creation",
+   "title": "בצק צהוב",
+   "materials": [
+    "בצק משחק",
+    "משטחי עבודה",
+    "מערוכים",
+    "קופיצים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "story",
+   "title": "מלך הצבעים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "story",
+   "title": "כספיון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "story",
+   "title": "חגיגה של צבעים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "story",
+   "title": "הזיקית שלא ידעה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צבעים",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "הצורות שמסביבנו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "העיגול",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "משולש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "ריבוע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "מלבן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "meeting",
+   "title": "קבלת שבת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "activity",
+   "title": "מציאת צורות בגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "activity",
+   "title": "פעילות במקלות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "activity",
+   "title": "תכונות הריבוע",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "activity",
+   "title": "הבדל בין ריבוע למלבן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "creation",
+   "title": "מדבקות צורות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "creation",
+   "title": "הדבקת צורות",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "creation",
+   "title": "יצירת מלבנים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "story",
+   "title": "אני וכל מיני חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "story",
+   "title": "מעשה בעיגול שחשב",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "story",
+   "title": "הביצה שהתחפשה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "story",
+   "title": "גולי עיגולי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "story",
+   "title": "חנן הגנן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "צורות",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "meeting",
+   "title": "תפוח בדבש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "meeting",
+   "title": "הדבש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "meeting",
+   "title": "חוגגים ראש השנה, נא להגיע בחולצה לבנה",
+   "materials": [
+    "חול",
+    "מגש חושים",
+    "כלי חפירה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "meeting",
+   "title": "התמר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "meeting",
+   "title": "הרימון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "activity",
+   "title": "נטבול תפוח בדבש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "activity",
+   "title": "מהדבורה לדבש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "activity",
+   "title": "נטעם ונריח את התמר",
+   "materials": [
+    "מזון לטעימה",
+    "צלחות חד-פעמיות",
+    "מפיות",
+    "פריטי ריח",
+    "מגש חושים",
+    "נרות",
+    "חנוכייה",
+    "גפרורים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "activity",
+   "title": "מה בתוך הרימון?",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "creation",
+   "title": "גואש",
+   "materials": [
+    "צבעי גואש",
+    "מכחולים",
+    "צלחות ערבוב",
+    "בריסטול",
+    "סינרים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "creation",
+   "title": "צביעה והדבקה",
+   "materials": [
+    "דבק",
+    "בריסטול",
+    "מגזרות",
+    "צבעים",
+    "מכחולים",
+    "דפי צביעה"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "creation",
+   "title": "הכנת עוגת דבש ותמרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "creation",
+   "title": "ניצור רימון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "story",
+   "title": "מר וגברת תפוח",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "story",
+   "title": "דו שיח תפוח ודבש",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "ראש השנה",
+   "category": "story",
+   "title": "הגמדון שברימון",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "הכרת הספר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "הספר הוא חבר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "ספרים שאנחנו אוהבים ומכירים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "הלו הלו אבא",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "לאה גולדברג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "חוקרים את הספר, מושגים, כריכה,דפים ומילים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "איך נשמור על הספר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "נדבר על הספרים שאנחנו אוהבים וכיצד אנחנו מזהים אותם",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "פעילות בתנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "נכיר את ספריה ונמחיש את הסיפור ״איה פלוטו״",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "האריה שאהב תות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "הלו הלו אבא",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "איה פלוטו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "לוין קיפניס",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "מרים רות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "רינת הופר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "פאול קור",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "meeting",
+   "title": "ספר הגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "שלושת הפרפרים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "הבית של יעל",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "איילת מטיילת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "סיפור בהמחשה , הפיל שרצה להיות הכי",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "activity",
+   "title": "נספר ונכין ספר של ילדי הגן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "פעילות בקרטונים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "סיפור בהמחשה",
+   "materials": [
+    "ספר",
+    "שטיח מפגש"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "הפיל שרצה להיות הכי",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבוע הספר",
+   "category": "story",
+   "title": "פעילות במטפחות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "חג הקציר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "מהלחם לחיטה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "סימלי החג ומצוותיו",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "יום ירושליים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "איך קצרו אז ואיך היום",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "נקטוש חיטה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "ביקור בבית הכנסת",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "נכיר מקומות חשובים בעיר",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "נחלוב את הפרה ונכין גבינה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "story",
+   "title": "שבעה ידידים",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "misc",
+   "title": "חוג תנועה",
+   "materials": [
+    "רמקול",
+    "מוזיקה",
+    "מזרנים"
+   ],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "misc",
+   "title": "חוג חיות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "misc",
+   "title": "נבנה חומה מקוביות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "חוגגים שבועות מגיעים בלבוש לבן",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "meeting",
+   "title": "חוויות מהחג",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "נכין עוגת גבינה",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  },
+  {
+   "theme": "שבועות",
+   "category": "activity",
+   "title": "מספרים חוויות מחג השבועות",
+   "materials": [],
+   "uses": 1,
+   "age_groups": [],
+   "sources": [
+    "גאנט עבודה שנתי - קפלן - תשפ_ד.xlsx"
+   ]
+  }
+ ]
+}

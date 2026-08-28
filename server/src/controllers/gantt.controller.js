@@ -2,9 +2,20 @@ const mongoose = require('mongoose');
 const { GanttMonth, Holiday, Classroom } = require('../models');
 const pv = require('../services/parentVisibility');
 
+// The five rows the gan actually writes, in the order the paper workbook uses.
+//
+// יצירה was missing here while every real yearly workbook has it — 119 distinct
+// craft activities in the גן החלומות books alone — so a gananet moving off the
+// spreadsheet had nowhere to put the one row she fills in every single day, and
+// had to add it by hand to each new month.
+//
+// Only new gantts pick this up. A month already saved keeps the rows it was
+// saved with, deliberately: silently inserting a row into an approved plan
+// changes a document a manager has signed off.
 const DEFAULT_ROWS = [
   { key: 'meeting', label: 'מפגש' },
   { key: 'activity', label: 'פעילות' },
+  { key: 'creation', label: 'יצירה' },
   { key: 'story', label: 'סיפור' },
   { key: 'misc', label: 'שונות' },
 ];
