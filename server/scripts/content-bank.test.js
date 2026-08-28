@@ -143,6 +143,18 @@ console.log('\n📦  הבנק המצורף\n');
   eq(ids.size, bank.SEED_ITEMS.length, 'אין שני פריטים עם אותו מזהה');
 }
 
+console.log('\n🆔  מזהה מצורף מול מזהה של הגן\n');
+{
+  ok(bank.isSeedId(bank.SEED_ITEMS[0].id), 'מזהה של פריט מצורף מזוהה');
+  // A Mongo ObjectId is 24 hex characters. Reading one as a seed id would turn
+  // "delete my own item" into "hide shipped content", which is unrecoverable
+  // from the screen.
+  ok(!bank.isSeedId('6a91c081b489959cdcbe07da'), 'מזהה של מונגו אינו מזהה מצורף');
+  ok(!bank.isSeedId('507f1f77bcf86cd799439011'), 'מזהה מונגו נוסף אינו מזהה מצורף');
+  ok(!bank.isSeedId(''), 'מחרוזת ריקה אינה מזהה');
+  ok(!bank.isSeedId(undefined), 'undefined אינו מזהה');
+}
+
 console.log('\n🙈  מה שהגן הוסיף ומה שהסתיר\n');
 {
   const seedSample = bank.SEED_ITEMS.filter(i => i.theme === 'פסח').slice(0, 3);

@@ -4,10 +4,14 @@ const pv = require('../services/parentVisibility');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
 //
-// יצירה was missing here while every real yearly workbook has it — 119 distinct
-// craft activities in the גן החלומות books alone — so a gananet moving off the
-// spreadsheet had nowhere to put the one row she fills in every single day, and
-// had to add it by hand to each new month.
+// The craft row was missing here while every real yearly workbook has it — so a
+// gananet moving off the spreadsheet had nowhere to put the one row she fills in
+// every single day, and had to add it by hand to each new month.
+//
+// It is labelled הנגשת חומרים rather than יצירה because that is what the gan
+// calls it: the row is what is PUT OUT for the children to work with, and the
+// creating is theirs. The key stays `creation` — renaming it would orphan every
+// cell already saved under it.
 //
 // Only new gantts pick this up. A month already saved keeps the rows it was
 // saved with, deliberately: silently inserting a row into an approved plan
@@ -15,7 +19,7 @@ const pv = require('../services/parentVisibility');
 const DEFAULT_ROWS = [
   { key: 'meeting', label: 'מפגש' },
   { key: 'activity', label: 'פעילות' },
-  { key: 'creation', label: 'יצירה' },
+  { key: 'creation', label: 'הנגשת חומרים' },
   { key: 'story', label: 'סיפור' },
   { key: 'misc', label: 'שונות' },
 ];
@@ -55,6 +59,15 @@ async function get(req, res, next) {
         approved_at: null,
       };
     }
+
+    // A plan saved during the hour the craft row was called יצירה keeps that
+    // word until somebody edits it, which would leave two gantts side by side
+    // naming the same row differently. Relabelled on the way out rather than
+    // migrated: it is the label only, the key is what cells are stored against,
+    // and rewriting saved documents to change a caption is not worth the risk.
+    gantt.row_definitions = (gantt.row_definitions || []).map(r => (
+      r.key === 'creation' && r.label === 'יצירה' ? { ...r, label: 'הנגשת חומרים' } : r
+    ));
 
     // Get holidays for this month. Only query when we have a real branch id —
     // an "all" / missing branch (e.g. the cross-branch view) is not an ObjectId

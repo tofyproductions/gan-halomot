@@ -201,50 +201,9 @@ function branchOf(fileName) {
   return m ? m[1] : null;
 }
 
-/**
- * A cell is worth banking only if it is an idea. Dates, "הגן סגור", a lone
- * day name and the like are administration, and putting them in the bank
- * means a gananet searching "סוכות" is offered "הגן סגור".
- */
-const NOT_CONTENT = [
-  /^חופש/u, /הגן סגור/u, /^אין /u, /^-+$/u, /^\d+$/u,
-  /^יום [א-ו]'?$/u,
-];
-
-/**
- * Named children, which must never reach the bank.
- *
- * The שונות row is where the gan writes who is אבא/אמא של שבת that week, by
- * first name and sometimes by surname initial — "בוגרים : ריין+ליה הרפז",
- * "תינוקיה : גפן .ס. + שקד .ש.". They are four-year-olds, and this bank ships
- * to every customer of the platform. A "content bank" that carries another
- * gan's children's names is not a content problem, it is a data-protection
- * incident, and it would be found by the person it names.
- *
- * Matched by the SHAPE the gan writes them in — a room or a role, then a colon
- * — rather than by trying to recognise names, which cannot be done reliably
- * and fails towards leaking.
- */
-const PERSONAL = [
-  /^(תינוקי[יה]?ה|צעירים|בוגרים)\s*[:：+]/u,
-  /(אבא|אמא|ילד|ילדת|ילדי)\s+של\s+שבת/u,
-  // Every birthday line in every workbook is "יום הולדת ל<שם של ילד>". There is
-  // no version of it that is not a named four-year-old, so the whole phrase
-  // goes — not just the colon form. 109 of them were in the first build.
-  /יום הולדת/u,
-  /מזל טוב/u,
-];
-
-function isContent(text) {
-  const t = String(text || '').trim();
-  if (t.length < 2 || t.length > 200) return false;
-  // Must contain an actual letter. NOT \W — in JavaScript \w is ASCII-only, so
-  // \W matches every Hebrew character and a "reject non-word" test silently
-  // throws away the entire bank.
-  if (!/\p{L}/u.test(t)) return false;
-  if (PERSONAL.some(re => re.test(t))) return false;
-  return !NOT_CONTENT.some(re => re.test(t));
-}
+// The "is this an idea, and does it name a child" rule lives in src/content-bank
+// so that this script and the live save-to-bank path cannot drift apart.
+const { isBankable: isContent } = require('../src/content-bank/privacy');
 
 function cellText(ws, r, c) {
   const ref = XLSX.utils.encode_cell({ r: r - 1, c: c - 1 });

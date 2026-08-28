@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import {
   Box, Typography, Stack, Chip, Drawer, IconButton, TextField, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions, Button, MenuItem,
@@ -8,6 +8,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import InventoryIcon from '@mui/icons-material/Inventory2';
@@ -18,12 +19,15 @@ import api from '../../api/client';
 export const BANK_ROWS = [
   { key: 'meeting', label: 'מפגש', color: '#dbeafe' },
   { key: 'activity', label: 'פעילות', color: '#dcfce7' },
-  { key: 'creation', label: 'יצירה', color: '#fce7f3' },
+  { key: 'creation', label: 'הנגשת חומרים', color: '#fce7f3' },
   { key: 'story', label: 'סיפור', color: '#fef9c3' },
   { key: 'misc', label: 'שונות', color: '#ede9fe' },
 ];
 
 const ROW_COLOR = Object.fromEntries(BANK_ROWS.map(r => [r.key, r.color]));
+
+// Friday is never proposed over — it is קבלת שבת and the parent-of-the-week.
+const PREVIEW_DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי'];
 
 /**
  * One idea, draggable onto a gantt cell.
@@ -90,10 +94,15 @@ export default function ContentBankPanel({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [draft, setDraft] = useState({ theme: '', category: 'activity', title: '', materials: '' });
+  // One dialog for both "add" and "edit" — the fields are identical, and two
+  // dialogs that differ only in their title drift apart.
+  const [editor, setEditor] = useState(null);
 
-  const [fill, setFill] = useState({ open: false, weekIdx: 0, offset: 0, preview: null, busy: false });
+  const [fill, setFill] = useState({ open: false, weekIdx: 0, offset: 0, busy: false });
+  // The proposal, held here and editable, so she can move Tuesday to Thursday
+  // BEFORE any of it touches the plan.
+  const [proposal, setProposal] = useState(null);
+  const [picked, setPicked] = useState(null);   // first half of a swap
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -117,22 +126,44 @@ export default function ContentBankPanel({
   // not appear until the drawer is closed and reopened.
   const refresh = () => setReloadKey(k => k + 1);
 
-  const addItem = async () => {
-    const title = draft.title.trim();
-    const themeName = (draft.theme || theme).trim();
-    if (!themeName || !title) return toast.error('נושא וכותרת הם שדות חובה');
+  const openAdd = () => setEditor({
+    id: null, theme: theme || '', category: 'activity', title: '', materials: '', origin: 'own',
+  });
+
+  const openEdit = (item) => setEditor({
+    id: item.id,
+    theme: item.theme,
+    category: item.category,
+    title: item.title,
+    materials: (item.materials || []).join(', '),
+    origin: item.origin,
+  });
+
+  const saveItem = async () => {
+    const title = editor.title.trim();
+    const themeName = editor.theme.trim();
+    if (!themeName || !title) return toast.error('נושא וטקסט הם שדות חובה');
+
+    const body = {
+      theme: themeName,
+      category: editor.category,
+      title,
+      materials: editor.materials.split(',').map(s => s.trim()).filter(Boolean),
+    };
+
     try {
-      await api.post('/content-bank', {
-        theme: themeName,
-        category: draft.category,
-        title,
-        materials: draft.materials.split(',').map(s => s.trim()).filter(Boolean),
-        age_groups: ageGroup ? [ageGroup] : [],
-      });
-      toast.success('נוסף לבנק');
-      setAddOpen(false);
-      setDraft({ theme: '', category: 'activity', title: '', materials: '' });
-      if (themeName === theme) refresh(); else setTheme(themeName);
+      if (editor.id) {
+        await api.put(`/content-bank/${editor.id}`, body);
+        // A shipped item cannot be changed in place — the server hides it and
+        // stores the edit as this gan's own. She does not need to know that,
+        // but she does need to know it now belongs to her gan.
+        toast.success(editor.origin === 'seed' ? 'נשמר כרעיון של הגן' : 'נשמר');
+      } else {
+        await api.post('/content-bank', { ...body, age_groups: ageGroup ? [ageGroup] : [] });
+        toast.success('נוסף לבנק');
+      }
+      setEditor(null);
+      if (themeName === theme || !theme) refresh(); else setTheme(themeName);
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
   };
 
@@ -150,28 +181,97 @@ export default function ContentBankPanel({
   const askWeek = async (weekIdx, offset) => {
     if (!theme) return toast.error('בחרי נושא קודם');
     setFill(f => ({ ...f, open: true, weekIdx, offset, busy: true }));
+    setPicked(null);
     try {
       const res = await api.post('/content-bank/suggest', { theme, age: ageGroup || '', offset });
-      setFill(f => ({ ...f, preview: res.data, busy: false }));
+      setProposal(res.data);
+      setFill(f => ({ ...f, busy: false }));
     } catch (err) {
       setFill(f => ({ ...f, open: false, busy: false }));
       toast.error(err.response?.data?.error || 'שגיאה');
     }
   };
 
+  const closeFill = () => {
+    setFill({ open: false, weekIdx: 0, offset: 0, busy: false });
+    setProposal(null);
+    setPicked(null);
+  };
+
   const applyWeek = () => {
-    if (!fill.preview) return;
-    onFillWeek(fill.weekIdx, fill.preview, theme);
-    setFill({ open: false, weekIdx: 0, offset: 0, preview: null, busy: false });
+    if (!proposal) return;
+    // Only boxes that still have text. A box she emptied in the preview is a
+    // box she wants to write herself.
+    onFillWeek(fill.weekIdx, {
+      ...proposal,
+      cells: proposal.cells.filter(c => String(c.content || '').trim()),
+    }, theme);
+    closeFill();
     onClose();
   };
 
-  const previewByRow = useMemo(() => {
-    const cells = fill.preview?.cells || [];
+  /**
+   * Move a proposed idea from one day to another, before any of it is applied.
+   *
+   * Tap the box, then tap where it should go — the two trade places, which is
+   * also how "move it to the empty Thursday" works, since an empty box swapped
+   * in leaves the original empty. Swaps stay inside one row on purpose: a story
+   * in the מפגש row is not a plan, it is a mistake that took two taps.
+   */
+  const tapCell = (rowKey, dayIdx) => {
+    if (!picked) { setPicked({ rowKey, dayIdx }); return; }
+    if (picked.rowKey !== rowKey) {
+      toast.info('אפשר להחליף רק בתוך אותה שורה');
+      setPicked({ rowKey, dayIdx });
+      return;
+    }
+    if (picked.dayIdx === dayIdx) { setPicked(null); return; }
+
+    setProposal(p => {
+      const cells = [...p.cells];
+      const at = (d) => cells.findIndex(c => c.row_key === rowKey && c.day_index === d);
+      const iA = at(picked.dayIdx);
+      const iB = at(dayIdx);
+      const blank = (d) => ({ row_key: rowKey, day_index: d, content: '', materials: [] });
+
+      const a = iA >= 0 ? cells[iA] : blank(picked.dayIdx);
+      const b = iB >= 0 ? cells[iB] : blank(dayIdx);
+
+      const newA = { ...b, day_index: picked.dayIdx };
+      const newB = { ...a, day_index: dayIdx };
+      if (iA >= 0) cells[iA] = newA; else cells.push(newA);
+      if (iB >= 0) cells[iB] = newB; else cells.push(newB);
+      return { ...p, cells };
+    });
+    setPicked(null);
+  };
+
+  const clearCell = (rowKey, dayIdx) => {
+    setProposal(p => ({
+      ...p,
+      cells: p.cells.filter(c => !(c.row_key === rowKey && c.day_index === dayIdx)),
+    }));
+    setPicked(null);
+  };
+
+  // The proposal as a grid: every row that has anything, every working day.
+  const previewGrid = useMemo(() => {
+    const cells = proposal?.cells || [];
     return BANK_ROWS
-      .map(r => ({ ...r, days: cells.filter(c => c.row_key === r.key).sort((a, b) => a.day_index - b.day_index) }))
-      .filter(r => r.days.length);
-  }, [fill.preview]);
+      .filter(r => cells.some(c => c.row_key === r.key))
+      .map(r => ({
+        ...r,
+        days: [0, 1, 2, 3, 4].map(d => cells.find(c => c.row_key === r.key && c.day_index === d) || null),
+      }));
+  }, [proposal]);
+
+  // Recomputed from what is on screen, not from what the server proposed —
+  // she has been moving and clearing boxes, and the shopping list has to match
+  // the week she is actually about to apply.
+  const previewMaterials = useMemo(() => (
+    [...new Set((proposal?.cells || []).flatMap(c => c.materials || []))]
+      .sort((a, b) => a.localeCompare(b, 'he'))
+  ), [proposal]);
 
   return (
     <>
@@ -181,7 +281,7 @@ export default function ContentBankPanel({
             <Typography variant="h6" sx={{ fontWeight: 800 }}>בנק תוכן</Typography>
             <Stack direction="row">
               <Tooltip title="הוספת רעיון משלך">
-                <IconButton size="small" onClick={() => { setDraft(d => ({ ...d, theme: theme || '' })); setAddOpen(true); }}>
+                <IconButton size="small" onClick={openAdd}>
                   <AddIcon />
                 </IconButton>
               </Tooltip>
@@ -253,11 +353,18 @@ export default function ContentBankPanel({
               <AccordionDetails sx={{ p: 1 }}>
                 <Stack spacing={0.5}>
                   {g.items.map(item => (
-                    <Stack key={item.id} direction="row" alignItems="center" spacing={0.5}>
+                    <Stack key={item.id} direction="row" alignItems="center" spacing={0.25}>
                       <Box sx={{ flex: 1, minWidth: 0 }}><DraggableIdea item={item} /></Box>
-                      <IconButton size="small" onClick={() => removeItem(item)}>
-                        <DeleteIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
-                      </IconButton>
+                      <Tooltip title="עריכה">
+                        <IconButton size="small" onClick={() => openEdit(item)}>
+                          <EditIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={item.origin === 'own' ? 'מחיקה' : 'הסתרה מהבנק של הגן'}>
+                        <IconButton size="small" onClick={() => removeItem(item)}>
+                          <DeleteIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
+                        </IconButton>
+                      </Tooltip>
                     </Stack>
                   ))}
                 </Stack>
@@ -267,43 +374,96 @@ export default function ContentBankPanel({
         </Box>
       </Drawer>
 
-      {/* Whole-week proposal, shown before anything touches the plan */}
-      <Dialog open={fill.open} onClose={() => setFill(f => ({ ...f, open: false }))} dir="rtl" maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>
+      {/* The proposed week, editable, before any of it touches the plan */}
+      <Dialog open={fill.open} onClose={closeFill} dir="rtl" maxWidth="lg" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
           הצעה לשבוע {weeks?.[fill.weekIdx]?.week_number} — {theme}
         </DialogTitle>
         <DialogContent>
-          {fill.busy && <Stack alignItems="center" sx={{ py: 4 }}><CircularProgress /></Stack>}
+          {fill.busy && <Stack alignItems="center" sx={{ py: 6 }}><CircularProgress /></Stack>}
 
-          {!fill.busy && fill.preview && (
+          {!fill.busy && proposal && (
             <Stack spacing={1.5} sx={{ mt: 1 }}>
-              {previewByRow.map(row => (
-                <Box key={row.key}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', mb: 0.5 }}>{row.label}</Typography>
-                  <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                    {row.days.map(c => (
-                      <Chip key={c.day_index} size="small" label={c.content}
-                        sx={{ bgcolor: row.color, fontWeight: 600, height: 'auto', py: 0.4,
-                          '& .MuiChip-label': { whiteSpace: 'normal' } }} />
-                    ))}
-                  </Stack>
-                </Box>
-              ))}
+              <Typography variant="caption" color="text.secondary">
+                {picked
+                  ? 'עכשיו לחצי על היום שאליו להעביר — השניים יתחלפו.'
+                  : 'לחצי על תוכן ואז על יום אחר כדי להחליף ביניהם. ✕ מרוקן תיבה.'}
+              </Typography>
 
-              {fill.preview.thin_rows?.length > 0 && (
+              <Box sx={{ overflowX: 'auto' }}>
+                <Box sx={{
+                  display: 'grid',
+                  gridTemplateColumns: `110px repeat(5, minmax(130px, 1fr))`,
+                  gap: 0.5, minWidth: 760,
+                }}>
+                  <Box />
+                  {PREVIEW_DAYS.map(d => (
+                    <Box key={d} sx={{
+                      textAlign: 'center', fontWeight: 800, fontSize: '0.8rem',
+                      color: '#475569', pb: 0.5,
+                    }}>{d}</Box>
+                  ))}
+
+                  {previewGrid.map(row => (
+                    <Fragment key={row.key}>
+                      <Box sx={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+                        fontWeight: 800, fontSize: '0.82rem', pl: 1, color: '#334155',
+                      }}>{row.label}</Box>
+
+                      {[0, 1, 2, 3, 4].map(d => {
+                        const cell = row.days[d];
+                        const isPicked = picked?.rowKey === row.key && picked?.dayIdx === d;
+                        return (
+                          <Box
+                            key={d}
+                            onClick={() => tapCell(row.key, d)}
+                            sx={{
+                              position: 'relative', minHeight: 52, borderRadius: 1.5, p: 0.8,
+                              cursor: 'pointer', userSelect: 'none',
+                              bgcolor: cell ? row.color : '#f8fafc',
+                              border: isPicked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                              fontSize: '0.78rem', fontWeight: 600, lineHeight: 1.35,
+                              color: cell ? '#1e293b' : '#cbd5e1',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              textAlign: 'center',
+                              '&:hover': { borderColor: '#f59e0b' },
+                              '&:hover .clr': { opacity: 1 },
+                            }}
+                          >
+                            {cell ? cell.content : '—'}
+                            {cell && (
+                              <Box
+                                className="clr"
+                                onClick={(e) => { e.stopPropagation(); clearCell(row.key, d); }}
+                                sx={{
+                                  position: 'absolute', top: 1, left: 3, opacity: 0,
+                                  transition: '0.2s', fontSize: '0.7rem', color: '#64748b',
+                                }}
+                              >✕</Box>
+                            )}
+                          </Box>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </Box>
+              </Box>
+
+              {proposal.thin_rows?.length > 0 && (
                 <Typography variant="caption" sx={{ color: '#b45309' }}>
-                  הבנק דל בנושא זה בשורות: {fill.preview.thin_rows.join(', ')} — יש חזרות, כדאי לערוך.
+                  הבנק דל בנושא זה בשורות: {proposal.thin_rows.join(', ')} — יש ימים ריקים, מלאי אותם בעצמך.
                 </Typography>
               )}
 
-              {fill.preview.materials?.length > 0 && (
+              {previewMaterials.length > 0 && (
                 <Box sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5 }}>
                   <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
                     <InventoryIcon sx={{ fontSize: 16, color: '#475569' }} />
                     <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>ציוד לשבוע</Typography>
                   </Stack>
                   <Typography variant="body2" sx={{ color: '#475569' }}>
-                    {fill.preview.materials.join(' · ')}
+                    {previewMaterials.join(' · ')}
                   </Typography>
                 </Box>
               )}
@@ -315,36 +475,47 @@ export default function ContentBankPanel({
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setFill(f => ({ ...f, open: false }))}>ביטול</Button>
+          <Button onClick={closeFill}>ביטול</Button>
           <Button onClick={() => askWeek(fill.weekIdx, fill.offset + 1)} disabled={fill.busy}>הצע אחרת</Button>
-          <Button variant="contained" onClick={applyWeek} disabled={fill.busy || !fill.preview?.cells?.length}>
+          <Button variant="contained" onClick={applyWeek}
+            disabled={fill.busy || !proposal?.cells?.some(c => String(c.content || '').trim())}>
             שבץ בשבוע
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* The gan's own addition */}
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)} dir="rtl" maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>הוספת רעיון לבנק</DialogTitle>
+      {/* Add, and edit — the same fields either way */}
+      <Dialog open={Boolean(editor)} onClose={() => setEditor(null)} dir="rtl" maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {editor?.id ? 'עריכת רעיון' : 'הוספת רעיון לבנק'}
+        </DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="נושא" fullWidth value={draft.theme}
-              onChange={e => setDraft(d => ({ ...d, theme: e.target.value }))}
-              helperText="למשל: פסח, הגינה, חורף" />
-            <TextField label="שורה בגאנט" select fullWidth value={draft.category}
-              onChange={e => setDraft(d => ({ ...d, category: e.target.value }))}>
-              {BANK_ROWS.map(r => <MenuItem key={r.key} value={r.key}>{r.label}</MenuItem>)}
-            </TextField>
-            <TextField label="הרעיון" fullWidth value={draft.title}
-              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} />
-            <TextField label="ציוד נדרש" fullWidth value={draft.materials}
-              onChange={e => setDraft(d => ({ ...d, materials: e.target.value }))}
-              helperText="מופרד בפסיקים. אפשר להשאיר ריק" />
-          </Stack>
+          {editor && (
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              {editor.origin === 'seed' && (
+                <Typography variant="caption" sx={{ color: '#b45309' }}>
+                  זהו רעיון שהגיע עם המערכת. השמירה תיצור ממנו גרסה של הגן שלכם,
+                  והמקורית תוסתר. לגנים אחרים לא ישתנה דבר.
+                </Typography>
+              )}
+              <TextField label="נושא" fullWidth value={editor.theme}
+                onChange={e => setEditor(d => ({ ...d, theme: e.target.value }))}
+                helperText="למשל: פסח, הגינה, חורף" />
+              <TextField label="שורה בגאנט" select fullWidth value={editor.category}
+                onChange={e => setEditor(d => ({ ...d, category: e.target.value }))}>
+                {BANK_ROWS.map(r => <MenuItem key={r.key} value={r.key}>{r.label}</MenuItem>)}
+              </TextField>
+              <TextField label="הרעיון" fullWidth multiline maxRows={4} value={editor.title}
+                onChange={e => setEditor(d => ({ ...d, title: e.target.value }))} />
+              <TextField label="ציוד נדרש" fullWidth value={editor.materials}
+                onChange={e => setEditor(d => ({ ...d, materials: e.target.value }))}
+                helperText="מופרד בפסיקים. אפשר להשאיר ריק" />
+            </Stack>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>ביטול</Button>
-          <Button variant="contained" onClick={addItem}>הוסף</Button>
+          <Button onClick={() => setEditor(null)}>ביטול</Button>
+          <Button variant="contained" onClick={saveItem}>{editor?.id ? 'שמור' : 'הוסף'}</Button>
         </DialogActions>
       </Dialog>
     </>

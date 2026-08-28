@@ -57,15 +57,54 @@ function DraggableActivity({ activity }) {
   );
 }
 
-// Droppable gantt cell wrapper
-function DroppableCell({ id, children, ...props }) {
-  const { setNodeRef, isOver } = useDroppable({ id });
+/**
+ * A gantt cell: a drop target, and — once it has text — a drag source too.
+ *
+ * Moving a box from Tuesday to Thursday used to mean selecting the text,
+ * cutting it, clicking the other box and pasting, then remembering to clear the
+ * first one. It is the single most common edit a gananet makes to a plan, so it
+ * is a drag.
+ *
+ * The grip is a small handle rather than the whole cell, deliberately: the cell
+ * is a text field, and making the text itself draggable takes away her ability
+ * to select a word inside it.
+ */
+function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id });
+  const {
+    attributes, listeners, setNodeRef: setDragRef, isDragging,
+  } = useDraggable({ id: dragId, data: { type: 'cell', cell: dragPayload }, disabled: !canDrag });
+
   return (
-    <TableCell ref={setNodeRef} {...props} sx={{
-      ...props.sx,
-      outline: isOver ? '2px solid #f59e0b' : 'none',
-      transition: 'outline 0.15s',
-    }}>
+    <TableCell
+      ref={setDropRef}
+      {...props}
+      sx={{
+        ...props.sx,
+        outline: isOver ? '2px solid #f59e0b' : 'none',
+        opacity: isDragging ? 0.45 : 1,
+        transition: 'outline 0.15s, opacity 0.15s',
+      }}
+    >
+      {canDrag && (
+        <Box
+          ref={setDragRef}
+          {...listeners}
+          {...attributes}
+          className="ca"
+          sx={{
+            // insetInlineEnd, not `right`. The app's emotion RTL plugin rewrites
+            // physical left/right, so a handle written as `right: 2` silently
+            // lands on the left — which is where the colour button already is.
+            // The logical property says the corner and survives the rewrite.
+            position: 'absolute', top: 2, insetInlineEnd: 2,
+            opacity: 0, transition: '0.2s',
+            cursor: 'grab', lineHeight: 0, '&:active': { cursor: 'grabbing' },
+          }}
+        >
+          <DragIndicatorIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
+        </Box>
+      )}
       {children}
     </TableCell>
   );
@@ -214,26 +253,52 @@ export default function GanttEditor() {
     setMergeMode(false);
   };
 
-  // DnD handler
+  // "cell-<weekIdx>-<rowKey>-<dayIdx>". The row key is rejoined rather than
+  // taken as one part, because a row added by hand is keyed "c_1724…".
+  const parseCellId = (id) => {
+    const parts = String(id).split('-');
+    if (parts[0] !== 'cell') return null;
+    return {
+      wk: parseInt(parts[1]),
+      rk: parts.slice(2, -1).join('-'),
+      di: parseInt(parts[parts.length - 1]),
+    };
+  };
+
   const handleDragEnd = (event) => {
     setDraggingActivity(null);
     const { active, over } = event;
-    if (!over || !active.data.current?.activity) return;
+    if (!over) return;
 
-    const activity = active.data.current.activity;
-    // over.id format: "cell-weekIdx-rowKey-dayIdx"
-    const parts = over.id.split('-');
-    if (parts[0] !== 'cell') return;
-    const wk = parseInt(parts[1]);
-    const rk = parts.slice(2, -1).join('-');
-    const di = parseInt(parts[parts.length - 1]);
+    const target = parseCellId(over.id);
+    if (!target) return;
 
-    updateCell(wk, rk, di, { content: activity.name, color: activity.color || '#dbeafe' });
+    // From one of the banks: fill the box.
+    const activity = active.data.current?.activity;
+    if (activity) {
+      updateCell(target.wk, target.rk, target.di, {
+        content: activity.name, color: activity.color || '#dbeafe',
+      });
+      return;
+    }
+
+    // From another box in the plan: SWAP, never overwrite. Moving Tuesday onto
+    // a full Thursday and losing Thursday is the one outcome she cannot undo,
+    // and a swap is what she meant every time — the two ideas trade places.
+    const from = active.data.current?.cell;
+    if (!from) return;
+    if (from.wk === target.wk && from.rk === target.rk && from.di === target.di) return;
+
+    const to = getCell(target.wk, target.rk, target.di);
+    updateCell(target.wk, target.rk, target.di, { content: from.content, color: from.color });
+    updateCell(from.wk, from.rk, from.di, { content: to?.content || '', color: to?.color || '' });
   };
 
   const handleDragStart = (event) => {
     const act = event.active.data.current?.activity;
-    if (act) setDraggingActivity(act);
+    if (act) { setDraggingActivity(act); return; }
+    const cell = event.active.data.current?.cell;
+    if (cell) setDraggingActivity({ name: cell.content, color: cell.color || '#e2e8f0' });
   };
 
   /**
@@ -295,6 +360,45 @@ export default function GanttEditor() {
   const addRow = () => { const l = prompt('שם:'); if (l) setGantt(prev => ({ ...prev, row_definitions: [...(prev.row_definitions||[]), { key: 'c_'+Date.now(), label: l }] })); };
   const removeRow = (k) => setGantt(prev => ({ ...prev, row_definitions: (prev.row_definitions||[]).filter(r => r.key !== k) }));
 
+  /**
+   * Everything she wrote herself, back into the bank.
+   *
+   * The bank is only worth having in three years if it keeps growing, and the
+   * ideas worth having are the ones she writes this year. Asking her to re-type
+   * them into a second screen means it never happens — so saving the plan is
+   * what saves them, filed under each week's own subject.
+   *
+   * Runs per week, because the subject is per week. A week with no subject
+   * contributes nothing: there would be nothing to find it by later.
+   *
+   * The server drops anything that names a child and anything the bank already
+   * holds, and it never fails the save — a plan that refused to save because
+   * the bank was unhappy would be an absurd thing to explain.
+   */
+  const captureTypedContent = async () => {
+    const rowKeys = new Set(BANK_ROWS.map(r => r.key));
+    let added = 0;
+
+    for (const week of gantt.weeks || []) {
+      const topic = String(week.topic || '').trim();
+      if (!topic) continue;
+
+      const items = (week.cells || [])
+        // Friday is קבלת שבת and the parent-of-the-week names. Never banked.
+        .filter(c => c.day_index <= 4 && rowKeys.has(c.row_key) && String(c.content || '').trim())
+        .map(c => ({ category: c.row_key, title: String(c.content).trim() }));
+      if (!items.length) continue;
+
+      try {
+        const res = await api.post('/content-bank/capture', {
+          theme: topic, age: classroomCategory || '', items,
+        });
+        added += res.data?.added || 0;
+      } catch { /* the plan is saved; the bank is a bonus */ }
+    }
+    return added;
+  };
+
   const handleSave = async (status = 'draft') => {
     setSaving(true);
     try {
@@ -303,7 +407,12 @@ export default function GanttEditor() {
         academic_year: `${month >= 9 ? year : year-1}-${month >= 9 ? year+1 : year}`,
         month, year, row_definitions: gantt.row_definitions, weeks: gantt.weeks, status,
       });
-      toast.success(status === 'pending' ? 'נשלח לאישור' : 'נשמר');
+
+      const banked = await captureTypedContent();
+      const bankNote = banked === 0 ? ''
+        : banked === 1 ? ' · רעיון אחד חדש נוסף לבנק'
+        : ` · ${banked} רעיונות חדשים נוספו לבנק`;
+      toast.success(`${status === 'pending' ? 'נשלח לאישור' : 'נשמר'}${bankNote}`);
       if (status === 'pending') navigate('/gantt');
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
     finally { setSaving(false); }
@@ -483,8 +592,13 @@ export default function GanttEditor() {
                             );
                           }
 
+                          const cellContent = getVal(weekIdx, row.key, di, 'content');
+
                           return (
-                            <DroppableCell key={di} id={cellId} colSpan={cs} rowSpan={rs}
+                            <GanttCell key={di} id={cellId} colSpan={cs} rowSpan={rs}
+                              dragId={`move-${cellId}`}
+                              dragPayload={{ wk: weekIdx, rk: row.key, di, content: cellContent, color: cc }}
+                              canDrag={!mergeMode && Boolean(String(cellContent).trim())}
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, di)}
                               sx={{
                                 bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : 'white'),
@@ -494,7 +608,7 @@ export default function GanttEditor() {
                               }}
                             >
                               <TextField size="small" multiline maxRows={5} fullWidth variant="standard"
-                                value={getVal(weekIdx, row.key, di, 'content')}
+                                value={cellContent}
                                 onChange={e => updateCell(weekIdx, row.key, di, { content: e.target.value })}
                                 inputProps={{ style: { fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5, padding: '4px 0' } }}
                                 InputProps={{ disableUnderline: true }}
@@ -510,7 +624,7 @@ export default function GanttEditor() {
                                   <Typography sx={{ fontSize: '0.55rem', color: '#94a3b8' }}>✕</Typography>
                                 </IconButton>
                               )}
-                            </DroppableCell>
+                            </GanttCell>
                           );
                         })}
                       </TableRow>

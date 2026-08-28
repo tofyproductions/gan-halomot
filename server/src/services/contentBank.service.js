@@ -24,7 +24,7 @@ const seed = require('../content-bank/seed.json');
 const CATEGORY_LABELS = {
   meeting: 'מפגש',
   activity: 'פעילות',
-  creation: 'יצירה',
+  creation: 'הנגשת חומרים',
   story: 'סיפור',
   misc: 'שונות',
 };
@@ -59,6 +59,19 @@ const SEED_ITEMS = Object.freeze(seed.items.map(i => Object.freeze({
 })));
 
 const SEED_THEMES = Object.freeze([...seed.themes]);
+
+/**
+ * Is this the id of a shipped item rather than one of the gan's own?
+ *
+ * Shipped ids are the content hash prefixed with "s"; the gan's own are Mongo
+ * ObjectIds, which are 24 hex characters. Testing only for the leading "s"
+ * would have been enough by luck — no ObjectId starts with a letter outside
+ * a-f — but "starts with s" is not a statement about what the id IS, and the
+ * two id spaces decide whether a delete removes a row or hides shipped content.
+ */
+function isSeedId(id) {
+  return typeof id === 'string' && /^s[0-9a-z]+$/.test(id) && !/^[0-9a-f]{24}$/.test(id);
+}
 
 /** Loose Hebrew match — no stemming, just "does the typed text appear". */
 function matches(item, q) {
@@ -216,6 +229,7 @@ module.exports = {
   SEED_THEMES,
   SEED_ITEMS,
   seedId,
+  isSeedId,
   mergeItems,
   browseFrom,
   suggestFrom,

@@ -10,6 +10,7 @@
  */
 const { ContentBankItem } = require('../models');
 const bank = require('../services/contentBank.service');
+const { isBankable } = require('../content-bank/privacy');
 
 /** GET /api/content-bank/themes */
 async function themes(req, res, next) {
@@ -86,9 +87,7 @@ async function remove(req, res, next) {
   try {
     const { id } = req.params;
 
-    if (id.startsWith('s')) {
-      const known = bank.SEED_THEMES.length > 0;
-      if (!known) return res.status(404).json({ error: 'הפריט לא נמצא' });
+    if (bank.isSeedId(id)) {
       await ContentBankItem.findOneAndUpdate(
         { hides_seed_id: id },
         {
@@ -112,6 +111,138 @@ async function remove(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * PUT /api/content-bank/:id   { theme?, category?, title?, materials?, notes? }
+ *
+ * Editing the gan's own item is an update. Editing a SHIPPED item cannot be —
+ * it is the same object every other customer reads — so it becomes two rows in
+ * this gan's database: the shipped one hidden, and the edited text stored as
+ * theirs. To the gananet both are "I fixed it", which is the only thing she
+ * should have to think about; the isolation is ours to keep, not hers.
+ */
+async function update(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { theme, category, title, materials, notes, age_groups: ageGroups } = req.body || {};
+
+    if (category && !bank.CATEGORY_ORDER.includes(category)) {
+      return res.status(400).json({ error: 'שורה לא מוכרת' });
+    }
+    if (title !== undefined && !String(title).trim()) {
+      return res.status(400).json({ error: 'לא ניתן לשמור רעיון בלי טקסט' });
+    }
+
+    const cleanMaterials = Array.isArray(materials)
+      ? materials.map(m => String(m).trim()).filter(Boolean)
+      : undefined;
+
+    if (bank.isSeedId(id)) {
+      const original = bank.SEED_ITEMS.find(i => i.id === id);
+      if (!original) return res.status(404).json({ error: 'הפריט לא נמצא' });
+
+      await ContentBankItem.updateOne(
+        { hides_seed_id: id },
+        {
+          $set: {
+            hides_seed_id: id,
+            theme: original.theme,
+            category: original.category,
+            title: original.title,
+            created_by: req.user?.id || null,
+          },
+        },
+        { upsert: true },
+      );
+
+      const replacement = await ContentBankItem.create({
+        theme: (theme ?? original.theme).trim(),
+        category: category || original.category,
+        title: (title ?? original.title).trim(),
+        notes: notes || '',
+        materials: cleanMaterials ?? original.materials,
+        age_groups: Array.isArray(ageGroups) ? ageGroups : original.age_groups,
+        created_by: req.user?.id || null,
+      });
+
+      return res.json({
+        item: { ...replacement.toObject(), id: replacement._id, origin: 'own' },
+        replaced_seed: true,
+      });
+    }
+
+    const item = await ContentBankItem.findById(id);
+    if (!item) return res.status(404).json({ error: 'הפריט לא נמצא' });
+
+    if (theme !== undefined) item.theme = String(theme).trim();
+    if (category) item.category = category;
+    if (title !== undefined) item.title = String(title).trim();
+    if (notes !== undefined) item.notes = notes;
+    if (cleanMaterials) item.materials = cleanMaterials;
+    if (Array.isArray(ageGroups)) item.age_groups = ageGroups;
+    await item.save();
+
+    res.json({ item: { ...item.toObject(), id: item._id, origin: 'own' } });
+  } catch (error) { next(error); }
+}
+
+/**
+ * POST /api/content-bank/capture   { theme, age?, items: [{ category, title }] }
+ *
+ * Everything a gananet typed into the plan herself, kept.
+ *
+ * This is the half of the bank that makes it grow rather than age: the ideas
+ * worth having next year are the ones she wrote this year, and asking her to
+ * re-type them into a second screen means it never happens. So the gantt sends
+ * what is new when she saves, and it lands under that week's subject.
+ *
+ * Three refusals, all silent by design — she pressed שמור on a work plan, not
+ * on a bank form, and an error about the bank would be noise:
+ *
+ *   - no subject on the week, so there is nothing to file it under
+ *   - the text names a child (birthdays and אבא של שבת live in this grid)
+ *   - the bank already holds it, from the seed or from her
+ *
+ * The count of what was actually kept comes back so the screen can say so.
+ */
+async function capture(req, res, next) {
+  try {
+    const { theme, age, items } = req.body || {};
+    const themeName = String(theme || '').trim();
+    if (!themeName) return res.json({ added: 0, skipped: 0, reason: 'no_theme' });
+    if (!Array.isArray(items) || !items.length) return res.json({ added: 0, skipped: 0 });
+
+    const existing = new Set(
+      (await bank.allItems()).map(i => `${i.category}|${i.title}`),
+    );
+
+    const seen = new Set();
+    const toAdd = [];
+    let skipped = 0;
+
+    for (const raw of items.slice(0, 60)) {
+      const category = raw?.category;
+      const title = String(raw?.title || '').trim();
+      if (!bank.CATEGORY_ORDER.includes(category) || !isBankable(title)) { skipped += 1; continue; }
+
+      const key = `${category}|${title}`;
+      if (existing.has(key) || seen.has(key)) { skipped += 1; continue; }
+      seen.add(key);
+
+      toAdd.push({
+        theme: themeName,
+        category,
+        title,
+        materials: [],
+        age_groups: age ? [String(age)] : [],
+        created_by: req.user?.id || null,
+      });
+    }
+
+    if (toAdd.length) await ContentBankItem.insertMany(toAdd);
+    res.json({ added: toAdd.length, skipped, theme: themeName });
+  } catch (error) { next(error); }
+}
+
 /** POST /api/content-bank/:id/restore — un-hide a shipped item. */
 async function restore(req, res, next) {
   try {
@@ -120,4 +251,4 @@ async function restore(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { themes, browse, suggest, create, remove, restore };
+module.exports = { themes, browse, suggest, create, update, capture, remove, restore };
