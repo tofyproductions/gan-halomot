@@ -109,6 +109,9 @@ const THEME_ALIASES = {
   'חיים נחמן ביאליק': 'ביאליק',
   'הגוף שלי': 'אני וגופי',
   ';הירות בדרכים': 'זהירות בדרכים',  // ז typed on an English layout
+  'א ביב': 'אביב',                    // a stray space inside the word
+  'טו שבט': 'ט"ו בשבט',
+  'חמשת החושים': 'החושים',
 };
 
 function canonicalTheme(t) {
