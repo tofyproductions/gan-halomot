@@ -1,3 +1,13 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<!-- Without this the file is served as a fragment and the browser has to GUESS
+     the encoding. On this laptop it guesses UTF-8 and the deck looks fine; over
+     plain HTTP, or on a venue machine, it guesses wrong and every Hebrew word on
+     every slide comes out as mojibake. That is not something to discover in
+     front of a room. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>מצגת יום המעונות</title>
 <style>
   /* ---- tokens: light is the base, both dark states redefine only these ---- */
@@ -144,6 +154,8 @@
   .notes p{margin:0 0 10px}
   .notes p:last-child{margin:0}
 </style>
+</head>
+<body>
 
 <div class="rail"><i id="rail"></i></div>
 
@@ -218,6 +230,7 @@
         <tbody>
           <tr><td>הודעות ותמונות להורים</td><td class="mark yes">✓</td><td class="mark yes">✓</td></tr>
           <tr><td>נוכחות ילדים</td><td class="mark yes">✓</td><td class="mark yes">✓</td></tr>
+          <tr><td>תוכנית עבודה חודשית ובנק תוכן</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
           <tr><td>גבייה מהורים ומחירונים</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
           <tr><td>שכר עובדות ותלושים</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
           <tr><td>חוזי העסקה וטופס 101</td><td class="mark no">✕</td><td class="mark yes">✓</td></tr>
@@ -244,11 +257,49 @@
       <div class="box"><h3>נוכחות</h3><p>שעון בגן או החתמה מהטלפון. דוחות שעות מוכנים לרואה החשבון.</p></div>
       <div class="box"><h3>פורטל הורים</h3><p>עדכון פרטים, דיווח היעדרות, תשלומים, הודעות, תמונות ומורשי איסוף.</p></div>
       <div class="box"><h3>תפעול</h3><p>מלאי, ספקים, הזמנות, תפריטים, אחזקה, חוגים ואירועים.</p></div>
+      <div class="box"><h3>תוכנית עבודה</h3><p>הגאנט החודשי במערכת, ובנק תוכן שממלא שבוע שלם לפי הנושא — כולל רשימת הציוד.</p></div>
     </div>
     <div class="notes">
       <span class="k">שקופית מעבר</span>
       <p>אל תקרא את הריבועים בקול. תן להם שתי שניות לסרוק ותגיד: <b>"אני לא הולך להקריא את זה. אני הולך להראות לכם."</b></p>
       <p>ומיד לעבור להדגמה.</p>
+    </div>
+  </section>
+
+  <!-- 5b — the work plan. Sits here on purpose: it is the only thing on the
+       list that a gananet, not a manager, uses every week, and it is the one
+       capability no communication app has. -->
+  <section class="slide">
+    <p class="eyebrow">תוכנית העבודה</p>
+    <h2 class="wide">הגננת לא מתחילה מדף ריק</h2>
+    <div class="two">
+      <div>
+        <!-- Bullets stay to one line each. ul.plain lays its children out as
+             flex items, so a long bullet with a bold phrase inside it wraps
+             into a scramble rather than into a second line. -->
+        <ul class="plain">
+          <li>הגאנט החודשי <b>בתוך המערכת</b>, לא באקסל</li>
+          <li>בוחרים נושא שבועי, והשבוע <b>מתמלא לבד</b></li>
+          <li>מפגש, פעילות, <b>יצירה</b>, סיפור ושונות</li>
+          <li>ההצעות הן <b>מה שהגן כבר עשה</b>, לפי שכבת גיל</li>
+          <li>מה שכבר כתוב <b>לא נדרס</b></li>
+          <li>המנהלת מאשרת, וההורים רואים <b>שבוע-שבוע</b></li>
+        </ul>
+      </div>
+      <div class="offer">
+        <h3 style="margin:0 0 10px;font-size:clamp(17px,1.9vw,22px)">ורשימת הציוד לשבוע</h3>
+        <p style="margin:0;color:var(--ink-soft);font-size:clamp(15px,1.6vw,18px);line-height:1.6">
+          כל שבוע משובץ יוצא עם רשימת החומרים שלו: גואש, מכחולים, בצק, סינרים, שתילים.
+          רוב הגנים מחזיקים את זה בבית. <b class="n">מה שחסר — אנחנו מספקים.</b>
+        </p>
+      </div>
+    </div>
+    <div class="notes">
+      <span class="k">זו השקופית שמדברת אל הגננות באולם, לא אל הבעלים</span>
+      <p>המנהלת קונה גבייה ושכר. <b>הגננת</b> היא זו שתתנגד למעבר מערכת, והיא זו שתשתמש בזה כל שבוע. תגיד: <b>"את התוכנית החודשית את כותבת בכל מקרה. אצלנו את לא כותבת אותה מאפס."</b></p>
+      <p>אם שואלים כמה רעיונות יש בבנק — כרגע כ-490, מ-19 נושאים, מתוך שנת עבודה מלאה של גן החלומות. <b>אל תעגל כלפי מעלה.</b> מספר אמיתי שאפשר להראות עדיף על "אלפי".</p>
+      <p>ואם שואלים "וזה של מי?" — התוכן נבנה מתוכניות העבודה שלנו, ומגיע עם המערכת. <b>מה שהגן מוסיף — שייך לגן ולא נראה לאף לקוח אחר.</b> שמות ילדים לא נכנסים לבנק בכלל.</p>
+      <p>סגירה למכירת הציוד: אל תדחף. משפט אחד — "יש לנו גם את הציוד, אם תרצו" — ותמשיך הלאה.</p>
     </div>
   </section>
 
@@ -264,7 +315,8 @@
       <p><b>1.</b> טבלת הגבייה — מי שילם, מי לא, ומה חסר החודש. <b>זה המסך שמוכר.</b> תישאר בו הכי הרבה.</p>
       <p><b>2.</b> תיק ילד — לוחצים על שם ורואים הכל.</p>
       <p><b>3.</b> פורטל ההורים — מהטלפון שלך, לא מהמסך. תראה להם דיווח היעדרות.</p>
-      <p><b>4.</b> טבלת השכר — רק להראות שהיא קיימת. אל תיכנס לעומק.</p>
+      <p><b>4.</b> תוכנית עבודה — פתח את הגאנט, לחץ "בנק תוכן", בחר נושא, ולחץ "שבוע 1". <b>שבוע שלם מתמלא מול העיניים שלהם.</b> זה הרגע שגורם לגננות באולם להסתובב אחורה. שלושים שניות, לא יותר.</p>
+      <p><b>5.</b> טבלת השכר — רק להראות שהיא קיימת. אל תיכנס לעומק.</p>
       <p><b>אזהרה:</b> הנתונים בהדגמה משובשים בכוונה. אם מישהו שואל — "אלה נתוני הדגמה, שמות של ילדים אמיתיים לא יוצאים מהמערכת שלנו לעולם." <b>זו תשובה שמרשימה, לא מתנצלת.</b></p>
     </div>
   </section>
@@ -427,3 +479,6 @@
 
   show(Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
 </script>
+
+</body>
+</html>
