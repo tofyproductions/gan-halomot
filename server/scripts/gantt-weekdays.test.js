@@ -20,7 +20,7 @@
  *   node scripts/gantt-weekdays.test.js
  */
 
-const { generateWeeks } = require('../src/controllers/gantt.controller');
+const { generateWeeks, normalizeWeeks } = require('../src/controllers/gantt.controller');
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -50,22 +50,66 @@ console.log('\n📅  חודש שמתחיל באמצע השבוע — ספטמב�
   const weeks = generateWeeks(9, 2026);
   const first = weeks[0];
 
-  eq(new Date(first.start_date).getDate(), 1, 'השבוע הראשון מתחיל ב-1 בחודש');
-  eq(DAYS[new Date(first.start_date).getDay()], 'שלישי', 'וה-1 בספטמבר 2026 הוא יום שלישי');
-
-  // The bug, stated as the assertion that would have caught it: the cell the
-  // gan writes first is not Sunday's box.
-  eq(columnOf(first, 0), 2, 'התא הראשון של השבוע יושב בעמודת שלישי, לא ראשון');
-  eq(DAYS[columnOf(first, 0)], 'שלישי', 'ושמו של היום הוא שלישי');
+  // The week starts where the WEEK starts, not where the month does: the gan
+  // changes subject after a full week, so those borrowed days are writable.
+  eq(DAYS[new Date(first.start_date).getDay()], 'ראשון', 'השבוע הראשון מתחיל ביום ראשון');
+  eq(new Date(first.start_date).getMonth(), 7, 'והוא נופל עדיין באוגוסט');
+  eq(new Date(first.start_date).getDate(), 30, 'ב-30 באוגוסט');
+  eq(columnOf(first, 0), 0, 'ולכן day_index 0 הוא עמודת ראשון');
 
   // Every column carries its true date.
-  eq(columnDate(first, 2).getDate(), 1, 'עמודת שלישי היא ה-1 בספטמבר');
-  eq(columnDate(first, 3).getDate(), 2, 'רביעי הוא ה-2');
+  eq(columnDate(first, 0).getDate(), 30, 'ראשון הוא 30.8');
+  eq(columnDate(first, 2).getDate(), 1, 'שלישי הוא ה-1 בספטמבר');
   eq(columnDate(first, 5).getDate(), 4, 'שישי הוא ה-4');
 
-  // The two columns before it are August, and belong to nobody's September.
-  ok(columnDate(first, 0).getMonth() === 7, 'עמודת ראשון נופלת באוגוסט');
-  ok(columnDate(first, 1).getMonth() === 7, 'ועמודת שני גם');
+  // Six writable boxes, so a week's subject covers the whole week.
+  ok([0, 1, 2, 3, 4, 5].every(di => columnDate(first, di).getDay() === di),
+    'כל שש העמודות יושבות על היום שלהן');
+}
+
+console.log('\n🔄  המרה של חודש שנשמר בפורמט הישן — בלי שדבר יזוז\n');
+{
+  // How September 2026 was stored before: the week starts on the 1st, a
+  // Tuesday, and day_index is counted from there.
+  const legacy = [{
+    week_number: 1,
+    start_date: new Date(2026, 8, 1),
+    end_date: new Date(2026, 8, 5),
+    topic: 'הסתגלות',
+    cells: [
+      { row_key: 'meeting', day_index: 0, content: 'חוקי הגן' },     // 1.9, שלישי
+      { row_key: 'meeting', day_index: 2, content: 'ראש השנה' },     // 3.9, חמישי
+      { row_key: 'story', day_index: 4, content: 'לא יצויר' },       // 5.9, שבת
+    ],
+  }];
+
+  const [w] = normalizeWeeks(legacy);
+  eq(DAYS[new Date(w.start_date).getDay()], 'ראשון', 'השבוע הומר להתחיל בראשון');
+  eq(new Date(w.start_date).getDate(), 30, 'כלומר ב-30 באוגוסט');
+  eq(w.topic, 'הסתגלות', 'הנושא נשמר');
+
+  // The whole point: each cell keeps the DATE it was written for.
+  const dateOfCell = (cell) => {
+    const d = new Date(w.start_date);
+    d.setDate(d.getDate() + cell.day_index);
+    return `${d.getDate()}.${d.getMonth() + 1}`;
+  };
+  const meetings = w.cells.filter(c => c.row_key === 'meeting');
+  eq(meetings.map(c => `${c.content} → ${dateOfCell(c)}`),
+    ['חוקי הגן → 1.9', 'ראש השנה → 3.9'],
+    'כל תא נשאר על אותו תאריך בדיוק');
+  eq(meetings.map(c => DAYS[c.day_index]), ['שלישי', 'חמישי'], 'ובעמודה של היום הנכון');
+
+  // The Saturday cell has no column on a ראשון–שישי grid and never had one.
+  eq(w.cells.filter(c => c.content === 'לא יצויר').length, 0, 'תא של שבת נושר');
+
+  // Running it twice must not shift anything a second time.
+  eq(JSON.stringify(normalizeWeeks(normalizeWeeks(legacy))), JSON.stringify(normalizeWeeks(legacy)),
+    'ההמרה אידמפוטנטית — הרצה נוספת לא מזיזה שוב');
+
+  // A month that already starts on a Sunday is returned as it came.
+  const clean = generateWeeks(11, 2026);
+  eq(JSON.stringify(normalizeWeeks(clean)), JSON.stringify(clean), 'חודש תקין אינו משתנה');
 }
 
 console.log('\n📅  חודש שנגמר באמצע השבוע — ספטמבר 2026 נגמר ברביעי\n');
@@ -111,11 +155,10 @@ console.log('\n📅  כל חודש בשנתיים הקרובות\n');
       for (const w of weeks) {
         for (let di = 0; di < 6; di += 1) {
           const d = columnDate(w, di);
-          if (d.getMonth() !== m - 1 || d.getFullYear() !== y) continue;
           checked += 1;
-          // The column a date lands in must be that date's real weekday.
           if (d.getDay() !== di) bad += 1;
-          // And no date may be drawn twice.
+          if (d.getMonth() !== m - 1 || d.getFullYear() !== y) continue;
+          // No date of THIS month may be drawn twice.
           const key = d.getDate();
           if (seen.has(key)) bad += 1;
           seen.set(key, true);

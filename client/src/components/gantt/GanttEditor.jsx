@@ -375,12 +375,11 @@ export default function GanttEditor() {
         // A column before the 1st of the month has no box to write into.
         if (storedIdx < 0) { skipped += 1; continue; }
 
-        const d = dateOf(c.day_index);
-        // Outside the month, or a day the gan is shut. Planning a craft
-        // activity for a day nobody is there is the fastest way to make a
-        // gananet stop trusting the button.
-        if (d.getMonth() !== month - 1 || d.getFullYear() !== year) { skipped += 1; continue; }
-        if (isClosed(d)) { closedDays += 1; continue; }
+        // A day the gan is shut. Planning a craft activity for a day nobody is
+        // there is the fastest way to make a gananet stop trusting the button.
+        // A day borrowed from the neighbouring month is NOT skipped — it is
+        // part of this week, and this week has one subject.
+        if (isClosed(dateOf(c.day_index))) { closedDays += 1; continue; }
 
         const idx = next.findIndex(x => x.row_key === c.row_key && x.day_index === storedIdx);
         if (idx >= 0 && String(next[idx].content || '').trim()) { skipped += 1; continue; }
@@ -603,7 +602,7 @@ export default function GanttEditor() {
                                 {!shut && hol.end_time ? ` · עד ${hol.end_time}` : ''}
                               </Box>
                             )}
-                            {!own && <Box sx={{ fontSize: '0.68rem', opacity: 0.85 }}>לא בחודש זה</Box>}
+                            {!own && <Box sx={{ fontSize: '0.68rem', opacity: 0.85 }}>{dd.toLocaleDateString('he-IL', { month: 'long' })}</Box>}
                           </TableCell>
                         );
                       })}
@@ -653,18 +652,13 @@ export default function GanttEditor() {
                         </TableCell>
                         {DAY_NAMES.map((_, di) => {
                           const dd = dateOfColumn(di);
-
-                          // A day outside this month gets no box at all. It is
-                          // not a gap to be filled in — it belongs to a plan
-                          // that is somebody else's month.
-                          if (!inMonth(dd)) {
-                            return (
-                              <TableCell key={di} sx={{
-                                bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
-                                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.16) 12px)',
-                              }} />
-                            );
-                          }
+                          // A day the week borrows from the month next door is
+                          // still part of THIS week's subject — the gan changes
+                          // subject after a full week, never at the turn of a
+                          // month — so it is written in like any other day. It
+                          // is only tinted, so nobody mistakes it for this
+                          // month when reading the printed page.
+                          const own = inMonth(dd);
 
                           // Cells are stored against day_index counted from the
                           // week's start_date, which is not always the Sunday
@@ -745,7 +739,7 @@ export default function GanttEditor() {
                               canDrag={!mergeMode && Boolean(String(cellContent).trim())}
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
-                                bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : 'white'),
+                                bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : own ? 'white' : '#f8fafc'),
                                 border: isSelected ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                                 p: 1, verticalAlign: 'top', cursor: mergeMode ? 'crosshair' : 'default',
                                 position: 'relative', '&:hover .ca': { opacity: 1 },

@@ -60,6 +60,11 @@ async function get(req, res, next) {
       };
     }
 
+    // Months saved before weeks began on Sunday are re-based on the way out, so
+    // the screen never has to know two shapes. Nothing moves: start date and
+    // indices shift together.
+    gantt.weeks = normalizeWeeks(gantt.weeks);
+
     // A plan saved during the hour the craft row was called יצירה keeps that
     // word until somebody edits it, which would leave two gantts side by side
     // naming the same row differently. Relabelled on the way out rather than
@@ -107,7 +112,7 @@ async function save(req, res, next) {
     if (gantt) {
       // Update existing
       if (row_definitions) gantt.row_definitions = row_definitions;
-      if (weeks) gantt.weeks = weeks;
+      if (weeks) gantt.weeks = normalizeWeeks(weeks);
       if (status) gantt.status = status;
       await gantt.save();
     } else {
@@ -119,7 +124,7 @@ async function save(req, res, next) {
         month: parseInt(month),
         year: parseInt(year),
         row_definitions: row_definitions || DEFAULT_ROWS,
-        weeks: weeks || generateWeeks(parseInt(month), parseInt(year)),
+        weeks: weeks ? normalizeWeeks(weeks) : generateWeeks(parseInt(month), parseInt(year)),
         status: status || 'draft',
       });
     }
@@ -164,36 +169,30 @@ async function getArchive(req, res, next) {
   } catch (error) { next(error); }
 }
 
-// Generate week structure for a month
+/**
+ * The month's weeks, every one of them a whole ראשון–שישי.
+ *
+ * A week is not clipped to the month. The gan changes its subject after a FULL
+ * week and never at the turn of a month, so the two or three days a week
+ * borrows from August are part of that week's subject and have to be writable
+ * — which they cannot be if the week does not start where the week starts.
+ * The first week therefore begins on the Sunday ON OR BEFORE the 1st, even
+ * when that Sunday is in the previous month.
+ *
+ * That also makes `day_index` mean the same thing everywhere: 0 is ראשון, for
+ * every week of every month, which is the whole reason the days used to be
+ * mislabelled.
+ */
 function generateWeeks(month, year) {
   const weeks = [];
   const firstDay = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0);
 
-  let current = new Date(firstDay);
-  // Find first Sunday
-  while (current.getDay() !== 0 && current <= lastDay) {
-    current.setDate(current.getDate() + 1);
-  }
-  // Include partial first week if month starts mid-week
-  if (firstDay.getDay() !== 0) {
-    const weekStart = new Date(firstDay);
-    const weekEnd = new Date(current);
-    weekEnd.setDate(weekEnd.getDate() - 1);
-    if (weekEnd >= weekStart) {
-      weeks.push({
-        week_number: 1,
-        start_date: weekStart,
-        end_date: weekEnd > lastDay ? lastDay : weekEnd,
-        topic: '',
-        cells: [],
-        friday_parent_father: '',
-        friday_parent_mother: '',
-      });
-    }
-  }
+  // Back up to this week's Sunday.
+  const current = new Date(firstDay);
+  current.setDate(current.getDate() - current.getDay());
 
-  let weekNum = weeks.length + 1;
+  let weekNum = 1;
   while (current <= lastDay) {
     const weekStart = new Date(current);
     const weekEnd = new Date(current);
@@ -202,7 +201,7 @@ function generateWeeks(month, year) {
     weeks.push({
       week_number: weekNum++,
       start_date: weekStart,
-      end_date: weekEnd > lastDay ? lastDay : weekEnd,
+      end_date: weekEnd,
       topic: '',
       cells: [],
       friday_parent_father: '',
@@ -213,6 +212,41 @@ function generateWeeks(month, year) {
   }
 
   return weeks;
+}
+
+/**
+ * Re-base a stored month onto Sunday-starting weeks, without moving a thing.
+ *
+ * Months saved before this shape existed have a first week that starts on the
+ * 1st, with `day_index` counted from there. Both the start date and every
+ * index are shifted by the SAME number of days, so every cell keeps the exact
+ * calendar day it was written for — this is a change of coordinates, not of
+ * content, and it is safe to apply to an approved plan.
+ *
+ * Idempotent: a week that already starts on a Sunday is returned untouched.
+ */
+function normalizeWeeks(weeks) {
+  return (weeks || []).map((w) => {
+    const start = new Date(w.start_date);
+    const offset = start.getDay();
+    if (!offset) return w;
+
+    const sunday = new Date(start);
+    sunday.setDate(sunday.getDate() - offset);
+    const friday = new Date(sunday);
+    friday.setDate(friday.getDate() + 5);
+
+    return {
+      ...w,
+      start_date: sunday,
+      end_date: friday,
+      cells: (w.cells || [])
+        .map((c) => ({ ...(c.toObject ? c.toObject() : c), day_index: c.day_index + offset }))
+        // A Saturday cell cannot exist on a ראשון–שישי grid. It was never drawn
+        // and never writable, so there is nothing in it to lose.
+        .filter((c) => c.day_index >= 0 && c.day_index <= 5),
+    };
+  });
 }
 
 
@@ -274,5 +308,5 @@ async function setVisibility(req, res, next) {
 // month's weeks is what decides which box is which day, and that has been wrong.
 module.exports = {
   get, save, approve, getArchive, getVisibility, setVisibility,
-  generateWeeks, DEFAULT_ROWS,
+  generateWeeks, normalizeWeeks, DEFAULT_ROWS,
 };
