@@ -155,16 +155,35 @@ export default function GanttEditor() {
       .catch(() => setClassSessions([]));
   }, [classroomId, month, year, selectedBranch]);
 
+  const localYmd = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+  // Holiday ranges arrive as instants (UTC midnight); a gantt column is a local
+  // midnight. Comparing them as instants makes a one-day holiday miss its own
+  // day in any timezone east of UTC — which is every timezone the gan is in.
+  // Compared as calendar dates instead.
+  const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
+
+  /** The gan's own vacation calendar, on this date. */
   const isHoliday = (date) => {
     if (!date) return null;
-    const d = new Date(date);
-    return holidays.find(h => d >= new Date(h.start_date) && d <= new Date(h.end_date));
+    const ymd = localYmd(date);
+    return holidays.find(h => ymd >= holidayYmd(h.start_date) && ymd <= holidayYmd(h.end_date));
+  };
+
+  /**
+   * Closed, as opposed to open-and-finishing-early.
+   *
+   * A `short_day` — יום הזיכרון until 12:00, the staff day until 15:00 — is a
+   * day the gan RUNS, and it still needs a plan. Treating it as a closure
+   * would blank a working morning.
+   */
+  const isClosed = (date) => {
+    const h = isHoliday(date);
+    return h && h.kind !== 'short_day' ? h : null;
   };
 
   // Read-only reflection of מעקב-חוגים sessions onto gantt days. A session shows
   // on this classroom's gantt when its program category matches this classroom
   // (or either side is unset = general). Purely informational; never saved.
-  const localYmd = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
   const sessionsOnDate = (dd) => {
     const ymd = localYmd(dd);
     return classSessions.filter(s => s.date === ymd
@@ -174,6 +193,7 @@ export default function GanttEditor() {
 
   // Cell helpers
   const getCell = (wk, rk, di) => gantt?.weeks?.[wk]?.cells?.find(c => c.row_key === rk && c.day_index === di);
+  const cellContentAt = (wk, rk, di) => getCell(wk, rk, di)?.content || '';
   const getVal = (wk, rk, di, field) => getCell(wk, rk, di)?.[field] || (field === 'col_span' || field === 'row_span' ? 1 : '');
 
   const isCellHidden = (wk, rk, di) => {
@@ -321,6 +341,7 @@ export default function GanttEditor() {
 
     let added = 0;
     let skipped = 0;
+    let closedDays = 0;
 
     setGantt(prev => {
       const rows = [...(prev.row_definitions || [])];
@@ -339,6 +360,13 @@ export default function GanttEditor() {
       // beginning mid-week those are not the same number, and filling without
       // the shift writes Sunday's idea into Tuesday's box.
       const offset = new Date(week.start_date).getDay();
+      const sunday = new Date(week.start_date);
+      sunday.setDate(sunday.getDate() - offset);
+      const dateOf = (columnIdx) => {
+        const d = new Date(sunday);
+        d.setDate(d.getDate() + columnIdx);
+        return d;
+      };
 
       const next = [...(week.cells || [])];
       for (const c of cells) {
@@ -346,6 +374,13 @@ export default function GanttEditor() {
         const storedIdx = c.day_index - offset;
         // A column before the 1st of the month has no box to write into.
         if (storedIdx < 0) { skipped += 1; continue; }
+
+        const d = dateOf(c.day_index);
+        // Outside the month, or a day the gan is shut. Planning a craft
+        // activity for a day nobody is there is the fastest way to make a
+        // gananet stop trusting the button.
+        if (d.getMonth() !== month - 1 || d.getFullYear() !== year) { skipped += 1; continue; }
+        if (isClosed(d)) { closedDays += 1; continue; }
 
         const idx = next.findIndex(x => x.row_key === c.row_key && x.day_index === storedIdx);
         if (idx >= 0 && String(next[idx].content || '').trim()) { skipped += 1; continue; }
@@ -360,10 +395,11 @@ export default function GanttEditor() {
       return { ...prev, row_definitions: rows, weeks };
     });
 
+    const notes = [];
+    if (skipped) notes.push(`${skipped} תאים לא נדרסו`);
+    if (closedDays) notes.push(`${closedDays} תאים דולגו — הגן סגור`);
     toast.success(
-      skipped
-        ? `שובצו ${added} תאים. ${skipped} תאים שכבר היה בהם תוכן לא נדרסו`
-        : `שובצו ${added} תאים. לא לשכוח לשמור`,
+      `שובצו ${added} תאים${notes.length ? `. ${notes.join(', ')}` : '. לא לשכוח לשמור'}`,
     );
   };
 
@@ -550,15 +586,23 @@ export default function GanttEditor() {
                         const dd = dateOfColumn(di);
                         const own = inMonth(dd);
                         const hol = own ? isHoliday(dd) : null;
+                        const shut = own ? isClosed(dd) : null;
                         return (
                           <TableCell key={di} sx={{
-                            bgcolor: !own ? '#64748b' : hol ? '#92400e' : di === 5 ? '#5b21b6' : '#1e3a5f',
+                            bgcolor: !own ? '#64748b' : shut ? '#92400e' : hol ? '#b45309' : di === 5 ? '#5b21b6' : '#1e3a5f',
                             color: 'white', fontWeight: 700, textAlign: 'center', p: 1,
                             opacity: own ? 1 : 0.55,
                           }}>
                             <Box sx={{ fontWeight: 800 }}>{day}</Box>
                             <Box sx={{ fontSize: '0.8rem', opacity: 0.8 }}>{dd.toLocaleDateString('he-IL', { day:'numeric', month:'numeric' })}</Box>
-                            {hol && <Box sx={{ fontSize: '0.7rem', color: '#fde68a' }}>{hol.name}</Box>}
+                            {hol && (
+                              <Box sx={{ fontSize: '0.7rem', color: '#fde68a' }}>
+                                {hol.emoji ? `${hol.emoji} ` : ''}{hol.name}
+                                {/* Open and finishing early is not a closure, and the
+                                    difference decides whether a plan gets written. */}
+                                {!shut && hol.end_time ? ` · עד ${hol.end_time}` : ''}
+                              </Box>
+                            )}
                             {!own && <Box sx={{ fontSize: '0.68rem', opacity: 0.85 }}>לא בחודש זה</Box>}
                           </TableCell>
                         );
@@ -628,12 +672,40 @@ export default function GanttEditor() {
                           const si = di - offset;
                           if (isCellHidden(weekIdx, row.key, si)) return null;
                           const hol = isHoliday(dd);
+                          const shut = isClosed(dd);
                           const isFri = di === 5;
                           const cc = getVal(weekIdx, row.key, si, 'color');
                           const cs = getVal(weekIdx, row.key, si, 'col_span');
                           const rs = getVal(weekIdx, row.key, si, 'row_span');
                           const isSelected = mergeStart?.wk === weekIdx && mergeStart?.rk === row.key && mergeStart?.di === si;
                           const cellId = `cell-${weekIdx}-${row.key}-${si}`;
+
+                          /**
+                           * A day the gan is CLOSED, drawn as closed.
+                           *
+                           * The header already names the holiday; without this the
+                           * body of the column was five empty white boxes that look
+                           * exactly like five boxes waiting to be filled in. Anything
+                           * already written there is kept and still shown — a closure
+                           * added after the plan was written must not swallow work —
+                           * but the box is not offered for typing, and the automatic
+                           * fill skips it.
+                           */
+                          if (shut) {
+                            return (
+                              <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{
+                                bgcolor: '#fef3c7', border: '1px solid #fde68a',
+                                textAlign: 'center', verticalAlign: 'middle', p: 1,
+                                color: '#92400e',
+                              }}>
+                                {String(cellContentAt(weekIdx, row.key, si)).trim()
+                                  ? <Box sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{cellContentAt(weekIdx, row.key, si)}</Box>
+                                  : rowIdx === 0
+                                    ? <Box sx={{ fontSize: '0.8rem', fontWeight: 800 }}>{shut.emoji ? `${shut.emoji} ` : ''}{shut.name}</Box>
+                                    : <Box sx={{ fontSize: '0.75rem', opacity: 0.6 }}>הגן סגור</Box>}
+                              </TableCell>
+                            );
+                          }
 
                           // Friday specials
                           if (isFri && row.key === 'meeting') {
