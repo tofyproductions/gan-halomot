@@ -84,8 +84,11 @@ function DraggableIdea({ item }) {
  * Everything is a proposal held in the editor's state. Nothing here saves the
  * gantt — she still presses שמור, and can still walk away.
  */
+const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
 export default function ContentBankPanel({
-  open, onClose, ageGroup, weeks, onFillWeek,
+  open, onClose, ageGroup, weeks, onFillWeek, month,
 }) {
   const [themes, setThemes] = useState([]);
   const [theme, setTheme] = useState('');
@@ -106,13 +109,14 @@ export default function ContentBankPanel({
   // The box whose text she is fixing, and the text as it stands.
   const [editingCell, setEditingCell] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [showAllThemes, setShowAllThemes] = useState(false);
 
   useEffect(() => {
     if (!open) return;
-    api.get('/content-bank/themes')
+    api.get('/content-bank/themes', { params: { month: month || '' } })
       .then(res => setThemes(res.data.themes || []))
       .catch(() => toast.error('שגיאה בטעינת הנושאים'));
-  }, [open]);
+  }, [open, month]);
 
   useEffect(() => {
     if (!open) return;
@@ -127,6 +131,13 @@ export default function ContentBankPanel({
   // unchanged, so that never re-runs the effect and a freshly added item does
   // not appear until the drawer is closed and reopened.
   const refresh = () => setReloadKey(k => k + 1);
+
+  // Which subjects this month is actually about, from six years of the gan's
+  // own work plans. Writing October means סוכות and שמחת תורה; finding them
+  // alphabetically between מספרים and פורים is the difference between a bank
+  // and a filing cabinet.
+  const inSeason = useMemo(() => themes.filter(t => t.in_season), [themes]);
+  const offSeason = useMemo(() => themes.filter(t => !t.in_season), [themes]);
 
   const openAdd = () => setEditor({
     id: null, theme: theme || '', category: 'activity', title: '', materials: '', origin: 'own',
@@ -302,7 +313,11 @@ export default function ContentBankPanel({
 
   return (
     <>
-      <Drawer anchor="left" open={open} onClose={onClose} PaperProps={{ sx: { width: 380 } }}>
+      {/* Full width on a phone, a side panel on a laptop. A 380px drawer on a
+          375px screen leaves a five-pixel sliver of the plan behind it, which
+          is worse than either. */}
+      <Drawer anchor="left" open={open} onClose={onClose}
+        PaperProps={{ sx: { width: { xs: '100%', sm: 400 }, maxWidth: '100%' } }}>
         <Box sx={{ p: 2 }} dir="rtl">
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 800 }}>בנק תוכן</Typography>
@@ -319,6 +334,9 @@ export default function ContentBankPanel({
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
             בחרי נושא, גררי רעיון לתא — או מלאי שבוע שלם בלחיצה.
             {ageGroup ? ` מותאם ל${ageGroup}.` : ''}
+            {month && inSeason.length > 0
+              ? ` הנושאים של ${MONTH_NAMES[month]} ראשונים.`
+              : ''}
           </Typography>
 
           <TextField
@@ -334,15 +352,43 @@ export default function ContentBankPanel({
               color={theme === '' ? 'primary' : 'default'}
               onClick={() => setTheme('')}
             />
-            {themes.map(t => (
+            {inSeason.map(t => (
               <Chip
                 key={t.theme} size="small"
                 label={`${t.theme} (${t.count})`}
                 color={theme === t.theme ? 'primary' : 'default'}
+                variant={theme === t.theme ? 'filled' : 'outlined'}
                 onClick={() => setTheme(t.theme)}
+                sx={{ fontWeight: 700, borderColor: '#f59e0b' }}
               />
             ))}
           </Box>
+
+          {/* The rest, folded away. Thirty-five subjects laid flat is a wall;
+              the five or six this month belongs to is a choice. */}
+          {offSeason.length > 0 && (
+            <Accordion disableGutters elevation={0} expanded={showAllThemes}
+              onChange={() => setShowAllThemes(v => !v)}
+              sx={{ '&:before': { display: 'none' }, bgcolor: 'transparent', mb: 1.5 }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 32, px: 0.5 }}>
+                <Typography variant="caption" sx={{ fontWeight: 700, color: '#64748b' }}>
+                  שאר הנושאים ({offSeason.length})
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0.5 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                  {offSeason.map(t => (
+                    <Chip
+                      key={t.theme} size="small"
+                      label={`${t.theme} (${t.count})`}
+                      color={theme === t.theme ? 'primary' : 'default'}
+                      onClick={() => setTheme(t.theme)}
+                    />
+                  ))}
+                </Box>
+              </AccordionDetails>
+            </Accordion>
+          )}
 
           {theme && weeks?.length > 0 && (
             <>
@@ -402,7 +448,15 @@ export default function ContentBankPanel({
       </Drawer>
 
       {/* The proposed week, editable, before any of it touches the plan */}
-      <Dialog open={fill.open} onClose={closeFill} dir="rtl" maxWidth="lg" fullWidth>
+      {/* Above the drawer, explicitly. Both are MUI modals and default to the
+          same z-index, so which one wins is decided by portal order — and on a
+          phone, where the drawer is the full width of the screen, losing that
+          race hides the dialog completely. */}
+      <Dialog open={fill.open} onClose={closeFill} dir="rtl" maxWidth="lg" fullWidth
+        sx={{
+          zIndex: (t) => t.zIndex.modal + 10,
+          '& .MuiDialog-paper': { m: { xs: 1, sm: 4 }, width: { xs: 'calc(100% - 16px)', sm: 'auto' } },
+        }}>
         <DialogTitle sx={{ fontWeight: 800, pb: 0.5 }}>
           הצעה לשבוע {weeks?.[fill.weekIdx]?.week_number} — {theme}
         </DialogTitle>
@@ -418,10 +472,13 @@ export default function ContentBankPanel({
               </Typography>
 
               <Box sx={{ overflowX: 'auto' }}>
+                {/* On a phone this is a five-column table nobody can read, so
+                    it scrolls as one rather than reflowing into something that
+                    is no longer a week. The row labels stay put. */}
                 <Box sx={{
                   display: 'grid',
-                  gridTemplateColumns: `110px repeat(5, minmax(130px, 1fr))`,
-                  gap: 0.5, minWidth: 760,
+                  gridTemplateColumns: { xs: '84px repeat(5, minmax(112px, 1fr))', sm: '110px repeat(5, minmax(130px, 1fr))' },
+                  gap: 0.5, minWidth: { xs: 640, sm: 760 },
                 }}>
                   <Box />
                   {PREVIEW_DAYS.map(d => (
@@ -554,7 +611,8 @@ export default function ContentBankPanel({
       </Dialog>
 
       {/* Add, and edit — the same fields either way */}
-      <Dialog open={Boolean(editor)} onClose={() => setEditor(null)} dir="rtl" maxWidth="xs" fullWidth>
+      <Dialog open={Boolean(editor)} onClose={() => setEditor(null)} dir="rtl" maxWidth="xs" fullWidth
+        sx={{ zIndex: (t) => t.zIndex.modal + 10 }}>
         <DialogTitle sx={{ fontWeight: 700 }}>
           {editor?.id ? 'עריכת רעיון' : 'הוספת רעיון לבנק'}
         </DialogTitle>

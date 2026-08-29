@@ -686,17 +686,46 @@ export default function GanttEditor() {
                            * fill skips it.
                            */
                           if (shut) {
+                            // A closed day is ONE statement, not five. The column
+                            // becomes a single cell down the whole height of the
+                            // week: the holiday once, "הגן סגור" once.
+                            //
+                            // Unless something is already written in it. A closure
+                            // added to the calendar after the month was planned
+                            // must not hide the work — so a column that still has
+                            // text in it keeps a box per row, and she can read it,
+                            // and move it.
+                            const columnHasWork = rows.some(r => (
+                              String(cellContentAt(weekIdx, r.key, si) || '').trim()
+                            ));
+
+                            if (!columnHasWork) {
+                              if (rowIdx > 0) return null;
+                              return (
+                                <TableCell key={di} rowSpan={rows.length} sx={{
+                                  bgcolor: '#fef3c7', border: '1px solid #fde68a',
+                                  textAlign: 'center', verticalAlign: 'middle', p: 1,
+                                  color: '#92400e',
+                                }}>
+                                  <Box sx={{ fontSize: '1rem', fontWeight: 800, lineHeight: 1.3 }}>
+                                    {shut.emoji ? `${shut.emoji} ` : ''}{shut.name}
+                                  </Box>
+                                  <Box sx={{ fontSize: '0.78rem', opacity: 0.65, mt: 0.5 }}>הגן סגור</Box>
+                                </TableCell>
+                              );
+                            }
+
                             return (
                               <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{
                                 bgcolor: '#fef3c7', border: '1px solid #fde68a',
                                 textAlign: 'center', verticalAlign: 'middle', p: 1,
                                 color: '#92400e',
                               }}>
-                                {String(cellContentAt(weekIdx, row.key, si)).trim()
+                                {String(cellContentAt(weekIdx, row.key, si) || '').trim()
                                   ? <Box sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{cellContentAt(weekIdx, row.key, si)}</Box>
                                   : rowIdx === 0
-                                    ? <Box sx={{ fontSize: '0.8rem', fontWeight: 800 }}>{shut.emoji ? `${shut.emoji} ` : ''}{shut.name}</Box>
-                                    : <Box sx={{ fontSize: '0.75rem', opacity: 0.6 }}>הגן סגור</Box>}
+                                    ? <Box sx={{ fontSize: '0.85rem', fontWeight: 800 }}>{shut.emoji ? `${shut.emoji} ` : ''}{shut.name}</Box>
+                                    : null}
                               </TableCell>
                             );
                           }
@@ -793,6 +822,7 @@ export default function GanttEditor() {
           open={showContentBank}
           onClose={() => setShowContentBank(false)}
           ageGroup={classroomCategory}
+          month={month}
           weeks={gantt.weeks || []}
           onFillWeek={fillWeekFromBank}
         />

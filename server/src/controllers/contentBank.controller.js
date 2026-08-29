@@ -33,10 +33,16 @@ function whyNotBankable(title) {
   return null;
 }
 
-/** GET /api/content-bank/themes */
+/**
+ * GET /api/content-bank/themes?month=10
+ * The subject list, with the ones this month belongs to first and flagged.
+ */
 async function themes(req, res, next) {
   try {
-    res.json({ themes: await bank.themes() });
+    const month = Number(req.query.month);
+    res.json({
+      themes: await bank.themes({ month: month >= 1 && month <= 12 ? month : null }),
+    });
   } catch (error) { next(error); }
 }
 

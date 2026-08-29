@@ -153,6 +153,49 @@ console.log('\n📦  הבנק המצורף\n');
   eq(ids.size, bank.SEED_ITEMS.length, 'אין שני פריטים עם אותו מזהה');
 }
 
+console.log('\n🗓️  נושאים לפי חודש\n');
+{
+  // Derived from six years of use, not from a festival table — the festivals
+  // move, and the gan's own habit is the better record.
+  const seasons = {
+    9: ['הסתגלות', 'ראש השנה', 'כיפור', 'פתיחת שנה'],
+    10: ['סוכות', 'שמחת תורה'],
+    12: ['חנוכה'],
+    3: ['פורים'],
+    4: ['פסח'],
+  };
+  for (const [m, expected] of Object.entries(seasons)) {
+    for (const t of expected) {
+      ok(bank.inSeason(t, Number(m)), `${t} שייך לחודש ${m}`);
+    }
+  }
+
+  // And is NOT offered in the wrong month.
+  ok(!bank.inSeason('חנוכה', 6), 'חנוכה אינו נושא של יוני');
+  ok(!bank.inSeason('פסח', 11), 'פסח אינו נושא של נובמבר');
+  ok(!bank.inSeason('סוכות', 3), 'סוכות אינו נושא של מרץ');
+
+  // A festival that straddles two Gregorian months keeps both.
+  ok(bank.inSeason('ט"ו בשבט', 1) && bank.inSeason('ט"ו בשבט', 2),
+    'ט"ו בשבט נופל גם בינואר וגם בפברואר, ושניהם נשמרו');
+  ok(bank.inSeason('שבועות', 5) && bank.inSeason('שבועות', 6), 'ושבועות במאי וביוני');
+
+  // A subject with no season belongs to every month rather than to none.
+  ok(bank.inSeason('התנסות בחומרים', 1) && bank.inSeason('התנסות בחומרים', 7),
+    'התנסות בחומרים היא רוטציה קבועה ולכן מתאימה לכל חודש');
+  // Anything the gan wrote itself has no history, and must not be buried.
+  ok(bank.inSeason('נושא שהגן המציא', 5), 'נושא ללא היסטוריה אינו נדחק למטה');
+
+  // Without a month there is no season, so nothing is promoted over anything.
+  ok(!bank.inSeason('חנוכה', null), 'בלי חודש אין העדפה');
+
+  // Every subject is in season somewhere, or the picker hides it forever.
+  const orphans = bank.SEED_THEMES.filter(
+    t => ![1,2,3,4,5,6,7,8,9,10,11,12].some(m => bank.inSeason(t, m)),
+  );
+  eq(orphans, [], 'אין נושא שאינו שייך לאף חודש');
+}
+
 console.log('\n🆔  מזהה מצורף מול מזהה של הגן\n');
 {
   ok(bank.isSeedId(bank.SEED_ITEMS[0].id), 'מזהה של פריט מצורף מזוהה');

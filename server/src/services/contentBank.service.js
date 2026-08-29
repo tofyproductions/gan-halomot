@@ -58,7 +58,36 @@ const SEED_ITEMS = Object.freeze(seed.items.map(i => Object.freeze({
   origin: 'seed',
 })));
 
-const SEED_THEMES = Object.freeze([...seed.themes]);
+// Names only, for callers that just want to know what exists.
+const SEED_THEMES = Object.freeze(seed.themes.map(t => (typeof t === 'string' ? t : t.name)));
+
+/**
+ * When each subject actually happens, built by the extractor from six years of
+ * use rather than from a festival table — because the festivals move. פסח is
+ * March in some years and April in others; חנוכה straddles November and
+ * December. Counting where the gan really put each subject captures that
+ * spread without anybody maintaining a calendar.
+ */
+const THEME_MONTHS = Object.freeze(Object.fromEntries(
+  seed.themes.map(t => [
+    typeof t === 'string' ? t : t.name,
+    Object.freeze(typeof t === 'string' ? [] : (t.months || [])),
+  ]),
+));
+
+/**
+ * Is this subject one the gan runs in this month?
+ *
+ * A subject with no recorded season — התנסות בחומרים is a standing craft rota,
+ * and anything the gan wrote itself — belongs to every month equally rather
+ * than to none, so it is never pushed down the list.
+ */
+function inSeason(theme, month) {
+  if (!month) return false;
+  const months = THEME_MONTHS[theme];
+  if (!months || !months.length) return true;
+  return months.includes(Number(month));
+}
 
 /**
  * Is this the id of a shipped item rather than one of the gan's own?
@@ -125,14 +154,34 @@ async function allItems() {
   return mergeItems(await ContentBankItem.find({}).lean());
 }
 
-/** The subject list for the picker: shipped themes plus anything the gan added. */
-async function themes() {
+/**
+ * The subject list for the picker, in the order a gananet wants it.
+ *
+ * Asked for a month, the subjects the gan actually runs in that month come
+ * first and are flagged. Writing October means סוכות and שמחת תורה, and having
+ * to find them alphabetically between מספרים and פורים is the difference
+ * between a bank and a filing cabinet.
+ *
+ * Subjects the gan added itself have no recorded season, so they sort with the
+ * in-season ones rather than below them — a gan that wrote a subject down is a
+ * gan that means to use it.
+ */
+async function themes({ month } = {}) {
   const items = await allItems();
   const counts = new Map();
   for (const i of items) counts.set(i.theme, (counts.get(i.theme) || 0) + 1);
+
   return [...counts.entries()]
-    .map(([theme, count]) => ({ theme, count }))
-    .sort((a, b) => a.theme.localeCompare(b.theme, 'he'));
+    .map(([theme, count]) => ({
+      theme,
+      count,
+      months: THEME_MONTHS[theme] || [],
+      in_season: inSeason(theme, month),
+    }))
+    .sort((a, b) => (
+      (b.in_season - a.in_season)
+      || a.theme.localeCompare(b.theme, 'he')
+    ));
 }
 
 /**
@@ -228,6 +277,8 @@ module.exports = {
   CATEGORY_ORDER,
   SEED_THEMES,
   SEED_ITEMS,
+  THEME_MONTHS,
+  inSeason,
   seedId,
   isSeedId,
   mergeItems,

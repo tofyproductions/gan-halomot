@@ -52,6 +52,23 @@ const CATEGORIES = {
 
 const WEEK_HEADER = 'תוכן';
 
+/**
+ * Which month a sheet is, from its own title.
+ *
+ * Every one of the 191 sheets across the eighteen workbooks names its month in
+ * Hebrew somewhere in the tab title — "ספטמבר - 23 גן החלומות", "אפריל22",
+ * "אוקטובר 25 - משה דיין - בוגרים". That is the only reliable signal of WHEN
+ * an idea was used, and when is most of what a gananet is asking when she
+ * opens the bank in October.
+ */
+const HEB_MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי',
+  'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
+
+function monthOfSheet(sheetName) {
+  const i = HEB_MONTHS.findIndex(m => String(sheetName).includes(m));
+  return i < 0 ? null : i + 1;
+}
+
 // The craft-station table's own rows, and the subject they are banked under —
 // the heading the gan itself puts above that table.
 const STATION_LABELS = new Set(['מוקד 1', 'מוקד 2', 'מוקד']);
@@ -289,7 +306,7 @@ function parseWorkbook(filePath) {
           title: text,
           age_group: rowAge,
           branch,
-          month_sheet: sheetName.trim(),
+          month: monthOfSheet(sheetName),
           source: fileName,
           materials: materialsFor(text),
         });
@@ -310,14 +327,24 @@ function dedupe(rows) {
     const key = `${row.theme} ${row.category} ${row.title}`;
     const seen = byKey.get(key);
     if (!seen) {
-      byKey.set(key, { ...row, uses: 1, age_groups: row.age_group ? [row.age_group] : [], sources: [row.source] });
+      byKey.set(key, {
+        ...row,
+        uses: 1,
+        age_groups: row.age_group ? [row.age_group] : [],
+        sources: [row.source],
+        // How often this idea was used in each calendar month. Kept as counts
+        // rather than a single month because a subject spreads: פסח lands in
+        // March some years and April others, and the bank should know both.
+        month_counts: row.month ? { [row.month]: 1 } : {},
+      });
       continue;
     }
     seen.uses += 1;
     if (row.age_group && !seen.age_groups.includes(row.age_group)) seen.age_groups.push(row.age_group);
     if (!seen.sources.includes(row.source)) seen.sources.push(row.source);
+    if (row.month) seen.month_counts[row.month] = (seen.month_counts[row.month] || 0) + 1;
   }
-  return [...byKey.values()].map(({ age_group: _a, branch: _b, source: _s, month_sheet: _m, ...keep }) => keep);
+  return [...byKey.values()].map(({ age_group: _a, branch: _b, source: _s, month: _m, ...keep }) => keep);
 }
 
 function main() {
@@ -353,7 +380,37 @@ function main() {
   }
 
   const items = dedupe(all).sort((x, y) => y.uses - x.uses || x.theme.localeCompare(y.theme, 'he'));
-  const themes = [...new Set(items.map(i => i.theme))].sort((a, b) => a.localeCompare(b, 'he'));
+
+  /**
+   * When each subject actually happens.
+   *
+   * Built from six years of use rather than from a festival table, because the
+   * festivals move: פסח is March in some years and April in others, and חנוכה
+   * straddles November and December. Counting where the gan really put each
+   * subject captures that spread without anybody maintaining a calendar.
+   *
+   * A month is kept for a subject when it holds at least a fifth of that
+   * subject's uses — enough to exclude the stray week somebody ran ט"ו בשבט in
+   * June, and loose enough to keep both halves of a festival that straddles.
+   */
+  const themeMonths = {};
+  for (const it of items) {
+    const bucket = themeMonths[it.theme] || (themeMonths[it.theme] = {});
+    for (const [m, n] of Object.entries(it.month_counts || {})) {
+      bucket[m] = (bucket[m] || 0) + n;
+    }
+  }
+  const themes = [...new Set(items.map(i => i.theme))]
+    .sort((a, b) => a.localeCompare(b, 'he'))
+    .map((name) => {
+      const counts = themeMonths[name] || {};
+      const total = Object.values(counts).reduce((x, y) => x + y, 0);
+      const months = Object.entries(counts)
+        .filter(([, n]) => total > 0 && n / total >= 0.2)
+        .sort((x, y) => y[1] - x[1])
+        .map(([m]) => Number(m));
+      return { name, months, counts };
+    });
 
   // NOT src/data/ — .gitignore excludes every `data/` directory, so the bank
   // would be built locally, work locally, and simply not exist on the server.
