@@ -1011,12 +1011,25 @@ async function childGantt(req, res) {
     week,
     dates,
     rows: doc.row_definitions || [],
-    weeks: inWeek.map((w) => ({
-      topic: w.topic || '',
-      cells: (w.cells || []).map((c) => ({
-        row_key: c.row_key, day_index: c.day_index, content: c.content || '', color: c.color || '',
-      })),
-    })),
+    // day_index is stored as an offset from the week's start_date, and for the
+    // first week of a month that begins mid-week the start_date is the 1st —
+    // not a Sunday. Sent raw, the parent's screen shows Tuesday's plan under
+    // ראשון. Shifted here rather than there so the API speaks in weekdays:
+    // 0 is ראשון for every week, and the phone needs to know nothing about it.
+    weeks: inWeek.map((w) => {
+      const offset = new Date(w.start_date).getDay();
+      return {
+        topic: w.topic || '',
+        cells: (w.cells || [])
+          .map((c) => ({
+            row_key: c.row_key,
+            day_index: c.day_index + offset,
+            content: c.content || '',
+            color: c.color || '',
+          }))
+          .filter((c) => c.day_index >= 0 && c.day_index <= 5),
+      };
+    }),
   });
 }
 

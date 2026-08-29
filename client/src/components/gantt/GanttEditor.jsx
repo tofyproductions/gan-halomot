@@ -334,13 +334,23 @@ export default function GanttEditor() {
       const week = weeks[weekIdx];
       if (!week) return prev;
 
+      // The proposal is in COLUMNS — 0 is ראשון — while cells are stored
+      // against day_index counted from the week's start_date. For a month
+      // beginning mid-week those are not the same number, and filling without
+      // the shift writes Sunday's idea into Tuesday's box.
+      const offset = new Date(week.start_date).getDay();
+
       const next = [...(week.cells || [])];
       for (const c of cells) {
         if (c.day_index > 4) continue;                    // Friday is not ours
-        const idx = next.findIndex(x => x.row_key === c.row_key && x.day_index === c.day_index);
+        const storedIdx = c.day_index - offset;
+        // A column before the 1st of the month has no box to write into.
+        if (storedIdx < 0) { skipped += 1; continue; }
+
+        const idx = next.findIndex(x => x.row_key === c.row_key && x.day_index === storedIdx);
         if (idx >= 0 && String(next[idx].content || '').trim()) { skipped += 1; continue; }
 
-        const base = { row_key: c.row_key, day_index: c.day_index, content: '', color: '', col_span: 1, row_span: 1 };
+        const base = { row_key: c.row_key, day_index: storedIdx, content: '', color: '', col_span: 1, row_span: 1 };
         const merged = { ...base, ...(idx >= 0 ? next[idx] : {}), content: c.content };
         if (idx >= 0) next[idx] = merged; else next.push(merged);
         added += 1;
@@ -383,9 +393,11 @@ export default function GanttEditor() {
       const topic = String(week.topic || '').trim();
       if (!topic) continue;
 
+      // Friday is קבלת שבת and the parent-of-the-week names, and it is column 5
+      // — which is day_index 5 only when the week starts on a Sunday.
+      const offset = new Date(week.start_date).getDay();
       const items = (week.cells || [])
-        // Friday is קבלת שבת and the parent-of-the-week names. Never banked.
-        .filter(c => c.day_index <= 4 && rowKeys.has(c.row_key) && String(c.content || '').trim())
+        .filter(c => c.day_index + offset < 5 && rowKeys.has(c.row_key) && String(c.content || '').trim())
         .map(c => ({ category: c.row_key, title: String(c.content).trim() }));
       if (!items.length) continue;
 
@@ -472,15 +484,52 @@ export default function GanttEditor() {
 
         {/* Weeks */}
         {(gantt.weeks || []).map((week, weekIdx) => {
-          const weekStart = new Date(week.start_date);
           const rows = gantt.row_definitions || [];
+
+          /**
+           * The columns are ראשון–שישי, always, and each one has to carry its
+           * real date.
+           *
+           * A week's `start_date` is NOT always a Sunday: for a month that
+           * begins mid-week the first week starts on the 1st, and `day_index`
+           * is counted from there. Drawing column 0 as "start_date, called
+           * ראשון" is what put 1.9.2026 — a Tuesday — under ראשון, and shifted
+           * that whole week by two days.
+           *
+           * So the grid is anchored to the SUNDAY of the week, and the stored
+           * index is recovered by subtracting the offset. For every full week
+           * the offset is zero and this is the identity; for the ragged first
+           * week it is the correction. Nothing stored moves — `day_index` keeps
+           * meaning exactly what it meant when the plan was saved, which
+           * matters because some of those plans are approved.
+           */
+          const offset = new Date(week.start_date).getDay();
+          const gridSunday = new Date(week.start_date);
+          gridSunday.setDate(gridSunday.getDate() - offset);
+          const dateOfColumn = (di) => {
+            const d = new Date(gridSunday);
+            d.setDate(d.getDate() + di);
+            return d;
+          };
+          // A column is this month's only if its date is. The month ends ragged
+          // too — September 2026 ends on a Wednesday, and the last week's
+          // Thursday and Friday belong to October.
+          const inMonth = (d) => d.getMonth() === month - 1 && d.getFullYear() === year;
 
           return (
             <Card key={weekIdx} sx={{ mb: 3, boxShadow: '0 2px 12px rgba(0,0,0,0.06)', borderRadius: 3, overflow: 'hidden' }}>
               <Box sx={{ bgcolor: '#1e3a5f', color: 'white', px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Chip label={`שבוע ${week.week_number}`} size="small" sx={{ bgcolor: '#f59e0b', color: 'white', fontWeight: 700 }} />
+                {/* The range the week actually DRAWS, not the stored one. The
+                    stored end_date is the Saturday, which is never a column,
+                    so printing it beside a row of dates that stops on Friday
+                    reads as an off-by-one. */}
                 <Typography sx={{ opacity: 0.8, fontSize: '0.85rem' }}>
-                  {new Date(week.start_date).toLocaleDateString('he-IL')} - {new Date(week.end_date).toLocaleDateString('he-IL')}
+                  {(() => {
+                    const own = [0, 1, 2, 3, 4, 5].map(dateOfColumn).filter(inMonth);
+                    if (!own.length) return '';
+                    return `${own[0].toLocaleDateString('he-IL')} - ${own[own.length - 1].toLocaleDateString('he-IL')}`;
+                  })()}
                 </Typography>
                 <Box sx={{ flex: 1, textAlign: 'center' }}>
                   <TextField size="small" placeholder="נושא שבועי" value={week.topic || ''}
@@ -498,13 +547,19 @@ export default function GanttEditor() {
                     <TableRow>
                       <TableCell sx={{ bgcolor: '#1e3a5f', color: 'white', fontWeight: 700, textAlign: 'center', width: 90, p: 1 }}></TableCell>
                       {DAY_NAMES.map((day, di) => {
-                        const dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
-                        const hol = isHoliday(dd);
+                        const dd = dateOfColumn(di);
+                        const own = inMonth(dd);
+                        const hol = own ? isHoliday(dd) : null;
                         return (
-                          <TableCell key={di} sx={{ bgcolor: hol ? '#92400e' : di===5 ? '#5b21b6' : '#1e3a5f', color: 'white', fontWeight: 700, textAlign: 'center', p: 1 }}>
+                          <TableCell key={di} sx={{
+                            bgcolor: !own ? '#64748b' : hol ? '#92400e' : di === 5 ? '#5b21b6' : '#1e3a5f',
+                            color: 'white', fontWeight: 700, textAlign: 'center', p: 1,
+                            opacity: own ? 1 : 0.55,
+                          }}>
                             <Box sx={{ fontWeight: 800 }}>{day}</Box>
                             <Box sx={{ fontSize: '0.8rem', opacity: 0.8 }}>{dd.toLocaleDateString('he-IL', { day:'numeric', month:'numeric' })}</Box>
                             {hol && <Box sx={{ fontSize: '0.7rem', color: '#fde68a' }}>{hol.name}</Box>}
+                            {!own && <Box sx={{ fontSize: '0.68rem', opacity: 0.85 }}>לא בחודש זה</Box>}
                           </TableCell>
                         );
                       })}
@@ -514,8 +569,8 @@ export default function GanttEditor() {
                     {/* Read-only class-tracking lane (מעקב חוגים reflection) */}
                     {(() => {
                       const dayCells = DAY_NAMES.map((_, di) => {
-                        const dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
-                        return { di, sessions: sessionsOnDate(dd) };
+                        const dd = dateOfColumn(di);
+                        return { di, sessions: inMonth(dd) ? sessionsOnDate(dd) : [] };
                       });
                       if (!dayCells.some(c => c.sessions.length)) return null;
                       return (
@@ -553,15 +608,32 @@ export default function GanttEditor() {
                           </Stack>
                         </TableCell>
                         {DAY_NAMES.map((_, di) => {
-                          if (isCellHidden(weekIdx, row.key, di)) return null;
-                          const dd = new Date(weekStart); dd.setDate(dd.getDate() + di);
+                          const dd = dateOfColumn(di);
+
+                          // A day outside this month gets no box at all. It is
+                          // not a gap to be filled in — it belongs to a plan
+                          // that is somebody else's month.
+                          if (!inMonth(dd)) {
+                            return (
+                              <TableCell key={di} sx={{
+                                bgcolor: '#f8fafc', border: '1px solid #e2e8f0',
+                                backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(148,163,184,0.16) 6px, rgba(148,163,184,0.16) 12px)',
+                              }} />
+                            );
+                          }
+
+                          // Cells are stored against day_index counted from the
+                          // week's start_date, which is not always the Sunday
+                          // this column sits under.
+                          const si = di - offset;
+                          if (isCellHidden(weekIdx, row.key, si)) return null;
                           const hol = isHoliday(dd);
                           const isFri = di === 5;
-                          const cc = getVal(weekIdx, row.key, di, 'color');
-                          const cs = getVal(weekIdx, row.key, di, 'col_span');
-                          const rs = getVal(weekIdx, row.key, di, 'row_span');
-                          const isSelected = mergeStart?.wk === weekIdx && mergeStart?.rk === row.key && mergeStart?.di === di;
-                          const cellId = `cell-${weekIdx}-${row.key}-${di}`;
+                          const cc = getVal(weekIdx, row.key, si, 'color');
+                          const cs = getVal(weekIdx, row.key, si, 'col_span');
+                          const rs = getVal(weekIdx, row.key, si, 'row_span');
+                          const isSelected = mergeStart?.wk === weekIdx && mergeStart?.rk === row.key && mergeStart?.di === si;
+                          const cellId = `cell-${weekIdx}-${row.key}-${si}`;
 
                           // Friday specials
                           if (isFri && row.key === 'meeting') {
@@ -592,14 +664,14 @@ export default function GanttEditor() {
                             );
                           }
 
-                          const cellContent = getVal(weekIdx, row.key, di, 'content');
+                          const cellContent = getVal(weekIdx, row.key, si, 'content');
 
                           return (
                             <GanttCell key={di} id={cellId} colSpan={cs} rowSpan={rs}
                               dragId={`move-${cellId}`}
-                              dragPayload={{ wk: weekIdx, rk: row.key, di, content: cellContent, color: cc }}
+                              dragPayload={{ wk: weekIdx, rk: row.key, di: si, content: cellContent, color: cc }}
                               canDrag={!mergeMode && Boolean(String(cellContent).trim())}
-                              onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, di)}
+                              onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
                                 bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : 'white'),
                                 border: isSelected ? '2px solid #f59e0b' : '1px solid #e2e8f0',
@@ -609,18 +681,18 @@ export default function GanttEditor() {
                             >
                               <TextField size="small" multiline maxRows={5} fullWidth variant="standard"
                                 value={cellContent}
-                                onChange={e => updateCell(weekIdx, row.key, di, { content: e.target.value })}
+                                onChange={e => updateCell(weekIdx, row.key, si, { content: e.target.value })}
                                 inputProps={{ style: { fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5, padding: '4px 0' } }}
                                 InputProps={{ disableUnderline: true }}
                               />
                               <Box className="ca" sx={{ position: 'absolute', top: 0, left: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
-                                <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: di }); }}>
+                                <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
                                   <PaletteIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
                                 </IconButton>
                               </Box>
                               {(cs > 1 || rs > 1) && (
                                 <IconButton size="small" sx={{ position: 'absolute', bottom: 0, left: 0, p: '2px' }}
-                                  onClick={() => updateCell(weekIdx, row.key, di, { col_span: 1, row_span: 1 })}>
+                                  onClick={() => updateCell(weekIdx, row.key, si, { col_span: 1, row_span: 1 })}>
                                   <Typography sx={{ fontSize: '0.55rem', color: '#94a3b8' }}>✕</Typography>
                                 </IconButton>
                               )}

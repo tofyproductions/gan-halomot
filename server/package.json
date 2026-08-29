@@ -16,6 +16,7 @@
     "test:supplies": "node scripts/supplies-visibility.test.js",
     "test:classrooms": "node scripts/classroom-planner.test.js",
     "test:bank": "node scripts/content-bank.test.js",
+    "test:weekdays": "node scripts/gantt-weekdays.test.js",
     "bank:build": "node scripts/content-bank-extract.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",

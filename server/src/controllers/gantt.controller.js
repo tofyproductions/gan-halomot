@@ -270,4 +270,9 @@ async function setVisibility(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { get, save, approve, getArchive, getVisibility, setVisibility };
+// generateWeeks is exported for scripts/gantt-weekdays.test.js — the shape of a
+// month's weeks is what decides which box is which day, and that has been wrong.
+module.exports = {
+  get, save, approve, getArchive, getVisibility, setVisibility,
+  generateWeeks, DEFAULT_ROWS,
+};
