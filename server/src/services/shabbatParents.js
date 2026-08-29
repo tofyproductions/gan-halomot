@@ -20,6 +20,30 @@
 const GENDERS = ['boy', 'girl'];
 
 /**
+ * What the gan's other systems call a boy or a girl.
+ *
+ * In the אמונה / תמ״ת branches — משה דיין כפר סבא, הרצוג הרצליה, אייזיק חריף
+ * תל אביב — a child arrives through the ministry list and ClickTac, and
+ * ClickTac's export already carries מגדר. That value was being kept on the
+ * registration and dropped on the way to the child, which meant asking a
+ * gananet to tap through seventy-four children to re-enter something the
+ * system was already told.
+ *
+ * Only values that are unambiguous are mapped. Anything else stays empty and
+ * the child is shown as unanswered, because a wrong guess here puts a girl
+ * down as אבא של שבת in front of her parents.
+ */
+const BOY_WORDS = new Set(['זכר', 'בן', 'ז', 'ז׳', 'boy', 'male', 'm']);
+const GIRL_WORDS = new Set(['נקבה', 'בת', 'נ', 'נ׳', 'girl', 'female', 'f']);
+
+function normalizeGender(raw) {
+  const v = String(raw || '').trim().toLowerCase().replace(/[.'"]/g, '');
+  if (BOY_WORDS.has(v)) return 'boy';
+  if (GIRL_WORDS.has(v)) return 'girl';
+  return '';
+}
+
+/**
  * Walk the turns in order and work out where the current round stands.
  *
  * A round closes the moment every child of that gender has had a turn, and the
@@ -140,4 +164,4 @@ function planMonth(state, weeks, { overwrite = false } = {}) {
   });
 }
 
-module.exports = { rotation, planMonth, GENDERS };
+module.exports = { rotation, planMonth, normalizeGender, GENDERS };

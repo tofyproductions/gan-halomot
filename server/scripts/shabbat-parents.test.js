@@ -10,7 +10,7 @@
  *   node scripts/shabbat-parents.test.js
  */
 
-const { rotation, planMonth } = require('../src/services/shabbatParents');
+const { rotation, planMonth, normalizeGender } = require('../src/services/shabbatParents');
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -28,6 +28,27 @@ const KIDS = [
   boy('b1', 'איתי'), boy('b2', 'נועם'), boy('b3', 'רועי'),
   girl('g1', 'אביגיל'), girl('g2', 'הדס'),
 ];
+
+console.log('\n🚻  מה שקליקטק קורא לזה\n');
+{
+  // The אמונה / תמ״ת branches get their whole roster through ClickTac, which
+  // already asks מגדר. Mapping it is what saves a gananet from re-entering
+  // seventy-four facts the import was handed.
+  eq(normalizeGender('זכר'), 'boy', 'זכר');
+  eq(normalizeGender('נקבה'), 'girl', 'נקבה');
+  eq(normalizeGender('בן'), 'boy', 'בן');
+  eq(normalizeGender('בת'), 'girl', 'בת');
+  eq(normalizeGender(' ז '), 'boy', 'אות בודדת עם רווחים');
+  eq(normalizeGender('נ׳'), 'girl', 'אות עם גרש');
+  eq(normalizeGender('Male'), 'boy', 'גם באנגלית, בלי תלות ברישיות');
+
+  // Anything unrecognised must stay unanswered. A guess here puts a girl down
+  // as אבא של שבת in front of her parents.
+  eq(normalizeGender(''), '', 'ריק נשאר ריק');
+  eq(normalizeGender(null), '', 'חסר נשאר ריק');
+  eq(normalizeGender('אחר'), '', 'ערך לא מוכר אינו מנוחש');
+  eq(normalizeGender('ילד/ה'), '', 'וגם לא ערך דו-משמעי');
+}
 
 console.log('\n🔁  סבב\n');
 {

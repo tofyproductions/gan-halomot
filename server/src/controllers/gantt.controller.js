@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { GanttMonth, Holiday, Classroom, User, Child } = require('../models');
+const { GanttMonth, Holiday, Classroom, User, Child, Registration } = require('../models');
 const shabbat = require('../services/shabbatParents');
 const pv = require('../services/parentVisibility');
 
@@ -540,10 +540,34 @@ async function shabbatParents(req, res, next) {
     const kids = await Child.find({
       classroom_id: classroom, is_active: true,
       ...(academicYear ? { academic_year: academicYear } : {}),
-    }).select('child_name gender').sort({ child_name: 1 }).lean();
+    }).select('child_name gender registration_id').sort({ child_name: 1 }).lean();
+
+    /**
+     * A child imported from ClickTac already told us. In the אמונה / תמ״ת
+     * branches the whole roster arrives through the ministry list and
+     * ClickTac, and ClickTac's export carries מגדר — it was being written into
+     * the registration and not onto the child. Read from there when the child
+     * has none of its own, so nobody is asked to re-enter seventy-four facts
+     * the system was handed.
+     *
+     * Read, not written: what the gan sets by hand on the child always wins,
+     * and a GET is not a place to quietly rewrite records.
+     */
+    const needGender = kids.filter(c => !c.gender && c.registration_id);
+    const fromImport = new Map();
+    if (needGender.length) {
+      const regs = await Registration.find({ _id: { $in: needGender.map(c => c.registration_id) } })
+        .select('configuration').lean();
+      for (const r of regs) {
+        const g = shabbat.normalizeGender(r.configuration?.external_source?.gender);
+        if (g) fromImport.set(String(r._id), g);
+      }
+    }
 
     const children = kids.map(c => ({
-      id: String(c._id), name: c.child_name, gender: c.gender || '',
+      id: String(c._id),
+      name: c.child_name,
+      gender: c.gender || fromImport.get(String(c.registration_id)) || '',
     }));
 
     // Every Friday this room has ever been assigned, oldest first. A week is

@@ -1,4 +1,5 @@
 const XLSX = require('xlsx');
+const shabbat = require('../services/shabbatParents');
 const {
   ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing, Classroom,
   EnrollmentImport,
@@ -554,6 +555,11 @@ async function promoteOne(doc, opts) {
     child_name: doc.child.full_name,
     child_id_number: doc.child.id_number || null,
     birth_date: doc.child.birth_date,
+    // ClickTac already asked. Kept on the child rather than only inside the
+    // registration's blob, because that is where the gan reads it from —
+    // אבא / אמא של שבת is two rotations, and nobody should be re-entering a
+    // fact the import was handed.
+    gender: shabbat.normalizeGender(doc.child.gender),
     classroom_id: classroom_id || null,
     parent_name: parentName,
     parent_id_number: doc.parent1?.id_number || null,
