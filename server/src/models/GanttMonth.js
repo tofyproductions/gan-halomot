@@ -37,6 +37,15 @@ const ganttMonthSchema = new mongoose.Schema({
   weeks: [ganttWeekSchema],
   approved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   approved_at: { type: Date, default: null },
+
+  /**
+   * Who saved last. Two gananot plan the same room, and until now a save
+   * replaced the whole month with whatever the saver's screen was holding —
+   * so the one who pressed שמור second silently deleted the other's morning.
+   * Recorded so the screen can say whose work it is looking at, and so a save
+   * that would land on top of somebody else's can be refused.
+   */
+  updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 ganttMonthSchema.index({ branch_id: 1, classroom_id: 1, month: 1, year: 1 }, { unique: true });

@@ -9,6 +9,9 @@ router.put('/visibility', c.setVisibility);
 
 router.get('/', c.get);
 router.get('/archive', c.getArchive);
+// Months worth copying FROM. Above '/:id/...' so it is never read as an id.
+router.get('/sources', c.sources);
+router.post('/copy', c.copy);
 router.post('/', c.save);
 router.post('/:id/approve', c.approve);
 

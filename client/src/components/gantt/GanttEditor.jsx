@@ -16,11 +16,15 @@ import PaletteIcon from '@mui/icons-material/Palette';
 import MergeIcon from '@mui/icons-material/CallMerge';
 import SportsIcon from '@mui/icons-material/FitnessCenter';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import GroupIcon from '@mui/icons-material/Group';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
+import GanttCopyDialog from './GanttCopyDialog';
+import GanttEditorsDialog from './GanttEditorsDialog';
 import { printGantt } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
@@ -132,6 +136,11 @@ export default function GanttEditor() {
   const [colorMenu, setColorMenu] = useState({ anchor: null, weekIdx: null, rowKey: null, dayIdx: null });
   const [showBank, setShowBank] = useState(false);
   const [showContentBank, setShowContentBank] = useState(false);
+  const [showCopy, setShowCopy] = useState(false);
+  const [showEditors, setShowEditors] = useState(false);
+  // Whether this person may write here, and whose save the screen is showing.
+  const [canEdit, setCanEdit] = useState(true);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
   // Merge selection
@@ -141,7 +150,12 @@ export default function GanttEditor() {
   useEffect(() => {
     if (!classroomId || !month || !year) return;
     api.get('/gantt', { params: { classroom: classroomId, month, year, branch: selectedBranch } })
-      .then(res => { setGantt(res.data.gantt); setHolidays(res.data.holidays || []); })
+      .then(res => {
+        setGantt(res.data.gantt);
+        setHolidays(res.data.holidays || []);
+        setCanEdit(res.data.can_edit !== false);
+        setLastSavedAt(res.data.gantt?.updated_at || null);
+      })
       .catch(() => toast.error('שגיאה'))
       .finally(() => setLoading(false));
     api.get('/classrooms').then(res => {
@@ -447,14 +461,20 @@ export default function GanttEditor() {
     return added;
   };
 
-  const handleSave = async (status = 'draft') => {
+  const handleSave = async (status = 'draft', force = false) => {
     setSaving(true);
     try {
-      await api.post('/gantt', {
+      const res = await api.post('/gantt', {
         branch_id: selectedBranch, classroom_id: classroomId,
         academic_year: `${month >= 9 ? year : year-1}-${month >= 9 ? year+1 : year}`,
         month, year, row_definitions: gantt.row_definitions, weeks: gantt.weeks, status,
+        // The version this screen loaded. The server refuses to write over a
+        // newer one rather than letting two gananot silently delete each
+        // other's morning.
+        base_updated_at: lastSavedAt,
+        force,
       });
+      setLastSavedAt(res.data?.gantt?.updated_at || new Date().toISOString());
 
       const banked = await captureTypedContent();
       const bankNote = banked === 0 ? ''
@@ -462,7 +482,22 @@ export default function GanttEditor() {
         : ` · ${banked} רעיונות חדשים נוספו לבנק`;
       toast.success(`${status === 'pending' ? 'נשלח לאישור' : 'נשמר'}${bankNote}`);
       if (status === 'pending') navigate('/gantt');
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) {
+      const d = err.response?.data;
+      if (err.response?.status === 409 && d?.conflict) {
+        const who = d.updated_by ? `${d.updated_by} ` : 'מישהו ';
+        // eslint-disable-next-line no-alert
+        const mine = window.confirm(
+          `${who}שמר/ה שינויים בתוכנית הזו אחרי שפתחת אותה.\n\n`
+          + 'אישור — לשמור את הגרסה שלך ולדרוס את שלה.\n'
+          + 'ביטול — לרענן ולראות מה השתנה. מה שכתבת לא יישמר.',
+        );
+        if (mine) { setSaving(false); return handleSave(status, true); }
+        window.location.reload();
+        return;
+      }
+      toast.error(d?.error || 'שגיאה');
+    }
     finally { setSaving(false); }
   };
 
@@ -498,6 +533,17 @@ export default function GanttEditor() {
             <Typography variant="body2" color="text.secondary">
               {classroomName}
               {gantt.status !== 'draft' && <Chip label={gantt.status === 'approved' ? 'מאושר' : 'ממתין'} color={gantt.status === 'approved' ? 'success' : 'warning'} size="small" sx={{ ml: 1 }} />}
+              {/* Two people plan the same room. Saying whose save this is turns
+                  "why did that change" into a question with an answer. */}
+              {gantt.updated_by_name && (
+                <span style={{ marginInlineStart: 8, opacity: 0.8 }}>
+                  · עודכן על ידי {gantt.updated_by_name}
+                  {lastSavedAt ? ` · ${new Date(lastSavedAt).toLocaleDateString('he-IL')}` : ''}
+                </span>
+              )}
+              {!canEdit && (
+                <Chip label="צפייה בלבד" size="small" color="default" sx={{ ml: 1, fontWeight: 700 }} />
+              )}
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
@@ -521,8 +567,15 @@ export default function GanttEditor() {
             <Button size="small" startIcon={<MergeIcon />} color={mergeMode ? 'warning' : 'inherit'}
               onClick={() => { setMergeMode(!mergeMode); setMergeStart(null); if (!mergeMode) toast.info('לחץ על 2 תאים לאיחוד'); }}
             >{mergeMode ? 'בטל איחוד' : 'אחד תאים'}</Button>
-            <Button variant="outlined" startIcon={<SaveIcon />} onClick={() => handleSave('draft')} disabled={saving}>שמור</Button>
-            <Button variant="contained" color="warning" onClick={() => handleSave('pending')} disabled={saving}>לאישור</Button>
+            <Button size="small" startIcon={<ContentCopyIcon />} onClick={() => setShowCopy(true)}
+              disabled={!canEdit}>העתקה מכיתה</Button>
+            {isManager && (
+              <Button size="small" startIcon={<GroupIcon />} onClick={() => setShowEditors(true)}>מי עורכת</Button>
+            )}
+            <Button variant="outlined" startIcon={<SaveIcon />} onClick={() => handleSave('draft')}
+              disabled={saving || !canEdit}>שמור</Button>
+            <Button variant="contained" color="warning" onClick={() => handleSave('pending')}
+              disabled={saving || !canEdit}>לאישור</Button>
             {isManager && gantt._id && gantt.status !== 'approved' && (
               <Button variant="contained" color="success" startIcon={<CheckCircleIcon />} onClick={handleApprove}>אשר</Button>
             )}
@@ -829,6 +882,20 @@ export default function GanttEditor() {
             </MenuItem>
           ))}
         </Menu>
+
+        <GanttCopyDialog
+          open={showCopy}
+          onClose={() => setShowCopy(false)}
+          target={{ classroomId, classroomName, month, year }}
+          onCopied={() => window.location.reload()}
+        />
+
+        <GanttEditorsDialog
+          open={showEditors}
+          onClose={() => setShowEditors(false)}
+          classroomId={classroomId}
+          classroomName={classroomName}
+        />
 
         {/* בנק תוכן — ideas by weekly subject, and whole-week fill */}
         <ContentBankPanel

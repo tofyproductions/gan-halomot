@@ -12,6 +12,9 @@ async function getAll(req, res, next) {
     const branchFilter = getBranchFilter(req);
     const classrooms = await Classroom.find({ is_active: true, ...branchFilter })
       .populate('lead_teacher_id', 'full_name')
+      // Who may write this room's monthly plan, by name, so the gantt screen
+      // can show it without a second round trip per room.
+      .populate('gantt_editor_ids', 'full_name')
       .sort({ name: 1 }).lean();
 
     // Get child counts
@@ -31,6 +34,10 @@ async function getAll(req, res, next) {
       child_count: countMap[String(c._id)] || 0,
       lead_teacher_name: c.lead_teacher_id?.full_name || null,
       lead_teacher_id: c.lead_teacher_id?._id || c.lead_teacher_id,
+      gantt_editors: (c.gantt_editor_ids || []).map(u => ({
+        id: u?._id || u, full_name: u?.full_name || '',
+      })),
+      gantt_editor_ids: (c.gantt_editor_ids || []).map(u => String(u?._id || u)),
     }));
 
     res.json({ classrooms: result });

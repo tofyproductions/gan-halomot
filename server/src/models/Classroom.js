@@ -24,6 +24,16 @@ const classroomSchema = new mongoose.Schema({
    */
   lead_employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', default: null },
   lead_teacher_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
+  /**
+   * Who may write this room's monthly work plan, besides a manager.
+   *
+   * A list rather than one person because a room is usually run by two, and
+   * both of them plan. `lead_teacher_id` still counts — it is a live
+   * permission on rooms that have one, and making every gan re-enter it to
+   * keep working would be a migration disguised as a feature.
+   */
+  gantt_editor_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { GanttMonth, Holiday, Classroom } = require('../models');
+const { GanttMonth, Holiday, Classroom, User } = require('../models');
 const pv = require('../services/parentVisibility');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
@@ -23,6 +23,40 @@ const DEFAULT_ROWS = [
   { key: 'story', label: 'סיפור' },
   { key: 'misc', label: 'שונות' },
 ];
+
+/**
+ * The school year a calendar month belongs to. September starts the year, so
+ * September 2026 is 2026-2027 and February 2027 is the same year.
+ */
+const academicYearFor = (month, year) => (
+  `${month >= 9 ? year : year - 1}-${month >= 9 ? year + 1 : year}`
+);
+
+/** Managers see and write every room's plan. */
+const MANAGER_ROLES = ['system_admin', 'branch_manager', 'accountant'];
+const isManager = (user) => MANAGER_ROLES.includes(user?.role);
+
+/**
+ * May this person write this room's plan?
+ *
+ * A manager always may. Otherwise it is the room's own leads — the list on the
+ * classroom, plus `lead_teacher_id` for the rooms that were set up before the
+ * list existed. Anyone else can read the plan and cannot change it: before
+ * this, every logged-in member of staff could rewrite any room in any branch,
+ * which is fine in one gan with four people and is not fine at forty.
+ */
+async function mayEdit(user, classroomId) {
+  if (isManager(user)) return true;
+  if (!classroomId || !mongoose.isValidObjectId(classroomId)) return false;
+
+  const room = await Classroom.findById(classroomId)
+    .select('lead_teacher_id gantt_editor_ids').lean();
+  if (!room) return false;
+
+  const allowed = [room.lead_teacher_id, ...(room.gantt_editor_ids || [])]
+    .filter(Boolean).map(String);
+  return allowed.includes(String(user?.id));
+}
 
 async function get(req, res, next) {
   try {
@@ -89,8 +123,18 @@ async function get(req, res, next) {
       }).lean();
     }
 
+    // Whose work this is, and whether the person looking at it may change it.
+    if (gantt.updated_by) {
+      const who = await User.findById(gantt.updated_by).select('full_name').lean();
+      gantt.updated_by_name = who?.full_name || '';
+    }
+
     gantt.id = gantt._id;
-    res.json({ gantt, holidays: holidays.map(h => ({ ...h, id: h._id })) });
+    res.json({
+      gantt,
+      can_edit: await mayEdit(req.user, classroom),
+      holidays: holidays.map(h => ({ ...h, id: h._id })),
+    });
   } catch (error) { next(error); }
 }
 
@@ -105,27 +149,72 @@ async function save(req, res, next) {
       return res.status(400).json({ error: 'classroom_id, month, year required' });
     }
 
+    if (!await mayEdit(req.user, classroom_id)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לערוך את תוכנית העבודה של הכיתה הזו' });
+    }
+
     let gantt = await GanttMonth.findOne({
       classroom_id, month: parseInt(month), year: parseInt(year),
     });
 
     if (gantt) {
-      // Update existing
+      /**
+       * Somebody else saved while this screen was open.
+       *
+       * The save replaces the whole month, so without this the second person
+       * to press שמור silently deletes everything the first one wrote. The
+       * client sends the updated_at it loaded; if the stored one has moved,
+       * the save is refused and the screen is told who moved it. `force` is
+       * the deliberate "yes, mine wins" — a decision, taken by a person,
+       * rather than a race nobody knew they were in.
+       */
+      const base = req.body.base_updated_at;
+      if (base && !req.body.force && gantt.updated_at
+          && new Date(gantt.updated_at).getTime() > new Date(base).getTime()) {
+        const who = gantt.updated_by
+          ? await User.findById(gantt.updated_by).select('full_name').lean()
+          : null;
+        return res.status(409).json({
+          error: 'התוכנית שונתה מאז שפתחת אותה',
+          conflict: true,
+          updated_by: who?.full_name || '',
+          updated_at: gantt.updated_at,
+        });
+      }
+
       if (row_definitions) gantt.row_definitions = row_definitions;
       if (weeks) gantt.weeks = normalizeWeeks(weeks);
       if (status) gantt.status = status;
+      gantt.updated_by = req.user?.id || null;
       await gantt.save();
     } else {
-      // Create new
+      /**
+       * Both of these are required by the model, and a save that arrives
+       * without them used to 500 — which tells the gananet nothing and looks
+       * like the system is broken. They are both derivable: the branch from
+       * the room, the year from the month, exactly as `get` already does it.
+       */
+      let branchId = (branch_id && mongoose.isValidObjectId(branch_id)) ? branch_id : null;
+      if (!branchId) {
+        const room = await Classroom.findById(classroom_id).select('branch_id').lean();
+        branchId = room?.branch_id || null;
+      }
+      if (!branchId) {
+        return res.status(400).json({ error: 'לכיתה הזו אין סניף, ולכן אי אפשר לשמור לה תוכנית עבודה' });
+      }
+
+      const m = parseInt(month);
+      const y = parseInt(year);
       gantt = await GanttMonth.create({
-        branch_id,
+        branch_id: branchId,
         classroom_id,
-        academic_year: academic_year || '',
+        academic_year: academic_year || academicYearFor(m, y),
         month: parseInt(month),
         year: parseInt(year),
         row_definitions: row_definitions || DEFAULT_ROWS,
         weeks: weeks ? normalizeWeeks(weeks) : generateWeeks(parseInt(month), parseInt(year)),
         status: status || 'draft',
+        updated_by: req.user?.id || null,
       });
     }
 
@@ -137,6 +226,12 @@ async function approve(req, res, next) {
   try {
     const gantt = await GanttMonth.findById(req.params.id);
     if (!gantt) return res.status(404).json({ error: 'גאנט לא נמצא' });
+
+    // Approving is the manager's signature, not the planner's. A lead who
+    // could approve her own month would make the approval step decorative.
+    if (!isManager(req.user)) {
+      return res.status(403).json({ error: 'אישור תוכנית עבודה הוא בסמכות מנהלת' });
+    }
 
     gantt.status = 'approved';
     gantt.approved_by = req.user?.id || null;
@@ -250,6 +345,176 @@ function normalizeWeeks(weeks) {
 }
 
 
+/**
+ * POST /api/gantt/copy
+ *   { from: {classroom, month, year}, to: {classroom, month, year},
+ *     overwrite?: bool, weeks?: [index] }
+ *
+ * Every branch writes the same month three times — תינוקייה, צעירים, בוגרים —
+ * and the three are mostly the same plan with the activities pitched
+ * differently. Writing it out twice more, by hand, is the largest single piece
+ * of typing left in the job, and it is the reason the ganenet stayed in Excel:
+ * there you copy a sheet.
+ *
+ * Copied BY POSITION, not by date: week 1 to week 1, ראשון to ראשון. That is
+ * what "the same plan" means to the person asking — the subject of the second
+ * week is the subject of the second week — and it is the only rule that
+ * survives September having five weeks and October four.
+ *
+ * One thing is never copied: a day the TARGET branch is closed. The two gans
+ * keep different holiday calendars, and a plan landing on a day nobody is in
+ * the building is how a copied month stops being trusted.
+ *
+ * Days the week borrows from the neighbouring month ARE copied. They are part
+ * of that week and the editor lets her write them, so a copy that refused them
+ * would leave holes in exactly the boxes she can fill by hand.
+ */
+async function copy(req, res, next) {
+  try {
+    const { from, to, overwrite } = req.body || {};
+    if (!from?.classroom || !to?.classroom || !to.month || !to.year) {
+      return res.status(400).json({ error: 'יש לבחור מקור ויעד' });
+    }
+    if (!await mayEdit(req.user, to.classroom)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לערוך את תוכנית העבודה של כיתת היעד' });
+    }
+
+    const source = await GanttMonth.findOne({
+      classroom_id: from.classroom,
+      month: parseInt(from.month),
+      year: parseInt(from.year),
+    }).lean();
+    if (!source) return res.status(404).json({ error: 'לא נמצאה תוכנית במקור' });
+
+    const targetMonth = parseInt(to.month);
+    const targetYear = parseInt(to.year);
+
+    let target = await GanttMonth.findOne({
+      classroom_id: to.classroom, month: targetMonth, year: targetYear,
+    });
+
+    const room = await Classroom.findById(to.classroom).select('branch_id').lean();
+    if (!target) {
+      target = new GanttMonth({
+        branch_id: room?.branch_id || null,
+        classroom_id: to.classroom,
+        academic_year: to.academic_year || academicYearFor(targetMonth, targetYear),
+        month: targetMonth,
+        year: targetYear,
+        row_definitions: source.row_definitions || DEFAULT_ROWS,
+        weeks: generateWeeks(targetMonth, targetYear),
+        status: 'draft',
+      });
+    }
+
+    // The target branch's own closures, which are not the source's.
+    const holidays = room?.branch_id ? await Holiday.find({
+      branch_id: room.branch_id,
+      start_date: { $lte: new Date(targetYear, targetMonth, 0) },
+      end_date: { $gte: new Date(targetYear, targetMonth - 1, 1) },
+    }).lean() : [];
+    const ymdOf = (d) => new Date(d).toISOString().slice(0, 10);
+    const closedOn = (d) => holidays.some(h => (
+      h.kind !== 'short_day' && ymdOf(d) >= ymdOf(h.start_date) && ymdOf(d) <= ymdOf(h.end_date)
+    ));
+
+    const srcWeeks = normalizeWeeks(source.weeks || []);
+    const dstWeeks = normalizeWeeks(target.weeks && target.weeks.length
+      ? target.weeks : generateWeeks(targetMonth, targetYear));
+
+    const wanted = Array.isArray(req.body.weeks) && req.body.weeks.length
+      ? new Set(req.body.weeks.map(Number)) : null;
+
+    let copied = 0; let kept = 0; let skipped = 0;
+
+    const merged = dstWeeks.map((dst, i) => {
+      const src = srcWeeks[i];
+      if (!src || (wanted && !wanted.has(i))) return dst;
+
+      const sunday = new Date(dst.start_date);
+      const cells = [...(dst.cells || [])];
+
+      for (const c of (src.cells || [])) {
+        const day = new Date(sunday);
+        day.setDate(day.getDate() + c.day_index);
+        if (closedOn(day)) { skipped += 1; continue; }
+        if (!String(c.content || '').trim()) continue;
+
+        const at = cells.findIndex(x => x.row_key === c.row_key && x.day_index === c.day_index);
+        if (at >= 0 && String(cells[at].content || '').trim() && !overwrite) { kept += 1; continue; }
+
+        const next = {
+          row_key: c.row_key, day_index: c.day_index,
+          content: c.content, color: c.color || '',
+          col_span: c.col_span || 1, row_span: c.row_span || 1,
+        };
+        if (at >= 0) cells[at] = next; else cells.push(next);
+        copied += 1;
+      }
+
+      return {
+        ...dst,
+        cells,
+        // The subject is the point of the week; carry it unless the target
+        // already has one of its own.
+        topic: (String(dst.topic || '').trim() && !overwrite) ? dst.topic : (src.topic || dst.topic || ''),
+      };
+    });
+
+    target.weeks = merged;
+    if (!target.row_definitions?.length) target.row_definitions = source.row_definitions || DEFAULT_ROWS;
+    target.updated_by = req.user?.id || null;
+    // A copy lands as a draft. It is a starting point somebody still has to
+    // read, and an approved month that changed under the approval is a lie.
+    target.status = 'draft';
+    await target.save();
+
+    res.json({
+      copied, kept, skipped,
+      weeks: Math.min(srcWeeks.length, dstWeeks.length),
+      gantt: { ...target.toObject(), id: target._id },
+    });
+  } catch (error) { next(error); }
+}
+
+/**
+ * GET /api/gantt/sources?month=&year=
+ * The months that actually have something in them, to copy FROM.
+ */
+async function sources(req, res, next) {
+  try {
+    const filter = {};
+    if (req.query.month) filter.month = parseInt(req.query.month);
+    if (req.query.year) filter.year = parseInt(req.query.year);
+
+    const rows = await GanttMonth.find(filter)
+      .select('classroom_id branch_id month year status weeks updated_at')
+      .populate('classroom_id', 'name category')
+      .populate('branch_id', 'name')
+      .sort({ year: -1, month: -1 })
+      .lean();
+
+    res.json({
+      sources: rows
+        .map(g => ({
+          id: g._id,
+          classroom_id: g.classroom_id?._id || g.classroom_id,
+          classroom_name: g.classroom_id?.name || '',
+          category: g.classroom_id?.category || '',
+          branch_name: g.branch_id?.name || '',
+          month: g.month,
+          year: g.year,
+          status: g.status,
+          filled: (g.weeks || []).reduce((n, w) => (
+            n + (w.cells || []).filter(c => String(c.content || '').trim()).length
+          ), 0),
+        }))
+        // A month with nothing written in it is not a source anybody wants.
+        .filter(s => s.filled > 0),
+    });
+  } catch (error) { next(error); }
+}
+
 // ---------------------------------------------------------------------------
 // מה ההורים רואים — one switch per branch per week, for the gantt and the menu.
 //
@@ -307,6 +572,6 @@ async function setVisibility(req, res, next) {
 // generateWeeks is exported for scripts/gantt-weekdays.test.js — the shape of a
 // month's weeks is what decides which box is which day, and that has been wrong.
 module.exports = {
-  get, save, approve, getArchive, getVisibility, setVisibility,
+  get, save, approve, getArchive, copy, sources, getVisibility, setVisibility,
   generateWeeks, normalizeWeeks, DEFAULT_ROWS,
 };
