@@ -224,6 +224,11 @@ function cellText(ws, r, c) {
     // Includes the non-breaking spaces a paste from Word leaves behind, which
     // are invisible and made "ציור + בצק" bank three times as three ideas.
     .replace(/[\s\u00a0\u200f\u200e]+/gu, ' ')
+    // A backslash where a slash was meant — "דליק \ לא דליק", "כובע צמר \ כובע
+    // מצחיה". It is always the "or" between two options, never an escape, and
+    // on the Hebrew layout the two keys are neighbours. Converting also merges
+    // "דליק \ לא דליק" with "דליק\לא דליק", which were banked as two ideas.
+    .replace(/\\/gu, '/')
     .replace(/\s*([+/])\s*/gu, ' $1 ')
     .trim();
 }

@@ -57,7 +57,13 @@ console.log('\n🔤  חילוץ מהגאנטים\n');
   ok(!isContent('יום הולדת לרפאל'), 'יום הולדת ללא נקודתיים נפסל');
   ok(!isContent('יום הולדת לגפן'), 'יום הולדת עם שם ילד נפסל');
   ok(!isContent('צעירים + כפיר + מאור'), 'שמות אחרי שם חדר עם פלוס נפסלים');
-  ok(isContent('קבלת שבת'), 'קבלת שבת עצמה כן נשמרת');
+  // קבלת שבת is the week's furniture, not an idea. Every workbook types it into
+  // the Friday column, which made it the most-used item in the bank — and
+  // most-used is what puts it first, so the suggester offered קבלת שבת on a
+  // Wednesday. 419 occurrences across 34 subjects, all of them noise.
+  ok(!isContent('קבלת שבת'), 'קבלת שבת אינה רעיון ואינה נכנסת לבנק');
+  ok(!isContent('קבלת השבת'), 'גם בכתיב עם ה"א הידיעה');
+  ok(isContent('קבלת שבת עם ההורים'), 'אבל פעילות אמיתית שמזכירה שבת כן נשמרת');
   ok(!isContent('12'), 'מספר בלבד נפסל');
   ok(!isContent('---'), 'קו מפריד נפסל');
   ok(!isContent('א'), 'תו בודד נפסל');
@@ -128,6 +134,10 @@ console.log('\n📦  הבנק המצורף\n');
   }
   // The craft-station table, banked under the gan's own name for it.
   ok(bank.SEED_THEMES.includes('התנסות בחומרים'), 'מוקדי ההתנסות בחומרים נשמרו');
+  // Asserted against the shipped file: this is the one that actually reached
+  // the screen, on a Wednesday, under חנוכה.
+  eq(bank.SEED_ITEMS.filter(i => /^קבלת\s*ה?שבת$/u.test(i.title)).length, 0,
+    'אין "קבלת שבת" בבנק המצורף');
   ok(bank.SEED_ITEMS.some(i => i.theme === 'התנסות בחומרים' && i.category === 'creation'),
     'והם יושבים על שורת יצירה');
 
@@ -196,6 +206,7 @@ console.log('\n🗓️  שבוע מוצע\n');
   eq(misc.length, Math.min(5, miscPool.length), 'שורה דלה מתמלאת עד כמה שיש ולא יותר');
   if (miscPool.length < 5) ok(week.thin_rows.includes('שונות'), 'ומדווחת כדלה');
   ok(week.cells.every(c => c.day_index >= 0 && c.day_index <= 4), 'יום שישי לא משובץ — הוא קבלת שבת');
+  ok(!week.cells.some(c => /^קבלת\s*ה?שבת$/u.test(c.content)), 'קבלת שבת לא מוצעת לאף יום');
   ok(week.cells.every(c => bank.CATEGORY_ORDER.includes(c.row_key)), 'כל תא יושב על שורה מוכרת של הגאנט');
   ok(week.cells.every(c => c.content.length < 200), 'תוכן התא באורך סביר');
 

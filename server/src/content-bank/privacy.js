@@ -37,6 +37,28 @@ const PERSONAL = [
   /מזל טוב/u,
 ];
 
+/**
+ * Fixed points of the week, which the plan already draws for itself.
+ *
+ * קבלת שבת happens on Friday and only on Friday — the editor renders it into
+ * the Friday column as a fact, not as a choice. But every workbook also TYPES
+ * it into that column, so it came out of the extractor as the single most
+ * common idea in the bank: 419 occurrences across 34 subjects. Being the
+ * most-used item is exactly what puts it first in every מפגש row, so the
+ * suggester proposed קבלת שבת on a Wednesday, under חנוכה, in a row it can
+ * never belong to.
+ *
+ * It is not an idea a gananet chooses between. It is the week's furniture, and
+ * furniture does not go in the bank.
+ */
+const FIXED_SLOTS = [
+  /^קבלת\s*ה?שבת$/u,
+];
+
+function isFixedWeeklySlot(text) {
+  return FIXED_SLOTS.some(re => re.test(String(text || '').trim()));
+}
+
 /** True when the text names, or probably names, a child. */
 function isPersonal(text) {
   const t = String(text || '').trim();
@@ -52,7 +74,11 @@ function isBankable(text) {
   // throws away the entire bank.
   if (!/\p{L}/u.test(t)) return false;
   if (isPersonal(t)) return false;
+  if (isFixedWeeklySlot(t)) return false;
   return !NOT_CONTENT.some(re => re.test(t));
 }
 
-module.exports = { isBankable, isPersonal, NOT_CONTENT, PERSONAL };
+module.exports = {
+  isBankable, isPersonal, isFixedWeeklySlot,
+  NOT_CONTENT, PERSONAL, FIXED_SLOTS,
+};

@@ -10,7 +10,28 @@
  */
 const { ContentBankItem } = require('../models');
 const bank = require('../services/contentBank.service');
-const { isBankable } = require('../content-bank/privacy');
+const { isBankable, isPersonal, isFixedWeeklySlot } = require('../content-bank/privacy');
+
+/**
+ * Why this text may not be banked, in words the gananet can act on.
+ *
+ * The same three rules the extractor applies to the workbooks, applied here to
+ * what she types — because the bank has two doors into it and only one of them
+ * was ever guarded.
+ */
+function whyNotBankable(title) {
+  const t = String(title || '').trim();
+  if (isFixedWeeklySlot(t)) {
+    return 'קבלת שבת נרשמת אוטומטית ביום שישי ואינה נשמרת בבנק';
+  }
+  if (isPersonal(t)) {
+    return 'לא ניתן לשמור בבנק טקסט שמכיל שם של ילד/ה';
+  }
+  if (!isBankable(t)) {
+    return 'הטקסט קצר או כללי מדי לשמירה בבנק';
+  }
+  return null;
+}
 
 /** GET /api/content-bank/themes */
 async function themes(req, res, next) {
@@ -61,6 +82,8 @@ async function create(req, res, next) {
     if (!bank.CATEGORY_ORDER.includes(category)) {
       return res.status(400).json({ error: 'שורה לא מוכרת' });
     }
+    const refusal = whyNotBankable(title);
+    if (refusal) return res.status(400).json({ error: refusal });
 
     const item = await ContentBankItem.create({
       theme: String(theme).trim(),
@@ -130,6 +153,10 @@ async function update(req, res, next) {
     }
     if (title !== undefined && !String(title).trim()) {
       return res.status(400).json({ error: 'לא ניתן לשמור רעיון בלי טקסט' });
+    }
+    if (title !== undefined) {
+      const refusal = whyNotBankable(title);
+      if (refusal) return res.status(400).json({ error: refusal });
     }
 
     const cleanMaterials = Array.isArray(materials)

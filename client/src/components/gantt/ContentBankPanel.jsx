@@ -103,6 +103,8 @@ export default function ContentBankPanel({
   // BEFORE any of it touches the plan.
   const [proposal, setProposal] = useState(null);
   const [picked, setPicked] = useState(null);   // first half of a swap
+  // The box whose text she is fixing, and the text as it stands.
+  const [editingCell, setEditingCell] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -196,6 +198,7 @@ export default function ContentBankPanel({
     setFill({ open: false, weekIdx: 0, offset: 0, busy: false });
     setProposal(null);
     setPicked(null);
+    setEditingCell(null);
   };
 
   const applyWeek = () => {
@@ -204,7 +207,9 @@ export default function ContentBankPanel({
     // box she wants to write herself.
     onFillWeek(fill.weekIdx, {
       ...proposal,
-      cells: proposal.cells.filter(c => String(c.content || '').trim()),
+      cells: proposal.cells
+        .map(c => ({ ...c, content: String(c.content || '').trim() }))
+        .filter(c => c.content),
     }, theme);
     closeFill();
     onClose();
@@ -244,6 +249,28 @@ export default function ContentBankPanel({
       return { ...p, cells };
     });
     setPicked(null);
+  };
+
+  /**
+   * Fix the wording of one box, here, before it is applied.
+   *
+   * Six years of hand-typed workbooks carry six years of typos — "ניצור\\ר יונת
+   * שלום" is a real cell — and until now the only way to fix one was to apply
+   * the week and then edit it in the plan. That works, but it means applying
+   * something you can see is wrong, which nobody wants to press.
+   *
+   * This changes THIS WEEK only. The bank keeps its own text, and the pencil
+   * beside the idea in the drawer is what changes that — editing a plan should
+   * never quietly rewrite content the whole gan reads.
+   */
+  const setCellText = (rowKey, dayIdx, text) => {
+    setProposal(p => {
+      const cells = [...p.cells];
+      const i = cells.findIndex(c => c.row_key === rowKey && c.day_index === dayIdx);
+      if (i < 0) return p;
+      cells[i] = { ...cells[i], content: text };
+      return { ...p, cells };
+    });
   };
 
   const clearCell = (rowKey, dayIdx) => {
@@ -387,7 +414,7 @@ export default function ContentBankPanel({
               <Typography variant="caption" color="text.secondary">
                 {picked
                   ? 'עכשיו לחצי על היום שאליו להעביר — השניים יתחלפו.'
-                  : 'לחצי על תוכן ואז על יום אחר כדי להחליף ביניהם. ✕ מרוקן תיבה.'}
+                  : 'לחצי על תוכן ואז על יום אחר כדי להחליף ביניהם. לחיצה כפולה, או העיפרון, לתיקון הכתוב. ✕ מרוקן תיבה.'}
               </Typography>
 
               <Box sx={{ overflowX: 'auto' }}>
@@ -414,10 +441,45 @@ export default function ContentBankPanel({
                       {[0, 1, 2, 3, 4].map(d => {
                         const cell = row.days[d];
                         const isPicked = picked?.rowKey === row.key && picked?.dayIdx === d;
+                        const isEditing = editingCell?.rowKey === row.key && editingCell?.dayIdx === d;
+
+                        if (isEditing) {
+                          return (
+                            <Box key={d} sx={{
+                              minHeight: 52, borderRadius: 1.5, p: 0.4,
+                              bgcolor: row.color, border: '2px solid #f59e0b',
+                              display: 'flex', alignItems: 'center',
+                            }}>
+                              <TextField
+                                autoFocus multiline maxRows={4} fullWidth variant="standard"
+                                // Written straight into the proposal on every
+                                // keystroke. Holding the text in local state and
+                                // committing it on blur loses the edit whenever
+                                // the blur does not arrive — which is what
+                                // happens when the dialog is closed, or a button
+                                // is pressed that re-renders first. There is no
+                                // commit step to miss this way.
+                                value={cell.content}
+                                onChange={e => setCellText(row.key, d, e.target.value)}
+                                onBlur={() => setEditingCell(null)}
+                                onKeyDown={e => {
+                                  // Shift+Enter is a line break — some of these
+                                  // really are two lines.
+                                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); setEditingCell(null); }
+                                  if (e.key === 'Escape') setEditingCell(null);
+                                }}
+                                InputProps={{ disableUnderline: true }}
+                                inputProps={{ style: { fontSize: '0.78rem', fontWeight: 600, textAlign: 'center', lineHeight: 1.35 } }}
+                              />
+                            </Box>
+                          );
+                        }
+
                         return (
                           <Box
                             key={d}
                             onClick={() => tapCell(row.key, d)}
+                            onDoubleClick={() => cell && setEditingCell({ rowKey: row.key, dayIdx: d })}
                             sx={{
                               position: 'relative', minHeight: 52, borderRadius: 1.5, p: 0.8,
                               cursor: 'pointer', userSelect: 'none',
@@ -428,19 +490,26 @@ export default function ContentBankPanel({
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               textAlign: 'center',
                               '&:hover': { borderColor: '#f59e0b' },
-                              '&:hover .clr': { opacity: 1 },
+                              '&:hover .act': { opacity: 1 },
                             }}
                           >
                             {cell ? cell.content : '—'}
                             {cell && (
-                              <Box
-                                className="clr"
-                                onClick={(e) => { e.stopPropagation(); clearCell(row.key, d); }}
-                                sx={{
-                                  position: 'absolute', top: 1, left: 3, opacity: 0,
-                                  transition: '0.2s', fontSize: '0.7rem', color: '#64748b',
-                                }}
-                              >✕</Box>
+                              <Stack className="act" direction="row" spacing={0.3} sx={{
+                                position: 'absolute', top: 0, insetInlineStart: 2,
+                                opacity: 0, transition: '0.2s',
+                              }}>
+                                <Box
+                                  onClick={(e) => { e.stopPropagation(); setEditingCell({ rowKey: row.key, dayIdx: d }); }}
+                                  sx={{ cursor: 'pointer', lineHeight: 0 }}
+                                >
+                                  <EditIcon sx={{ fontSize: 12, color: '#64748b' }} />
+                                </Box>
+                                <Box
+                                  onClick={(e) => { e.stopPropagation(); clearCell(row.key, d); }}
+                                  sx={{ fontSize: '0.7rem', color: '#64748b', cursor: 'pointer', lineHeight: 1 }}
+                                >✕</Box>
+                              </Stack>
                             )}
                           </Box>
                         );
