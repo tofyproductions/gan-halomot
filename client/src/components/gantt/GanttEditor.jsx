@@ -21,6 +21,7 @@ import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/co
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
+import { printGantt } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -500,7 +501,19 @@ export default function GanttEditor() {
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
-            <Button size="small" startIcon={<PrintIcon />} onClick={() => window.print()}>הדפסה</Button>
+            <Button size="small" startIcon={<PrintIcon />} onClick={() => {
+              // Not window.print(). The live screen is a stack of cards full of
+              // text fields and prints as four pages of app chrome; what goes on
+              // the wall is a purpose-built sheet.
+              const ok = printGantt({
+                weeks: gantt.weeks || [],
+                rows: gantt.row_definitions || [],
+                holidays, month, year,
+                classroomName,
+                status: gantt.status,
+              });
+              if (!ok) toast.error('הדפדפן חסם את חלון ההדפסה. יש לאשר חלונות קופצים.');
+            }}>הדפסה</Button>
             <Button size="small" variant="contained" startIcon={<AutoStoriesIcon />}
               onClick={() => setShowContentBank(true)} color="primary">בנק תוכן</Button>
             <Button size="small" startIcon={<SportsIcon />} onClick={() => setShowBank(true)} color="secondary">בנק חוגים</Button>
