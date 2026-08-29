@@ -18,6 +18,22 @@
  */
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
+
+/**
+ * A colour per row, the same ones the bank and the editor use.
+ *
+ * On a wall this is not decoration. The sheet is read from two metres away by
+ * somebody looking for one thing — "what is the story today" — and a coloured
+ * band is findable at that distance where a row label is not.
+ */
+const ROW_TINT = {
+  meeting: { bg: '#eaf2fd', label: '#dbeafe', ink: '#1e40af' },
+  activity: { bg: '#eafaf0', label: '#dcfce7', ink: '#166534' },
+  creation: { bg: '#fdeef5', label: '#fce7f3', ink: '#9d174d' },
+  story: { bg: '#fdfae6', label: '#fef9c3', ink: '#854d0e' },
+  misc: { bg: '#f2effc', label: '#ede9fe', ink: '#5b21b6' },
+};
+const tintOf = (key) => ROW_TINT[key] || { bg: '#f8fafc', label: '#f1f5f9', ink: '#334155' };
 const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
@@ -137,12 +153,14 @@ export function buildGanttPrintHtml({
         }
 
         const cell = cellAt(row.key, di);
-        const cls = ['c', borrowedCols.has(di) ? 'borrowed' : '', isFri ? 'fri' : ''].filter(Boolean).join(' ');
-        const tint = cell?.color ? ` style="background:${esc(cell.color)} !important"` : '';
-        return `<td class="${cls}"${tint}>${esc(contentAt(row.key, di))}</td>`;
+        const cls = ['c', borrowedCols.has(di) ? 'borrowed' : ''].filter(Boolean).join(' ');
+        // A colour the gananet set by hand on that one box wins over the row's.
+        const bg = cell?.color || tintOf(row.key).bg;
+        return `<td class="${cls}" style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
       }).join('');
 
-      return `<tr><th class="rl">${esc(row.label)}</th>${tds}</tr>`;
+      const t = tintOf(row.key);
+      return `<tr><th class="rl" style="background:${t.label} !important;color:${t.ink}">${esc(row.label)}</th>${tds}</tr>`;
     }).join('');
 
     const own = [0, 1, 2, 3, 4, 5].map(dateOf).filter(inMonth);
@@ -178,58 +196,67 @@ export function buildGanttPrintHtml({
   @page { size: A4 landscape; margin: 6mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html, body { background: #fff; margin: 0; padding: 0; }
-  :root { --k: 1; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
+  :root { --k: 1; --pad: 0mm; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
   body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: #0f172a; }
 
-  .head { display: flex; align-items: baseline; justify-content: space-between;
-          border-bottom: 1.5pt solid #1e3a5f; padding-bottom: 2mm; margin-bottom: 2mm; }
-  .head .t { font-size: 13pt; font-weight: 800; }
-  .head .s { font-size: 8pt; color: #475569; }
+  .head { display: flex; align-items: center; justify-content: space-between;
+          margin-bottom: 2mm; }
+  .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: #1e3a5f; }
+  .head .s { font-size: calc(var(--head) * var(--k)); color: #64748b; font-weight: 700; }
 
-  table.wk { width: 100%; border-collapse: collapse; table-layout: fixed;
-             margin-bottom: 1.6mm; page-break-inside: avoid; }
-  table.wk th, table.wk td { border: 0.5pt solid #94a3b8; }
+  /* Cells sit in their own rounded tiles with white between them, the way the
+     screen shows them. On paper it also stops five weeks of grid from reading
+     as one undifferentiated mesh from across a room. */
+  table.wk { width: 100%; border-collapse: separate; border-spacing: 0.5mm;
+             table-layout: fixed; margin-bottom: 1.4mm; page-break-inside: avoid; }
+  table.wk th, table.wk td { border: none; border-radius: 1.6mm; }
 
-  tr.banner th { background: #1e3a5f !important; color: #fff; padding: 0.6mm 1.5mm; }
-  tr.banner .wn { font-size: calc(var(--head) * var(--k)); font-weight: 800; width: 16mm; text-align: center; }
-  tr.banner .topic { text-align: center; position: relative; }
-  tr.banner .tp { font-size: calc(var(--head) * var(--k)); font-weight: 800; }
-  tr.banner .rg { font-size: calc(var(--small) * var(--k)); opacity: 0.8; margin-right: 3mm; }
+  tr.banner th { background: #1e3a5f !important; color: #fff; padding: 0.9mm 2mm; }
+  tr.banner .wn { font-size: calc(var(--head) * var(--k)); font-weight: 800;
+                  width: 20mm; text-align: center; }
+  tr.banner .topic { text-align: center; }
+  tr.banner .tp { font-size: calc(var(--head) * var(--k) * 1.25); font-weight: 800; }
+  tr.banner .rg { font-size: calc(var(--small) * var(--k)); opacity: 0.75; margin-right: 4mm; }
 
-  th.d { background: #eef2f7 !important; padding: 0.5mm; text-align: center; line-height: 1.1; }
-  th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; }
-  th.d .dd { font-size: calc(var(--small) * var(--k)); color: #475569; }
-  th.d .hol { font-size: calc(var(--small) * var(--k)); color: #92400e; font-weight: 700; }
+  th.d { background: #f1f5f9 !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
+         text-align: center; line-height: 1.15; }
+  th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: #334155; }
+  th.d .dd { font-size: calc(var(--small) * var(--k)); color: #64748b; font-weight: 700; }
+  th.d .hol { font-size: calc(var(--small) * var(--k)); color: #92400e; font-weight: 800; }
   th.d.shut { background: #fde68a !important; }
   th.d.short { background: #fef3c7 !important; }
-  th.d.borrowed { background: #f1f5f9 !important; color: #94a3b8; }
-  th.d.borrowed .dn, th.d.borrowed .dd { color: #94a3b8; }
+  th.d.borrowed { background: #f8fafc !important; }
+  th.d.borrowed .dn, th.d.borrowed .dd { color: #a8b4c2; }
 
-  th.rl { background: #f1f5f9 !important; width: 16mm; text-align: center;
-          font-size: calc(var(--head) * var(--k)); font-weight: 800; padding: 0.4mm; line-height: 1.1; }
-  th.corner { background: #eef2f7 !important; }
+  th.rl { width: 20mm; text-align: center; font-weight: 800; line-height: 1.15;
+          font-size: calc(var(--head) * var(--k)); padding: 0.5mm; }
+  th.corner { background: #fff !important; }
 
-  td.c { padding: 0.7mm 0.8mm; text-align: center; vertical-align: middle;
-         font-size: calc(var(--cell) * var(--k)); line-height: 1.15;
-         overflow-wrap: anywhere; }
-  td.borrowed { background: #f8fafc !important; }
+  td.c { padding: calc(0.8mm + var(--pad)) 1mm; text-align: center; vertical-align: middle;
+         font-size: calc(var(--cell) * var(--k)); line-height: 1.22; font-weight: 600;
+         color: #1e293b; overflow-wrap: anywhere; }
+  /* A day borrowed from the month next door is written in like any other, just
+     quieter, so a parent reading the sheet knows which month they are in. */
+  td.c.borrowed { opacity: 0.72; }
   td.fri { background: #f5f3ff !important; }
-  td.strong { font-weight: 800; color: #5b21b6; text-align: center; font-size: calc(var(--head) * var(--k)); }
-  td.fri .fp { font-size: calc(var(--small) * var(--k)); text-align: right; color: #5b21b6; line-height: 1.25; }
+  td.strong { font-weight: 800; color: #5b21b6; text-align: center;
+              font-size: calc(var(--head) * var(--k) * 1.1); }
+  td.fri .fp { font-size: calc(var(--small) * var(--k)); text-align: right;
+               color: #5b21b6; line-height: 1.35; font-weight: 700; }
 
   td.closed { background: #fef3c7 !important; text-align: center; vertical-align: middle; }
-  td.closed .cname { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: #92400e; }
-  td.closed .cnote { font-size: calc(var(--small) * var(--k)); color: #b45309; }
+  td.closed .cname { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: #92400e; }
+  td.closed .cnote { font-size: calc(var(--small) * var(--k)); color: #b45309; font-weight: 700; }
 
   /* The last lever before giving up: take the air out rather than the type.
      Padding and leading are worth a few percent and cost less readability
      than another step down in font size. */
-  body.tight table.wk { margin-bottom: 0.7mm; }
-  body.tight td.c { padding: 0.35mm 0.5mm; line-height: 1.08; }
+  body.tight table.wk { margin-bottom: 0.7mm; border-spacing: 0.35mm; }
+  body.tight td.c { padding: calc(0.35mm + var(--pad)) 0.6mm; line-height: 1.1; }
   body.tight th.rl, body.tight th.d { padding: 0.25mm; }
-  body.tight tr.banner th { padding: 0.3mm 1.5mm; }
+  body.tight tr.banner th { padding: 0.4mm 1.5mm; }
 
-  .foot { margin-top: 1.5mm; font-size: 6pt; color: #94a3b8; text-align: left; }
+  .foot { margin-top: 1.5mm; font-size: calc(var(--small) * var(--k)); color: #b6c1cc; text-align: left; }
 
   .toolbar { position: fixed; top: 8px; left: 8px; background: #f59e0b; color: #111;
              padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;
@@ -264,23 +291,49 @@ export function buildGanttPrintHtml({
   (function fit() {
     var MM = 96 / 25.4;
     var pageH = (210 - 12) * MM;   // A4 landscape less the 6mm @page margins
-    var k = 1;
     var root = document.documentElement;
-    for (var i = 0; i < 24 && document.body.scrollHeight > pageH && k > 0.62; i += 1) {
+    var body = document.body;
+    var over = function () { return body.scrollHeight > pageH; };
+    var set = function (name, v) { root.style.setProperty(name, v); void body.offsetHeight; };
+
+    var k = 1;
+
+    // Down until it fits. The floor is 0.62 — below that it stops being
+    // readable across a room, which is the entire point of printing it.
+    for (var i = 0; i < 30 && over() && k > 0.62; i += 1) {
       k -= 0.03;
-      root.style.setProperty('--k', k.toFixed(2));
-      // Row height follows the type, so the tables re-flow on their own.
-      void document.body.offsetHeight;
+      set('--k', k.toFixed(2));
     }
-    // Still over at the floor: squeeze the padding, which buys a few percent
-    // without making a single word smaller.
-    if (document.body.scrollHeight > pageH) {
-      document.body.classList.add('tight');
-      void document.body.offsetHeight;
+
+    // Still over at the floor: take the air out rather than the type.
+    if (over()) { body.classList.add('tight'); void body.offsetHeight; }
+
+    // And UP, while it still fits. A month that fits at full size used to stop
+    // there and leave the bottom half of the page white — which on a wall is
+    // just a smaller sheet with a margin, and the whole ask was a full page
+    // readable from across the room.
+    if (!over() && !body.classList.contains('tight')) {
+      for (var j = 0; j < 40 && k < 2.4; j += 1) {
+        k += 0.04;
+        set('--k', k.toFixed(2));
+        if (over()) { k -= 0.04; set('--k', k.toFixed(2)); break; }
+      }
     }
-    document.body.dataset.fitK = k.toFixed(2);
-    document.body.dataset.fitTight = document.body.classList.contains('tight') ? '1' : '0';
-    document.body.dataset.fitPages = (document.body.scrollHeight / pageH).toFixed(2);
+
+    // Whatever vertical space is left over becomes row height rather than more
+    // type. Past a point bigger letters stop helping and taller rows — more
+    // white around each idea — are what makes it readable on a wall.
+    // The cap is generous on purpose: a sparse month, or a dense one that had
+    // to shrink, can have a lot of page left and the padding is what spends it.
+    for (var p = 0; p < 90 && !over(); p += 1) {
+      set('--pad', ((p + 1) * 0.2).toFixed(2) + 'mm');
+      if (over()) { set('--pad', (p * 0.2).toFixed(2) + 'mm'); break; }
+    }
+
+    body.dataset.fitK = k.toFixed(2);
+    body.dataset.fitPad = root.style.getPropertyValue('--pad') || '0mm';
+    body.dataset.fitTight = body.classList.contains('tight') ? '1' : '0';
+    body.dataset.fitPages = (body.scrollHeight / pageH).toFixed(2);
   }());
 </script>
 </body>
