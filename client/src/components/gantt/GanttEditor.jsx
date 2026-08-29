@@ -25,6 +25,7 @@ import api from '../../api/client';
 import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
 import GanttCopyDialog from './GanttCopyDialog';
 import GanttEditorsDialog from './GanttEditorsDialog';
+import ShabbatParentPicker from './ShabbatParentPicker';
 import { printGantt } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
@@ -142,6 +143,7 @@ export default function GanttEditor() {
   const [canEdit, setCanEdit] = useState(true);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [editorNames, setEditorNames] = useState([]);
+  const [parentPick, setParentPick] = useState(null);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
   // Merge selection
@@ -261,6 +263,59 @@ export default function GanttEditor() {
       weeks[wk] = { ...weeks[wk], cells };
       return { ...prev, weeks };
     });
+  };
+
+  /**
+   * The Friday pair, name AND child, together.
+   *
+   * The name is what the plan prints and what the gan has always written; the
+   * id is what lets a turn be counted. Written in one step so the two can
+   * never disagree — a name without its child is a turn that never happened as
+   * far as the rotation is concerned.
+   */
+  const setShabbatParent = (wk, role, child) => {
+    setGantt(prev => {
+      const weeks = [...(prev.weeks || [])];
+      if (!weeks[wk]) return prev;
+      weeks[wk] = {
+        ...weeks[wk],
+        [role === 'father' ? 'friday_parent_father' : 'friday_parent_mother']: child?.name || '',
+        [role === 'father' ? 'friday_father_child_id' : 'friday_mother_child_id']: child?.id || null,
+      };
+      return { ...prev, weeks };
+    });
+  };
+
+  /**
+   * Fill every Friday of the month that has nobody on it yet.
+   *
+   * Proposed by the server from the whole year's plans, applied here and saved
+   * by her — the same shape as the content bank, so "the system suggested" and
+   * "I decided" stay two different things.
+   */
+  const autoAssignShabbat = async () => {
+    try {
+      const res = await api.get('/gantt/shabbat-parents', {
+        params: { classroom: classroomId, month, year },
+      });
+      const plan = res.data?.plan || [];
+      let n = 0;
+      setGantt(prev => {
+        const weeks = [...(prev.weeks || [])];
+        for (const p of plan) {
+          const w = weeks[p.index];
+          if (!w) continue;
+          const next = { ...w };
+          if (p.father) { next.friday_parent_father = p.father.name; next.friday_father_child_id = p.father.id; n += 1; }
+          if (p.mother) { next.friday_parent_mother = p.mother.name; next.friday_mother_child_id = p.mother.id; n += 1; }
+          weeks[p.index] = next;
+        }
+        return { ...prev, weeks };
+      });
+      toast.success(n ? `שובצו ${n} ילדים. לא לשכוח לשמור` : 'כל השבועות כבר משובצים');
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשיבוץ');
+    }
   };
 
   const updateWeek = (wk, field, value) => {
@@ -838,23 +893,40 @@ export default function GanttEditor() {
                           if (isFri && row.key === 'activity') {
                             return (
                               <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: '#ede9fe', p: 1.5, border: '1px solid #e2e8f0' }}>
-                                <Stack spacing={1}>
-                                  <Box>
-                                    <Typography sx={{ fontSize: '0.8rem', color: '#5b21b6', fontWeight: 700 }}>אבא של שבת:</Typography>
-                                    <TextField size="small" variant="outlined" fullWidth placeholder="שם הילד"
-                                      value={week.friday_parent_father || ''} onChange={e => updateWeek(weekIdx, 'friday_parent_father', e.target.value)}
-                                      inputProps={{ style: { fontSize: '0.85rem', textAlign: 'center', fontWeight: 600, padding: '6px 8px' } }}
-                                      sx={{ bgcolor: 'white', borderRadius: 1 }}
-                                    />
-                                  </Box>
-                                  <Box>
-                                    <Typography sx={{ fontSize: '0.8rem', color: '#5b21b6', fontWeight: 700 }}>אמא של שבת:</Typography>
-                                    <TextField size="small" variant="outlined" fullWidth placeholder="שם הילדה"
-                                      value={week.friday_parent_mother || ''} onChange={e => updateWeek(weekIdx, 'friday_parent_mother', e.target.value)}
-                                      inputProps={{ style: { fontSize: '0.85rem', textAlign: 'center', fontWeight: 600, padding: '6px 8px' } }}
-                                      sx={{ bgcolor: 'white', borderRadius: 1 }}
-                                    />
-                                  </Box>
+                                {/* Chosen from the room's children rather than
+                                    typed, so the turn can be counted and the
+                                    round kept without anybody remembering it. */}
+                                <Stack spacing={0.8}>
+                                  {[
+                                    { role: 'father', label: 'אבא של שבת', name: week.friday_parent_father, hint: 'בחר/י ילד' },
+                                    { role: 'mother', label: 'אמא של שבת', name: week.friday_parent_mother, hint: 'בחר/י ילדה' },
+                                  ].map(({ role, label, name, hint }) => (
+                                    <Box key={role}>
+                                      <Typography sx={{ fontSize: '0.75rem', color: '#5b21b6', fontWeight: 700 }}>{label}:</Typography>
+                                      <Button
+                                        fullWidth size="small" variant="outlined" disabled={!canEdit}
+                                        onClick={() => setParentPick({
+                                          weekIdx, role, currentName: name || '',
+                                          weekLabel: `שבוע ${week.week_number}${week.topic ? ` · ${week.topic}` : ''}`,
+                                        })}
+                                        sx={{
+                                          bgcolor: 'white', borderRadius: 1, py: 0.3,
+                                          fontSize: '0.85rem', fontWeight: 700,
+                                          color: name ? '#1e293b' : '#94a3b8',
+                                          borderColor: '#ddd6fe',
+                                          '&:hover': { borderColor: '#8b5cf6', bgcolor: 'white' },
+                                        }}
+                                      >
+                                        {name || hint}
+                                      </Button>
+                                    </Box>
+                                  ))}
+                                  {canEdit && weekIdx === 0 && (
+                                    <Button size="small" onClick={autoAssignShabbat}
+                                      sx={{ fontSize: '0.7rem', py: 0, minHeight: 0, color: '#6d28d9' }}>
+                                      שיבוץ אוטומטי לחודש
+                                    </Button>
+                                  )}
                                 </Stack>
                               </TableCell>
                             );
@@ -955,6 +1027,16 @@ export default function GanttEditor() {
             </MenuItem>
           ))}
         </Menu>
+
+        <ShabbatParentPicker
+          open={Boolean(parentPick)}
+          onClose={() => setParentPick(null)}
+          classroomId={classroomId}
+          role={parentPick?.role}
+          weekLabel={parentPick?.weekLabel}
+          currentName={parentPick?.currentName}
+          onPick={(child) => setShabbatParent(parentPick.weekIdx, parentPick.role, child)}
+        />
 
         <GanttCopyDialog
           open={showCopy}

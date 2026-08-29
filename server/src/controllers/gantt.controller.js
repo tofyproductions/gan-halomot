@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
-const { GanttMonth, Holiday, Classroom, User } = require('../models');
+const { GanttMonth, Holiday, Classroom, User, Child } = require('../models');
+const shabbat = require('../services/shabbatParents');
 const pv = require('../services/parentVisibility');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
@@ -515,6 +516,70 @@ async function sources(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * GET /api/gantt/shabbat-parents?classroom=&month=&year=
+ *
+ * Who is waiting for a turn as אבא / אמא של שבת, and who to put on the weeks
+ * of this month.
+ *
+ * The round is read back out of the plans themselves — every Friday already
+ * records the two names — rather than kept as a counter somewhere. A counter
+ * drifts the first time an old month is edited or a child leaves in March; the
+ * plans are the record, so the plans are what is counted.
+ */
+async function shabbatParents(req, res, next) {
+  try {
+    const { classroom, month, year } = req.query;
+    if (!classroom || !mongoose.isValidObjectId(classroom)) {
+      return res.status(400).json({ error: 'יש לבחור כיתה' });
+    }
+
+    const room = await Classroom.findById(classroom).select('academic_year').lean();
+    const academicYear = room?.academic_year || '';
+
+    const kids = await Child.find({
+      classroom_id: classroom, is_active: true,
+      ...(academicYear ? { academic_year: academicYear } : {}),
+    }).select('child_name gender').sort({ child_name: 1 }).lean();
+
+    const children = kids.map(c => ({
+      id: String(c._id), name: c.child_name, gender: c.gender || '',
+    }));
+
+    // Every Friday this room has ever been assigned, oldest first. A week is
+    // dated by its own start, so months edited out of order still count in
+    // the order the weeks actually happened.
+    const months = await GanttMonth.find({ classroom_id: classroom })
+      .select('weeks month year').lean();
+
+    const history = months
+      .flatMap(m => (m.weeks || []).map(w => ({
+        date: w.start_date,
+        father_child_id: w.friday_father_child_id ? String(w.friday_father_child_id) : null,
+        mother_child_id: w.friday_mother_child_id ? String(w.friday_mother_child_id) : null,
+      })))
+      .filter(t => t.father_child_id || t.mother_child_id)
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    const state = shabbat.rotation(children, history);
+
+    // A proposal for this month, if one was asked for.
+    let plan = null;
+    if (month && year) {
+      const doc = months.find(m => m.month === parseInt(month) && m.year === parseInt(year));
+      const weeks = normalizeWeeks(doc?.weeks?.length
+        ? doc.weeks : generateWeeks(parseInt(month), parseInt(year)));
+      plan = shabbat.planMonth(state, weeks.map((w, i) => ({
+        index: i,
+        has_father: Boolean(String(w.friday_parent_father || '').trim()),
+        has_mother: Boolean(String(w.friday_parent_mother || '').trim()),
+      })));
+    }
+
+    res.json({ ...state, plan });
+  } catch (error) { next(error); }
+}
+
 // ---------------------------------------------------------------------------
 // מה ההורים רואים — one switch per branch per week, for the gantt and the menu.
 //
@@ -572,6 +637,7 @@ async function setVisibility(req, res, next) {
 // generateWeeks is exported for scripts/gantt-weekdays.test.js — the shape of a
 // month's weeks is what decides which box is which day, and that has been wrong.
 module.exports = {
-  get, save, approve, getArchive, copy, sources, getVisibility, setVisibility,
+  get, save, approve, getArchive, copy, sources, shabbatParents,
+  getVisibility, setVisibility,
   generateWeeks, normalizeWeeks, DEFAULT_ROWS,
 };

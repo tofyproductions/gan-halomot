@@ -15,8 +15,14 @@ const ganttWeekSchema = new mongoose.Schema({
   end_date: { type: Date, required: true },
   topic: { type: String, default: '' },
   cells: [ganttCellSchema],
+  // The names are what the plan prints and what the gan has always written.
   friday_parent_father: { type: String, default: '' },
   friday_parent_mother: { type: String, default: '' },
+  // The children they refer to, so a turn can be counted. Kept beside the
+  // names rather than replacing them: years of plans hold names and no ids,
+  // and a name typed by hand is still a valid thing to write here.
+  friday_father_child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
+  friday_mother_child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
 }, { _id: true });
 
 const ganttMonthSchema = new mongoose.Schema({

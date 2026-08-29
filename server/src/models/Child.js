@@ -21,6 +21,18 @@ const childSchema = new mongoose.Schema({
   emergency_phone: { type: String, default: null },
   notes: { type: String, default: null },
   academic_year: { type: String, required: true },
+
+  /**
+   * Boy or girl, and empty until somebody says.
+   *
+   * It exists for one reason: אבא של שבת and אמא של שבת are two rotations, not
+   * one, and the gan cannot be asked to fill in a field for every child before
+   * the feature works at all. So it stays empty and is set from the picker, one
+   * tap, at the moment a gananet is choosing that child anyway — by the person
+   * who knows, on the day it matters.
+   */
+  gender: { type: String, enum: ['boy', 'girl', ''], default: '' },
+
   is_active: { type: Boolean, default: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
