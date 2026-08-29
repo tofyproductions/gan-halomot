@@ -141,11 +141,34 @@ export default function GanttEditor() {
   // Whether this person may write here, and whose save the screen is showing.
   const [canEdit, setCanEdit] = useState(true);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [editorNames, setEditorNames] = useState([]);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
   // Merge selection
   const [mergeStart, setMergeStart] = useState(null);
   const [mergeMode, setMergeMode] = useState(false);
+
+  /**
+   * The room, and who is allowed to write its plan.
+   *
+   * The names are shown in the header rather than only inside the "מי עורכת"
+   * dialog: a permission you have to open a dialog to read is a permission
+   * nobody checks, and the question — "is she on this room?" — comes up while
+   * looking at the plan, not while editing settings.
+   */
+  const loadRoom = useCallback(() => {
+    api.get('/classrooms').then(res => {
+      const cls = (res.data.classrooms || []).find(c => (c._id || c.id) === classroomId);
+      if (!cls) return;
+      setClassroomName(cls.name);
+      setClassroomCategory(cls.category || '');
+      // The room's lead counts as an editor even when she is not on the list,
+      // so she is shown as one. Deduped: she is often on both.
+      const names = [cls.lead_teacher_name, ...(cls.gantt_editors || []).map(e => e.full_name)]
+        .filter(Boolean);
+      setEditorNames([...new Set(names)]);
+    }).catch(() => {});
+  }, [classroomId]);
 
   useEffect(() => {
     if (!classroomId || !month || !year) return;
@@ -158,17 +181,14 @@ export default function GanttEditor() {
       })
       .catch(() => toast.error('שגיאה'))
       .finally(() => setLoading(false));
-    api.get('/classrooms').then(res => {
-      const cls = (res.data.classrooms || []).find(c => (c._id || c.id) === classroomId);
-      if (cls) { setClassroomName(cls.name); setClassroomCategory(cls.category || ''); }
-    }).catch(() => {});
+    loadRoom();
     api.get('/activities').then(res => setActivities(res.data.activities || [])).catch(() => {});
     // Reflect class-tracking sessions for this branch+month onto the gantt days.
     const ym = `${year}-${String(month).padStart(2, '0')}`;
     api.get('/classes/sessions', { params: { branch: selectedBranch, month: ym } })
       .then(res => setClassSessions(res.data.sessions || []))
       .catch(() => setClassSessions([]));
-  }, [classroomId, month, year, selectedBranch]);
+  }, [classroomId, month, year, selectedBranch, loadRoom]);
 
   const localYmd = (d) => { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
   // Holiday ranges arrive as instants (UTC midnight); a gantt column is a local
@@ -178,6 +198,7 @@ export default function GanttEditor() {
   const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
 
   /** The gan's own vacation calendar, on this date. */
+
   const isHoliday = (date) => {
     if (!date) return null;
     const ymd = localYmd(date);
@@ -545,6 +566,23 @@ export default function GanttEditor() {
                 <Chip label="צפייה בלבד" size="small" color="default" sx={{ ml: 1, fontWeight: 700 }} />
               )}
             </Typography>
+
+            {/* Who may write this room's plan, on the plan. The manager set it
+                once and then wants to see it, not re-open a dialog to check. */}
+            <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
+                מובילות:
+              </Typography>
+              {editorNames.length === 0 && (
+                <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                  לא הוגדרו — רק מנהלת יכולה לערוך
+                </Typography>
+              )}
+              {editorNames.map(n => (
+                <Chip key={n} label={n} size="small"
+                  sx={{ height: 20, fontSize: '0.72rem', fontWeight: 700, bgcolor: '#e0f2fe', color: '#075985' }} />
+              ))}
+            </Stack>
           </Box>
           <Stack direction="row" spacing={1} flexWrap="wrap">
             <Button size="small" startIcon={<PrintIcon />} onClick={() => {
@@ -895,6 +933,7 @@ export default function GanttEditor() {
           onClose={() => setShowEditors(false)}
           classroomId={classroomId}
           classroomName={classroomName}
+          onSaved={loadRoom}
         />
 
         {/* בנק תוכן — ideas by weekly subject, and whole-week fill */}
