@@ -601,10 +601,6 @@ export default function GanttEditor() {
             <Button size="small" variant="contained" startIcon={<AutoStoriesIcon />}
               onClick={() => setShowContentBank(true)} color="primary">בנק תוכן</Button>
             <Button size="small" startIcon={<SportsIcon />} onClick={() => setShowBank(true)} color="secondary">בנק חוגים</Button>
-            <Button size="small" startIcon={<AddIcon />} onClick={addRow}>שורה</Button>
-            <Button size="small" startIcon={<MergeIcon />} color={mergeMode ? 'warning' : 'inherit'}
-              onClick={() => { setMergeMode(!mergeMode); setMergeStart(null); if (!mergeMode) toast.info('לחץ על 2 תאים לאיחוד'); }}
-            >{mergeMode ? 'בטל איחוד' : 'אחד תאים'}</Button>
             <Button size="small" startIcon={<ContentCopyIcon />} onClick={() => setShowCopy(true)}
               disabled={!canEdit}>העתקה מכיתה</Button>
             {isManager && (
@@ -776,6 +772,7 @@ export default function GanttEditor() {
                           const cs = getVal(weekIdx, row.key, si, 'col_span');
                           const rs = getVal(weekIdx, row.key, si, 'row_span');
                           const isSelected = mergeStart?.wk === weekIdx && mergeStart?.rk === row.key && mergeStart?.di === si;
+                          const isMergeStart = isSelected;
                           const cellId = `cell-${weekIdx}-${row.key}-${si}`;
 
                           /**
@@ -884,10 +881,30 @@ export default function GanttEditor() {
                                 inputProps={{ style: { fontSize: '0.9rem', textAlign: 'center', lineHeight: 1.5, padding: '4px 0' } }}
                                 InputProps={{ disableUnderline: true }}
                               />
-                              <Box className="ca" sx={{ position: 'absolute', top: 0, left: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
-                                <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
-                                  <PaletteIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
-                                </IconButton>
+                              {/* The controls for a box live on the box. "אחד
+                                  תאים" used to be a mode you turned on in the
+                                  toolbar and then aimed — which meant reading a
+                                  toast to find out what the screen was now
+                                  doing. Started from the first cell instead,
+                                  it is one gesture and it says what it will do. */}
+                              <Box className="ca" sx={{ position: 'absolute', top: 0, insetInlineStart: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
+                                <Tooltip title="צבע">
+                                  <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
+                                    <PaletteIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
+                                  </IconButton>
+                                </Tooltip>
+                                {canEdit && (
+                                  <Tooltip title={isMergeStart ? 'בטלי איחוד' : 'איחוד — ואז לחצי על התא השני'}>
+                                    <IconButton size="small" sx={{ p: '2px' }} onClick={e => {
+                                      e.stopPropagation();
+                                      if (isMergeStart) { setMergeMode(false); setMergeStart(null); return; }
+                                      setMergeMode(true);
+                                      setMergeStart({ wk: weekIdx, rk: row.key, di: si });
+                                    }}>
+                                      <MergeIcon sx={{ fontSize: 13, color: isMergeStart ? '#f59e0b' : '#94a3b8' }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
                               </Box>
                               {(cs > 1 || rs > 1) && (
                                 <IconButton size="small" sx={{ position: 'absolute', bottom: 0, left: 0, p: '2px' }}
@@ -900,6 +917,24 @@ export default function GanttEditor() {
                         })}
                       </TableRow>
                     ))}
+
+                    {/* Adding a row belongs at the end of the rows, in the
+                        rows' own column — not in a toolbar above the plan.
+                        A row is shared by every week of the month, so this
+                        does the same thing from whichever week she is
+                        looking at. */}
+                    {canEdit && (
+                      <TableRow>
+                        <TableCell sx={{ bgcolor: '#f8fafc', p: 0.25, borderLeft: '2px solid #cbd5e1' }}>
+                          <Button size="small" fullWidth startIcon={<AddIcon sx={{ fontSize: 15 }} />}
+                            onClick={addRow}
+                            sx={{ fontSize: '0.72rem', color: '#64748b', py: 0.2, minHeight: 0 }}>
+                            שורה
+                          </Button>
+                        </TableCell>
+                        <TableCell colSpan={DAY_NAMES.length} sx={{ bgcolor: '#f8fafc', p: 0.25 }} />
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </TableContainer>
