@@ -195,9 +195,26 @@ export function buildGanttPrintHtml({
      the width of a thumb and the plan is read from across the room. */
   @page { size: A4 landscape; margin: 6mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  html, body { background: #fff; margin: 0; padding: 0; }
+  html { background: #e2e8f0; }
+  /*
+   * The body is exactly the printable width of the page, always.
+   *
+   * Without this the sheet is laid out at the WINDOW's width and then scaled by
+   * the browser to fit the paper — so on a wide monitor the whole document is
+   * shrunk by a third and the "full page" it measured itself into prints as
+   * half a page of content and a lot of white. Which is exactly what happened.
+   *
+   * Pinning the width to the page makes the screen layout and the print layout
+   * the same layout, so the fit script below is measuring the thing that will
+   * actually be printed.
+   */
+  body { width: 285mm; margin: 0 auto; background: #fff; padding: 0;
+         box-shadow: 0 0 0 1px #cbd5e1, 0 6px 24px rgba(15,23,42,.12); }
+  @media print { html { background: #fff; } body { box-shadow: none; margin: 0; } }
   :root { --k: 1; --pad: 0mm; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
   body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: #0f172a; }
+  /* A4 landscape less the 6mm @page margins, stated once and used by the
+     fit script below so the two cannot drift apart. */
 
   .head { display: flex; align-items: center; justify-content: space-between;
           margin-bottom: 2mm; }
@@ -293,6 +310,8 @@ export function buildGanttPrintHtml({
     var pageH = (210 - 12) * MM;   // A4 landscape less the 6mm @page margins
     var root = document.documentElement;
     var body = document.body;
+    // The body is the page: its width is pinned to the printable width, so its
+    // scroll height is the number of pages this will take.
     var over = function () { return body.scrollHeight > pageH; };
     var set = function (name, v) { root.style.setProperty(name, v); void body.offsetHeight; };
 
