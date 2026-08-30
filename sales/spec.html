@@ -1,0 +1,1074 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<!-- Same reason as the deck: without an explicit charset the browser guesses,
+     and over plain HTTP on a venue machine it guesses wrong. Every Hebrew word
+     in a 40-page document is not something to discover in front of a room. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>חלום — מסמך אפיון מערכת</title>
+<style>
+  /* Tokens are the deck's, on purpose. The document and the presentation are
+     shown in the same meeting and must look like one thing. */
+  :root{
+    --ground:#FBFCFD;
+    --surface:#EEF4F8;
+    --surface-2:#E3EDF3;
+    --line:#D5E2EA;
+    --ink:#0E2A3D;
+    --ink-soft:#3C5768;
+    --dim:#6C8394;
+    --teal:#158A7B;
+    --blue:#2668A8;
+    --gold:#A6701D;
+    --gold-bg:#FBF2E0;
+    --shadow:0 1px 2px rgba(14,42,61,.05), 0 8px 28px rgba(14,42,61,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0B1B26; --surface:#122635; --surface-2:#183245; --line:#23445A;
+      --ink:#EAF3F8; --ink-soft:#B4CBD9; --dim:#7E9AAC;
+      --teal:#3FCBB6; --blue:#66AAE8; --gold:#E0B45F; --gold-bg:#2A2113;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.34);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0B1B26; --surface:#122635; --surface-2:#183245; --line:#23445A;
+    --ink:#EAF3F8; --ink-soft:#B4CBD9; --dim:#7E9AAC;
+    --teal:#3FCBB6; --blue:#66AAE8; --gold:#E0B45F; --gold-bg:#2A2113;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 10px 34px rgba(0,0,0,.34);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);direction:rtl;
+    font-family:"Assistant","Heebo",-apple-system,"Arial Hebrew",Arial,sans-serif;
+    font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased;
+  }
+
+  /* ---- shell: sticky contents rail beside the page ---- */
+  .shell{display:grid;grid-template-columns:260px minmax(0,1fr);gap:48px;
+         max-width:1400px;margin:0 auto;padding:48px 32px 120px}
+  @media(max-width:1020px){.shell{grid-template-columns:1fr;gap:0;padding:28px 20px 80px}}
+
+  nav.toc{position:sticky;top:32px;align-self:start;max-height:calc(100vh - 64px);overflow-y:auto;
+          border-inline-start:1px solid var(--line);padding-inline-start:18px}
+  @media(max-width:1020px){nav.toc{position:static;max-height:none;border:1px solid var(--line);
+          border-radius:16px;padding:18px;margin-bottom:32px;background:var(--surface)}}
+  nav.toc .k{color:var(--teal);font-size:11px;font-weight:800;letter-spacing:.14em;
+             display:block;margin-bottom:12px}
+  nav.toc a{display:block;color:var(--dim);text-decoration:none;font-size:14px;padding:4px 0;
+            border-radius:6px;transition:color .15s}
+  nav.toc a:hover{color:var(--ink)}
+  nav.toc a.sub{padding-inline-start:14px;font-size:13px;opacity:.85}
+
+  main{min-width:0;max-width:none}
+
+  /* ---- cover ---- */
+  .cover{border-bottom:2px solid var(--line);padding-bottom:36px;margin-bottom:44px}
+  .brandrow{display:flex;align-items:center;gap:16px;margin-bottom:28px}
+  .mark{width:62px;height:62px;border-radius:22%;flex:none;position:relative;overflow:hidden;
+        background:linear-gradient(135deg,var(--teal),var(--blue))}
+  .mark svg{position:absolute;inset:0;width:100%;height:100%}
+  .brandrow .name{font-size:32px;font-weight:800;letter-spacing:-.02em}
+  .brandrow .sub{color:var(--dim);font-size:15px}
+  h1{font-size:clamp(34px,5vw,54px);line-height:1.06;margin:0 0 16px;font-weight:800;letter-spacing:-.03em}
+  .cover p.lede{font-size:clamp(17px,2vw,21px);line-height:1.6;color:var(--ink-soft);max-width:52ch;margin:0}
+  .meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+  .meta span{background:var(--surface);border:1px solid var(--line);border-radius:999px;
+             padding:6px 14px;font-size:13px;color:var(--dim)}
+
+  /* ---- headings ---- */
+  h2{font-size:clamp(24px,3vw,34px);font-weight:800;letter-spacing:-.02em;line-height:1.2;
+     margin:64px 0 6px;scroll-margin-top:24px}
+  h2 .num{color:var(--teal);font-variant-numeric:tabular-nums;margin-inline-end:12px}
+  h2 + p.sec{color:var(--dim);font-size:16px;margin:0 0 26px;max-width:62ch}
+  h3{font-size:20px;font-weight:800;margin:34px 0 10px;scroll-margin-top:24px}
+  h4{font-size:16px;font-weight:800;margin:20px 0 6px;color:var(--ink)}
+  p{margin:0 0 14px;color:var(--ink-soft);max-width:76ch}
+  b,strong{color:var(--ink);font-weight:700}
+
+  ul,ol{margin:0 0 16px;padding-inline-start:22px;color:var(--ink-soft);max-width:76ch}
+  li{margin-bottom:7px}
+  li b{color:var(--ink)}
+
+  /* ---- blocks ---- */
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px;margin:20px 0}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;
+       box-shadow:var(--shadow)}
+  .box h4{margin:0 0 7px;font-size:16px}
+  .box p{margin:0;color:var(--dim);font-size:14.5px;line-height:1.55}
+  .box ul{margin:8px 0 0;font-size:14.5px;color:var(--dim);padding-inline-start:18px}
+  .box ul li{margin-bottom:4px}
+
+  .note{background:var(--gold-bg);border:1px solid var(--gold);border-radius:14px;
+        padding:18px 20px;margin:20px 0}
+  .note .k{color:var(--gold);font-size:11px;font-weight:800;letter-spacing:.14em;
+           display:block;margin-bottom:8px}
+  .note p:last-child{margin:0}
+
+  .rule{background:var(--surface-2);border-inline-start:3px solid var(--teal);border-radius:0 10px 10px 0;
+        padding:14px 18px;margin:16px 0}
+  .rule p:last-child{margin:0}
+  .rule .k{color:var(--teal);font-size:11px;font-weight:800;letter-spacing:.14em;
+           display:block;margin-bottom:6px}
+
+  table{width:100%;border-collapse:collapse;font-size:15px;margin:18px 0}
+  th{text-align:right;padding:11px 12px;color:var(--dim);font-size:12.5px;font-weight:800;
+     letter-spacing:.06em;border-bottom:2px solid var(--line);vertical-align:top}
+  td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:var(--ink-soft)}
+  td:first-child{font-weight:700;color:var(--ink);white-space:nowrap}
+  tbody tr:hover{background:var(--surface)}
+  .wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:24px 0}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;text-align:center}
+  .stat .n{font-size:32px;font-weight:800;letter-spacing:-.03em;font-variant-numeric:tabular-nums;
+           color:var(--teal);line-height:1.1}
+  .stat .l{font-size:13px;color:var(--dim);margin-top:6px}
+
+  code{background:var(--surface-2);border:1px solid var(--line);border-radius:6px;
+       padding:1px 6px;font-size:13.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+       direction:ltr;display:inline-block;color:var(--ink)}
+  pre{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:16px 18px;
+      overflow-x:auto;direction:ltr;text-align:left;font-size:13.5px;line-height:1.6;margin:16px 0;
+      font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:18px 0}
+  .flow .s{background:var(--surface);border:1px solid var(--line);border-radius:10px;
+           padding:9px 14px;font-size:14px;font-weight:600;color:var(--ink)}
+  .flow .a{color:var(--teal);font-weight:800}
+
+  .tag{display:inline-block;background:var(--surface-2);border:1px solid var(--line);
+       border-radius:999px;padding:3px 11px;font-size:12.5px;color:var(--dim);margin:0 0 4px 4px}
+
+  hr{border:0;border-top:1px solid var(--line);margin:44px 0}
+
+  /* ---- theme toggle ----
+     Lives inside the contents rail rather than floating over the page. A fixed
+     control at the bottom corner sits on top of body text at every scroll
+     position, and this document is read, not clicked through. */
+  .toggle{display:block;width:100%;margin-top:18px;
+          background:var(--surface);border:1px solid var(--line);border-radius:999px;
+          padding:8px 14px;font-size:13px;color:var(--dim);cursor:pointer;
+          font-family:inherit;text-align:center}
+  .toggle:hover{color:var(--ink)}
+
+  /* ---- print: this document gets handed out ---- */
+  @media print{
+    :root{--ground:#fff;--surface:#f6f9fb;--surface-2:#eef4f8;--line:#c9d8e2;
+          --ink:#0E2A3D;--ink-soft:#2c4658;--dim:#5a7385;--shadow:none}
+    body{font-size:10.5pt;line-height:1.5}
+    .shell{display:block;max-width:none;padding:0}
+    nav.toc,.toggle{display:none}
+    h2{margin-top:26pt;page-break-after:avoid;font-size:17pt}
+    h3,h4{page-break-after:avoid}
+    .box,.note,.rule,table,pre{page-break-inside:avoid}
+    .cover{page-break-after:always}
+    a{color:inherit;text-decoration:none}
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+<nav class="toc">
+  <span class="k">תוכן העניינים</span>
+  <a href="#tamcit">תקציר מנהלים</a>
+  <a href="#baaya">1 · הבעיה</a>
+  <a href="#eqron">2 · עקרונות</a>
+  <a href="#arch">3 · ארכיטקטורה</a>
+  <a href="#users">4 · משתמשים והרשאות</a>
+  <a href="#nihul">5 · ניהול</a>
+  <a href="#kohadam">6 · כוח אדם</a>
+  <a href="#tifol">7 · תפעול</a>
+  <a href="#logistika">8 · אחזקה ולוגיסטיקה</a>
+  <a href="#horim">9 · פורטל הורים</a>
+  <a href="#ovedet">10 · האזור של העובדת</a>
+  <a href="#integ">11 · ממשקים חיצוניים</a>
+  <a href="#auto">12 · תהליכים אוטומטיים</a>
+  <a href="#security">13 · אבטחה ופרטיות</a>
+  <a href="#platform">14 · פלטפורמה רב-לקוחית</a>
+  <a href="#tashtit">15 · תשתית ותפעול</a>
+  <a href="#mispar">16 · קנה מידה</a>
+  <a href="#roadmap">17 · מפת דרכים</a>
+  <button class="toggle" id="tg">מצב תצוגה</button>
+</nav>
+
+<main>
+
+<!-- ============ COVER ============ -->
+<header class="cover">
+  <div class="brandrow">
+    <div class="mark">
+      <svg viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="38" r="15" fill="rgba(255,255,255,.92)"/>
+        <path d="M22 78c0-14 12-24 28-24s28 10 28 24z" fill="rgba(255,255,255,.72)"/>
+      </svg>
+    </div>
+    <div>
+      <div class="name">חלום</div>
+      <div class="sub">מערכת ניהול מעונות וגני ילדים</div>
+    </div>
+  </div>
+
+  <h1>מסמך אפיון מערכת</h1>
+  <p class="lede">
+    תיאור מלא של המערכת, המודולים, בעלי התפקידים, הממשקים והתשתית —
+    כפי שהיא פועלת היום בשימוש יומיומי בחמישה סניפים.
+  </p>
+
+  <div class="meta">
+    <span>גרסה 1.0</span>
+    <span>אוגוסט 2026</span>
+    <span>מסמך פנימי ולהצגה ללקוחות</span>
+  </div>
+</header>
+
+<!-- ============ EXEC SUMMARY ============ -->
+<h2 id="tamcit"><span class="num">·</span>תקציר מנהלים</h2>
+
+<p>
+  <b>חלום</b> היא מערכת ניהול אחת למעון או לרשת מעונות. היא מחזיקה את כל מה שגן עושה —
+  ילדים, הורים, כסף, עובדות, שעות, שכר, מלאי, תוכנית עבודה ותקשורת — במסד נתונים אחד,
+  ובממשק אחד בעברית.
+</p>
+
+<p>
+  ההבדל מהמוצרים הקיימים בשוק הוא לא ברשימת התכונות אלא בהיקף. אפליקציות התקשורת עושות
+  יפה את מה שההורה רואה. הן לא נוגעות בגבייה, בשכר, בחוזי העסקה, בטופס 101, במלאי, בשעון
+  הנוכחות או בתוכנית העבודה השבועית. את כל אלה הגן מנהל היום בשבע מערכות נפרדות שלא
+  מדברות ביניהן, ורובן אקסל.
+</p>
+
+<div class="stats">
+  <div class="stat"><div class="n">85</div><div class="l">ישויות במסד הנתונים</div></div>
+  <div class="stat"><div class="n">557</div><div class="l">נקודות קצה בשרת</div></div>
+  <div class="stat"><div class="n">141</div><div class="l">מסכי ניהול</div></div>
+  <!-- No "~" prefix here. A tilde is neutral-direction, so in an RTL block the
+       browser flips it to the far side and "~110K" reads as "110K~". The word
+       goes in the label instead, where it is Hebrew and cannot move. -->
+  <div class="stat"><div class="n">110,000</div><div class="l">שורות קוד, בקירוב</div></div>
+  <div class="stat"><div class="n">40</div><div class="l">מסכים בתפריט</div></div>
+  <div class="stat"><div class="n">7</div><div class="l">תפקידים מוגדרים</div></div>
+</div>
+
+<p>
+  המערכת בשימוש ייצור יומיומי. היא לא אב-טיפוס ולא הדגמה: הגן מפיק ממנה תלושי שכר,
+  גובה מהורים, חותם חוזי העסקה ומדפיס את התוכנית שתלויה על הקיר.
+</p>
+
+<!-- ============ 1 PROBLEM ============ -->
+<h2 id="baaya"><span class="num">1</span>הבעיה</h2>
+<p class="sec">מה שגורם לניהול גן להיות עבודה של ערבים, ולא של שעות העבודה.</p>
+
+<h3>1.1 שבע מערכות שלא מדברות</h3>
+<p>מעון טיפוסי מנהל היום את עצמו כך:</p>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>תחום</th><th>איפה זה חי היום</th><th>מה נשבר</th></tr></thead>
+  <tbody>
+    <tr><td>רשימת ילדים</td><td>אקסל, לפעמים שניים</td><td>שני קבצים לא מסכימים מי עזב</td></tr>
+    <tr><td>גבייה</td><td>אקסל נפרד + פנקס קבלות</td><td>תשלום שנשכח מתגלה בסוף השנה</td></tr>
+    <tr><td>נוכחות עובדות</td><td>שעון נוכחות של ספק חיצוני</td><td>דוח שמגיע כקובץ ומוקלד מחדש</td></tr>
+    <tr><td>שכר</td><td>רואה חשבון, בדוא״ל</td><td>שגיאה מתגלה אחרי שהתלוש נשלח</td></tr>
+    <tr><td>חוזים וטופס 101</td><td>נייר בקלסר</td><td>אף אחד לא יודע מה פג תוקף</td></tr>
+    <tr><td>תקשורת עם הורים</td><td>וואטסאפ</td><td>אין תיעוד, אין למי לחזור</td></tr>
+    <tr><td>תוכנית עבודה</td><td>אקסל שנתי, מועתק משנה לשנה</td><td>נכתב מחדש בכל שנה מאפס</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>1.2 העלות האמיתית</h3>
+<ul>
+  <li><b>כסף שלא נגבה.</b> תשלום חודשי אחד שנופל בין הכיסאות עולה יותר ממחיר המנוי החודשי למערכת.</li>
+  <li><b>הקלדה כפולה.</b> אותו ילד מוקלד ברישום, בגבייה, ברשימת הכיתה ובדף הקשר.</li>
+  <li><b>ידע שיוצא עם האדם.</b> מנהלת שעוזבת לוקחת איתה את מה שהיה בראש שלה.</li>
+  <li><b>אין תמונה של רשת.</b> בעלים של חמישה סניפים לא יכול לראות תפוסה או חוב בלי לפתוח חמישה קבצים.</li>
+</ul>
+
+<!-- ============ 2 PRINCIPLES ============ -->
+<h2 id="eqron"><span class="num">2</span>עקרונות תכנון</h2>
+<p class="sec">ההחלטות שחוזרות בכל מסך במערכת.</p>
+
+<div class="cols">
+  <div class="box">
+    <h4>מקור אמת אחד</h4>
+    <p>ילד מוקלד פעם אחת. הגבייה, דף הקשר, רשימת הכיתה ותיק הילד קוראים את אותה רשומה. אין ייצוא וייבוא בין מסכים.</p>
+  </div>
+  <div class="box">
+    <h4>מי שיודע — הוא זה שרושם</h4>
+    <p>הגננת שבחדר מדווחת שנגמרו המגבונים. הצלמת מעלה את התמונות. המנהלת לא צוואר בקבוק לכל פעולה.</p>
+  </div>
+  <div class="box">
+    <h4>הרשאות לפי מציאות</h4>
+    <p>מנהלת סניף לא רואה שכר של עובדת בסניף אחר. גננת לא רואה שכר בכלל. ההגבלה נאכפת בשרת, לא בהסתרה במסך.</p>
+  </div>
+  <div class="box">
+    <h4>כלום לא נמחק</h4>
+    <p>ילד שעזב, עובדת שסיימה, חוזה שהוחלף — עוברים לארכיון עם תאריך וסיבה. היסטוריה היא נכס, לא לכלוך.</p>
+  </div>
+  <div class="box">
+    <h4>עברית מלאה, ימין לשמאל</h4>
+    <p>לא תרגום של ממשק אנגלי. כל טופס, כל הודעת שגיאה, כל מסמך מודפס — נבנו בעברית.</p>
+  </div>
+  <div class="box">
+    <h4>המערכת עובדת גם כשאף אחד לא מסתכל</h4>
+    <p>סריקת דואר, בדיקת אישורים שפג תוקפם, איסוף החתמות מהשעון, גיבויים — רצים לבד ומתריעים כשצריך.</p>
+  </div>
+</div>
+
+<!-- ============ 3 ARCHITECTURE ============ -->
+<h2 id="arch"><span class="num">3</span>ארכיטקטורה</h2>
+<p class="sec">מה רץ איפה, ולמה.</p>
+
+<h3>3.1 מבט על</h3>
+<div class="flow">
+  <span class="s">דפדפן — צוות הגן</span><span class="a">←</span>
+  <span class="s">שרת יישום</span><span class="a">←</span>
+  <span class="s">מסד נתונים</span>
+</div>
+<div class="flow">
+  <span class="s">דפדפן/נייד — הורים</span><span class="a">←</span>
+  <span class="s">אותו שרת, פורטל נפרד</span>
+</div>
+<div class="flow">
+  <span class="s">שעון נוכחות בגן</span><span class="a">←</span>
+  <span class="s">רספברי פיי בסניף</span><span class="a">→</span>
+  <span class="s">שרת יישום</span>
+</div>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>רכיב</th><th>טכנולוגיה</th><th>תפקיד</th></tr></thead>
+  <tbody>
+    <tr><td>שרת יישום</td><td>Node.js, Express</td><td>כל ההיגיון העסקי, האימות וההרשאות. 557 נקודות קצה.</td></tr>
+    <tr><td>מסד נתונים</td><td>MongoDB Atlas</td><td>85 ישויות. מנוהל בענן עם גיבוי אוטומטי.</td></tr>
+    <tr><td>ממשק ניהול</td><td>React, Vite, MUI</td><td>141 מסכים בעברית ימין-לשמאל.</td></tr>
+    <tr><td>פורטל הורים</td><td>אותה אפליקציה, נתיב נפרד</td><td>כניסה בקוד חד-פעמי, ללא סיסמה קבועה בהתחלה.</td></tr>
+    <tr><td>סוכן סניף</td><td>Raspberry Pi Zero 2 W</td><td>מחבר את שעון הנוכחות המקומי לשרת. אחד לכל סניף.</td></tr>
+    <tr><td>הפקת מסמכים</td><td>Chromium בשרת</td><td>חוזים, תלושים, אישורים ותוכניות עבודה — כקובץ PDF.</td></tr>
+    <tr><td>אחסון קבצים</td><td>דיסק מתמיד + מסד</td><td>מסמכים חתומים, תמונות, סריקות.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>3.2 סוכן הסניף</h3>
+<p>
+  שעוני הנוכחות בגנים הם מכשירים מקומיים בלי גישה לאינטרנט. בכל סניף מותקן מחשב זעיר
+  שמריץ שלוש לולאות: משיכת החתמות חדשות כל 15 שניות, קבלת פקודות מהשרת כל 30 שניות,
+  ופעימת חיים כל דקה.
+</p>
+<div class="rule">
+  <span class="k">למה זה חשוב</span>
+  <p>
+    השעון לא נשען על ענן של ספק חיצוני. אם האינטרנט בסניף נופל — השעון ממשיך להחתים,
+    והסוכן משלים את מה שהצטבר כשהקו חוזר. שרת המערכת מתריע כשסוכן נשתתק, כדי שחודש
+    שלם של החתמות לא ייעלם בשקט.
+  </p>
+</div>
+
+<h3>3.3 שכפול טביעות אצבע בין סניפים</h3>
+<p>
+  עובדת שעובדת בשני סניפים צריכה להצליח להחתים בשני השעונים. תהליך רקע לוכד את טביעת
+  האצבע פעם אחת ודוחף אותה לכל שעון שבו היא עובדת. היא לא נרשמת פעמיים.
+</p>
+
+<!-- ============ 4 USERS ============ -->
+<h2 id="users"><span class="num">4</span>משתמשים והרשאות</h2>
+<p class="sec">שבעה תפקידים, ארבעים מסכים, והיכולת לחרוג מהברירה בשתי רמות.</p>
+
+<h3>4.1 התפקידים</h3>
+<div class="wrap">
+<table>
+  <thead><tr><th>תפקיד</th><th>מי זה</th><th>מה רואה</th></tr></thead>
+  <tbody>
+    <tr><td>מנהל מערכת</td><td>הבעלים או מנהל הרשת</td><td>הכל, בכל הסניפים</td></tr>
+    <tr><td>מנהלת סניף</td><td>מנהלת המעון</td><td>הסניפים שלה בלבד — נאכף בשרת בכל שאילתה</td></tr>
+    <tr><td>הנהלת חשבונות</td><td>חשב שכר או רו״ח</td><td>גבייה, שכר, תלושים, חוזים — בכל הסניפים</td></tr>
+    <tr><td>מובילת כיתה</td><td>גננת אחראית</td><td>הכיתה שלה: לוח יומי, גאנט, מלאי, תמונות</td></tr>
+    <tr><td>גננת</td><td>צוות חינוכי</td><td>לוח יומי, מה חסר, תמונות, האזור האישי</td></tr>
+    <tr><td>סייעת</td><td>צוות תומך</td><td>לוח יומי, מה חסר, תמונות, האזור האישי</td></tr>
+    <tr><td>טבחית</td><td>מטבח</td><td>מעקב מלאי, האזור האישי</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>4.2 חריגות מהברירה</h3>
+<p>
+  לכל מסך יש מזהה קבוע. מעליו פועלות שתי שכבות עקיפה, לפי סדר קדימות:
+</p>
+<ol>
+  <li><b>עקיפה אישית</b> — הוספה או שלילה של מסך למשתמש מסוים.</li>
+  <li><b>עקיפה לתפקיד</b> — שינוי הברירה לכל בעלי התפקיד בבת אחת.</li>
+  <li><b>ברירת המחדל של התפקיד.</b></li>
+</ol>
+<p>
+  כך אפשר לתת לגננת ותיקה גישה לרישום בלי להפוך אותה למנהלת, ובלי לגעת בקוד.
+</p>
+
+<div class="note">
+  <span class="k">הפרדה בין ראייה לפעולה</span>
+  <p>
+    גישה למסך אינה גישה לפעולה. דוגמה: מסך ההודעות פתוח לגננת — היא זו שיודעת שהטיול
+    ביום חמישי — אבל <b>פרסום</b> ההודעה, שליחתה בהודעות טקסט וחיוב תקציב ההודעות
+    שמורים למנהלת. ההפרדה נאכפת בשרת.
+  </p>
+</div>
+
+<!-- ============ 5 NIHUL ============ -->
+<h2 id="nihul"><span class="num">5</span>ניהול</h2>
+<p class="sec">תשעה מסכים. הליבה העסקית: מי הילדים, כמה הם משלמים, ומה הגן חייב להחזיק.</p>
+
+<h3>5.1 לוח בקרה</h3>
+<p>
+  מסך הפתיחה. מציג לכל סניף ושנת לימודים: מספר ילדים פעילים, חוזים חתומים, ממתינים
+  לחתימה, מקומות פנויים ותפוסה לפי כיתה. כרטיסי הכיתות צבועים לפי שכבת גיל, ולחיצה על
+  שם ילד פותחת את תיק הילד המלא. אריח נפרד מתריע על פריטי מלאי שירדו מתחת לסף.
+</p>
+
+<h3>5.2 פניות הורים</h3>
+<p>
+  טופס באתר הגן יוצר פנייה במערכת. הפנייה עוברת בשלבים — נוצר קשר, סיור נקבע, נרשם או
+  לא רלוונטי — ומי שנרשם עובר לתהליך הרישום בלי הקלדה חוזרת.
+</p>
+
+<h3>5.3 רישום</h3>
+<p>אשף רישום מלא, ולאחריו מעקב:</p>
+<ul>
+  <li>פרטי ילד, הורה ראשון והורה שני, כתובת, קופת חולים, אלרגיות והערות רפואיות</li>
+  <li>שיבוץ לכיתה עם בדיקת תפוסה מול הרישיון ומול קיבולת החדר</li>
+  <li>שכר לימוד חודשי, דמי רישום, והנחות</li>
+  <li><b>שכר לימוד עם תאריך תחילה</b> — שינוי מחיר באמצע שנה לא משנה רטרואקטיבית את החודשים שכבר חויבו</li>
+  <li>הפקת חוזה, שליחתו להורה בקישור אישי, וחתימה דיגיטלית</li>
+  <li>קליטת החוזה החתום חזרה למערכת ושליחת עותק להורה</li>
+</ul>
+
+<h3>5.4 רישום חיצוני — מעונות מפוקחים</h3>
+<p>
+  שלושה סניפים פועלים תחת פיקוח משרד התמ״ת. אצלם רשימת הילדים אינה נוצרת בגן אלא מגיעה
+  משני מקורות שצריכים להסכים: דוח האישורים של המשרד, וקובץ הרישום של מערכת ההרשמה החיצונית.
+</p>
+<div class="flow">
+  <span class="s">טעינת שני הקבצים</span><span class="a">←</span>
+  <span class="s">הצלבה</span><span class="a">←</span>
+  <span class="s">החלת מסקנות</span><span class="a">←</span>
+  <span class="s">שיבוץ לכיתות</span><span class="a">←</span>
+  <span class="s">קליטה למערכת</span>
+</div>
+<p>ההצלבה מסווגת כל שורה לאחת מהתוצאות:</p>
+<ul>
+  <li>מאושר בשני המקורות — מוכן לקליטה</li>
+  <li>אושר במשרד אך לא נרשם — צריך להתקשר להורים</li>
+  <li>נרשם אך אין אישור — לא ניתן לקלוט</li>
+  <li>ביטל רישום — מקום מתפנה</li>
+  <li>האישור בוטל בדיעבד</li>
+  <li>חסר תאריך כניסה בדוח המשרד</li>
+</ul>
+<div class="rule">
+  <span class="k">שכר לימוד שטרם נקבע</span>
+  <p>
+    במעונות המסובסדים שכר הלימוד תלוי במדרגת הכנסה שאינה מופיעה באף אחד משני הקבצים.
+    ילד יכול להיות מאושר, רשום ובטוח להגיע — ועדיין בלי סכום שאפשר להגן עליו. המערכת
+    קולטת אותו בסכום אפס ומסמנת את הרשומה כ״טרם נקבע״, במקום להמציא מספר שאיש לא אישר.
+    זו הרשימה שחוזרים אליה כשהמדרגות מגיעות.
+  </p>
+</div>
+
+<h3>5.5 גבייה</h3>
+<p>
+  טבלה אחת לשנה שלמה: שורה לילד, עמודה לחודש, וכל תא יודע כמה מצופה, כמה שולם ומה מספר
+  הקבלה.
+</p>
+<ul>
+  <li>סכום מצופה נגזר אוטומטית מהמחירון ומשכבת הגיל</li>
+  <li><b>עקיפה נקודתית</b> — סכום שונה לילד מסוים בחודש מסוים, עם סיבה</li>
+  <li>חישוב יחסי לילד שנכנס או יצא באמצע חודש</li>
+  <li>הנחות אחים והנחות פרטניות</li>
+  <li>דמי רישום וקבלה עליהם, בנפרד מהתשלום החודשי</li>
+  <li>קייטנת קיץ כרישום נפרד</li>
+  <li>סטטוס לכל תשלום — שולם, חלקי, לא שולם, בוטל</li>
+  <li>ביטול רישום שומר את החוב שנצבר עד לביטול</li>
+  <li>היסטוריית שינויים לכל רשומת גבייה</li>
+</ul>
+
+<h3>5.6 מחירון</h3>
+<p>
+  מחירון לכל סניף בנפרד, לפי שכבת גיל ולפי שנת לימודים. במעונות המפוקחים המחירון כולל
+  את המדרגה הממשלתית, את סל השירותים של הגן, ואת שעות ההארכה — עם הבחנה בין מחיר לפני
+  פריסת התשלומים לבין מחיר שנוסף לכל חיוב.
+</p>
+<div class="rule">
+  <span class="k">פריסה לאחד-עשר תשלומים</span>
+  <p>
+    הגן פועל שנים-עשר חודשים וגובה באחד-עשר: אוגוסט אינו נגבה ומתחלק על פני השנה.
+    המערכת מבחינה בין רכיב שנפרס לרכיב שנוסף כמות שהוא לכל תשלום — הבחנה ששווה
+    כחמישים שקלים בחודש לילד אם עושים אותה לא נכון.
+  </p>
+</div>
+
+<h3>5.7 מסמכים להורים</h3>
+<p>
+  אישור שהות ואישור קייטנה — המסמכים שמשפחה מבקשת מהמשרד לצורך מס הכנסה, ביטוח לאומי
+  או מקום עבודה. מופקים מהמערכת עם הנתונים האמיתיים ועם לוגו הגן, במקום להיכתב מחדש
+  בכל פעם.
+</p>
+
+<h3>5.8 ארכיון</h3>
+<p>
+  ילדים שסיימו, רישומים שבוטלו ושנים קודמות. נשמר במלואו, ניתן לחיפוש, ולא מעורבב
+  ברשימות הפעילות.
+</p>
+
+<h3>5.9 אישורי מעון</h3>
+<p>
+  המסמכים שהגן חייב להחזיק כדי לפעול: רישיון הפעלה, בדיקת חשמלאי, מערכת גילוי אש,
+  אישור כיבוי, תברואה. לכל אישור תאריך תפוגה, וקובץ סרוק. תהליך רקע שולח למשרד התרעה
+  כשאישור פג או נכנס לחלון האזהרה.
+</p>
+
+<!-- ============ 6 HR ============ -->
+<h2 id="kohadam"><span class="num">6</span>כוח אדם</h2>
+<p class="sec">שנים-עשר מסכים. מגיוס ועד תלוש, כולל מנוע חישוב שכר מלא.</p>
+
+<h3>6.1 תיק עובד</h3>
+<p>רשומה אחת לעובדת, ובה כל מה שהגן צריך לדעת:</p>
+<div class="cols">
+  <div class="box">
+    <h4>זהות והעסקה</h4>
+    <ul>
+      <li>תעודת זהות, טלפון, כתובת</li>
+      <li>תפקיד, סניף ראשי וסניפים נוספים</li>
+      <li>כיתה ראשית וכיתות נוספות</li>
+      <li>תאריך תחילת עבודה</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>תנאי שכר</h4>
+    <ul>
+      <li>שכר שעתי או גלובלי</li>
+      <li>שכר ברוטו או נטו</li>
+      <li>שעות נדרשות לחודש</li>
+      <li>תעריף שעות נוספות</li>
+      <li>תעריף שונה לכל עמותה או סניף</li>
+      <li>היסטוריית תנאים עם תאריך תחולה</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>תוספות וניכויים</h4>
+    <ul>
+      <li>נסיעות — יומי, חודשי או קבוע</li>
+      <li>ארוחות, דמי הבראה</li>
+      <li>בונוסים חוזרים או חד-פעמיים</li>
+      <li>הלוואות בתשלומים</li>
+      <li>פנסיה וקרן השתלמות</li>
+      <li>פטורים — פנסיה, ביטוח לאומי</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>מצבים מיוחדים</h4>
+    <ul>
+      <li>מחלה — מכסה, יתרה ומדיניות</li>
+      <li>הריון, בדיקות ושמירת הריון</li>
+      <li>חופשת לידה עם תאריכים</li>
+      <li>מילואים</li>
+      <li>משרה קבועה עם ימים ושעות</li>
+    </ul>
+  </div>
+</div>
+
+<h3>6.2 גיוס</h3>
+<p>
+  טופס באתר יוצר מועמד. מנהלת סניף רואה רק את המועמדים לגנים שהיא מנהלת — הסינון נאכף
+  שורה-שורה בשרת, כי מדובר בטלפונים פרטיים של אנשים שאינם עובדים כאן. תהליך רקע שולח לכל
+  מנהלת בבוקר את מי שממתין לה, ורק אם יש מה לשלוח. פנייה ראשונה למועמד נשלחת בשם אדם,
+  לא בשם מוסד.
+</p>
+
+<h3>6.3 נוכחות והחתמות</h3>
+<ul>
+  <li>החתמות מגיעות מהשעון בסניף דרך סוכן הסניף, ומקושרות אוטומטית לעובדת לפי תעודת זהות</li>
+  <li>לוח חודשי צבעוני: כל יום, כל עובדת, כל זוג כניסה-יציאה</li>
+  <li>החתמה ידנית ליום שנשכח, עם ציון מי הוסיף</li>
+  <li>אישור מנהלת להחתמות חריגות</li>
+  <li>בקשת תיקון מהעובדת, והחלטה של המנהלת</li>
+  <li>זיהוי אוטומטי של בעיות: החתמה בודדת, יום ללא יציאה, חפיפה בין סניפים</li>
+  <li>פיצול יום בין סניפים או בין עמותות</li>
+  <li>משרה קבועה — ימים ושעות שנחשבים גם בלי החתמה</li>
+  <li>דוח שעות חודשי לכל עובדת, כולל ייצוא</li>
+</ul>
+
+<h3>6.4 מנוע חישוב השכר</h3>
+<p>
+  ליבת המערכת. מקבל עובדת, חודש והחתמות, ומחזיר תלוש מלא. עיקרי הלוגיקה:
+</p>
+<div class="wrap">
+<table>
+  <thead><tr><th>רכיב</th><th>מה נעשה</th></tr></thead>
+  <tbody>
+    <tr><td>זיווג החתמות</td><td>כניסות ויציאות מזווגות כרונולוגית, לפי יום קלנדרי ישראלי</td></tr>
+    <tr><td>שעות נוספות</td><td>פיצול יומי לרגילות, 125% ו-150% לפי חוק שעות עבודה ומנוחה</td></tr>
+    <tr><td>שכר גלובלי</td><td>חישוב יחסי כשמספר השעות נמוך מהנדרש, עם אפשרות לכפות תשלום מלא</td></tr>
+    <tr><td>פיצול בין סניפים</td><td>יום שנעבד בשני סניפים מתחלק לפי הזמן בפועל</td></tr>
+    <tr><td>פיצול בין עמותות</td><td>אותו פיצול ברמת הגוף המשלם, לצורך דיווח נפרד</td></tr>
+    <tr><td>ימים מיוחדים</td><td>מכפילי תעריף לחגים ולתאריכים שהוגדרו מראש</td></tr>
+    <tr><td>מחלה</td><td>לפי מדיניות, מיתרה, עם ערך יום שניתן לעקוף</td></tr>
+    <tr><td>חופשה וחגים</td><td>יישום אוטומטי של ימי חג ובקשות חופשה מאושרות</td></tr>
+    <tr><td>הריון ולידה</td><td>בדיקות הריון, שמירת הריון וחופשת לידה כרכיבים נפרדים</td></tr>
+    <tr><td>הלוואות ובונוסים</td><td>ניכוי תשלום חודשי, וזיכוי בונוס לפי שעות או ימים</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>6.5 חודש שכר — תהליך הסגירה</h3>
+<div class="flow">
+  <span class="s">איסוף החתמות</span><span class="a">←</span>
+  <span class="s">טיפול בחריגות</span><span class="a">←</span>
+  <span class="s">עדכונים מהמנהלות</span><span class="a">←</span>
+  <span class="s">נעילת חודש</span><span class="a">←</span>
+  <span class="s">שליחה לרו״ח</span><span class="a">←</span>
+  <span class="s">קליטת תלושים</span>
+</div>
+<ul>
+  <li><b>רשימת חריגות</b> לפני הסגירה, עם תזכורות אוטומטיות למי שצריך לתקן</li>
+  <li><b>עדכוני שכר חודשי</b> — מסך למנהלת סניף לדווח בונוס, ניכוי או תוספת בלי לראות תעריפים של אחרות</li>
+  <li><b>בקשות שינוי</b> עם אישור או דחייה מתועדים</li>
+  <li><b>נעילה</b> שמונעת שינוי בדיעבד, עם אפשרות פתיחה מחדש מתועדת</li>
+  <li><b>תצוגה מקדימה לרו״ח</b> וייצוא בפורמט שלו</li>
+  <li><b>עמודות מותאמות</b> ותבניות שמורות לרכיבים שחוזרים</li>
+</ul>
+
+<h3>6.6 ביקורת תלושים</h3>
+<p>
+  התלושים חוזרים מרואה החשבון כקובץ. המערכת מפרקת אותם, משווה כל רכיב מול מה שהיא עצמה
+  חישבה, ומציגה רק את הפערים. תלוש מאושר מסומן כגרסה סופית ונשלח לעובדת.
+</p>
+
+<h3>6.7 חוזי העסקה</h3>
+<p>
+  הפקת חוזה מתנאי ההעסקה שבתיק, שליחה לחתימה דיגיטלית, שמירת העותק החתום, וניהול
+  גרסאות ונספחים. שינוי תעריף מייצר נספח עם תיעוד מי אישר ומתי.
+</p>
+
+<h3>6.8 טופס 101</h3>
+<p>
+  סריקת תיבת הדואר לאיתור טפסים שהגיעו, זיהוי אוטומטי של הטופס והעובדת, ותיוק לתיק
+  האישי. מסך מרכזי מראה מי הגיש לשנה הנוכחית ומי לא.
+</p>
+
+<h3>6.9 קורסים והכשרות</h3>
+<p>
+  מעקב אחר ההסמכות שכל עובדת חייבת להחזיק — עזרה ראשונה, התנהלות בטוחה — עם תאריך
+  תפוגה, קובץ התעודה, והתרעה במייל לפני שפג.
+</p>
+
+<h3>6.10 בקשות ומסמכים לעובד</h3>
+<p>
+  בקשות חופשה, בקשות שינוי פרטים ובקשות אישור — כולן עוברות אישור מתועד. אישור העסקה,
+  אישור שכר ומכתבים אחרים מופקים מהמערכת עם לוגו ונתונים אמיתיים.
+</p>
+
+<!-- ============ 7 OPS ============ -->
+<h2 id="tifol"><span class="num">7</span>תפעול</h2>
+<p class="sec">שלושה-עשר מסכים. מה שקורה בגן עצמו, ביום עבודה רגיל.</p>
+
+<h3>7.1 לוח תינוקייה</h3>
+<p>
+  הלוח היומי של חדרי התינוקות. לכל ילד: אכילה, שינה, החתלה, מצב רוח והערות. ההורה רואה
+  את היום של הילד שלו בפורטל בזמן אמת. הלוח פתוח לצוות שנמצא בחדר — לוח שממלאת ההנהלה
+  הוא לוח שממלא מי שלא היה שם.
+</p>
+
+<h3>7.2 מה חסר</h3>
+<p>
+  דיווח מהיר על מלאי שנגמר בחדר. פתוח לכל מי שנמצא בחדר, כי מי שרואה שנגמרו המגבונים
+  אינו במשרד. הדיווח מגיע ישירות למסך ההזמנות.
+</p>
+
+<h3>7.3 גאנט — תוכנית העבודה החודשית</h3>
+<p>
+  התוכנית השבועית שהגננת בונה בכל חודש, שעד היום נכתבה באקסל ונתלתה על הקיר.
+</p>
+<div class="cols">
+  <div class="box">
+    <h4>מבנה</h4>
+    <p>שורות לפי תחום, עמודות לפי ימי השבוע — ראשון עד שישי. שבועות שלמים, כולל ימים שנשאלים מהחודש הקודם או הבא.</p>
+  </div>
+  <div class="box">
+    <h4>בנק תוכן</h4>
+    <p>3,009 פעילויות ב-35 נושאים, שנבנו מ-18 תוכניות עבודה שנתיות אמיתיות. הבנק יודע אילו נושאים שייכים לאיזה חודש.</p>
+  </div>
+  <div class="box">
+    <h4>מילוי שבוע</h4>
+    <p>בוחרים נושא, ושבוע שלם מתמלא בהצעות מדורגות לפי שכבת גיל — עם תצוגה מקדימה והחלפה בין ימים לפני היישום.</p>
+  </div>
+  <div class="box">
+    <h4>לוח חופשות</h4>
+    <p>ימי סגירה מגיעים מלוח החופשות של הסניף, מסומנים על התוכנית, והמילוי האוטומטי מדלג עליהם.</p>
+  </div>
+  <div class="box">
+    <h4>העתקה</h4>
+    <p>העתקת תוכנית בין שכבות גיל ובין סניפים, לפי מיקום בשבוע. חופשות של סניף היעד נשמרות.</p>
+  </div>
+  <div class="box">
+    <h4>עבודה משותפת</h4>
+    <p>מובילות מוגדרות לכל כיתה ועורכות יחד עם המנהלת. שמירה בו-זמנית מזוהה ומוצגת, ולא דורסת.</p>
+  </div>
+  <div class="box">
+    <h4>אבא ואמא של שבת</h4>
+    <p>המערכת יודעת מי הילדים בכיתה, מנהלת סבב שבו אף ילד לא חוזר עד שכולם היו, ומציעה שיבוץ לחודש שלם.</p>
+  </div>
+  <div class="box">
+    <h4>הדפסה</h4>
+    <p>חודש מלא בעיצוב שמתאים לתלייה בגן. הדף מודד את עצמו ומתאים את הגופן והריווח כדי למלא את העמוד.</p>
+  </div>
+</div>
+<div class="rule">
+  <span class="k">כל תוכן חדש נשמר</span>
+  <p>
+    מה שהגננת כותבת בעצמה נשמר לבנק של הגן — ומוצע לה שוב בשנה הבאה. שמות ילדים,
+    ימי הולדת וקבלת שבת מסוננים ולא נכנסים לבנק בשום מצב. תוכן שגן מוסיף שייך לו ואינו
+    נראה לאף לקוח אחר.
+  </p>
+</div>
+
+<h3>7.4 מעקב חוגים</h3>
+<p>
+  חוגים חיצוניים: ספק, מפגשים, נוכחות ילדים, וחיוב. כולל התראה כשמפגש לא בוצע.
+</p>
+
+<h3>7.5 אירועים</h3>
+<p>
+  אירועי גן עם הרשמה: מסיבת סוף שנה, יום הורים, מכירת עוגות. הורים נרשמים בקישור,
+  ובוחרים מה הם מביאים — עם מניעת כפילויות.
+</p>
+
+<h3>7.6 הודעות לגן</h3>
+<p>
+  הודעה נכתבת בידי מי שיודעת, מאושרת בידי מנהלת, ואז מפורסמת בפורטל ההורים, מועתקת
+  לוואטסאפ, או נשלחת בהודעת טקסט. תקציב ההודעות מנוהל ומוצג לפני השליחה.
+</p>
+
+<h3>7.7 היעדרויות</h3>
+<p>
+  הורה מדווח מראש שהילד לא מגיע. הצוות רואה את זה בבוקר, ולא בשעה שהילד לא מגיע.
+</p>
+
+<h3>7.8 מורשי איסוף</h3>
+<p>
+  מי מורשה לאסוף כל ילד, עם תמונה. הצפייה פתוחה לכל מי שסוגר את החדר; ההרשאה עצמה
+  ניתנת רק בידי מנהלת.
+</p>
+
+<h3>7.9 תמונות ומתנות</h3>
+<p>
+  העלאת תמונות בידי מי שצילם, שיוך לכיתה, וגלריה להורים. במסגרת קמפיין מתנות — ההורה
+  או הגננת בוחרים את התמונה שתיכנס למתנה.
+</p>
+
+<h3>7.10 עדכונים מהורים</h3>
+<p>
+  הורה מתקן טלפון, כתובת או אלרגיה בפורטל, והשינוי חי מיד. המסך הזה הוא איך שהגן
+  מגלה. מובילת כיתה נמצאת ברשימה כי אלרגיה היא עניינה לפני שהיא עניין ההנהלה.
+</p>
+
+<h3>7.11 דף קשר</h3>
+<p>
+  רשימת קשר מודפסת לכיתה או לסניף — שמות, טלפונים, אלרגיות. מסונן לסניף ולשנה הנכונים.
+</p>
+
+<!-- ============ 8 LOGISTICS ============ -->
+<h2 id="logistika"><span class="num">8</span>אחזקה ולוגיסטיקה</h2>
+<p class="sec">ארבעה מסכים. מה נכנס לגן ומה מתקלקל בו.</p>
+
+<h3>8.1 מעקב מלאי</h3>
+<ul>
+  <li>פריטים לפי קטגוריה, יחידת מידה וגודל אריזה</li>
+  <li>כמות נוכחית, סף אזהרה וסף מינימום</li>
+  <li>תנועות מלאי מתועדות — קליטה, שימוש, ספירה</li>
+  <li>אצוות עם תאריך תפוגה ומספר מדף</li>
+  <li>ספירת מלאי עם ציון מי ספר ומתי</li>
+</ul>
+
+<h3>8.2 הזמנות</h3>
+<p>
+  הזמנה נבנית מדיווחי החוסר או ידנית, עוברת אישור, נשלחת לספק כמסמך, ונקלטת בחזרה
+  למלאי בעת האספקה — כולל קליטה חלקית. כללי אלרגיה נשמרים ברמת המוצר, כדי ששומשום לא
+  ייכנס לגן בטעות.
+</p>
+
+<h3>8.3 ספקים</h3>
+<p>פרטי קשר, מוצרים, מחירים ותנאי תשלום.</p>
+
+<h3>8.4 אחזקה</h3>
+<p>תקלות ומשימות אחזקה לפי סניף, עם סטטוס וטיפול.</p>
+
+<!-- ============ 9 PARENT PORTAL ============ -->
+<h2 id="horim"><span class="num">9</span>פורטל הורים</h2>
+<p class="sec">אפליקציה נפרדת, בטלפון, בלי התקנה.</p>
+
+<h3>9.1 כניסה</h3>
+<p>
+  הורה מזדהה בטלפון ומקבל קוד חד-פעמי. רק אחריו הוא מגדיר סיסמה. הורה שני מוזמן בידי
+  הראשון. החלפת מספר טלפון דורשת אימות מחדש.
+</p>
+
+<h3>9.2 מה ההורה עושה</h3>
+<div class="cols">
+  <div class="box"><h4>פרטי הילד</h4><p>צפייה ועדכון של טלפון, כתובת, אלרגיות ואנשי קשר. השינוי חי מיד ומדווח לגן.</p></div>
+  <div class="box"><h4>היום בגן</h4><p>לוח התינוקייה של הילד — אכילה, שינה, החתלה, מצב רוח.</p></div>
+  <div class="box"><h4>דיווח היעדרות</h4><p>סימון מראש שהילד לא מגיע, וביטול הדיווח.</p></div>
+  <div class="box"><h4>תשלומים</h4><p>מה שולם, מה מצופה, ומה נותר — לפי חודש.</p></div>
+  <div class="box"><h4>חוזים</h4><p>צפייה והורדה של החוזה החתום.</p></div>
+  <div class="box"><h4>הודעות</h4><p>הודעות הגן לכיתה ולסניף, כולל דחופות.</p></div>
+  <div class="box"><h4>תמונות</h4><p>גלריית התמונות של הכיתה, והעלאת תמונה למתנה.</p></div>
+  <div class="box"><h4>מורשי איסוף</h4><p>הוספה והסרה של מי שרשאי לאסוף.</p></div>
+  <div class="box"><h4>תוכנית העבודה</h4><p>הגאנט החודשי של הכיתה, במידה שהגן בחר לחשוף אותו.</p></div>
+  <div class="box"><h4>חופשות</h4><p>לוח החופשות של הסניף.</p></div>
+  <div class="box"><h4>ציוד ואספקה</h4><p>מה ההורה מתבקש להביא.</p></div>
+</div>
+
+<div class="note">
+  <span class="k">שליטת הגן בחשיפה</span>
+  <p>
+    לא כל גן רוצה להראות להורים את אותם דברים. מה שנחשף בפורטל נקבע לכל סניף בנפרד —
+    כולל תוכנית העבודה, שגן אחד יראה בה שקיפות וגן אחר יראה בה מסמך פנימי.
+  </p>
+</div>
+
+<!-- ============ 10 EMPLOYEE ============ -->
+<h2 id="ovedet"><span class="num">10</span>האזור של העובדת</h2>
+<p class="sec">חמישה מסכים. מה שעד היום נענה בטלפון למנהלת.</p>
+<ul>
+  <li><b>צפי השכר שלי</b> — כמה יצא החודש, לפי השעות שכבר נצברו</li>
+  <li><b>התלושים שלי</b> — כל התלושים שנשלחו, להורדה</li>
+  <li><b>המסמכים שלי</b> — חוזה, טופס 101, תעודות והסמכות</li>
+  <li><b>ההחתמות שלי</b> — היומן החודשי, ובקשת תיקון ליום שגוי</li>
+  <li><b>עדכונים</b> — מה שונה בשכר החודש ולמה</li>
+</ul>
+
+<!-- ============ 11 INTEGRATIONS ============ -->
+<h2 id="integ"><span class="num">11</span>ממשקים חיצוניים</h2>
+<p class="sec">איפה המערכת נוגעת בעולם.</p>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>ממשק</th><th>כיוון</th><th>מה עובר</th></tr></thead>
+  <tbody>
+    <tr><td>שעוני נוכחות</td><td>נכנס</td><td>החתמות וטביעות אצבע, דרך סוכן הסניף</td></tr>
+    <tr><td>מערכת ההרשמה החיצונית</td><td>נכנס</td><td>קובץ רישום ילדים, כולל מגדר ותנאי תשלום</td></tr>
+    <tr><td>דוח משרד התמ״ת</td><td>נכנס</td><td>אישורי זכאות, מדרגות סבסוד ותאריכי כניסה</td></tr>
+    <tr><td>סיבוס</td><td>נכנס</td><td>דוח חודשי, נמשך אוטומטית מהדואר</td></tr>
+    <tr><td>טופס 101</td><td>נכנס</td><td>סריקת דואר, זיהוי הטופס והעובדת, תיוק אוטומטי</td></tr>
+    <tr><td>תלושי שכר</td><td>נכנס</td><td>קבצים מרואה החשבון, מפורקים ומושווים</td></tr>
+    <tr><td>טופס גיוס באתר</td><td>נכנס</td><td>מועמדים, משויכים לסניף</td></tr>
+    <tr><td>טופס פנייה באתר</td><td>נכנס</td><td>פניות הורים</td></tr>
+    <tr><td>דואר אלקטרוני</td><td>יוצא</td><td>חוזים, תלושים, אישורים, דיג׳סטים</td></tr>
+    <tr><td>הודעות טקסט</td><td>יוצא</td><td>הודעות לגן, עם ניהול תקציב</td></tr>
+    <tr><td>וואטסאפ</td><td>יוצא</td><td>הודעה מוכנה להעתקה, כולל באנר לקבוצה</td></tr>
+    <tr><td>ייצוא לרו״ח</td><td>יוצא</td><td>קובץ חודשי בפורמט של משרד הנהלת החשבונות</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============ 12 AUTOMATION ============ -->
+<h2 id="auto"><span class="num">12</span>תהליכים אוטומטיים</h2>
+<p class="sec">מה שרץ בלי שאף אחד לוחץ.</p>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>תהליך</th><th>תדירות</th><th>מה עושה</th></tr></thead>
+  <tbody>
+    <tr><td>איסוף החתמות</td><td>כל 15 שניות</td><td>משיכת החתמות חדשות מהשעון בכל סניף</td></tr>
+    <tr><td>פעימת חיים</td><td>כל דקה</td><td>סוכן הסניף מדווח שהוא חי ושהשעון מגיב</td></tr>
+    <tr><td>סוכן שנשתתק</td><td>כל שעה</td><td>התרעה כשסניף הפסיק לדווח</td></tr>
+    <tr><td>שכפול טביעות אצבע</td><td>כל 6 שעות</td><td>העתקת טביעה של עובדת לכל שעון שבו היא עובדת</td></tr>
+    <tr><td>סיבוס</td><td>כל שעה</td><td>שליפת הדוח החודשי מהדואר, פעם אחת בחודש</td></tr>
+    <tr><td>סריקת טופסי 101</td><td>כל 6 שעות</td><td>זיהוי טפסים חדשים בדואר ותיוקם</td></tr>
+    <tr><td>דיג׳סט גיוס</td><td>כל שעה, מ-10:00</td><td>מייל למנהלת עם המועמדים שממתינים לה</td></tr>
+    <tr><td>דיג׳סט אישורים</td><td>כל שעה</td><td>התרעה על רישיונות וקורסים שפגו — רק כשהרשימה השתנתה</td></tr>
+    <tr><td>גיבוי מסד</td><td>יומי</td><td>מנוהל בענן, עם שמירת גרסאות</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="rule">
+  <span class="k">עיקרון: אין רעש</span>
+  <p>
+    דיג׳סט האישורים לא נשלח כל בוקר. הוא נשלח רק כשהרשימה השתנתה, או פעם בשבוע —
+    כי ״הרישיון עדיין פג במאי״ אינו חדשות במשך חודשיים. התרעה שמתעלמים ממנה היא
+    התרעה שלא קיימת.
+  </p>
+</div>
+
+<!-- ============ 13 SECURITY ============ -->
+<h2 id="security"><span class="num">13</span>אבטחה ופרטיות</h2>
+<p class="sec">מדובר בילדים, במשכורות ובמספרי זהות.</p>
+
+<h3>13.1 הזדהות</h3>
+<ul>
+  <li>צוות — שם משתמש וסיסמה, עם אפשרות כניסה ביומטרית במכשיר</li>
+  <li>הורים — קוד חד-פעמי לטלפון, ואחריו סיסמה אישית</li>
+  <li>סוכן סניף — סוד ייעודי לכל סניף, בהשוואה עמידה בזמן</li>
+  <li>קישורי חתימה — אסימון אישי עם תפוגה, לא ניתן לניחוש</li>
+</ul>
+
+<h3>13.2 הפרדת נתונים</h3>
+<ul>
+  <li>מנהלת סניף נחסמת ברמת השאילתה, לא ברמת המסך — היא לא יכולה לבקש נתון של סניף אחר גם ישירות</li>
+  <li>שכר ותעריפים אינם נגישים לתפקידים חינוכיים</li>
+  <li>טלפונים של מועמדים לעבודה מסוננים לפי הסניפים שבאחריות המנהלת</li>
+  <li>הורה רואה את הילד שלו בלבד</li>
+</ul>
+
+<h3>13.3 מעקב ותיעוד</h3>
+<ul>
+  <li>יומן פעילות לפעולות משמעותיות — מי, מה, מתי</li>
+  <li>שינויי שכר, ביטולי רישום ופתיחת חודש נעול — כולם מתועדים עם המבצע והסיבה</li>
+  <li>מחיקה היא העברה לארכיון, לא השמדה</li>
+</ul>
+
+<h3>13.4 פרטיות בבנק התוכן</h3>
+<p>
+  בנק התוכן מסנן שמות ילדים, ימי הולדת וכל מה שמזהה אדם — בשני מקומות: בעת בניית הבנק
+  ובעת שמירת תוכן חדש. תוכן שגן מוסיף שייך לגן ואינו נראה לאף לקוח אחר.
+</p>
+
+<!-- ============ 14 PLATFORM ============ -->
+<h2 id="platform"><span class="num">14</span>פלטפורמה רב-לקוחית</h2>
+<p class="sec">איך אותה מערכת משרתת רשת אחת או מאה גנים נפרדים.</p>
+
+<p>
+  המערכת בנויה בשני מצבים. במצב הרגיל היא משרתת רשת אחת, עם מסד נתונים אחד. במצב
+  פלטפורמה יש מישור בקרה מרכזי, ולכל לקוח מסד נתונים משלו.
+</p>
+
+<div class="cols">
+  <div class="box">
+    <h4>הפרדה מלאה</h4>
+    <p>נתוני לקוח יושבים במסד נפרד. אין שאילתה שיכולה לחצות בין לקוחות, גם לא בטעות.</p>
+  </div>
+  <div class="box">
+    <h4>תהליכים לכל לקוח</h4>
+    <p>כל תהליך רקע רץ לכל לקוח בנפרד, בתוך המסד שלו.</p>
+  </div>
+  <div class="box">
+    <h4>מה לא רץ לכל לקוח</h4>
+    <p>תהליכים שקוראים את תיבת הדואר שלנו או משתמשים במפתחות שלנו נשארים מרכזיים — עד שלקוח יוכל לשאת אישורים משלו.</p>
+  </div>
+</div>
+
+<!-- ============ 15 INFRA ============ -->
+<h2 id="tashtit"><span class="num">15</span>תשתית ותפעול</h2>
+
+<h3>15.1 סביבת ריצה</h3>
+<ul>
+  <li>שרת בענן, עם העלאה אוטומטית של גרסה חדשה מהמאגר</li>
+  <li>מסד נתונים מנוהל בענן, עם גיבוי אוטומטי</li>
+  <li>דיסק מתמיד לקבצים — מסמכים חתומים, תמונות, סריקות</li>
+  <li>ניטור בריאות עם מזהה גרסה, כדי לאמת איזו גרסה חיה בפועל</li>
+</ul>
+
+<h3>15.2 בקרת איכות</h3>
+<ul>
+  <li>בדיקות אוטומטיות רצות בכל העלאה, ותקלה עוצרת את ההעלאה</li>
+  <li>כל תיקון באג נוחת עם בדיקה שנכשלת בלעדיו</li>
+  <li>בדיקות ייעודיות למנוע השכר, לבנק התוכן, ללוח השנה ולסבב אבא ואמא של שבת</li>
+</ul>
+
+<h3>15.3 חומרה בסניף</h3>
+<ul>
+  <li>מחשב זעיר לכל סניף, מופעל אוטומטית בעליית מתח</li>
+  <li>עלות חומרה נמוכה, התקנה של פעם אחת</li>
+  <li>שחזור עצמי אחרי הפסקת חשמל או ניתוק רשת</li>
+</ul>
+
+<!-- ============ 16 SCALE ============ -->
+<h2 id="mispar"><span class="num">16</span>קנה מידה</h2>
+<p class="sec">המספרים, כפי שהם היום.</p>
+
+<div class="wrap">
+<table>
+  <thead><tr><th>מדד</th><th>ערך</th></tr></thead>
+  <tbody>
+    <tr><td>סניפים פעילים</td><td>חמישה</td></tr>
+    <tr><td>ישויות במסד</td><td>85</td></tr>
+    <tr><td>נקודות קצה בשרת</td><td>557</td></tr>
+    <tr><td>מסכי ניהול</td><td>141 רכיבים, 40 מסכים בתפריט</td></tr>
+    <tr><td>שורות קוד</td><td>כ-110,000</td></tr>
+    <tr><td>תפקידים</td><td>שבעה, עם עקיפה אישית ולתפקיד</td></tr>
+    <tr><td>פעילויות בבנק התוכן</td><td>3,009 ב-35 נושאים</td></tr>
+    <tr><td>מקור בנק התוכן</td><td>18 תוכניות עבודה שנתיות, מנובמבר 2020</td></tr>
+    <tr><td>שפת ממשק</td><td>עברית מלאה, ימין לשמאל</td></tr>
+  </tbody>
+</table>
+</div>
+
+<!-- ============ 17 ROADMAP ============ -->
+<h2 id="roadmap"><span class="num">17</span>מפת דרכים</h2>
+<p class="sec">מה בפיתוח, ומה נבחן.</p>
+
+<div class="cols">
+  <div class="box">
+    <h4>בפיתוח</h4>
+    <ul>
+      <li>חיבור תשלומים ישיר — הוראת קבע וסליקה</li>
+      <li>הרחבת פורטל ההורים למכשיר נייד ייעודי</li>
+      <li>אשף הקמה ללקוח חדש, ללא ליווי</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>נבחן</h4>
+    <ul>
+      <li>דיווח אוטומטי למשרד התמ״ת</li>
+      <li>ניתוח תפוסה וחיזוי רישום</li>
+      <li>אפליקציית צוות ייעודית לחדר</li>
+    </ul>
+  </div>
+  <div class="box">
+    <h4>עקרון</h4>
+    <p>שום יכולת לא נכנסת לפני שיש גן אחד שמבקש אותה בשם. מערכת שנבנתה מרשימת משאלות היא מערכת שאיש לא משתמש בה.</p>
+  </div>
+</div>
+
+<hr>
+
+<p style="color:var(--dim);font-size:14px">
+  מסמך זה מתאר את המערכת כפי שהיא פועלת באוגוסט 2026. המערכת בפיתוח פעיל ומתעדכנת
+  באופן שוטף.
+</p>
+
+</main>
+</div>
+
+<script>
+  // Theme toggle. The OS preference is the default; this only overrides it, and
+  // the override wins in both directions because the [data-theme] rules are
+  // written for both light and dark rather than only for dark.
+  var tg = document.getElementById('tg');
+  tg.addEventListener('click', function(){
+    var r = document.documentElement;
+    var now = r.getAttribute('data-theme');
+    if (!now) {
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      r.setAttribute('data-theme', dark ? 'light' : 'dark');
+    } else {
+      r.setAttribute('data-theme', now === 'dark' ? 'light' : 'dark');
+    }
+  });
+
+  // Contents rail: highlight nothing, but make the jump smooth.
+  document.querySelectorAll('nav.toc a').forEach(function(a){
+    a.addEventListener('click', function(e){
+      var el = document.querySelector(a.getAttribute('href'));
+      if (!el) return;
+      e.preventDefault();
+      el.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  });
+</script>
+
+</body>
+</html>
