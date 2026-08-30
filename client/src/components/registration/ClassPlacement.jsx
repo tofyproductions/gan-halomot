@@ -10,8 +10,12 @@ import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
 import OpenYearClassrooms from './OpenYearClassrooms';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/DeleteOutline';
+import SwapHorizIcon from '@mui/icons-material/SwapHoriz';
+import { Autocomplete } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * שיבוץ לכיתות — the board where the intake becomes a gan.
@@ -68,6 +72,13 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   const [result, setResult] = useState(null);
   const [newRoom, setNewRoom] = useState({ open: false, category: '', name: '', capacity: '' });
   const [licence, setLicence] = useState({ editing: false, value: '' });
+  const confirmDlg = useConfirm();
+  // Editing a room that already exists (name/capacity), and the mistake case —
+  // a room opened in the wrong group — which is a delete.
+  const [editRoom, setEditRoom] = useState(null); // {id, name, capacity}
+  // Moving a child who is ALREADY enrolled between rooms.
+  const [moveKids, setMoveKids] = useState([]);
+  const [move, setMove] = useState({ child: null, room: '' });
 
   const load = useCallback(() => {
     if (!branchId || !year) return;
@@ -133,6 +144,61 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    }
+  };
+
+  const saveRoomEdit = async () => {
+    try {
+      await api.put(`/classrooms/${editRoom.id}`, {
+        name: editRoom.name,
+        capacity: editRoom.capacity === '' ? null : Number(editRoom.capacity),
+      });
+      toast.success('הכיתה עודכנה');
+      setEditRoom(null);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בעדכון הכיתה');
+    }
+  };
+
+  const deleteRoom = async (room) => {
+    if (!(await confirmDlg({
+      title: 'מחיקת כיתה',
+      message: `למחוק את "${room.name}"? אפשר למחוק רק כיתה ריקה — ילדים משובצים חוסמים את המחיקה.`,
+      danger: true,
+    }))) return;
+    try {
+      await api.delete(`/classrooms/${room.id}`);
+      toast.success('הכיתה נמחקה');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה במחיקה');
+    }
+  };
+
+  /** The already-enrolled of this branch's rooms — the move-a-child list. */
+  const loadMoveKids = useCallback(async () => {
+    if (!data?.classrooms?.length) { setMoveKids([]); return; }
+    try {
+      const res = await api.get('/children', { params: { year } });
+      const roomIds = new Set((data.classrooms || []).map(r => String(r.id)));
+      setMoveKids((res.data.children || res.data || [])
+        .filter(c => roomIds.has(String(c.classroom_id?._id || c.classroom_id || ''))));
+    } catch { setMoveKids([]); }
+  }, [data, year]);
+
+  useEffect(() => { loadMoveKids(); }, [loadMoveKids]);
+
+  const moveChild = async () => {
+    if (!move.child || !move.room) return toast.error('יש לבחור ילד/ה וכיתה');
+    try {
+      await api.put(`/children/${move.child._id || move.child.id}/classroom`, { classroom_id: move.room });
+      toast.success(`${move.child.child_name} הועבר/ה לכיתה החדשה`);
+      setMove({ child: null, room: '' });
+      load();
+      loadMoveKids();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בהעברה');
     }
   };
 
@@ -311,9 +377,22 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                   {g.classrooms.map(r => {
                     const nowAssigned = live?.perRoom?.[r.id]?.assigned || 0;
                     return (
-                      <Box key={r.id} sx={{ minWidth: 160 }}>
-                        <CapacityBar used={r.seated + nowAssigned} total={r.capacity || 0} label={r.name} />
-                      </Box>
+                      <Stack key={r.id} direction="row" alignItems="center" spacing={0.25} sx={{ minWidth: 160 }}>
+                        <Box sx={{ flex: 1 }}>
+                          <CapacityBar used={r.seated + nowAssigned} total={r.capacity || 0} label={r.name} />
+                        </Box>
+                        <Tooltip title="עריכת שם/מקומות">
+                          <IconButton size="small" sx={{ p: 0.25 }}
+                            onClick={() => setEditRoom({ id: r.id, name: r.name, capacity: r.capacity ?? '' })}>
+                            <EditIcon sx={{ fontSize: 15 }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="מחיקת כיתה (רק כשהיא ריקה)">
+                          <IconButton size="small" color="error" sx={{ p: 0.25 }} onClick={() => deleteRoom(r)}>
+                            <DeleteIcon sx={{ fontSize: 15 }} />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
                     );
                   })}
                   <Box sx={{ flex: 1 }} />
@@ -391,6 +470,41 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                 )}
               </Card>
             ))}
+
+            {/* ---------- moving a child who is already enrolled ---------- */}
+            {moveKids.length > 0 && (
+              <Card variant="outlined" sx={{ p: 2, mb: 2 }}>
+                <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                  <SwapHorizIcon fontSize="small" />
+                  <Typography variant="subtitle1" fontWeight={800}>שינוי שיבוץ לילד/ה קיים/ת</Typography>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                  לילדים שכבר נקלטו למערכת. ההעברה מיידית ומעדכנת גם את הרישום.
+                </Typography>
+                <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
+                  <Autocomplete
+                    size="small" sx={{ minWidth: 240 }}
+                    options={moveKids}
+                    value={move.child}
+                    onChange={(_, v) => setMove(m => ({ ...m, child: v }))}
+                    getOptionLabel={(c) => `${c.child_name} (${c.classroom_name || c.classroom_id?.name || '—'})`}
+                    isOptionEqualToValue={(a, b) => (a._id || a.id) === (b._id || b.id)}
+                    renderInput={(params) => <TextField {...params} label="ילד/ה" />}
+                  />
+                  <TextField select size="small" label="לכיתה" value={move.room} sx={{ minWidth: 160 }}
+                    onChange={e => setMove(m => ({ ...m, room: e.target.value }))}>
+                    {(data.classrooms || []).map(r => (
+                      <MenuItem key={r.id} value={r.id}>
+                        {r.name}{r.capacity ? ` (${r.seated}/${r.capacity})` : ''}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <Button variant="contained" size="small" onClick={moveChild} disabled={!move.child || !move.room}>
+                    העברה
+                  </Button>
+                </Stack>
+              </Card>
+            )}
 
             {/* ---------- the money ---------- */}
             <Card variant="outlined" sx={{ p: 2, mb: 1 }}>
@@ -477,6 +591,23 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
         <DialogActions>
           <Button onClick={() => setNewRoom(n => ({ ...n, open: false }))}>ביטול</Button>
           <Button variant="contained" onClick={createRoom}>יצירה</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ---------- editing an existing room ---------- */}
+      <Dialog open={!!editRoom} onClose={() => setEditRoom(null)} dir="rtl">
+        <DialogTitle>עריכת כיתה</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1, minWidth: 300 }}>
+            <TextField size="small" label="שם הכיתה" value={editRoom?.name || ''}
+              onChange={e => setEditRoom(r => ({ ...r, name: e.target.value }))} />
+            <TextField size="small" label="מספר מקומות" type="number" value={editRoom?.capacity ?? ''}
+              onChange={e => setEditRoom(r => ({ ...r, capacity: e.target.value }))} />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditRoom(null)}>ביטול</Button>
+          <Button variant="contained" onClick={saveRoomEdit}>שמירה</Button>
         </DialogActions>
       </Dialog>
 
