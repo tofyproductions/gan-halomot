@@ -1,4 +1,5 @@
-const { Child, Employee } = require('../models');
+const { Child, Employee, Classroom, Registration, Branch } = require('../models');
+const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
 
 /**
  * Everything on this page is a name somebody typed. A child called
@@ -11,11 +12,29 @@ const esc = (v) => String(v ?? '')
 
 async function generatePDF(req, res, next) {
   try {
-    const { classroom } = req.query;
+    const { classroom, year, branch } = req.query;
 
+    // One year, one branch. This page printed every active child in the
+    // network regardless of the branch selected at the top of the screen —
+    // משה דיין's wall got קפלן's children because nothing here ever asked.
     const filter = { is_active: true };
+    filter.academic_year = normalizeYear(year) || getAcademicYears().current.range;
+    let branchName = '';
     if (classroom) {
       filter.classroom_id = classroom;
+    } else if (branch && branch !== 'all') {
+      const [rooms, regs, branchDoc] = await Promise.all([
+        Classroom.find({ branch_id: branch }).select('_id').lean(),
+        // A child with no room yet still belongs to a branch — through the
+        // registration.
+        Registration.find({ branch_id: branch }).select('_id').lean(),
+        Branch.findById(branch).select('name').lean(),
+      ]);
+      branchName = branchDoc?.name || '';
+      filter.$or = [
+        { classroom_id: { $in: rooms.map(r => r._id) } },
+        { classroom_id: null, registration_id: { $in: regs.map(r => r._id) } },
+      ];
     }
 
     const children = await Child.find(filter)
@@ -113,8 +132,8 @@ async function generatePDF(req, res, next) {
         </style>
       </head>
       <body>
-        <h1>רשימת אנשי קשר - גן החלומות</h1>
-        <p class="date">תאריך הפקה: ${today}</p>
+        <h1>רשימת אנשי קשר - גן החלומות${branchName ? ` — ${esc(branchName)}` : ''}</h1>
+        <p class="date">שנה"ל ${esc(filter.academic_year)} · תאריך הפקה: ${today}</p>
     `;
 
     // Alphabetical by room name — until now the order was whichever room's

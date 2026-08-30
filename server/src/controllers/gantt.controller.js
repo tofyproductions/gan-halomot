@@ -112,15 +112,20 @@ async function get(req, res, next) {
     // Get holidays for this month. Only query when we have a real branch id —
     // an "all" / missing branch (e.g. the cross-branch view) is not an ObjectId
     // and would throw a CastError, which previously 500'd the whole gantt load.
-    const startOfMonth = new Date(parseInt(year), parseInt(month) - 1, 1);
-    const endOfMonth = new Date(parseInt(year), parseInt(month), 0);
+    // A week's grid borrows days from the neighbouring months (September 2026
+    // ends mid-week; its last row runs to 2.10), so the window is the GRID,
+    // not the calendar month. Clipping to the month dropped the closure that
+    // covers the end of סוכות and those days rendered as open. A week's worth
+    // of margin on each side covers every borrowable day.
+    const startOfGrid = new Date(parseInt(year), parseInt(month) - 1, 1 - 7);
+    const endOfGrid = new Date(parseInt(year), parseInt(month), 7, 23, 59, 59);
 
     let holidays = [];
     if (gantt.branch_id && mongoose.isValidObjectId(gantt.branch_id)) {
       holidays = await Holiday.find({
         branch_id: gantt.branch_id,
-        start_date: { $lte: endOfMonth },
-        end_date: { $gte: startOfMonth },
+        start_date: { $lte: endOfGrid },
+        end_date: { $gte: startOfGrid },
       }).lean();
     }
 
@@ -408,11 +413,12 @@ async function copy(req, res, next) {
       });
     }
 
-    // The target branch's own closures, which are not the source's.
+    // The target branch's own closures, which are not the source's. Same
+    // grid-not-month window as the loader — borrowed days close too.
     const holidays = room?.branch_id ? await Holiday.find({
       branch_id: room.branch_id,
-      start_date: { $lte: new Date(targetYear, targetMonth, 0) },
-      end_date: { $gte: new Date(targetYear, targetMonth - 1, 1) },
+      start_date: { $lte: new Date(targetYear, targetMonth, 7, 23, 59, 59) },
+      end_date: { $gte: new Date(targetYear, targetMonth - 1, 1 - 7) },
     }).lean() : [];
     const ymdOf = (d) => new Date(d).toISOString().slice(0, 10);
     const closedOn = (d) => holidays.some(h => (
@@ -537,10 +543,19 @@ async function shabbatParents(req, res, next) {
     const room = await Classroom.findById(classroom).select('academic_year').lean();
     const academicYear = room?.academic_year || '';
 
-    const kids = await Child.find({
+    let kids = await Child.find({
       classroom_id: classroom, is_active: true,
       ...(academicYear ? { academic_year: academicYear } : {}),
     }).select('child_name gender registration_id').sort({ child_name: 1 }).lean();
+    // A returning child re-placed into this year's room can still carry LAST
+    // year's academic_year on the card — the placement update touches only
+    // classroom_id. The year filter then empties the roster, the auto-assign
+    // proposes nobody, and the button reports "already assigned" to a month of
+    // blank Fridays. The children ARE in this room — trust the room.
+    if (!kids.length) {
+      kids = await Child.find({ classroom_id: classroom, is_active: true })
+        .select('child_name gender registration_id').sort({ child_name: 1 }).lean();
+    }
 
     /**
      * A child imported from ClickTac already told us. In the אמונה / תמ״ת

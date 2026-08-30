@@ -93,7 +93,11 @@ async function seed() {
     const startYear = isAfterCutoff ? year : year - 1;
     const academicYear = `${startYear}-${startYear + 1}`;
 
-    const classroomNames = ['תינוקייה א', 'תינוקייה ב', 'צעירים', 'בוגרים'];
+    // Inventing rooms for every branch is how phantom "תינוקייה ב" ended up in
+    // gans that never opened one. Rooms are opened by the manager from the
+    // placement screen; the seed only does it when explicitly told to.
+    const classroomNames = process.env.SEED_CLASSROOMS === '1'
+      ? ['תינוקייה א', 'תינוקייה ב', 'צעירים', 'בוגרים'] : [];
 
     for (const [bName, bId] of Object.entries(branchMap)) {
       if (bName === 'כפר סבא - קפלן') continue; // Already has classrooms

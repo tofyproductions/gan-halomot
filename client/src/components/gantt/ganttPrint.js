@@ -56,16 +56,20 @@ const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
  * and the result is clamped to something still readable across a room.
  */
 function scaleFor(weekCount, rowCount) {
-  const availableMm = 198 - 11;
+  // The budget is TWO pages now, not one. A five-week month squeezed onto a
+  // single sheet came out at 3pt — nobody on a wall reads 3pt — so the sheet
+  // is allowed to run to a second page and the type stays human-sized. The
+  // fit script below still packs a sparse month onto one page.
+  const availableMm = (198 - 11) * 2;
   const perWeekMm = availableMm / Math.max(weekCount, 1);
   // A week costs its banner and its day-header row on top of the gantt rows;
   // together those are worth about three rows of height.
   const rowMm = perWeekMm / (rowCount + 3);
-  const cell = Math.max(4.6, Math.min(7.5, rowMm * 1.05));
+  const cell = Math.max(8, Math.min(12, rowMm * 1.05));
   return {
     cell: cell.toFixed(2),
-    head: Math.max(5.2, Math.min(8.5, cell * 1.15)).toFixed(2),
-    small: Math.max(4.0, cell - 0.9).toFixed(2),
+    head: Math.max(9, Math.min(13.5, cell * 1.15)).toFixed(2),
+    small: Math.max(6.5, cell - 1.5).toFixed(2),
   };
 }
 
@@ -137,6 +141,16 @@ export function buildGanttPrintHtml({
             <div class="cname">${esc(shut.emoji || '')}${esc(shut.name)}</div>
             <div class="cnote">הגן סגור</div>
           </td>`;
+        }
+
+        // A closed day that already has work in some row keeps every cell of
+        // its column amber and named — the same as the screen. This check
+        // comes BEFORE the Friday specials: a closed Friday must not print
+        // "קבלת שבת" as if the gan were open.
+        if (closedCols.has(di)) {
+          const shut = isClosed(dateOf(di));
+          const content = contentAt(row.key, di);
+          return `<td class="c shutc">${esc(content) || `${esc(shut.emoji || '')}${esc(shut.name)}`}</td>`;
         }
 
         const isFri = di === 5;
@@ -242,8 +256,12 @@ export function buildGanttPrintHtml({
   th.d .hol { font-size: calc(var(--small) * var(--k)); color: #92400e; font-weight: 800; }
   th.d.shut { background: #fde68a !important; }
   th.d.short { background: #fef3c7 !important; }
-  th.d.borrowed { background: #f8fafc !important; }
-  th.d.borrowed .dn, th.d.borrowed .dd { color: #a8b4c2; }
+  /* Only a PLAIN borrowed day fades — a borrowed day that is also a closure
+     keeps its amber. The unqualified rule used to win the cascade and the
+     end of סוכות printed as two ordinary white columns. */
+  th.d.borrowed:not(.shut):not(.short) { background: #f8fafc !important; }
+  th.d.borrowed:not(.shut):not(.short) .dn,
+  th.d.borrowed:not(.shut):not(.short) .dd { color: #a8b4c2; }
 
   th.rl { width: 20mm; text-align: center; font-weight: 800; line-height: 1.15;
           font-size: calc(var(--head) * var(--k)); padding: 0.5mm; }
@@ -261,6 +279,8 @@ export function buildGanttPrintHtml({
   td.fri .fp { font-size: calc(var(--small) * var(--k)); text-align: right;
                color: #5b21b6; line-height: 1.35; font-weight: 700; }
 
+  /* A closed column that still has work in it: every cell amber, like the screen. */
+  td.c.shutc { background: #fde68a !important; color: #92400e; font-weight: 700; }
   td.closed { background: #fef3c7 !important; text-align: center; vertical-align: middle; }
   td.closed .cname { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: #92400e; }
   td.closed .cnote { font-size: calc(var(--small) * var(--k)); color: #b45309; font-weight: 700; }
@@ -307,7 +327,8 @@ export function buildGanttPrintHtml({
    */
   (function fit() {
     var MM = 96 / 25.4;
-    var pageH = (210 - 12) * MM;   // A4 landscape less the 6mm @page margins
+    var oneP = (210 - 12) * MM;    // A4 landscape less the 6mm @page margins
+    var pageH = oneP;
     var root = document.documentElement;
     var body = document.body;
     // The body is the page: its width is pinned to the printable width, so its
@@ -317,11 +338,22 @@ export function buildGanttPrintHtml({
 
     var k = 1;
 
-    // Down until it fits. The floor is 0.62 — below that it stops being
-    // readable across a room, which is the entire point of printing it.
-    for (var i = 0; i < 30 && over() && k > 0.62; i += 1) {
+    // Try one page first, but never below 0.85 — the last export shrank a full
+    // month to 3pt to keep the single-sheet promise, and 3pt on a wall is not
+    // a plan, it is a texture. If one page needs smaller than that, the month
+    // takes two sheets at full size instead (weeks never split mid-table).
+    for (var i = 0; i < 10 && over() && k > 0.85; i += 1) {
       k -= 0.03;
       set('--k', k.toFixed(2));
+    }
+    if (over()) {
+      pageH = oneP * 2;
+      k = 1;
+      set('--k', '1');
+      for (var i2 = 0; i2 < 10 && over() && k > 0.85; i2 += 1) {
+        k -= 0.03;
+        set('--k', k.toFixed(2));
+      }
     }
 
     // Still over at the floor: take the air out rather than the type.

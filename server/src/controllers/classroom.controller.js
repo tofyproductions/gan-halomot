@@ -10,7 +10,10 @@ async function getAll(req, res, next) {
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
     const branchFilter = getBranchFilter(req);
-    const classrooms = await Classroom.find({ is_active: true, ...branchFilter })
+    // targetYear was computed and then used only for the child counts — the
+    // room list itself returned every year ever opened, so last year's rooms
+    // appeared as duplicates on every screen that consumes this.
+    const classrooms = await Classroom.find({ is_active: true, academic_year: targetYear, ...branchFilter })
       .populate('lead_teacher_id', 'full_name')
       // Who may write this room's monthly plan, by name, so the gantt screen
       // can show it without a second round trip per room.

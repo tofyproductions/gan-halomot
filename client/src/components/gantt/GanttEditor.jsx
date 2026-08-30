@@ -299,20 +299,37 @@ export default function GanttEditor() {
         params: { classroom: classroomId, month, year },
       });
       const plan = res.data?.plan || [];
-      let n = 0;
+      // Counted from the plan itself, NOT inside the setGantt updater — an
+      // updater runs when React decides (twice in StrictMode), so a counter
+      // mutated inside it lied to the toast.
+      const n = plan.reduce((s, p) => s + (p.father ? 1 : 0) + (p.mother ? 1 : 0), 0);
       setGantt(prev => {
         const weeks = [...(prev.weeks || [])];
         for (const p of plan) {
           const w = weeks[p.index];
           if (!w) continue;
           const next = { ...w };
-          if (p.father) { next.friday_parent_father = p.father.name; next.friday_father_child_id = p.father.id; n += 1; }
-          if (p.mother) { next.friday_parent_mother = p.mother.name; next.friday_mother_child_id = p.mother.id; n += 1; }
+          if (p.father) { next.friday_parent_father = p.father.name; next.friday_father_child_id = p.father.id; }
+          if (p.mother) { next.friday_parent_mother = p.mother.name; next.friday_mother_child_id = p.mother.id; }
           weeks[p.index] = next;
         }
         return { ...prev, weeks };
       });
-      toast.success(n ? `שובצו ${n} ילדים. לא לשכוח לשמור` : 'כל השבועות כבר משובצים');
+      if (n) {
+        toast.success(`שובצו ${n} ילדים. לא לשכוח לשמור`);
+      } else {
+        // Zero can mean three different things — say which.
+        const boys = res.data?.boys?.round?.total || 0;
+        const girls = res.data?.girls?.round?.total || 0;
+        const unknown = res.data?.unknown_gender?.length || 0;
+        if (!boys && !girls) {
+          toast.warning(unknown
+            ? `ל-${unknown} ילדים בכיתה לא מסומן בן/בת — פתחו את בוחר הילדים וסמנו, ואז נסו שוב`
+            : 'אין ילדים פעילים בכיתה הזו — אין את מי לשבץ');
+        } else {
+          toast.success('כל השבועות כבר משובצים');
+        }
+      }
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בשיבוץ');
     }

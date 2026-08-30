@@ -28,6 +28,8 @@ const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_lea
 
 // Diagnostic: which of the four things an upload needs is actually broken.
 router.get('/selftest', allow, ctrl.selftest);
+// The rooms this user may upload to — all categories, this year only.
+router.get('/classrooms', allow, ctrl.listClassrooms);
 router.get('/', allow, ctrl.list);
 router.post('/upload', allow, upload.array('photos', 30), ctrl.upload);
 router.patch('/:id', allow, ctrl.tag);

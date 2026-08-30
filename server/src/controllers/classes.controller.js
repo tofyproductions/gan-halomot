@@ -91,6 +91,10 @@ async function updateProgram(req, res, next) {
     const update = {};
     for (const f of fields) if (req.body[f] !== undefined) update[f] = req.body[f];
     if (update.default_day === '' ) update.default_day = null;
+    // "בלי ספק" arrives from the dialog as an empty string, and Mongo refuses
+    // to cast '' to an ObjectId — the whole edit died on it.
+    if (update.provider_id === '') update.provider_id = null;
+    if (update.classroom_id === '') update.classroom_id = null;
     const program = await ClassProgram.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
     if (!program) return res.status(404).json({ error: 'חוג לא נמצא' });
     res.json({ program });

@@ -37,14 +37,17 @@ export default function PhotosManager() {
   const [draftIds, setDraftIds] = useState([]);
   const fileInput = useRef(null);
 
-  // The classroom list comes from the board, which already answers "which
-  // rooms may this user act on" with the branch scoping applied.
+  // The photos feature's OWN room list — every category, this year only.
+  // It used to borrow the nursery board's list, which is infant-rooms-only by
+  // design and spans every year ever opened: בוגרים could never get photos,
+  // and last year's rooms showed as duplicates.
   useEffect(() => {
     (async () => {
       try {
-        const res = await api.get('/nursery/board');
-        setClassrooms(res.data.classrooms || []);
-        setClassroomId(String(res.data.classroom?.id || ''));
+        const res = await api.get('/photos/classrooms');
+        const rooms = res.data.classrooms || [];
+        setClassrooms(rooms);
+        setClassroomId(String(rooms[0]?.id || ''));
       } catch (err) {
         setError(apiError(err, 'לא הצלחנו לטעון את הכיתות'));
         setLoading(false);

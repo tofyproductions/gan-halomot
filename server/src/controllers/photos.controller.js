@@ -18,14 +18,45 @@ const nursery = require('../services/nursery.service');
 
 /** Which classrooms this user may act on. Same rule as the daily board. */
 async function visibleClassrooms(user) {
-  const rooms = await Classroom.find({ is_active: true }).populate('branch_id', 'name').lean();
+  // This year's rooms only. Rooms are never deactivated at year rollover, so
+  // without the year filter last year's "קפלן — תינוקייה א" showed up as an
+  // indistinguishable duplicate of this year's.
+  const { getAcademicYears } = require('../services/academic-year.service');
+  const rooms = await Classroom.find({
+    is_active: true,
+    academic_year: getAcademicYears().current.range,
+  }).populate('branch_id', 'name').lean();
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   const managed = (user.managed_branch_ids || []).map(String);
   const own = user.branch_id ? [String(user.branch_id)] : [];
   const allowed = new Set([...managed, ...own].filter(Boolean));
-  if (allowed.size === 0) return rooms;
+  // No branches at all = sees nothing, not everything. The old fallback
+  // showed a scope-less account every room in the network.
+  if (allowed.size === 0) return [];
   return rooms.filter(r => allowed.has(String(r.branch_id?._id || r.branch_id)));
+}
+
+/**
+ * GET /api/photos/classrooms — the rooms this user may upload to.
+ *
+ * The screen used to borrow the nursery board's list, which is infant-rooms
+ * only by design — so בוגרים and צעירים could never receive photographs. This
+ * is the same list the upload itself authorizes against, all categories.
+ */
+async function listClassrooms(req, res, next) {
+  try {
+    const rooms = await visibleClassrooms(req.user);
+    res.json({
+      classrooms: rooms
+        .map(r => ({
+          id: String(r._id),
+          name: r.name,
+          branch: r.branch_id?.name || '',
+        }))
+        .sort((a, b) => a.branch.localeCompare(b.branch, 'he') || a.name.localeCompare(b.name, 'he')),
+    });
+  } catch (err) { next(err); }
 }
 
 async function assertRoom(user, classroomId) {
@@ -237,4 +268,4 @@ async function selftest(_req, res) {
   return res.json({ ok: steps.every(s => s.ok), steps });
 }
 
-module.exports = { upload, list, tag, remove, selftest, visibleClassrooms };
+module.exports = { upload, list, tag, remove, selftest, visibleClassrooms, listClassrooms };
