@@ -175,6 +175,18 @@ if (require('./platform/connection').isEnabled()) {
   };
   app.get('/pitch', sales('pitch-share.html'));
   app.get('/spec', sales('spec.html'));
+
+  // The same specification as a file. Its name on disk is Hebrew and contains
+  // spaces, which survives a download header but not a URL somebody has to
+  // retype or paste into WhatsApp — so the address is ASCII and the Hebrew
+  // name is what lands in the Downloads folder.
+  app.get('/spec.pdf', (req, res, next) => {
+    if (slugFromHost(req.headers.host)) return next();
+    res.download(
+      path.join(__dirname, '../../sales/חלום - מסמך אפיון מערכת.pdf'),
+      'חלום - מסמך אפיון מערכת.pdf',
+    );
+  });
 }
 
 // Serve static frontend in production
