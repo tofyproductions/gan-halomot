@@ -202,6 +202,27 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
     }
   };
 
+  /** ביטל/ה שיבוץ: the same temporary removal as on the contact page —
+   *  off every list now, restored automatically by the next file upload
+   *  if the ת"ז reappears. */
+  const hideChild = async () => {
+    if (!move.child) return toast.error('יש לבחור ילד/ה');
+    if (!(await confirmDlg({
+      title: 'הסרה זמנית',
+      message: `להסיר את ${move.child.child_name} מכל הרשימות? אם הילד/ה יופיע/תופיע בקובץ קליקטאק/תמ"ת הבא — יחזור/תחזור אוטומטית. החזרה ידנית אפשרית בדף קשר ← עריכת הרשימה.`,
+      danger: true,
+    }))) return;
+    try {
+      await api.post(`/children/${move.child._id || move.child.id}/hide`, { note: 'ביטל/ה שיבוץ — הוסר/ה ממסך השיבוץ' });
+      toast.success(`${move.child.child_name} הוסר/ה זמנית מכל הרשימות`);
+      setMove({ child: null, room: '' });
+      load();
+      loadMoveKids();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בהסרה');
+    }
+  };
+
   const createRoom = async () => {
     if (!newRoom.name) return toast.error('יש להזין שם כיתה');
     try {
@@ -502,6 +523,13 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                   <Button variant="contained" size="small" onClick={moveChild} disabled={!move.child || !move.room}>
                     העברה
                   </Button>
+                  <Tooltip title='לילד/ה שביטל/ה שיבוץ — הסרה מכל הרשימות עד הקובץ הבא'>
+                    <span>
+                      <Button variant="outlined" color="warning" size="small" onClick={hideChild} disabled={!move.child}>
+                        הסרה זמנית (ביטל/ה)
+                      </Button>
+                    </span>
+                  </Tooltip>
                 </Stack>
               </Card>
             )}
