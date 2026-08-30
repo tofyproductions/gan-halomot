@@ -24,6 +24,9 @@ async function getAll(req, res, next) {
       $or: [
         { status: 'completed' },
         { _id: { $in: activeRegIds } },
+        // A cancelled registration stays here until its cancellation debt is
+        // marked settled — the child is off the rosters, the money is not.
+        { status: 'cancelled', billing_settled: { $ne: true } },
       ],
     })
       .populate('classroom_id', 'name')

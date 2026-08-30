@@ -3,6 +3,7 @@ import {
   Box, Typography, Stack, Card, CardContent, Table, TableHead, TableBody, TableRow,
   TableCell, TableContainer, Chip, IconButton, Tooltip, TextField, Alert,
   AlertTitle, Divider, CircularProgress, Button, Tabs, Tab, Collapse, Badge,
+  MenuItem,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditNoteIcon from '@mui/icons-material/EditNote';
@@ -130,6 +131,192 @@ function EmployeeRow({ emp, month, canDecide, onAdd, onDecide }) {
         </TableRow>
       )}
     </>
+  );
+}
+
+/* -------------------------------------------------- permanent rate changes */
+
+const fmtDate = (d) => { try { return d ? new Date(d).toLocaleDateString('he-IL') : ''; } catch { return ''; } };
+const RATE_STATUS = {
+  pending: { label: 'ממתין לאישור הנה"ח', color: 'warning' },
+  approved: { label: 'אושר ונכנס לתוקף', color: 'success' },
+  rejected: { label: 'נדחה', color: 'error' },
+};
+
+/** First of next month, as an <input type="date"> value — the natural default
+ *  for a raise: the month is payroll's unit, so mid-month dates only confuse. */
+function firstOfNextMonth() {
+  const d = new Date();
+  d.setMonth(d.getMonth() + 1, 1);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`;
+}
+
+/**
+ * העלאות שכר קבועות — the manager states the new rate and the date, per the
+ * contract she signed with the employee; the accountant's approval applies it
+ * through the dated employment-terms history, so past months keep paying what
+ * they paid.
+ */
+function RateChangesCard({ employees, canDecide }) {
+  const confirm = useConfirm();
+  const [rows, setRows] = useState([]);
+  const [dlg, setDlg] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = () => {
+    api.get('/rate-changes')
+      .then(res => setRows(res.data.requests || []))
+      .catch(() => {});
+  };
+  useEffect(load, []);
+
+  const openDlg = () => setDlg({
+    employee_id: '', effective_date: firstOfNextMonth(), salary_type: 'hourly',
+    hourly_rate: '', global_salary: '', global_ot_rate: '', required_hours: '', reason: '',
+  });
+
+  const save = async () => {
+    if (!dlg.employee_id) return toast.error('יש לבחור עובד/ת');
+    setSaving(true);
+    try {
+      const res = await api.post('/rate-changes', {
+        employee_id: dlg.employee_id,
+        effective_date: dlg.effective_date,
+        salary_type: dlg.salary_type,
+        hourly_rate: dlg.hourly_rate === '' ? null : Number(dlg.hourly_rate),
+        global_salary: dlg.global_salary === '' ? null : Number(dlg.global_salary),
+        global_ot_rate: dlg.global_ot_rate === '' ? null : Number(dlg.global_ot_rate),
+        required_hours: dlg.required_hours === '' ? null : Number(dlg.required_hours),
+        reason: dlg.reason,
+      });
+      toast.success(`הבקשה נרשמה — תיכנס לתוקף מחודש ${res.data.effective_month} לאחר אישור הנה"ח`);
+      setDlg(null);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירת הבקשה');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const decide = async (r, approve) => {
+    const what = r.salary_type === 'hourly'
+      ? `${r.hourly_rate} ₪ לשעה` : `${r.global_salary} ₪ גלובלי`;
+    if (!(await confirm({
+      title: approve ? 'אישור העלאת שכר' : 'דחיית העלאת שכר',
+      message: approve
+        ? `לאשר ל${r.employee_name} ${what} החל מ-${fmtDate(r.effective_date)}? השינוי יירשם בתנאי ההעסקה ויחול מאותו חודש והלאה.`
+        : `לדחות את הבקשה עבור ${r.employee_name}?`,
+      danger: !approve,
+    }))) return;
+    try {
+      const res = await api.post(`/rate-changes/${r.id}/decide`, { approve });
+      toast.success(approve ? `אושר — בתוקף מחודש ${res.data.effective_month}` : 'נדחה');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  };
+
+  const pending = rows.filter(r => r.status === 'pending').length;
+
+  return (
+    <Card sx={{ borderRadius: 3, mt: 2 }}>
+      <CardContent>
+        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+          <Typography sx={{ fontWeight: 800 }}>העלאות שכר קבועות</Typography>
+          {pending > 0 && <Chip size="small" color="warning" label={`${pending} ממתינות`} />}
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={openDlg}>
+            בקשת העלאה
+          </Button>
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+          שינוי קבוע של השכר (שעתי או גלובלי) מתאריך נתון — לא בונוס חד-פעמי.
+          נכנס לשכר רק לאחר אישור הנהלת החשבונות, וחל מהחודש שנבחר והלאה בלבד.
+        </Typography>
+        {rows.length === 0 ? (
+          <Typography variant="body2" color="text.disabled">אין בקשות</Typography>
+        ) : rows.map(r => (
+          <Stack key={r.id} direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap
+            sx={{ py: 0.75, borderBottom: '1px solid', borderColor: 'divider' }}>
+            <Typography sx={{ fontWeight: 700, minWidth: 120 }}>{r.employee_name}</Typography>
+            <Typography variant="body2" color="text.secondary">{r.branch_name}</Typography>
+            <Chip size="small" variant="outlined" label={
+              r.salary_type === 'hourly'
+                ? `${r.hourly_rate} ₪/שעה`
+                : `${r.global_salary} ₪ גלובלי${r.required_hours ? ` · ${r.required_hours} ש'` : ''}`
+            } />
+            <Typography variant="body2">מ-{fmtDate(r.effective_date)}</Typography>
+            <Chip size="small" color={RATE_STATUS[r.status]?.color} label={RATE_STATUS[r.status]?.label || r.status} />
+            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>
+              {r.reason || ''} · {r.requested_by_name}
+              {r.decided_by_name && ` · הוכרע ע"י ${r.decided_by_name}`}
+              {r.decided_note && ` — ${r.decided_note}`}
+            </Typography>
+            {canDecide && r.status === 'pending' && (
+              <Stack direction="row" spacing={0.5}>
+                <Tooltip title="אשר וישם">
+                  <IconButton size="small" color="success" onClick={() => decide(r, true)}>
+                    <CheckCircleIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="דחה">
+                  <IconButton size="small" color="error" onClick={() => decide(r, false)}>
+                    <CancelIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+            )}
+          </Stack>
+        ))}
+      </CardContent>
+
+      {/* ---- טופס בקשה ---- */}
+      {dlg && (
+        <Box sx={{ px: 2, pb: 2 }}>
+          <Divider sx={{ mb: 2 }} />
+          <Stack spacing={2}>
+            <TextField select size="small" label="עובד/ת" value={dlg.employee_id}
+              onChange={e => setDlg(v => ({ ...v, employee_id: e.target.value }))} sx={{ maxWidth: 320 }}>
+              {employees.map(e => (
+                <MenuItem key={e.employee_id} value={e.employee_id}>{`${e.full_name} — ${e.branch_name}`}</MenuItem>
+              ))}
+            </TextField>
+            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+              <TextField size="small" type="date" label="בתוקף מתאריך" InputLabelProps={{ shrink: true }}
+                value={dlg.effective_date} onChange={e => setDlg(v => ({ ...v, effective_date: e.target.value }))}
+                helperText="השכר משתנה מהחודש של התאריך" />
+              <TextField select size="small" label="סוג שכר" value={dlg.salary_type}
+                onChange={e => setDlg(v => ({ ...v, salary_type: e.target.value }))} sx={{ minWidth: 130 }}>
+                <MenuItem value="hourly">שעתי</MenuItem>
+                <MenuItem value="global">גלובלי (חודשי)</MenuItem>
+              </TextField>
+              {dlg.salary_type === 'hourly' ? (
+                <TextField size="small" type="number" label="שכר שעתי חדש (₪)" value={dlg.hourly_rate}
+                  onChange={e => setDlg(v => ({ ...v, hourly_rate: e.target.value }))} />
+              ) : (
+                <>
+                  <TextField size="small" type="number" label="שכר חודשי (₪)" value={dlg.global_salary}
+                    onChange={e => setDlg(v => ({ ...v, global_salary: e.target.value }))} />
+                  <TextField size="small" type="number" label="שעות חודשיות" value={dlg.required_hours}
+                    onChange={e => setDlg(v => ({ ...v, required_hours: e.target.value }))} />
+                  <TextField size="small" type="number" label='ש"נ גלובלי (₪, לא חובה)' value={dlg.global_ot_rate}
+                    onChange={e => setDlg(v => ({ ...v, global_ot_rate: e.target.value }))} />
+                </>
+              )}
+            </Stack>
+            <TextField size="small" label="סיבה (למשל: לפי סיכום בחוזה)" value={dlg.reason}
+              onChange={e => setDlg(v => ({ ...v, reason: e.target.value }))} fullWidth />
+            <Stack direction="row" spacing={1}>
+              <BusyButton size="small" variant="contained" loading={saving} onClick={save}>שליחת הבקשה</BusyButton>
+              <Button size="small" onClick={() => setDlg(null)}>ביטול</Button>
+            </Stack>
+          </Stack>
+        </Box>
+      )}
+    </Card>
   );
 }
 
@@ -323,6 +510,8 @@ export default function PayrollUpdates() {
           )}
         </CardContent>
       </Card>
+
+      <RateChangesCard employees={employees} canDecide={canDecide} />
 
       <AddUpdateDialog
         open={!!addFor}

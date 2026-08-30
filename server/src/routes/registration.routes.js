@@ -51,7 +51,23 @@ router.get('/:id/contract-versions', registrationController.listContractVersions
 // GET /api/registration/contract-versions/:versionId/download
 router.get('/contract-versions/:versionId/download', registrationController.downloadContractVersion);
 
-// DELETE /api/registration/:id
-router.delete('/:id', registrationController.remove);
+// POST /api/registration/:id/cancel — ביטול רישום: off the rosters, still in
+// גבייה until the cancellation debt is settled. Managers may cancel their own.
+const { requireRole } = require('../middleware/auth');
+router.post('/:id/cancel',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  registrationController.cancel);
+
+// POST /api/registration/:id/settle-billing — the debt is paid; the office
+// closes the file and the family drops from גבייה.
+router.post('/:id/settle-billing',
+  requireRole('system_admin', 'accountant'),
+  registrationController.settleBilling);
+
+// DELETE /api/registration/:id — for rows created in error. A real departure
+// that owes money goes through /cancel above, or the debt is deleted with it.
+router.delete('/:id',
+  requireRole('system_admin', 'branch_manager', 'accountant'),
+  registrationController.remove);
 
 module.exports = router;

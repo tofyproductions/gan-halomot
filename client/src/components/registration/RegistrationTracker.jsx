@@ -9,6 +9,8 @@ import {
 import SearchIcon from '@mui/icons-material/Search';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import PersonOffIcon from '@mui/icons-material/PersonOff';
+import PriceCheckIcon from '@mui/icons-material/PriceCheck';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import AutorenewIcon from '@mui/icons-material/Autorenew';
 import DescriptionIcon from '@mui/icons-material/Description';
@@ -34,7 +36,15 @@ const STATUS_CONFIG = {
   contract_signed: { label: 'חוזה נחתם', color: '#dbeafe', textColor: '#1e40af', border: '#3b82f6' },
   docs_uploaded: { label: 'מסמכים הועלו', color: '#e0e7ff', textColor: '#3730a3', border: '#6366f1' },
   completed: { label: 'הושלם', color: '#dcfce7', textColor: '#166534', border: '#22c55e' },
+  cancelled: { label: 'בוטל — ממתין לגבייה', color: '#fee2e2', textColor: '#991b1b', border: '#ef4444' },
 };
+
+/** Academic order, calendar numbers — what Collection.exit_month stores. */
+const ACADEMIC_MONTH_OPTIONS = [
+  [9, 'ספטמבר'], [10, 'אוקטובר'], [11, 'נובמבר'], [12, 'דצמבר'],
+  [1, 'ינואר'], [2, 'פברואר'], [3, 'מרץ'], [4, 'אפריל'],
+  [5, 'מאי'], [6, 'יוני'], [7, 'יולי'], [8, 'אוגוסט'],
+];
 
 export default function RegistrationTracker() {
   const navigate = useNavigate();
@@ -50,6 +60,8 @@ export default function RegistrationTracker() {
   const [selected, setSelected] = useState([]);
   const [yearDlg, setYearDlg] = useState({ open: false, regs: [], year: '', saving: false, conflict: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
+  // ביטול רישום — off the rosters, still billed through the chosen month.
+  const [cancelDlg, setCancelDlg] = useState({ open: false, reg: null, exitMonth: '', note: '', saving: false });
   const [renewDlg, setRenewDlg] = useState({ open: false, reg: null, monthlyFee: '', regFee: '', saving: false, mode: 'link', file: null });
   const [docsDialog, setDocsDialog] = useState({ open: false, reg: null, documents: [], loading: false });
   const [docTypeForUpload, setDocTypeForUpload] = useState('id_copy');
@@ -267,6 +279,31 @@ export default function RegistrationTracker() {
       fetchData();
     } catch {
       toast.error('שגיאה במחיקה');
+    }
+  };
+
+  const handleCancelReg = async () => {
+    const { reg, exitMonth, note } = cancelDlg;
+    if (!exitMonth) return toast.error('יש לבחור עד איזה חודש המשפחה מחויבת');
+    setCancelDlg(d => ({ ...d, saving: true }));
+    try {
+      await api.post(`/registrations/${reg._id || reg.id}/cancel`, { exit_month: exitMonth, note });
+      toast.success('הרישום בוטל — הילד/ה הוסר/ה מהרשימות, המשפחה נשארת בגבייה עד סגירת החוב');
+      setCancelDlg({ open: false, reg: null, exitMonth: '', note: '', saving: false });
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בביטול הרישום');
+      setCancelDlg(d => ({ ...d, saving: false }));
+    }
+  };
+
+  const handleSettle = async (reg) => {
+    try {
+      await api.post(`/registrations/${reg._id || reg.id}/settle-billing`);
+      toast.success('החוב נסגר — המשפחה הוסרה מהגבייה');
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בסגירת החוב');
     }
   };
 
@@ -730,7 +767,21 @@ export default function RegistrationTracker() {
                       <EditIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="מחיקה (העבר לארכיון)">
+                  {reg.status !== 'cancelled' ? (
+                    <Tooltip title="ביטול רישום — הילד/ה יורד/ת מהרשימות אך המשפחה נשארת בגבייה">
+                      <IconButton size="small" sx={{ color: '#b45309' }}
+                        onClick={() => setCancelDlg({ open: true, reg, exitMonth: '', note: '', saving: false })}>
+                        <PersonOffIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title="החוב שולם — סגירה והסרה מהגבייה">
+                      <IconButton size="small" color="success" onClick={() => handleSettle(reg)}>
+                        <PriceCheckIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  )}
+                  <Tooltip title="מחיקה (לטעויות הקלדה בלבד — מוחקת גם את הגבייה)">
                     <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id })}>
                       <DeleteIcon fontSize="small" />
                     </IconButton>
@@ -898,8 +949,56 @@ export default function RegistrationTracker() {
         onClose={() => setConfirm({ open: false, id: null })}
         onConfirm={handleDelete}
         title="מחיקת רישום"
-        message="למחוק את הרישום ולהעביר לארכיון?"
+        message="מחיקה מוחקת גם את נתוני הגבייה של המשפחה — מיועדת לטעויות הקלדה בלבד. ילד/ה שעוזב/ת וחייב/ת כסף? השתמשו ב'ביטול רישום'. למחוק?"
       />
+
+      {/* ---- ביטול רישום ---- */}
+      <Dialog open={cancelDlg.open} onClose={() => setCancelDlg(d => ({ ...d, open: false }))} dir="rtl" maxWidth="sm" fullWidth>
+        <DialogTitle>ביטול רישום — {cancelDlg.reg?.child_name}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Alert severity="info">
+              הילד/ה יוסר/תוסר מהכיתות ומכל הרשימות, אבל המשפחה תישאר במסך הגבייה —
+              מחויבת עד החודש שנבחר כאן — עד שהמשרד יסמן שהחוב שולם.
+              את הסכום המדויק לכל חודש אפשר לערוך במסך הגבייה.
+            </Alert>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button size="small" variant="outlined" onClick={() => {
+                const m = cancelDlg.reg?.start_date ? new Date(cancelDlg.reg.start_date).getMonth() + 1 : 9;
+                setCancelDlg(d => ({ ...d, exitMonth: m }));
+              }}>
+                ביטול לפני תחילת השנה — חודש ראשון בלבד
+              </Button>
+              <Button size="small" variant="outlined" onClick={() => {
+                const next = new Date(); next.setMonth(next.getMonth() + 1);
+                setCancelDlg(d => ({ ...d, exitMonth: next.getMonth() + 1 }));
+              }}>
+                עזיבה באמצע שנה — חודש ההודעה + חודש נוסף
+              </Button>
+            </Stack>
+            <TextField
+              select label="מחויבים עד חודש (כולל)" value={cancelDlg.exitMonth} fullWidth
+              onChange={e => setCancelDlg(d => ({ ...d, exitMonth: Number(e.target.value) }))}
+              helperText='לפי החוזה: ביטול מאוחר — החודש הראשון אינו מוחזר; עזיבה באמצע שנה — חודש ההודעה ועוד חודש.'
+            >
+              {ACADEMIC_MONTH_OPTIONS.map(([num, name]) => (
+                <MenuItem key={num} value={num}>{name}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="הערה (סיבת הביטול)" multiline minRows={2} fullWidth
+              value={cancelDlg.note}
+              onChange={e => setCancelDlg(d => ({ ...d, note: e.target.value }))}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelDlg(d => ({ ...d, open: false }))}>סגירה</Button>
+          <Button variant="contained" color="warning" onClick={handleCancelReg} disabled={cancelDlg.saving}>
+            {cancelDlg.saving ? 'מבטל…' : 'ביטול הרישום'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Documents + manual finalize dialog */}
       <Dialog open={docsDialog.open} onClose={closeDocsDialog} dir="rtl" maxWidth="sm" fullWidth>

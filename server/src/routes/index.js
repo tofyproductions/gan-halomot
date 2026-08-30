@@ -135,6 +135,8 @@ router.use('/admin', require('./admin.routes'));
 router.use('/employee-letters', require('./employeeLetters.routes'));
 // מסמכים להורים — אישור שהות בגן ואישור קייטנה, מופקים מהמערכת.
 router.use('/parent-letters', require('./parentLetters.routes'));
+// העלאות שכר קבועות — המנהלת קובעת, הנה"ח מיישמת דרך תנאי ההעסקה המתוארכים.
+router.use('/rate-changes', require('./rateChangeRequests.routes'));
 router.use('/employment-contracts', require('./employmentContracts.routes'));
 router.use('/cibus-sync', require('./cibusSync.routes'));
 router.use('/stock', require('./stock.routes'));

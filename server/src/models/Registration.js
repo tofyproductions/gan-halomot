@@ -36,9 +36,20 @@ const registrationSchema = new mongoose.Schema({
   academic_year: { type: String, default: null },
   status: {
     type: String,
-    enum: ['link_generated', 'contract_signed', 'docs_uploaded', 'completed'],
+    // 'cancelled' is a departure that still owes money: the child is off every
+    // roster, but the registration stays on the collections screen until the
+    // debt the contract fixes (first month / notice month + one) is settled.
+    enum: ['link_generated', 'contract_signed', 'docs_uploaded', 'completed', 'cancelled'],
     default: 'link_generated',
   },
+  cancelled_at: { type: Date, default: null },
+  cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  cancel_note: { type: String, default: '' },
+  // Flipped by the office once the cancellation debt is paid — the moment the
+  // family disappears from גבייה too.
+  billing_settled: { type: Boolean, default: false },
+  billing_settled_at: { type: Date, default: null },
+  billing_settled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   agreement_signed: { type: Boolean, default: false },
   card_completed: { type: Boolean, default: false },
   signature_data: { type: String, default: null },

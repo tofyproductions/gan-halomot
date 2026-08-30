@@ -850,6 +850,79 @@ async function activate(req, res, next) {
   }
 }
 
+/**
+ * POST /api/registrations/:id/cancel  { exit_month, note }
+ *
+ * ביטול רישום — the departure that still owes money. The contract fixes what a
+ * late canceller pays (the first month is a non-refundable advance; a mid-year
+ * leaver pays the notice month plus one more), and the branch manager sets the
+ * last billable month accordingly. The child comes off every roster now; the
+ * family stays on the collections screen, billed exactly through that month,
+ * until the office marks the debt settled. Deleting did the opposite — it took
+ * the billing down with the child, which is why nothing could ever be collected.
+ */
+async function cancel(req, res, next) {
+  try {
+    const { id } = req.params;
+    const registration = await Registration.findById(id);
+    if (!registration) return res.status(404).json({ error: 'רישום לא נמצא' });
+    if (registration.status === 'cancelled') {
+      return res.status(409).json({ error: 'הרישום כבר בוטל' });
+    }
+
+    const exitMonth = Number(req.body?.exit_month);
+    if (!Number.isInteger(exitMonth) || exitMonth < 1 || exitMonth > 12) {
+      return res.status(400).json({ error: 'יש לבחור עד איזה חודש המשפחה מחויבת' });
+    }
+
+    // Off the rosters — classrooms, attendance, the parent portal.
+    await Child.updateMany({ registration_id: id }, { $set: { is_active: false } });
+
+    // The billing view derives everything from exit_month: months after it
+    // zero out, months up to it stay billable (amounts editable per-month on
+    // the collections screen, where the office adjusts to what the contract
+    // says for this family).
+    const academicYear = academicYearOf(registration) || '';
+    const existing = await Collection.findOne({ registration_id: id });
+    if (existing) {
+      existing.exit_month = exitMonth;
+      existing.last_updated = new Date();
+      await existing.save();
+    } else {
+      await Collection.create({ registration_id: id, academic_year: academicYear, exit_month: exitMonth });
+    }
+
+    registration.status = 'cancelled';
+    registration.cancelled_at = new Date();
+    registration.cancelled_by = req.user?.id || null;
+    registration.cancel_note = String(req.body?.note || '').trim();
+    registration.billing_settled = false;
+    await registration.save();
+
+    res.json({ ok: true, exit_month: exitMonth });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** POST /api/registrations/:id/settle-billing — the debt is paid; drop from גבייה. */
+async function settleBilling(req, res, next) {
+  try {
+    const registration = await Registration.findById(req.params.id);
+    if (!registration) return res.status(404).json({ error: 'רישום לא נמצא' });
+    if (registration.status !== 'cancelled') {
+      return res.status(409).json({ error: 'אפשר לסגור חוב רק לרישום שבוטל' });
+    }
+    registration.billing_settled = true;
+    registration.billing_settled_at = new Date();
+    registration.billing_settled_by = req.user?.id || null;
+    await registration.save();
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function remove(req, res, next) {
   try {
     const { id } = req.params;
@@ -1065,6 +1138,7 @@ async function fixOrphanBranch(req, res, next) {
 
 module.exports = {
   getAll, getById, create, update, generateLink, renew, activate, remove,
+  cancel, settleBilling,
   finalizeManual, downloadContract, listContractVersions, downloadContractVersion,
   fixOrphanBranch, setAcademicYear, bulkSetAcademicYear,
 };
