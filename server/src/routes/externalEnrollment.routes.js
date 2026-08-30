@@ -20,7 +20,9 @@ router.post('/import', allow('system_admin', 'accountant'), upload.single('file'
 router.get('/contacts', ctrl.contacts);
 router.get('/pricing', ctrl.pricing);
 router.get('/classroom-plan', ctrl.classroomPlan);
-router.post('/classrooms', allow('system_admin', 'accountant'), ctrl.createClassroom);
+// A branch manager creates rooms for her own placement board — she is already
+// allowed to place children into them one line below.
+router.post('/classrooms', allow('system_admin', 'accountant', 'branch_manager'), ctrl.createClassroom);
 router.post('/promote-bulk', allow('system_admin', 'accountant'), ctrl.promoteBulk);
 
 // Undoing a whole upload — a file put against the wrong branch. Refuses to

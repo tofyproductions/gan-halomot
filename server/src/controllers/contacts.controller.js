@@ -97,7 +97,19 @@ async function generatePDF(req, res, next) {
           .count { color: #64748b; font-size: 0.85rem; }
           .team { margin: 2px 0 8px; color: #334155; font-size: 0.85rem; }
           .team.empty { color: #b45309; }
-          @media print { body { padding: 20px; } }
+          @page { size: A4; margin: 12mm; }
+          @media print {
+            body { padding: 0; max-width: none; }
+            /* One classroom per sheet: the page on the wall is one room's
+               page, and two rooms sharing a sheet means scissors. */
+            .room { break-after: page; page-break-after: always; }
+            .room:last-of-type { break-after: auto; page-break-after: auto; }
+            /* A room too big for one sheet continues cleanly: whole rows,
+               header repeated. */
+            thead { display: table-header-group; }
+            tr { break-inside: avoid; page-break-inside: avoid; }
+            .room h2 { margin-top: 0; }
+          }
         </style>
       </head>
       <body>
@@ -105,10 +117,16 @@ async function generatePDF(req, res, next) {
         <p class="date">תאריך הפקה: ${today}</p>
     `;
 
-    for (const [roomId, group] of Object.entries(grouped)) {
+    // Alphabetical by room name — until now the order was whichever room's
+    // child happened to sort first, which read as random on paper.
+    const orderedRooms = Object.entries(grouped)
+      .sort(([, a], [, b]) => a.name.localeCompare(b.name, 'he'));
+
+    for (const [roomId, group] of orderedRooms) {
       const { name: classroomName, kids } = group;
       const team = staffByRoom[roomId] || [];
       html += `
+        <section class="room">
         <h2>${esc(classroomName)} <span class="count">(${kids.length} ילדים)</span></h2>
         ${team.length ? `<p class="team">${team.map(t =>
           `${esc(t.full_name)}${t.position ? ` (${esc(t.position)})` : ''}${t.primary ? '' : ' — נוספת'}${t.phone ? ` · ${esc(t.phone)}` : ''}`
@@ -138,7 +156,7 @@ async function generatePDF(req, res, next) {
         `;
       });
 
-      html += `</tbody></table>`;
+      html += `</tbody></table></section>`;
     }
 
     html += `</body></html>`;
