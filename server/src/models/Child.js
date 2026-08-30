@@ -34,6 +34,17 @@ const childSchema = new mongoose.Schema({
   gender: { type: String, enum: ['boy', 'girl', ''], default: '' },
 
   is_active: { type: Boolean, default: true },
+
+  /**
+   * הסרה זמנית בידי המנהלת — the child dropped off the ClickTac/תמ"ת list and
+   * the manager saw it before the next file upload proved it. Set together
+   * with is_active=false; distinguishes this reversible, human-declared state
+   * from an ordinary deactivation, so the next file import may automatically
+   * restore the child if their ת"ז shows up in it again.
+   */
+  hidden_at: { type: Date, default: null },
+  hidden_by_name: { type: String, default: '' },
+  hide_note: { type: String, default: '' },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 childSchema.index({ registration_id: 1 });

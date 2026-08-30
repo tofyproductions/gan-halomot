@@ -240,6 +240,26 @@ async function importFile(req, res, next) {
       missingNames.push(doc.child.full_name);
     }
 
+    /**
+     * The other direction of the manager's "הסרה זמנית": a child she hid
+     * because they dropped off the list, whose ת"ז now appears in this fresh
+     * file — the file is the proof they are back, so they come back. Only
+     * children hidden THROUGH the temporary mechanism are touched; ordinary
+     * deactivations are not the file's to reverse.
+     */
+    const restoredNames = [];
+    const hiddenKids = await Child.find({ hidden_at: { $ne: null }, is_active: false })
+      .select('child_name child_id_number').lean();
+    for (const kid of hiddenKids) {
+      const idNum = String(kid.child_id_number || '').replace(/\D/g, '');
+      if (!idNum || !seen.has(idNum)) continue;
+      await Child.updateOne(
+        { _id: kid._id },
+        { $set: { is_active: true, hidden_at: null, hidden_by_name: '', hide_note: '' } },
+      );
+      restoredNames.push(kid.child_name);
+    }
+
     const batch = await EnrollmentImport.create({
       source: 'clicktac',
       branch_id: branchId,
@@ -270,6 +290,8 @@ async function importFile(req, res, next) {
       unchanged,
       missing: missingNames.length,
       missing_names: missingNames.slice(0, 50),
+      restored: restoredNames.length,
+      restored_names: restoredNames.slice(0, 50),
       results: results.slice(0, 50),
       import_id: batch._id,
     });

@@ -179,4 +179,59 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { getAll, getById, update, updateClassroom, remove };
+/**
+ * POST /api/children/:id/hide  { note }
+ *
+ * הסרה זמנית: the child left the ClickTac/תמ"ת list before the next file
+ * upload says so. Off the contact page and every roster now; the next file
+ * import restores them automatically if their ת"ז reappears.
+ */
+async function hide(req, res, next) {
+  try {
+    const child = await Child.findById(req.params.id);
+    if (!child) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    child.is_active = false;
+    child.hidden_at = new Date();
+    child.hidden_by_name = req.user?.full_name || req.user?.username || '';
+    child.hide_note = String(req.body?.note || '').trim();
+    await child.save();
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+/** POST /api/children/:id/unhide — the manager puts the child back herself. */
+async function unhide(req, res, next) {
+  try {
+    const child = await Child.findById(req.params.id);
+    if (!child) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    child.is_active = true;
+    child.hidden_at = null;
+    child.hidden_by_name = '';
+    child.hide_note = '';
+    await child.save();
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+/** GET /api/children/hidden — the temporarily-removed, so they can be restored. */
+async function listHidden(req, res, next) {
+  try {
+    const rows = await Child.find({ hidden_at: { $ne: null }, is_active: false })
+      .populate('classroom_id', 'name')
+      .sort({ hidden_at: -1 })
+      .lean();
+    res.json({
+      children: rows.map(c => ({
+        id: String(c._id),
+        child_name: c.child_name,
+        classroom_name: c.classroom_id?.name || '',
+        academic_year: c.academic_year,
+        hidden_at: c.hidden_at,
+        hidden_by_name: c.hidden_by_name,
+        hide_note: c.hide_note,
+      })),
+    });
+  } catch (error) { next(error); }
+}
+
+module.exports = { getAll, getById, update, updateClassroom, remove, hide, unhide, listHidden };
