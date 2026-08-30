@@ -69,8 +69,10 @@ function introWhatsapp(candidate, branchName, senderName) {
     '• האם המשרה עדיין רלוונטית עבורך?',
     '• יש לך ניסיון בגני ילדים, או בעבודה עם ילדים בכלל?',
     '• איזו משרה מתאימה לך — מלאה / חלקית / שעות בוקר?',
-    '• באיזה אזור נוח לך לעבוד?',
-    '• ממתי תוכל/י להתחיל?',
+    // The office doesn't know yet which gan she is for — the branch question
+    // only makes sense when there is no branch in the signature.
+    ...(branchName ? [] : ['• באיזה אזור נוח לך לעבוד?']),
+    '• מתי יתאים לך להגיע לראיון?',
     '',
     'תודה, ונשמח להכיר! 🙂',
   ];
