@@ -425,7 +425,7 @@ function ContractSection({ registrationId }) {
         await printContractHtml(res.data.html);
       } else if (res.data?.url) {
         // Stored PDF — served by the API behind auth, or an old Drive link.
-        await openApiFile(res.data.url, { filename: 'חוזה.pdf' });
+        await openApiFile(res.data.url, { filename: res.data.filename || 'חוזה.pdf' });
       } else {
         toast.error('אין חוזה זמין');
       }

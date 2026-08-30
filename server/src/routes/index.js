@@ -133,6 +133,8 @@ router.use('/discounts', require('./discount.routes'));
 router.use('/branch-pricing', require('./branchPricing.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/employee-letters', require('./employeeLetters.routes'));
+// מסמכים להורים — אישור שהות בגן ואישור קייטנה, מופקים מהמערכת.
+router.use('/parent-letters', require('./parentLetters.routes'));
 router.use('/employment-contracts', require('./employmentContracts.routes'));
 router.use('/cibus-sync', require('./cibusSync.routes'));
 router.use('/stock', require('./stock.routes'));

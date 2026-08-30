@@ -81,6 +81,7 @@ const GiftSelection = require('./GiftSelection');
 const Candidate = require('./Candidate');
 const BranchCertification = require('./BranchCertification');
 const EmployeeCourse = require('./EmployeeCourse');
+const ParentLetter = require('./ParentLetter');
 
 const real = {
   PayrollRollup,
@@ -161,6 +162,7 @@ const real = {
   Candidate,
   BranchCertification,
   EmployeeCourse,
+  ParentLetter,
   Announcement,
   SmsBudget,
   Absence,

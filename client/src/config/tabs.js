@@ -23,6 +23,9 @@ export const TAB_GROUPS = [
       // renaming it would revoke the screen from whoever was granted it by hand.
       { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
+      // אישור שהות ואישור קייטנה — the papers a family asks the office for,
+      // filled from the system instead of typed from memory.
+      { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי

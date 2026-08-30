@@ -46,6 +46,7 @@ import LeadForm from './components/leads/LeadForm';
 import LeadsPage from './components/leads/LeadsPage';
 import RecruitmentPage from './components/recruitment/RecruitmentPage';
 import BranchCertificationsPage from './components/compliance/BranchCertificationsPage';
+import ParentLettersPage from './components/parent-letters/ParentLettersPage';
 import CoursesPage from './components/compliance/CoursesPage';
 import MySalaryPreview from './components/employee-portal/MySalaryPreview';
 import MyPayslips from './components/employee-portal/MyPayslips';
@@ -205,6 +206,11 @@ function AppRoutes() {
         <Route path="recruitment" element={
           <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
             <RecruitmentPage />
+          </ProtectedRoute>
+        } />
+        <Route path="parent-letters" element={
+          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+            <ParentLettersPage />
           </ProtectedRoute>
         } />
         <Route path="branch-certifications" element={
