@@ -74,7 +74,9 @@ function introWhatsapp(candidate, branchName, senderName) {
     ...(branchName ? [] : ['• באיזה אזור נוח לך לעבוד?']),
     '• מתי יתאים לך להגיע לראיון?',
     '',
-    'תודה, ונשמח להכיר! 🙂',
+    // No emoji: the wa.me handoff mangles astral-plane characters on some
+    // clients and the message lands with a � at the end.
+    'תודה, ונשמח להכיר!',
   ];
   return `https://wa.me/${waNumber(candidate.phone_raw || candidate.phone)}?text=${encodeURIComponent(lines.join('\n'))}`;
 }
