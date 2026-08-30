@@ -77,10 +77,13 @@ export default function OrderView() {
     const supplierObj = order.supplier_id || {};
     const branchObj = order.branch_id || {};
 
+    const escNote = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const itemsHTML = (order.items || []).map(it => `
       <tr>
         <td>${it.sku || ''}</td>
-        <td style="font-weight:600">${it.name || ''}</td>
+        <td style="font-weight:600">${it.name || ''}
+          ${it.note ? `<div style="color:#b45309;font-weight:700;font-size:12px">⚠️ ${escNote(it.note)}</div>` : ''}
+        </td>
         <td style="text-align:center;font-weight:700">${it.qty || 0}</td>
         <td style="text-align:center">${fmt(it.unit_price)}</td>
         <td style="text-align:center;font-weight:700">${fmt(it.total)}</td>
@@ -247,7 +250,14 @@ export default function OrderView() {
                     return (
                       <TableRow key={i} sx={{ bgcolor: shortage ? '#fffbeb' : undefined }}>
                         <TableCell>{item.sku || ''}</TableCell>
-                        <TableCell sx={{ fontWeight: 600 }}>{item.name}</TableCell>
+                        <TableCell sx={{ fontWeight: 600 }}>
+                          {item.name}
+                          {item.note && (
+                            <Box component="span" sx={{ display: 'block', color: '#b45309', fontSize: '0.78rem', fontWeight: 700 }}>
+                              ⚠️ {item.note}
+                            </Box>
+                          )}
+                        </TableCell>
                         <TableCell align="center" sx={{ fontWeight: 700 }}>{item.qty}</TableCell>
                         {showReceived && (
                           <TableCell align="center" sx={{ fontWeight: 700, color: shortage ? '#92400e' : '#065f46' }}>

@@ -230,10 +230,14 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
   const fmtCurrency = (n) => `₪${Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const today = new Date(order.created_at || Date.now()).toLocaleDateString('he-IL');
 
+  const escNote = (s) => String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const itemsHTML = (order.items || []).map(it => `
     <tr>
       <td style="padding:8px;border:1px solid #e2e8f0;">${it.sku || ''}</td>
-      <td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;">${it.name || ''}</td>
+      <td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;">${it.name || ''}
+        ${it.note ? `<div style="font-weight:700;color:#b45309;font-size:12px;">⚠️ ${escNote(it.note)}</div>` : ''}
+      </td>
       <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:700;">${it.qty || 0}</td>
       <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;">${fmtCurrency(it.unit_price)}</td>
       <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:700;">${fmtCurrency(it.total)}</td>

@@ -63,6 +63,31 @@ async function getById(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * Item mapping, with each product's הערה קבועה snapshotted onto the line.
+ *
+ * Read from the DATABASE, not from whatever the client sent — the note is the
+ * gan's rule ("תבלינים של טעם וריח בלבד — אלרגיה לשומשום"), and a rule the
+ * browser can drop is not a rule. Snapshotted so the order forever shows what
+ * the supplier was actually told, even if the product is edited later.
+ */
+async function withStandingNotes(items) {
+  const ids = items.map(i => i.product_id).filter(Boolean);
+  const products = ids.length
+    ? await Product.find({ _id: { $in: ids } }).select('standing_note').lean()
+    : [];
+  const noteById = new Map(products.map(p => [String(p._id), p.standing_note || '']));
+  return items.map(item => ({
+    product_id: item.product_id || null,
+    sku: item.sku || '',
+    name: item.name,
+    qty: item.qty,
+    unit_price: item.unit_price || 0,
+    total: Number(((item.qty || 0) * (item.unit_price || 0)).toFixed(2)),
+    note: noteById.get(String(item.product_id)) || '',
+  }));
+}
+
 async function create(req, res, next) {
   try {
     const { branch_id, supplier_id, items, notes, created_by } = req.body;
@@ -74,14 +99,7 @@ async function create(req, res, next) {
     if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
     // Calculate totals
-    const processedItems = items.map(item => ({
-      product_id: item.product_id || null,
-      sku: item.sku || '',
-      name: item.name,
-      qty: item.qty,
-      unit_price: item.unit_price || 0,
-      total: Number(((item.qty || 0) * (item.unit_price || 0)).toFixed(2)),
-    }));
+    const processedItems = await withStandingNotes(items);
 
     const total_amount = processedItems.reduce((sum, i) => sum + i.total, 0);
 
@@ -132,14 +150,7 @@ async function update(req, res, next) {
 
     const { items, notes } = req.body;
     if (items) {
-      order.items = items.map(item => ({
-        product_id: item.product_id || null,
-        sku: item.sku || '',
-        name: item.name,
-        qty: item.qty,
-        unit_price: item.unit_price || 0,
-        total: Number(((item.qty || 0) * (item.unit_price || 0)).toFixed(2)),
-      }));
+      order.items = await withStandingNotes(items);
       order.total_amount = order.items.reduce((sum, i) => sum + i.total, 0);
     }
     if (notes !== undefined) order.notes = notes;

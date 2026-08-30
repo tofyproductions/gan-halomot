@@ -269,6 +269,11 @@ export default function OrderForm() {
                             <Box sx={{ flex: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
                               <Typography variant="caption" color="text.secondary">{p.sku}</Typography>
+                              {p.standing_note && (
+                                <Typography variant="caption" sx={{ display: 'block', color: '#b45309', fontWeight: 700 }}>
+                                  ⚠️ {p.standing_note}
+                                </Typography>
+                              )}
                             </Box>
                             <Box sx={{ textAlign: 'left' }}>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
@@ -317,6 +322,11 @@ export default function OrderForm() {
                             <DeleteIcon fontSize="small" />
                           </IconButton>
                         </Stack>
+                        {c.product.standing_note && (
+                          <Typography variant="caption" sx={{ display: 'block', color: '#b45309', fontWeight: 700 }}>
+                            ⚠️ {c.product.standing_note} — יצורף להזמנה אוטומטית
+                          </Typography>
+                        )}
                         <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
                           <TextField
                             size="small" type="number" value={c.qty}

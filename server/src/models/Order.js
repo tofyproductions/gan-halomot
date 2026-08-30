@@ -7,6 +7,9 @@ const orderItemSchema = new mongoose.Schema({
   qty: { type: Number, required: true },
   unit_price: { type: Number, default: 0 },
   total: { type: Number, default: 0 },
+  // Snapshot of the product's standing_note at order time — the note the
+  // supplier actually saw stays with the order even if the product is edited.
+  note: { type: String, default: '' },
   // Set when the order is received (Phase 3 receive flow).
   qty_received: { type: Number, default: 0 },
   expiry_date: { type: Date, default: null },

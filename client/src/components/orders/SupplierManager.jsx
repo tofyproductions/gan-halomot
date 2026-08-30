@@ -55,13 +55,19 @@ export default function SupplierManager() {
     }
   };
 
-  // Product add
+  // Product add / edit
   const handleSaveProduct = async () => {
     const { supplierId, data } = productDialog;
     if (!data.name?.trim()) return toast.error('שם המוצר חובה');
     try {
-      await api.post('/products', { ...data, supplier_id: supplierId });
-      toast.success('מוצר נוסף');
+      const editId = data._id || data.id;
+      if (editId) {
+        await api.put(`/products/${editId}`, data);
+        toast.success('מוצר עודכן');
+      } else {
+        await api.post('/products', { ...data, supplier_id: supplierId });
+        toast.success('מוצר נוסף');
+      }
       setProductDialog({ open: false, supplierId: null, data: {} });
       fetchProducts(supplierId);
     } catch (err) {
@@ -219,9 +225,21 @@ export default function SupplierManager() {
                           </TableCell>
                           <TableCell>{p.sku}</TableCell>
                           <TableCell>{p.category}</TableCell>
-                          <TableCell sx={{ fontWeight: 600 }}>{p.name}</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {p.name}
+                            {p.standing_note && (
+                              <Box component="span" sx={{ display: 'block', color: '#b45309', fontSize: '0.75rem', fontWeight: 700 }}>
+                                ⚠️ {p.standing_note}
+                              </Box>
+                            )}
+                          </TableCell>
                           <TableCell align="center" sx={{ fontWeight: 700 }}>{formatCurrency(p.price_with_vat)}</TableCell>
                           <TableCell align="center">
+                            <IconButton size="small"
+                              onClick={() => setProductDialog({ open: true, supplierId: sid, data: { ...p } })}
+                            >
+                              <EditIcon fontSize="small" />
+                            </IconButton>
                             <IconButton size="small" color="error"
                               onClick={() => setConfirm({ open: true, type: 'product', id: p._id || p.id })}
                             >
@@ -269,18 +287,25 @@ export default function SupplierManager() {
 
       {/* Product Dialog */}
       <Dialog open={productDialog.open} onClose={() => setProductDialog({ open: false, supplierId: null, data: {} })} dir="rtl" maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>הוסף מוצר</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>{(productDialog.data._id || productDialog.data.id) ? 'עריכת מוצר' : 'הוסף מוצר'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="מק״ט" value={productDialog.data.sku || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, sku: e.target.value } }))} fullWidth />
             <TextField label="קטגוריה" value={productDialog.data.category || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, category: e.target.value } }))} fullWidth />
             <TextField label="שם המוצר" value={productDialog.data.name || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, name: e.target.value } }))} fullWidth required />
             <TextField label="מחיר לפני מע״מ" type="number" value={productDialog.data.price_before_vat || ''} onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, price_before_vat: parseFloat(e.target.value) || 0 } }))} fullWidth />
+            <TextField
+              label="הערה קבועה להזמנה" multiline minRows={2}
+              value={productDialog.data.standing_note || ''}
+              onChange={e => setProductDialog(prev => ({ ...prev, data: { ...prev.data, standing_note: e.target.value } }))}
+              helperText='תופיע אוטומטית בכל הזמנה שכוללת את המוצר — גם במייל וב-PDF לספק. למשל: "תבלינים של טעם וריח בלבד — אלרגיה לשומשום"'
+              fullWidth
+            />
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setProductDialog({ open: false, supplierId: null, data: {} })}>ביטול</Button>
-          <Button variant="contained" onClick={handleSaveProduct}>הוסף</Button>
+          <Button variant="contained" onClick={handleSaveProduct}>{(productDialog.data._id || productDialog.data.id) ? 'שמור' : 'הוסף'}</Button>
         </DialogActions>
       </Dialog>
 

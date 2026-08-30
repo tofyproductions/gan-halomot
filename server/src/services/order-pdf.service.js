@@ -109,11 +109,20 @@ const SHARED_CSS = `
   .footer { margin-top: 14px; padding-top: 6px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 9px; text-align: center; }
 `;
 
+// The notes are the gan's rules to the supplier — the sesame allergy line
+// lives here. Escaped, because a note is typed text inside markup.
+const escNote = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const itemNoteHTML = (it) => (it.note
+  ? `<div style="font-weight:800;color:#b45309;">⚠️ ${escNote(it.note)}</div>` : '');
+const orderNotesHTML = (order) => (order.notes
+  ? `<div style="margin-top:6px;padding:6px 10px;border:2px solid #b45309;background:#fef3c7;font-weight:800;color:#92400e;">הערות: ${escNote(order.notes)}</div>` : '');
+
 function buildSupplierHTML({ order, supplier, branch }) {
   const itemsHTML = (order.items || []).map(it => `
     <tr>
       <td>${it.sku || ''}</td>
-      <td class="product">${it.name || ''}</td>
+      <td class="product">${it.name || ''}${itemNoteHTML(it)}</td>
       <td><b>${it.qty || 0}</b></td>
     </tr>
   `).join('');
@@ -123,6 +132,7 @@ function buildSupplierHTML({ order, supplier, branch }) {
     <style>${SHARED_CSS}</style>
   </head><body>
     ${topBlock({ order, supplier, branch, variant: 'supplier' })}
+    ${orderNotesHTML(order)}
     <table class="items">
       <thead><tr>
         <th style="width: 80px">מק"ט</th>
@@ -139,7 +149,7 @@ function buildInternalHTML({ order, supplier, branch }) {
   const itemsHTML = (order.items || []).map(it => `
     <tr>
       <td>${it.sku || ''}</td>
-      <td class="product">${it.name || ''}</td>
+      <td class="product">${it.name || ''}${itemNoteHTML(it)}</td>
       <td><b>${it.qty || 0}</b></td>
       <td>${fmt(it.unit_price)}</td>
       <td><b>${fmt(it.total)}</b></td>
@@ -151,6 +161,7 @@ function buildInternalHTML({ order, supplier, branch }) {
     <style>${SHARED_CSS}</style>
   </head><body>
     ${topBlock({ order, supplier, branch, variant: 'internal' })}
+    ${orderNotesHTML(order)}
     <table class="items">
       <thead><tr>
         <th style="width: 80px">מק"ט</th>

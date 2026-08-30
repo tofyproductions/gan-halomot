@@ -12,7 +12,7 @@ async function getAll(req, res, next) {
 
 async function create(req, res, next) {
   try {
-    const { supplier_id, sku, category, name, price_before_vat } = req.body;
+    const { supplier_id, sku, category, name, price_before_vat, standing_note } = req.body;
     if (!supplier_id || !name) return res.status(400).json({ error: 'supplier_id and name are required' });
 
     const supplier = await Supplier.findById(supplier_id);
@@ -21,7 +21,7 @@ async function create(req, res, next) {
     const vatRate = supplier.vat_rate || 1.18;
     const product = await Product.create({
       supplier_id, sku: sku || '', category: category || '',
-      name, price_before_vat: price_before_vat || 0,
+      name, standing_note: standing_note || '', price_before_vat: price_before_vat || 0,
       price_with_vat: Number(((price_before_vat || 0) * vatRate).toFixed(2)),
     });
     res.status(201).json({ product: { ...product.toObject(), id: product._id } });
@@ -33,7 +33,7 @@ async function update(req, res, next) {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
-    const fields = ['sku', 'category', 'name', 'price_before_vat', 'image_url'];
+    const fields = ['sku', 'category', 'name', 'price_before_vat', 'image_url', 'standing_note'];
     fields.forEach(f => { if (req.body[f] !== undefined) product[f] = req.body[f]; });
 
     if (req.body.price_before_vat !== undefined) {
