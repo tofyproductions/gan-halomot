@@ -124,7 +124,9 @@ export default function RegistrationTracker() {
         await printContractHtml(res.data.html);
       } else if (res.data?.url) {
         // Stored PDF — served by the API behind auth, or an old Drive link.
-        await openApiFile(res.data.url, { filename: `חוזה_${docsDialog.reg?.child_name || regId}.pdf` });
+        await openApiFile(res.data.url, {
+          filename: res.data.filename || `${docsDialog.reg?.child_name || ''} - חוזה.pdf`,
+        });
       } else {
         toast.error('אין חוזה זמין');
       }
@@ -268,14 +270,39 @@ export default function RegistrationTracker() {
     }
   };
 
-  const handleWhatsApp = (reg) => {
+  /**
+   * Open WhatsApp with the message ready, and TELL THE TRUTH about it.
+   * A blocked popup used to vanish silently under a green toast; now the
+   * link lands on the clipboard and the toast says what to do with it.
+   */
+  const openWhatsApp = (phone, text, link) => {
+    const win = window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+    if (!win) {
+      if (link) navigator.clipboard?.writeText(link).catch(() => {});
+      toast.warning('הדפדפן חסם את פתיחת הווטסאפ — הקישור הועתק, אפשר להדביק ידנית');
+      return false;
+    }
+    return true;
+  };
+
+  const handleWhatsApp = async (reg) => {
     const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
     if (!phone) return toast.error('אין מספר טלפון');
-    const link = reg.access_token ? `${window.location.origin}/register/${reg.access_token}` : '';
-    const text = encodeURIComponent(
-      `שלום ${reg.parent_name}, שמחים שהצטרפתם לגן החלומות!\nלהשלמת הרישום אנא היכנסו לקישור וחתמו על החוזה:\n${link}`
-    );
-    window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+    // A registration without a live token used to produce a message with NO
+    // link at the end — the parent got a greeting and nowhere to go. Mint one.
+    let token = reg.access_token;
+    if (!token) {
+      try {
+        const res = await api.post(`/registrations/${reg._id || reg.id}/generate-link`);
+        token = res.data.access_token;
+      } catch {
+        return toast.error('שגיאה ביצירת קישור לחתימה');
+      }
+    }
+    const link = `${window.location.origin}/register/${token}`;
+    openWhatsApp(phone,
+      `שלום ${reg.parent_name}, שמחים שהצטרפתם לגן החלומות!\nלהשלמת הרישום אנא היכנסו לקישור וחתמו על החוזה:\n${link}`,
+      link);
   };
 
   const DOC_NAMES = { id_copy: 'צילום תעודת זהות', payment_proof: 'אישור תשלום' };
@@ -294,11 +321,10 @@ export default function RegistrationTracker() {
     try {
       const res = await api.post(`/registrations/${reg._id || reg.id}/generate-link`);
       const link = `${window.location.origin}/register/${res.data.access_token}`;
-      const text = encodeURIComponent(
-        `שלום ${reg.parent_name}, זוהי תזכורת ${what} של ${reg.child_name} בגן החלומות 🌟\nנא להיכנס לקישור:\n${link}`
-      );
-      window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
-      toast.success('נפתחה תזכורת בוואטסאפ');
+      const ok = openWhatsApp(phone,
+        `שלום ${reg.parent_name}, זוהי תזכורת ${what} של ${reg.child_name} בגן החלומות 🌟\nנא להיכנס לקישור:\n${link}`,
+        link);
+      if (ok) toast.success('נפתחה תזכורת בוואטסאפ — יש ללחוץ "שלח"');
     } catch {
       toast.error('שגיאה ביצירת תזכורת');
     }
@@ -350,11 +376,11 @@ export default function RegistrationTracker() {
 
       const phone = (reg.parent_phone || '').replace(/^0/, '972').replace(/\D/g, '');
       if (phone) {
-        const text = encodeURIComponent(
+        const ok = openWhatsApp(phone,
           `שלום ${reg.parent_name}, לקראת שנת הלימודים החדשה מצורף חוזה הרישום של ${reg.child_name} לחתימה 🌟\nנא להיכנס לקישור:\n${link}`,
-        );
-        window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
-        toast.success(res.data.reused ? 'הקישור הקיים רוענן ונשלח' : 'נוצר רישום לשנה החדשה ונשלח להורה');
+          link);
+        // "נשלח" was a lie — WhatsApp only opens with the text ready.
+        if (ok) toast.success('נוצר רישום לשנה החדשה — נפתח ווטסאפ, יש ללחוץ "שלח"');
       } else {
         navigator.clipboard.writeText(link);
         toast.success('נוצר רישום לשנה החדשה — הקישור הועתק (אין טלפון להורה)');

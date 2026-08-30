@@ -80,12 +80,20 @@ export async function printContractHtml(html) {
     });
   }));
 
+  // The "Save as PDF" default filename comes from the TAB's title, not the
+  // hidden iframe's — so borrow the contract's own <title> ("שם הילד - חוזה -
+  // שנה") for the duration of the dialog and put the app's title back after.
+  const appTitle = document.title;
+  const contractTitle = doc.title || appTitle;
+
   const cleanup = () => setTimeout(() => {
+    document.title = appTitle;
     try { document.body.removeChild(iframe); } catch { /* already gone */ }
   }, 500);
   win.addEventListener('afterprint', cleanup, { once: true });
   setTimeout(cleanup, 120000); // hard fallback if afterprint never fires
 
+  document.title = contractTitle;
   win.focus();
   win.print();
 }

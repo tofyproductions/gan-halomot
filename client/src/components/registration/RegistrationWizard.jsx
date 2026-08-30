@@ -224,12 +224,18 @@ export default function RegistrationWizard() {
   };
 
   const sendWhatsApp = () => {
-    if (!result?.link) return;
-    const phone = form.parent_phone.replace(/^0/, '972');
+    if (!result?.link) return toast.error('אין קישור — נסו להעתיק אותו ידנית');
+    // Digits only: "050-123..." used to become "97250-123..." and wa.me
+    // refused it without a word.
+    const phone = form.parent_phone.replace(/\D/g, '').replace(/^0/, '972');
     const text = encodeURIComponent(
       `שלום ${form.parent_name}, שמחים שהצטרפתם לגן החלומות!\nלהשלמת הרישום אנא היכנסו לקישור וחתמו על החוזה:\n${result.link}`
     );
-    window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+    const win = window.open(`https://wa.me/${phone}?text=${text}`, '_blank');
+    if (!win) {
+      navigator.clipboard?.writeText(result.link).catch(() => {});
+      toast.warning('הדפדפן חסם את פתיחת הווטסאפ — הקישור הועתק, אפשר להדביק ידנית');
+    }
   };
 
   if (loading) return <LoadingSpinner />;

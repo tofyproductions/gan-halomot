@@ -675,15 +675,20 @@ async function generateLink(req, res, next) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
-    const access_token = generateAccessToken();
+    // Reuse a live token instead of rotating it. Rotation meant a "reminder"
+    // quietly killed the link from last week's WhatsApp — the parent taps the
+    // old message, gets "expired", and to her that is "they never sent it".
     const token_expires_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const stillValid = registration.access_token
+      && (!registration.token_expires_at || registration.token_expires_at > new Date());
+    const access_token = stillValid ? registration.access_token : generateAccessToken();
 
     registration.access_token = access_token;
     registration.token_expires_at = token_expires_at;
     await registration.save();
 
     const link = `${env.FRONTEND_URL}/register/${access_token}`;
-    res.json({ link, access_token, expires_at: token_expires_at });
+    res.json({ link, access_token, expires_at: token_expires_at, reused: !!stillValid });
   } catch (error) {
     next(error);
   }
@@ -1021,7 +1026,12 @@ async function downloadContract(req, res, next) {
     // directly. Server-generated contracts are HTML-as-.pdf and must be
     // re-rendered below so the client makes a real PDF (else: blank page).
     if (registration.contract_pdf_path && isServableUrl(registration.contract_pdf_path)) {
-      return res.json({ url: registration.contract_pdf_path });
+      // The name the file lands under — the child, not the record id.
+      const yr = academicYearOf(registration) || '';
+      return res.json({
+        url: registration.contract_pdf_path,
+        filename: `${registration.child_name || 'ילד'} - חוזה${yr ? ` - ${yr}` : ''}.pdf`,
+      });
     }
     // Live fallback: render HTML now using current registration data + saved
     // signature. Works even if R2 isn't configured.

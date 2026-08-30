@@ -69,7 +69,7 @@ function generateContractHTML(data) {
     <html dir="rtl" lang="he">
     <head>
       <meta charset="UTF-8">
-      <title>הסכם התקשרות - ${childName}${schoolYear ? ` - ${schoolYear}` : ''}</title>
+      <title>${childName} - חוזה${schoolYear ? ` - ${schoolYear}` : ''}</title>
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;600;700;800&family=Heebo:wght@400;600;700;800&display=swap" rel="stylesheet">
