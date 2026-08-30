@@ -169,21 +169,29 @@ async function sendAgreementEmail({ childName, parentName, parentEmail, contract
     </div>
   `;
 
-  const mailAttachments = [];
+  // Through dispatchEmail, NOT raw SMTP: Render blocks port 587, so the old
+  // getTransporter().sendMail here timed out on every signed contract and the
+  // copy quietly never reached the office or the parent.
+  const toB64 = (c) => (Buffer.isBuffer(c) ? c.toString('base64') : String(c || ''));
+  const fileAttachments = [];
   if (contractPdfBuffer) {
-    mailAttachments.push({
+    fileAttachments.push({
       filename: `Agreement_${childName}.pdf`,
-      content: contractPdfBuffer,
+      contentBase64: toB64(contractPdfBuffer),
       contentType: 'application/pdf',
     });
   }
-  attachments.forEach(a => mailAttachments.push(a));
+  attachments.forEach(a => fileAttachments.push({
+    filename: a.filename,
+    contentBase64: a.contentBase64 || toB64(a.content),
+    contentType: a.contentType,
+  }));
 
-  await getTransporter().sendMail({
+  await dispatchEmail({
     to: recipients,
     subject: `סיום רישום והסכם חתום - ${childName}`,
     html: htmlBody,
-    attachments: mailAttachments,
+    fileAttachments,
   });
 }
 
