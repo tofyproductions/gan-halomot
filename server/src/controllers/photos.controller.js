@@ -18,14 +18,13 @@ const nursery = require('../services/nursery.service');
 
 /** Which classrooms this user may act on. Same rule as the daily board. */
 async function visibleClassrooms(user) {
-  // This year's rooms only. Rooms are never deactivated at year rollover, so
-  // without the year filter last year's "קפלן — תינוקייה א" showed up as an
-  // indistinguishable duplicate of this year's.
-  const { getAcademicYears } = require('../services/academic-year.service');
-  const rooms = await Classroom.find({
-    is_active: true,
-    academic_year: getAcademicYears().current.range,
-  }).populate('branch_id', 'name').lean();
+  // Each branch's newest rooms — NOT "the current calendar year", which in
+  // late August hides every branch that hasn't opened next year's rooms yet.
+  // See services/classroomList.js.
+  const { dedupeNewest } = require('../services/classroomList');
+  const rooms = dedupeNewest(
+    await Classroom.find({ is_active: true }).populate('branch_id', 'name').lean(),
+  );
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   const managed = (user.managed_branch_ids || []).map(String);

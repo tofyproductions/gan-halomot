@@ -2,6 +2,7 @@ const { Classroom, Child, Branch } = require('../models');
 const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
 const planner = require('../services/classroomPlanner');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { dedupeNewest } = require('../services/classroomList');
 
 async function getAll(req, res, next) {
   try {
@@ -10,19 +11,27 @@ async function getAll(req, res, next) {
     const targetYear = year ? normalizeYear(year) : academicYears.current.range;
 
     const branchFilter = getBranchFilter(req);
-    // targetYear was computed and then used only for the child counts — the
-    // room list itself returned every year ever opened, so last year's rooms
-    // appeared as duplicates on every screen that consumes this.
-    const classrooms = await Classroom.find({ is_active: true, academic_year: targetYear, ...branchFilter })
+    // An explicit ?year= filters to that year; otherwise every year is
+    // fetched and collapsed below to each branch's newest rooms — see
+    // services/classroomList.js for why "current calendar year" is wrong.
+    const classrooms = await Classroom.find({
+      is_active: true,
+      ...(year ? { academic_year: targetYear } : {}),
+      ...branchFilter,
+    })
       .populate('lead_teacher_id', 'full_name')
       // Who may write this room's monthly plan, by name, so the gantt screen
       // can show it without a second round trip per room.
       .populate('gantt_editor_ids', 'full_name')
       .sort({ name: 1 }).lean();
 
-    // Get child counts
+    const rooms = year ? classrooms : dedupeNewest(classrooms);
+
+    // Get child counts. A room is already year-specific, so children are
+    // counted by the room they point at — filtering them by targetYear zeroed
+    // the counts for every branch still running on last year's rooms.
     const childCounts = await Child.aggregate([
-      { $match: { is_active: true, academic_year: targetYear } },
+      { $match: { is_active: true } },
       { $group: { _id: '$classroom_id', child_count: { $sum: 1 } } },
     ]);
 
@@ -31,7 +40,7 @@ async function getAll(req, res, next) {
       countMap[String(row._id)] = row.child_count;
     }
 
-    const result = classrooms.map(c => ({
+    const result = rooms.map(c => ({
       ...c,
       id: c._id,
       child_count: countMap[String(c._id)] || 0,

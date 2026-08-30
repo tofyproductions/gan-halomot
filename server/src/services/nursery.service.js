@@ -57,20 +57,15 @@ function isNurseryClassroom(classroom) {
   return NURSERY_NAME_RE.test(String(classroom.name || ''));
 }
 
-/** Every active infant room — this academic year's, unless told otherwise. */
+/** Every active infant room — each branch's newest, so year rollover never
+ *  shows the same room twice and never hides a branch that hasn't rolled yet. */
 async function nurseryClassrooms(filter = {}) {
-  const { getAcademicYears } = require('./academic-year.service');
-  const rooms = await Classroom.find({
-    is_active: true,
-    // Rooms are never deactivated at rollover, so without this the board
-    // offered last year's rooms alongside this year's, indistinguishable.
-    academic_year: getAcademicYears().current.range,
-    ...filter,
-  })
+  const { dedupeNewest } = require('./classroomList');
+  const rooms = await Classroom.find({ is_active: true, ...filter })
     .populate('branch_id', 'name')
     .sort({ name: 1 })
     .lean();
-  return rooms.filter(isNurseryClassroom);
+  return dedupeNewest(rooms.filter(isNurseryClassroom));
 }
 
 /**

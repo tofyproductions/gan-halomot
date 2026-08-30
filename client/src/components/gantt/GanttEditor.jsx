@@ -173,7 +173,10 @@ export default function GanttEditor() {
   }, [classroomId]);
 
   useEffect(() => {
-    if (!classroomId || !month || !year) return;
+    // Arriving without a room or a month must not strand the screen on
+    // "טוען..." forever — it happened when the calendar navigated here with an
+    // empty classroom because the room list came back empty.
+    if (!classroomId || !month || !year) { setLoading(false); return; }
     api.get('/gantt', { params: { classroom: classroomId, month, year, branch: selectedBranch } })
       .then(res => {
         setGantt(res.data.gantt);
@@ -611,6 +614,14 @@ export default function GanttEditor() {
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
   };
 
+  if (!classroomId || !month || !year) {
+    return (
+      <Box dir="rtl" sx={{ textAlign: 'center', py: 10 }}>
+        <Typography sx={{ mb: 2 }}>לא נבחרה כיתה או חודש.</Typography>
+        <Button variant="contained" onClick={() => navigate('/gantt')}>חזרה לבחירת כיתה</Button>
+      </Box>
+    );
+  }
   if (loading) return <Typography sx={{ textAlign: 'center', py: 10 }}>טוען...</Typography>;
   if (!gantt) return <Typography>גאנט לא נמצא</Typography>;
 
