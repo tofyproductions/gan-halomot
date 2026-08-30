@@ -79,6 +79,8 @@ const Photo = require('./Photo');
 const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
 const Candidate = require('./Candidate');
+const BranchCertification = require('./BranchCertification');
+const EmployeeCourse = require('./EmployeeCourse');
 
 const real = {
   PayrollRollup,
@@ -157,6 +159,8 @@ const real = {
   GiftCampaign,
   GiftSelection,
   Candidate,
+  BranchCertification,
+  EmployeeCourse,
   Announcement,
   SmsBudget,
   Absence,

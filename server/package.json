@@ -18,6 +18,8 @@
     "test:bank": "node scripts/content-bank.test.js",
     "test:weekdays": "node scripts/gantt-weekdays.test.js",
     "test:shabbat": "node scripts/shabbat-parents.test.js",
+    "test:compliance": "node scripts/compliance.test.js",
+    "import:courses": "node scripts/import-courses.js",
     "bank:build": "node scripts/content-bank-extract.js",
     "demo:build": "node scripts/ganflow-demo-build.js",
     "platform:isolation": "node scripts/ganflow-isolation.test.js",

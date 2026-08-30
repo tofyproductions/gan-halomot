@@ -25,6 +25,9 @@ export const TAB_GROUPS = [
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },
+      // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
+      // אש — with the expiry dates the mail digest watches.
+      { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
     ],
   },
   {
@@ -50,6 +53,9 @@ export const TAB_GROUPS = [
       { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
       { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'form_101',           label: 'טופסי 101', path: '/form-101',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      // The tracking sheet, moved in: every עובדת's מד"א and התנהלות בטוחה,
+      // when they run out, and the certificate one click away.
+      { id: 'courses',            label: 'קורסים והכשרות', path: '/courses',       defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
     ],
   },
   {

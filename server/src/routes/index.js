@@ -114,6 +114,10 @@ router.use('/pickup', require('./pickup.routes'));
 // silently returns nothing — which is what it did while this sat above the
 // line, and it left /recruitment/pull reachable by anyone with the URL.
 router.use('/recruitment', require('./recruitment.routes'));
+// אישורי מעון — the papers a branch operates under, with their expiry dates.
+router.use('/branch-certifications', require('./branchCertifications.routes'));
+// קורסים והכשרות — every עובדת's מד"א and התנהלות בטוחה, and when they run out.
+router.use('/employee-courses', require('./employeeCourses.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));

@@ -308,6 +308,20 @@ connectDB().then(() => {
       setTimeout(runRecruitment, 2 * 60 * 1000);
       setInterval(runRecruitment, 60 * 60 * 1000);
     }
+
+    // אישורים וקורסים: mail the office when a branch certificate or an
+    // employee's course is expired or inside the warning window. Hourly and
+    // self-limiting like the recruitment digest — and it only sends when the
+    // list CHANGED (or on Sunday), because "the license still expires in May"
+    // is not news every morning for two months.
+    const complianceJob = require('./services/complianceDigestJob');
+    const runCompliance = () => complianceJob.tick()
+      .then(r => { if (r?.sent) console.log(`[compliance] digest: ${r.total} items to ${r.to.length} recipients`); })
+      .catch(e => console.error('[compliance] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runCompliance, 5 * 60 * 1000);
+      setInterval(runCompliance, 60 * 60 * 1000);
+    }
   });
 });
 
