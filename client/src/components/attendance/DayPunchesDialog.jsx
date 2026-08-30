@@ -107,7 +107,14 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
     if (!e) return;
     const ts = timeToIsraelDate(date, e.hhmm);
     api.patch(`/payroll/punches/${p._id}`, { timestamp: ts.toISOString(), state: Number(e.state), manual_note: e.manual_note })
-      .then(() => { setEditing(prev => { const x = { ...prev }; delete x[p._id]; return x; }); load(); markDirty(); toast.success('עודכן'); })
+      .then((res) => {
+        setEditing(prev => { const x = { ...prev }; delete x[p._id]; return x; });
+        load(); markDirty();
+        // A parked time-change is not an update — say what actually happened.
+        toast.success(res.data?.pending
+          ? 'שינוי השעה נשלח לאישור הנהלת החשבונות — השעה תתעדכן אחרי האישור'
+          : 'עודכן');
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
   const cancelEdit = (id) => setEditing(prev => { const x = { ...prev }; delete x[id]; return x; });

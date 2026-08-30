@@ -2630,9 +2630,14 @@ async function editPunch(req, res, next) {
     const COUNTS = ['auto', 'approved'];
     const editorRole = req.user?.role;
     const editorIsFinal = editorRole === 'system_admin' || editorRole === 'accountant';
-    if (req.body.timestamp && !editorIsFinal && COUNTS.includes(p.approval_status)) {
-      const wanted = new Date(req.body.timestamp);
-      if (Number.isNaN(wanted.getTime())) return res.status(400).json({ error: 'שעה לא תקינה' });
+    // The dialog always sends a timestamp, changed or not. Only an actual
+    // MOVE of the time is money; a manager relabelling כניסה/יציאה or adding
+    // a note was falling into this branch, getting parked, and seeing a green
+    // "עודכן" over a value that never changed.
+    const wanted = req.body.timestamp ? new Date(req.body.timestamp) : null;
+    if (wanted && Number.isNaN(wanted.getTime())) return res.status(400).json({ error: 'שעה לא תקינה' });
+    const timeChanged = !!wanted && (!p.timestamp || wanted.getTime() !== p.timestamp.getTime());
+    if (timeChanged && !editorIsFinal && COUNTS.includes(p.approval_status)) {
       p.pending_edit = {
         timestamp: wanted,
         prev_status: p.approval_status,
@@ -2649,18 +2654,22 @@ async function editPunch(req, res, next) {
       // the accountant's queue picks it up on pending_edit rather than status.
       p.manager_approved_by = req.user?.id || null;
       p.manager_approved_at = new Date();
+      // The label and the note are not money — pairing is chronological and
+      // pay never reads them — so they apply now rather than waiting with
+      // the timestamp.
+      if (req.body.state != null) p.state = Number(req.body.state);
+      if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
       await p.save();
       return res.json({ ok: true, punch: p, pending: true });
     }
 
-    if (req.body.timestamp) {
-      const next = new Date(req.body.timestamp);
+    if (timeChanged) {
       // Correcting a generated row makes it a human decision. Mark it so the
       // regenerator leaves that day alone when the weekly hours change.
-      if (p.timestamp_source === 'fixed_schedule' && next.getTime() !== p.timestamp.getTime()) {
+      if (p.timestamp_source === 'fixed_schedule') {
         p.schedule_edited = true;
       }
-      p.timestamp = next;
+      p.timestamp = wanted;
     }
     if (req.body.state != null) p.state = Number(req.body.state);
     if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
