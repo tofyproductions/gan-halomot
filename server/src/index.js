@@ -157,6 +157,24 @@ if (require('./platform/connection').isEnabled()) {
   // On the bare domain only — a customer's own address is their system.
   app.get('/privacy', landing('privacy.html'));
   app.get('/terms', landing('terms.html'));
+
+  // The deck and the specification, as links that can be sent to somebody who
+  // has no account anywhere — which is the whole requirement: a gan owner gets
+  // this in a WhatsApp message and taps it on a phone.
+  //
+  // /pitch serves pitch-share.html and NEVER pitch.html. The presenting copy
+  // carries speaker notes — which objection is coming, not to lower the price,
+  // that whoever speaks first after the price question loses — behind a CSS
+  // class and a keypress. That is enough to keep them off the wall behind you
+  // and nothing at all against a reader holding the page. Route the wrong file
+  // here and the notes are on the public internet, addressed to the person
+  // reading them. Regenerate the share copy with `node sales/build-share.js`.
+  const sales = (file) => (req, res, next) => {
+    if (slugFromHost(req.headers.host)) return next();
+    res.sendFile(path.join(__dirname, '../../sales', file));
+  };
+  app.get('/pitch', sales('pitch-share.html'));
+  app.get('/spec', sales('spec.html'));
 }
 
 // Serve static frontend in production

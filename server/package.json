@@ -33,7 +33,8 @@
     "tenant:import": "node scripts/ganflow-tenant-import.js",
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
-    "demo:test": "node scripts/ganflow-demo-scramble.test.js"
+    "demo:test": "node scripts/ganflow-demo-scramble.test.js",
+    "test:sales": "node scripts/sales-pages.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
