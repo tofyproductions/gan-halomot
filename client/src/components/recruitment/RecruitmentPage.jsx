@@ -3,6 +3,7 @@ import {
   Box, Typography, Button, Card, CardContent, Stack, Chip, Tabs, Tab, TextField,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, AlertTitle,
   CircularProgress, Tooltip, IconButton, Divider, FormControlLabel, Checkbox,
+  MenuItem,
 } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
@@ -13,6 +14,7 @@ import PhoneMissedIcon from '@mui/icons-material/PhoneMissed';
 import HistoryIcon from '@mui/icons-material/History';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useBranch } from '../../hooks/useBranch';
 
 /**
  * גיוס עובדים — the screen a manager works from.
@@ -55,12 +57,16 @@ function defaultInterviewSlot() {
 }
 
 export default function RecruitmentPage() {
+  const { branches } = useBranch();
   const [view, setView] = useState(0);
   const [rows, setRows] = useState([]);
   const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
   const [pulling, setPulling] = useState(false);
   const [search, setSearch] = useState('');
+  // Narrows the list to one branch (or to 'office' — candidates with no
+  // branch). On top of the server's scope, never instead of it.
+  const [branchFilter, setBranchFilter] = useState('');
   const [invite, setInvite] = useState(null);
   const [reject, setReject] = useState(null);
   const [history, setHistory] = useState(null);
@@ -73,6 +79,7 @@ export default function RecruitmentPage() {
     setLoading(true);
     try {
       const params = search.trim() ? { q: search.trim() } : { view: viewKey };
+      if (branchFilter) params.branch_filter = branchFilter;
       const [list, c] = await Promise.all([
         api.get('/recruitment', { params }),
         api.get('/recruitment/counts'),
@@ -84,7 +91,7 @@ export default function RecruitmentPage() {
     } finally {
       setLoading(false);
     }
-  }, [viewKey, search]);
+  }, [viewKey, search, branchFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -190,6 +197,16 @@ export default function RecruitmentPage() {
           </Typography>
         </Box>
         <Stack direction="row" spacing={1}>
+          <TextField
+            select size="small" label="סניף" value={branchFilter}
+            onChange={e => setBranchFilter(e.target.value)} sx={{ minWidth: 150 }}
+          >
+            <MenuItem value="">כל הסניפים</MenuItem>
+            {branches.map(b => (
+              <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
+            ))}
+            <MenuItem value="office">מענה כללי / ללא שיוך</MenuItem>
+          </TextField>
           <TextField
             size="small" placeholder="חיפוש שם או טלפון" value={search}
             onChange={e => setSearch(e.target.value)} sx={{ minWidth: 220 }}

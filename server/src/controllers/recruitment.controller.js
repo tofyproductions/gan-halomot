@@ -109,6 +109,19 @@ async function list(req, res, next) {
     const view = req.query.view || 'due';
     const filter = await scopeFilter(req);
 
+    // Narrowing to one branch, on top of the scope — never instead of it.
+    // 'office' is the candidates that resolved to no branch at all; a specific
+    // id outside the caller's scope yields an impossible filter, not a leak.
+    const bf = String(req.query.branch_filter || '');
+    if (bf === 'office') {
+      filter.branch_ids = { $size: 0 };
+    } else if (bf) {
+      const scoped = filter.branch_ids?.$in;
+      filter.branch_ids = scoped && !scoped.map(String).includes(bf)
+        ? { $in: [] }
+        : bf;
+    }
+
     if (view === 'due') {
       Object.assign(filter, {
         status: { $in: ['new', 'no_answer', 'not_relevant'] },
