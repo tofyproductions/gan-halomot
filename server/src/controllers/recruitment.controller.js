@@ -51,6 +51,33 @@ function interviewWhatsapp(candidate, branchName) {
 }
 
 /**
+ * The first message — before anybody has picked up a phone.
+ *
+ * Signed by the actual sender and her actual branch, because "אנחנו מגן
+ * החלומות" from an unknown number reads as spam and "אני לידור מסניף שאול
+ * המלך" reads as a person. The questions are the screening call's first five
+ * minutes, moved to a medium the candidate answers from the bus; the manager
+ * can edit all of it in WhatsApp before pressing send.
+ */
+function introWhatsapp(candidate, branchName, senderName) {
+  if (!candidate.phone) return null;
+  const lines = [
+    `היי ${candidate.full_name},`,
+    `אני ${senderName || 'המנהלת'} מ"גן החלומות"${branchName ? ` — סניף ${branchName}` : ''}.`,
+    'ראיתי את פנייתך אלינו לגבי עבודה, ואשמח לקבל ממך כמה פרטים:',
+    '',
+    '• האם המשרה עדיין רלוונטית עבורך?',
+    '• יש לך ניסיון בגני ילדים, או בעבודה עם ילדים בכלל?',
+    '• איזו משרה מתאימה לך — מלאה / חלקית / שעות בוקר?',
+    '• באיזה אזור נוח לך לעבוד?',
+    '• ממתי תוכל/י להתחיל?',
+    '',
+    'תודה, ונשמח להכיר! 🙂',
+  ];
+  return `https://wa.me/${waNumber(candidate.phone_raw || candidate.phone)}?text=${encodeURIComponent(lines.join('\n'))}`;
+}
+
+/**
  * The branch filter for this caller, from the database.
  *
  * null scope (system_admin, accountant) sees everything, INCLUDING the ones
@@ -63,7 +90,7 @@ async function scopeFilter(req) {
   return { branch_ids: { $in: scope } };
 }
 
-function shape(c, branchNames) {
+function shape(c, branchNames, senderName = '') {
   const names = (c.branch_ids || []).map(id => branchNames.get(String(id))).filter(Boolean);
   return {
     id: c._id,
@@ -89,6 +116,7 @@ function shape(c, branchNames) {
     history: (c.applications || []).slice(0, -1).map(a => ({ at: a.at, branch: a.requested_branch })),
     events: (c.events || []).map(e => ({ at: e.at, type: e.type, note: e.note, by: e.by_name })),
     whatsapp_url: c.interview?.at ? interviewWhatsapp(c, names[0] || '') : null,
+    intro_whatsapp_url: introWhatsapp(c, names[0] || '', senderName),
     hours_waiting: c.status === 'new'
       ? Math.floor((Date.now() - new Date(c.next_action_at).getTime()) / 3600000)
       : null,
@@ -163,7 +191,8 @@ async function list(req, res, next) {
 
     const branches = await Branch.find({}).select('name').lean();
     const branchNames = new Map(branches.map(b => [String(b._id), b.name]));
-    res.json({ candidates: rows.map(c => shape(c, branchNames)) });
+    const senderName = req.user?.full_name || req.user?.username || '';
+    res.json({ candidates: rows.map(c => shape(c, branchNames, senderName)) });
   } catch (error) {
     next(error);
   }

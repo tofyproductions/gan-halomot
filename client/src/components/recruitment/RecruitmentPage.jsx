@@ -331,6 +331,14 @@ export default function RecruitmentPage() {
                     <Divider sx={{ my: 1.5 }} />
                     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                       <Button size="small" startIcon={<PhoneIcon />} href={`tel:${row.phone}`}>חיוג</Button>
+                      {row.intro_whatsapp_url && (
+                        <Tooltip title="הודעת היכרות עם שאלות ראשונות — נפתחת בווטסאפ לעריכה לפני שליחה">
+                          <Button size="small" color="success" startIcon={<WhatsAppIcon />}
+                            href={row.intro_whatsapp_url} target="_blank" rel="noopener">
+                            פנייה בווטסאפ
+                          </Button>
+                        </Tooltip>
+                      )}
                       <Box sx={{ flex: 1 }} />
                       <Button size="small" variant="contained" color="success" startIcon={<EventAvailableIcon />}
                         onClick={() => setInvite({ row, at: defaultInterviewSlot(), note: '', saved: false })}>
