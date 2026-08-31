@@ -55,4 +55,13 @@ const employeeRequestSchema = new mongoose.Schema({
 employeeRequestSchema.index({ user_id: 1, type: 1 });
 employeeRequestSchema.index({ branch_id: 1, status: 1 });
 
+// The task board pulls incrementally with find({updated_at: {$gt: since}})
+// sorted by updated_at. WITHOUT this index Mongo sorts the whole collection in
+// memory and refuses past 32MB — which is what broke the mirror on its first
+// run, when `since` is epoch 0 and the filter matches everything.
+//
+// An index rather than allowDiskUse: disk sorting would have made a bad query
+// merely possible, where this makes it cheap forever.
+employeeRequestSchema.index({ updated_at: 1 });
+
 module.exports = mongoose.model('EmployeeRequest', employeeRequestSchema);
