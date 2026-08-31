@@ -55,12 +55,13 @@ const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
  * Rather than guess, the budget is divided by what this month actually needs
  * and the result is clamped to something still readable across a room.
  */
-function scaleFor(weekCount, rowCount) {
-  // The budget is TWO pages now, not one. A five-week month squeezed onto a
-  // single sheet came out at 3pt — nobody on a wall reads 3pt — so the sheet
-  // is allowed to run to a second page and the type stays human-sized. The
-  // fit script below still packs a sparse month onto one page.
-  const availableMm = (198 - 11) * 2;
+function scaleFor(weekCount, rowCount, pages = 1) {
+  // Two pages buys human-sized type for a full five-week month; one page is
+  // what you ask for when the sheet has to be sent as a single picture. The
+  // caller decides, because it is a trade nobody can make on their behalf: a
+  // month that fits one page at 11pt and one that only fits at 5pt look the
+  // same from here.
+  const availableMm = (198 - 11) * pages;
   const perWeekMm = availableMm / Math.max(weekCount, 1);
   // A week costs its banner and its day-header row on top of the gantt rows;
   // together those are worth about three rows of height.
@@ -84,8 +85,17 @@ function scaleFor(weekCount, rowCount) {
 export function buildGanttPrintHtml({
   weeks = [], rows = [], holidays = [], month, year,
   classroomName = '', branchName = '', status = 'draft',
+  // 'print' → A4 landscape, fitted to `pages` sheets.
+  // 'image' → one continuous picture for WhatsApp. No paper, so no page to fit
+  //   into and nothing to shrink: the canvas grows to the month instead, and
+  //   the type is set once at a size that survives a phone screen.
+  mode = 'print',
+  pages = 1,
 }) {
-  const size = scaleFor(weeks.length, rows.length || 5);
+  const image = mode === 'image';
+  const size = image
+    ? { cell: '15', head: '17', small: '12.5' }
+    : scaleFor(weeks.length, rows.length || 5, pages);
 
   const isHoliday = (d) => holidays.find(h => (
     ymd(d) >= holidayYmd(h.start_date) && ymd(d) <= holidayYmd(h.end_date)
@@ -105,6 +115,44 @@ export function buildGanttPrintHtml({
     const cellAt = (rowKey, di) => (week.cells || [])
       .find(c => c.row_key === rowKey && c.day_index === di - offset);
     const contentAt = (rowKey, di) => String(cellAt(rowKey, di)?.content || '').trim();
+    const spanAt = (rowKey, di, field) => {
+      const n = Number(cellAt(rowKey, di)?.[field]);
+      return Number.isFinite(n) && n > 1 ? n : 1;
+    };
+
+    /**
+     * A box the gananet merged across days or rows is one box, and it printed
+     * as six.
+     *
+     * The editor stores a merge as col_span/row_span on the top-right cell and
+     * BLANKS the cells it swallowed. The print builder knew nothing about
+     * either, so it drew every one of them: the merged text appeared in a
+     * single narrow box and the rest of the span came out empty. A week whose
+     * first row reads הסתגלות across all five days printed the word once, under
+     * Tuesday, and four blanks — which reads as a plan nobody finished writing.
+     *
+     * Every span paints its whole rectangle, rather than each axis being tested
+     * on its own. Checking "is a colspan reaching me along my row, or a rowspan
+     * reaching me down my column" misses the corner: a 2×3 merge starting at
+     * Monday covers Tuesday two rows down, but nothing in Tuesday's column
+     * carries a rowspan — the cell that does is in Monday's. That box printed
+     * anyway and pushed the rest of the row sideways by one day.
+     */
+    const covered = new Set();
+    rows.forEach((r, rowIdx) => {
+      for (let di = 0; di < 6; di += 1) {
+        const cs = spanAt(r.key, di, 'col_span');
+        const rs = spanAt(r.key, di, 'row_span');
+        if (cs === 1 && rs === 1) continue;
+        for (let rr = rowIdx; rr < Math.min(rowIdx + rs, rows.length); rr += 1) {
+          for (let dd = di; dd < Math.min(di + cs, 6); dd += 1) {
+            if (rr === rowIdx && dd === di) continue;   // the box itself
+            covered.add(`${rr}|${dd}`);
+          }
+        }
+      }
+    });
+    const coveredAt = (rowKey, di) => covered.has(`${rows.findIndex(r => r.key === rowKey)}|${di}`);
 
     const closedCols = new Set();
     const borrowedCols = new Set();
@@ -134,6 +182,9 @@ export function buildGanttPrintHtml({
 
     const body = rows.map((row, rowIdx) => {
       const tds = DAY_NAMES.map((_, di) => {
+        // Swallowed by a merge that starts above or to the right of here.
+        if (!collapsed.has(di) && coveredAt(row.key, di)) return '';
+
         if (collapsed.has(di)) {
           if (rowIdx > 0) return '';
           const shut = isClosed(dateOf(di));
@@ -170,7 +221,17 @@ export function buildGanttPrintHtml({
         const cls = ['c', borrowedCols.has(di) ? 'borrowed' : ''].filter(Boolean).join(' ');
         // A colour the gananet set by hand on that one box wins over the row's.
         const bg = cell?.color || tintOf(row.key).bg;
-        return `<td class="${cls}" style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
+
+        // A merge is clamped to what is actually on this sheet. The editor
+        // cannot produce a span past the week's six days, but a row that was
+        // deleted after the merge was made would leave one reaching past the
+        // last row — and a rowspan that overruns its table pulls the whole
+        // sheet's layout apart rather than failing where it was written.
+        const cs = Math.min(spanAt(row.key, di, 'col_span'), 6 - di);
+        const rs = Math.min(spanAt(row.key, di, 'row_span'), rows.length - rowIdx);
+        const span = `${cs > 1 ? ` colspan="${cs}"` : ''}${rs > 1 ? ` rowspan="${rs}"` : ''}`;
+        const merged = cs > 1 || rs > 1 ? ' merged' : '';
+        return `<td class="${cls}${merged}"${span} style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
       }).join('');
 
       const t = tintOf(row.key);
@@ -208,6 +269,16 @@ export function buildGanttPrintHtml({
   /* Landscape, because six day-columns across a portrait page leaves a column
      the width of a thumb and the plan is read from across the room. */
   @page { size: A4 landscape; margin: 6mm; }
+  ${image ? `
+  /* The picture is not a page. Nothing here is measured against paper: the
+     sheet is as tall as the month needs, the type is fixed, and WhatsApp's
+     viewer does the scrolling that a printer cannot. */
+  @page { size: auto; margin: 0; }
+  body.img { width: 1400px !important; padding: 22px 26px !important; }
+  body.img table.wk { margin-bottom: 14px; border-spacing: 3px; }
+  body.img td.c { padding: 12px 8px !important; line-height: 1.3; }
+  body.img .head { margin-bottom: 14px; }
+  ` : ''}
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html { background: #e2e8f0; }
   /*
@@ -293,16 +364,29 @@ export function buildGanttPrintHtml({
   body.tight th.rl, body.tight th.d { padding: 0.25mm; }
   body.tight tr.banner th { padding: 0.4mm 1.5mm; }
 
+  /* A merged box carries the week's one big idea — הסתגלות, a trip, a holiday
+     theme — across several days. It gets the weight to match, or a wide box of
+     ordinary text just looks like a cell somebody forgot to fill in. */
+  td.c.merged { font-size: calc(var(--cell) * var(--k) * 1.25); font-weight: 800; }
+
   .foot { margin-top: 1.5mm; font-size: calc(var(--small) * var(--k)); color: #b6c1cc; text-align: left; }
 
-  .toolbar { position: fixed; top: 8px; left: 8px; background: #f59e0b; color: #111;
+  .bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
+         z-index: 9999; }
+  .toolbar { background: #f59e0b; color: #111;
              padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;
-             border: none; font-size: 14px; z-index: 9999; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
-  @media print { .toolbar { display: none !important; } }
+             border: none; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+  .toolbar.alt { background: #25D366; color: #fff; }
+  .toolbar.ghost { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+  @media print { .bar { display: none !important; } }
 </style>
 </head>
-<body>
-  <button class="toolbar" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
+<body${image ? ' class="img"' : ''}>
+  ${image ? '' : `<div class="bar">
+    <button class="toolbar" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
+    <button class="toolbar ghost" onclick="window.__ganttPages()">${pages === 1 ? 'כתב גדול · 2 עמודים' : 'לדחוס לעמוד אחד'}</button>
+    <button class="toolbar alt" onclick="window.__ganttImage()">📷 תמונה לוואטסאפ</button>
+  </div>`}
   <div class="head">
     <div class="t">תוכנית עבודה · ${MONTH_NAMES[month]} ${year}</div>
     <div class="s">${esc(classroomName)}${branchName ? ` · ${esc(branchName)}` : ''} · ${statusLabel}</div>
@@ -326,9 +410,15 @@ export function buildGanttPrintHtml({
    * than shrink into something nobody can use.
    */
   (function fit() {
+    // In image mode there is no page, so there is nothing to fit into and
+    // nothing to shrink. Returning here is the whole difference: every loop
+    // below exists to trade type size against a sheet of paper.
+    if (${image ? 'true' : 'false'}) { document.body.classList.add('img'); return; }
+
     var MM = 96 / 25.4;
     var oneP = (210 - 12) * MM;    // A4 landscape less the 6mm @page margins
-    var pageH = oneP;
+    var BUDGET = ${Math.max(1, Math.min(2, Number(pages) || 1))};
+    var pageH = oneP * BUDGET;
     var root = document.documentElement;
     var body = document.body;
     // The body is the page: its width is pinned to the printable width, so its
@@ -338,22 +428,25 @@ export function buildGanttPrintHtml({
 
     var k = 1;
 
-    // Try one page first, but never below 0.85 — the last export shrank a full
-    // month to 3pt to keep the single-sheet promise, and 3pt on a wall is not
-    // a plan, it is a texture. If one page needs smaller than that, the month
-    // takes two sheets at full size instead (weeks never split mid-table).
-    for (var i = 0; i < 10 && over() && k > 0.85; i += 1) {
+    /*
+     * Shrink into the budget the reader chose, and do not quietly overrun it.
+     *
+     * This used to try one page, and on failing widen its OWN budget to two —
+     * which is how a sheet asked for as one page came out as three. Two, from
+     * the growth loop below filling the doubled budget; three, because a week
+     * never splits across a break, so a document 2.1 pages tall lands on a
+     * third sheet with most of the second left white.
+     *
+     * The floor is much lower for a one-page request than it used to be: a
+     * person asking for one page has said which side of the trade they want,
+     * and answering with two is not honouring it. If the type ends up small,
+     * the toolbar's other button is the honest way out — a picture has no page
+     * to be small on.
+     */
+    var floor = BUDGET === 1 ? 0.55 : 0.85;
+    for (var i = 0; i < 40 && over() && k > floor; i += 1) {
       k -= 0.03;
       set('--k', k.toFixed(2));
-    }
-    if (over()) {
-      pageH = oneP * 2;
-      k = 1;
-      set('--k', '1');
-      for (var i2 = 0; i2 < 10 && over() && k > 0.85; i2 += 1) {
-        k -= 0.03;
-        set('--k', k.toFixed(2));
-      }
     }
 
     // Still over at the floor: take the air out rather than the type.
@@ -391,11 +484,76 @@ export function buildGanttPrintHtml({
 </html>`;
 }
 
-/** Open the printable plan in its own window. */
-export function printGantt(opts) {
+/**
+ * The month as one picture, for sending to the parents' WhatsApp group.
+ *
+ * Rendered on the server rather than in the browser: Chromium is already there
+ * for contracts and payslips, and the alternative is a DOM-to-canvas library on
+ * the critical path of every page load for a button most people press once a
+ * month. The document is the same one the print window shows, in image mode.
+ *
+ * Returns a Blob. The caller decides what to do with it, because the two
+ * answers are different: a phone can hand the file straight to WhatsApp, and a
+ * desktop cannot and has to save it first.
+ */
+export async function renderGanttImage(opts, api) {
+  const html = buildGanttPrintHtml({ ...opts, mode: 'image' });
+  const res = await api.post('/gantt/image', { html }, { responseType: 'blob', timeout: 120000 });
+  return res.data;
+}
+
+/**
+ * Hand the picture to whatever can send it.
+ *
+ * On a phone the Web Share sheet passes the actual FILE to WhatsApp, which is
+ * the whole point — the manager picks the parents' group and sends. Desktop
+ * browsers cannot share files, so there it saves the image and opens WhatsApp
+ * Web with the caption ready; the picture is then dragged into the chat. Saying
+ * which of the two just happened matters: a download that appears with no
+ * explanation looks like the share failed.
+ */
+export async function shareGanttImage(blob, { fileName, caption }) {
+  const file = new File([blob], fileName, { type: 'image/png' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], text: caption });
+      return 'shared';
+    } catch (e) {
+      // The user closing the share sheet is not a failure to report.
+      if (e && e.name === 'AbortError') return 'cancelled';
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return 'downloaded';
+}
+
+/**
+ * Open the printable plan in its own window.
+ *
+ * The window's buttons call back into this tab: it holds the gantt data, the
+ * authenticated API client and the toast, none of which exist in a document
+ * created by document.write.
+ */
+export function printGantt(opts, { onImage } = {}) {
+  let pages = 1;
   const win = window.open('', '_blank', 'width=1200,height=850');
   if (!win) return false;
-  win.document.write(buildGanttPrintHtml(opts));
-  win.document.close();
+
+  const draw = () => {
+    win.document.open();
+    win.document.write(buildGanttPrintHtml({ ...opts, mode: 'print', pages }));
+    win.document.close();
+    // document.write replaces the document, so the handlers are re-attached
+    // every time rather than once.
+    win.__ganttPages = () => { pages = pages === 1 ? 2 : 1; draw(); };
+    win.__ganttImage = () => onImage && onImage();
+  };
+
+  draw();
   return true;
 }

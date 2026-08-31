@@ -13,6 +13,7 @@
     "test:contracts": "node scripts/contract-upload.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:reminder": "node scripts/manager-reminder.test.js",
+    "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",
     "test:vacations": "node scripts/vacation-calendar.test.js",
     "test:supplies": "node scripts/supplies-visibility.test.js",
