@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const { GanttMonth, Holiday, Classroom, User, Child, Registration } = require('../models');
 const shabbat = require('../services/shabbatParents');
 const pv = require('../services/parentVisibility');
+const { htmlToPng } = require('../services/htmlPdf');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
 //
@@ -675,8 +676,42 @@ async function setVisibility(req, res, next) {
 
 // generateWeeks is exported for scripts/gantt-weekdays.test.js — the shape of a
 // month's weeks is what decides which box is which day, and that has been wrong.
+/**
+ * POST /api/gantt/image  { html }  →  image/png
+ *
+ * The month as one picture for the parents' WhatsApp group. The sheet is built
+ * in the browser — it is the same document the print window shows, and having
+ * one builder is what keeps the picture and the printout from disagreeing about
+ * which box is Tuesday — so this only renders what it is handed.
+ *
+ * Which is why the renderer has its network cut (see htmlToPng): a caller can
+ * post any HTML, and Chromium runs inside our network. Staff-only is not a
+ * defence here — the point is that the DOCUMENT cannot reach anywhere, whoever
+ * sent it.
+ */
+async function image(req, res, next) {
+  try {
+    const html = String(req.body?.html || '');
+    if (!html.trim()) return res.status(400).json({ error: 'חסר תוכן להפקה' });
+    // Comfortably above a five-week month (~60KB) and far below the body limit.
+    if (html.length > 2_000_000) return res.status(413).json({ error: 'התוכנית גדולה מדי להפקה' });
+
+    const png = await htmlToPng(html);
+    res.set('Content-Type', 'image/png');
+    res.set('Content-Disposition', 'inline; filename="gantt.png"');
+    res.send(png);
+  } catch (err) {
+    // Chromium not launching is the expected failure on a small instance, and
+    // it must read as "the picture didn't happen" rather than a stack trace.
+    console.error('[gantt] image render failed:', err.message);
+    res.status(503).json({ error: err.message || 'הפקת התמונה נכשלה — נסו שוב בעוד רגע' });
+  }
+}
+
+// generateWeeks is exported for scripts/gantt-weekdays.test.js — the shape of a
+// month's weeks is what decides which box is which day, and that has been wrong.
 module.exports = {
   get, save, approve, getArchive, copy, sources, shabbatParents,
-  getVisibility, setVisibility,
+  getVisibility, setVisibility, image,
   generateWeeks, normalizeWeeks, DEFAULT_ROWS,
 };

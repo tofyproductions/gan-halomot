@@ -81,4 +81,60 @@ async function htmlToPdf(html) {
   return pdf;
 }
 
-module.exports = { htmlToPdf, htmlToPdfBatch, tryGc };
+/**
+ * A self-contained document → one full-height PNG.
+ *
+ * For the work plan sent to the parents' WhatsApp group: a picture has no
+ * pages, so the month is one continuous image at a width a phone can read
+ * rather than a month squeezed onto A4 until the type disappears.
+ *
+ * ⚠️ THE HTML COMES FROM THE BROWSER, so this renders with the network cut.
+ * Chromium here sits inside our own network and would happily fetch whatever a
+ * document asked it to — a cloud metadata address, an internal service — and
+ * paint the answer into a picture the caller then downloads. Every request
+ * except the document itself is aborted. The gantt sheet is entirely inline
+ * (its CSS is in a <style> block and it loads no images), so nothing legitimate
+ * is lost; a future template that needs a web font has to inline it too.
+ *
+ * deviceScaleFactor 2 because the result is read on a telephone, where a 1x
+ * screenshot of 15pt text is soft enough to look like a bad scan.
+ */
+async function htmlToPng(html, { width = 1400, maxHeightPx = 20000 } = {}) {
+  const run = async () => {
+    let browser;
+    try {
+      browser = await getBrowser();
+      const page = await browser.newPage();
+      try {
+        await page.setViewport({ width, height: 1200, deviceScaleFactor: 2 });
+        await page.setRequestInterception(true);
+        page.on('request', (r) => {
+          // The document itself arrives via setContent, so anything that
+          // reaches here is the page reaching outward.
+          if (r.isNavigationRequest() && r.frame() === page.mainFrame() && r.url() === 'about:blank') {
+            return r.continue();
+          }
+          return r.abort();
+        });
+        await page.setContent(html, { waitUntil: 'load', timeout: 60000 });
+
+        // A runaway document must not turn into a 400MB buffer on a 512MB box.
+        const h = await page.evaluate(() => document.body.scrollHeight);
+        if (h > maxHeightPx) {
+          throw new Error(`התוכנית ארוכה מדי לתמונה אחת (${h}px)`);
+        }
+        return Buffer.from(await page.screenshot({ type: 'png', fullPage: true, timeout: 120000 }));
+      } finally { try { await page.close(); } catch (e) { /* ignore */ } }
+    } finally {
+      if (browser) { try { await browser.close(); } catch (e) { /* ignore */ } }
+      tryGc();
+    }
+  };
+  // Same single-Chromium rule as the PDF path, and the SAME queue — two
+  // browsers is two browsers whichever function launched them.
+  const next = _queue.then(run);
+  _queue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+module.exports = { htmlToPdf, htmlToPdfBatch, htmlToPng, tryGc };

@@ -7,6 +7,10 @@ const c = require('../controllers/gantt.controller');
 router.get('/visibility', c.getVisibility);
 router.put('/visibility', c.setVisibility);
 
+// The month as one PNG for the parents' WhatsApp group. POST because the
+// document is the body, not an id.
+router.post('/image', c.image);
+
 router.get('/', c.get);
 router.get('/archive', c.getArchive);
 // Months worth copying FROM. Above '/:id/...' so it is never read as an id.

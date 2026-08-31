@@ -18,15 +18,16 @@ import SportsIcon from '@mui/icons-material/FitnessCenter';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import GroupIcon from '@mui/icons-material/Group';
+import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError } from '../../api/client';
 import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
 import GanttCopyDialog from './GanttCopyDialog';
 import GanttEditorsDialog from './GanttEditorsDialog';
 import ShabbatParentPicker from './ShabbatParentPicker';
-import { printGantt } from './ganttPrint';
+import { printGantt, renderGanttImage, shareGanttImage } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -146,9 +147,10 @@ export default function GanttEditor() {
   const [parentPick, setParentPick] = useState(null);
   const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
-  // Merge selection
-  const [mergeStart, setMergeStart] = useState(null);
+  // Merge selection — a set of 'wk|rowKey|di' keys, built by clicking cells.
   const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSel, setMergeSel] = useState([]);
+  const [makingImage, setMakingImage] = useState(false);
 
   /**
    * The room, and who is allowed to write its plan.
@@ -346,42 +348,132 @@ export default function GanttEditor() {
     });
   };
 
-  // Merge: 2D
+  /**
+   * Merging, as picking boxes rather than pairing them.
+   *
+   * It used to take exactly two clicks: press איחוד, click a corner, click the
+   * opposite corner, and merge mode switched itself off — so merging four
+   * things in a week meant pressing the button four times and remembering which
+   * corner you were on. Now the button turns selection ON and stays on: tap
+   * every box you want, press אחד, and it stays on for the next one.
+   *
+   * Clicking a selected box again removes it, which is the only way back from a
+   * mis-tap that does not throw away the whole selection.
+   */
+  const selKey = (wk, rk, di) => `${wk}|${rk}|${di}`;
+  const isSelected = (wk, rk, di) => mergeSel.includes(selKey(wk, rk, di));
+
   const handleMergeClick = (wk, rk, di) => {
     if (!mergeMode) return;
-    if (!mergeStart) {
-      setMergeStart({ wk, rk, di });
-      return;
-    }
-    if (mergeStart.wk !== wk) { toast.error('רק באותו שבוע'); setMergeStart(null); return; }
+    const key = selKey(wk, rk, di);
+    setMergeSel((prev) => {
+      if (prev.includes(key)) return prev.filter(k => k !== key);
+      // One merge lives inside one week's table; boxes from two weeks have no
+      // rectangle between them. Starting a fresh selection is friendlier than
+      // an error nobody asked for — the click says which week they mean now.
+      const otherWeek = prev.length && prev[0].split('|')[0] !== String(wk);
+      return otherWeek ? [key] : [...prev, key];
+    });
+  };
 
+  /**
+   * The selection becomes the smallest rectangle containing it.
+   *
+   * A table cannot merge an L-shape, so what is applied is the bounding box —
+   * and the count is reported, because "I picked 4 and it merged 6" needs to be
+   * visible at the moment it happens rather than discovered on the printout.
+   */
+  const applyMerge = () => {
     const rows = gantt?.row_definitions || [];
-    const r1 = rows.findIndex(r => r.key === mergeStart.rk);
-    const r2 = rows.findIndex(r => r.key === rk);
-    const d1 = Math.min(mergeStart.di, di);
-    const d2 = Math.max(mergeStart.di, di);
-    const rStart = Math.min(r1, r2);
-    const rEnd = Math.max(r1, r2);
+    if (mergeSel.length < 2) { toast.error('בחרו לפחות שני תאים'); return; }
 
+    const parts = mergeSel.map(k => k.split('|'));
+    const wk = Number(parts[0][0]);
+    const rowIdxs = parts.map(p => rows.findIndex(r => r.key === p[1])).filter(i => i >= 0);
+    const dayIdxs = parts.map(p => Number(p[2]));
+    const rStart = Math.min(...rowIdxs);
+    const rEnd = Math.max(...rowIdxs);
+    const d1 = Math.min(...dayIdxs);
+    const d2 = Math.max(...dayIdxs);
     const colSpan = d2 - d1 + 1;
     const rowSpan = rEnd - rStart + 1;
+    const covered = colSpan * rowSpan;
 
-    if (colSpan === 1 && rowSpan === 1) {
-      // Unmerge
-      updateCell(wk, rows[rStart].key, d1, { col_span: 1, row_span: 1 });
-    } else {
-      updateCell(wk, rows[rStart].key, d1, { col_span: colSpan, row_span: rowSpan });
-      // Clear hidden cells
-      for (let r = rStart; r <= rEnd; r++) {
-        for (let d = d1; d <= d2; d++) {
-          if (r === rStart && d === d1) continue;
-          updateCell(wk, rows[r].key, d, { content: '', col_span: 1, row_span: 1 });
-        }
+    // Text already written inside the rectangle is about to be cleared. Keep
+    // it: the merged box takes the first thing anybody wrote there, so merging
+    // over "הסתגלות" leaves the word rather than an empty box and a retype.
+    const kept = [];
+    for (let r = rStart; r <= rEnd; r += 1) {
+      for (let d = d1; d <= d2; d += 1) {
+        const t = String(cellContentAt(wk, rows[r].key, d) || '').trim();
+        if (t) kept.push(t);
       }
-      toast.success(`${colSpan}×${rowSpan} תאים אוחדו`);
     }
-    setMergeStart(null);
-    setMergeMode(false);
+
+    updateCell(wk, rows[rStart].key, d1, {
+      col_span: colSpan, row_span: rowSpan, content: kept[0] || '',
+    });
+    for (let r = rStart; r <= rEnd; r += 1) {
+      for (let d = d1; d <= d2; d += 1) {
+        if (r === rStart && d === d1) continue;
+        updateCell(wk, rows[r].key, d, { content: '', col_span: 1, row_span: 1 });
+      }
+    }
+
+    const lost = kept.length > 1 ? ` · ${kept.length - 1} כיתובים נוספים הוסרו` : '';
+    toast.success(covered > mergeSel.length
+      ? `אוחדו ${colSpan}×${rowSpan} תאים (המלבן שמכיל את הבחירה)${lost}`
+      : `${colSpan}×${rowSpan} תאים אוחדו${lost}`);
+    setMergeSel([]);
+  };
+
+  /** Undo the merge on every selected box, without leaving selection mode. */
+  const applyUnmerge = () => {
+    const rows = gantt?.row_definitions || [];
+    if (!mergeSel.length) { toast.error('בחרו תא מאוחד'); return; }
+    let n = 0;
+    for (const k of mergeSel) {
+      const [w, rk, d] = k.split('|');
+      if (!rows.some(r => r.key === rk)) continue;
+      if (getVal(Number(w), rk, Number(d), 'col_span') > 1
+          || getVal(Number(w), rk, Number(d), 'row_span') > 1) {
+        updateCell(Number(w), rk, Number(d), { col_span: 1, row_span: 1 });
+        n += 1;
+      }
+    }
+    toast[n ? 'success' : 'error'](n ? `בוטל איחוד ב-${n} תאים` : 'לא נבחר תא מאוחד');
+    setMergeSel([]);
+  };
+
+  /** Everything the print sheet and the picture are built from. */
+  const printOpts = () => ({
+    weeks: gantt?.weeks || [],
+    rows: gantt?.row_definitions || [],
+    holidays, month, year,
+    classroomName,
+    status: gantt?.status,
+  });
+
+  /**
+   * The month as a picture, handed to WhatsApp.
+   *
+   * On a phone the share sheet passes the file itself, so the manager picks the
+   * parents' group and sends. A desktop browser cannot share files, so it saves
+   * the picture and says so — a download nobody explained looks like a failure.
+   */
+  const sendToWhatsapp = async () => {
+    setMakingImage(true);
+    try {
+      const blob = await renderGanttImage(printOpts(), api);
+      const where = await shareGanttImage(blob, {
+        fileName: `תוכנית עבודה - ${classroomName || ''} - ${MONTH_NAMES[month]} ${year}.png`,
+        caption: `תוכנית העבודה של ${classroomName || 'הכיתה'} · ${MONTH_NAMES[month]} ${year}`,
+      });
+      if (where === 'shared') toast.success('התמונה נשלחה');
+      else if (where === 'downloaded') toast.success('התמונה נשמרה במחשב — אפשר לגרור אותה לקבוצת ההורים בוואטסאפ');
+    } catch (err) {
+      toast.error(apiError(err, 'הפקת התמונה נכשלה'));
+    } finally { setMakingImage(false); }
   };
 
   // "cell-<weekIdx>-<rowKey>-<dayIdx>". The row key is rejoined rather than
@@ -672,15 +764,13 @@ export default function GanttEditor() {
               // Not window.print(). The live screen is a stack of cards full of
               // text fields and prints as four pages of app chrome; what goes on
               // the wall is a purpose-built sheet.
-              const ok = printGantt({
-                weeks: gantt.weeks || [],
-                rows: gantt.row_definitions || [],
-                holidays, month, year,
-                classroomName,
-                status: gantt.status,
-              });
+              const ok = printGantt(printOpts(), { onImage: sendToWhatsapp });
               if (!ok) toast.error('הדפדפן חסם את חלון ההדפסה. יש לאשר חלונות קופצים.');
             }}>הדפסה</Button>
+            <Button size="small" startIcon={<WhatsAppIcon />} onClick={sendToWhatsapp}
+              disabled={makingImage} sx={{ color: '#128C7E' }}>
+              {makingImage ? 'מכין תמונה…' : 'תמונה לוואטסאפ'}
+            </Button>
             <Button size="small" variant="contained" startIcon={<AutoStoriesIcon />}
               onClick={() => setShowContentBank(true)} color="primary">בנק תוכן</Button>
             <Button size="small" startIcon={<SportsIcon />} onClick={() => setShowBank(true)} color="secondary">בנק חוגים</Button>
@@ -699,6 +789,32 @@ export default function GanttEditor() {
             <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/gantt')}>חזרה</Button>
           </Stack>
         </Stack>
+
+        {/*
+          The merge bar, shown only while selecting.
+          A mode with no visible way out is a trap — the previous merge turned
+          itself off after one pair and left nothing on screen either way, so
+          there was never anything to read. This says what is selected, what the
+          buttons will do, and how to stop.
+        */}
+        {mergeMode && (
+          <Card sx={{
+            p: 1, mb: 1.5, display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap',
+            bgcolor: '#fffbeb', border: '1px solid #fbbf24',
+          }}>
+            <MergeIcon sx={{ color: '#b45309' }} />
+            <Typography variant="body2" sx={{ fontWeight: 700, color: '#92400e' }}>
+              {mergeSel.length
+                ? `נבחרו ${mergeSel.length} תאים`
+                : 'סמני תאים לאיחוד — לחיצה על תא מסמנת אותו, לחיצה שנייה מבטלת'}
+            </Typography>
+            <Box sx={{ flex: 1 }} />
+            <Button size="small" variant="contained" color="warning"
+              disabled={mergeSel.length < 2} onClick={applyMerge}>אחדי</Button>
+            <Button size="small" onClick={applyUnmerge} disabled={!mergeSel.length}>בטלי איחוד</Button>
+            <Button size="small" onClick={() => { setMergeMode(false); setMergeSel([]); }}>סיום</Button>
+          </Card>
+        )}
 
         {/* Weeks */}
         {(gantt.weeks || []).map((week, weekIdx) => {
@@ -854,8 +970,7 @@ export default function GanttEditor() {
                           const cc = getVal(weekIdx, row.key, si, 'color');
                           const cs = getVal(weekIdx, row.key, si, 'col_span');
                           const rs = getVal(weekIdx, row.key, si, 'row_span');
-                          const isSelected = mergeStart?.wk === weekIdx && mergeStart?.rk === row.key && mergeStart?.di === si;
-                          const isMergeStart = isSelected;
+                          const picked = mergeMode && isSelected(weekIdx, row.key, si);
                           const cellId = `cell-${weekIdx}-${row.key}-${si}`;
 
                           /**
@@ -970,7 +1085,7 @@ export default function GanttEditor() {
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
                                 bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : own ? 'white' : '#f8fafc'),
-                                border: isSelected ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                                border: picked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                                 p: 1, verticalAlign: 'top', cursor: mergeMode ? 'crosshair' : 'default',
                                 position: 'relative', '&:hover .ca': { opacity: 1 },
                               }}
@@ -994,14 +1109,13 @@ export default function GanttEditor() {
                                   </IconButton>
                                 </Tooltip>
                                 {canEdit && (
-                                  <Tooltip title={isMergeStart ? 'בטלי איחוד' : 'איחוד — ואז לחצי על התא השני'}>
+                                  <Tooltip title={picked ? 'הסירי מהבחירה' : 'סימון לאיחוד — סמני עוד תאים ואז לחצי "אחדי"'}>
                                     <IconButton size="small" sx={{ p: '2px' }} onClick={e => {
                                       e.stopPropagation();
-                                      if (isMergeStart) { setMergeMode(false); setMergeStart(null); return; }
-                                      setMergeMode(true);
-                                      setMergeStart({ wk: weekIdx, rk: row.key, di: si });
+                                      if (!mergeMode) setMergeMode(true);
+                                      handleMergeClick(weekIdx, row.key, si);
                                     }}>
-                                      <MergeIcon sx={{ fontSize: 13, color: isMergeStart ? '#f59e0b' : '#94a3b8' }} />
+                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : '#94a3b8' }} />
                                     </IconButton>
                                   </Tooltip>
                                 )}
