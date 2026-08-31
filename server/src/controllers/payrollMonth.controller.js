@@ -3466,10 +3466,28 @@ async function punchIssues(month) {
     byDay.get(k).push(p);
   }
 
+  /**
+   * Today is not a missing punch. She is still at work.
+   *
+   * A lone punch means somebody clocked in and never clocked out — which is
+   * true of every single person in the building right now, every day, until
+   * they go home. Reported as an outstanding problem it put the whole staff on
+   * the manager's list each morning, and a list that is wrong every day before
+   * lunch is a list nobody reads by the end of the week.
+   *
+   * Israel time, not the server's: at 01:00 UTC it is already tomorrow in
+   * Jerusalem, and yesterday's genuinely unfinished days must not be hidden.
+   */
+  const todayIL = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+
   const dupKeys = [], missKeys = [], crossKeys = [];
   for (const [k, list] of byDay) {
+    const dayOf = k.split('|')[1];
     if (list.length > 2) dupKeys.push(k);
-    else if (list.length === 1) missKeys.push(k); // a lone punch — the pair is incomplete
+    // A lone punch TODAY is a shift in progress, not an omission. A duplicate
+    // today is still a duplicate — nothing about the day being unfinished
+    // explains four readings.
+    else if (list.length === 1) { if (dayOf < todayIL) missKeys.push(k); }
     else if (list.length === 2) {
       // Clocked in at one branch and out at another. The day looks complete, so
       // nothing else flags it — but the whole session is billed to the IN
@@ -3699,25 +3717,45 @@ function managerContact(user, fromCard = {}) {
  * manager already has is what guards it, so a forwarded link is no more use to
  * a stranger than the front page is.
  */
-const punchFixLink = (month) =>
-  `${env.FRONTEND_URL}/attendance?month=${encodeURIComponent(month)}&fix=1`;
+const punchFixLink = (month, req = null) => {
+  // The address the REQUEST came in on, before the environment variable.
+  //
+  // FRONTEND_URL defaults to http://localhost:5173 for development, and it is
+  // not set on the live service — so every reminder went out carrying a link to
+  // the manager's own machine, which refuses the connection. The host the
+  // manager is already using is the one address guaranteed to work, and it is
+  // right there on the request that asked for the reminder.
+  const base = (req && req.get && req.get('host'))
+    ? `${req.get('x-forwarded-proto') || req.protocol}://${req.get('host')}`
+    : env.FRONTEND_URL;
+  return `${base}/attendance?month=${encodeURIComponent(month)}&fix=1`;
+};
 
 /** The Hebrew nudge sent to a branch manager (also reused as the WhatsApp text). */
-function buildReminderText(branchName, month, missing, duplicates) {
-  const missLines = [...missing]
-    .sort((a, b) => a.date.localeCompare(b.date) || a.full_name.localeCompare(b.full_name, 'he'))
-    .map(m => `• ${m.date} — ${m.full_name} (החתמה יחידה ${m.punch_hhmm})`);
-  const dupLines = [...duplicates]
-    .sort((a, b) => a.date.localeCompare(b.date))
-    .map(d => `• ${d.date} — ${d.full_name} (${d.punches.length} החתמות באותו יום)`);
+function buildReminderText(branchName, month, missing, duplicates, req = null) {
+  /**
+   * How many, not which ones.
+   *
+   * This used to list every outstanding day by name and time. On a real month
+   * that is forty lines, so the WhatsApp message arrived collapsed behind
+   * "read more", the link sat at the very bottom underneath all of it, and the
+   * list was stale the moment anybody fixed a day — while the screen behind the
+   * link is never stale. A reminder's job is to say there is something waiting
+   * and where; the list belongs at the destination.
+   */
+  const counts = [
+    missing.length ? `${missing.length} ימים עם החתמה חסרה` : '',
+    duplicates.length ? `${duplicates.length} ימים עם החתמה כפולה` : '',
+  ].filter(Boolean).join(' · ');
+
   return [
     `שלום, נדרשת השלמת החתמות בסניף ${branchName} לחודש ${month}.`,
+    counts,
     '',
-    ...(missing.length ? [`ימים עם החתמה חסרה (${missing.length}):`, ...missLines, ''] : []),
-    ...(duplicates.length ? [`ימים עם החתמה כפולה הממתינים לבדיקה (${duplicates.length}):`, ...dupLines, ''] : []),
-    `להשלמה, בקישור הזה: ${punchFixLink(month)}`,
-    'הקישור נפתח ישירות במסך ההשלמה. לאחר ההשלמה השעות יגיעו לאישור הנהלת החשבונות.',
-  ].join('\n');
+    punchFixLink(month, req),
+    '',
+    'הקישור נפתח ישירות במסך ההשלמה, עם הרשימה המלאה. לאחר ההשלמה השעות יגיעו לאישור הנהלת החשבונות.',
+  ].filter(l => l !== undefined).join('\n');
 }
 
 /**
@@ -3780,7 +3818,7 @@ async function punchReviewStatus(req, res, next) {
       const bDups = mine(scopedDuplicates);
       const bCross = crossBranch.filter(i =>
         String(i.in_branch_id) === id || String(i.out_branch_id) === id);
-      const text = buildReminderText(bd.name, month, bMissing, bDups);
+      const text = buildReminderText(bd.name, month, bMissing, bDups, req);
       const task = taskByBranch.get(id);
       return {
         id,
@@ -4087,7 +4125,7 @@ async function remindBranchManager(req, res, next) {
     }
 
     const managers = (await branchManagers([branchId])).get(String(branchId)) || [];
-    const summary = buildReminderText(branch.name, month, branchMissing, branchDups);
+    const summary = buildReminderText(branch.name, month, branchMissing, branchDups, req);
     const emails = managers.map(m => m.email).filter(Boolean);
     let emailed = 0;
     if (emails.length) {
@@ -4158,7 +4196,7 @@ async function assignPunchEntry(req, res, next) {
       return res.status(400).json({ error: `לא מוגדר מנהל לסניף ${branch.name} — אי אפשר להקצות משימה` });
     }
 
-    const summary = `${buildReminderText(branch.name, month, branchMissing, branchDups)}\n\nנפתחה עבורך משימה במערכת — היא תופיע בכניסה הבאה שלך לאפליקציה.`;
+    const summary = `${buildReminderText(branch.name, month, branchMissing, branchDups, req)}\n\nנפתחה עבורך משימה במערכת — היא תופיע בכניסה הבאה שלך לאפליקציה.`;
     const emails = managers.map(m => m.email).filter(Boolean);
     let emailed = 0;
     if (emails.length) {

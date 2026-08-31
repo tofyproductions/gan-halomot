@@ -58,17 +58,63 @@ console.log('\nהטלפון — כמו שהיה');
 
 console.log('\nההודעה');
 {
-  const missing = [{ date: '2026-08-13', full_name: 'נטע בראון', punch_hhmm: '07:31' }];
-  const text = c.buildReminderText('כפר סבא - משה דיין', '2026-08', missing, []);
-  const link = c.punchFixLink('2026-08');
+  const missing = [
+    { date: '2026-08-13', full_name: 'נטע בראון', punch_hhmm: '07:31' },
+    { date: '2026-08-26', full_name: 'אילנה שמחי', punch_hhmm: '13:52' },
+  ];
+  const dups = [{ date: '2026-08-05', full_name: 'קרן בן שבת', punches: [1, 2, 3, 4] }];
+  const req = { get: (h) => (h === 'host' ? 'gan-halomot.onrender.com' : null), protocol: 'https' };
+  const text = c.buildReminderText('כפר סבא - משה דיין', '2026-08', missing, dups, req);
 
-  ok(text.includes(link), 'ההודעה מכילה קישור ישיר למסך ההשלמה');
+  ok(text.includes(c.punchFixLink('2026-08', req)), 'ההודעה מכילה קישור ישיר למסך ההשלמה');
+  ok(text.includes('2 ימים עם החתמה חסרה'), 'ומספרת כמה ימים חסרים');
+  ok(text.includes('1 ימים עם החתמה כפולה'), 'וכמה כפולים');
+
+  // Forty lines of names pushed the link below WhatsApp's "read more", and the
+  // list was stale the moment somebody fixed a day. The screen behind the link
+  // never is.
+  ok(!text.includes('נטע בראון'), 'ואינה מפרטת שמות — הרשימה נמצאת בקישור');
+  ok(!text.includes('07:31'), 'ולא שעות');
+  ok(text.split('\n').length < 10, `ההודעה קצרה (${text.split('\n').length} שורות)`);
+}
+
+console.log('\nהכתובת בקישור');
+{
+  // Render terminates TLS at its proxy, so the socket underneath is plain http
+  // and only this header says what the browser actually asked for.
+  const req = {
+    get: (h) => ({ host: 'gan-halomot.onrender.com', 'x-forwarded-proto': 'https' }[h] || null),
+    protocol: 'http',
+  };
+  const link = c.punchFixLink('2026-08', req);
+  ok(link.startsWith('https://gan-halomot.onrender.com/'),
+    'הכתובת נלקחת מהבקשה — FRONTEND_URL לא מוגדר בייצור ושלח את כולם ל-localhost');
   ok(link.includes('fix=1'), 'והקישור מסומן כך שהמסך ייפתח מיד');
   ok(link.includes('month=2026-08'), 'ועם החודש הנכון');
-  ok(!/היכנס.? למערכת →|נא להיכנס למערכת/.test(text),
-    'ההוראה בת ארבעת השלבים הוחלפה');
-  ok(text.includes('נטע בראון') && text.includes('2026-08-13'),
-    'והיום החסר עדיין מפורט בגוף ההודעה');
+
+  // Behind Render's proxy the socket is plain http; the header is what says the
+  // browser asked for https. Without it the link downgrades and the browser
+  // warns on a page that asks for a password.
+  const plain = c.punchFixLink('2026-08', { get: (h) => (h === 'host' ? 'x.onrender.com' : null), protocol: 'http' });
+  ok(plain.startsWith('http://'), 'בלי הכותרת — נשארים במה שהבקשה אמרה');
+  ok(c.punchFixLink('2026-08', null).length > 0, 'ובלי בקשה בכלל — עדיין מחזיר כתובת');
+}
+
+console.log('\nהיום הנוכחי');
+{
+  // The rule punchIssues applies, stated here so it can be checked without a
+  // month of punches in a database: a lone punch is an unfinished pair only
+  // once the day is over. Israel time, because at 01:00 UTC Jerusalem is
+  // already on the next date and yesterday's real omissions must still show.
+  const todayIL = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+  const isMissing = (date) => date < todayIL;
+
+  ok(!isMissing(todayIL), 'היום עצמו אינו החתמה חסרה — העובדות עדיין בעבודה');
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  ok(isMissing(y.toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' })),
+    'אתמול כן — היום נגמר וההחתמה באמת חסרה');
+  ok(!isMissing('2099-01-01'), 'ויום עתידי לא נספר');
+  ok(isMissing('2026-08-13'), 'ויום ישן בהחלט כן');
 }
 
 console.log(`\n${failures === 0 ? '✅ הכל עבר' : `❌ ${failures} נכשלו`}\n`);
