@@ -39,6 +39,20 @@ const isApproverRole = (r) => r === 'system_admin' || r === 'accountant';
 const WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 
 /**
+ * Israeli mobile → the international form wa.me needs (0501234567 →
+ * 972501234567). Returns '' for anything that cannot be a mobile number, so the
+ * caller falls back to the unaddressed link rather than opening a chat with a
+ * number somebody mistyped into the card.
+ */
+function waNumber(phone) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('972')) return digits.length === 12 ? digits : '';
+  if (digits.startsWith('0')) return digits.length === 10 ? `972${digits.slice(1)}` : '';
+  return '';
+}
+
+/**
  * The contracted week: a working day, or a day off, per weekday.
  *
  * This replaced two pairs of fields — "א׳–ה׳ משעה/עד" and "שישי משעה/עד" —
@@ -165,6 +179,15 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   const current = history[0] || null;
   const active = current && ['sent', 'signed', 'approved'].includes(current.status) ? current : null;
 
+  // wa.me with no number opens WhatsApp on the contact list, so sending the
+  // signing link meant searching for the employee by name — for someone whose
+  // telephone number is already on the card that produced the contract. Address
+  // it. The bare form stays for the employee who has no number on file: it is
+  // still the fastest way to send, it just cannot be aimed.
+  const waPhone = waNumber(values.phone);
+  const waText = encodeURIComponent(`הסכם ההעסקה שלך לחתימה: ${signUrl}`);
+  const waLink = waPhone ? `https://wa.me/${waPhone}?text=${waText}` : `https://wa.me/?text=${waText}`;
+
   const doPreview = async () => {
     setBusy(true);
     try {
@@ -289,13 +312,15 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
             action={
               <Stack direction="row" spacing={0.5}>
                 <Button size="small" startIcon={<ContentCopyIcon />} onClick={copyLink}>העתק</Button>
-                <Button size="small" href={`https://wa.me/?text=${encodeURIComponent(`הסכם ההעסקה שלך לחתימה: ${signUrl}`)}`} target="_blank">
+                <Button size="small" href={waLink} target="_blank">
                   וואטסאפ
                 </Button>
               </Stack>
             }
           >
-            קישור חתימה נוצר. שלחו אותו לעובד/ת — הוא נפתח בנייד ומאפשר קריאה וחתימה.
+            {waPhone
+              ? `קישור חתימה נוצר. הוואטסאפ ייפתח ישירות בשיחה עם ${values.employee_name || 'העובד/ת'}.`
+              : 'קישור חתימה נוצר. אין מספר טלפון בכרטיס העובד/ת, לכן תצטרכו לבחור אותו/ה בוואטסאפ.'}
           </Alert>
         )}
 
