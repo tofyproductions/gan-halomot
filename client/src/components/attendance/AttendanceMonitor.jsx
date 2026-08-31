@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Box, Typography, Stack, TextField, Paper, Table, TableBody, TableCell,
   TableHead, TableRow, TableContainer, Chip, Alert, Button, Tooltip, IconButton,
@@ -70,11 +70,51 @@ export default function AttendanceMonitor() {
   const [issuesCount, setIssuesCount] = useState(0);
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
+  // The scrolling box. A month-wide grid is scrolled in both directions, and
+  // the horizontal position is the one that hurts to lose — day 28 is a long
+  // way right of day 1.
+  const gridRef = useRef(null);
   const [search, setSearch] = useState('');
 
-  const fetchAttendance = useCallback(() => {
+  /**
+   * @param {object} opts
+   * @param {boolean} opts.quiet  refresh in place, without blanking the grid
+   *
+   * Editing one punch used to send the whole screen back to the top.
+   *
+   * The reload sets `loading`, and every row in the table is drawn behind
+   * `!loading`, so the grid emptied for as long as the request took. An empty
+   * scroll container has nothing to be scrolled, so the browser resets it —
+   * and this table is a month wide and a branch tall, so the person who had
+   * scrolled to the 28th to fix one day was put back at the 1st, at the top,
+   * every single time they saved. With a month of corrections to make that is
+   * the whole job.
+   *
+   * A refresh after an edit keeps what is on screen and swaps the data
+   * underneath. Changing month or branch still blanks it, because there the old
+   * rows are the WRONG rows and leaving them up is a lie for as long as the
+   * request takes.
+   */
+  const fetchAttendance = useCallback(({ quiet = false } = {}) => {
     if (!selectedBranch) return;
-    setLoading(true);
+    if (!quiet) setLoading(true);
+
+    // Belt and braces on top of keeping the rows mounted. React reuses the row
+    // elements — the keys are employee ids — so the scroll normally survives on
+    // its own; it does not when the new data has fewer rows than the old, and
+    // the browser clamps a scrollTop that no longer exists. Restoring on the
+    // frame after the swap covers that without fighting the normal case.
+    const box = gridRef.current;
+    const keep = quiet && box ? { left: box.scrollLeft, top: box.scrollTop } : null;
+    const restore = () => {
+      if (!keep || !gridRef.current) return;
+      requestAnimationFrame(() => {
+        if (!gridRef.current) return;
+        gridRef.current.scrollLeft = keep.left;
+        gridRef.current.scrollTop = keep.top;
+      });
+    };
+
     if (isAllBranches) {
       Promise.all(branches.map(b => {
         const id = b._id || b.id;
@@ -90,13 +130,14 @@ export default function AttendanceMonitor() {
           // freshly-deployed server is propagating.
           setPerBranch(results.filter(r => r.status !== 403));
           setData(null);
+          restore();
         })
         .catch(err => { console.error(err); toast.error('שגיאה בטעינת מעקב החתמות'); })
         .finally(() => setLoading(false));
       return;
     }
     api.get('/payroll/attendance', { params: { branch: selectedBranch, month } })
-      .then(res => { setData(res.data); setPerBranch(null); })
+      .then(res => { setData(res.data); setPerBranch(null); restore(); })
       .catch(err => {
         console.error(err);
         toast.error('שגיאה בטעינת מעקב החתמות');
@@ -533,7 +574,7 @@ export default function AttendanceMonitor() {
             InputLabelProps={{ shrink: true }}
           />
           <Tooltip title="רענן">
-            <IconButton onClick={fetchAttendance} disabled={loading}>
+            <IconButton onClick={() => fetchAttendance()} disabled={loading}>
               <RefreshIcon />
             </IconButton>
           </Tooltip>
@@ -591,7 +632,7 @@ export default function AttendanceMonitor() {
         </Alert>
       )}
 
-      <TableContainer component={Paper} sx={{ borderRadius: 3, maxHeight: '75vh' }}>
+      <TableContainer ref={gridRef} component={Paper} sx={{ borderRadius: 3, maxHeight: '75vh' }}>
         <Table size="small" stickyHeader>
           <TableHead>
             <TableRow>
@@ -719,7 +760,7 @@ export default function AttendanceMonitor() {
         canFix={canFixIssues}
         canRemind={isAccountant || isAdmin}
         onClose={() => setIssuesOpen(false)}
-        onChanged={() => { fetchAttendance(); fetchIssuesCount(); }}
+        onChanged={() => { fetchAttendance({ quiet: true }); fetchIssuesCount(); }}
       />
 
       <HoursReportDialog
@@ -744,7 +785,7 @@ export default function AttendanceMonitor() {
         isUnlinked={dayDialog.isUnlinked}
         israeliId={dayDialog.israeliId}
         onClose={() => setDayDialog({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null })}
-        onChanged={fetchAttendance}
+        onChanged={() => fetchAttendance({ quiet: true })}
       />
     </Box>
   );
