@@ -30,6 +30,11 @@ router.use('/utils', require('./utils.routes'));
 // NOT with the normal JWT flow used by the web client.
 router.use('/agent', require('./agent.routes'));
 
+// Task-board sync — same idea as the agent above: its own shared-key + HMAC
+// scheme rather than the JWT flow, so it sits with the routes that authenticate
+// themselves. Read-only, and closed entirely when TASKS_SYNC_KEY is unset.
+router.use('/sync', require('./sync.routes'));
+
 // Protected routes that require auth for employees/salary
 router.use('/employees', require('./employee.routes'));
 router.use('/salary-requests', require('./salary.routes'));
