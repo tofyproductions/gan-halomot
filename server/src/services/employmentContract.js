@@ -187,14 +187,79 @@ const CSS = `
            border-radius:4pt; font-size:10pt; color:#166534; }
 `;
 
-/** Fixed weekly hours table — from the employee's fixed_schedule when set. */
+/**
+ * The contracted weekly hours table.
+ *
+ * A row carrying `off` is a weekly day off, and it is written as one rather
+ * than left blank. Blank reads as "nobody filled this in"; a contract that
+ * cannot tell a day off from an unanswered question is a contract that gets
+ * argued about, and the day off is exactly the term the employee agreed to.
+ */
 function hoursTable(rows) {
-  const byDay = new Map((rows || []).map(r => [r.weekday, r]));
+  const byDay = new Map((rows || []).map(r => [Number(r.weekday), r]));
   const body = WEEKDAYS.map((name, i) => {
     const r = byDay.get(i);
+    if (r?.off) return `<tr><td>${name}</td><td colspan="2">יום חופש שבועי</td><td>${esc(r?.note || '')}</td></tr>`;
     return `<tr><td>${name}</td><td>${r?.in || ''}</td><td>${r?.out || ''}</td><td>${esc(r?.note || '')}</td></tr>`;
   }).join('');
   return `<table class="hours"><thead><tr><th>יום</th><th>תחילת עבודה</th><th>סיום עבודה</th><th>הערות</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/** "ראשון, שני ושלישי" — a Hebrew list, with the ו׳ on the last item. */
+function dayList(indexes) {
+  const names = indexes.slice().sort((a, b) => a - b).map(i => WEEKDAYS[i]).filter(Boolean);
+  if (names.length === 0) return '';
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} ו${names[names.length - 1]}`;
+}
+
+/**
+ * The working-hours sentence, written FROM the weekly table rather than beside
+ * it. It used to be two fixed lines — "ראשון עד חמישי" and "שישי" — which is a
+ * second statement of the same fact, and the two disagree the moment somebody
+ * has Wednesday off or one short day mid-week. The employee signs both, so the
+ * contract has to say one thing.
+ *
+ * Days sharing the same hours are grouped, so the common case still reads as
+ * one sentence; a day with different hours gets its own line rather than
+ * collapsing the difference away.
+ *
+ * `fallback` keeps every contract written before the table existed rendering
+ * exactly as it did: their `weekly_hours` is empty and the old two fields are
+ * all they ever had.
+ */
+function hoursSentence(rows, fallback) {
+  const filled = (rows || []).filter(r => !r.off && r.in && r.out);
+  if (!filled.length) {
+    return `<div>בימים ראשון עד חמישי, החל מהשעה ${val(fallback.weekday_start, 60)} בבוקר ועד השעה ${val(fallback.weekday_end, 60)} בצהריים.</div>
+    <div>בימי שישי, החל מהשעה ${val(fallback.friday_start, 60)} בבוקר ועד השעה ${val(fallback.friday_end, 60)} בצהריים.</div>`;
+  }
+
+  const groups = new Map();   // "in|out" → [weekday…]
+  for (const r of filled) {
+    const key = `${r.in}|${r.out}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(Number(r.weekday));
+  }
+  // Earliest day first, so the sentence runs in the order of the week.
+  const ordered = [...groups.entries()].sort((a, b) => Math.min(...a[1]) - Math.min(...b[1]));
+  const lines = ordered.map(([key, days]) => {
+    const [start, end] = key.split('|');
+    const prefix = days.length === 1 ? 'ביום' : 'בימים';
+    // val(), not esc(): every other filled-in value in the contract is drawn in
+    // a .filled span, and an hour that is plain text reads as boilerplate the
+    // signer skims rather than a term somebody entered for her.
+    return `<div>${prefix} ${dayList(days)}, החל מהשעה ${val(start, 40)} ועד השעה ${val(end, 40)}.</div>`;
+  });
+
+  // Named explicitly: a day the employee does not work is a term of the
+  // agreement, and "it isn't in the list" is not the same as it being written.
+  const offDays = (rows || []).filter(r => r.off).map(r => Number(r.weekday));
+  if (offDays.length) {
+    const label = offDays.length === 1 ? 'יום החופש השבועי' : 'ימי החופש השבועיים';
+    lines.push(`<div>${label} של העובדת: ${dayList(offDays)}.</div>`);
+  }
+  return lines.join('\n    ');
 }
 
 /**
@@ -284,8 +349,7 @@ ${letterhead.SLOT}
 <ol>
   <li>תחילת שנת הלימודים חלה בתאריך: ${val(c.school_year_start, 90)} ומסתיימת בתאריך: ${val(c.school_year_end, 90)}. במסגרת עבודת הגן כלולה עבודה בקייטנת אוגוסט המסתיימת בתאריך: ${val(c.camp_end, 90)}.</li>
   <li>העובדת מודעת לכך כי שעות העבודה אצל המעסיק הינן:
-    <div>בימים ראשון עד חמישי, החל מהשעה ${val(c.weekday_start, 60)} בבוקר ועד השעה ${val(c.weekday_end, 60)} בצהריים.</div>
-    <div>בימי שישי, החל מהשעה ${val(c.friday_start, 60)} בבוקר ועד השעה ${val(c.friday_end, 60)} בצהריים.</div>
+    ${hoursSentence(c.weekly_hours, c)}
   </li>
   <li>היקף המשרה של העובדת יהיה בהתאם לימי ושעות העבודה כמפורט לעיל. המעסיק ישתדל כי לעובדת יהיו ימים ושעות קבועות להעסקתה, בהתאם לבקשתה, כדלהלן:
     ${hoursTable(c.weekly_hours)}
@@ -402,8 +466,51 @@ ${signature?.data_url ? `<div class="stamp">נחתם דיגיטלית על יד�
 </body></html>`;
 }
 
+/**
+ * The weekly table the contract prints, from the schedule the system already
+ * keeps — EmployeeCommitment, edited in שכר ← התחייבויות and already the thing
+ * attendance, sick days and paid vacation are counted against.
+ *
+ * It was previously read off `fixed_schedule.days`, which is the arrangement
+ * for staff who do NOT clock in. Anyone who punches a card has that empty, so
+ * the table printed six blank rows for almost everybody — the schedule was in
+ * the database the whole time, one field over.
+ *
+ * `fixed_schedule` stays as the fallback: for office staff it IS the schedule,
+ * and it carries hours a commitment row may not have.
+ */
+function weeklyHoursFrom(employee, commitment) {
+  if (commitment && Array.isArray(commitment.days) && commitment.days.length) {
+    return commitment.days
+      .map(d => ({
+        weekday: Number(d.day),
+        off: !!d.is_off,
+        in: d.start_hhmm || '',
+        out: d.end_hhmm || '',
+        note: '',
+      }))
+      .sort((a, b) => a.weekday - b.weekday);
+  }
+  const fixed = employee.fixed_schedule?.days || [];
+  if (fixed.length) {
+    return fixed.map(d => ({
+      weekday: Number(d.weekday), off: false, in: d.in, out: d.out, note: '',
+    }));
+  }
+
+  // Neither is set: start from the employee's working days, hours blank. This
+  // is a starting grid for the manager to correct, not a claim about her week —
+  // but it beats six blank rows, because the common case really is Sunday to
+  // Thursday and the manager only has to change what differs.
+  const work = Array.isArray(employee.work_days) && employee.work_days.length
+    ? employee.work_days.map(Number) : [0, 1, 2, 3, 4];
+  return [0, 1, 2, 3, 4, 5].map(weekday => ({
+    weekday, off: !work.includes(weekday), in: '', out: '', note: '',
+  }));
+}
+
 /** The merge context, from the employee card plus what the manager fills in. */
-function buildContext(employee, { branch, overrides = {} } = {}) {
+function buildContext(employee, { branch, commitment = null, overrides = {} } = {}) {
   const variant = overrides.variant || (employee.salary_type === 'global' ? 'global' : 'hourly');
   const dist = (employee.amuta_distribution || [])[0] || {};
   const bank = [employee.bank_number && `בנק ${employee.bank_number}`,
@@ -432,9 +539,7 @@ function buildContext(employee, { branch, overrides = {} } = {}) {
     religion: '',
     school_year_start: '', school_year_end: '', camp_end: '',
     weekday_start: '', weekday_end: '', friday_start: '', friday_end: '',
-    weekly_hours: (employee.fixed_schedule?.days || []).map(d => ({
-      weekday: d.weekday, in: d.in, out: d.out, note: '',
-    })),
+    weekly_hours: weeklyHoursFrom(employee, commitment),
     job_definition: jobDefinitionFor(employee.position),
     annex_c: '',
     // Filled by the controller from the standing ContractAnnex parts, so the

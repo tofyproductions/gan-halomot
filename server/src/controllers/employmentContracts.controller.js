@@ -6,7 +6,9 @@
  * employed with no contract in the system, and without "התעלם" / "העלה" this
  * feature would mark every one of them as a problem on the day it ships.
  */
-const { Employee, Branch, EmploymentContract, ContractAnnex, PayrollMonth, User } = require('../models');
+const {
+  Employee, Branch, EmploymentContract, ContractAnnex, PayrollMonth, User, EmployeeCommitment,
+} = require('../models');
 const tpl = require('../services/employmentContract');
 const terms = require('../services/employmentTerms');
 const storage = require('../services/storage.service');
@@ -92,7 +94,54 @@ async function loadEmployee(req, employeeId) {
     return { error: { status: 403, message: 'העובד/ת אינו/ה בסניף שבאחריותך' } };
   }
   const branch = emp.branch_id ? await Branch.findById(emp.branch_id).select('name').lean() : null;
-  return { emp, branch };
+  const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
+  return { emp, branch, commitment };
+}
+
+/**
+ * Write the weekly table back onto the employee's commitment.
+ *
+ * The contract screen is now a second door onto the same schedule that שכר ←
+ * התחייבויות edits, and it has to be a door rather than a copy: the commitment
+ * is what attendance compares against and what sick, absence and paid-vacation
+ * days are counted on. A weekly table that lived only inside the contract would
+ * put "רביעי חופש" on the signed page while the system went on expecting her
+ * every Wednesday.
+ *
+ * Saturday is never stored — the commitment's own schema stops at Friday, and
+ * the contract says separately that Saturday is the day of rest.
+ *
+ * Only days the manager actually described are written. An untouched row is not
+ * an assertion that she is off that day, and overwriting a schedule somebody
+ * built in the payroll screen with a form nobody filled in is how a correct
+ * commitment quietly becomes an empty one.
+ */
+async function syncCommitment(emp, weeklyHours) {
+  if (!Array.isArray(weeklyHours)) return null;
+  const days = weeklyHours
+    .filter(r => Number(r.weekday) >= 0 && Number(r.weekday) <= 5)
+    .filter(r => r.off || r.in || r.out)
+    .map(r => ({
+      day: Number(r.weekday),
+      is_off: !!r.off,
+      start_hhmm: r.off ? '' : (r.in || ''),
+      end_hhmm: r.off ? '' : (r.out || ''),
+    }))
+    .sort((a, b) => a.day - b.day);
+  if (!days.length) return null;
+
+  const existing = await EmployeeCommitment.findOne({ employee_id: emp._id }).select('_id').lean();
+  // branch_id is required on the commitment, so an employee with no branch can
+  // update one that already exists but cannot have the first one created here.
+  // Silent rather than an error: the contract itself is correct either way, and
+  // an employee with no branch is a card to fix, not a contract to block.
+  if (!existing && !emp.branch_id) return null;
+
+  return EmployeeCommitment.findOneAndUpdate(
+    { employee_id: emp._id },
+    { $set: { days }, $setOnInsert: { employee_id: emp._id, branch_id: emp.branch_id } },
+    { new: true, upsert: true },
+  ).lean();
 }
 
 /** The annex parts, in the shape the contract template lists them. */
@@ -185,10 +234,10 @@ async function statusMap(req, res, next) {
  */
 async function getContext(req, res, next) {
   try {
-    const { emp, branch, error } = await loadEmployee(req, req.params.employeeId);
+    const { emp, branch, commitment, error } = await loadEmployee(req, req.params.employeeId);
     if (error) return res.status(error.status).json({ error: error.message });
     res.json({
-      context: tpl.buildContext(emp, { branch }),
+      context: tpl.buildContext(emp, { branch, commitment }),
       job_presets: Object.entries(tpl.JOB_DEFINITIONS)
         .map(([position, lines]) => ({ position, text: lines.join('\n') })),
       current: publicShape(await currentFor(emp._id).lean()),
@@ -200,9 +249,9 @@ async function getContext(req, res, next) {
 async function preview(req, res, next) {
   try {
     const { employee_id, overrides } = req.body || {};
-    const { emp, branch, error } = await loadEmployee(req, employee_id);
+    const { emp, branch, commitment, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
-    const ctx = tpl.buildContext(emp, { branch, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
+    const ctx = tpl.buildContext(emp, { branch, commitment, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
     res.json({ html: letterhead.inject(tpl.render(ctx)), context: ctx });
   } catch (err) { next(err); }
 }
@@ -216,7 +265,7 @@ async function preview(req, res, next) {
 async function create(req, res, next) {
   try {
     const { employee_id, overrides, send } = req.body || {};
-    const { emp, branch, error } = await loadEmployee(req, employee_id);
+    const { emp, branch, commitment, error } = await loadEmployee(req, employee_id);
     if (error) return res.status(error.status).json({ error: error.message });
 
     const existing = await currentFor(emp._id).lean();
@@ -227,7 +276,16 @@ async function create(req, res, next) {
       });
     }
 
-    const ctx = tpl.buildContext(emp, { branch, overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) } });
+    // The schedule goes back to the commitment BEFORE the text is built, so the
+    // contract is rendered from the same rows the system will be counting
+    // against — not from a copy that agreed with them only at this instant.
+    const saved = await syncCommitment(emp, overrides?.weekly_hours);
+
+    const ctx = tpl.buildContext(emp, {
+      branch,
+      commitment: saved || commitment,
+      overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) },
+    });
     const doc = await EmploymentContract.create({
       employee_id: emp._id,
       branch_id: emp.branch_id || null,

@@ -36,6 +36,88 @@ export const CONTRACT_STATUS = {
 
 const isApproverRole = (r) => r === 'system_admin' || r === 'accountant';
 
+const WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
+
+/**
+ * The contracted week: a working day, or a day off, per weekday.
+ *
+ * This replaced two pairs of fields — "א׳–ה׳ משעה/עד" and "שישי משעה/עד" —
+ * which could describe exactly one shape of week. A weekly day off (Wednesday)
+ * and a short day mid-week are both ordinary here and neither could be written
+ * there; the manager's only options were to leave the contract wrong or to not
+ * issue one.
+ *
+ * The rows are the employee's commitment (שכר ← התחייבויות), not a copy of it,
+ * so what is typed here is also what attendance, sick days and paid vacation
+ * are counted against. Saturday is absent on purpose: the contract states the
+ * day of rest separately, and it is not negotiable per employee here.
+ */
+function WeeklyHoursEditor({ rows, onChange }) {
+  const byDay = new Map((rows || []).map(r => [Number(r.weekday), r]));
+  const grid = WEEKDAY_NAMES.map((name, weekday) => {
+    const r = byDay.get(weekday);
+    return {
+      weekday,
+      name,
+      // A weekday with no row at all is treated as a day off: the grid always
+      // shows all six, so every day the manager can see is a day she answered.
+      off: r ? !!r.off : true,
+      in: r?.in || '',
+      out: r?.out || '',
+    };
+  });
+
+  const update = (weekday, patch) => {
+    onChange(grid.map(r => (r.weekday === weekday
+      ? { ...r, ...patch, note: '' }
+      : { weekday: r.weekday, off: r.off, in: r.in, out: r.out, note: '' })));
+  };
+
+  return (
+    <Stack spacing={0.5}>
+      {grid.map(r => (
+        <Stack key={r.weekday} direction="row" spacing={1} alignItems="center">
+          <FormControlLabel
+            sx={{ minWidth: 92, mr: 0 }}
+            control={(
+              <Checkbox
+                size="small"
+                checked={!r.off}
+                onChange={(e) => update(r.weekday, { off: !e.target.checked })}
+              />
+            )}
+            label={<Typography variant="body2">{r.name}</Typography>}
+          />
+          {r.off ? (
+            <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
+              יום חופש שבועי
+            </Typography>
+          ) : (
+            <>
+              <TextField
+                size="small" label="משעה" type="time" fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={r.in}
+                onChange={(e) => update(r.weekday, { in: e.target.value })}
+              />
+              <TextField
+                size="small" label="עד שעה" type="time" fullWidth
+                InputLabelProps={{ shrink: true }}
+                value={r.out}
+                onChange={(e) => update(r.weekday, { out: e.target.value })}
+              />
+            </>
+          )}
+        </Stack>
+      ))}
+      <Typography variant="caption" color="text.secondary">
+        יום שאינו מסומן הוא יום חופש שבועי. השעות נשמרות גם במסך שכר ← התחייבויות,
+        ולפיהן נספרים ימי מחלה, היעדרות וחופשה.
+      </Typography>
+    </Stack>
+  );
+}
+
 export default function EmploymentContractDialog({ open, employee, role, onClose, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [ctx, setCtx] = useState(null);
@@ -362,19 +444,11 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
                 <TextField size="small" label="ממונה ישירה" value={values.supervisor ?? ''}
                   onChange={(e) => set('supervisor', e.target.value)} />
 
-                <Divider textAlign="right"><Typography variant="caption">שעות</Typography></Divider>
-                <Stack direction="row" spacing={1}>
-                  <TextField size="small" label="א׳–ה׳ משעה" value={values.weekday_start ?? ''} fullWidth
-                    onChange={(e) => set('weekday_start', e.target.value)} />
-                  <TextField size="small" label="עד שעה" value={values.weekday_end ?? ''} fullWidth
-                    onChange={(e) => set('weekday_end', e.target.value)} />
-                </Stack>
-                <Stack direction="row" spacing={1}>
-                  <TextField size="small" label="שישי משעה" value={values.friday_start ?? ''} fullWidth
-                    onChange={(e) => set('friday_start', e.target.value)} />
-                  <TextField size="small" label="עד שעה" value={values.friday_end ?? ''} fullWidth
-                    onChange={(e) => set('friday_end', e.target.value)} />
-                </Stack>
+                <Divider textAlign="right"><Typography variant="caption">ימים ושעות</Typography></Divider>
+                <WeeklyHoursEditor
+                  rows={values.weekly_hours}
+                  onChange={(rows) => set('weekly_hours', rows)}
+                />
 
                 <Divider textAlign="right"><Typography variant="caption">שנת לימודים</Typography></Divider>
                 <Stack direction="row" spacing={1}>

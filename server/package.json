@@ -11,6 +11,7 @@
     "test:terms": "node scripts/employment-terms.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",
+    "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",
     "test:vacations": "node scripts/vacation-calendar.test.js",
     "test:supplies": "node scripts/supplies-visibility.test.js",
