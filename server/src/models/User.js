@@ -94,6 +94,24 @@ const userSchema = new mongoose.Schema({
   // tab_overrides_remove: tab IDs the user is denied even though their role would.
   tab_overrides_add: { type: [String], default: [] },
   tab_overrides_remove: { type: [String], default: [] },
+
+  /**
+   * When this person last read the decisions on their own requests.
+   *
+   * A branch manager sends a payroll change, an employee-card change or a rate
+   * change, and accounting approves or refuses it — and nothing ever told her.
+   * She found out by opening the right screen and pressing the right tab, or
+   * more often by noticing the number was different in the payslip.
+   *
+   * One timestamp on the person rather than a "seen" flag on each request:
+   * there are three separate request collections and this reads them all
+   * without a migration on any of them, and "what has happened since I last
+   * looked" is a question about the READER, not about each request.
+   *
+   * Null means never looked — everything decided is new to her, which is the
+   * right answer on the day this ships.
+   */
+  decisions_seen_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 userSchema.index({ branch_id: 1, role: 1 });

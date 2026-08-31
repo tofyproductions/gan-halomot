@@ -17,6 +17,7 @@ import SalaryRequests from '../employees/SalaryRequests';
 import PayrollSettings from './PayrollSettings';
 import CommitmentsManager from './CommitmentsManager';
 import PayrollChangeRequests from './PayrollChangeRequests';
+import MyDecisions from './MyDecisions';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -31,6 +32,7 @@ const TABS = [
   { id: 'commitments', label: 'התחייבויות',  icon: <EventNoteIcon fontSize="small" />, component: CommitmentsManager, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'change-requests', label: 'בקשות שינוי', icon: <RuleFolderIcon fontSize="small" />, component: PayrollChangeRequests, roles: ['system_admin', 'accountant', 'branch_manager'] },
+  { id: 'my-decisions', label: 'ההחלטות שלי', icon: <RuleFolderIcon fontSize="small" />, component: MyDecisions, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'accountant', 'branch_manager'] },
   { id: 'distribution', label: 'הפצת תלושים ודוחות', icon: <SendIcon fontSize="small" />, component: Distribution, roles: ['system_admin', 'accountant'] },
   { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },

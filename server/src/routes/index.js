@@ -42,6 +42,9 @@ router.use('/salary-requests', require('./salary.routes'));
 router.use('/payroll', require('./payroll.routes'));
 // Monthly payroll table — per-amuta breakdown + manual fields (sick, vacation, etc.)
 router.use('/payroll-month', require('./payrollMonth.routes'));
+// What accounting decided on the requests THIS person sent — one answer across
+// the three separate request collections a branch manager writes into.
+router.use('/my-decisions', require('./decisions.routes'));
 // Employee requests (vacation, sick leave)
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table

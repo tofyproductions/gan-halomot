@@ -7,6 +7,7 @@ import { useAuth } from '../../hooks/useAuth';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
 import PunchEntryTaskGate from '../attendance/PunchEntryTaskGate';
+import { MyDecisionsPopup } from '../payroll/MyDecisions';
 
 // Routes that benefit from extra horizontal space — payroll/attendance tables
 // are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
@@ -125,6 +126,9 @@ function RouteAwareContainer() {
       {/* A branch manager's open "complete your missing punches" assignment —
           pinned above whatever page they navigate to until the branch is clean. */}
       <PunchEntryTaskGate />
+      {/* What accounting decided on the requests THIS person sent. Shown once
+          on entry, then reachable from the bell — the screen keeps the rest. */}
+      <MyDecisionsPopup />
       <Outlet />
     </Box>
   );
