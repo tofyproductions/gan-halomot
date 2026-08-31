@@ -42,7 +42,14 @@ export default function PunchEntryTaskGate() {
       .then(r => {
         const list = r.data?.tasks || [];
         setTasks(list);
-        if (autoOpen && list.length > 0 && !sessionStorage.getItem(DISMISS_KEY)) setOpen(true);
+        if (!list.length) return;
+        // The reminder's link (?fix=1) means "open the thing I messaged you
+        // about". It beats the once-per-session dismissal on purpose: somebody
+        // who closed the dialog this morning and is now tapping the link in the
+        // message is asking for it, and showing nothing would look broken.
+        const asked = new URLSearchParams(window.location.search).get('fix') === '1';
+        if (asked) { setOpen(true); return; }
+        if (autoOpen && !sessionStorage.getItem(DISMISS_KEY)) setOpen(true);
       })
       .catch(() => {});
   }, []);

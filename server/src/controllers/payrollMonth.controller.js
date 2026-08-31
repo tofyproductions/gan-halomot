@@ -9,6 +9,7 @@ const {
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
   User, PunchEntryTask, PayrollRollup,
 } = require('../models');
+const env = require('../config/env');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
   materializeMonth: materializeFixedSchedule,
@@ -3637,9 +3638,19 @@ async function branchManagers(branchIds) {
   }).select('full_name email phone managed_branch_ids branch_id').lean();
   if (!users.length) return new Map();
 
+  // The login record and the payroll card are two rows about one person, and
+  // the contact details are typed into whichever one the office had open. The
+  // phone already fell back to the employee card; the email did not, so a
+  // manager whose address was entered under עובדים — which is where somebody
+  // filling in an employee's details naturally puts it — was reported as having
+  // no email at all, and the reminder went nowhere while the screen said so in
+  // small grey text. Both fields now read the same two places.
   const empDocs = await Employee.find({ user_id: { $in: users.map(u => u._id) } })
-    .select('user_id phone').lean();
+    .select('user_id phone email').lean();
   const phoneByUser = new Map(empDocs.filter(e => e.phone).map(e => [String(e.user_id), e.phone]));
+  const emailByUser = new Map(
+    empDocs.filter(e => isRealEmail(e.email)).map(e => [String(e.user_id), e.email]),
+  );
 
   const byBranch = new Map(ids.map(id => [String(id), []]));
   for (const u of users) {
@@ -3647,16 +3658,49 @@ async function branchManagers(branchIds) {
     if (!covers.length && u.branch_id) covers.push(String(u.branch_id));
     for (const bid of covers) {
       if (!byBranch.has(bid)) continue;
-      byBranch.get(bid).push({
-        id: String(u._id),
-        name: u.full_name,
-        email: isRealEmail(u.email) ? u.email : '',
-        phone: u.phone || phoneByUser.get(String(u._id)) || '',
-      });
+      byBranch.get(bid).push(managerContact(u, {
+        phone: phoneByUser.get(String(u._id)),
+        email: emailByUser.get(String(u._id)),
+      }));
     }
   }
   return byBranch;
 }
+
+/**
+ * One manager's contact details, merged from the two rows that describe her.
+ *
+ * The login record and the payroll card are both about the same person, and
+ * whoever typed the address in used whichever screen they had open. Pulled out
+ * as a rule of its own because "which of the two do we read" is the entire bug
+ * this had, and a rule that only exists inside a database query is a rule that
+ * can only be checked against a database.
+ *
+ * The login wins when it holds something real, because that is where an admin
+ * who deliberately redirects a manager's mail would put it.
+ */
+function managerContact(user, fromCard = {}) {
+  return {
+    id: String(user._id),
+    name: user.full_name,
+    email: isRealEmail(user.email)
+      ? user.email
+      : (isRealEmail(fromCard.email) ? fromCard.email : ''),
+    phone: user.phone || fromCard.phone || '',
+  };
+}
+
+/**
+ * Where the reminder points.
+ *
+ * "נא להיכנס למערכת ← החתמות" is four steps on a phone, read while standing in
+ * a room full of children, and the message arrives on the device least able to
+ * follow them. The address opens the completion screen itself; the login the
+ * manager already has is what guards it, so a forwarded link is no more use to
+ * a stranger than the front page is.
+ */
+const punchFixLink = (month) =>
+  `${env.FRONTEND_URL}/attendance?month=${encodeURIComponent(month)}&fix=1`;
 
 /** The Hebrew nudge sent to a branch manager (also reused as the WhatsApp text). */
 function buildReminderText(branchName, month, missing, duplicates) {
@@ -3671,7 +3715,8 @@ function buildReminderText(branchName, month, missing, duplicates) {
     '',
     ...(missing.length ? [`ימים עם החתמה חסרה (${missing.length}):`, ...missLines, ''] : []),
     ...(duplicates.length ? [`ימים עם החתמה כפולה הממתינים לבדיקה (${duplicates.length}):`, ...dupLines, ''] : []),
-    'נא להיכנס למערכת → החתמות → להשלים את השעות החסרות. לאחר ההשלמה הן יגיעו לאישור הנהלת החשבונות.',
+    `להשלמה, בקישור הזה: ${punchFixLink(month)}`,
+    'הקישור נפתח ישירות במסך ההשלמה. לאחר ההשלמה השעות יגיעו לאישור הנהלת החשבונות.',
   ].join('\n');
 }
 
@@ -4426,6 +4471,10 @@ async function sendToAccountant(req, res, next) {
 }
 
 module.exports = {
+  // Pure helpers, exported so they can be checked without a database.
+  managerContact,
+  punchFixLink,
+  buildReminderText,
   getMonth,
   sendToAccountant,
   previewAccountant,
