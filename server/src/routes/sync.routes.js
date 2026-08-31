@@ -4,6 +4,12 @@ const crypto = require('crypto');
 const PunchEntryTask = require('../models/PunchEntryTask');
 const EmployeeRequest = require('../models/EmployeeRequest');
 const EmployeeChangeRequest = require('../models/EmployeeChangeRequest');
+// Required for their own sake, not for a reference in this file: populate()
+// resolves a ref by MODEL NAME at query time, and if nothing has registered
+// Branch or Employee yet, mongoose throws MissingSchemaError from inside the
+// query. Importing them here makes that impossible to get wrong.
+require('../models/Branch');
+require('../models/Employee');
 
 const router = express.Router();
 
@@ -52,6 +58,28 @@ function verifyCaller(req, res) {
   return true;
 }
 
+/**
+ * Express 4 does not catch a rejection thrown inside an async handler: the
+ * request gets NO RESPONSE at all and the caller waits for its own timeout.
+ *
+ * That is exactly what went wrong here. /v1/tasks hung for two minutes while
+ * /ping and /tasks/ids answered in under a second — which reads like a slow
+ * database and was in fact a thrown error with nowhere to go. A failure has to
+ * be a fast 500 that names itself.
+ */
+function guard(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(err => {
+      console.error('[sync]', (err && err.message) || err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: { code: 'SYNC_FAILED', message: String((err && err.message) || err).slice(0, 200) },
+        });
+      }
+    });
+  };
+}
+
 router.get('/v1/ping', (req, res) => {
   if (!verifyCaller(req, res)) return;
   res.json({ v: VERSION, ok: true, now: new Date().toISOString() });
@@ -67,7 +95,7 @@ router.get('/v1/ping', (req, res) => {
  * line per item, and "בקשת חופשה — נועה כהן" is a line somebody can act on
  * where a type code and three ids are not.
  */
-router.get('/v1/tasks', async (req, res) => {
+router.get('/v1/tasks', guard(async (req, res) => {
   if (!verifyCaller(req, res)) return;
 
   const since = new Date(req.query.since || 0);
@@ -148,11 +176,11 @@ router.get('/v1/tasks', async (req, res) => {
     has_more: out.length > limit,
     tasks: page,
   });
-});
+}));
 
 /** Ids only, so the caller can tell a deleted item from one it has not seen.
  *  Cheap: three id projections and nothing else. */
-router.get('/v1/tasks/ids', async (req, res) => {
+router.get('/v1/tasks/ids', guard(async (req, res) => {
   if (!verifyCaller(req, res)) return;
   const [punch, request, change] = await Promise.all([
     PunchEntryTask.find({}, { _id: 1 }).lean(),
@@ -166,7 +194,7 @@ router.get('/v1/tasks/ids', async (req, res) => {
     employee_request: request.map(d => String(d._id)),
     employee_change: change.map(d => String(d._id)),
   });
-});
+}));
 
 // The board is in Hebrew and one line wide. A raw enum value is exactly the
 // sort of thing that makes a mirrored item unreadable at a glance.
