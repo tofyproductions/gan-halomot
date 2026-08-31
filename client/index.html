@@ -6,6 +6,29 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&family=Assistant:wght@300;400;600;700;800&family=Varela+Round&display=swap" rel="stylesheet" />
+
+  <!--
+    Added so "התקן את האפליקציה" is a true sentence. Adding this to a home
+    screen previously produced an unnamed square with a screenshot in it, which
+    is not something you ask an employee to do.
+
+    A manifest and icons only — deliberately NO service worker. A worker is what
+    makes an installed page keep serving last week's build after a deploy, and
+    the people on the receiving end here have no idea what a hard refresh is.
+    Everything below buys the icon, the name and the full-screen window; none of
+    it needs to cache a thing.
+  -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#f59e0b" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <!-- iOS reads its own vendor-prefixed pair; without them Safari opens the
+       home-screen icon in a browser tab with an address bar. -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="גן החלומות" />
+
   <title>גן החלומות - ניהול חכם</title>
 </head>
 <body>
