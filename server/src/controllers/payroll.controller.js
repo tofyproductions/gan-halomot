@@ -62,7 +62,39 @@ function monthRange(ym) {
  * code is unreliable on TANDEM4 PRO. We just chronologically pair: #1=in,
  * #2=out, #3=in, #4=out, etc.
  */
-function summarizeDay(dayPunches, resolution) {
+/**
+ * Who typed the manual readings on this day.
+ *
+ * The grid stated "עודכן ידנית ע״י הנה״ח" for every manual day. That is a
+ * sentence about a person, and it was false whenever a branch manager filled in
+ * a forgotten punch or the employee reported her own — which is most of them.
+ *
+ * A day can carry more than one hand: she reported the exit, her manager added
+ * the entry that was never clocked. The first one entered is named and
+ * `multiple` says there were others, so the grid can say so rather than pick a
+ * winner. Punches written before `created_by` existed have no author and return
+ * nothing — the screen says "לא ידוע" instead of attributing them to somebody.
+ */
+function manualByOf(dayPunches, employeeUserId) {
+  const creators = [];
+  for (const p of dayPunches) {
+    if (p.timestamp_source !== 'manual') continue;
+    const c = p.created_by;
+    if (!c) continue;
+    const id = String(c._id || c);
+    if (creators.some(x => x.id === id)) continue;
+    creators.push({
+      id,
+      name: c.full_name || '',
+      role: c.role || '',
+      self: Boolean(employeeUserId) && id === String(employeeUserId),
+    });
+  }
+  if (creators.length === 0) return null;
+  return { ...creators[0], multiple: creators.length > 1 };
+}
+
+function summarizeDay(dayPunches, resolution, employeeUserId) {
   const allSorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
   // Same billing rule as the salary calc: ≤2 punches pair normally; a >2-punch
   // day uses the accountant's approved in/out labels when it has been resolved,
@@ -118,6 +150,9 @@ function summarizeDay(dayPunches, resolution) {
     incomplete,
     has_pending,
     has_manual,
+    // null when nothing hand-entered here carries an author — the grid says
+    // "לא ידוע" rather than naming the accountant by default.
+    manual_by: manualByOf(allSorted, employeeUserId),
     has_fixed_schedule,
     has_closure_completion,
     total_minutes: totalMinutes,
@@ -714,12 +749,14 @@ async function attendanceByMonth(req, res, next) {
 
     // First batch — employees + branch list (don't depend on each other).
     const [homeEmployees, allEmployees, branches] = await Promise.all([
+      // `user_id` is what lets a manual punch be recognised as the employee's
+      // own report rather than somebody else's entry on her behalf.
       Employee.find({ branch_id: branch, is_active: true })
-        .select('_id full_name israeli_id position')
+        .select('_id full_name israeli_id position user_id')
         .sort({ full_name: 1 })
         .lean(),
       Employee.find({ is_active: true })
-        .select('_id full_name israeli_id branch_id position')
+        .select('_id full_name israeli_id branch_id position user_id')
         .lean(),
       Branch.find({}).select('_id name').lean(),
     ]);
@@ -733,13 +770,13 @@ async function attendanceByMonth(req, res, next) {
         branch_id: branch,
         timestamp: { $gte: range.from, $lt: range.to },
         ignored: { $ne: true },
-      }).sort({ timestamp: 1 }).lean(),
+      }).populate('created_by', 'full_name role').sort({ timestamp: 1 }).lean(),
       Punch.find({
         branch_id: { $ne: branch },
         employee_id: { $in: homeIdsArr },
         timestamp: { $gte: range.from, $lt: range.to },
         ignored: { $ne: true },
-      }).sort({ timestamp: 1 }).lean(),
+      }).populate('created_by', 'full_name role').sort({ timestamp: 1 }).lean(),
     ]);
 
     const ymPrefix = `${range.year}-${String(range.month).padStart(2, '0')}`;
@@ -854,8 +891,14 @@ async function attendanceByMonth(req, res, next) {
     const finalize = (bucket) => {
       const summarized = {};
       const empRes = bucket.employee_id ? (attRes.get(String(bucket.employee_id)) || new Map()) : new Map();
+      // Her own login, so a manual punch she entered herself reads as a self
+      // report and not as somebody else's entry on her behalf. Unlinked
+      // employees simply have none, and then no day claims to be self-reported.
+      const empUserId = bucket.employee_id
+        ? (empById.get(String(bucket.employee_id))?.user_id || null)
+        : null;
       for (const [dayKey, dayPunches] of Object.entries(bucket.days)) {
-        const s = summarizeDay(dayPunches, empRes.get(dayKey));
+        const s = summarizeDay(dayPunches, empRes.get(dayKey), empUserId);
         summarized[dayKey] = s;
         bucket.month_total_hours += s.total_hours;
         if (s.incomplete) bucket.incomplete_days++;
@@ -867,7 +910,7 @@ async function attendanceByMonth(req, res, next) {
       if (bucket.away_days) {
         const awaySummarized = {};
         for (const [dayKey, info] of Object.entries(bucket.away_days)) {
-          const s = summarizeDay(info.punches, empRes.get(dayKey));
+          const s = summarizeDay(info.punches, empRes.get(dayKey), empUserId);
           s.at_branches = [...info.at_branches];
           awaySummarized[dayKey] = s;
           bucket.away_total_hours += s.total_hours;
@@ -2075,6 +2118,52 @@ async function createManualPunches(req, res, next, opts = {}) {
     if (in_time)  pairs.push({ time: in_time,  state: 0, label: 'in'  });
     if (out_time) pairs.push({ time: out_time, state: 1, label: 'out' });
 
+    /**
+     * The same reading, entered twice.
+     *
+     * Dedup was carried entirely by the unique (branch, device_user_sn) index,
+     * and a manual punch mints its own sn from `-Date.now()`, which is unique
+     * per REQUEST — so nothing stopped the same event being written again. A
+     * double-click, a retry after the phone lost signal, or the employee and
+     * her manager both reporting the forgotten exit produced two identical
+     * rows. They are invisible while they wait: punchIssues() counts only
+     * 'auto' and 'approved'. On approval the day silently reaches three or four
+     * readings, becomes a "החתמה כפולה", and blocks the month's send.
+     *
+     * So the real key is checked here: the same employee, the same minute, the
+     * same side of the day. The minute — not the exact instant — because a
+     * clock record carries seconds and a hand-typed 13:48 is a duplicate of a
+     * device's 13:48:22, not a second event.
+     *
+     * A rejected punch does not block: saying no to a report is precisely what
+     * makes re-reporting it correctly the next step.
+     */
+    const wanted = pairs.map(p => ({ ...p, ts: ilDateTime(date, p.time) }));
+    const existing = await Punch.find({
+      employee_id: emp._id,
+      timestamp: {
+        $gte: new Date(Math.min(...wanted.map(w => w.ts.getTime()))),
+        $lt: new Date(Math.max(...wanted.map(w => w.ts.getTime())) + 60000),
+      },
+      approval_status: { $ne: 'rejected' },
+      ignored: { $ne: true },
+    }).select('timestamp state').lean();
+
+    const clash = wanted.filter(w => existing.some(e =>
+      e.state === w.state
+      && new Date(e.timestamp).getTime() >= w.ts.getTime()
+      && new Date(e.timestamp).getTime() < w.ts.getTime() + 60000));
+
+    if (clash.length > 0) {
+      // All-or-nothing: creating only the half that is new would leave a lone
+      // punch behind and turn "already reported" into "missing exit".
+      const what = clash.map(c => `${c.state === 0 ? 'כניסה' : 'יציאה'} ${c.time}`).join(' ו-');
+      return res.status(409).json({
+        error: `כבר קיימת החתמה זהה לעובד/ת ב-${date}: ${what}. ייתכן שהדיווח כבר נשלח, או שמישהו אחר דיווח עליו.`,
+        duplicate: clash.map(c => ({ time: c.time, state: c.state })),
+      });
+    }
+
     for (let i = 0; i < pairs.length; i++) {
       const { time, state } = pairs[i];
       const ts = ilDateTime(date, time);
@@ -2502,9 +2591,12 @@ async function listPendingPunches(req, res, next) {
     // cross-branch sentinel and must NOT be used as a branch_id filter.
     const branchQ = req.query.branch && req.query.branch !== 'all' ? req.query.branch : null;
 
+    // `user_id` and the creator's `role` are what tell an employee reporting her
+    // own day apart from a manager filling one in — the same row otherwise, and
+    // not the same claim about the hours.
     const load = (filter) => Punch.find(filter)
-      .populate('employee_id', 'full_name israeli_id')
-      .populate('created_by', 'full_name')
+      .populate('employee_id', 'full_name israeli_id user_id')
+      .populate('created_by', 'full_name role')
       .sort({ timestamp: -1 }).lean();
 
     // Stage 1 (branch manager): employee-reported punches in managed branches.

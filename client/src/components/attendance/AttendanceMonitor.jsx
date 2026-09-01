@@ -19,6 +19,7 @@ import HoursReportDialog from '../employees/HoursReportDialog';
 import MonthlyHoursReports from './MonthlyHoursReports';
 import DescriptionIcon from '@mui/icons-material/Description';
 import PendingPunchApprovals from './PendingPunchApprovals';
+import { formatManualBy } from './punchApproval';
 import DayPunchesDialog from './DayPunchesDialog';
 import PunchIssuesDialog from '../payroll/PunchIssuesDialog';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
@@ -275,7 +276,15 @@ export default function AttendanceMonitor() {
               {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
               {day.needs_review && <div style={{color:'#fca5a5',fontWeight:800}}>⚠️ החתמה כפולה ({day.punch_count} החתמות) — ממתין להחלטת הנה״ח</div>}
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
-              {!day.has_pending && day.has_manual && <div style={{color:'#93c5fd'}}>✎ עודכן ידנית ע״י הנה״ח</div>}
+              {/* Who actually typed it. This line used to name the accountant on
+                  every manual day, including the ones a branch manager or the
+                  employee herself entered. */}
+              {!day.has_pending && day.has_manual && (
+                <div style={{color:'#93c5fd'}}>
+                  ✎ עודכן ידנית · {formatManualBy(day.manual_by)}
+                  {day.manual_by?.multiple ? ' ואחרים' : ''}
+                </div>
+              )}
               {day.has_fixed_schedule && <div style={{color:'#5eead4'}}>⏱ שעות קבועות — ללא החתמה בשעון</div>}
               {day.has_closure_completion && <div style={{color:'#f9a8d4'}}>📋 השלמת שכר אוגוסט — הגן היה סגור</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
@@ -453,7 +462,7 @@ export default function AttendanceMonitor() {
           </table>
           <div class="legend">
             <span><span class="swatch" style="background:#fff"></span>החתמת שעון</span>
-            <span><span class="swatch" style="background:#dbeafe;border-color:#1e40af"></span>✎ עדכון ידני (הנה״ח)</span>
+            <span><span class="swatch" style="background:#dbeafe;border-color:#1e40af"></span>✎ עדכון ידני</span>
             <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
             <span><span class="swatch" style="background:#ede9fe;border-color:#6d28d9"></span>ידני — ממתין לאישור</span>
             <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
@@ -541,7 +550,14 @@ export default function AttendanceMonitor() {
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 1400, mx: 'auto' }}>
-      <PendingPunchApprovals />
+      {/* Approving a punch here changes what counts in the salary, and therefore
+          what the month's punch problems are — an approval can turn a day into a
+          three-reading "החתמה כפולה" that blocks the accountant's send. The
+          issues dialog already refreshes this screen after its own actions; this
+          is the same wire in the other direction. */}
+      <PendingPunchApprovals
+        onChanged={() => { fetchAttendance({ quiet: true }); fetchIssuesCount(); }}
+      />
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב החתמות</Typography>
@@ -616,7 +632,7 @@ export default function AttendanceMonitor() {
       <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5, px: 0.5, alignItems: 'center' }}>
         {[
           { c: '#d1fae5', t: '#065f46', label: 'החתמת שעון' },
-          { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני (הנה״ח)' },
+          { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני' },
           { c: '#ccfbf1', t: '#0f766e', label: '⏱ שעות קבועות' },
           { c: '#fef3c7', t: '#92400e', label: 'חסרה יציאה' },
           { c: '#ede9fe', t: '#5b21b6', label: 'ידני — ממתין לאישור' },
