@@ -994,9 +994,9 @@ export default function PayrollMonthTable() {
         } else if (!r.has_window) {
           toast.warning(`לא נמצא בלוח החופשות טווח "סגירה" לסניף של ${row.full_name} עבור החודש הזה`, { autoClose: 9000 });
         } else if (r.newly_completed_days === 0) {
-          toast.info(`אין ימים חדשים להשלמה — כל ${r.committed_days_in_window} ימי ההתחייבות בטווח הסגירה כבר מכוסים בהחתמה`, { autoClose: 9000 });
+          toast.info(`אין ימים חדשים להשלמה — כל ${r.committed_days_in_window} ימי ההתחייבות בטווח הסגירה (${r.window_start} עד ${r.window_end}) כבר מכוסים בהחתמה${r.window_from_fallback_policy ? ' — טווח לפי מדיניות קבועה, לא נמצאה רשומת חופשה' : ''}`, { autoClose: 9000 });
         } else {
-          toast.success(`הושלמו ${r.newly_completed_days} ימים מתוך ${r.committed_days_in_window} ימי התחייבות בטווח הסגירה`, { autoClose: 9000 });
+          toast.success(`הושלמו ${r.newly_completed_days} ימים מתוך ${r.committed_days_in_window} ימי התחייבות בטווח הסגירה (${r.window_start} עד ${r.window_end})${r.window_from_fallback_policy ? ' — טווח לפי מדיניות קבועה, לא נמצאה רשומת חופשה' : ''}`, { autoClose: 9000 });
         }
       }
       await fetchData({ quiet: true });

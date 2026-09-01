@@ -27,8 +27,43 @@
  * safe (never overwrites, never duplicates) even without one.
  */
 
-const { Employee, EmployeeCommitment, Holiday, Punch, PayrollMonth } = require('../models');
+const { Employee, EmployeeCommitment, Holiday, Punch, PayrollMonth, Branch } = require('../models');
 const { ilDateTime, ISR_DAY, weekdayOf, todayIsrael } = require('./fixedSchedule');
+
+/**
+ * Fallback closure window, used ONLY when no Holiday(kind:'closure') entry is
+ * found for the branch — the office's stated policy (2026-09-01): every
+ * branch closes 9.8 and resumes 29.8, except קפלן which closes 10.8 and
+ * resumes 1.9. A Holiday entry, if one exists, always wins — this exists
+ * because that entry turned out to be missing/misconfigured for the 2026
+ * closure and the office needed completion to work correctly regardless.
+ *
+ * Matched by substring on the branch name since there are only two policies
+ * today; `end` lands within August either way (31.8 the day before 1.9, 28.8
+ * the day before 29.8), so no cross-month arithmetic is needed.
+ *
+ * TODO: once every branch has a real Holiday(kind:'closure') entry for the
+ * relevant year, this stops being consulted (closureWindowForBranch only
+ * calls it when the Holiday lookup comes back empty) — it can stay as a
+ * standing safety net for a branch that's missing one.
+ */
+const DEFAULT_CLOSURE_POLICY = [
+  { match: /קפלן/, startDay: 11, endDay: 31 },
+  { match: /.*/, startDay: 10, endDay: 28 },
+];
+
+async function fallbackClosureWindow(branchId, month) {
+  if (!/-08$/.test(month)) return null; // the policy only speaks to August
+  const branch = await Branch.findById(branchId).select('name').lean();
+  const name = branch?.name || '';
+  const policy = DEFAULT_CLOSURE_POLICY.find(p => p.match.test(name));
+  if (!policy) return null;
+  return {
+    start: `${month}-${String(policy.startDay).padStart(2, '0')}`,
+    end: `${month}-${String(policy.endDay).padStart(2, '0')}`,
+    from_fallback_policy: true,
+  };
+}
 
 /** Every 'YYYY-MM-DD' from `start` to `end` inclusive. */
 function dateRange(start, end) {
@@ -59,7 +94,7 @@ async function closureWindowForBranch(branchId, month) {
     start_date: { $lte: monthEnd },
     end_date: { $gte: monthStart },
   }).select('start_date end_date').lean();
-  if (closures.length === 0) return null;
+  if (closures.length === 0) return fallbackClosureWindow(branchId, month);
   const starts = closures.map(h => ISR_DAY(h.start_date));
   const ends = closures.map(h => ISR_DAY(h.end_date));
   return { start: starts.sort()[0], end: ends.sort().pop() };
@@ -266,6 +301,7 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     results.push({
       employee_id: empIdStr, has_commitment: true, has_window: true,
       window_start: window.start, window_end: windowEnd,
+      window_from_fallback_policy: !!window.from_fallback_policy,
       committed_days_in_window: eligible.length,
       already_had_punch_days: eligible.length - gaps.length,
       newly_completed_days: gaps.length,
