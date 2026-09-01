@@ -3518,7 +3518,30 @@ async function previewAccountant(req, res, next) {
  * before the month can leave the building. Scans ALL branches for the month
  * (not just the one on screen) and returns what is still unresolved.
  */
-async function punchIssues(month) {
+/**
+ * `includePending` — false (default) for every payroll-facing use of this
+ * function: "what still blocks the send" / "what's countable" must ignore a
+ * punch nobody has approved yet, exactly as before.
+ *
+ * true — for the branch-manager-facing "did she still need to fill this in"
+ * callers (myPunchEntryTasks, completePunchEntryTask, remindBranchManager,
+ * assignPunchEntry). Her manual completion starts at approval_status
+ * 'pending_accountant' (createManualPunches) — the FILLING is done the moment
+ * she submits it, and the approving is a separate job (PendingPunchApprovals),
+ * not hers. Without this, a day she already completed still reads as a single
+ * punch here (pending is invisible to the default filter below) and never
+ * left her "השלמת החתמות חסרות" list — she saw the same day every time she
+ * opened the app, having already sent it, with no way to tell the two states
+ * apart.
+ *
+ * Only changes what counts as a DAY'S PUNCHES for the missing/duplicate
+ * grouping itself — a duplicate day still requires an explicit accountant
+ * decision either way (dupKeys is filtered by `resolved`, an APPROVED
+ * PunchResolution, never by this flag), so the "asks_accountant" gate this
+ * function feeds (sendToAccountant, punchReviewStatus) is untouched by every
+ * caller that doesn't opt in.
+ */
+async function punchIssues(month, { includePending = false } = {}) {
   const from = new Date(`${month}-01T00:00:00Z`);
   const to = new Date(from); to.setUTCMonth(to.getUTCMonth() + 1);
   const punches = await Punch.find({
@@ -3530,7 +3553,7 @@ async function punchIssues(month) {
   for (const p of punches) {
     if (!p.employee_id) continue;
     const s = p.approval_status || 'auto';
-    if (s !== 'auto' && s !== 'approved') continue;
+    if (!includePending && s !== 'auto' && s !== 'approved') continue;
     const d = ISR_DAY(p.timestamp);
     if (d.slice(0, 7) !== month) continue;
     const k = String(p.employee_id) + '|' + d;
@@ -4189,7 +4212,7 @@ async function remindBranchManager(req, res, next) {
     const branch = await Branch.findById(branchId).select('name').lean();
     if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
 
-    const { duplicates, missing } = await punchIssues(month);
+    const { duplicates, missing } = await punchIssues(month, { includePending: true });
     const branchMissing = missing.filter(m => String(m.branch_id) === String(branchId));
     const branchDups = duplicates.filter(d => String(d.branch_id) === String(branchId));
     if (branchMissing.length === 0 && branchDups.length === 0) {
@@ -4254,7 +4277,7 @@ async function assignPunchEntry(req, res, next) {
     const branch = await Branch.findById(branchId).select('name').lean();
     if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
 
-    const { duplicates, missing } = await punchIssues(month);
+    const { duplicates, missing } = await punchIssues(month, { includePending: true });
     const branchMissing = missing.filter(m => String(m.branch_id) === String(branchId));
     const branchDups = duplicates.filter(d => String(d.branch_id) === String(branchId));
     if (branchMissing.length === 0 && branchDups.length === 0) {
@@ -4360,7 +4383,7 @@ async function myPunchEntryTasks(req, res, next) {
     const userId = req.user?.id || req.user?._id || null;
     const months = [...new Set(open.map(t => t.month))];
     const issuesByMonth = new Map();
-    for (const m of months) issuesByMonth.set(m, await punchIssues(m));
+    for (const m of months) issuesByMonth.set(m, await punchIssues(m, { includePending: true }));
 
     const branchDocs = await Branch.find({ _id: { $in: open.map(t => t.branch_id) } }).select('name').lean();
     const branchName = (id) => (branchDocs.find(b => String(b._id) === String(id)) || {}).name || '';
@@ -4421,7 +4444,7 @@ async function completePunchEntryTask(req, res, next) {
       return res.status(403).json({ error: 'המשימה אינה של סניף שבאחריותך' });
     }
 
-    const { missing } = await punchIssues(task.month);
+    const { missing } = await punchIssues(task.month, { includePending: true });
     const left = missing.filter(m => String(m.branch_id) === String(task.branch_id)).length;
     const note = (req.body?.note || '').trim();
     if (left > 0 && !note) {

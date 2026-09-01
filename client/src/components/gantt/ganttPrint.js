@@ -55,23 +55,50 @@ const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
  * Rather than guess, the budget is divided by what this month actually needs
  * and the result is clamped to something still readable across a room.
  */
-function scaleFor(weekCount, rowCount, pages = 1) {
+/**
+ * `weekWeights` — one entry per week, in "row units" (banner + day-header +
+ * however many content rows that week actually prints). A week the gan is
+ * closed for entirely collapses on the page to a single banner cell (see
+ * weekHtml's `collapsed` handling) — sizing every week as if it still needed
+ * the full row count wastes exactly the space that week gave back, and the
+ * type stays smaller than the page has room for. A five-week month with one
+ * closed week (יום כיפור, סוכות, a whole חופשת קיץ week) is a real, common
+ * case — not sizing for it is why those months print at a noticeably smaller
+ * scale than a five-week month with no closures at all, despite the sheet
+ * having genuinely more blank room.
+ */
+function scaleFor(weekWeights, pages = 1) {
   // Two pages buys human-sized type for a full five-week month; one page is
   // what you ask for when the sheet has to be sent as a single picture. The
   // caller decides, because it is a trade nobody can make on their behalf: a
   // month that fits one page at 11pt and one that only fits at 5pt look the
   // same from here.
   const availableMm = (198 - 11) * pages;
-  const perWeekMm = availableMm / Math.max(weekCount, 1);
-  // A week costs its banner and its day-header row on top of the gantt rows;
-  // together those are worth about three rows of height.
-  const rowMm = perWeekMm / (rowCount + 3);
+  const totalWeight = weekWeights.reduce((a, w) => a + w, 0) || 1;
+  const rowMm = availableMm / totalWeight;
   const cell = Math.max(8, Math.min(12, rowMm * 1.05));
   return {
     cell: cell.toFixed(2),
     head: Math.max(9, Math.min(13.5, cell * 1.15)).toFixed(2),
     small: Math.max(6.5, cell - 1.5).toFixed(2),
   };
+}
+
+/** Every in-month day of `week` is closed (holiday, not merely a short day) —
+ * matches the `collapsed` test weekHtml uses to draw it as one banner cell. */
+function isWeekWhollyClosed(week, isClosed, inMonth) {
+  const offset = new Date(week.start_date).getDay();
+  const sunday = new Date(week.start_date);
+  sunday.setDate(sunday.getDate() - offset);
+  let hasOwnDay = false;
+  for (let di = 0; di < 6; di += 1) {
+    const d = new Date(sunday);
+    d.setDate(d.getDate() + di);
+    if (!inMonth(d)) continue; // a day borrowed from another month doesn't count
+    hasOwnDay = true;
+    if (!isClosed(d)) return false;
+  }
+  return hasOwnDay;
 }
 
 /**
@@ -93,9 +120,6 @@ export function buildGanttPrintHtml({
   pages = 1,
 }) {
   const image = mode === 'image';
-  const size = image
-    ? { cell: '15', head: '17', small: '12.5' }
-    : scaleFor(weeks.length, rows.length || 5, pages);
 
   const isHoliday = (d) => holidays.find(h => (
     ymd(d) >= holidayYmd(h.start_date) && ymd(d) <= holidayYmd(h.end_date)
@@ -105,6 +129,17 @@ export function buildGanttPrintHtml({
     return h && h.kind !== 'short_day' ? h : null;
   };
   const inMonth = (d) => d.getMonth() === month - 1 && d.getFullYear() === year;
+
+  const rowCount = rows.length || 5;
+  // A week costs its banner and its day-header row on top of the gantt rows;
+  // together those are worth about three rows of height. A wholly-closed week
+  // collapses to that overhead plus its one banner cell (see weekHtml).
+  const weekWeights = weeks.map(w => (
+    isWeekWhollyClosed(w, isClosed, inMonth) ? 4 : rowCount + 3
+  ));
+  const size = image
+    ? { cell: '15', head: '17', small: '12.5' }
+    : scaleFor(weekWeights, pages);
 
   const weekHtml = (week) => {
     // day_index is counted from start_date, which is the week's Sunday.
