@@ -13,6 +13,7 @@
     "test:contracts": "node scripts/contract-upload.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:reminder": "node scripts/manager-reminder.test.js",
+    "test:punch-approval": "node scripts/punch-approval-stage.test.js",
     "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
     "test:decisions": "node scripts/my-decisions.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",

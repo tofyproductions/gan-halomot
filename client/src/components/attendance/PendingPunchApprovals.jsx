@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Box, Paper, Typography, Stack, Chip, IconButton, Tooltip, Collapse,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Button, Alert,
@@ -10,13 +10,30 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import {
+  applyDecision, approvalMessage, rejectionMessage, stageOf, manualSource,
+  STAGE_LABEL, STAGE_ORDER,
+} from './punchApproval';
 
 /**
- * Branch-manager banner showing manual punches that employees submitted and
- * are waiting on review. One-click approve / reject; the action timestamps
- * the manager and immediately removes the row from the list.
+ * Manual punches waiting on review, in the order the approval chain actually
+ * runs: what the branch manager still owes, then what the accountant still owes.
+ *
+ * Approval is TWO stages. A manager approving an employee's report does not put
+ * the hours in the salary — it hands the punch to the accountant. This banner
+ * used to remove the row on any successful PATCH and say "אושר", so an
+ * accountant or an admin, who sees both stages, would confirm a punch in one
+ * click, watch it disappear, and be told it was approved when it was in fact
+ * parked at a stage they could no longer reach without reloading. The list is
+ * now redrawn from the punch the server sends back (see `punchApproval.js`),
+ * and every row states which desk it is on.
+ *
+ * `onChanged` matters as much as the display: approving a punch changes what
+ * counts in the salary, which changes the month's punch problems (a day that
+ * reaches three counted readings becomes a "החתמה כפולה" that blocks the send).
+ * The screens showing those numbers have to be told.
  */
-export default function PendingPunchApprovals() {
+export default function PendingPunchApprovals({ onChanged }) {
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
@@ -34,34 +51,61 @@ export default function PendingPunchApprovals() {
 
   const approve = (id) => {
     api.patch(`/payroll/punches/${id}/approve`)
-      .then(() => { toast.success('אושר'); setPunches(p => p.filter(x => x._id !== id)); })
+      .then((res) => {
+        const updated = res.data?.punch;
+        toast.success(approvalMessage(updated));
+        setPunches(p => applyDecision(p, id, updated));
+        // An answer without a punch tells us nothing about where it landed —
+        // reload rather than guess.
+        if (!updated) load();
+        onChanged && onChanged();
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
+
   const doReject = () => {
     const { punch, note } = reject;
     if (!punch) return;
     api.patch(`/payroll/punches/${punch._id}/reject`, { note })
-      .then(() => { toast.success('נדחה'); setPunches(p => p.filter(x => x._id !== punch._id)); setReject({ open: false, punch: null, note: '' }); })
+      .then((res) => {
+        const updated = res.data?.punch;
+        toast.success(rejectionMessage(updated));
+        setPunches(p => applyDecision(p, punch._id, updated));
+        if (!updated) load();
+        setReject({ open: false, punch: null, note: '' });
+        onChanged && onChanged();
+      })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
+  // Two sections, each grouped by employee+date inside. A row's stage is read
+  // from the punch itself, so a punch that moved up a stage moves section
+  // without a round trip.
+  const sections = useMemo(() => {
+    const byStage = new Map(STAGE_ORDER.map(s => [s, new Map()]));
+    for (const p of punches) {
+      const stage = stageOf(p) || 'manager';
+      const groups = byStage.get(stage);
+      if (!groups) continue;
+      const key = `${p.employee_id?._id || 'no-emp'}-${new Date(p.timestamp).toLocaleDateString('he-IL')}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          employee_name: p.employee_id?.full_name || '—',
+          israeli_id: p.employee_id?.israeli_id || '',
+          date: new Date(p.timestamp).toLocaleDateString('he-IL'),
+          items: [],
+        });
+      }
+      groups.get(key).items.push(p);
+    }
+    return STAGE_ORDER
+      .map(stage => ({ stage, groups: [...byStage.get(stage).values()] }))
+      .filter(s => s.groups.length > 0);
+  }, [punches]);
+
   if (loading && punches.length === 0) return null;
   if (punches.length === 0) return null;
-
-  // Group punches by date+employee for compact display
-  const grouped = {};
-  for (const p of punches) {
-    const key = `${p.employee_id?._id || 'no-emp'}-${new Date(p.timestamp).toLocaleDateString('he-IL')}`;
-    if (!grouped[key]) {
-      grouped[key] = {
-        employee_name: p.employee_id?.full_name || '—',
-        israeli_id: p.employee_id?.israeli_id || '',
-        date: new Date(p.timestamp).toLocaleDateString('he-IL'),
-        items: [],
-      };
-    }
-    grouped[key].items.push(p);
-  }
 
   return (
     <>
@@ -79,44 +123,76 @@ export default function PendingPunchApprovals() {
 
         <Collapse in={expanded}>
           <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
-            החתמות ידניות הממתינות לאישורך. רק לאחר אישור סופי של הנה״ח הן נכנסות לשכר.
+            החתמות ידניות ממתינות. האישור הוא בשני שלבים — מנהל/ת הסניף ואז הנה״ח.
+            רק לאחר האישור הסופי של הנה״ח הן נכנסות לשכר.
           </Alert>
 
-          <Stack spacing={1}>
-            {Object.entries(grouped).map(([key, group]) => (
-              <Paper key={key} variant="outlined" sx={{ borderRadius: 2, p: 1.2 }}>
-                <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                  <Typography sx={{ fontWeight: 700, minWidth: 130 }}>{group.employee_name}</Typography>
-                  <Typography variant="caption" color="text.secondary">{group.date}</Typography>
-                  <Box sx={{ flex: 1 }} />
-                  {group.items.map(p => (
-                    <Stack key={p._id} direction="row" spacing={0.5} alignItems="center" sx={{ bgcolor: 'background.paper', borderRadius: 2, px: 1, py: 0.3 }}>
-                      <Chip
-                        size="small" label={p.state === 0 ? 'כניסה' : 'יציאה'}
-                        color={p.state === 0 ? 'primary' : 'default'} variant="outlined"
-                      />
-                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                        {new Date(p.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
-                      </Typography>
-                      {p.manual_note && (
-                        <Tooltip title={p.manual_note}>
-                          <Chip size="small" label="הערה" variant="outlined" />
-                        </Tooltip>
-                      )}
-                      <Tooltip title="אשר">
-                        <IconButton size="small" color="success" onClick={() => approve(p._id)}>
-                          <CheckCircleIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="דחה">
-                        <IconButton size="small" color="error" onClick={() => setReject({ open: true, punch: p, note: '' })}>
-                          <CancelIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Stack>
+          <Stack spacing={2}>
+            {sections.map(({ stage, groups }) => (
+              <Box key={stage}>
+                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.8 }}>
+                  <Chip
+                    size="small"
+                    label={STAGE_LABEL[stage]}
+                    color={stage === 'accountant' ? 'warning' : 'default'}
+                    variant={stage === 'accountant' ? 'filled' : 'outlined'}
+                  />
+                  <Typography variant="caption" color="text.secondary">
+                    {groups.reduce((n, g) => n + g.items.length, 0)} החתמות
+                  </Typography>
+                </Stack>
+
+                <Stack spacing={1}>
+                  {groups.map(group => (
+                    <Paper key={group.key} variant="outlined" sx={{ borderRadius: 2, p: 1.2 }}>
+                      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+                        <Typography sx={{ fontWeight: 700, minWidth: 130 }}>{group.employee_name}</Typography>
+                        <Typography variant="caption" color="text.secondary">{group.date}</Typography>
+                        <Box sx={{ flex: 1 }} />
+                        {group.items.map((p) => {
+                          const src = manualSource(p, p.employee_id);
+                          return (
+                            <Stack key={p._id} direction="row" spacing={0.5} alignItems="center" sx={{ bgcolor: 'background.paper', borderRadius: 2, px: 1, py: 0.3 }}>
+                              <Chip
+                                size="small" label={p.state === 0 ? 'כניסה' : 'יציאה'}
+                                color={p.state === 0 ? 'primary' : 'default'} variant="outlined"
+                              />
+                              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                {new Date(p.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
+                              </Typography>
+                              {/* Who typed this in. An employee reporting her own day and a
+                                  manager filling one in are different claims about the hours. */}
+                              <Tooltip title={src.key === 'unknown' ? 'נוצר לפני שהמערכת תיעדה מי מזין' : `הוזן ע״י ${src.label}`}>
+                                <Chip
+                                  size="small"
+                                  label={src.label}
+                                  variant="outlined"
+                                  color={src.key === 'self' ? 'info' : 'default'}
+                                />
+                              </Tooltip>
+                              {p.manual_note && (
+                                <Tooltip title={p.manual_note}>
+                                  <Chip size="small" label="הערה" variant="outlined" />
+                                </Tooltip>
+                              )}
+                              <Tooltip title={stage === 'accountant' ? 'אשר סופית — ייכנס לשכר' : 'אשר והעבר להנה״ח'}>
+                                <IconButton size="small" color="success" onClick={() => approve(p._id)}>
+                                  <CheckCircleIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="דחה">
+                                <IconButton size="small" color="error" onClick={() => setReject({ open: true, punch: p, note: '' })}>
+                                  <CancelIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </Stack>
+                          );
+                        })}
+                      </Stack>
+                    </Paper>
                   ))}
                 </Stack>
-              </Paper>
+              </Box>
             ))}
           </Stack>
         </Collapse>
