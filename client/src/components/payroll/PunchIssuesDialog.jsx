@@ -60,6 +60,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   const [roles, setRoles] = useState({});
   const [busy, setBusy] = useState({});
   const [fill, setFill] = useState({}); // key → {in, out}
+  const [newPunch, setNewPunch] = useState({}); // key → {time, role} — a punch missing from the middle of the day (e.g. "back from an errand")
   const [selfEntry, setSelfEntry] = useState(false); // accountant's fallback
   const [reminders, setReminders] = useState({});    // branch_id → send result
   const [transfer, setTransfer] = useState({});      // day key → HH:mm typed by the manager
@@ -120,6 +121,38 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
         toast.success(r.data?.status === 'pending'
           ? `${day.full_name} · ${day.date} — נשלח לאישור הנהלת החשבונות`
           : `${day.full_name} · ${day.date} פוצל`);
+        load(); onChanged && onChanged();
+      })
+      .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
+  };
+
+  /**
+   * A genuinely missing punch in the MIDDLE of a >2-punch day — she clocked in,
+   * left for something, came back, and never clocked the return. "Ignore" the
+   * middle reading and the span pays for the time she was out; cut the day
+   * there and the afternoon she actually worked goes unpaid. Neither is right
+   * — the fix is a real punch for when she came back, then label all four.
+   *
+   * Accountant/admin only (canRemind): punch-issues only lists punches with
+   * approval_status auto/approved (payrollMonth.controller.js#punchIssues) — a
+   * branch_manager's addition would come back pending_accountant and simply
+   * not reappear here, which would look like the click did nothing.
+   */
+  const addPunchToDay = (day) => {
+    const k = keyOf(day);
+    const v = newPunch[k] || {};
+    if (!/^\d{2}:\d{2}$/.test(v.time || '')) return toast.error('הזן/י שעה להחתמה החדשה');
+    const role = v.role === 'out' ? 'out' : 'in';
+    return withBusy(`${k}-add`, api.post('/payroll/manual-punches', {
+      employee_id: day.employee_id,
+      date: day.date,
+      branch_id: day.branch_id,
+      [role === 'in' ? 'in_time' : 'out_time']: v.time,
+      note: 'החתמה נוספה ידנית (בעיות בהחתמה — כפילויות)',
+    })
+      .then(() => {
+        toast.success(`החתמה נוספה ל-${day.full_name} · ${day.date} — סמנ/י לה תפקיד ואשר/י את היום`);
+        setNewPunch(s => ({ ...s, [k]: {} }));
         load(); onChanged && onChanged();
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
@@ -481,6 +514,27 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                           </Stack>
                         ))}
                       </Stack>
+                      {canRemind && (
+                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                          <Typography variant="caption" color="text.secondary">
+                            חסרה החתמה באמצע (למשל חזרה מהפסקה)?
+                          </Typography>
+                          <TextField size="small" type="time" label="שעה" InputLabelProps={{ shrink: true }}
+                            value={(newPunch[k] || {}).time || ''}
+                            onChange={e => setNewPunch(s => ({ ...s, [k]: { ...(s[k] || {}), time: e.target.value } }))}
+                            sx={{ width: 130 }}
+                          />
+                          <ToggleButtonGroup size="small" exclusive value={(newPunch[k] || {}).role || 'in'}
+                            onChange={(_e, v) => v && setNewPunch(s => ({ ...s, [k]: { ...(s[k] || {}), role: v } }))}>
+                            <ToggleButton value="in" sx={{ py: 0.2, px: 1.2, fontSize: '0.72rem' }}>כניסה</ToggleButton>
+                            <ToggleButton value="out" sx={{ py: 0.2, px: 1.2, fontSize: '0.72rem' }}>יציאה</ToggleButton>
+                          </ToggleButtonGroup>
+                          <BusyButton size="small" variant="outlined" loading={!!busy[`${k}-add`]}
+                            onClick={() => addPunchToDay(day)}>
+                            הוסף החתמה
+                          </BusyButton>
+                        </Stack>
+                      )}
                       {canFix && (
                         <>
                           <Divider sx={{ my: 1 }} />
