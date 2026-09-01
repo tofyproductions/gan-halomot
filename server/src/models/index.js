@@ -13,6 +13,7 @@ const CollectionHistory = require('./CollectionHistory');
 const PriceAdjustment = require('./PriceAdjustment');
 const SalaryRequest = require('./SalaryRequest');
 const Holiday = require('./Holiday');
+const SupplyList = require('./SupplyList');
 const Activity = require('./Activity');
 const Discount = require('./Discount');
 const GanttMonth = require('./GanttMonth');
@@ -100,6 +101,7 @@ const real = {
   PriceAdjustment,
   SalaryRequest,
   Holiday,
+  SupplyList,
   Activity,
   Discount,
   GanttMonth,

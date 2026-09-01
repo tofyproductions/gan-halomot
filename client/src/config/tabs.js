@@ -26,6 +26,10 @@ export const TAB_GROUPS = [
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
       { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      // The equipment-list poster sent to parents (diapers, sheets, a change
+      // of clothes) — one shared list, export-to-PNG. Same audience as the
+      // documents above, so it sits beside them rather than under חופשות.
+      { id: 'parent_supply_list', label: 'רשימת ציוד', path: '/parent-supply-list', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי

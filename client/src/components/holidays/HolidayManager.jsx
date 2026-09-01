@@ -10,6 +10,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import EventRepeatIcon from '@mui/icons-material/EventRepeat';
+import ImageIcon from '@mui/icons-material/Image';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -123,6 +124,31 @@ export default function HolidayManager() {
     }
   };
 
+  /**
+   * The poster is rendered server-side from whatever's already saved (same
+   * data this screen shows) — no HTML is built here, unlike the gantt image
+   * which needs a live client-side preview. Downloaded via an authenticated
+   * blob fetch (a plain link would miss the auth header the api client adds).
+   */
+  const [exportingPoster, setExportingPoster] = useState(false);
+  const exportPoster = async () => {
+    setExportingPoster(true);
+    try {
+      const res = await api.get('/holidays/poster', {
+        params: { branch: selectedBranch, year: academicYear },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `לוח-חופשות-${academicYear}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      toast.error('שגיאה בהפקת הפוסטר — נסו שוב בעוד רגע');
+    } finally { setExportingPoster(false); }
+  };
+
   const addPreset = (name) => {
     setDialog({
       open: true, mode: 'add',
@@ -141,6 +167,11 @@ export default function HolidayManager() {
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>חופשות וחגים - {academicYear}</Typography>
         <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<ImageIcon />}
+            onClick={exportPoster} disabled={exportingPoster}
+          >
+            ייצוא פוסטר
+          </Button>
           <Button variant="outlined" color="secondary" startIcon={<EventRepeatIcon />}
             onClick={importYear} disabled={importing}
           >
@@ -225,6 +256,9 @@ export default function HolidayManager() {
                             end_date: new Date(h.end_date).toISOString().slice(0, 10),
                             is_half_day: !!h.is_half_day,
                             end_time: h.end_time || '12:00',
+                            hebrew: h.hebrew || '', note: h.note || '',
+                            return_note: h.return_note || '',
+                            emoji: h.emoji || '', color: h.color || '',
                           },
                         })}>
                           <EditIcon fontSize="small" />
@@ -313,6 +347,30 @@ export default function HolidayManager() {
                 onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, end_time: e.target.value } }))}
               />
             )}
+
+            {/* Poster-only display fields — none of these affect payroll or
+                the calendar logic, they only decide how the row looks on the
+                exported poster (client/src/config or ask "ייצוא פוסטר" above). */}
+            <Stack direction="row" spacing={2}>
+              <TextField label="אימוג'י" value={dialog.data.emoji || ''} sx={{ width: 110 }}
+                placeholder="🍎"
+                onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, emoji: e.target.value } }))}
+              />
+              <TextField label="צבע" type="color" value={dialog.data.color || '#2e7dd7'} sx={{ width: 110 }}
+                onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, color: e.target.value } }))}
+              />
+            </Stack>
+            <TextField label="תאריך עברי (לפוסטר)" value={dialog.data.hebrew || ''} fullWidth
+              placeholder="כ״ט אלול – ב׳ תשרי"
+              onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, hebrew: e.target.value } }))}
+            />
+            <TextField label="הערה (לפוסטר)" value={dialog.data.note || ''} fullWidth
+              onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, note: e.target.value } }))}
+            />
+            <TextField label="הערת חזרה (לפוסטר)" value={dialog.data.return_note || ''} fullWidth
+              placeholder="חזרה לגן: יום שני, 14.9"
+              onChange={e => setDialog(prev => ({ ...prev, data: { ...prev.data, return_note: e.target.value } }))}
+            />
           </Stack>
         </DialogContent>
         <DialogActions>

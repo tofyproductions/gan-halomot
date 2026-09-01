@@ -34,6 +34,7 @@ import SalaryTable from './components/payroll/SalaryTable';
 import PayslipAudit from './components/payroll/PayslipAudit';
 import PayrollPage from './components/payroll/PayrollPage';
 import HolidayManager from './components/holidays/HolidayManager';
+import SupplyListManager from './components/holidays/SupplyListManager';
 import GanttCalendar from './components/gantt/GanttCalendar';
 import SuppliesBoard from './components/supplies/SuppliesBoard';
 import ParentVisibilityPanel from './components/gantt/ParentVisibilityPanel';
@@ -162,6 +163,7 @@ function AppRoutes() {
         <Route path="salary-table" element={<Navigate to="/payroll?tab=summary" replace />} />
         <Route path="payslip-audit" element={<Navigate to="/payroll?tab=audit" replace />} />
         <Route path="holidays" element={<HolidayManager />} />
+        <Route path="parent-supply-list" element={<SupplyListManager />} />
         {/* לוח תינוקייה — infant rooms only; the controller narrows it again
             by branch scope. */}
         <Route path="nursery" element={<NurseryBoard />} />

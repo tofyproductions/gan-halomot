@@ -52,6 +52,7 @@ const ICON_BY_TAB = {
   salary_table: PaymentsIcon,
   payslip_audit: ReceiptLongIcon,
   holidays: EventIcon,
+  parent_supply_list: Inventory2Icon,
   employee_requests: AssignmentIcon,
   orders: ShoppingCartIcon,
   stock: Inventory2Icon,

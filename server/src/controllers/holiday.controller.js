@@ -1,6 +1,14 @@
 const { Holiday, SpecialDay, Branch } = require('../models');
 const vacationCalendar = require('../services/vacationCalendar');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { htmlToPng } = require('../services/htmlPdf');
+const { buildVacationPosterHtml } = require('../services/posterTemplates');
+const { formatAcademicYear } = require('../services/academic-year.service');
+
+// The poster's display fields — free text the office fills in per entry.
+// Kept in their own list so create/update can't silently drop one if the
+// poster template grows another field later.
+const DISPLAY_FIELDS = ['hebrew', 'note', 'return_note', 'emoji', 'color', 'sort_order'];
 
 async function getAll(req, res, next) {
   try {
@@ -50,6 +58,9 @@ async function create(req, res, next) {
       is_half_day: !!is_half_day,
       end_time: is_half_day ? (end_time || '12:00') : '',
     };
+    for (const f of DISPLAY_FIELDS) {
+      if (req.body[f] !== undefined) baseDoc[f] = req.body[f];
+    }
 
     // Sentinel "all" → create the holiday for every active branch the user
     // has access to. Frontend may also send empty string with the same intent.
@@ -85,7 +96,7 @@ async function update(req, res, next) {
     const holiday = await Holiday.findById(req.params.id);
     if (!holiday) return res.status(404).json({ error: 'חופשה לא נמצאה' });
 
-    ['name', 'start_date', 'end_date'].forEach(f => {
+    ['name', 'start_date', 'end_date', ...DISPLAY_FIELDS].forEach(f => {
       if (req.body[f] !== undefined) holiday[f] = req.body[f];
     });
     if (req.body.is_half_day !== undefined) holiday.is_half_day = !!req.body.is_half_day;
@@ -136,6 +147,8 @@ async function copyFromBranch(req, res, next) {
       is_custom: h.is_custom,
       is_half_day: h.is_half_day,
       end_time: h.end_time,
+      hebrew: h.hebrew, note: h.note, return_note: h.return_note,
+      emoji: h.emoji, color: h.color, sort_order: h.sort_order,
     }));
 
     await Holiday.insertMany(copies);
@@ -213,4 +226,38 @@ async function calendar(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, create, update, remove, copyFromBranch, importYear, calendar };
+/**
+ * GET /api/holidays/poster?branch=<id>&year=<תשפ״ז> — the merged year as a PNG poster.
+ * Same data source as `calendar` (readCalendar), rendered through Chromium —
+ * see htmlPdf.js for why that renderer has its network cut.
+ */
+async function posterImage(req, res, next) {
+  try {
+    const branchId = req.query.branch;
+    if (!branchId) return res.status(400).json({ error: 'יש לציין סניף' });
+    const year = vacationCalendar.normalizeYearKey(req.query.year || vacationCalendar.YEAR_5787);
+
+    const [branch, cal] = await Promise.all([
+      Branch.findById(branchId).select('name').lean(),
+      vacationCalendar.readCalendar(branchId, year),
+    ]);
+
+    const html = buildVacationPosterHtml({
+      title: 'לוח חופשות',
+      subtitle: branch?.name || 'גן החלומות',
+      schoolYear: `שנת הלימודים ${formatAcademicYear(year)}`,
+      footer: cal.footer || 'בימים של מסיבות בגן — הגן מסתיים בשעה 13:00',
+      entries: cal.entries,
+    });
+
+    const png = await htmlToPng(html);
+    res.set('Content-Type', 'image/png');
+    res.set('Content-Disposition', `inline; filename="luach-chufshot-${year}.png"`);
+    res.send(png);
+  } catch (error) {
+    console.error('[holidays] poster render failed:', error.message);
+    res.status(503).json({ error: error.message || 'הפקת הפוסטר נכשלה — נסו שוב בעוד רגע' });
+  }
+}
+
+module.exports = { getAll, create, update, remove, copyFromBranch, importYear, calendar, posterImage };
