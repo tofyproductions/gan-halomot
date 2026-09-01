@@ -173,6 +173,24 @@ function gapDatesForEmployee(commitment, realDates, windowStart, windowEnd, avgM
   return out;
 }
 
+/**
+ * Every committed weekday in [windowStart, windowEnd], regardless of whether
+ * she already has a punch there. Only used for the toggle's diagnostic —
+ * "how many days would completion even cover" — never for materialization
+ * itself (gapDatesForEmployee is the one that decides what actually gets
+ * written, and it's the one that has to stay conservative).
+ */
+function eligibleDatesForEmployee(commitment, windowStart, windowEnd) {
+  const out = [];
+  for (const date of dateRange(windowStart, windowEnd)) {
+    const weekday = weekdayOf(date);
+    if (weekday === 6) continue;
+    if (!committedHoursForWeekday(commitment, weekday)) continue;
+    out.push(date);
+  }
+  return out;
+}
+
 /** Deterministic negative serial, in its own range so it can never collide
  * with fixedSchedule's synthetic punches (which start at 0) or a real device
  * reading (always positive). */
@@ -189,13 +207,13 @@ function syntheticSn(employeeId, dateStr, slot) {
  * (e.g. on every payroll/attendance load, like fixedSchedule.materializeMonth).
  */
 async function materializeMonth(month, { branchIds = null, employeeIds = null, userId = null } = {}) {
-  if (!/^\d{4}-\d{2}$/.test(month)) return { created: 0 };
+  if (!/^\d{4}-\d{2}$/.test(month)) return { created: 0, results: [] };
 
   const pmFilter = { month, 'manual.closure_completion': true };
   if (employeeIds) pmFilter.employee_id = { $in: employeeIds };
   if (branchIds) pmFilter.branch_id = { $in: branchIds };
   const flagged = await PayrollMonth.find(pmFilter).select('employee_id').lean();
-  if (flagged.length === 0) return { created: 0 };
+  if (flagged.length === 0) return { created: 0, results: [] };
   const empIds = flagged.map(f => f.employee_id);
 
   const [employees, commitments] = await Promise.all([
@@ -207,23 +225,32 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
   const today = todayIsrael();
   const branchWindowCache = new Map(); // branchId → window | null
   const toCreate = [];
+  const results = []; // per-employee diagnostic — what the toggle actually reports back
   let skippedNoCommitment = 0;
   let skippedNoWindow = 0;
 
   for (const emp of employees) {
-    const commitment = commitmentByEmp.get(String(emp._id));
-    if (!commitment) { skippedNoCommitment++; continue; }
-    if (!emp.branch_id) { skippedNoWindow++; continue; }
+    const empIdStr = String(emp._id);
+    const empty = {
+      employee_id: empIdStr, has_commitment: false, has_window: false,
+      committed_days_in_window: 0, already_had_punch_days: 0, newly_completed_days: 0,
+    };
+    const commitment = commitmentByEmp.get(empIdStr);
+    if (!commitment) { skippedNoCommitment++; results.push(empty); continue; }
+    if (!emp.branch_id) { skippedNoWindow++; results.push({ ...empty, has_commitment: true }); continue; }
 
     const bId = String(emp.branch_id);
     if (!branchWindowCache.has(bId)) {
       branchWindowCache.set(bId, await closureWindowForBranch(emp.branch_id, month));
     }
     const window = branchWindowCache.get(bId);
-    if (!window) { skippedNoWindow++; continue; }
+    if (!window) { skippedNoWindow++; results.push({ ...empty, has_commitment: true }); continue; }
 
     const windowEnd = window.end > today ? today : window.end; // never generate ahead of today
-    if (window.start > windowEnd) continue;
+    if (window.start > windowEnd) {
+      results.push({ ...empty, has_commitment: true, has_window: true });
+      continue;
+    }
 
     const from = ilDateTime(window.start, '00:00');
     const to = new Date(ilDateTime(windowEnd, '00:00').getTime() + 36 * 3600 * 1000);
@@ -235,6 +262,14 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
 
     const avgByWeekday = await averageMinutesByWeekday(emp._id, window.start);
     const gaps = gapDatesForEmployee(commitment, realDates, window.start, windowEnd, avgByWeekday);
+    const eligible = eligibleDatesForEmployee(commitment, window.start, windowEnd);
+    results.push({
+      employee_id: empIdStr, has_commitment: true, has_window: true,
+      window_start: window.start, window_end: windowEnd,
+      committed_days_in_window: eligible.length,
+      already_had_punch_days: eligible.length - gaps.length,
+      newly_completed_days: gaps.length,
+    });
     for (const g of gaps) {
       const inSn = syntheticSn(emp._id, g.date, 0);
       const outSn = syntheticSn(emp._id, g.date, 1);
@@ -278,19 +313,22 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     }
   }
 
-  if (toCreate.length === 0) return { created: 0, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
+  if (toCreate.length === 0) {
+    return { created: 0, results, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
+  }
 
   try {
     await Punch.insertMany(toCreate, { ordered: false });
   } catch (err) {
     if (err.code !== 11000 && !err.writeErrors) throw err;
   }
-  return { created: toCreate.length, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
+  return { created: toCreate.length, results, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
 }
 
 module.exports = {
   closureWindowForBranch,
   gapDatesForEmployee,
+  eligibleDatesForEmployee,
   committedHoursForWeekday,
   averageMinutesByWeekday,
   addMinutesToHHMM,

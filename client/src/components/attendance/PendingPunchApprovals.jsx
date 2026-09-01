@@ -8,8 +8,10 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import PendingActionsIcon from '@mui/icons-material/PendingActions';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import {
   applyDecision, approvalMessage, rejectionMessage, stageOf, manualSource,
   STAGE_LABEL, STAGE_ORDER,
@@ -34,10 +36,14 @@ import {
  * The screens showing those numbers have to be told.
  */
 export default function PendingPunchApprovals({ onChanged }) {
+  const { isAdmin, isAccountant } = useAuth();
   const [punches, setPunches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [reject, setReject] = useState({ open: false, punch: null, note: '' });
+  // Accounting/admin approving a stage-1 row directly — the branch manager
+  // never got to look at it. See services/decisions.js for how she's told.
+  const [bypassConfirm, setBypassConfirm] = useState({ open: false, punch: null, busy: false });
 
   const load = useCallback(() => {
     setLoading(true);
@@ -49,18 +55,35 @@ export default function PendingPunchApprovals({ onChanged }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const approve = (id) => {
-    api.patch(`/payroll/punches/${id}/approve`)
-      .then((res) => {
-        const updated = res.data?.punch;
-        toast.success(approvalMessage(updated));
-        setPunches(p => applyDecision(p, id, updated));
-        // An answer without a punch tells us nothing about where it landed —
-        // reload rather than guess.
-        if (!updated) load();
-        onChanged && onChanged();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+  const doApprove = (id, body) => api.patch(`/payroll/punches/${id}/approve`, body)
+    .then((res) => {
+      const updated = res.data?.punch;
+      toast.success(approvalMessage(updated));
+      setPunches(p => applyDecision(p, id, updated));
+      // An answer without a punch tells us nothing about where it landed —
+      // reload rather than guess.
+      if (!updated) load();
+      onChanged && onChanged();
+    })
+    .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+
+  // Clicking ✓ on a stage-1 row is the normal handoff for a branch manager.
+  // For accounting/admin it's a decision to skip her review entirely — that
+  // needs the explicit warning + confirmation, never a plain click.
+  const approve = (p) => {
+    if (stageOf(p) === 'manager' && (isAdmin || isAccountant)) {
+      setBypassConfirm({ open: true, punch: p, busy: false });
+      return;
+    }
+    doApprove(p._id);
+  };
+
+  const confirmBypass = () => {
+    const p = bypassConfirm.punch;
+    if (!p) return;
+    setBypassConfirm(s => ({ ...s, busy: true }));
+    doApprove(p._id, { override_manager: true })
+      .finally(() => setBypassConfirm({ open: false, punch: null, busy: false }));
   };
 
   const doReject = () => {
@@ -175,8 +198,10 @@ export default function PendingPunchApprovals({ onChanged }) {
                                   <Chip size="small" label="הערה" variant="outlined" />
                                 </Tooltip>
                               )}
-                              <Tooltip title={stage === 'accountant' ? 'אשר סופית — ייכנס לשכר' : 'אשר והעבר להנה״ח'}>
-                                <IconButton size="small" color="success" onClick={() => approve(p._id)}>
+                              <Tooltip title={stage === 'accountant'
+                                ? 'אשר סופית — ייכנס לשכר'
+                                : (isAdmin || isAccountant) ? 'אשר ישירות — עוקף את מנהל/ת הסניף' : 'אשר והעבר להנה״ח'}>
+                                <IconButton size="small" color="success" onClick={() => approve(p)}>
                                   <CheckCircleIcon fontSize="small" />
                                 </IconButton>
                               </Tooltip>
@@ -211,6 +236,27 @@ export default function PendingPunchApprovals({ onChanged }) {
         <DialogActions>
           <Button onClick={() => setReject({ open: false, punch: null, note: '' })}>ביטול</Button>
           <Button variant="contained" color="error" onClick={doReject}>דחה</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={bypassConfirm.open} onClose={() => setBypassConfirm({ open: false, punch: null, busy: false })} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <WarningAmberIcon color="warning" />
+          אישור עוקף מנהל/ת סניף
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 1 }}>
+            אישור זה עוקף את מנהל/ת הסניף ושולח לה/לו התראה.
+          </Alert>
+          <Typography variant="body2" color="text.secondary">
+            מנהל/ת הסניף עדיין לא בדק/ה את הדיווח הזה. אישור ישיר ידלג על השלב שלה/ו ויכניס את ההחתמה לשכר מיד — היא/הוא תקבל/י הודעה שהאישור בוצע בלעדיה/ו.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBypassConfirm({ open: false, punch: null, busy: false })} disabled={bypassConfirm.busy}>ביטול</Button>
+          <Button variant="contained" color="warning" onClick={confirmBypass} disabled={bypassConfirm.busy}>
+            אשר בכל זאת
+          </Button>
         </DialogActions>
       </Dialog>
     </>

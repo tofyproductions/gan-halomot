@@ -2658,7 +2658,23 @@ async function approvePunch(req, res, next) {
       return res.json({ ok: true, punch: p, applied_edit: true });
     }
 
-    if ((st === 'pending_manager' || st === 'pending') && isManager) {
+    // Accounting/admin approving an employee self-report the branch manager
+    // hasn't reviewed at all — a deliberate bypass, not the normal stage 1.
+    // Requires an explicit flag from the client so a plain click can never
+    // silently skip her: PendingPunchApprovals.jsx only sends it after the
+    // "this overrides the branch manager" confirmation dialog.
+    const override = req.body?.override_manager === true;
+
+    if ((st === 'pending_manager' || st === 'pending') && isFinal && override) {
+      p.approval_status = 'approved';
+      p.approval_decided_by = req.user.id;
+      p.approval_decided_at = new Date();
+      p.approval_decided_note = req.body?.note || '';
+      p.manager_bypassed = true;
+      p.manager_bypassed_by = req.user.id;
+      p.manager_bypassed_by_name = req.user.full_name || '';
+      p.manager_bypassed_at = new Date();
+    } else if ((st === 'pending_manager' || st === 'pending') && isManager) {
       // Stage 1 → forward to the accountant.
       p.approval_status = 'pending_accountant';
       p.manager_approved_by = req.user.id;

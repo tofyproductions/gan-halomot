@@ -72,6 +72,16 @@ const punchSchema = new mongoose.Schema({
   approval_decided_at: { type: Date, default: null },
   approval_decided_note: { type: String, default: '' },
 
+  // Accountant/admin approved an employee self-report directly from
+  // pending_manager/pending — skipping stage 1 entirely rather than the branch
+  // manager ever reviewing it. Distinct from manager_approved_by (which means
+  // the manager DID review it): this means she never got the chance to. The
+  // manager is notified after the fact (services/decisions — 'punch_override').
+  manager_bypassed: { type: Boolean, default: false },
+  manager_bypassed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  manager_bypassed_by_name: { type: String, default: '' },
+  manager_bypassed_at: { type: Date, default: null },
+
   /**
    * A correction a branch manager has asked for on a punch that already counts.
    *

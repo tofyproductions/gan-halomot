@@ -12,11 +12,19 @@
  * person only, and marks as new anything decided since she last looked.
  */
 const {
-  PayrollChangeRequest, EmployeeChangeRequest, RateChangeRequest, Employee, User,
+  PayrollChangeRequest, EmployeeChangeRequest, RateChangeRequest, Employee, User, Punch,
 } = require('../models');
 
 /** How far back the list reaches. Older than this is history, not news. */
 const WINDOW_DAYS = 90;
+
+/** Same reading as payrollMonth.controller.js#managedBranchIds — off the JWT,
+ * no DB round trip: the branches a branch manager is actually responsible for. */
+function managedBranchIds(user) {
+  const managed = (user?.managed_branch_ids || []).map(String);
+  const fallback = user?.branch_id ? [String(user.branch_id)] : [];
+  return managed.length > 0 ? managed : fallback;
+}
 
 const HE_STATUS = {
   approved: 'אושרה',
@@ -68,7 +76,59 @@ async function myDecisions(req, res, next) {
       }).sort({ decided_at: -1 }).limit(100).lean(),
     ]);
 
+    // "Something happened in my branch without me" — the one item on this
+    // screen that is NOT about a request she made. Accounting/admin approving
+    // an employee's self-report directly (skipping her stage-1 review) is
+    // still her business: it's her staff's hours, decided without her.
+    const managedBranches = managedBranchIds(req.user);
+    const overrides = managedBranches.length
+      ? await Punch.find({
+        branch_id: { $in: managedBranches },
+        manager_bypassed: true,
+        manager_bypassed_at: { $gte: since },
+      }).select('employee_id timestamp manager_bypassed_at manager_bypassed_by_name')
+        .populate('employee_id', 'full_name')
+        .sort({ manager_bypassed_at: -1 })
+        .limit(200)
+        .lean()
+      : [];
+
     const items = [];
+
+    // Grouped by employee+day — an in/out pair bypassed together is one story,
+    // not two identical rows.
+    const overrideGroups = new Map();
+    for (const p of overrides) {
+      const dateStr = new Date(p.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+      const key = `${p.employee_id?._id || 'unknown'}|${dateStr}`;
+      const existing = overrideGroups.get(key);
+      if (!existing) {
+        overrideGroups.set(key, {
+          id: String(p._id),
+          employee_name: p.employee_id?.full_name || 'עובד/ת',
+          date: dateStr,
+          decided_at: p.manager_bypassed_at,
+          decided_by_name: p.manager_bypassed_by_name || '',
+        });
+      } else if (new Date(p.manager_bypassed_at) > new Date(existing.decided_at)) {
+        existing.decided_at = p.manager_bypassed_at;
+        existing.decided_by_name = p.manager_bypassed_by_name || existing.decided_by_name;
+      }
+    }
+    for (const g of overrideGroups.values()) {
+      items.push({
+        id: `override-${g.id}`,
+        kind: 'punch_override',
+        kind_label: 'אישור החתמה בלעדייך',
+        title: `${g.employee_name} · ${new Date(g.date).toLocaleDateString('he-IL')}`,
+        status: 'approved',
+        status_label: 'אושר ישירות',
+        decided_at: g.decided_at,
+        decided_by_name: g.decided_by_name,
+        note: 'הנהלת חשבונות אישרה החתמה זו ישירות, ללא מעברך.',
+        lines: [],
+      });
+    }
 
     for (const r of payroll) {
       // A partial approval is the one that MUST be itemised: "אושרה חלקית" on

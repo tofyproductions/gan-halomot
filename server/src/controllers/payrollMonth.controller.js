@@ -1604,7 +1604,26 @@ async function upsertEntry(req, res, next) {
       );
     }
 
-    res.json({ ok: true, entry: row });
+    // Turning closure_completion on is otherwise silent — the accountant clicks
+    // it and the table just re-fetches. Running the materializer synchronously
+    // here (scoped to this one employee — cheap) lets the response say exactly
+    // what happened: how many days were completed, or precisely why none were
+    // (no ימי התחייבות configured, no Holiday closure entry for her branch, or
+    // every committed day in the window already had a real punch). Without this
+    // "nothing changed" and "there was nothing to change" look identical.
+    let closureCompletionResult = null;
+    if (Object.prototype.hasOwnProperty.call(body, 'closure_completion') && body.closure_completion) {
+      try {
+        const mat = await materializeClosureCompletion(month, {
+          employeeIds: [employeeId], userId: req.user?.id || null,
+        });
+        closureCompletionResult = (mat.results || [])[0] || null;
+      } catch (e) {
+        console.error('[payroll-month] closure-completion materialize (toggle) failed:', e.message);
+      }
+    }
+
+    res.json({ ok: true, entry: row, closure_completion_result: closureCompletionResult });
   } catch (err) { next(err); }
 }
 

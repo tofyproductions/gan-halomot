@@ -887,6 +887,12 @@ export default function PayrollMonthTable() {
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
   const [closureBusy, setClosureBusy] = useState({}); // employee_id → true while the toggle round-trips
+  // The scrolling box. Same fix as AttendanceMonitor's grid: a full reload sets
+  // `loading`, and while loading the table body collapses to one spinner row
+  // (line ~1870) — an empty container has nothing to scroll, so the browser
+  // resets it. A row 40 employees down that had just been toggled sent whoever
+  // clicked it back to row 1, every time.
+  const tableContainerRef = useRef(null);
   const [cibusDlg, setCibusDlg] = useState(false);
   const [empDetail, setEmpDetail] = useState({ open: false, employeeId: null });
 
@@ -901,8 +907,10 @@ export default function PayrollMonthTable() {
       .catch(() => {});
   }, []);
 
-  const fetchData = useCallback(() => {
-    setLoading(true);
+  const fetchData = useCallback(({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
+    const box = tableContainerRef.current;
+    const keep = quiet && box ? { left: box.scrollLeft, top: box.scrollTop } : null;
     const params = { month };
     if (viewMode === 'branch') {
       if (selectedBranch && !isAllBranches) params.branch = selectedBranch;
@@ -910,9 +918,18 @@ export default function PayrollMonthTable() {
       params.amuta = selectedAmuta;
     }
     api.get('/payroll-month', { params })
-      .then(res => setData(res.data))
+      .then(res => {
+        setData(res.data);
+        if (keep) {
+          requestAnimationFrame(() => {
+            if (!tableContainerRef.current) return;
+            tableContainerRef.current.scrollLeft = keep.left;
+            tableContainerRef.current.scrollTop = keep.top;
+          });
+        }
+      })
       .catch(err => { console.error(err); toast.error('שגיאה בטעינת טבלת שכר'); })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!quiet) setLoading(false); });
   }, [month, viewMode, selectedBranch, isAllBranches, selectedAmuta]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
@@ -965,8 +982,24 @@ export default function PayrollMonthTable() {
     const next = !row.manual?.closure_completion;
     setClosureBusy(b => ({ ...b, [employeeId]: true }));
     try {
-      await api.patch(`/payroll-month/${employeeId}`, { manual: { closure_completion: next } }, { params: { month } });
-      await fetchData();
+      const res = await api.patch(`/payroll-month/${employeeId}`, { manual: { closure_completion: next } }, { params: { month } });
+      // Turning it ON runs the materializer synchronously on the server and
+      // reports back exactly what it found — otherwise "nothing changed" and
+      // "there was nothing to complete" look identical, and the only way to
+      // tell them apart used to be asking someone to go check the database.
+      if (next) {
+        const r = res.data?.closure_completion_result;
+        if (!r || !r.has_commitment) {
+          toast.warning(`לא נמצאו ימי התחייבות (EmployeeCommitment) מוגדרים ל${row.full_name} — אי אפשר לחשב השלמה`, { autoClose: 9000 });
+        } else if (!r.has_window) {
+          toast.warning(`לא נמצא בלוח החופשות טווח "סגירה" לסניף של ${row.full_name} עבור החודש הזה`, { autoClose: 9000 });
+        } else if (r.newly_completed_days === 0) {
+          toast.info(`אין ימים חדשים להשלמה — כל ${r.committed_days_in_window} ימי ההתחייבות בטווח הסגירה כבר מכוסים בהחתמה`, { autoClose: 9000 });
+        } else {
+          toast.success(`הושלמו ${r.newly_completed_days} ימים מתוך ${r.committed_days_in_window} ימי התחייבות בטווח הסגירה`, { autoClose: 9000 });
+        }
+      }
+      await fetchData({ quiet: true });
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בעדכון השלמת אוגוסט');
     } finally {
@@ -1743,7 +1776,7 @@ export default function PayrollMonthTable() {
         </Stack>
       </Paper>
 
-      <TableContainer component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+      <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
         <Table size="small" stickyHeader sx={{
           tableLayout: 'fixed',
           minWidth: 1100,
