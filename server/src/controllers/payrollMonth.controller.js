@@ -947,19 +947,23 @@ async function getMonth(req, res, next) {
         breakdown.estimated_total = Math.round((breakdown.estimated_total - completionOffset) * 100) / 100;
       }
 
-      // --- "השלמת שכר אוגוסט" — closure-completion בונוס (global only) -----
+      // --- "השלמת שכר אוגוסט" — per-day breakdown, both salary types ------
       //
       // closureCompletion.js already materialized her committed-but-closed
-      // days as Punch rows (timestamp_source: 'closure_completion');
-      // payrollCalc.js excluded them from a global employee's hours (they're
-      // a visual-only marker in the attendance grid for her). Price them here
-      // at her own hourly_value and add them as a separate בונוס line — same
-      // move as the sick-pay offset just above, and for the same reason: the
-      // automatic completion has to shrink by the same amount, or she is paid
-      // for those days twice under two different names.
-      let closureCompletionBonus = 0;
-      const closureCompletionDates = [];
-      if (isTeken && tb) {
+      // days as Punch rows (timestamp_source: 'closure_completion'). What
+      // happens with them differs by salary type:
+      //   - global (תקן): priced here at her hourly_value and pulled OUT into
+      //     a separate בונוס line — same move as the sick-pay offset above,
+      //     and for the same reason: the automatic completion has to shrink
+      //     by the same amount, or she's paid for those days twice under two
+      //     different names.
+      //   - hourly: those hours are already inside her regular/OT hours
+      //     (payrollCalc.js never excluded them for hourly staff) — this is
+      //     purely informational, so the accountant can see which days and
+      //     how much without digging through individual punches.
+      // Either way the per-day list is the same shape, built once here.
+      const closureCompletionDays = [];
+      {
         const closurePunches = empPunches.filter(p => p.timestamp_source === 'closure_completion');
         const byClosureDate = new Map();
         for (const p of closurePunches) {
@@ -967,21 +971,24 @@ async function getMonth(req, res, next) {
           if (!byClosureDate.has(d)) byClosureDate.set(d, []);
           byClosureDate.get(d).push(p);
         }
-        let closureWeightedHours = 0;
-        for (const [date, dayPunches] of byClosureDate) {
-          const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        const hourlyValue = isTeken ? Number(tb?.hourly_value || 0) : Number(breakdown.rates?.hourly_rate || 0);
+        for (const date of [...byClosureDate.keys()].sort()) {
+          const sorted = [...byClosureDate.get(date)].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
           if (sorted.length < 2) continue;
           const minutes = Math.max(0, Math.round(
             (new Date(sorted[sorted.length - 1].timestamp) - new Date(sorted[0].timestamp)) / 60000,
           ));
           if (minutes <= 0) continue;
-          closureWeightedHours += weightedDayHours(minutes / 60);
-          closureCompletionDates.push(date);
+          const hours = weightedDayHours(minutes / 60);
+          const amount = hourlyValue > 0 ? Math.round(hours * hourlyValue * 100) / 100 : 0;
+          closureCompletionDays.push({ date, hours: Math.round(hours * 100) / 100, amount });
         }
-        closureCompletionDates.sort();
-        if (closureWeightedHours > 0 && tb.hourly_value > 0) {
-          closureCompletionBonus = Math.round(closureWeightedHours * tb.hourly_value * 100) / 100;
-        }
+      }
+      let closureCompletionBonus = 0;
+      if (isTeken && tb && closureCompletionDays.length) {
+        closureCompletionBonus = Math.round(
+          closureCompletionDays.reduce((sum, d) => sum + d.amount, 0) * 100,
+        ) / 100;
       }
       if (closureCompletionBonus > 0) {
         const closureOffset = Math.min(tb.completion || 0, closureCompletionBonus);
@@ -995,7 +1002,8 @@ async function getMonth(req, res, next) {
         }
         breakdown.components.closure_completion_bonus = {
           amount: closureCompletionBonus,
-          dates: closureCompletionDates,
+          dates: closureCompletionDays.map(d => d.date),
+          days: closureCompletionDays,
           reason: 'השלמת שכר אוגוסט — הגן היה סגור',
         };
         // Net effect: +bonus, −offset. When the closure fully explains the
@@ -1007,6 +1015,10 @@ async function getMonth(req, res, next) {
         breakdown.estimated_total = Math.round(
           (breakdown.estimated_total + closureCompletionBonus - closureOffset) * 100,
         ) / 100;
+      } else if (closureCompletionDays.length) {
+        // Hourly: no line to add, no offset to apply — just surface the days
+        // for the same "what did she actually get paid for" transparency.
+        breakdown.components.closure_completion_days = closureCompletionDays;
       }
 
       // --- Partial-day absence (היעדרות שעות) ------------------------------

@@ -36,6 +36,7 @@ import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
+import ClosureCompletionDetailDialog from './ClosureCompletionDetailDialog';
 import EmployeeDocsDialog from './EmployeeDocsDialog';
 import PregnancyDetailDialog from './PregnancyDetailDialog';
 import PunchReviewDialog from './PunchReviewDialog';
@@ -874,6 +875,7 @@ export default function PayrollMonthTable() {
   const [adjustments, setAdjustments] = useState({ open: false, row: null });
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
+  const [closureDetail, setClosureDetail] = useState({ open: false, row: null });
   const [absence, setAbsence] = useState({ open: false, row: null });
   const [partialAbs, setPartialAbs] = useState({ open: false, row: null });
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
@@ -2133,14 +2135,6 @@ export default function PayrollMonthTable() {
                         <TekenCompletionCell row={r} disabled={locked}
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
-                        {Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
-                          <Tooltip arrow title={`בונוס עבור ${r.breakdown.components.closure_completion_bonus.dates.length} ימי סגירה באוגוסט (${r.breakdown.components.closure_completion_bonus.dates.join(', ')}) — לא נכלל בחישוב השעות. השלמת השכר הרגילה הופחתה באותו סכום כדי שלא ישולם פעמיים.`}>
-                            <Chip size="small" color="secondary" variant="outlined"
-                              label={`📋 בונוס אוגוסט ₪${Math.round(r.breakdown.components.closure_completion_bonus.amount).toLocaleString('he-IL')}`}
-                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'help' }}
-                            />
-                          </Tooltip>
-                        )}
                       </TableCell>
                       <TableCell align="center" className="ag-divider" sx={{ cursor: 'pointer', padding: '6px !important' }}
                         onClick={() => setTravelDlg({ open: true, row: r, locked })}>
@@ -2227,6 +2221,28 @@ export default function PayrollMonthTable() {
                               disabled={locked || !!closureBusy[r.employee_id]}
                               onClick={(e) => { e.stopPropagation(); toggleClosureCompletion(r); }}
                               sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer', mt: 0.5 }}
+                            />
+                          </Tooltip>
+                        )}
+                        {/* Amount actually paid for those days — global: the
+                            separate בונוס אוגוסט line; hourly: informational
+                            (already inside her regular hours). Click for the
+                            per-day breakdown, same pattern as every other cell. */}
+                        {r.salary_type === 'global' && Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
+                          <Tooltip title="לחץ/י לפירוט ימים">
+                            <Chip size="small" color="secondary" variant="filled"
+                              label={`📋 בונוס אוגוסט ₪${Math.round(r.breakdown.components.closure_completion_bonus.amount).toLocaleString('he-IL')}`}
+                              onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
+                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        )}
+                        {r.salary_type !== 'global' && (r.breakdown?.components?.closure_completion_days?.length > 0) && (
+                          <Tooltip title="לחץ/י לפירוט ימים">
+                            <Chip size="small" color="secondary" variant="outlined"
+                              label={`📋 הושלמו ${r.breakdown.components.closure_completion_days.length} ימים`}
+                              onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
+                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
                             />
                           </Tooltip>
                         )}
@@ -2411,6 +2427,12 @@ export default function PayrollMonthTable() {
         month={month}
         onClose={() => setVacation({ open: false, row: null })}
         onSaved={fetchData}
+      />
+      <ClosureCompletionDetailDialog
+        open={closureDetail.open}
+        row={closureDetail.row}
+        month={month}
+        onClose={() => setClosureDetail({ open: false, row: null })}
       />
       <SickDetailDialog
         open={sick.open}
