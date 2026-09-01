@@ -69,6 +69,11 @@ async function closureWindowForBranch(branchId, month) {
  * What the commitment says about one weekday: { start_hhmm, end_hhmm } to
  * complete, or null (no commitment / day off / an alternating day — we can't
  * know which specific weeks she's committed on, so it's never auto-completed).
+ *
+ * start_hhmm is still used as the anchor clock time for the completed shift
+ * (it has to start sometime, and her usual start time reads naturally on the
+ * attendance grid); end_hhmm is the FALLBACK duration only, for a weekday
+ * averageMinutesByWeekday has no data for — see gapDatesForEmployee.
  */
 function committedHoursForWeekday(commitment, weekday) {
   if (!commitment) return null;
@@ -79,11 +84,81 @@ function committedHoursForWeekday(commitment, weekday) {
   return { start_hhmm: day.start_hhmm, end_hhmm: day.end_hhmm };
 }
 
+/** 'HH:MM' + minutes → 'HH:MM', clamped to the same calendar day (a shift
+ * never wraps past midnight here — the longest real day is nowhere close). */
+function addMinutesToHHMM(hhmm, minutes) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = Math.max(0, Math.min(23 * 60 + 59, h * 60 + m + Math.round(minutes)));
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * How long she actually worked, on average, each weekday she showed up for,
+ * over the `months` calendar months immediately before `beforeDate`.
+ *
+ * "Real" punches only — timestamp_source outside fixed_schedule/closure_completion,
+ * and only auto/approved (the same countability rule payrollCalc.js applies) —
+ * so a prior completion run, or an unresolved multi-punch day, never leaks into
+ * the average that later completions are priced from.
+ *
+ * A day's worked minutes are its first-punch-to-last-punch span — matching
+ * collapseToSpan()'s provisional pairing in payrollCalc.js. It slightly
+ * overstates a day with an unresolved lunch-break gap, but under-stating by
+ * strict pairing would silently drop legitimate multi-session days from the
+ * average instead of just being a little generous on a handful of inputs.
+ *
+ * Returns a Map<weekday 0-6, avgMinutes>. A weekday with no data simply has no
+ * entry — the caller falls back to her committed shift length rather than
+ * completing the day at zero hours.
+ */
+async function averageMinutesByWeekday(employeeId, beforeDate, months = 3) {
+  const [y, m, d] = beforeDate.split('-').map(Number);
+  const toDate = new Date(Date.UTC(y, m - 1, d));
+  const fromDate = new Date(Date.UTC(y, m - 1 - months, d));
+  const from = ilDateTime(fromDate.toISOString().slice(0, 10), '00:00');
+  const to = ilDateTime(toDate.toISOString().slice(0, 10), '00:00');
+
+  const punches = await Punch.find({
+    employee_id: employeeId,
+    timestamp: { $gte: from, $lt: to },
+    ignored: { $ne: true },
+    timestamp_source: { $nin: ['fixed_schedule', 'closure_completion'] },
+  }).select('timestamp approval_status').lean();
+
+  const byDay = new Map(); // date → sorted epoch-ms[]
+  for (const p of punches) {
+    const s = p.approval_status || 'auto';
+    if (s !== 'auto' && s !== 'approved') continue;
+    const date = ISR_DAY(p.timestamp);
+    if (!byDay.has(date)) byDay.set(date, []);
+    byDay.get(date).push(new Date(p.timestamp).getTime());
+  }
+
+  const sums = new Map(); // weekday → { total, count }
+  for (const [date, times] of byDay) {
+    if (times.length < 2) continue; // no span to measure
+    times.sort((a, b) => a - b);
+    const minutes = Math.round((times[times.length - 1] - times[0]) / 60000);
+    if (minutes <= 0) continue;
+    const wd = weekdayOf(date);
+    const cur = sums.get(wd) || { total: 0, count: 0 };
+    cur.total += minutes; cur.count += 1;
+    sums.set(wd, cur);
+  }
+
+  const avg = new Map();
+  for (const [wd, { total, count }] of sums) avg.set(wd, total / count);
+  return avg;
+}
+
 /**
  * Committed weekdays in [windowStart, windowEnd] with no real punch.
  * `realDates` is a Set of 'YYYY-MM-DD' — every date she already has ANY punch on.
+ * `avgMinutesByWeekday` (from averageMinutesByWeekday) prices each completed
+ * day by her own recent-history average for that weekday; a weekday absent
+ * from it falls back to her committed shift's own length.
  */
-function gapDatesForEmployee(commitment, realDates, windowStart, windowEnd) {
+function gapDatesForEmployee(commitment, realDates, windowStart, windowEnd, avgMinutesByWeekday = new Map()) {
   const out = [];
   for (const date of dateRange(windowStart, windowEnd)) {
     const weekday = weekdayOf(date);
@@ -91,7 +166,9 @@ function gapDatesForEmployee(commitment, realDates, windowStart, windowEnd) {
     if (realDates.has(date)) continue;
     const hours = committedHoursForWeekday(commitment, weekday);
     if (!hours) continue;
-    out.push({ date, ...hours });
+    const avgMin = avgMinutesByWeekday.get(weekday);
+    const end_hhmm = avgMin ? addMinutesToHHMM(hours.start_hhmm, avgMin) : hours.end_hhmm;
+    out.push({ date, start_hhmm: hours.start_hhmm, end_hhmm, from_average: !!avgMin });
   }
   return out;
 }
@@ -156,11 +233,14 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     }).select('timestamp').lean();
     const realDates = new Set(existing.map(p => ISR_DAY(p.timestamp)));
 
-    const gaps = gapDatesForEmployee(commitment, realDates, window.start, windowEnd);
+    const avgByWeekday = await averageMinutesByWeekday(emp._id, window.start);
+    const gaps = gapDatesForEmployee(commitment, realDates, window.start, windowEnd, avgByWeekday);
     for (const g of gaps) {
       const inSn = syntheticSn(emp._id, g.date, 0);
       const outSn = syntheticSn(emp._id, g.date, 1);
-      const note = 'השלמת שכר אוגוסט — הגן היה סגור';
+      const note = g.from_average
+        ? 'השלמת שכר אוגוסט — הגן היה סגור (לפי ממוצע שעות ב-3 חודשים אחרונים)'
+        : 'השלמת שכר אוגוסט — הגן היה סגור (לפי שעות ההתחייבות — אין מספיק היסטוריית שעות ליום זה)';
       toCreate.push(
         {
           branch_id: emp.branch_id,
@@ -212,5 +292,7 @@ module.exports = {
   closureWindowForBranch,
   gapDatesForEmployee,
   committedHoursForWeekday,
+  averageMinutesByWeekday,
+  addMinutesToHHMM,
   materializeMonth,
 };

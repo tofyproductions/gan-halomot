@@ -886,6 +886,7 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
+  const [closureBusy, setClosureBusy] = useState({}); // employee_id → true while the toggle round-trips
   const [cibusDlg, setCibusDlg] = useState(false);
   const [empDetail, setEmpDetail] = useState({ open: false, employeeId: null });
 
@@ -950,6 +951,28 @@ export default function PayrollMonthTable() {
     api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
+
+  /**
+   * Unlike every other manual field, flipping closure_completion triggers
+   * server-side punch materialization (services/closureCompletion.js) — the
+   * salary breakdown genuinely changes on the server. patchManual's optimistic
+   * merge only updates the manual.* flag locally and never re-fetches, so the
+   * toggle would show "on" while the numbers on screen stayed the old ones
+   * until an unrelated reload happened to fire. This one always re-fetches.
+   */
+  const toggleClosureCompletion = useCallback(async (row) => {
+    const employeeId = row.employee_id;
+    const next = !row.manual?.closure_completion;
+    setClosureBusy(b => ({ ...b, [employeeId]: true }));
+    try {
+      await api.patch(`/payroll-month/${employeeId}`, { manual: { closure_completion: next } }, { params: { month } });
+      await fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בעדכון השלמת אוגוסט');
+    } finally {
+      setClosureBusy(b => ({ ...b, [employeeId]: false }));
+    }
+  }, [month, fetchData]);
 
   // Supplement approvals (manager / accounting) are written DIRECTLY — even for
   // a branch manager (who otherwise stages edits). The server enforces that
@@ -2030,19 +2053,6 @@ export default function PayrollMonthTable() {
                               sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
                             />
                           </Tooltip>
-                          <Tooltip title={r.manual?.closure_completion
-                            ? 'השלמת שכר אוגוסט פעילה — ימי ההתחייבות בטווח סגירת הסניף משתבצים כאילו עבדה. לחץ לביטול'
-                            : 'הפעל השלמת שכר אוגוסט: ימי ההתחייבות בטווח סגירת הסניף (לוח חופשות) ישתבצו כאילו עבדה — שעתית: תשלום שעות רגיל. גלובלית: בונוס נפרד, לא נכנס לחישוב השעות'}>
-                            <Chip
-                              size="small"
-                              color={r.manual?.closure_completion ? 'secondary' : 'default'}
-                              variant={r.manual?.closure_completion ? 'filled' : 'outlined'}
-                              label={r.manual?.closure_completion ? '📋 השלמת אוגוסט' : 'השלמת אוגוסט?'}
-                              disabled={locked}
-                              onClick={(e) => { e.stopPropagation(); patchManual(r.employee_id, { closure_completion: !r.manual?.closure_completion }); }}
-                              sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
-                            />
-                          </Tooltip>
                           <Tooltip title={r.is_freelancer ? 'פרילנסרית — מפיקה חשבונית, לא נשלחת לרו״ח. לחץ לביטול' : 'סמן כפרילנסרית (חשבונית, לא תיכלל בייצוא לרו״ח)'}>
                             <Chip
                               size="small"
@@ -2169,6 +2179,24 @@ export default function PayrollMonthTable() {
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: '#f0fdf4' }} onClick={() => !locked && setBonusDlg({ open: true, row: r })}>
                         <BonusCell row={r} />
+                        {/* Only relevant the one month a branch actually closes for the
+                            summer — showing it year-round just invites toggling it on
+                            in, say, March. */}
+                        {month?.slice(5, 7) === '08' && (
+                          <Tooltip title={r.manual?.closure_completion
+                            ? 'השלמת שכר אוגוסט פעילה — ימי ההתחייבות בטווח סגירת הסניף משתבצים כאילו עבדה (לפי ממוצע השעות שלה). לחץ לביטול'
+                            : 'הפעל השלמת שכר אוגוסט: ימי ההתחייבות בטווח סגירת הסניף (לוח חופשות) ישתבצו כאילו עבדה, לפי ממוצע שעות העבודה שלה ב-3 החודשים האחרונים לאותו יום בשבוע — שעתית: תשלום שעות רגיל. גלובלית: בונוס נפרד, לא נכנס לחישוב השעות'}>
+                            <Chip
+                              size="small"
+                              color={r.manual?.closure_completion ? 'secondary' : 'default'}
+                              variant={r.manual?.closure_completion ? 'filled' : 'outlined'}
+                              label={closureBusy[r.employee_id] ? '...' : (r.manual?.closure_completion ? '📋 השלמת אוגוסט' : 'השלמת אוגוסט?')}
+                              disabled={locked || !!closureBusy[r.employee_id]}
+                              onClick={(e) => { e.stopPropagation(); toggleClosureCompletion(r); }}
+                              sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer', mt: 0.5 }}
+                            />
+                          </Tooltip>
+                        )}
                       </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
