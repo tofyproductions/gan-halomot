@@ -71,6 +71,7 @@ const FIELD_LABELS = {
   advance_deduction_preset_id: 'קיזוז מקדמה',
   travel_override: 'נסיעות',
   include_salary_completion: 'השלמת שכר',
+  closure_completion: 'השלמת שכר אוגוסט',
   custom_values: 'עמודה מותאמת',
 };
 
@@ -2029,6 +2030,19 @@ export default function PayrollMonthTable() {
                               sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
                             />
                           </Tooltip>
+                          <Tooltip title={r.manual?.closure_completion
+                            ? 'השלמת שכר אוגוסט פעילה — ימי ההתחייבות בטווח סגירת הסניף משתבצים כאילו עבדה. לחץ לביטול'
+                            : 'הפעל השלמת שכר אוגוסט: ימי ההתחייבות בטווח סגירת הסניף (לוח חופשות) ישתבצו כאילו עבדה — שעתית: תשלום שעות רגיל. גלובלית: בונוס נפרד, לא נכנס לחישוב השעות'}>
+                            <Chip
+                              size="small"
+                              color={r.manual?.closure_completion ? 'secondary' : 'default'}
+                              variant={r.manual?.closure_completion ? 'filled' : 'outlined'}
+                              label={r.manual?.closure_completion ? '📋 השלמת אוגוסט' : 'השלמת אוגוסט?'}
+                              disabled={locked}
+                              onClick={(e) => { e.stopPropagation(); patchManual(r.employee_id, { closure_completion: !r.manual?.closure_completion }); }}
+                              sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
                           <Tooltip title={r.is_freelancer ? 'פרילנסרית — מפיקה חשבונית, לא נשלחת לרו״ח. לחץ לביטול' : 'סמן כפרילנסרית (חשבונית, לא תיכלל בייצוא לרו״ח)'}>
                             <Chip
                               size="small"
@@ -2076,6 +2090,14 @@ export default function PayrollMonthTable() {
                         <TekenCompletionCell row={r} disabled={locked}
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
+                        {Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
+                          <Tooltip arrow title={`בונוס עבור ${r.breakdown.components.closure_completion_bonus.dates.length} ימי סגירה באוגוסט (${r.breakdown.components.closure_completion_bonus.dates.join(', ')}) — לא נכלל בחישוב השעות. השלמת השכר הרגילה הופחתה באותו סכום כדי שלא ישולם פעמיים.`}>
+                            <Chip size="small" color="secondary" variant="outlined"
+                              label={`📋 בונוס אוגוסט ₪${Math.round(r.breakdown.components.closure_completion_bonus.amount).toLocaleString('he-IL')}`}
+                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'help' }}
+                            />
+                          </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell align="center" className="ag-divider" sx={{ cursor: 'pointer', padding: '6px !important' }}
                         onClick={() => setTravelDlg({ open: true, row: r, locked })}>

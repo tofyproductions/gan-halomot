@@ -260,12 +260,27 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const forceFullGlobal = opts.force_full_global || false;
   const branchAmutaMap = opts.branchAmutaMap || new Map();
 
+  // Rates (and which pay model applies) are needed early: the countable-punch
+  // filter below drops closure-completion punches for global employees before
+  // they ever reach the hours loop (see the salaryType check just below).
+  const rates = primaryRates(employee, monthYM);
+  const salaryType = rates.salary_type;
+
   // Salary excludes any punch that is pending review or has been rejected by
   // the branch manager. Punches with no approval_status (legacy) are treated
   // as 'auto' (counted). Approved manual punches count.
+  //
+  // closure_completion punches (services/closureCompletion.js) are real rows
+  // for a global (תקן) employee too, but only so the attendance grid can show
+  // them — her pay for those days is priced separately as a בונוס line
+  // (payrollMonth.controller.js), never through hours, or the automatic
+  // completion below would fold them in a second time. Hourly employees are
+  // paid through hours exactly like any other punch, so they stay countable.
   const countablePunches = punches.filter(p => {
     const s = p.approval_status || 'auto';
-    return s === 'auto' || s === 'approved';
+    if (s !== 'auto' && s !== 'approved') return false;
+    if (salaryType === 'global' && p.timestamp_source === 'closure_completion') return false;
+    return true;
   });
 
   // Bucket by Israel-local day. Callers intentionally query a slightly wider
@@ -285,10 +300,9 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   const amutaBuckets = new Map();   // amutaIdStr → bucket
   const branchBuckets = new Map();  // branchIdStr → bucket
 
-  const rates = primaryRates(employee, monthYM);
   // Which pay model applies is itself dated: an employee moved from hourly to
-  // תקן in September must still be summed as hourly for August.
-  const salaryType = rates.salary_type;
+  // תקן in September must still be summed as hourly for August. (rates/salaryType
+  // computed above, before the countable-punch filter that depends on salaryType.)
   // The committed hours from the employee's work-schedule (commitment) are the
   // source of truth for the teken hourly value — NOT a separately-stored
   // required_hours field, which can drift. When the caller supplies the month's

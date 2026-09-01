@@ -12,6 +12,7 @@ const { calculateMonthlySalary, billableDayPunches } = require('../services/payr
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
 const fixedSchedule = require('../services/fixedSchedule');
+const closureCompletion = require('../services/closureCompletion');
 const fingerprintSync = require('../services/fingerprintSync');
 const staffClassrooms = require('../services/staffClassrooms');
 const userSync = require('../services/userSync');
@@ -93,6 +94,10 @@ function summarizeDay(dayPunches, resolution) {
   // Generated from a standing weekly schedule (employee doesn't clock in) —
   // marked separately so the grid never passes it off as a real clock reading.
   const has_fixed_schedule = allSorted.some(p => p.timestamp_source === 'fixed_schedule');
+  // Generated for "השלמת שכר אוגוסט" — a committed day inside a branch closure
+  // with no real punch. Counted normally for hourly; for global it's a visual
+  // marker only (payrollCalc.js excludes it from her hours — see closureCompletion.js).
+  const has_closure_completion = allSorted.some(p => p.timestamp_source === 'closure_completion');
   // Only a lone single punch is genuinely incomplete (no span to bill).
   const incomplete = allSorted.length === 1;
   let trailingPunch = null;
@@ -114,6 +119,7 @@ function summarizeDay(dayPunches, resolution) {
     has_pending,
     has_manual,
     has_fixed_schedule,
+    has_closure_completion,
     total_minutes: totalMinutes,
     total_hours: Math.round((totalMinutes / 60) * 100) / 100,
     first_in: sorted.length ? israelTimeHHMM(new Date(sorted[0].timestamp)) : null,
@@ -699,6 +705,11 @@ async function attendanceByMonth(req, res, next) {
       await fixedSchedule.materializeMonth(month, { branchIds: [branch], userId: req.user?.id || null });
     } catch (e) {
       console.error('[attendance] fixed-schedule fill failed:', e.message);
+    }
+    try {
+      await closureCompletion.materializeMonth(month, { branchIds: [branch], userId: req.user?.id || null });
+    } catch (e) {
+      console.error('[attendance] closure-completion fill failed:', e.message);
     }
 
     // First batch — employees + branch list (don't depend on each other).

@@ -255,6 +255,7 @@ export default function AttendanceMonitor() {
         //   Amber  = incomplete (missing a clock-out)
         //   Blue   = manual update entered by accounting (approved, counted)
         //   Teal   = generated from the employee's fixed weekly hours (no clock)
+        //   Pink   = "השלמת שכר אוגוסט" — a committed day inside a branch closure
         //   Green  = punched on the clock by the employee (complete)
         let bgColor, textColor;
         if (day.needs_review) { bgColor = '#fee2e2'; textColor = '#b91c1c'; }
@@ -262,6 +263,7 @@ export default function AttendanceMonitor() {
         else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
         else if (day.has_manual) { bgColor = '#dbeafe'; textColor = '#1e40af'; }
         else if (day.has_fixed_schedule) { bgColor = '#ccfbf1'; textColor = '#0f766e'; }
+        else if (day.has_closure_completion) { bgColor = '#fce7f3'; textColor = '#9d174d'; }
         else { bgColor = '#d1fae5'; textColor = '#065f46'; }
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
@@ -275,6 +277,7 @@ export default function AttendanceMonitor() {
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
               {!day.has_pending && day.has_manual && <div style={{color:'#93c5fd'}}>✎ עודכן ידנית ע״י הנה״ח</div>}
               {day.has_fixed_schedule && <div style={{color:'#5eead4'}}>⏱ שעות קבועות — ללא החתמה בשעון</div>}
+              {day.has_closure_completion && <div style={{color:'#f9a8d4'}}>📋 השלמת שכר אוגוסט — הגן היה סגור</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>

@@ -10,6 +10,26 @@
 
 const IL_TZ = 'Asia/Jerusalem';
 
+// A committed day's OT-WEIGHTED hours: the agreed standard salary (שכר תקן) is
+// a basket that already includes the premium for the OT built into the regular
+// schedule (e.g. a 8.5h day = 8 regular + 0.5 at 125%). To get a base hourly
+// value that doesn't manufacture a phantom "excess" when she works exactly her
+// schedule, the OT portion of each committed day must be weighted by its
+// premium here — mirroring splitDayOvertime() in payrollCalc.js (8h reg, next
+// 2h ×1.25, above 10h ×1.5).
+//
+// Module-level (not local to analyzeCommitment) so other callers valuing a
+// specific set of committed hours — e.g. closureCompletion.js pricing the
+// hours it completed — use the exact same weighting instead of a copy that
+// can drift.
+function weightedDayHours(h) {
+  const reg = Math.min(h, 8);
+  const after8 = Math.max(0, h - 8);
+  const ot125 = Math.min(after8, 2);
+  const ot150 = Math.max(0, after8 - 2);
+  return reg + ot125 * 1.25 + ot150 * 1.5;
+}
+
 function israelDayInfo(date) {
   // Compute YYYY-MM-DD and weekday (0..6) in Israel timezone.
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -76,21 +96,6 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     if (!s || !/^\d{1,2}:\d{2}$/.test(s)) return 0;
     const [h, m] = s.split(':').map(Number);
     return (h || 0) + (m || 0) / 60;
-  };
-
-  // A committed day's OT-WEIGHTED hours: the agreed standard salary (שכר תקן) is
-  // a basket that already includes the premium for the OT built into the regular
-  // schedule (e.g. a 8.5h day = 8 regular + 0.5 at 125%). To get a base hourly
-  // value that doesn't manufacture a phantom "excess" when she works exactly her
-  // schedule, the OT portion of each committed day must be weighted by its
-  // premium here — mirroring splitDayOvertime() in payrollCalc.js (8h reg, next
-  // 2h ×1.25, above 10h ×1.5).
-  const weightedDayHours = (h) => {
-    const reg = Math.min(h, 8);
-    const after8 = Math.max(0, h - 8);
-    const ot125 = Math.min(after8, 2);
-    const ot150 = Math.max(0, after8 - 2);
-    return reg + ot125 * 1.25 + ot150 * 1.5;
   };
 
   // Alternating day (e.g. "Friday once a month" — שישי לסירוגין): she is committed
@@ -181,4 +186,4 @@ function workingWeekdays(commitment, fallbackWorkDays) {
   return [0, 1, 2, 3, 4];
 }
 
-module.exports = { analyzeCommitment, israelDayInfo, datesInMonth, workingWeekdays };
+module.exports = { analyzeCommitment, israelDayInfo, datesInMonth, workingWeekdays, weightedDayHours };

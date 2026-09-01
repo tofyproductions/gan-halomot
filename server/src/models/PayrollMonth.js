@@ -74,6 +74,20 @@ const payrollMonthSchema = new mongoose.Schema({
     // false to pay only the actual worked hours × hourly_value (no top-up).
     include_salary_completion: { type: Boolean, default: true },
 
+    // "השלמת שכר אוגוסט" — UNRELATED to include_salary_completion above (that
+    // one is the standing תקן top-up; this one is the once-a-year decision that
+    // THIS employee is owed pay for the branch's summer closure). When true,
+    // services/closureCompletion.js materializes her committed weekdays inside
+    // the branch's Holiday closure window that have no real punch:
+    //   - hourly:  real, counted Punch rows — paid like any other worked day.
+    //   - global:  the same Punch rows, but payrollCalc.js excludes them from
+    //     hours; payrollMonth.controller.js instead prices them at her hourly_value
+    //     and adds that as a separate `closure_completion_bonus`, offsetting the
+    //     automatic completion so the total isn't paid twice (exactly like the
+    //     sick-pay/completion_offset pattern above).
+    // Per-employee, per-month. Admin/accountant only (not a branch-manager field).
+    closure_completion: { type: Boolean, default: false },
+
     // DEPRECATED — no longer read by the calc. Statutory daily overtime is now
     // always paid automatically; the beyond-commitment supplement is gated by
     // the two approval flags below. Kept for back-compat with old documents.

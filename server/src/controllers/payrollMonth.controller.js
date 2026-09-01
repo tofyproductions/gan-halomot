@@ -17,6 +17,7 @@ const {
   markDayOff: markFixedScheduleDayOff,
   ilDateTime: ilDateTimeOf,
 } = require('../services/fixedSchedule');
+const { materializeMonth: materializeClosureCompletion } = require('../services/closureCompletion');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -64,7 +65,7 @@ function suggestPunchLabels(sortedPunches) {
       ? 'כל ההחתמות ידניות — מוצע הראשונה ככניסה והאחרונה כיציאה.'
       : 'קריאה כפולה של השעון — מוצע הראשונה ככניסה והאחרונה כיציאה.');
 }
-const { analyzeCommitment, datesInMonth, workingWeekdays } = require('../services/commitmentAnalysis');
+const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
@@ -365,6 +366,15 @@ async function getMonth(req, res, next) {
       await materializeFixedSchedule(month, { branchIds, userId: req.user?.id || null });
     } catch (e) {
       console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
+    }
+
+    // Same idea for "השלמת שכר אוגוסט" — fill in the committed days a flagged
+    // employee is owed for her branch's summer closure, before punches are
+    // read for the table below. Idempotent; a failure must not take the table down.
+    try {
+      await materializeClosureCompletion(month, { branchIds, userId: req.user?.id || null });
+    } catch (e) {
+      console.error('[payrollMonth] closure-completion fill failed:', e.message);
     }
 
     // Date window for the month (used for punches + inactive-relevance).
@@ -937,6 +947,68 @@ async function getMonth(req, res, next) {
         breakdown.estimated_total = Math.round((breakdown.estimated_total - completionOffset) * 100) / 100;
       }
 
+      // --- "השלמת שכר אוגוסט" — closure-completion בונוס (global only) -----
+      //
+      // closureCompletion.js already materialized her committed-but-closed
+      // days as Punch rows (timestamp_source: 'closure_completion');
+      // payrollCalc.js excluded them from a global employee's hours (they're
+      // a visual-only marker in the attendance grid for her). Price them here
+      // at her own hourly_value and add them as a separate בונוס line — same
+      // move as the sick-pay offset just above, and for the same reason: the
+      // automatic completion has to shrink by the same amount, or she is paid
+      // for those days twice under two different names.
+      let closureCompletionBonus = 0;
+      const closureCompletionDates = [];
+      if (isTeken && tb) {
+        const closurePunches = empPunches.filter(p => p.timestamp_source === 'closure_completion');
+        const byClosureDate = new Map();
+        for (const p of closurePunches) {
+          const d = ISR_DAY(p.timestamp);
+          if (!byClosureDate.has(d)) byClosureDate.set(d, []);
+          byClosureDate.get(d).push(p);
+        }
+        let closureWeightedHours = 0;
+        for (const [date, dayPunches] of byClosureDate) {
+          const sorted = [...dayPunches].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+          if (sorted.length < 2) continue;
+          const minutes = Math.max(0, Math.round(
+            (new Date(sorted[sorted.length - 1].timestamp) - new Date(sorted[0].timestamp)) / 60000,
+          ));
+          if (minutes <= 0) continue;
+          closureWeightedHours += weightedDayHours(minutes / 60);
+          closureCompletionDates.push(date);
+        }
+        closureCompletionDates.sort();
+        if (closureWeightedHours > 0 && tb.hourly_value > 0) {
+          closureCompletionBonus = Math.round(closureWeightedHours * tb.hourly_value * 100) / 100;
+        }
+      }
+      if (closureCompletionBonus > 0) {
+        const closureOffset = Math.min(tb.completion || 0, closureCompletionBonus);
+        tb.completion = Math.round(((tb.completion || 0) - closureOffset) * 100) / 100;
+        tb.completion_reduced_by_closure = Math.round(closureOffset * 100) / 100;
+        breakdown.components.base_salary =
+          Math.round((Number(breakdown.components.base_salary || 0) - closureOffset) * 100) / 100;
+        if (breakdown.components.pay_split) {
+          breakdown.components.pay_split.completion =
+            Math.round((Number(breakdown.components.pay_split.completion || 0) - closureOffset) * 100) / 100;
+        }
+        breakdown.components.closure_completion_bonus = {
+          amount: closureCompletionBonus,
+          dates: closureCompletionDates,
+          reason: 'השלמת שכר אוגוסט — הגן היה סגור',
+        };
+        // Net effect: +bonus, −offset. When the closure fully explains the
+        // shortfall these cancel (offset === bonus) and the total is
+        // unchanged from what automatic completion alone would have paid —
+        // only the label moves from "השלמת שכר" to "בונוס". If she ALSO had
+        // an unrelated shortfall this month, the remainder still flows
+        // through completion (or a deduction) exactly as today.
+        breakdown.estimated_total = Math.round(
+          (breakdown.estimated_total + closureCompletionBonus - closureOffset) * 100,
+        ) / 100;
+      }
+
       // --- Partial-day absence (היעדרות שעות) ------------------------------
       // Days the employee worked but fell > 1h short of their committed hours.
       // By default every shortfall is deducted; the accountant can mark a day as
@@ -1448,7 +1520,7 @@ async function upsertEntry(req, res, next) {
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'travel_note', 'bonus', 'notes', 'custom_values',
-      'include_salary_completion',
+      'include_salary_completion', 'closure_completion',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'vacation_pay_confirmed',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
