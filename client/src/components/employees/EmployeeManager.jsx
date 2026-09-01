@@ -29,6 +29,8 @@ import ClockMatchDialog from './ClockMatchDialog';
 import EmployeeChangeRequests from './EmployeeChangeRequests';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import Badge from '@mui/material/Badge';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 
 // Job titles carry gender in Hebrew, so the list follows the employee's own.
 // Pairs, not two lists, so switching gender can translate the title already on
@@ -90,6 +92,16 @@ const EMPTY_FORM = {
   recreation_annual: 0,
   pension_exempt: false,
   bituach_leumi_exempt: false,
+  // Bank + pension/education-fund details — sensitive, same fields the
+  // payroll table's own בנק וקופות dialog edits (PayrollMonthTable.jsx).
+  // Added here so they can be filled once, at hiring, instead of only later
+  // from the salary table.
+  bank_number: '',
+  bank_branch: '',
+  bank_account: '',
+  bank_account_holder: '',
+  pension_fund: '',
+  education_fund: '',
   work_days: [0, 1, 2, 3, 4],
   is_active: true,
   // Paid by default. Turning this off makes the person a role-holder only:
@@ -248,6 +260,18 @@ export default function EmployeeManager() {
   // Narrow the roster to records that are still missing something.
   const [onlyIncomplete, setOnlyIncomplete] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  // Whoever else sits at this desk shouldn't be able to read salaries off the
+  // screen over someone's shoulder. Hidden by default, remembered per browser
+  // (localStorage, not per-session) — the point is that it stays off until
+  // someone who needs it deliberately turns it back on, not just for one visit.
+  const [hideSalary, setHideSalary] = useState(() => {
+    try { return localStorage.getItem('employees_hide_salary') !== '0'; } catch { return true; }
+  });
+  const toggleHideSalary = () => setHideSalary(v => {
+    const next = !v;
+    try { localStorage.setItem('employees_hide_salary', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
 
   const fetchEmployees = useCallback(() => {
     if (!selectedBranch) { setEmployees([]); setLoading(false); return; }
@@ -277,11 +301,19 @@ export default function EmployeeManager() {
   }, []);
   useEffect(() => { fetchPendingChanges(); }, [fetchPendingChanges]);
 
-  const openAdd = () => setDialog({
+  // `contractFlow` only changes what the dialog SAYS (see the banner in the
+  // dialog title area) — the actual behavior is identical either way: create
+  // the card, then continue straight to issuing her contract. The two entry
+  // points converge because a real EmploymentContract requires an employee_id
+  // (server-enforced) — there is no such thing as a contract for nobody, so
+  // "issue a contract for someone not in the system yet" already means
+  // "create her, then issue it," which is exactly what both buttons do.
+  const openAdd = (contractFlow = false) => setDialog({
     open: true,
     mode: 'add',
     data: { ...EMPTY_FORM, branch_id: isAllBranches ? '' : selectedBranch },
     original: null,
+    contractFlow,
   });
 
   const openEdit = (emp) => {
@@ -310,6 +342,12 @@ export default function EmployeeManager() {
         recreation_annual: emp.recreation_annual || 0,
         pension_exempt: !!emp.pension_exempt,
         bituach_leumi_exempt: !!emp.bituach_leumi_exempt,
+        bank_number: emp.bank_number || '',
+        bank_branch: emp.bank_branch || '',
+        bank_account: emp.bank_account || '',
+        bank_account_holder: emp.bank_account_holder || '',
+        pension_fund: emp.pension_fund || '',
+        education_fund: emp.education_fund || '',
         work_days: Array.isArray(emp.work_days) ? emp.work_days : [0, 1, 2, 3, 4],
         is_active: emp.is_active !== false,
         receives_salary: emp.receives_salary !== false,
@@ -368,6 +406,12 @@ export default function EmployeeManager() {
       recreation_annual: Number(data.recreation_annual) || 0,
       pension_exempt: data.pension_exempt,
       bituach_leumi_exempt: data.bituach_leumi_exempt,
+      bank_number: (data.bank_number || '').trim(),
+      bank_branch: (data.bank_branch || '').trim(),
+      bank_account: (data.bank_account || '').trim(),
+      bank_account_holder: (data.bank_account_holder || '').trim(),
+      pension_fund: (data.pension_fund || '').trim(),
+      education_fund: (data.education_fund || '').trim(),
       work_days: Array.isArray(data.work_days) ? [...data.work_days].sort((a, b) => a - b) : [0, 1, 2, 3, 4],
       is_active: data.is_active !== false,
       receives_salary: data.receives_salary !== false,
@@ -412,8 +456,20 @@ export default function EmployeeManager() {
 
     try {
       if (mode === 'add') {
-        await api.post('/payroll/employees', payload);
+        const res = await api.post('/payroll/employees', payload);
+        const created = res.data?.employee;
         toast.success('עובד נוסף');
+        closeDialog();
+        fetchEmployees();
+        // Straight into contract issuance — the two are one motion in practice:
+        // you don't create a card without also giving her something to sign.
+        // (If ת"ז was filled in, the clock side is already handled — the server
+        // just queued add_user commands to every branch's clock as part of the
+        // create above; nothing further to jump to for that.)
+        if (created && (created._id || created.id)) {
+          setContractDialog({ open: true, employee: created });
+        }
+        return;
       } else {
         const res = await api.put(`/payroll/employees/${data.id}`, payload);
         // Branch-manager edits don't apply directly — they wait for the accountant.
@@ -588,6 +644,17 @@ export default function EmployeeManager() {
               ) : null,
             }}
           />
+          <Tooltip title={hideSalary ? 'הצג עמודות סוג שכר ותעריף' : 'הסתר עמודות סוג שכר ותעריף (למי שיושב לידך)'}>
+            <Button
+              size="small"
+              variant={hideSalary ? 'outlined' : 'contained'}
+              color={hideSalary ? 'inherit' : 'warning'}
+              startIcon={hideSalary ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
+              onClick={toggleHideSalary}
+            >
+              {hideSalary ? 'שכר מוסתר' : 'שכר גלוי'}
+            </Button>
+          </Tooltip>
           <Tooltip title={showArchived ? 'מציג עובדים פעילים + ארכיון' : 'מציג עובדים פעילים בלבד'}>
             <Button
               size="small"
@@ -611,7 +678,10 @@ export default function EmployeeManager() {
               <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
                 שיוך לשעון
               </Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={openAdd}>
+              <Button variant="outlined" startIcon={<DescriptionIcon />} onClick={() => openAdd(true)}>
+                הנפק הסכם לעובד חדש
+              </Button>
+              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openAdd(false)}>
                 הוסף עובד
               </Button>
             </>
@@ -634,8 +704,8 @@ export default function EmployeeManager() {
               <TableCell sx={{ fontWeight: 700 }}>תפקיד</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>טלפון</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>אימייל</TableCell>
-              <TableCell sx={{ fontWeight: 700 }}>סוג שכר</TableCell>
-              <TableCell sx={{ fontWeight: 700 }} align="center">שכר / תעריף</TableCell>
+              {!hideSalary && <TableCell sx={{ fontWeight: 700 }}>סוג שכר</TableCell>}
+              {!hideSalary && <TableCell sx={{ fontWeight: 700 }} align="center">שכר / תעריף</TableCell>}
               <TableCell sx={{ fontWeight: 700 }} align="center">שעות חובה</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">נסיעות</TableCell>
               <TableCell sx={{ fontWeight: 700 }} align="center">שלמות</TableCell>
@@ -672,16 +742,18 @@ export default function EmployeeManager() {
                     <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
                     <EditableCell empId={empId} field="email" value={emp.email} displayValue={emp.email || '—'} dir="ltr"
                       sx={{ fontSize: '0.8rem', color: emp.email ? 'text.primary' : 'warning.main' }} />
-                    <TableCell>
-                      <Chip
-                        label={emp.salary_type === 'global' ? 'תקן' : 'שעתי'}
-                        size="small"
-                        color={emp.salary_type === 'global' ? 'primary' : 'default'}
-                        variant="outlined"
-                      />
-                      {emp.salary_is_net && <Chip label="נטו" size="small" sx={{ ml: 0.5 }} />}
-                    </TableCell>
-                    <TableCell align="center" sx={{ fontWeight: 700 }}>{rateLabel}</TableCell>
+                    {!hideSalary && (
+                      <TableCell>
+                        <Chip
+                          label={emp.salary_type === 'global' ? 'תקן' : 'שעתי'}
+                          size="small"
+                          color={emp.salary_type === 'global' ? 'primary' : 'default'}
+                          variant="outlined"
+                        />
+                        {emp.salary_is_net && <Chip label="נטו" size="small" sx={{ ml: 0.5 }} />}
+                      </TableCell>
+                    )}
+                    {!hideSalary && <TableCell align="center" sx={{ fontWeight: 700 }}>{rateLabel}</TableCell>}
                     <TableCell align="center" sx={{ color: emp.salary_type === 'global' && emp._display_required_hours ? 'text.primary' : 'text.disabled', fontSize: '0.85rem' }}>
                       {emp._display_required_hours ? `${emp._display_required_hours}h` : '—'}
                     </TableCell>
@@ -766,7 +838,8 @@ export default function EmployeeManager() {
                   </TableRow>
                 );
               };
-              if (loading) return <TableRow><TableCell colSpan={11} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
+              const colCount = (canManage ? 11 : 10) - (hideSalary ? 2 : 0);
+              if (loading) return <TableRow><TableCell colSpan={colCount} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
               const out = [];
               if (employeesByBranch) {
                 const ordered = (branches || [])
@@ -779,7 +852,7 @@ export default function EmployeeManager() {
                   const list = employeesByBranch.get(bid) || [];
                   out.push(
                     <TableRow key={`hdr-${bid}`} sx={{ bgcolor: color.header }}>
-                      <TableCell colSpan={canManage ? 11 : 10} sx={{
+                      <TableCell colSpan={colCount} sx={{
                         fontWeight: 900, fontSize: '0.9rem', py: 1,
                         color: color.accent, borderTop: '3px solid', borderColor: color.border,
                       }}>
@@ -811,6 +884,11 @@ export default function EmployeeManager() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
+            {dialog.mode === 'add' && dialog.contractFlow && (
+              <Alert severity="info" icon={<DescriptionIcon fontSize="small" />}>
+                לאחר ההקמה נעבור ישירות להנפקת הסכם ההעסקה שלה.
+              </Alert>
+            )}
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>פרטים אישיים</Typography>
             <Stack direction="row" spacing={2}>
               <TextField label="שם מלא" value={dialog.data.full_name || ''} onChange={e => updateField('full_name', e.target.value)} fullWidth required />
@@ -1060,6 +1138,37 @@ export default function EmployeeManager() {
                 />
               </Stack>
             )}
+
+            <Divider />
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>בנק וקופות</Typography>
+            <Alert severity="warning" sx={{ borderRadius: 2, py: 0.5 }}>
+              מידע רגיש לתשלום שכר. מוצג להנהלת חשבונות בלבד.
+            </Alert>
+            <Stack direction="row" spacing={2}>
+              <TextField label="בנק (קוד)" value={dialog.data.bank_number}
+                onChange={e => updateField('bank_number', e.target.value)} fullWidth placeholder="לדוגמה 10" />
+              <TextField label="סניף" value={dialog.data.bank_branch}
+                onChange={e => updateField('bank_branch', e.target.value)} fullWidth />
+              <TextField label="מספר חשבון" value={dialog.data.bank_account}
+                onChange={e => updateField('bank_account', e.target.value)} fullWidth />
+            </Stack>
+            {/* A minor is often paid into a parent's account. Leaving this blank
+                means the account is her own — filling it tells the accountant the
+                differing name on the transfer is deliberate, not a typo. */}
+            <TextField
+              label="בעל/ת החשבון (אם שונה מהעובד/ת)" value={dialog.data.bank_account_holder}
+              onChange={e => updateField('bank_account_holder', e.target.value)}
+              placeholder="ריק = החשבון על שם העובד/ת"
+              helperText={dialog.data.bank_account_holder?.trim() && dialog.data.bank_account_holder.trim() !== (dialog.data.full_name || '').trim()
+                ? 'ההעברה תבוצע לחשבון על שם אחר — יופיע בדוח לרו״ח'
+                : ' '}
+            />
+            <Stack direction="row" spacing={2}>
+              <TextField label="קופת פנסיה" value={dialog.data.pension_fund}
+                onChange={e => updateField('pension_fund', e.target.value)} fullWidth placeholder="שם / מספר הקופה" />
+              <TextField label="קרן השתלמות" value={dialog.data.education_fund}
+                onChange={e => updateField('education_fund', e.target.value)} fullWidth placeholder="שם / מספר הקרן" />
+            </Stack>
 
             <Divider />
             <Stack direction="row" alignItems="center" spacing={1}>

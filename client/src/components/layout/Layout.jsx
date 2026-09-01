@@ -1,4 +1,4 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Box } from '@mui/material';
 import { useState, useEffect } from 'react';
 import Header from './Header';
@@ -80,8 +80,34 @@ export default function Layout() {
       </Box>
       <ClassPopupPoller />
       <SetPasswordGate />
+      <FreshEntryGate />
     </Box>
   );
+}
+
+/**
+ * A closed tab reopened on a bookmark, or a shared office computer left on a
+ * deep link (the branch manager's Employees screen — rates and salaries) —
+ * this sends a brand-new tab home instead of restoring whatever page the URL
+ * bar happened to say, so the "what was decided" popup lands over the
+ * dashboard instead of a table full of numbers a passer-by should not read.
+ *
+ * sessionStorage is the right primitive here: it survives an in-tab refresh
+ * (F5), but is wiped the moment the tab actually closes — closing and
+ * reopening the same link is indistinguishable from a stranger opening it
+ * cold, which is exactly the case this exists for.
+ */
+function FreshEntryGate() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    if (sessionStorage.getItem('app_entered')) return;
+    sessionStorage.setItem('app_entered', '1');
+    if (location.pathname !== '/') navigate('/', { replace: true });
+    // Fresh-tab check only — deliberately not reacting to later navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
 }
 
 // Nags the user to choose a login password once per session while they have
