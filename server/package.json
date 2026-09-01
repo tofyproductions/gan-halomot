@@ -39,7 +39,8 @@
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js",
-    "test:sales": "node scripts/sales-pages.test.js"
+    "test:sales": "node scripts/sales-pages.test.js",
+    "test:rtl-badge": "node scripts/rtl-badge-position.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

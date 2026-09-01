@@ -89,7 +89,43 @@ export default function PayrollPage() {
               value={t.id}
               label={
                 t.id === 'change-requests' && pendingCount > 0 ? (
-                  <Badge badgeContent={pendingCount} color="error" sx={{ '& .MuiBadge-badge': { right: -14, top: 2 } }}>
+                  /**
+                   * The count sits INSIDE the label, not floating off its corner.
+                   *
+                   * Two separate faults put it in the gap between two tabs with its
+                   * top sliced off, and this shape avoids both rather than tuning
+                   * around them.
+                   *
+                   * `right: -14` was a physical property in an app whose emotion
+                   * cache runs stylis-plugin-rtl: the plugin rewrites it to
+                   * `left: -14`. MUI's own anchor is flipped by that same plugin
+                   * (`right:0` → `left:0`, `translate(50%)` → `translate(-50%)`), so
+                   * the override was not correcting the mirroring — it was adding a
+                   * second push in the direction the badge had already moved, 14px
+                   * clear of the label and into the next tab's space.
+                   *
+                   * And `variant="scrollable"` gives .MuiTabs-scroller
+                   * `overflow-x: auto` with `overflow-y: hidden` (MUI Tabs.js), with
+                   * `overflow: hidden` on the Paper around it — so anything the badge
+                   * lifts above the label box is cut, which is why the circle was
+                   * flat on top.
+                   *
+                   * Laid out in the flow it has no offsets to mirror and nothing to
+                   * escape, so neither fault can recur. `marginInlineStart` is
+                   * logical: stylis-plugin-rtl leaves it alone precisely because it
+                   * already means "after the text" in whichever direction the text runs.
+                   */
+                  <Badge
+                    badgeContent={pendingCount}
+                    color="error"
+                    sx={{
+                      '& .MuiBadge-badge': {
+                        position: 'static',
+                        transform: 'none',
+                        marginInlineStart: '6px',
+                      },
+                    }}
+                  >
                     {t.label}
                   </Badge>
                 ) : t.label
