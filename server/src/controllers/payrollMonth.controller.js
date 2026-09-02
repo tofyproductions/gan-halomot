@@ -4036,7 +4036,14 @@ async function punchIssues(month, { includePending = false } = {}) {
   }).sort(byName);
 
   const missing = missKeys.filter(isPaid).map(k => {
-    const p = byDay.get(k)[0];
+    const dayPunches = byDay.get(k);
+    const p = dayPunches[0];
+    // A pending report that mirrors a punch the day ALREADY has (same side,
+    // same minute — the dedup guard's key) must not be offered: approving it
+    // would make the day a three-punch החתמה כפולה. Only the reports that
+    // COMPLETE the day get a button.
+    const mirrorsExisting = (pp) => dayPunches.some(cp =>
+      cp.state === pp.state && ISR_HHMM(cp.timestamp) === ISR_HHMM(pp.timestamp));
     return {
       ...meta(k),
       punch_hhmm: ISR_HHMM(p.timestamp),
@@ -4044,6 +4051,7 @@ async function punchIssues(month, { includePending = false } = {}) {
       // A report already filed for this day, waiting for approval — the UI
       // offers approving it instead of retyping it (which would 409).
       pending_punches: (pendingByDay.get(k) || [])
+        .filter(pp => !mirrorsExisting(pp))
         .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
         .map(pp => ({
           id: String(pp._id),
