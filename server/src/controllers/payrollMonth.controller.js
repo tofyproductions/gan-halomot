@@ -3401,15 +3401,23 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ? `${n1(paEffHours)} ש׳` + (paDedDays.length ? subLine(paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')) : '')
       : '';
     const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
+    // A highlighted inline figure the accountant copies straight into the
+    // payslip — bolder than subLine on purpose.
+    const emphLine = (s) => `<div style="margin-top:2px;display:inline-block;font-size:10.5px;font-weight:800;color:#6d28d9;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:1px 6px">${s}</div>`;
     // Every card names the hourly value its pay is computed from — hourly
     // staff their contract rate, teken staff the derived salary/committed-hours
     // value (the one that prices OT, absences and the August bonus alike).
     const rateCell = isGlobal
       ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''),
           b.rates?.global_salary
-            ? f(b.rates.global_salary) + (tb.hourly_value ? subLine(`ערך שעה: ₪${n1(tb.hourly_value)}`) : '')
+            ? f(b.rates.global_salary) + (tb.hourly_value ? emphLine(`ערך שעה: ₪${n1(tb.hourly_value)}`) : '')
             : '')
       : cell('תעריף שעה', b.rates?.hourly_rate ? f(b.rates.hourly_rate) : '');
+    // The payslip's standard-salary coefficient (מקדם): worked base pay as a
+    // fraction of the agreed teken salary — the accountant records it as-is.
+    const tekenFactor = (isGlobal && Number(tb.teken_salary) > 0 && tb.regular_pay != null)
+      ? Math.round((tb.regular_pay / tb.teken_salary) * 1000) / 1000
+      : null;
     const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
     const bank = [r.bank_number, r.bank_branch, r.bank_account].some(Boolean);
     // Inactive employees (left / maternity / ended) stay on the report so the
@@ -3437,7 +3445,9 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // שכר שע״נ 125% + שכר שע״נ 150% + השלמת שכר, which sum to the agreed teken
     // salary. Only for teken; hourly staff keep a single שכר בסיס below.
     const tekenSplitRow = (isGlobal && tb.teken_salary) ? `<tr style="background:#f6f9ff">
-        ${cell('שכר בסיס', tb.regular_pay != null ? f(tb.regular_pay) : '', { bold: true })}
+        ${cell('שכר בסיס', tb.regular_pay != null
+          ? f(tb.regular_pay) + (tekenFactor != null ? emphLine(`מקדם תקן: ${tekenFactor}`) : '')
+          : '', { bold: true })}
         ${cell('שכר שע״נ 125%', tb.ot125_pay ? f(tb.ot125_pay) : '')}
         ${cell('שכר שע״נ 150%', tb.ot150_pay ? f(tb.ot150_pay) : '')}
         ${cell('השלמת שכר', completion ? f(completion) : '')}
