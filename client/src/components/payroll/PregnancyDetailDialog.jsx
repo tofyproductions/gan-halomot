@@ -240,7 +240,37 @@ export default function PregnancyDetailDialog({ open, row, canManager, canAccoun
 
             {/* Entries list */}
             <Box>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>רישומי שעות ({requests.length})</Typography>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }}>רישומי שעות ({requests.length})</Typography>
+                {canDecide && requests.some(r => !r.has_file) && (
+                  <Tooltip title="מחפש במסמכי העובד קובץ ששמו נושא את תאריך הבדיקה (למשל 'אישור ביקור רופא 06.08.26') ומצרף אותו לרישום. התאמה חד-משמעית בלבד — ספק לא מצורף">
+                    <span>
+                      <BusyButton size="small" variant="outlined" loading={saving} loadingText="מתאים…"
+                        sx={{ color: '#9d174d', borderColor: '#f9a8d4' }}
+                        onClick={() => {
+                          setSaving(true);
+                          api.post('/employee-requests/pregnancy-exam/auto-attach', { employee_id: row.employee_id })
+                            .then(res => {
+                              const a = res.data?.attached || [];
+                              const u = res.data?.unmatched || [];
+                              if (a.length === 0) {
+                                toast.info(u.length
+                                  ? `לא נמצאה התאמה חד-משמעית לפי שם קובץ עבור: ${u.join(', ')} — צרפו ידנית`
+                                  : 'לכל הרישומים כבר מצורף אישור');
+                              } else {
+                                toast.success(`צורפו ${a.length} אישורים לפי שם הקובץ: ${a.map(x => x.date).join(', ')}${u.length ? ` · ללא התאמה: ${u.join(', ')}` : ''}`, { autoClose: 8000 });
+                              }
+                              load(); onSaved && onSaved();
+                            })
+                            .catch(err => toast.error(err.response?.data?.error || 'ההתאמה נכשלה'))
+                            .finally(() => setSaving(false));
+                        }}>
+                        🪄 התאם אישורים מהמסמכים
+                      </BusyButton>
+                    </span>
+                  </Tooltip>
+                )}
+              </Stack>
               {requests.length === 0 ? (
                 <Alert severity="info">לא נרשמו עדיין שעות בדיקות.</Alert>
               ) : (

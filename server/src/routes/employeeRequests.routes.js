@@ -18,6 +18,8 @@ router.get('/vacation-for-month', requireRole('system_admin', 'branch_manager', 
 router.get('/sick-for-month', requireRole('system_admin', 'branch_manager', 'accountant'), c.listSickForMonth);
 router.get('/pending-for-employee', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingForEmployee);
 router.get('/pregnancy-exam', requireRole('system_admin', 'branch_manager', 'accountant'), c.listPregnancyExam);
+// Adopt certificates from the employee's documents by date-in-filename.
+router.post('/pregnancy-exam/auto-attach', requireRole('system_admin', 'accountant'), c.autoAttachPregnancyCerts);
 router.get('/:id/medical-file', requireRole('system_admin', 'branch_manager', 'accountant'), c.getMedicalFile);
 router.put('/:id/status', requireRole('system_admin', 'branch_manager', 'accountant'), c.updateRequestStatus);
 router.put('/:id/admin', requireRole('system_admin', 'branch_manager', 'accountant'), c.editAdminRequest);

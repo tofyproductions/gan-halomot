@@ -1,7 +1,31 @@
-const { EmployeeRequest, Employee, PayrollMonth, EmployeeCommitment } = require('../models');
+const { EmployeeRequest, Employee, PayrollMonth, EmployeeCommitment, EmployeeDocument } = require('../models');
 const { scanSickNote } = require('../services/sickNoteScan');
 const { workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeBalance } = require('../services/pregnancyExam');
+const { findDocumentForDate } = require('../services/docDateMatch');
+
+/**
+ * A pregnancy-exam entry without a certificate goes looking for one among the
+ * employee's free-form documents: the office uploads certificates whose NAME
+ * carries the exam date ("אישור ביקור רופא 06.08.26"), so an exact,
+ * single-candidate date match (services/docDateMatch.js) is safe to copy onto
+ * the entry. The source document is left in place — it is the office's filing;
+ * the entry only gets its own copy, same as a hand-attached certificate.
+ * Returns { doc_name } when a file was attached, null otherwise.
+ */
+async function attachCertFromDocuments(request) {
+  if (!request || request.type !== 'pregnancy_exam' || request.medical_file_data) return null;
+  const docs = await EmployeeDocument.find({ employee_id: request.employee_id })
+    .select('name file_name').lean();
+  const hit = findDocumentForDate(docs, request.from_date);
+  if (!hit) return null;
+  const full = await EmployeeDocument.findById(hit._id).select('name file_name file_data').lean();
+  if (!full || !full.file_data) return null;
+  request.medical_file_data = full.file_data;
+  request.medical_file_name = full.file_name || full.name;
+  await request.save();
+  return { doc_name: full.name };
+}
 
 /**
  * Count working days from `from` to `to` inclusive (YYYY-MM-DD).
@@ -402,7 +426,44 @@ async function createAdminRequest(req, res, next) {
     } else if (status === 'approved' && type === 'vacation') {
       try { await applyVacationToPayroll(request); } catch (e) { console.error('applyVacationToPayroll failed:', e.message); }
     }
-    res.status(201).json({ request });
+    // A pregnancy-exam entry created without a certificate tries to adopt one
+    // from the employee's documents by date-in-filename (best effort — a miss
+    // just means attaching by hand, exactly as before).
+    let autoAttached = null;
+    if (type === 'pregnancy_exam' && !medical_file_data) {
+      try { autoAttached = await attachCertFromDocuments(request); }
+      catch (e) { console.error('attachCertFromDocuments failed:', e.message); }
+    }
+    res.status(201).json({ request, auto_attached_doc: autoAttached?.doc_name || null });
+  } catch (error) { next(error); }
+}
+
+/**
+ * POST /api/employee-requests/pregnancy-exam/auto-attach
+ * Body: { employee_id }
+ *
+ * Sweep every certificate-less pregnancy-exam entry of this employee and
+ * attach the employee-document whose filename carries that entry's exact date.
+ * Reports what matched and what still needs a hand.
+ */
+async function autoAttachPregnancyCerts(req, res, next) {
+  try {
+    const { employee_id } = req.body || {};
+    if (!employee_id) return res.status(400).json({ error: 'employee_id נדרש' });
+    const requests = await EmployeeRequest.find({
+      employee_id,
+      type: 'pregnancy_exam',
+      status: { $ne: 'rejected' },
+      $or: [{ medical_file_data: null }, { medical_file_data: '' }],
+    });
+    const attached = [];
+    const unmatched = [];
+    for (const r of requests) {
+      const hit = await attachCertFromDocuments(r);
+      if (hit) attached.push({ date: r.from_date, doc_name: hit.doc_name });
+      else unmatched.push(r.from_date);
+    }
+    res.json({ attached, unmatched });
   } catch (error) { next(error); }
 }
 
@@ -555,6 +616,7 @@ module.exports = {
   listSickForMonth,
   listPendingForEmployee,
   listPregnancyExam,
+  autoAttachPregnancyCerts,
   createAdminRequest,
   editAdminRequest,
   deleteRequest,

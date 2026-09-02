@@ -3250,7 +3250,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
   const registerAsExam = async (c) => {
     setExamBusy(b => ({ ...b, [c.date]: true }));
     try {
-      await api.post('/employee-requests/admin', {
+      const res = await api.post('/employee-requests/admin', {
         employee_id: row.employee_id,
         type: 'pregnancy_exam',
         from_date: c.date,
@@ -3258,7 +3258,12 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
         exam_hours: c.shortfall_h,
         reason: 'נרשם מתוך היעדרויות שעות — חוסר יום בדיקה',
       });
-      toast.success(`${c.shortfall_h} ש׳ נרשמו כבדיקת היריון ב-${c.date} — היום לא יקוזז, והשעות נספרות במעקב 40 השעות`);
+      const attachedDoc = res.data?.auto_attached_doc;
+      toast.success(
+        `${c.shortfall_h} ש׳ נרשמו כבדיקת היריון ב-${c.date} — היום לא יקוזז, והשעות נספרות במעקב 40 השעות`
+        + (attachedDoc ? ` · האישור "${attachedDoc}" צורף אוטומטית לפי שם הקובץ` : ''),
+        { autoClose: 8000 },
+      );
       setExamRegistered(prev => ({ ...prev, [c.date]: true }));
       setExcused(prev => ({ ...prev, [c.date]: true }));
       setReasons(prev => ({ ...prev, [c.date]: prev[c.date] || 'בדיקת היריון' }));
