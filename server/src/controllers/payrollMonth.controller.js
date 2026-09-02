@@ -68,6 +68,20 @@ function suggestPunchLabels(sortedPunches) {
     return label(manual, real,
       'העדכון הידני נעשה אחרי שהחתמות השעון כבר היו במערכת — כלומר הנה״ח ראתה אותן ותיקנה במכוון, ולכן מוצע להשתמש בעדכון הידני.');
   }
+  // An even number of ALL-MANUAL punches is a human deliberately typing
+  // sessions — morning in/out plus afternoon in/out of a split day — not a
+  // device double-read. Suggest alternating pairs, so the day arrives labeled
+  // the way it was reported instead of first-in/last-out with the middle
+  // punches thrown to 'ignore' (which silently pays the break too).
+  if (manual.length === sortedPunches.length && sortedPunches.length >= 4 && sortedPunches.length % 2 === 0) {
+    return {
+      labels: sortedPunches.map((p, i) => ({
+        punch_id: String(p._id),
+        role: i % 2 === 0 ? 'in' : 'out',
+      })),
+      reason: 'כל ההחתמות ידניות ובמספר זוגי — מוצע זיווג לסירוגין: כניסה/יציאה לכל מקטע (יום מפוצל). ההפסקה שבין המקטעים אינה משולמת.',
+    };
+  }
   return label(sortedPunches, [],
     manual.length
       ? 'כל ההחתמות ידניות — מוצע הראשונה ככניסה והאחרונה כיציאה.'
@@ -5030,6 +5044,7 @@ module.exports = {
   managerContact,
   punchFixLink,
   buildReminderText,
+  suggestPunchLabels,
   getMonth,
   sendToAccountant,
   previewAccountant,
