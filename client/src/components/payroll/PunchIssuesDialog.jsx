@@ -183,8 +183,22 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       && !window.confirm('הדיווח עדיין לא אושר ע״י מנהל/ת הסניף — לאשר בכל זאת ולעקוף את שלב המנהל?')) return undefined;
     return withBusy(`pp|${pp.id}`,
       api.patch(`/payroll/punches/${pp.id}/approve`, needsOverride ? { override_manager: true } : {})
-        .then(() => {
-          toast.success(`הדיווח של ${item.full_name} (${pp.hhmm}) אושר — היום הושלם`);
+        .then(async () => {
+          // The day's mirrored twins — pending reports duplicating an existing
+          // punch to the minute — are moot the moment the day completes.
+          // Reject them now, or they sit in the pending-approvals list forever
+          // as reports nobody will ever act on.
+          let cleaned = 0;
+          for (const mp of (item.mirrored_pending || [])) {
+            try {
+              await api.patch(`/payroll/punches/${mp.id}/reject`, {
+                note: 'נדחה אוטומטית — כפול להחתמה קיימת באותה דקה; היום הושלם באישור הדיווח הממתין',
+              });
+              cleaned++;
+            } catch { /* stays visible in the pending list for a manual ✗ */ }
+          }
+          toast.success(`הדיווח של ${item.full_name} (${pp.hhmm}) אושר — היום הושלם`
+            + (cleaned ? ` · ${cleaned} דיווחים כפולים נדחו אוטומטית` : ''));
           load(); onChanged && onChanged();
         })
         .catch(err => toast.error(err.response?.data?.error || 'האישור נכשל')));

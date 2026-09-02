@@ -4047,21 +4047,28 @@ async function punchIssues(month, { includePending = false } = {}) {
     // past its device twin. Only reports that COMPLETE the day get a button.
     const mirrorsExisting = (pp) => dayPunches.some(cp =>
       ISR_HHMM(cp.timestamp) === ISR_HHMM(pp.timestamp));
+    const pendList = (pendingByDay.get(k) || [])
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
     return {
       ...meta(k),
       punch_hhmm: ISR_HHMM(p.timestamp),
       is_manual: p.timestamp_source === 'manual',
       // A report already filed for this day, waiting for approval — the UI
       // offers approving it instead of retyping it (which would 409).
-      pending_punches: (pendingByDay.get(k) || [])
+      pending_punches: pendList
         .filter(pp => !mirrorsExisting(pp))
-        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
         .map(pp => ({
           id: String(pp._id),
           hhmm: ISR_HHMM(pp.timestamp),
           state: pp.state,
           status: pp.approval_status,
         })),
+      // The twins hidden above. Once the completing report is approved these
+      // are moot — the client rejects them so they stop haunting the pending
+      // approvals list as reports nobody will ever act on.
+      mirrored_pending: pendList
+        .filter(pp => mirrorsExisting(pp))
+        .map(pp => ({ id: String(pp._id), hhmm: ISR_HHMM(pp.timestamp) })),
     };
   }).sort(byName);
 
