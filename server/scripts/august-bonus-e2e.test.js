@@ -211,11 +211,12 @@ console.log('ימי היערכות — עבדה 3 מימי החלון, השאר 
 // ═══════════════════════════════════════════════════════════ hourly employee
 //
 // An hourly employee has no salary basket and no completion to carve — her
-// bonus days are ordinary countable punches (payrollCalc keeps
-// closure_completion punches for hourly staff), so the promise takes a
-// different form: an approved day pays like a day she worked, an unapproved
-// day pays nothing at all, and a fully-approved month lands on exactly what a
-// normally-worked month would have paid.
+// approved bonus days are priced like her worked days but paid as a SEPARATE
+// bonus line: payrollCalc drops closure punches for everyone (office decision,
+// 2026-09-02 — a gift day must not inflate ימי עבודה or שעות), and the
+// controller adds their value on top. The promises: hours and days stay
+// exactly what she worked, an approved day adds exactly one day's pay as
+// bonus, and a fully-approved month totals what a normally-worked month would.
 
 const RATE = 50;
 const hourlyEmployee = {
@@ -227,14 +228,25 @@ const hourlyEmployee = {
   travel_per_day: 0,
 };
 
-/** The controller does no carve for hourly — the engine's total IS the month. */
+/** The controller's hourly sequence: engine (closure punches excluded from
+ * hours) + the bonus days' value added on top as a separate line. */
 function runHourlyMonth({ realDays, closureDays }) {
   const punches = [
     ...realDays.flatMap(d => punchPair(d.date, d.start, d.end)),
     ...closureDays.flatMap(d => punchPair(d.date, d.start, d.end, 'closure_completion')),
   ];
   const breakdown = calculateMonthlySalary(hourlyEmployee, punches, MONTH, {});
-  return { breakdown, estimatedTotal: breakdown.estimated_total, hours: breakdown.hours };
+  const bonus = r2(closureDays.reduce((s, d) => {
+    const span = (Number(d.end.split(':')[0]) + Number(d.end.split(':')[1]) / 60)
+      - (Number(d.start.split(':')[0]) + Number(d.start.split(':')[1]) / 60);
+    return s + weightedDayHours(span) * RATE;
+  }, 0));
+  return {
+    breakdown,
+    bonus,
+    estimatedTotal: r2(breakdown.estimated_total + bonus),
+    hours: breakdown.hours,
+  };
 }
 
 const DAY_PAY = 8 * RATE; // an 8h day, no OT
@@ -252,9 +264,13 @@ console.log(`שעתית, אישור מלא — עבדה 1–15, כל ${windowCan
   const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: closureAll });
   check(`total equals a normally-worked month exactly (${ILS(FULL_MONTH_PAY)})`,
     m.estimatedTotal === FULL_MONTH_PAY, `got ${ILS(m.estimatedTotal)}`);
-  check('bonus days count as ordinary paid hours',
-    m.hours.total === (preWindowDates.length + windowCandidates.length) * 8, `got ${m.hours.total}h`);
-  console.log(`    דוגמה: ${preWindowDates.length + windowCandidates.length} ימים × 8ש׳ × ₪${RATE} = ${ILS(m.estimatedTotal)}`);
+  check('hours stay exactly what she WORKED — bonus days add none',
+    m.hours.total === preWindowDates.length * 8, `got ${m.hours.total}h`);
+  check('days worked stay exactly what she worked',
+    m.hours.days_worked === preWindowDates.length, `got ${m.hours.days_worked}`);
+  check(`the gift arrives as a separate bonus line (${ILS(windowCandidates.length * DAY_PAY)})`,
+    m.bonus === windowCandidates.length * DAY_PAY, `got ${ILS(m.bonus)}`);
+  console.log(`    דוגמה: שעות ${ILS(preWindowDates.length * DAY_PAY)} + בונוס ${ILS(m.bonus)} = ${ILS(m.estimatedTotal)}`);
 }
 
 console.log('שעתית, אף יום לא אושר — ימי החלון פשוט לא משולמים');
@@ -287,7 +303,7 @@ console.log('שעתית, ממוצע נדיב — יום בונוס מוגבל ל
 {
   // Her 3-month average says 9h — but a gift day pays BASE pay only (office
   // decision): the materializer writes the day at bonusDayMinutes() = 8h, so
-  // the engine sees an 8h day and no overtime premium ever enters the month.
+  // the bonus line carries no overtime premium.
   const { bonusDayMinutes } = require('../src/services/augustBonus');
   const cappedMinutes = bonusDayMinutes('hourly', 9 * 60, 8 * 60);
   check('the materializer writes the day at 8h, not 9', cappedMinutes === 480);
@@ -295,9 +311,10 @@ console.log('שעתית, ממוצע נדיב — יום בונוס מוגבל ל
   const capped = [{ date: windowCandidates[0].date, start: '08:00', end: endHH }];
   const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: capped });
   const expected = preWindowDates.length * DAY_PAY + 8 * RATE; // base pay only, no 125%
-  check(`the day pays exactly 8h base pay (${ILS(expected)})`, m.estimatedTotal === expected,
+  check(`the day pays exactly 8h base pay as bonus (${ILS(expected)})`, m.estimatedTotal === expected,
     `got ${ILS(m.estimatedTotal)}`);
-  console.log(`    דוגמה: ממוצע 9ש׳ → משולם 8ש׳ × ₪${RATE} = ${ILS(8 * RATE)}, בלי תוספת 125%`);
+  check('and still adds no hours', m.hours.total === preWindowDates.length * 8);
+  console.log(`    דוגמה: ממוצע 9ש׳ → בונוס 8ש׳ × ₪${RATE} = ${ILS(8 * RATE)}, בלי תוספת 125%`);
 }
 
 if (failures) {

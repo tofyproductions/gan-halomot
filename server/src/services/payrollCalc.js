@@ -271,15 +271,16 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   // as 'auto' (counted). Approved manual punches count.
   //
   // closure_completion punches (services/closureCompletion.js) are real rows
-  // for a global (תקן) employee too, but only so the attendance grid can show
-  // them — her pay for those days is priced separately as a בונוס line
-  // (payrollMonth.controller.js), never through hours, or the automatic
-  // completion below would fold them in a second time. Hourly employees are
-  // paid through hours exactly like any other punch, so they stay countable.
+  // only so the attendance grid can show the gift day — they are NEVER hours.
+  // Office decision (2026-09-02): a bonus day must not inflate ימי עבודה or
+  // שעות עבודה for ANY salary type — the accountant has to see at a glance
+  // that she did not work those days. The pay reaches her as a separate בונוס
+  // line priced by payrollMonth.controller.js: carved from the completion for
+  // a global (תקן) employee, added on top for an hourly one.
   const countablePunches = punches.filter(p => {
     const s = p.approval_status || 'auto';
     if (s !== 'auto' && s !== 'approved') return false;
-    if (salaryType === 'global' && p.timestamp_source === 'closure_completion') return false;
+    if (p.timestamp_source === 'closure_completion') return false;
     return true;
   });
 

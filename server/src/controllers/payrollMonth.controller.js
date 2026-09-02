@@ -1106,10 +1106,23 @@ async function getMonth(req, res, next) {
           // actually changes the month's total.
           breakdown.estimated_total = Math.round((breakdown.estimated_total - deduction) * 100) / 100;
         }
-      } else if (closureCompletionDays.length) {
-        // Hourly: no line to add, no offset to apply — just surface the days
-        // for the same "what did she actually get paid for" transparency.
-        breakdown.components.closure_completion_days = closureCompletionDays;
+      } else if (!isTeken && closureFlagOn && augWindow && closureCompletionDays.length) {
+        // Hourly: the bonus days are NOT hours (payrollCalc drops closure
+        // punches for everyone now) — the value is a separate בונוס added on
+        // top, so ימי עבודה and שעות עבודה stay exactly what she worked and
+        // the accountant sees the gift as the bonus it is.
+        const amount = Math.round(closureCompletionDays.reduce((s, d) => s + d.amount, 0) * 100) / 100;
+        if (amount > 0) {
+          breakdown.components.closure_completion_bonus = {
+            amount,
+            dates: closureCompletionDays.map(d => d.date),
+            days: closureCompletionDays,
+            deduction: 0,
+            unapproved_days: [],
+            reason: 'בונוס אוגוסט — ימי חופשת קיץ בתשלום',
+          };
+          breakdown.estimated_total = Math.round((breakdown.estimated_total + amount) * 100) / 100;
+        }
       }
 
       // --- Partial-day absence (היעדרות שעות) ------------------------------
@@ -3474,12 +3487,11 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       : '';
 
     const sickVal = sickDays ? `${n1(sickDays)} ימים${sickPay ? ` · ${f(sickPay)}` : ''}` : '';
-    // בונוס אוגוסט — the accountant must see it or the total reads wrong:
-    // global carries a bonus line carved out of the completion (and possibly a
-    // deduction for unapproved days); hourly's bonus days are already inside
-    // her hours, so they only need naming.
-    const augBonus = (isGlobal && c.closure_completion_bonus) ? c.closure_completion_bonus : null;
-    const augHourlyDays = (!isGlobal && Array.isArray(c.closure_completion_days)) ? c.closure_completion_days : [];
+    // בונוס אוגוסט — the accountant must see it or the total reads wrong.
+    // For BOTH salary types the bonus days are outside ימי עבודה and שעות
+    // (payrollCalc drops closure punches): global's bonus is carved out of the
+    // completion, hourly's is added on top — either way it is a separate line.
+    const augBonus = c.closure_completion_bonus || null;
     // Teken salary split — same columns as the salary table: שכר בסיס (regular) +
     // שכר שע״נ 125% + שכר שע״נ 150% + השלמת שכר, which sum to the agreed teken
     // salary. Only for teken; hourly staff keep a single שכר בסיס below.
@@ -3497,7 +3509,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // allowances; hourly shows its single base + completion here.
     const payRow = isGlobal
       ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
-      : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('השלמת שכר', completion ? f(completion) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
+      : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('בונוס אוגוסט', augBonus?.amount ? f(augBonus.amount) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
 
     // Per-branch payment detail — hourly staff who worked at >1 branch (or a
     // single branch at a non-standard rate), so the accountant sees exactly what
@@ -3595,14 +3607,11 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">מחלה (תקן): </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה שולמו כדמי מחלה (${f(r.sick_info.pay)}), <u>והשלמת השכר הופחתה באותו סכום</u> (${f(r.sick_info.completion_offset)}) — כדי שלא ישולם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא. יש לנכות את הימים ממאזן המחלה.</span></td></tr>` : ''}
       ${(augBonus && Number(augBonus.amount) > 0) ? `<tr><td colspan="6" style="border:2px solid #7c3aed;background:#f5f3ff;padding:5px 9px">
-          <span style="font-size:10.5px;color:#6d28d9;font-weight:800">בונוס אוגוסט (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.days || []).length} ימי חופשת קיץ שאושרו שולמו כבונוס במתנה מהגן (${f(augBonus.amount)}). <u>אין לנכות ימים אלה מיתרת החופשה</u>.${(augBonus.days || []).length ? subLine((augBonus.days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
+          <span style="font-size:10.5px;color:#6d28d9;font-weight:800">בונוס אוגוסט: </span>
+          <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.days || []).length} ימי חופשת קיץ שאושרו שולמו כבונוס במתנה מהגן (${f(augBonus.amount)}). העובדת <u>לא עבדה</u> בימים אלה — הם אינם כלולים בימי העבודה ובשעות שלמעלה, והתוספת מתבטאת בסכום הבונוס בלבד. <u>אין לנכות ימים אלה מיתרת החופשה</u>.${(augBonus.days || []).length ? subLine((augBonus.days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
       ${(augBonus && Number(augBonus.deduction) > 0) ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">בונוס אוגוסט — ימים שלא אושרו: </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.unapproved_days || []).length || ''} ימי חופשת קיץ לא אושרו לתשלום — השכר הופחת ב-${f(augBonus.deduction)}.${(augBonus.unapproved_days || []).length ? subLine((augBonus.unapproved_days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
-      ${augHourlyDays.length ? `<tr><td colspan="6" style="border:2px solid #7c3aed;background:#f5f3ff;padding:5px 9px">
-          <span style="font-size:10.5px;color:#6d28d9;font-weight:800">בונוס אוגוסט (שעתי): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">${augHourlyDays.length} ימי חופשת קיץ שאושרו שולמו כשעות עבודה רגילות (${f(augHourlyDays.reduce((s, x) => s + (Number(x.amount) || 0), 0))}) — <u>כבר כלולים בשעות ובשכר למעלה</u>. אין לנכות ימים אלה מיתרת החופשה.${subLine(augHourlyDays.map(x => ddmm(x.date)).join(' · '))}</span></td></tr>` : ''}
       ${(vac && isGlobal) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">חופשה (תקן): </span>
           <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.</span></td></tr>` : ''}

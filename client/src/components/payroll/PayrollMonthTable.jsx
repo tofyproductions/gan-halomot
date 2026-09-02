@@ -2358,11 +2358,11 @@ export default function PayrollMonthTable() {
                             />
                           </Tooltip>
                         )}
-                        {/* Amount actually paid for the approved days — global:
-                            the בונוס אוגוסט line carved out of the completion;
-                            hourly: informational (already inside her regular
-                            hours). Click opens the same edit dialog. */}
-                        {r.salary_type === 'global' && Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
+                        {/* Amount actually paid for the approved days — both
+                            types get a separate בונוס line (never hours):
+                            global carved from the completion, hourly added on
+                            top. Click opens the same edit dialog. */}
+                        {Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
                           <Tooltip title="לחץ/י לעריכת ימי הבונוס">
                             <Chip size="small" color="secondary" variant="filled"
                               label={`📋 בונוס אוגוסט ₪${Math.round(r.breakdown.components.closure_completion_bonus.amount).toLocaleString('he-IL')}`}
@@ -2375,15 +2375,6 @@ export default function PayrollMonthTable() {
                           <Tooltip title="ימי חופשת קיץ שלא אושרו לתשלום — יורדים מהשכר. לחץ/י לעריכה">
                             <Chip size="small" color="warning" variant="outlined"
                               label={`⚠ לא אושרו −₪${Math.round(r.breakdown.components.closure_completion_bonus.deduction).toLocaleString('he-IL')}`}
-                              onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
-                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
-                            />
-                          </Tooltip>
-                        )}
-                        {r.salary_type !== 'global' && (r.breakdown?.components?.closure_completion_days?.length > 0) && (
-                          <Tooltip title="לחץ/י לעריכת ימי הבונוס">
-                            <Chip size="small" color="secondary" variant="outlined"
-                              label={`📋 אושרו ${r.breakdown.components.closure_completion_days.length} ימים`}
                               onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
                               sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
                             />
