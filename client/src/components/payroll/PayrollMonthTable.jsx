@@ -749,7 +749,7 @@ function AccountantContactsDialog({ open, onClose }) {
 
 /* Preview the accountant PDF before sending, and choose recipients per-send.
    Renders the same cards HTML the PDF is built from inside an iframe. */
-function AccountantPreviewDialog({ open, month, branch, onClose, onManageContacts }) {
+function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, onClose, onManageContacts }) {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [data, setData] = useState(null);
@@ -806,6 +806,15 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
       <DialogTitle sx={{ fontWeight: 700 }}>
         תצוגה מקדימה — שליחה לרו״ח{data ? ` · ${data.employees} עובדים · ${data.attachments} קבצים מצורפים` : ''}
       </DialogTitle>
+      {/* The preview is open for INSPECTION even while punch issues block the
+          month — only the send itself stays gated (the server enforces the
+          same gate with a 409, this is just the honest UI for it). */}
+      {blocked && (
+        <Alert severity="error" sx={{ mx: 1.5, mt: 1, borderRadius: 2 }}>
+          השליחה חסומה: {blockedCount} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח.
+          אפשר לעיין ולהדפיס — כפתור השליחה יישאר נעול עד שהימים ייפתרו ב"בעיות בהחתמה".
+        </Alert>
+      )}
       <DialogContent dividers sx={{ display: 'flex', gap: 1.5, p: 1.5 }}>
         <Box sx={{ flex: 1, border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden', bgcolor: '#fff' }}>
           {loading && <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}><CircularProgress /></Box>}
@@ -844,8 +853,14 @@ function AccountantPreviewDialog({ open, month, branch, onClose, onManageContact
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
         <Button startIcon={<PrintIcon />} onClick={handlePrint} disabled={loading || !data}>הדפסה</Button>
-        <Button variant="contained" startIcon={sending ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
-          onClick={send} disabled={loading || sending || chosen.length === 0}>שלח עכשיו</Button>
+        <Tooltip title={blocked ? 'חסום עד לפתרון ימי ההחתמה הממתינים — "בעיות בהחתמה"' : ''}>
+          <span>
+            <Button variant="contained" startIcon={sending ? <CircularProgress size={14} color="inherit" /> : <SendIcon />}
+              onClick={send} disabled={loading || sending || chosen.length === 0 || blocked}>
+              {blocked ? `שליחה חסומה (${blockedCount})` : 'שלח עכשיו'}
+            </Button>
+          </span>
+        </Tooltip>
       </DialogActions>
     </Dialog>
   );
@@ -1813,14 +1828,14 @@ export default function PayrollMonthTable() {
             </Button>
           </Badge>
           <Tooltip title={punchGate.blocked
-            ? `חסום: ${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — פתח/י "בעיות בהחתמה"`
+            ? `${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — התצוגה המקדימה פתוחה לצפייה, אבל השליחה עצמה חסומה עד לפתרון ב"בעיות בהחתמה"`
             : 'שליחת טבלת השכר לרו״ח'}>
             <span>
               <Button size="small" variant="contained" color="primary"
                 startIcon={<SendIcon />}
                 onClick={() => setAcctPreviewOpen(true)}
-                disabled={!data || stagingMode || punchGate.blocked}>
-                שלח לרו״ח{punchGate.blocked ? ` (חסום — ${punchGate.count})` : ''}
+                disabled={!data || stagingMode}>
+                שלח לרו״ח{punchGate.blocked ? ` (שליחה חסומה — ${punchGate.count})` : ''}
               </Button>
             </span>
           </Tooltip>
@@ -2488,6 +2503,7 @@ export default function PayrollMonthTable() {
       />
       <AccountantContactsDialog open={acctContactsOpen} onClose={() => setAcctContactsOpen(false)} />
       <AccountantPreviewDialog open={acctPreviewOpen} month={month} branch={acctBranch}
+        blocked={punchGate.blocked} blockedCount={punchGate.count}
         onClose={() => setAcctPreviewOpen(false)} onManageContacts={() => { setAcctPreviewOpen(false); setAcctContactsOpen(true); }} />
       <EmployeeNumberDialog
         open={empNumDlg.open}
