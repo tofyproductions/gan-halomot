@@ -72,7 +72,8 @@ const FIELD_LABELS = {
   advance_deduction_preset_id: 'קיזוז מקדמה',
   travel_override: 'נסיעות',
   include_salary_completion: 'השלמת שכר',
-  closure_completion: 'השלמת שכר אוגוסט',
+  closure_completion: 'בונוס אוגוסט',
+  closure_completion_approved_dates: 'בונוס אוגוסט — ימים מאושרים',
   custom_values: 'עמודה מותאמת',
 };
 
@@ -888,7 +889,6 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
-  const [closureBusy, setClosureBusy] = useState({}); // employee_id → true while the toggle round-trips
   // The scrolling box. Same fix as AttendanceMonitor's grid: a full reload sets
   // `loading`, and while loading the table body collapses to one spinner row
   // (line ~1870) — an empty container has nothing to scroll, so the browser
@@ -971,43 +971,10 @@ export default function PayrollMonthTable() {
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
 
-  /**
-   * Unlike every other manual field, flipping closure_completion triggers
-   * server-side punch materialization (services/closureCompletion.js) — the
-   * salary breakdown genuinely changes on the server. patchManual's optimistic
-   * merge only updates the manual.* flag locally and never re-fetches, so the
-   * toggle would show "on" while the numbers on screen stayed the old ones
-   * until an unrelated reload happened to fire. This one always re-fetches.
-   */
-  const toggleClosureCompletion = useCallback(async (row) => {
-    const employeeId = row.employee_id;
-    const next = !row.manual?.closure_completion;
-    setClosureBusy(b => ({ ...b, [employeeId]: true }));
-    try {
-      const res = await api.patch(`/payroll-month/${employeeId}`, { manual: { closure_completion: next } }, { params: { month } });
-      // Turning it ON runs the materializer synchronously on the server and
-      // reports back exactly what it found — otherwise "nothing changed" and
-      // "there was nothing to complete" look identical, and the only way to
-      // tell them apart used to be asking someone to go check the database.
-      if (next) {
-        const r = res.data?.closure_completion_result;
-        if (!r || !r.has_commitment) {
-          toast.warning(`לא נמצאו ימי התחייבות (EmployeeCommitment) מוגדרים ל${row.full_name} — אי אפשר לחשב השלמה`, { autoClose: 9000 });
-        } else if (!r.has_window) {
-          toast.warning(`לא נמצא בלוח החופשות טווח "סגירה" לסניף של ${row.full_name} עבור החודש הזה`, { autoClose: 9000 });
-        } else if (r.newly_completed_days === 0) {
-          toast.info(`אין ימים חדשים להשלמה — כל ${r.committed_days_in_window} ימי ההתחייבות בטווח הסגירה (${r.window_start} עד ${r.window_end}) כבר מכוסים בהחתמה${r.window_from_fallback_policy ? ' — טווח לפי מדיניות קבועה, לא נמצאה רשומת חופשה' : ''}`, { autoClose: 9000 });
-        } else {
-          toast.success(`הושלמו ${r.newly_completed_days} ימים מתוך ${r.committed_days_in_window} ימי התחייבות בטווח הסגירה (${r.window_start} עד ${r.window_end})${r.window_from_fallback_policy ? ' — טווח לפי מדיניות קבועה, לא נמצאה רשומת חופשה' : ''}`, { autoClose: 9000 });
-        }
-      }
-      await fetchData({ quiet: true });
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בעדכון השלמת אוגוסט');
-    } finally {
-      setClosureBusy(b => ({ ...b, [employeeId]: false }));
-    }
-  }, [month, fetchData]);
+  // בונוס אוגוסט is no longer a one-click toggle that pays everything: the
+  // chip only OPENS the edit dialog (ClosureCompletionDetailDialog), and the
+  // dialog is where days are approved and saved — nothing is paid before the
+  // accountant approves days there.
 
   // Supplement approvals (manager / accounting) are written DIRECTLY — even for
   // a branch manager (who otherwise stages edits). The server enforces that
@@ -2211,25 +2178,24 @@ export default function PayrollMonthTable() {
                             in, say, March. */}
                         {month?.slice(5, 7) === '08' && (
                           <Tooltip title={r.manual?.closure_completion
-                            ? 'השלמת שכר אוגוסט פעילה — ימי ההתחייבות בטווח סגירת הסניף משתבצים כאילו עבדה (לפי ממוצע השעות שלה). לחץ לביטול'
-                            : 'הפעל השלמת שכר אוגוסט: ימי ההתחייבות בטווח סגירת הסניף (לוח חופשות) ישתבצו כאילו עבדה, לפי ממוצע שעות העבודה שלה ב-3 החודשים האחרונים לאותו יום בשבוע — שעתית: תשלום שעות רגיל. גלובלית: בונוס נפרד, לא נכנס לחישוב השעות'}>
+                            ? 'בונוס אוגוסט פעיל — לחץ/י לעריכת הימים המאושרים לתשלום (16–31.8)'
+                            : 'בונוס אוגוסט: פתיחת חלון אישור ימי חופשת הקיץ (16–31.8). שום יום לא משולם עד שמאשרים אותו בחלונית'}>
                             <Chip
                               size="small"
                               color={r.manual?.closure_completion ? 'secondary' : 'default'}
                               variant={r.manual?.closure_completion ? 'filled' : 'outlined'}
-                              label={closureBusy[r.employee_id] ? '...' : (r.manual?.closure_completion ? '📋 השלמת אוגוסט' : 'השלמת אוגוסט?')}
-                              disabled={locked || !!closureBusy[r.employee_id]}
-                              onClick={(e) => { e.stopPropagation(); toggleClosureCompletion(r); }}
+                              label={r.manual?.closure_completion ? '📋 בונוס אוגוסט' : 'בונוס אוגוסט?'}
+                              onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
                               sx={{ height: 18, fontSize: '0.58rem', fontWeight: 700, cursor: 'pointer', mt: 0.5 }}
                             />
                           </Tooltip>
                         )}
-                        {/* Amount actually paid for those days — global: the
-                            separate בונוס אוגוסט line; hourly: informational
-                            (already inside her regular hours). Click for the
-                            per-day breakdown, same pattern as every other cell. */}
+                        {/* Amount actually paid for the approved days — global:
+                            the בונוס אוגוסט line carved out of the completion;
+                            hourly: informational (already inside her regular
+                            hours). Click opens the same edit dialog. */}
                         {r.salary_type === 'global' && Number(r.breakdown?.components?.closure_completion_bonus?.amount) > 0 && (
-                          <Tooltip title="לחץ/י לפירוט ימים">
+                          <Tooltip title="לחץ/י לעריכת ימי הבונוס">
                             <Chip size="small" color="secondary" variant="filled"
                               label={`📋 בונוס אוגוסט ₪${Math.round(r.breakdown.components.closure_completion_bonus.amount).toLocaleString('he-IL')}`}
                               onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
@@ -2237,10 +2203,19 @@ export default function PayrollMonthTable() {
                             />
                           </Tooltip>
                         )}
+                        {r.salary_type === 'global' && Number(r.breakdown?.components?.closure_completion_bonus?.deduction) > 0 && (
+                          <Tooltip title="ימי חופשת קיץ שלא אושרו לתשלום — יורדים מהשכר. לחץ/י לעריכה">
+                            <Chip size="small" color="warning" variant="outlined"
+                              label={`⚠ לא אושרו −₪${Math.round(r.breakdown.components.closure_completion_bonus.deduction).toLocaleString('he-IL')}`}
+                              onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
+                              sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        )}
                         {r.salary_type !== 'global' && (r.breakdown?.components?.closure_completion_days?.length > 0) && (
-                          <Tooltip title="לחץ/י לפירוט ימים">
+                          <Tooltip title="לחץ/י לעריכת ימי הבונוס">
                             <Chip size="small" color="secondary" variant="outlined"
-                              label={`📋 הושלמו ${r.breakdown.components.closure_completion_days.length} ימים`}
+                              label={`📋 אושרו ${r.breakdown.components.closure_completion_days.length} ימים`}
                               onClick={(e) => { e.stopPropagation(); setClosureDetail({ open: true, row: r }); }}
                               sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer' }}
                             />
@@ -2432,7 +2407,9 @@ export default function PayrollMonthTable() {
         open={closureDetail.open}
         row={closureDetail.row}
         month={month}
+        locked={closureDetail.row?.status === 'finalized'}
         onClose={() => setClosureDetail({ open: false, row: null })}
+        onSaved={() => fetchData({ quiet: true })}
       />
       <SickDetailDialog
         open={sick.open}

@@ -88,6 +88,15 @@ const payrollMonthSchema = new mongoose.Schema({
     // Per-employee, per-month. Admin/accountant only (not a branch-manager field).
     closure_completion: { type: Boolean, default: false },
 
+    // בונוס אוגוסט — the per-day approval list behind the flag above. A day in
+    // the fixed summer window (Aug 16–31, services/augustBonus.js) is paid ONLY
+    // if its date is listed here; the flag alone pays nothing. `default:
+    // undefined` is deliberate: a row flagged before this field existed is
+    // recognizable (field missing) and adopts its already-materialized punch
+    // dates as its approved list, so an already-paid August never silently
+    // shrinks (closureCompletion.materializeMonth handles that adoption).
+    closure_completion_approved_dates: { type: [String], default: undefined },
+
     // DEPRECATED — no longer read by the calc. Statutory daily overtime is now
     // always paid automatically; the beyond-commitment supplement is gated by
     // the two approval flags below. Kept for back-compat with old documents.

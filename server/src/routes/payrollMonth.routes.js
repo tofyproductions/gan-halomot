@@ -35,6 +35,9 @@ router.post('/punch-entry-tasks/:id/done',    requireRole('system_admin', 'accou
 // stores hers as `pending` until accounting confirms (models/PunchResolution).
 router.post('/punch-resolutions',              requireRole('system_admin', 'accountant', 'branch_manager'), c.resolvePunchDay);
 router.delete('/punch-resolutions',            requireRole('system_admin', 'accountant'), c.unresolvePunchDay);
+// בונוס אוגוסט — the edit dialog's per-day candidate list. Literal path,
+// before the /:param routes.
+router.get('/closure-candidates/:employeeId', requireRole('system_admin', 'accountant'), c.getClosureCandidates);
 // ימים מיוחדים — employer-declared closures. Literal paths, before /:param.
 router.get('/special-days',                   c.listSpecialDays);
 router.post('/special-days',                  requireRole('system_admin', 'accountant'), c.createSpecialDay);

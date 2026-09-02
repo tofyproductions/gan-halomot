@@ -1,123 +1,48 @@
 /**
- * "השלמת שכר אוגוסט" — closure-completion punches.
+ * "בונוס אוגוסט" (השלמת שכר אוגוסט) — closure-completion punches.
  *
- * Some branches close for the summer before the month is out (school year end
- * / קייטנה finishing), and again before the new year's first day. Committed
- * staff lose real pay for those days through no fault of theirs — the gan
- * simply wasn't open. When the admin flags an employee's
- * PayrollMonth.manual.closure_completion for a month, this MATERIALIZES her
- * committed weekdays inside her branch's Holiday closure window that carry no
- * real punch, as ordinary Punch rows (source 'closure_completion') — the same
- * "make it a real row, don't teach payroll a second source of truth" move as
- * services/fixedSchedule.js.
+ * Some branches close for the summer before the month is out. Committed staff
+ * lose real pay for those days through no fault of theirs — the gan simply
+ * wasn't open. The candidate days are FIXED by office policy: August 16–31
+ * (services/augustBonus.js). Days 1–15 are ordinary payroll, covered by the
+ * standing monthly completion.
+ *
+ * Since 2026-09: paying is a two-step decision. Flagging
+ * PayrollMonth.manual.closure_completion only OPENS the month to the bonus;
+ * nothing is paid until the accountant approves specific days
+ * (manual.closure_completion_approved_dates — edited in the payroll table's
+ * bonus dialog). This service MATERIALIZES exactly the approved committed
+ * weekdays that carry no real punch, as ordinary Punch rows (source
+ * 'closure_completion') — the same "make it a real row, don't teach payroll a
+ * second source of truth" move as services/fixedSchedule.js — and DELETES the
+ * rows of days whose approval was revoked, so the punches always mirror the
+ * approval list.
  *
  * What happens to those rows downstream differs by salary type, and lives
  * OUTSIDE this file on purpose (this file only decides WHICH days and
  * generates the rows):
  *   - hourly: counted like any other punch — they pay for themselves.
- *   - global (תקן): excluded from hours by payrollCalc.js (salaryType==='global'
- *     drops timestamp_source==='closure_completion' from countablePunches) —
- *     payrollMonth.controller.js prices them separately as a בונוס line and
- *     offsets the automatic completion so the total isn't paid twice. The row
- *     still shows up in the attendance grid as a visual marker.
+ *   - global (תקן): excluded from hours by payrollCalc.js;
+ *     payrollMonth.controller.js prices them as a בונוס carved out of the
+ *     monthly completion (augustBonus.applyBonusSplit), so full approval pays
+ *     exactly 100% of the agreed salary and nothing is ever paid twice.
  *
- * Idempotent and conservative: a date that already carries ANY punch (real,
- * or a previous run's) is never touched. There is no conflict-resolution UI
- * here like fixedSchedule's — the real clock always silently wins, which is
- * safe (never overwrites, never duplicates) even without one.
+ * An approved day is a gift day the gan grants — the controller excludes the
+ * window from vacation-day accrual, so it never draws from her balance.
+ *
+ * Conservative: a date that already carries a REAL punch (היערכות days she
+ * clocked) is never touched — the real clock always silently wins.
+ *
+ * Back-compat: rows flagged before the approval field existed (approved_dates
+ * missing entirely) adopt their already-materialized punch dates as the
+ * approved list, so nobody's already-paid August silently shrinks.
  */
 
-const { Employee, EmployeeCommitment, Holiday, Punch, PayrollMonth, Branch } = require('../models');
-const { ilDateTime, ISR_DAY, weekdayOf, todayIsrael } = require('./fixedSchedule');
-
-/**
- * Fallback closure window, used ONLY when no Holiday(kind:'closure') entry is
- * found for the branch — the office's stated policy (2026-09-01): every
- * branch closes 9.8 and resumes 29.8, except קפלן which closes 10.8 and
- * resumes 1.9. A Holiday entry, if one exists, always wins — this exists
- * because that entry turned out to be missing/misconfigured for the 2026
- * closure and the office needed completion to work correctly regardless.
- *
- * Matched by substring on the branch name since there are only two policies
- * today; `end` lands within August either way (31.8 the day before 1.9, 28.8
- * the day before 29.8), so no cross-month arithmetic is needed.
- *
- * TODO: once every branch has a real Holiday(kind:'closure') entry for the
- * relevant year, this stops being consulted (closureWindowForBranch only
- * calls it when the Holiday lookup comes back empty) — it can stay as a
- * standing safety net for a branch that's missing one.
- */
-const DEFAULT_CLOSURE_POLICY = [
-  { match: /קפלן/, startDay: 11, endDay: 31 },
-  { match: /.*/, startDay: 10, endDay: 28 },
-];
-
-async function fallbackClosureWindow(branchId, month) {
-  if (!/-08$/.test(month)) return null; // the policy only speaks to August
-  const branch = await Branch.findById(branchId).select('name').lean();
-  const name = branch?.name || '';
-  const policy = DEFAULT_CLOSURE_POLICY.find(p => p.match.test(name));
-  if (!policy) return null;
-  return {
-    start: `${month}-${String(policy.startDay).padStart(2, '0')}`,
-    end: `${month}-${String(policy.endDay).padStart(2, '0')}`,
-    from_fallback_policy: true,
-  };
-}
-
-/** Every 'YYYY-MM-DD' from `start` to `end` inclusive. */
-function dateRange(start, end) {
-  const out = [];
-  let d = start;
-  let guard = 0;
-  while (d <= end && guard < 400) { // 400 days is far beyond any real closure window
-    out.push(d);
-    const [y, m, day] = d.split('-').map(Number);
-    d = new Date(Date.UTC(y, m - 1, day + 1)).toISOString().slice(0, 10);
-    guard++;
-  }
-  return out;
-}
-
-/**
- * Union of every `kind: 'closure'` Holiday for this branch overlapping `month`.
- * ('short_day' is excluded on purpose — the gan is open that day.)
- * Returns { start, end } as 'YYYY-MM-DD', or null if no closure is recorded.
- */
-async function closureWindowForBranch(branchId, month) {
-  const [yy, mm] = month.split('-').map(Number);
-  const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
-  const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
-  const closures = await Holiday.find({
-    branch_id: branchId,
-    kind: 'closure',
-    start_date: { $lte: monthEnd },
-    end_date: { $gte: monthStart },
-  }).select('start_date end_date').lean();
-  if (closures.length === 0) return fallbackClosureWindow(branchId, month);
-  const starts = closures.map(h => ISR_DAY(h.start_date));
-  const ends = closures.map(h => ISR_DAY(h.end_date));
-  return { start: starts.sort()[0], end: ends.sort().pop() };
-}
-
-/**
- * What the commitment says about one weekday: { start_hhmm, end_hhmm } to
- * complete, or null (no commitment / day off / an alternating day — we can't
- * know which specific weeks she's committed on, so it's never auto-completed).
- *
- * start_hhmm is still used as the anchor clock time for the completed shift
- * (it has to start sometime, and her usual start time reads naturally on the
- * attendance grid); end_hhmm is the FALLBACK duration only, for a weekday
- * averageMinutesByWeekday has no data for — see gapDatesForEmployee.
- */
-function committedHoursForWeekday(commitment, weekday) {
-  if (!commitment) return null;
-  if (commitment.is_alternating_off && commitment.alternating_day === weekday) return null;
-  const day = (commitment.days || []).find(d => d.day === weekday);
-  if (!day || day.is_off) return null;
-  if (!day.start_hhmm || !day.end_hhmm) return null;
-  return { start_hhmm: day.start_hhmm, end_hhmm: day.end_hhmm };
-}
+const { Employee, EmployeeCommitment, Punch, PayrollMonth } = require('../models');
+const { ilDateTime, ISR_DAY, todayIsrael } = require('./fixedSchedule');
+const {
+  augustBonusWindow, candidateDays, committedHoursForWeekday, sanitizeApprovedDates,
+} = require('./augustBonus');
 
 /** 'HH:MM' + minutes → 'HH:MM', clamped to the same calendar day (a shift
  * never wraps past midnight here — the longest real day is nowhere close). */
@@ -175,7 +100,7 @@ async function averageMinutesByWeekday(employeeId, beforeDate, months = 3) {
     times.sort((a, b) => a - b);
     const minutes = Math.round((times[times.length - 1] - times[0]) / 60000);
     if (minutes <= 0) continue;
-    const wd = weekdayOf(date);
+    const wd = new Date(Date.UTC(...date.split('-').map(Number).map((v, i) => i === 1 ? v - 1 : v))).getUTCDay();
     const cur = sums.get(wd) || { total: 0, count: 0 };
     cur.total += minutes; cur.count += 1;
     sums.set(wd, cur);
@@ -184,46 +109,6 @@ async function averageMinutesByWeekday(employeeId, beforeDate, months = 3) {
   const avg = new Map();
   for (const [wd, { total, count }] of sums) avg.set(wd, total / count);
   return avg;
-}
-
-/**
- * Committed weekdays in [windowStart, windowEnd] with no real punch.
- * `realDates` is a Set of 'YYYY-MM-DD' — every date she already has ANY punch on.
- * `avgMinutesByWeekday` (from averageMinutesByWeekday) prices each completed
- * day by her own recent-history average for that weekday; a weekday absent
- * from it falls back to her committed shift's own length.
- */
-function gapDatesForEmployee(commitment, realDates, windowStart, windowEnd, avgMinutesByWeekday = new Map()) {
-  const out = [];
-  for (const date of dateRange(windowStart, windowEnd)) {
-    const weekday = weekdayOf(date);
-    if (weekday === 6) continue; // Saturday — never a work day
-    if (realDates.has(date)) continue;
-    const hours = committedHoursForWeekday(commitment, weekday);
-    if (!hours) continue;
-    const avgMin = avgMinutesByWeekday.get(weekday);
-    const end_hhmm = avgMin ? addMinutesToHHMM(hours.start_hhmm, avgMin) : hours.end_hhmm;
-    out.push({ date, start_hhmm: hours.start_hhmm, end_hhmm, from_average: !!avgMin });
-  }
-  return out;
-}
-
-/**
- * Every committed weekday in [windowStart, windowEnd], regardless of whether
- * she already has a punch there. Only used for the toggle's diagnostic —
- * "how many days would completion even cover" — never for materialization
- * itself (gapDatesForEmployee is the one that decides what actually gets
- * written, and it's the one that has to stay conservative).
- */
-function eligibleDatesForEmployee(commitment, windowStart, windowEnd) {
-  const out = [];
-  for (const date of dateRange(windowStart, windowEnd)) {
-    const weekday = weekdayOf(date);
-    if (weekday === 6) continue;
-    if (!committedHoursForWeekday(commitment, weekday)) continue;
-    out.push(date);
-  }
-  return out;
 }
 
 /** Deterministic negative serial, in its own range so it can never collide
@@ -236,19 +121,51 @@ function syntheticSn(employeeId, dateStr, slot) {
   return -(4_000_000_000_000_000 + dateNum * 0x2000000 + empHash * 2 + slot);
 }
 
+/** All of this employee's punches for `month`, split into the synthetic
+ * closure rows (by _id and by date) and the dates that carry any REAL punch. */
+async function monthPunchState(employeeId, month) {
+  const [y, m] = month.split('-').map(Number);
+  const from = ilDateTime(`${month}-01`, '00:00');
+  const nextMonth = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}-01`;
+  const to = ilDateTime(nextMonth, '00:00');
+  const punches = await Punch.find({
+    employee_id: employeeId,
+    timestamp: { $gte: from, $lt: to },
+  }).select('_id timestamp timestamp_source').lean();
+  const closureByDate = new Map(); // date → [punch _id]
+  const realDates = new Set();
+  for (const p of punches) {
+    const date = ISR_DAY(p.timestamp);
+    if (p.timestamp_source === 'closure_completion') {
+      if (!closureByDate.has(date)) closureByDate.set(date, []);
+      closureByDate.get(date).push(p._id);
+    } else {
+      realDates.add(date);
+    }
+  }
+  return { closureByDate, realDates };
+}
+
 /**
- * Fill in closure-completion punches for every employee flagged for `month`,
- * optionally narrowed to `branchIds` / `employeeIds`. Safe to call repeatedly
- * (e.g. on every payroll/attendance load, like fixedSchedule.materializeMonth).
+ * Sync closure-completion punches to the approval list for every employee
+ * flagged for `month`, optionally narrowed to `branchIds` / `employeeIds`.
+ * Creates approved days that are missing, deletes days no longer approved.
+ * Idempotent — safe to call on every payroll/attendance load.
  */
 async function materializeMonth(month, { branchIds = null, employeeIds = null, userId = null } = {}) {
-  if (!/^\d{4}-\d{2}$/.test(month)) return { created: 0, results: [] };
+  const window = augustBonusWindow(month);
+  if (!window) return { created: 0, deleted: 0, results: [] };
 
   const pmFilter = { month, 'manual.closure_completion': true };
   if (employeeIds) pmFilter.employee_id = { $in: employeeIds };
   if (branchIds) pmFilter.branch_id = { $in: branchIds };
-  const flagged = await PayrollMonth.find(pmFilter).select('employee_id').lean();
-  if (flagged.length === 0) return { created: 0, results: [] };
+  const flagged = await PayrollMonth.find(pmFilter)
+    .select('employee_id manual.closure_completion_approved_dates').lean();
+  if (flagged.length === 0) return { created: 0, deleted: 0, results: [] };
+  const approvalsByEmp = new Map(flagged.map(f => [
+    String(f.employee_id),
+    f.manual ? f.manual.closure_completion_approved_dates : undefined,
+  ]));
   const empIds = flagged.map(f => f.employee_id);
 
   const [employees, commitments] = await Promise.all([
@@ -258,115 +175,120 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
   const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
 
   const today = todayIsrael();
-  const branchWindowCache = new Map(); // branchId → window | null
+  const windowEnd = window.end > today ? today : window.end; // never generate ahead of today
   const toCreate = [];
-  const results = []; // per-employee diagnostic — what the toggle actually reports back
-  let skippedNoCommitment = 0;
-  let skippedNoWindow = 0;
+  const toDeleteIds = [];
+  const results = []; // per-employee diagnostic — what the toggle/dialog reports back
 
   for (const emp of employees) {
     const empIdStr = String(emp._id);
-    const empty = {
-      employee_id: empIdStr, has_commitment: false, has_window: false,
-      committed_days_in_window: 0, already_had_punch_days: 0, newly_completed_days: 0,
-    };
     const commitment = commitmentByEmp.get(empIdStr);
-    if (!commitment) { skippedNoCommitment++; results.push(empty); continue; }
-    if (!emp.branch_id) { skippedNoWindow++; results.push({ ...empty, has_commitment: true }); continue; }
+    const { closureByDate, realDates } = await monthPunchState(emp._id, month);
 
-    const bId = String(emp.branch_id);
-    if (!branchWindowCache.has(bId)) {
-      branchWindowCache.set(bId, await closureWindowForBranch(emp.branch_id, month));
+    // Back-compat: a row flagged before approvals existed adopts its
+    // already-materialized days as the approved list — once, persisted.
+    let approvedDates = approvalsByEmp.get(empIdStr);
+    if (approvedDates == null) {
+      approvedDates = [...closureByDate.keys()].sort();
+      await PayrollMonth.updateOne(
+        { employee_id: emp._id, month },
+        { $set: { 'manual.closure_completion_approved_dates': approvedDates } },
+      );
     }
-    const window = branchWindowCache.get(bId);
-    if (!window) { skippedNoWindow++; results.push({ ...empty, has_commitment: true }); continue; }
+    const approvedSet = new Set(sanitizeApprovedDates(approvedDates));
 
-    const windowEnd = window.end > today ? today : window.end; // never generate ahead of today
-    if (window.start > windowEnd) {
-      results.push({ ...empty, has_commitment: true, has_window: true });
-      continue;
+    // Delete: closure rows whose approval was revoked, or that collide with a
+    // real punch that has since arrived (the real clock wins).
+    let deletedDays = 0;
+    for (const [date, ids] of closureByDate) {
+      if (!approvedSet.has(date) || realDates.has(date)) {
+        toDeleteIds.push(...ids);
+        deletedDays++;
+        closureByDate.delete(date);
+      }
     }
 
-    const from = ilDateTime(window.start, '00:00');
-    const to = new Date(ilDateTime(windowEnd, '00:00').getTime() + 36 * 3600 * 1000);
-    const existing = await Punch.find({
-      employee_id: emp._id,
-      timestamp: { $gte: from, $lt: to },
-    }).select('timestamp').lean();
-    const realDates = new Set(existing.map(p => ISR_DAY(p.timestamp)));
+    const candidates = commitment ? candidateDays(commitment, month) : [];
+    const gaps = candidates.filter(c =>
+      c.date <= windowEnd
+      && approvedSet.has(c.date)
+      && !realDates.has(c.date)
+      && !closureByDate.has(c.date));
 
-    const avgByWeekday = await averageMinutesByWeekday(emp._id, window.start);
-    const gaps = gapDatesForEmployee(commitment, realDates, window.start, windowEnd, avgByWeekday);
-    const eligible = eligibleDatesForEmployee(commitment, window.start, windowEnd);
+    const avgByWeekday = commitment && gaps.length
+      ? await averageMinutesByWeekday(emp._id, window.start)
+      : new Map();
+
     results.push({
-      employee_id: empIdStr, has_commitment: true, has_window: true,
-      window_start: window.start, window_end: windowEnd,
-      window_from_fallback_policy: !!window.from_fallback_policy,
-      committed_days_in_window: eligible.length,
-      already_had_punch_days: eligible.length - gaps.length,
+      employee_id: empIdStr,
+      has_commitment: !!commitment,
+      window_start: window.start,
+      window_end: windowEnd,
+      candidate_days: candidates.length,
+      worked_days_in_window: candidates.filter(c => realDates.has(c.date)).length,
+      approved_days: approvedSet.size,
       newly_completed_days: gaps.length,
+      removed_days: deletedDays,
     });
+
     for (const g of gaps) {
-      const inSn = syntheticSn(emp._id, g.date, 0);
-      const outSn = syntheticSn(emp._id, g.date, 1);
-      const note = g.from_average
-        ? 'השלמת שכר אוגוסט — הגן היה סגור (לפי ממוצע שעות ב-3 חודשים אחרונים)'
-        : 'השלמת שכר אוגוסט — הגן היה סגור (לפי שעות ההתחייבות — אין מספיק היסטוריית שעות ליום זה)';
+      const avgMin = avgByWeekday.get(g.weekday);
+      const end_hhmm = avgMin ? addMinutesToHHMM(g.start_hhmm, avgMin) : g.end_hhmm;
+      const note = avgMin
+        ? 'בונוס אוגוסט — יום חופשת קיץ בתשלום (לפי ממוצע שעות ב-3 חודשים אחרונים)'
+        : 'בונוס אוגוסט — יום חופשת קיץ בתשלום (לפי שעות ההתחייבות — אין מספיק היסטוריית שעות ליום זה)';
+      const common = {
+        branch_id: emp.branch_id,
+        employee_id: emp._id,
+        israeli_id: emp.israeli_id || '',
+        timestamp_source: 'closure_completion',
+        received_at: new Date(),
+        agent_version: 'closure-completion',
+        manual_note: note,
+        created_by: userId,
+        approval_status: 'approved',
+        approval_decided_by: userId,
+        approval_decided_at: new Date(),
+      };
       toCreate.push(
-        {
-          branch_id: emp.branch_id,
-          employee_id: emp._id,
-          israeli_id: emp.israeli_id || '',
-          device_user_sn: inSn,
-          timestamp: ilDateTime(g.date, g.start_hhmm),
-          timestamp_source: 'closure_completion',
-          state: 0,
-          received_at: new Date(),
-          agent_version: 'closure-completion',
-          manual_note: note,
-          created_by: userId,
-          approval_status: 'approved',
-          approval_decided_by: userId,
-          approval_decided_at: new Date(),
-        },
-        {
-          branch_id: emp.branch_id,
-          employee_id: emp._id,
-          israeli_id: emp.israeli_id || '',
-          device_user_sn: outSn,
-          timestamp: ilDateTime(g.date, g.end_hhmm),
-          timestamp_source: 'closure_completion',
-          state: 1,
-          received_at: new Date(),
-          agent_version: 'closure-completion',
-          manual_note: note,
-          created_by: userId,
-          approval_status: 'approved',
-          approval_decided_by: userId,
-          approval_decided_at: new Date(),
-        },
+        { ...common, device_user_sn: syntheticSn(emp._id, g.date, 0), timestamp: ilDateTime(g.date, g.start_hhmm), state: 0 },
+        { ...common, device_user_sn: syntheticSn(emp._id, g.date, 1), timestamp: ilDateTime(g.date, end_hhmm), state: 1 },
       );
     }
   }
 
-  if (toCreate.length === 0) {
-    return { created: 0, results, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
+  if (toDeleteIds.length) {
+    await Punch.deleteMany({ _id: { $in: toDeleteIds }, timestamp_source: 'closure_completion' });
   }
+  if (toCreate.length) {
+    try {
+      await Punch.insertMany(toCreate, { ordered: false });
+    } catch (err) {
+      if (err.code !== 11000 && !err.writeErrors) throw err;
+    }
+  }
+  return { created: toCreate.length, deleted: toDeleteIds.length, results };
+}
 
-  try {
-    await Punch.insertMany(toCreate, { ordered: false });
-  } catch (err) {
-    if (err.code !== 11000 && !err.writeErrors) throw err;
-  }
-  return { created: toCreate.length, results, skipped_no_commitment: skippedNoCommitment, skipped_no_window: skippedNoWindow };
+/**
+ * Turning the month's flag OFF: every synthetic closure row of this employee's
+ * month goes away, so nothing keeps being priced off a decision that was
+ * reversed. The approval list is kept — flipping back on restores the same
+ * choices.
+ */
+async function removeEmployeeMonth(employeeId, month) {
+  const { closureByDate } = await monthPunchState(employeeId, month);
+  const ids = [...closureByDate.values()].flat();
+  if (ids.length === 0) return { deleted: 0 };
+  await Punch.deleteMany({ _id: { $in: ids }, timestamp_source: 'closure_completion' });
+  return { deleted: ids.length };
 }
 
 module.exports = {
-  closureWindowForBranch,
-  gapDatesForEmployee,
-  eligibleDatesForEmployee,
-  committedHoursForWeekday,
+  committedHoursForWeekday, // re-exported from augustBonus for existing callers
   averageMinutesByWeekday,
   addMinutesToHHMM,
   materializeMonth,
+  removeEmployeeMonth,
+  monthPunchState,
 };

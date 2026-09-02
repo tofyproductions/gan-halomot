@@ -17,7 +17,14 @@ const {
   markDayOff: markFixedScheduleDayOff,
   ilDateTime: ilDateTimeOf,
 } = require('../services/fixedSchedule');
-const { materializeMonth: materializeClosureCompletion } = require('../services/closureCompletion');
+const {
+  materializeMonth: materializeClosureCompletion,
+  removeEmployeeMonth: removeClosureCompletion,
+  averageMinutesByWeekday,
+} = require('../services/closureCompletion');
+const {
+  augustBonusWindow, candidateDays: augustCandidateDays, applyBonusSplit, sanitizeApprovedDates,
+} = require('../services/augustBonus');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -233,7 +240,7 @@ function committedDayOverages(commitment, workedDays, excludeSet, graceH = 1) {
  *
  * Returns { total, details: [{date, name, value}], worked_on_holiday: [...] }.
  */
-function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates, workedDates) {
+function computeKindergartenVacationDays(holidays, monthYM, commitment, statutoryDates, workedDates, excludedDates) {
   // Only days she was supposed to WORK count as paid vacation. With a commitment
   // that means a required weekday; a closure on her off-day / a non-work weekday
   // gives no vacation pay.
@@ -244,6 +251,11 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
   }
   const statutory = statutoryDates instanceof Set ? statutoryDates : new Set(statutoryDates || []);
   const worked = workedDates instanceof Set ? workedDates : new Set(workedDates || []);
+  // Days handed over to another pay mechanism entirely — currently the August
+  // bonus window (16–31.8) when the month is opened to it: an approved bonus
+  // day is a GIFT day the gan grants, and an unapproved one is simply unpaid.
+  // Neither is her vacation, so neither may draw from her balance.
+  const excluded = excludedDates instanceof Set ? excludedDates : new Set(excludedDates || []);
   const result = { total: 0, details: [], worked_on_holiday: [] };
   for (const h of holidays) {
     // A short day is a day the gan RAN and finished early. She worked it and is
@@ -262,6 +274,8 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
       if (hasCommitment && !requiredWeekdays.has(wd)) continue;
       // Statutory-holiday days are paid via דמי חגים, not vacation — skip them.
       if (statutory.has(ymd)) continue;
+      // Days owned by another mechanism (August bonus window) — see above.
+      if (excluded.has(ymd)) continue;
       // She came in on a day the gan was listed as closed: pay the hours, keep
       // the vacation day, and flag it.
       if (worked.has(ymd)) {
@@ -694,9 +708,18 @@ async function getMonth(req, res, next) {
         if (matEnd && ymd > matEnd) return false;
         return true;
       };
+      // בונוס אוגוסט: when the month is opened to the bonus, the fixed summer
+      // window (16–31.8) leaves the absence mechanism entirely — an unapproved
+      // day is deducted ONCE, out of the completion (applyBonusSplit below),
+      // and an approved day is paid as the bonus. Counting those same days
+      // here as unexplained absences would deduct them a second time.
+      const augWindow = augustBonusWindow(month);
+      const closureFlagOn = !!existingManual.closure_completion;
+      const inAugustBonusWindow = (d) =>
+        closureFlagOn && !!augWindow && d >= augWindow.start && d <= augWindow.end;
       const absenceDays = isTeken
         ? commitmentInfo.absent_dates
-            .filter(d => !holidayDates.has(d) && !leaveDates.has(d))
+            .filter(d => !holidayDates.has(d) && !leaveDates.has(d) && !inAugustBonusWindow(d))
             .map(d => ({
               date: d,
               source: 'unknown',
@@ -776,8 +799,13 @@ async function getMonth(req, res, next) {
       const workedDates = new Set((punchesByEmp.get(String(emp._id)) || [])
         .filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'))
         .map(p => ISR_DAY(p.timestamp)));
+      const augustExcludedDates = new Set();
+      if (closureFlagOn && augWindow) {
+        for (let dd = 16; dd <= 31; dd++) augustExcludedDates.add(`${month}-${String(dd).padStart(2, '0')}`);
+      }
       const vacationAutoInfo = computeKindergartenVacationDays(
         kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates, workedDates,
+        augustExcludedDates,
       );
       const empAdjustments = adjByEmp.get(String(emp._id)) || [];
       // Aggregate adjustments
@@ -984,37 +1012,61 @@ async function getMonth(req, res, next) {
           closureCompletionDays.push({ date, hours: Math.round(hours * 100) / 100, amount });
         }
       }
-      let closureCompletionBonus = 0;
-      if (isTeken && tb && closureCompletionDays.length) {
-        closureCompletionBonus = Math.round(
-          closureCompletionDays.reduce((sum, d) => sum + d.amount, 0) * 100,
-        ) / 100;
-      }
-      if (closureCompletionBonus > 0) {
-        const closureOffset = Math.min(tb.completion || 0, closureCompletionBonus);
-        tb.completion = Math.round(((tb.completion || 0) - closureOffset) * 100) / 100;
-        tb.completion_reduced_by_closure = Math.round(closureOffset * 100) / 100;
-        breakdown.components.base_salary =
-          Math.round((Number(breakdown.components.base_salary || 0) - closureOffset) * 100) / 100;
-        if (breakdown.components.pay_split) {
-          breakdown.components.pay_split.completion =
-            Math.round((Number(breakdown.components.pay_split.completion || 0) - closureOffset) * 100) / 100;
+      // Global (תקן): both the bonus (approved days) and the unapproved-day
+      // deduction are CARVED OUT of the remaining monthly completion
+      // (augustBonus.applyBonusSplit) — the bonus relabels completion money,
+      // never adds beside it. Full approval therefore pays exactly the agreed
+      // salary (100%, split into real worked hours + בונוס), an unapproved day
+      // genuinely reduces the month, and nothing is ever paid under two names.
+      // The completion that remains after the carve is what covers 1–15.8.
+      if (isTeken && tb && closureFlagOn && augWindow) {
+        const hourlyValue = Number(tb.hourly_value || 0);
+        // Unapproved candidates: committed window days that ended up with no
+        // punch at all — approved days were materialized as closure punches,
+        // and days she actually worked (ימי היערכות) carry real punches. An
+        // approved-leave day is hers already, not an August-bonus decision.
+        const absentSet = new Set(commitmentInfo.absent_dates);
+        const unapprovedDays = augustCandidateDays(commitmentByEmp.get(String(emp._id)), month)
+          .filter(c => absentSet.has(c.date) && !leaveDates.has(c.date))
+          .map(c => {
+            const hours = weightedDayHours(c.committed_hours);
+            return {
+              date: c.date,
+              hours: Math.round(hours * 100) / 100,
+              amount: hourlyValue > 0 ? Math.round(hours * hourlyValue * 100) / 100 : 0,
+            };
+          });
+        const approvedValue = closureCompletionDays.reduce((s, d) => s + d.amount, 0);
+        const unapprovedValue = unapprovedDays.reduce((s, d) => s + d.amount, 0);
+        if (approvedValue > 0 || unapprovedValue > 0) {
+          const { bonus, deduction, scale, completion_after } = applyBonusSplit({
+            completion: tb.completion || 0, approvedValue, unapprovedValue,
+          });
+          const carved = Math.round(((tb.completion || 0) - completion_after) * 100) / 100;
+          tb.completion = completion_after;
+          tb.completion_reduced_by_closure = bonus;
+          tb.closure_unapproved_deduction = deduction;
+          breakdown.components.base_salary =
+            Math.round((Number(breakdown.components.base_salary || 0) - carved) * 100) / 100;
+          if (breakdown.components.pay_split) {
+            breakdown.components.pay_split.completion =
+              Math.round((Number(breakdown.components.pay_split.completion || 0) - carved) * 100) / 100;
+          }
+          const scaleAmount = (d) => (scale < 1 ? { ...d, amount: Math.round(d.amount * scale * 100) / 100 } : d);
+          const scaledDays = closureCompletionDays.map(scaleAmount);
+          breakdown.components.closure_completion_bonus = {
+            amount: bonus,
+            dates: scaledDays.map(d => d.date),
+            days: scaledDays,
+            unapproved_days: unapprovedDays.map(scaleAmount),
+            deduction,
+            reason: 'בונוס אוגוסט — ימי חופשת קיץ בתשלום',
+          };
+          // The bonus was carved out of completion, so approved days move
+          // money's LABEL, not its amount — only the unapproved deduction
+          // actually changes the month's total.
+          breakdown.estimated_total = Math.round((breakdown.estimated_total - deduction) * 100) / 100;
         }
-        breakdown.components.closure_completion_bonus = {
-          amount: closureCompletionBonus,
-          dates: closureCompletionDays.map(d => d.date),
-          days: closureCompletionDays,
-          reason: 'השלמת שכר אוגוסט — הגן היה סגור',
-        };
-        // Net effect: +bonus, −offset. When the closure fully explains the
-        // shortfall these cancel (offset === bonus) and the total is
-        // unchanged from what automatic completion alone would have paid —
-        // only the label moves from "השלמת שכר" to "בונוס". If she ALSO had
-        // an unrelated shortfall this month, the remainder still flows
-        // through completion (or a deduction) exactly as today.
-        breakdown.estimated_total = Math.round(
-          (breakdown.estimated_total + closureCompletionBonus - closureOffset) * 100,
-        ) / 100;
       } else if (closureCompletionDays.length) {
         // Hourly: no line to add, no offset to apply — just surface the days
         // for the same "what did she actually get paid for" transparency.
@@ -1532,7 +1584,7 @@ async function upsertEntry(req, res, next) {
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'travel_note', 'bonus', 'notes', 'custom_values',
-      'include_salary_completion', 'closure_completion',
+      'include_salary_completion', 'closure_completion', 'closure_completion_approved_dates',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'vacation_pay_confirmed',
       'absence_entries', 'partial_absence_entries', 'partial_extra_entries',
@@ -1596,6 +1648,12 @@ async function upsertEntry(req, res, next) {
       if (k === 'vacation_pay_confirmed' && !canSetAccountingApproval) {
         return res.status(403).json({ error: 'רק הנהלת חשבונות יכולה לאשר תשלום חופשה ללא יתרה' });
       }
+      // The August-bonus approval list is what gets people paid — accept only
+      // clean YYYY-MM-DD strings, deduped and sorted, whatever the client sent.
+      if (k === 'closure_completion_approved_dates') {
+        setObj[`manual.${k}`] = sanitizeApprovedDates(body[k]);
+        continue;
+      }
       setObj[`manual.${k}`] = body[k];
     }
 
@@ -1624,18 +1682,148 @@ async function upsertEntry(req, res, next) {
     // every committed day in the window already had a real punch). Without this
     // "nothing changed" and "there was nothing to change" look identical.
     let closureCompletionResult = null;
-    if (Object.prototype.hasOwnProperty.call(body, 'closure_completion') && body.closure_completion) {
+    const touchedClosure = Object.prototype.hasOwnProperty.call(body, 'closure_completion')
+      || Object.prototype.hasOwnProperty.call(body, 'closure_completion_approved_dates');
+    if (touchedClosure) {
       try {
-        const mat = await materializeClosureCompletion(month, {
-          employeeIds: [employeeId], userId: req.user?.id || null,
-        });
-        closureCompletionResult = (mat.results || [])[0] || null;
+        if (Object.prototype.hasOwnProperty.call(body, 'closure_completion') && !body.closure_completion) {
+          // Flag turned OFF: every synthetic bonus punch of this month goes
+          // away, so nothing keeps being paid off a reversed decision. The
+          // approval list is kept — flipping back on restores the choices.
+          const removed = await removeClosureCompletion(employeeId, month);
+          closureCompletionResult = { removed_days: removed.deleted / 2 };
+        } else if (row.manual?.closure_completion) {
+          // Flag on (newly or already) and/or the approval list changed —
+          // sync punches to the approvals: create the newly approved days,
+          // delete the revoked ones.
+          const mat = await materializeClosureCompletion(month, {
+            employeeIds: [employeeId], userId: req.user?.id || null,
+          });
+          closureCompletionResult = (mat.results || [])[0] || null;
+        }
       } catch (e) {
-        console.error('[payroll-month] closure-completion materialize (toggle) failed:', e.message);
+        console.error('[payroll-month] closure-completion sync (toggle) failed:', e.message);
       }
     }
 
     res.json({ ok: true, entry: row, closure_completion_result: closureCompletionResult });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll-month/closure-candidates/:employeeId?month=YYYY-MM
+ *
+ * The August-bonus edit dialog's data: every committed weekday of this
+ * employee inside the fixed summer window (16–31.8), each classified —
+ *   'worked'      she clocked a real punch (ימי היערכות) — paid normally,
+ *                 not a bonus candidate;
+ *   'approved'    on the approval list — materialized and paid as bonus;
+ *   'unapproved'  a candidate awaiting the accountant's decision.
+ * Plus any legacy approved day OUTSIDE the window (the pre-2026-09 policy
+ * materialized 10–15.8 too), flagged out_of_window so the accountant can see
+ * and revoke it. Amount pricing stays client-side off the row's hourly value —
+ * the table row already carries it, and the final bonus is capped by the
+ * completion anyway (services/augustBonus.applyBonusSplit).
+ */
+async function getClosureCandidates(req, res, next) {
+  try {
+    const { month } = req.query;
+    const { employeeId } = req.params;
+    if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
+    const window = augustBonusWindow(month);
+    if (!window) {
+      return res.json({ window: null, days: [], message: 'בונוס אוגוסט רלוונטי רק לחודש אוגוסט' });
+    }
+
+    const [emp, commitment, pm] = await Promise.all([
+      Employee.findById(employeeId).select('full_name salary_type').lean(),
+      EmployeeCommitment.findOne({ employee_id: employeeId }).lean(),
+      PayrollMonth.findOne({ employee_id: employeeId, month })
+        .select('manual.closure_completion manual.closure_completion_approved_dates status').lean(),
+    ]);
+    if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    const [yy, mm] = month.split('-').map(Number);
+    const nextMonth = `${mm === 12 ? yy + 1 : yy}-${String(mm === 12 ? 1 : mm + 1).padStart(2, '0')}`;
+    const punches = await Punch.find({
+      employee_id: employeeId,
+      timestamp: { $gte: ilDateTimeOf(`${month}-01`, '00:00'), $lt: ilDateTimeOf(`${nextMonth}-01`, '00:00') },
+      ignored: { $ne: true },
+    }).select('timestamp timestamp_source approval_status').lean();
+    const realByDate = new Map();     // date → epoch-ms[] of real punches
+    const closureByDate = new Map();  // date → epoch-ms[] of synthetic bonus punches
+    for (const p of punches) {
+      const s = p.approval_status || 'auto';
+      if (s !== 'auto' && s !== 'approved') continue;
+      const d = ISR_DAY(p.timestamp);
+      const target = p.timestamp_source === 'closure_completion' ? closureByDate : realByDate;
+      if (!target.has(d)) target.set(d, []);
+      target.get(d).push(new Date(p.timestamp).getTime());
+    }
+    const spanHours = (times) => {
+      if (!times || times.length < 2) return 0;
+      const t = [...times].sort((a, b) => a - b);
+      return Math.max(0, (t[t.length - 1] - t[0]) / 3600000);
+    };
+
+    const approvedDates = new Set(sanitizeApprovedDates(pm?.manual?.closure_completion_approved_dates || []));
+    // Legacy row (approvals field not written yet): its materialized punches
+    // ARE its approvals — mirror what materializeMonth will persist.
+    if (pm?.manual && pm.manual.closure_completion_approved_dates == null) {
+      for (const d of closureByDate.keys()) approvedDates.add(d);
+    }
+
+    const avg = await averageMinutesByWeekday(employeeId, window.start);
+    const days = augustCandidateDays(commitment, month).map(c => {
+      const worked = realByDate.has(c.date);
+      const closureTimes = closureByDate.get(c.date);
+      const avgMin = avg.get(c.weekday);
+      const payHoursRaw = closureTimes ? spanHours(closureTimes) : (avgMin ? avgMin / 60 : c.committed_hours);
+      return {
+        date: c.date,
+        weekday: c.weekday,
+        committed_start: c.start_hhmm,
+        committed_end: c.end_hhmm,
+        committed_hours: c.committed_hours,
+        status: worked ? 'worked' : (approvedDates.has(c.date) ? 'approved' : 'unapproved'),
+        worked_hours: worked ? Math.round(spanHours(realByDate.get(c.date)) * 100) / 100 : 0,
+        pay_hours: worked ? 0 : Math.round(payHoursRaw * 100) / 100,
+        weighted_pay_hours: worked ? 0 : Math.round(weightedDayHours(payHoursRaw) * 100) / 100,
+        from_average: !worked && !closureTimes && !!avgMin,
+        out_of_window: false,
+      };
+    });
+    const extraDays = [...closureByDate.keys()]
+      .filter(d => d < window.start || d > window.end)
+      .sort()
+      .map(d => {
+        const payHoursRaw = spanHours(closureByDate.get(d));
+        return {
+          date: d,
+          weekday: new Date(`${d}T12:00:00Z`).getUTCDay(),
+          committed_start: null,
+          committed_end: null,
+          committed_hours: null,
+          status: approvedDates.has(d) ? 'approved' : 'unapproved',
+          worked_hours: 0,
+          pay_hours: Math.round(payHoursRaw * 100) / 100,
+          weighted_pay_hours: Math.round(weightedDayHours(payHoursRaw) * 100) / 100,
+          from_average: false,
+          out_of_window: true,
+        };
+      });
+
+    res.json({
+      employee_id: String(employeeId),
+      full_name: emp.full_name,
+      salary_type: emp.salary_type,
+      month,
+      window,
+      flag_on: !!pm?.manual?.closure_completion,
+      locked: pm?.status === 'finalized',
+      approved_dates: [...approvedDates].sort(),
+      days: [...days, ...extraDays],
+    });
   } catch (err) { next(err); }
 }
 
@@ -2387,9 +2575,22 @@ async function applyKindergartenVacationDays(req, res, next) {
     let noKindergartenHolidays = 0;
 
     const statutoryHolidayDates = new Set(getHolidaysInMonth(month).map(h => h.date));
+    // Same exclusion as the salary table: an employee whose month is opened to
+    // בונוס אוגוסט has the fixed summer window (16–31.8) owned by the bonus
+    // mechanism — approved days are gift days, unapproved days are unpaid, and
+    // neither may be billed to her vacation balance by this bulk fill.
+    const bulkAugWindow = augustBonusWindow(month);
+    const augWindowDates = new Set();
+    if (bulkAugWindow) {
+      for (let dd = 16; dd <= 31; dd++) augWindowDates.add(`${month}-${String(dd).padStart(2, '0')}`);
+    }
     for (const emp of employees) {
       const empHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
-      const info = computeKindergartenVacationDays(empHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates);
+      const empClosureFlag = !!existingByEmp.get(String(emp._id))?.manual?.closure_completion;
+      const info = computeKindergartenVacationDays(
+        empHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates,
+        undefined, (empClosureFlag && bulkAugWindow) ? augWindowDates : undefined,
+      );
       if (info.total <= 0) { noKindergartenHolidays++; continue; }
       const cur = Number(existingByEmp.get(String(emp._id))?.manual?.vacation_days) || 0;
       if (cur > 0) { skippedAlreadySet++; continue; }
@@ -4660,6 +4861,7 @@ module.exports = {
   updateSpecialDay,
   deleteSpecialDay,
   upsertEntry,
+  getClosureCandidates,
   createChangeRequest,
   listChangeRequests,
   decideChangeRequest,
