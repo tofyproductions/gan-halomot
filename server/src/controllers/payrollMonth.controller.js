@@ -502,7 +502,7 @@ async function getMonth(req, res, next) {
     // base64 payloads are never selected).
     const [allDocs, allCerts] = await Promise.all([
       EmployeeDocument.find({ employee_id: { $in: empIdList } })
-        .select('employee_id name file_name created_at acknowledged').sort({ created_at: -1 }).lean(),
+        .select('employee_id name file_name month created_at acknowledged').sort({ created_at: -1 }).lean(),
       EmployeeRequest.find({
         $or: [
           { employee_id: { $in: empIdList } },
@@ -512,8 +512,17 @@ async function getMonth(req, res, next) {
       }).select('employee_id user_id type from_date to_date medical_file_name created_at cert_acknowledged')
         .sort({ created_at: -1 }).lean(),
     ]);
-    const pendingDocs = allDocs.filter(d => d.acknowledged !== true);
-    const pendingCerts = allCerts.filter(c => c.cert_acknowledged !== true);
+    // A file belongs to ONE salary month — the one it was uploaded for (its
+    // `month` context, or the month it was created in when no context was
+    // recorded; a certificate goes by the date it certifies). Afterwards it
+    // lives on quietly in the employee's file (the קבצים chip still counts
+    // it), but it stops waving "ממתין בקבצים" at every later month — and only
+    // the current month's files are what the accountant send attaches anyway.
+    const docMonth = (d) => d.month
+      || (d.created_at ? new Date(d.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }).slice(0, 7) : null);
+    const pendingDocs = allDocs.filter(d => d.acknowledged !== true && docMonth(d) === month);
+    const pendingCerts = allCerts.filter(c => c.cert_acknowledged !== true
+      && String(c.from_date || '').startsWith(month));
     // Certificates filed through a login carry user_id only — map back to the employee.
     const empByUserId = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
     const CERT_LABEL = { sick: 'אישור מחלה', vacation: 'אישור חופשה', pregnancy_exam: 'אישור בדיקת הריון' };
