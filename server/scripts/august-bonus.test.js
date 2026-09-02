@@ -21,7 +21,7 @@
  */
 
 const {
-  augustBonusWindow, candidateDays, applyBonusSplit, sanitizeApprovedDates,
+  augustBonusWindow, candidateDays, applyBonusSplit, bonusDayMinutes, sanitizeApprovedDates,
 } = require('../src/services/augustBonus');
 
 let failures = 0;
@@ -109,6 +109,17 @@ console.log('applyBonusSplit — carve, never add');
   check('negative completion treated as zero', r.bonus === 0 && r.completion_after === 0);
   r = applyBonusSplit({ completion: 5000, approvedValue: 0, unapprovedValue: 0 });
   check('no candidate days at all → completion untouched', r.bonus === 0 && r.deduction === 0 && r.completion_after === 5000);
+}
+
+// ---------------------------------------------------------------- day length
+console.log('bonusDayMinutes — an hourly gift day is capped at 8h, never OT');
+{
+  check('hourly: 9h average is capped to 8h', bonusDayMinutes('hourly', 540, 480) === 480);
+  check('hourly: 8.5h committed fallback is capped to 8h', bonusDayMinutes('hourly', null, 510) === 480);
+  check('hourly: a 6h average stays 6h (cap is a ceiling, not a floor)', bonusDayMinutes('hourly', 360, 480) === 360);
+  check('global: a 9h average stays 9h (the 100% salary cap protects the total)', bonusDayMinutes('global', 540, 480) === 540);
+  check('average wins over commitment when present', bonusDayMinutes('global', 300, 480) === 300);
+  check('no average → committed shift length', bonusDayMinutes('global', null, 480) === 480);
 }
 
 // ---------------------------------------------------------------- sanitation

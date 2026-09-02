@@ -283,17 +283,21 @@ console.log('שעתית, ימי היערכות — עבדה 3 מימי החלו�
     m.estimatedTotal === FULL_MONTH_PAY, `got ${ILS(m.estimatedTotal)}`);
 }
 
-console.log('שעתית, תמחור נדיב — יום בונוס של 9 שעות משולם לפי שעותיו, כולל שע״נ');
+console.log('שעתית, ממוצע נדיב — יום בונוס מוגבל ל-8 שעות, בלי שע״נ');
 {
-  // Unlike a global employee (capped at 100% of the salary), an hourly
-  // employee has no salary ceiling: a bonus day materialized at 9h pays
-  // 8h regular + 1h at 125%, exactly like a real 9h day would. Documented
-  // here so the difference is a decision, not a surprise.
-  const generous = [{ date: windowCandidates[0].date, start: '08:00', end: '17:00' }];
-  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: generous });
-  const expected = preWindowDates.length * DAY_PAY + (8 * RATE + 1 * RATE * 1.25);
-  check(`a 9h bonus day pays like a real 9h day (${ILS(expected)})`, m.estimatedTotal === expected,
+  // Her 3-month average says 9h — but a gift day pays BASE pay only (office
+  // decision): the materializer writes the day at bonusDayMinutes() = 8h, so
+  // the engine sees an 8h day and no overtime premium ever enters the month.
+  const { bonusDayMinutes } = require('../src/services/augustBonus');
+  const cappedMinutes = bonusDayMinutes('hourly', 9 * 60, 8 * 60);
+  check('the materializer writes the day at 8h, not 9', cappedMinutes === 480);
+  const endHH = `${String(8 + cappedMinutes / 60).padStart(2, '0')}:00`;
+  const capped = [{ date: windowCandidates[0].date, start: '08:00', end: endHH }];
+  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: capped });
+  const expected = preWindowDates.length * DAY_PAY + 8 * RATE; // base pay only, no 125%
+  check(`the day pays exactly 8h base pay (${ILS(expected)})`, m.estimatedTotal === expected,
     `got ${ILS(m.estimatedTotal)}`);
+  console.log(`    דוגמה: ממוצע 9ש׳ → משולם 8ש׳ × ₪${RATE} = ${ILS(8 * RATE)}, בלי תוספת 125%`);
 }
 
 if (failures) {

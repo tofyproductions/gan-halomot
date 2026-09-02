@@ -24,6 +24,7 @@ const {
 } = require('../services/closureCompletion');
 const {
   augustBonusWindow, candidateDays: augustCandidateDays, applyBonusSplit, sanitizeApprovedDates,
+  bonusDayMinutes,
 } = require('../services/augustBonus');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
@@ -1785,7 +1786,12 @@ async function getClosureCandidates(req, res, next) {
       const worked = realByDate.has(c.date);
       const closureTimes = closureByDate.get(c.date);
       const avgMin = avg.get(c.weekday);
-      const payHoursRaw = closureTimes ? spanHours(closureTimes) : (avgMin ? avgMin / 60 : c.committed_hours);
+      // Same minutes the materializer will write — hourly capped at 8h (a gift
+      // day pays base pay, never OT premium), so the dialog's estimate matches
+      // what actually gets paid.
+      const payHoursRaw = closureTimes
+        ? spanHours(closureTimes)
+        : bonusDayMinutes(emp.salary_type, avgMin, c.committed_hours * 60) / 60;
       return {
         date: c.date,
         weekday: c.weekday,

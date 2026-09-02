@@ -42,6 +42,7 @@ const { Employee, EmployeeCommitment, Punch, PayrollMonth } = require('../models
 const { ilDateTime, ISR_DAY, todayIsrael } = require('./fixedSchedule');
 const {
   augustBonusWindow, candidateDays, committedHoursForWeekday, sanitizeApprovedDates,
+  bonusDayMinutes, HOURLY_BONUS_CAP_MINUTES,
 } = require('./augustBonus');
 
 /** 'HH:MM' + minutes → 'HH:MM', clamped to the same calendar day (a shift
@@ -132,18 +133,25 @@ async function monthPunchState(employeeId, month) {
     employee_id: employeeId,
     timestamp: { $gte: from, $lt: to },
   }).select('_id timestamp timestamp_source').lean();
-  const closureByDate = new Map(); // date → [punch _id]
+  const closureByDate = new Map(); // date → [{ _id, timestamp }]
   const realDates = new Set();
   for (const p of punches) {
     const date = ISR_DAY(p.timestamp);
     if (p.timestamp_source === 'closure_completion') {
       if (!closureByDate.has(date)) closureByDate.set(date, []);
-      closureByDate.get(date).push(p._id);
+      closureByDate.get(date).push({ _id: p._id, timestamp: p.timestamp });
     } else {
       realDates.add(date);
     }
   }
   return { closureByDate, realDates };
+}
+
+/** First-to-last span of one day's closure rows, in minutes. */
+function closureSpanMinutes(rows) {
+  if (!rows || rows.length < 2) return 0;
+  const t = rows.map(r => new Date(r.timestamp).getTime()).sort((a, b) => a - b);
+  return Math.round((t[t.length - 1] - t[0]) / 60000);
 }
 
 /**
@@ -169,7 +177,7 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
   const empIds = flagged.map(f => f.employee_id);
 
   const [employees, commitments] = await Promise.all([
-    Employee.find({ _id: { $in: empIds } }).select('full_name israeli_id branch_id').lean(),
+    Employee.find({ _id: { $in: empIds } }).select('full_name israeli_id branch_id salary_type').lean(),
     EmployeeCommitment.find({ employee_id: { $in: empIds } }).lean(),
   ]);
   const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
@@ -198,12 +206,17 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     const approvedSet = new Set(sanitizeApprovedDates(approvedDates));
 
     // Delete: closure rows whose approval was revoked, or that collide with a
-    // real punch that has since arrived (the real clock wins).
+    // real punch that has since arrived (the real clock wins). For an HOURLY
+    // employee, also rows longer than the 8h gift-day cap (created before the
+    // cap existed) — they fall through to the gap pass below and come back
+    // capped, so a bonus day never pays overtime premium.
     let deletedDays = 0;
-    for (const [date, ids] of closureByDate) {
-      if (!approvedSet.has(date) || realDates.has(date)) {
-        toDeleteIds.push(...ids);
-        deletedDays++;
+    for (const [date, rows] of closureByDate) {
+      const overCap = emp.salary_type === 'hourly'
+        && closureSpanMinutes(rows) > HOURLY_BONUS_CAP_MINUTES + 1;
+      if (!approvedSet.has(date) || realDates.has(date) || overCap) {
+        toDeleteIds.push(...rows.map(r => r._id));
+        if (!overCap) deletedDays++;
         closureByDate.delete(date);
       }
     }
@@ -233,10 +246,16 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
 
     for (const g of gaps) {
       const avgMin = avgByWeekday.get(g.weekday);
-      const end_hhmm = avgMin ? addMinutesToHHMM(g.start_hhmm, avgMin) : g.end_hhmm;
-      const note = avgMin
+      // Hourly: capped at 8h — a gift day pays base pay, never OT premium.
+      const minutes = bonusDayMinutes(emp.salary_type, avgMin, g.committed_hours * 60);
+      const end_hhmm = addMinutesToHHMM(g.start_hhmm, minutes);
+      const capped = emp.salary_type === 'hourly'
+        && minutes === HOURLY_BONUS_CAP_MINUTES
+        && ((avgMin || g.committed_hours * 60) > HOURLY_BONUS_CAP_MINUTES);
+      const note = (avgMin
         ? 'בונוס אוגוסט — יום חופשת קיץ בתשלום (לפי ממוצע שעות ב-3 חודשים אחרונים)'
-        : 'בונוס אוגוסט — יום חופשת קיץ בתשלום (לפי שעות ההתחייבות — אין מספיק היסטוריית שעות ליום זה)';
+        : 'בונוס אוגוסט — יום חופשת קיץ בתשלום (לפי שעות ההתחייבות — אין מספיק היסטוריית שעות ליום זה)')
+        + (capped ? ' — הוגבל ל-8 שעות, יום בונוס אינו משלם שעות נוספות' : '');
       const common = {
         branch_id: emp.branch_id,
         employee_id: emp._id,
@@ -278,7 +297,7 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
  */
 async function removeEmployeeMonth(employeeId, month) {
   const { closureByDate } = await monthPunchState(employeeId, month);
-  const ids = [...closureByDate.values()].flat();
+  const ids = [...closureByDate.values()].flat().map(r => r._id);
   if (ids.length === 0) return { deleted: 0 };
   await Punch.deleteMany({ _id: { $in: ids }, timestamp_source: 'closure_completion' });
   return { deleted: ids.length };

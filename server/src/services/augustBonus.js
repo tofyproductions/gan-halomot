@@ -107,6 +107,23 @@ function applyBonusSplit({ completion, approvedValue, unapprovedValue }) {
   return { bonus, deduction, completion_after, scale };
 }
 
+/**
+ * How many minutes a bonus day is materialized (and therefore paid) at.
+ *
+ * The base is her 3-month average for that weekday when one exists, else her
+ * committed shift length. For an HOURLY employee the result is capped at 8
+ * hours: a gift day pays base pay only — it must never manufacture overtime
+ * premium (office decision, 2026-09-02). A global (תקן) employee keeps the
+ * uncapped average: her month is already capped at 100% of the agreed salary
+ * by applyBonusSplit, so a generous day can shift the split but never the total.
+ */
+const HOURLY_BONUS_CAP_MINUTES = 8 * 60;
+function bonusDayMinutes(salaryType, avgMinutes, committedMinutes) {
+  const base = (Number(avgMinutes) > 0) ? Number(avgMinutes) : (Number(committedMinutes) || 0);
+  if (salaryType === 'hourly') return Math.min(base, HOURLY_BONUS_CAP_MINUTES);
+  return base;
+}
+
 /** Sanitize a client-sent approved-dates array: valid YYYY-MM-DD, unique, sorted. */
 function sanitizeApprovedDates(arr) {
   if (!Array.isArray(arr)) return [];
@@ -120,5 +137,7 @@ module.exports = {
   committedHoursForWeekday,
   candidateDays,
   applyBonusSplit,
+  bonusDayMinutes,
+  HOURLY_BONUS_CAP_MINUTES,
   sanitizeApprovedDates,
 };
