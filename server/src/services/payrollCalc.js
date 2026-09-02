@@ -667,7 +667,12 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     }
   }
   const meal       = Number(employee.meal_vouchers) || 0;
-  const recreation = (Number(employee.recreation_annual) || 0) / 12; // pro-rate annually
+  // RETIRED (office decision, 2026-09-02): the monthly 1/12 recreation drip is
+  // gone. דמי הבראה are paid ONCE A YEAR, in August, through the payroll
+  // table's הבראה column (suggested by services/recreationPay.js per the צו).
+  // Paying both would pay recreation twice, so this leg is hard-zero — the
+  // employee-card recreation_annual field remains only as reference data.
+  const recreation = 0;
 
   // --- Loan deductions ---
   const loans = Array.isArray(employee.loans) ? employee.loans : [];
