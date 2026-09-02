@@ -709,15 +709,20 @@ async function getMonth(req, res, next) {
         if (matEnd && ymd > matEnd) return false;
         return true;
       };
-      // בונוס אוגוסט: when the month is opened to the bonus, the fixed summer
-      // window (16–31.8) leaves the absence mechanism entirely — an unapproved
-      // day is deducted ONCE, out of the completion (applyBonusSplit below),
-      // and an approved day is paid as the bonus. Counting those same days
-      // here as unexplained absences would deduct them a second time.
+      // The fixed summer window (16–31.8) leaves the absence mechanism
+      // entirely, for EVERY global employee in August — flag on or off:
+      //   - bonus ON:  an unapproved day is deducted ONCE, out of the
+      //     completion (applyBonusSplit below); counting it here too would
+      //     deduct it a second time.
+      //   - bonus OFF: the window is known summer vacation, not an
+      //     unexplained absence — the standing monthly completion covers it
+      //     exactly as it did before the bonus feature existed. (Without this,
+      //     deleting the calendar's חופשת קיץ record turned the whole window
+      //     into "absences" and silently ate her completion.)
       const augWindow = augustBonusWindow(month);
       const closureFlagOn = !!existingManual.closure_completion;
       const inAugustBonusWindow = (d) =>
-        closureFlagOn && !!augWindow && d >= augWindow.start && d <= augWindow.end;
+        !!augWindow && d >= augWindow.start && d <= augWindow.end;
       const absenceDays = isTeken
         ? commitmentInfo.absent_dates
             .filter(d => !holidayDates.has(d) && !leaveDates.has(d) && !inAugustBonusWindow(d))
@@ -3396,8 +3401,14 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ? `${n1(paEffHours)} ש׳` + (paDedDays.length ? subLine(paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')) : '')
       : '';
     const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
+    // Every card names the hourly value its pay is computed from — hourly
+    // staff their contract rate, teken staff the derived salary/committed-hours
+    // value (the one that prices OT, absences and the August bonus alike).
     const rateCell = isGlobal
-      ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''), b.rates?.global_salary ? f(b.rates.global_salary) : '')
+      ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''),
+          b.rates?.global_salary
+            ? f(b.rates.global_salary) + (tb.hourly_value ? subLine(`ערך שעה: ₪${n1(tb.hourly_value)}`) : '')
+            : '')
       : cell('תעריף שעה', b.rates?.hourly_rate ? f(b.rates.hourly_rate) : '');
     const notes = [r.permanent_note, r.manual?.notes].filter(Boolean).join(' · ');
     const bank = [r.bank_number, r.bank_branch, r.bank_account].some(Boolean);
@@ -3511,7 +3522,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}
         ${cell('סיבוס', nt(r.manual?.cibus))}
-        ${cell('תוספת שעות (מעל התקן)', paExtraHrs ? `${n1(paExtraHrs)} ש׳` : '', { color: '#15803d' })}
+        ${cell('תוספת שעות (מעל התקן)', paExtraHrs ? `${n1(paExtraHrs)} ש׳${paExtra ? ` · ${f(paExtra)}` : ''}` : '', { color: '#15803d' })}
       </tr>
       <tr>
         ${cell('קיזוז מקדמה', advance)}
@@ -3536,7 +3547,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
           <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה שולמו כדמי מחלה (${f(r.sick_info.pay)}), <u>והשלמת השכר הופחתה באותו סכום</u> (${f(r.sick_info.completion_offset)}) — כדי שלא ישולם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא. יש לנכות את הימים ממאזן המחלה.</span></td></tr>` : ''}
       ${(augBonus && Number(augBonus.amount) > 0) ? `<tr><td colspan="6" style="border:2px solid #7c3aed;background:#f5f3ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#6d28d9;font-weight:800">בונוס אוגוסט (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.days || []).length} ימי חופשת קיץ שאושרו שולמו כבונוס במתנה מהגן (${f(augBonus.amount)}) — <u>השלמת השכר הופחתה באותו סכום</u>, כך שסה״כ המשכורת אינו משולם פעמיים. <u>אין לנכות ימים אלה מיתרת החופשה</u>.${(augBonus.days || []).length ? subLine((augBonus.days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
+          <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.days || []).length} ימי חופשת קיץ שאושרו שולמו כבונוס במתנה מהגן (${f(augBonus.amount)}). <u>אין לנכות ימים אלה מיתרת החופשה</u>.${(augBonus.days || []).length ? subLine((augBonus.days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
       ${(augBonus && Number(augBonus.deduction) > 0) ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">בונוס אוגוסט — ימים שלא אושרו: </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.unapproved_days || []).length || ''} ימי חופשת קיץ לא אושרו לתשלום — השכר הופחת ב-${f(augBonus.deduction)}.${(augBonus.unapproved_days || []).length ? subLine((augBonus.unapproved_days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
