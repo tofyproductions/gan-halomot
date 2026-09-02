@@ -1014,6 +1014,7 @@ export default function PayrollMonthTable() {
         if (!m.has(k)) m.set(k, []);
         m.get(k).push({
           ...ch,
+          request_id: String(reqDoc._id),
           requested_by_name: reqDoc.requested_by_name,
           branch_name: reqDoc.branch_name,
           created_at: reqDoc.created_at,
@@ -1023,6 +1024,38 @@ export default function PayrollMonthTable() {
     }
     return m;
   }, [mgrRequests]);
+
+  // Per-request decision note the accountant types before approving/rejecting.
+  const [mgrDecisionNotes, setMgrDecisionNotes] = useState({}); // request_id → text
+
+  // Decide a manager's request right from the table dialog — the same
+  // endpoint the בקשות שינוי tab uses. Approving APPLIES the requested value
+  // to PayrollMonth.manual; rejecting requires a reason, which the manager
+  // sees in her "ההחלטות שלי" screen. Either way the request leaves the
+  // pending list and the table refreshes.
+  const decideMgrRequest = useCallback(async (requestId, decision) => {
+    const reqDoc = mgrRequests.find(r => String(r._id) === requestId);
+    if (!reqDoc) return;
+    const note = (mgrDecisionNotes[requestId] || '').trim();
+    if (decision === 'rejected' && !note) {
+      toast.error('דחייה מחייבת סיבה — המנהל יראה אותה במסך ההחלטות שלו');
+      return;
+    }
+    try {
+      await api.post(`/payroll-month/change-requests/${String(reqDoc._id)}/decide`, {
+        decisions: (reqDoc.changes || []).map(() => decision),
+        decision_note: note,
+      });
+      toast.success(decision === 'approved'
+        ? 'הבקשה אושרה — הערך המבוקש הוחל בטבלה'
+        : 'הבקשה נדחתה — הסיבה תוצג למנהל הסניף');
+      setMgrRequests(prev => prev.filter(r => String(r._id) !== requestId));
+      setMgrDecisionNotes(prev => { const next = { ...prev }; delete next[requestId]; return next; });
+      fetchData({ quiet: true });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'ההחלטה נכשלה');
+    }
+  }, [mgrRequests, mgrDecisionNotes, fetchData]);
 
   // Close the dialog, scroll the employee's row into view and flash it.
   const jumpToEmployee = useCallback((employeeId) => {
@@ -2511,40 +2544,74 @@ export default function PayrollMonthTable() {
             return (
               <Stack spacing={1.5} sx={{ mt: 0.5 }}>
                 <Alert severity="info" sx={{ borderRadius: 2, py: 0.3 }}>
-                  תצוגה להשוואה בלבד — אישור או דחייה נעשים בלשונית "בקשות שינוי".
+                  ביצעת את העדכון בטבלה? אשר — הערך המבוקש יוחל וייסגר מול המנהל.
+                  החלטת שלא לבצע? דחה עם סיבה — המנהל יראה אותה במסך "ההחלטות שלי".
                 </Alert>
-                {entries.map(([empId, items]) => (
-                  <Paper key={empId} variant="outlined" sx={{ p: 1.2, borderRadius: 2 }}>
-                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                      <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>
-                        {items[0].employee_name || data?.rows?.find(x => x.employee_id === empId)?.full_name || ''}
-                      </Typography>
-                      <Button size="small" variant="outlined" color="warning"
-                        onClick={() => jumpToEmployee(empId)}>
-                        הצג בטבלה
-                      </Button>
-                    </Stack>
-                    {items.map((ch, i) => (
-                      <Box key={i} sx={{ py: 0.5, borderTop: i > 0 ? '1px dashed' : 'none', borderColor: 'divider' }}>
-                        <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
-                          <Chip size="small" variant="outlined" label={ch.field_label || FIELD_LABELS[ch.field] || ch.field}
-                            sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
-                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                            נוכחי: <b>{fmtReqValue(ch.current_value)}</b>
-                          </Typography>
-                          <Typography variant="body2" sx={{ color: 'warning.dark' }}>
-                            מבוקש: <b>{fmtReqValue(ch.requested_value)}</b>
-                          </Typography>
-                        </Stack>
-                        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
-                          {ch.requested_by_name}{ch.branch_name ? ` · ${ch.branch_name}` : ''}
-                          {ch.created_at ? ` · ${new Date(ch.created_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
-                          {ch.request_note ? ` · "${ch.request_note}"` : ''}
+                {entries.map(([empId, items]) => {
+                  // One card per employee, one decision strip per REQUEST (a
+                  // request usually carries a single change, but never split a
+                  // multi-change request here — that nuance lives in the
+                  // בקשות שינוי tab).
+                  const groups = [];
+                  for (const it of items) {
+                    let g = groups.find(x => x.request_id === it.request_id);
+                    if (!g) { g = { request_id: it.request_id, items: [] }; groups.push(g); }
+                    g.items.push(it);
+                  }
+                  return (
+                    <Paper key={empId} variant="outlined" sx={{ p: 1.2, borderRadius: 2 }}>
+                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>
+                          {items[0].employee_name || data?.rows?.find(x => x.employee_id === empId)?.full_name || ''}
                         </Typography>
-                      </Box>
-                    ))}
-                  </Paper>
-                ))}
+                        <Button size="small" variant="outlined" color="warning"
+                          onClick={() => jumpToEmployee(empId)}>
+                          הצג בטבלה
+                        </Button>
+                      </Stack>
+                      {groups.map((g, gi) => (
+                        <Box key={g.request_id} sx={{ pt: gi > 0 ? 1 : 0, mt: gi > 0 ? 1 : 0, borderTop: gi > 0 ? '1px solid' : 'none', borderColor: 'divider' }}>
+                          {g.items.map((ch, i) => (
+                            <Box key={i} sx={{ py: 0.5, borderTop: i > 0 ? '1px dashed' : 'none', borderColor: 'divider' }}>
+                              <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
+                                <Chip size="small" variant="outlined" label={ch.field_label || FIELD_LABELS[ch.field] || ch.field}
+                                  sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+                                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                                  נוכחי: <b>{fmtReqValue(ch.current_value)}</b>
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: 'warning.dark' }}>
+                                  מבוקש: <b>{fmtReqValue(ch.requested_value)}</b>
+                                </Typography>
+                              </Stack>
+                              <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                                {ch.requested_by_name}{ch.branch_name ? ` · ${ch.branch_name}` : ''}
+                                {ch.created_at ? ` · ${new Date(ch.created_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                                {ch.request_note ? ` · "${ch.request_note}"` : ''}
+                              </Typography>
+                            </Box>
+                          ))}
+                          <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.7 }}>
+                            <TextField
+                              size="small" fullWidth
+                              placeholder="הערת החלטה למנהל (חובה בדחייה)"
+                              value={mgrDecisionNotes[g.request_id] || ''}
+                              onChange={(e) => setMgrDecisionNotes(prev => ({ ...prev, [g.request_id]: e.target.value }))}
+                              inputProps={{ style: { fontSize: '0.8rem' } }}
+                            />
+                            <Button size="small" variant="contained" color="success" sx={{ whiteSpace: 'nowrap' }}
+                              onClick={() => decideMgrRequest(g.request_id, 'approved')}>
+                              ✓ בוצע — אשר
+                            </Button>
+                            <Button size="small" variant="outlined" color="error" sx={{ whiteSpace: 'nowrap' }}
+                              onClick={() => decideMgrRequest(g.request_id, 'rejected')}>
+                              ✗ דחה
+                            </Button>
+                          </Stack>
+                        </Box>
+                      ))}
+                    </Paper>
+                  );
+                })}
               </Stack>
             );
           })()}
