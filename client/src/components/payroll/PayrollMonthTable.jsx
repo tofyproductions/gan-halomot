@@ -2382,6 +2382,16 @@ export default function PayrollMonthTable() {
                           {/* August: every chip opens the preview dialog — the figure
                               is approved against its data (start date, seniority,
                               bracket, rate), never entered blind. */}
+                          {/* A value already entered keeps a small doorway back to the
+                              full preview — the data behind the figure stays one
+                              click away, not gone the moment it was approved. */}
+                          {r.recreation_auto && r.manual.recreation && r.manual.recreation.kind !== 'empty' && (
+                            <Tooltip title="פתח/י את חלונית ההבראה — כל הנתונים, עריכה ואישור מחדש">
+                              <Chip size="small" variant="outlined" label="🌴 פרטים"
+                                onClick={(e) => { e.stopPropagation(); setRecDlg({ open: true, row: r }); }}
+                                sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#a5f3fc' }} />
+                            </Tooltip>
+                          )}
                           {r.recreation_auto && (!r.manual.recreation || r.manual.recreation.kind === 'empty') && (() => {
                             const ra = r.recreation_auto;
                             const openDlg = (e) => { e.stopPropagation(); setRecDlg({ open: true, row: r }); };
@@ -3275,10 +3285,16 @@ function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate
   useEffect(() => {
     if (!open || !row) return;
     setStartDate(ra?.start_date && ra.start_date > '1990-01-01' ? ra.start_date : '');
-    setAmount(ra?.amount != null ? String(ra.amount) : '');
+    // An already-entered figure is what re-opens for editing; the computed
+    // suggestion fills in only when nothing was entered yet.
+    const existing = row.manual?.recreation;
+    setAmount(existing?.kind === 'number' && existing.amount != null
+      ? String(existing.amount)
+      : (ra?.amount != null ? String(ra.amount) : ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row]);
   if (!row) return null;
+  const entered = row.manual?.recreation && row.manual.recreation.kind !== 'empty' ? row.manual.recreation : null;
   const basis = ra?.basis || 'unknown_start';
   const doubtful = basis === 'unknown_start' || basis === 'suspicious_start';
   const notYet = basis === 'not_yet_eligible';
@@ -3294,6 +3310,13 @@ function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate
       <DialogTitle sx={{ fontWeight: 700 }}>🌴 דמי הבראה — {row.full_name}</DialogTitle>
       <DialogContent>
         <Stack spacing={1.2} sx={{ mt: 0.5 }}>
+          {entered && (
+            <Alert severity="success" sx={{ borderRadius: 2, py: 0.3 }}>
+              {entered.kind === 'number'
+                ? `הוזן כבר סכום: ₪${Number(entered.amount).toLocaleString('he-IL')} — אפשר לערוך ולאשר מחדש.`
+                : `נרשם כבר: "${entered.text}" — אישור סכום יחליף את הרישום.`}
+            </Alert>
+          )}
           {doubtful && (
             <Alert severity="warning" sx={{ borderRadius: 2 }}>
               {basis === 'unknown_start'
