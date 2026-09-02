@@ -77,6 +77,22 @@ const FIELD_LABELS = {
   custom_values: 'עמודה מותאמת',
 };
 
+// A manager-requested value can be a number, free text, a boolean, or a
+// {kind, amount, text} mixed field (gift_card/cibus etc.) — render it human.
+function fmtReqValue(v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'boolean') return v ? 'כן' : 'לא';
+  if (typeof v === 'object') {
+    if ('kind' in v || 'amount' in v || 'text' in v) {
+      if (v.kind === 'text') return v.text || '—';
+      if (v.amount != null && v.amount !== '') return `₪${Number(v.amount).toLocaleString('he-IL')}`;
+      return v.text || '—';
+    }
+    return JSON.stringify(v);
+  }
+  return String(v);
+}
+
 function currentYearMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -877,6 +893,13 @@ export default function PayrollMonthTable() {
   const [vacation, setVacation] = useState({ open: false, row: null });
   const [sick, setSick] = useState({ open: false, row: null });
   const [closureDetail, setClosureDetail] = useState({ open: false, row: null });
+  // Pending manager change-requests for THIS month, shown inside the table so
+  // the accountant compares what the managers asked against the row she's
+  // editing — without flipping back and forth to the בקשות שינוי tab.
+  const [mgrRequests, setMgrRequests] = useState([]);
+  const [mgrReqDlg, setMgrReqDlg] = useState({ open: false, employeeId: null }); // employeeId null → all
+  const [highlightEmp, setHighlightEmp] = useState(null);
+  const rowRefs = useRef({});
   const [absence, setAbsence] = useState({ open: false, row: null });
   const [partialAbs, setPartialAbs] = useState({ open: false, row: null });
   const [inactiveDlg, setInactiveDlg] = useState({ open: false, row: null });
@@ -970,6 +993,44 @@ export default function PayrollMonthTable() {
     api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
+
+  // Pending manager requests for the month — refetched whenever the table
+  // reloads, so approving/rejecting in the בקשות שינוי tab is reflected here.
+  useEffect(() => {
+    if (!(isAdmin || isAccountant)) { setMgrRequests([]); return undefined; }
+    let alive = true;
+    api.get('/payroll-month/change-requests', { params: { status: 'pending', month } })
+      .then(res => { if (alive) setMgrRequests(res.data?.requests || []); })
+      .catch(() => { /* a failed side-fetch must never take the table down */ });
+    return () => { alive = false; };
+  }, [month, isAdmin, isAccountant, data]);
+
+  // employee_id → the change items managers asked for (annotated with who/when).
+  const mgrReqByEmp = useMemo(() => {
+    const m = new Map();
+    for (const reqDoc of mgrRequests) {
+      for (const ch of (reqDoc.changes || [])) {
+        const k = String(ch.employee_id);
+        if (!m.has(k)) m.set(k, []);
+        m.get(k).push({
+          ...ch,
+          requested_by_name: reqDoc.requested_by_name,
+          branch_name: reqDoc.branch_name,
+          created_at: reqDoc.created_at,
+          request_note: reqDoc.note || '',
+        });
+      }
+    }
+    return m;
+  }, [mgrRequests]);
+
+  // Close the dialog, scroll the employee's row into view and flash it.
+  const jumpToEmployee = useCallback((employeeId) => {
+    setMgrReqDlg({ open: false, employeeId: null });
+    setHighlightEmp(employeeId);
+    setTimeout(() => rowRefs.current[employeeId]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120);
+    setTimeout(() => setHighlightEmp(null), 4000);
+  }, []);
 
   // בונוס אוגוסט is no longer a one-click toggle that pays everything: the
   // chip only OPENS the edit dialog (ClosureCompletionDetailDialog), and the
@@ -1696,6 +1757,16 @@ export default function PayrollMonthTable() {
             <Button startIcon={<ScheduleIcon />} size="small" onClick={() => setFixedSchedOpen(true)}
               variant="outlined" color="secondary" disabled={stagingMode}>שעות קבועות</Button>
           </Tooltip>
+          {(isAdmin || isAccountant) && mgrRequests.length > 0 && (
+            <Tooltip title="בקשות עדכון שכר ממתינות מהמנהלים לחודש זה — השוואה מול הטבלה">
+              <Badge badgeContent={mgrRequests.length} color="warning">
+                <Button size="small" variant="outlined" color="warning" startIcon={<NoteAltIcon />}
+                  onClick={() => setMgrReqDlg({ open: true, employeeId: null })}>
+                  בקשות מנהלים
+                </Button>
+              </Badge>
+            </Tooltip>
+          )}
           <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
           <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />}
             onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
@@ -1943,7 +2014,14 @@ export default function PayrollMonthTable() {
                     ? (ri % 2 === 1 ? lightenHex(marker.nameTint, 0.45) : lightenHex(marker.nameTint, 0.7))
                     : (ri % 2 === 1 ? '#f3f4f6' : '#ffffff');
                   elements.push(
-                    <TableRow key={r.employee_id} sx={{ ...(marker ? { backgroundColor: marker.rowTint } : {}), ...(r.is_active === false ? { opacity: 0.6 } : {}) }}>
+                    <TableRow
+                      key={r.employee_id}
+                      ref={(el) => { rowRefs.current[r.employee_id] = el; }}
+                      sx={{
+                        ...(marker ? { backgroundColor: marker.rowTint } : {}),
+                        ...(r.is_active === false ? { opacity: 0.6 } : {}),
+                        ...(highlightEmp === r.employee_id ? { outline: '3px solid #f59e0b', outlineOffset: '-3px' } : {}),
+                      }}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0
                         // Forced past the translucent zebra / hover rules (high
@@ -1995,6 +2073,14 @@ export default function PayrollMonthTable() {
                               {r.payslip_paid && (
                                 <Tooltip title={r.payslip_paid_at ? `אושר ושולם · ${new Date(r.payslip_paid_at).toLocaleDateString('he-IL')}` : 'אושר ושולם'}>
                                   <Chip size="small" color="success" label="✓ שולם" sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
+                                </Tooltip>
+                              )}
+                              {mgrReqByEmp.has(r.employee_id) && (
+                                <Tooltip title="מנהל הסניף ביקש עדכון שכר לעובדת זו — לחץ/י להשוואה מול הטבלה">
+                                  <Chip size="small" color="warning" variant="filled"
+                                    label={`📨 בקשת מנהל${mgrReqByEmp.get(r.employee_id).length > 1 ? ` ×${mgrReqByEmp.get(r.employee_id).length}` : ''}`}
+                                    onClick={(e) => { e.stopPropagation(); setMgrReqDlg({ open: true, employeeId: r.employee_id }); }}
+                                    sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700, cursor: 'pointer' }} />
                                 </Tooltip>
                               )}
                             </Box>
@@ -2403,6 +2489,70 @@ export default function PayrollMonthTable() {
         onClose={() => setVacation({ open: false, row: null })}
         onSaved={fetchData}
       />
+      {/* בקשות מנהלים — the managers' asks side by side with the table, with a
+          jump-to-row so entering them is one glance and one click, not a tab
+          switch. Read-only here: approving/rejecting stays in בקשות שינוי. */}
+      <Dialog open={mgrReqDlg.open} onClose={() => setMgrReqDlg({ open: false, employeeId: null })} dir="rtl" maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          📨 בקשות מנהלים — {month}
+          {mgrReqDlg.employeeId && data?.rows && (
+            <Typography component="span" variant="body2" sx={{ color: 'text.secondary', mr: 1 }}>
+              · {data.rows.find(x => x.employee_id === mgrReqDlg.employeeId)?.full_name || ''}
+            </Typography>
+          )}
+        </DialogTitle>
+        <DialogContent>
+          {(() => {
+            const entries = [...mgrReqByEmp.entries()]
+              .filter(([empId]) => !mgrReqDlg.employeeId || empId === mgrReqDlg.employeeId);
+            if (entries.length === 0) {
+              return <Typography variant="body2" color="text.secondary">אין בקשות ממתינות לחודש זה.</Typography>;
+            }
+            return (
+              <Stack spacing={1.5} sx={{ mt: 0.5 }}>
+                <Alert severity="info" sx={{ borderRadius: 2, py: 0.3 }}>
+                  תצוגה להשוואה בלבד — אישור או דחייה נעשים בלשונית "בקשות שינוי".
+                </Alert>
+                {entries.map(([empId, items]) => (
+                  <Paper key={empId} variant="outlined" sx={{ p: 1.2, borderRadius: 2 }}>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>
+                        {items[0].employee_name || data?.rows?.find(x => x.employee_id === empId)?.full_name || ''}
+                      </Typography>
+                      <Button size="small" variant="outlined" color="warning"
+                        onClick={() => jumpToEmployee(empId)}>
+                        הצג בטבלה
+                      </Button>
+                    </Stack>
+                    {items.map((ch, i) => (
+                      <Box key={i} sx={{ py: 0.5, borderTop: i > 0 ? '1px dashed' : 'none', borderColor: 'divider' }}>
+                        <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap" useFlexGap>
+                          <Chip size="small" variant="outlined" label={ch.field_label || FIELD_LABELS[ch.field] || ch.field}
+                            sx={{ height: 18, fontSize: '0.65rem', fontWeight: 700 }} />
+                          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                            נוכחי: <b>{fmtReqValue(ch.current_value)}</b>
+                          </Typography>
+                          <Typography variant="body2" sx={{ color: 'warning.dark' }}>
+                            מבוקש: <b>{fmtReqValue(ch.requested_value)}</b>
+                          </Typography>
+                        </Stack>
+                        <Typography variant="caption" sx={{ color: 'text.disabled', display: 'block' }}>
+                          {ch.requested_by_name}{ch.branch_name ? ` · ${ch.branch_name}` : ''}
+                          {ch.created_at ? ` · ${new Date(ch.created_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : ''}
+                          {ch.request_note ? ` · "${ch.request_note}"` : ''}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Paper>
+                ))}
+              </Stack>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMgrReqDlg({ open: false, employeeId: null })}>סגור</Button>
+        </DialogActions>
+      </Dialog>
       <ClosureCompletionDetailDialog
         open={closureDetail.open}
         row={closureDetail.row}

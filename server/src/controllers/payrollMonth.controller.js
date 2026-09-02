@@ -3198,10 +3198,13 @@ async function createChangeRequest(req, res, next) {
  */
 async function listChangeRequests(req, res, next) {
   try {
-    const { status, mine } = req.query;
+    const { status, mine, month } = req.query;
     const role = req.user?.role;
     const filter = {};
     if (status) filter.status = status;
+    // The payroll table asks for its own month's pending requests, so the
+    // accountant sees the managers' asks next to the rows they're editing.
+    if (month) filter.month = month;
     const isReviewer = role === 'system_admin' || role === 'accountant';
     if (mine === '1' || !isReviewer) {
       filter.requested_by = req.user.id;
