@@ -3919,6 +3919,42 @@ async function punchIssues(month, { includePending = false } = {}) {
     byDay.get(k).push(p);
   }
 
+  // Retire mirrored leftovers: a pending report that duplicates (same minute)
+  // a countable punch on an already-COMPLETE day will never be acted on — the
+  // pending list shows it forever while this screen says all clear, and the
+  // two views disagree until someone hand-rejects it. Reject it here, with a
+  // note, the moment it is seen. Incomplete days keep their pending reports —
+  // there the report may be the missing half.
+  if (!includePending) {
+    const retireIds = [];
+    for (const [k, pend] of pendingByDay) {
+      const day = byDay.get(k) || [];
+      if (day.length < 2) continue;
+      const minutes = new Set(day.map(p => ISR_HHMM(p.timestamp)));
+      const keep = [];
+      for (const pp of pend) {
+        if (minutes.has(ISR_HHMM(pp.timestamp))) retireIds.push(pp._id);
+        else keep.push(pp);
+      }
+      pendingByDay.set(k, keep);
+    }
+    if (retireIds.length) {
+      await Punch.updateMany(
+        {
+          _id: { $in: retireIds },
+          approval_status: { $in: ['pending', 'pending_manager', 'pending_accountant'] },
+        },
+        {
+          $set: {
+            approval_status: 'rejected',
+            approval_decided_at: new Date(),
+            approval_decided_note: 'נדחה אוטומטית — כפול להחתמה קיימת באותה דקה ביום שכבר הושלם',
+          },
+        },
+      );
+    }
+  }
+
   /**
    * Today is not a missing punch. She is still at work.
    *

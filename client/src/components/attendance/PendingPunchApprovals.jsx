@@ -41,6 +41,38 @@ export default function PendingPunchApprovals({ onChanged }) {
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [reject, setReject] = useState({ open: false, punch: null, note: '' });
+  // Per-group full-day context: what the employee's day actually looks like —
+  // clock punches, other reports, their statuses — fetched on demand so the
+  // accountant approves against the whole day, not a bare time.
+  const [dayCtx, setDayCtx] = useState({}); // group.key → { loading, punches } | undefined (closed)
+
+  const toggleDayCtx = (group) => {
+    setDayCtx(prev => {
+      if (prev[group.key]) { const next = { ...prev }; delete next[group.key]; return next; }
+      return { ...prev, [group.key]: { loading: true, punches: [] } };
+    });
+    if (dayCtx[group.key]) return; // was open — just closed it
+    api.get('/payroll/punches/day', { params: { employee_id: group.employee_db_id, date: group.iso_date } })
+      .then(res => {
+        const list = (res.data?.punches || [])
+          .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        setDayCtx(prev => (prev[group.key] ? { ...prev, [group.key]: { loading: false, punches: list } } : prev));
+      })
+      .catch(() => {
+        toast.error('טעינת יום ההחתמות נכשלה');
+        setDayCtx(prev => { const next = { ...prev }; delete next[group.key]; return next; });
+      });
+  };
+
+  const DAY_SRC = { manual: 'ידני', fixed_schedule: 'שעות קבועות', closure_completion: 'בונוס אוגוסט' };
+  const DAY_STATUS = {
+    auto: { label: 'שעון', color: 'success' },
+    approved: { label: 'מאושר', color: 'success' },
+    pending: { label: 'ממתין', color: 'warning' },
+    pending_manager: { label: 'ממתין למנהל', color: 'warning' },
+    pending_accountant: { label: 'ממתין להנה״ח', color: 'warning' },
+    rejected: { label: 'נדחה', color: 'error' },
+  };
   // Accounting/admin approving a stage-1 row directly — the branch manager
   // never got to look at it. See services/decisions.js for how she's told.
   const [bypassConfirm, setBypassConfirm] = useState({ open: false, punch: null, busy: false });
@@ -116,6 +148,8 @@ export default function PendingPunchApprovals({ onChanged }) {
           key,
           employee_name: p.employee_id?.full_name || '—',
           israeli_id: p.employee_id?.israeli_id || '',
+          employee_db_id: p.employee_id?._id || null,
+          iso_date: new Date(p.timestamp).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' }),
           date: new Date(p.timestamp).toLocaleDateString('he-IL'),
           items: [],
         });
@@ -171,6 +205,16 @@ export default function PendingPunchApprovals({ onChanged }) {
                       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
                         <Typography sx={{ fontWeight: 700, minWidth: 130 }}>{group.employee_name}</Typography>
                         <Typography variant="caption" color="text.secondary">{group.date}</Typography>
+                        {group.employee_db_id && (
+                          <Tooltip title="הצג את כל החתמות היום — שעון ודיווחים — לפני האישור">
+                            <Chip
+                              size="small" variant={dayCtx[group.key] ? 'filled' : 'outlined'} color="info"
+                              label={dayCtx[group.key] ? 'הסתר יום' : '🕐 הצג יום מלא'}
+                              onClick={() => toggleDayCtx(group)}
+                              sx={{ height: 20, fontSize: '0.65rem', cursor: 'pointer' }}
+                            />
+                          </Tooltip>
+                        )}
                         <Box sx={{ flex: 1 }} />
                         {group.items.map((p) => {
                           const src = manualSource(p, p.employee_id);
@@ -214,6 +258,42 @@ export default function PendingPunchApprovals({ onChanged }) {
                           );
                         })}
                       </Stack>
+                      {dayCtx[group.key] && (
+                        <Box sx={{ mt: 1, p: 1, borderRadius: 2, bgcolor: '#f0f9ff', border: '1px solid #bae6fd' }}>
+                          {dayCtx[group.key].loading ? (
+                            <Typography variant="caption" color="text.secondary">טוען את היום…</Typography>
+                          ) : dayCtx[group.key].punches.length === 0 ? (
+                            <Typography variant="caption" color="text.secondary">
+                              אין החתמות נוספות ביום זה — הדיווח הממתין הוא כל מה שיש. אישורו ישאיר את היום עם החתמה בודדת.
+                            </Typography>
+                          ) : (
+                            <>
+                              <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
+                                כל החתמות היום ({group.date}):
+                              </Typography>
+                              <Stack direction="row" spacing={0.7} flexWrap="wrap" useFlexGap>
+                                {dayCtx[group.key].punches.map(dp => {
+                                  const st = DAY_STATUS[dp.approval_status || 'auto'] || { label: dp.approval_status, color: 'default' };
+                                  const isThisPending = group.items.some(it => it._id === dp._id);
+                                  return (
+                                    <Chip
+                                      key={dp._id}
+                                      size="small"
+                                      variant={isThisPending ? 'filled' : 'outlined'}
+                                      color={st.color}
+                                      label={`${new Date(dp.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} · ${DAY_SRC[dp.timestamp_source] || 'שעון'} · ${st.label}`}
+                                      sx={{ height: 22, fontSize: '0.68rem', fontWeight: isThisPending ? 800 : 500 }}
+                                    />
+                                  );
+                                })}
+                              </Stack>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                                המודגש הוא הדיווח שממתין כאן — אשרו/דחו אותו בכפתורים שבשורה למעלה.
+                              </Typography>
+                            </>
+                          )}
+                        </Box>
+                      )}
                     </Paper>
                   ))}
                 </Stack>
