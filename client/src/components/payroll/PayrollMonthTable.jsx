@@ -1106,6 +1106,13 @@ export default function PayrollMonthTable() {
     }
   }, [mgrRequests, mgrDecisionNotes, fetchData]);
 
+  // דמי הבראה is an ANNUAL August payment — the column earns its place only
+  // in August (or in any month that already carries entered values, so old
+  // data never disappears from view).
+  const isAugustMonth = month?.slice(5, 7) === '08';
+  const showRecreation = isAugustMonth
+    || (data?.rows || []).some(r => r.manual?.recreation && r.manual.recreation.kind !== 'empty');
+
   // Close the dialog, scroll the employee's row into view and flash it.
   const jumpToEmployee = useCallback((employeeId) => {
     setMgrReqDlg({ open: false, employeeId: null });
@@ -1898,6 +1905,17 @@ export default function PayrollMonthTable() {
         </Stack>
       </Paper>
 
+      {isAugustMonth && (
+        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: '#ecfeff', border: '1px solid #67e8f9', color: '#0f172a' }}>
+          <b>אוגוסט — חודש תשלום דמי ההבראה השנתי.</b>{' '}
+          זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה: ימים לפי מדרגות הוותק שבצו ההרחבה × תעריף יום × היקף משרה.
+          מי שטרם השלימ/ה שנה — אינה זכאית השנה ותקבל תשלום מלא באוגוסט הבא.
+          הצעה מחושבת מופיעה בעמודת "הבראה" ליד כל עובד/ת — לחיצה עליה מזינה את הסכום.
+          {(data?.rows || []).find(r => r.recreation_auto)?.recreation_auto?.day_rate
+            ? ` תעריף יום נוכחי: ₪${(data.rows.find(r => r.recreation_auto).recreation_auto.day_rate).toLocaleString('he-IL')} — יש לוודא מול רו״ח שהוא מעודכן לשנה זו.`
+            : ''}
+        </Alert>
+      )}
       <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
         <Table size="small" stickyHeader sx={{
           tableLayout: 'fixed',
@@ -1930,11 +1948,11 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.days }} />{/* חופשה */}
             <col style={{ width: W.days }} />{/* דמי חגים */}
             <col style={{ width: W.advance }} />
-            <col style={{ width: W.money }} />
-            <col style={{ width: W.money }} />
-            <col style={{ width: W.money }} />
-            <col style={{ width: W.money }} />
-            <col style={{ width: W.money }} />
+            <col style={{ width: W.money }} />{/* GIFT CARD */}
+            {showRecreation && <col style={{ width: W.money }} />}{/* הבראה — אוגוסט בלבד */}
+            <col style={{ width: W.money }} />{/* סיבוס */}
+            <col style={{ width: W.money }} />{/* מילואים */}
+            <col style={{ width: W.money }} />{/* הלוואות */}
             <col style={{ width: W.money }} />{/* בונוס */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
@@ -1993,7 +2011,13 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>דמי חגים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>קיזוז מקדמה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>GIFT CARD</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>הבראה</TableCell>
+              {showRecreation && (
+                <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#ecfeff' }}>
+                  <Tooltip arrow title="דמי הבראה שנתיים — משולמים באוגוסט. זכאות: השלמת שנת עבודה מלאה; ימים לפי מדרגות ותק בצו ההרחבה × תעריף יום × היקף משרה. ההצעה מחושבת אוטומטית — לחיצה עליה מזינה את הסכום">
+                    <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>הבראה 🌴</span>
+                  </Tooltip>
+                </TableCell>
+              )}
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.50' }}>הלוואות</TableCell>
@@ -2021,7 +2045,7 @@ export default function PayrollMonthTable() {
 
           <TableBody>
             {(() => {
-              const totalCols = 1 + 6 + 19 + customColumns.length;
+              const totalCols = 1 + 6 + (showRecreation ? 19 : 18) + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -2333,7 +2357,31 @@ export default function PayrollMonthTable() {
                         />
                       </TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.gift_card}  disabled={locked} onSave={v => patchManual(r.employee_id, { gift_card: v })} /></TableCell>
-                      <TableCell align="center"><NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} /></TableCell>
+                      {showRecreation && (
+                        <TableCell align="center">
+                          <NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} />
+                          {/* August suggestion: the צו's figure, one click from entered.
+                              A not-yet-eligible employee gets a gray "why empty" chip
+                              instead of a number that would tempt someone to pay it. */}
+                          {r.recreation_auto && (!r.manual.recreation || r.manual.recreation.kind === 'empty') && (
+                            r.recreation_auto.basis === 'annual' ? (
+                              <Tooltip title={`ותק ${r.recreation_auto.full_years} שנים → ${r.recreation_auto.days} ימי הבראה × ₪${r.recreation_auto.day_rate} × ${Math.round(r.recreation_auto.fte * 100)}% משרה. לחץ/י להזנה`}>
+                                <Chip size="small" variant="outlined" label={`🌴 ₪${r.recreation_auto.amount.toLocaleString('he-IL')}`}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (!locked) patchManual(r.employee_id, { recreation: { kind: 'number', amount: r.recreation_auto.amount, text: '' } });
+                                  }}
+                                  sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#67e8f9' }} />
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title={`טרם השלימה שנת עבודה (${r.recreation_auto.months_worked} חודשים) — לפי הצו אין זכאות השנה; תשלום מלא באוגוסט הבא`}>
+                                <Chip size="small" variant="outlined" label="טרם שנה"
+                                  sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, color: 'text.disabled' }} />
+                              </Tooltip>
+                            )
+                          )}
+                        </TableCell>
+                      )}
                       <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.50' }} onClick={() => setLoansDlg({ open: true, row: r })}>

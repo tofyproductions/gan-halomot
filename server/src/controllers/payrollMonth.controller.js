@@ -26,6 +26,7 @@ const {
   augustBonusWindow, candidateDays: augustCandidateDays, applyBonusSplit, sanitizeApprovedDates,
   bonusDayMinutes,
 } = require('../services/augustBonus');
+const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -678,6 +679,16 @@ async function getMonth(req, res, next) {
         created_by_name: adj.created_by?.full_name || '',
         created_at: adj.created_at,
       });
+    }
+
+    // דמי הבראה — August only. The per-day rate lives in Setting
+    // 'recreation_day_rate' (updated yearly with the accountant); the fallback
+    // is the service's default. Each row below carries its own suggestion.
+    const isAugustMonth = /^\d{4}-08$/.test(month);
+    let recreationDayRate = RECREATION_DEFAULT_RATE;
+    if (isAugustMonth) {
+      const rateDoc = await Setting.findOne({ key: 'recreation_day_rate' }).lean();
+      if (Number(rateDoc?.value) > 0) recreationDayRate = Number(rateDoc.value);
     }
 
     // Need ALL branches (not just in-scope) so cross-branch hours can still
@@ -1549,6 +1560,26 @@ async function getMonth(req, res, next) {
         },
         vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
         special_days: { pay: specialDayPay, lines: specialDayLines },
+        // דמי הבראה — August's suggested figure per the צו (seniority bracket ×
+        // day rate × היקף משרה); basis 'not_yet_eligible' = no completed year,
+        // nothing paid, shown so the empty cell reads as "not yet", not "missed".
+        recreation_auto: isAugustMonth ? (() => {
+          const c = commitmentByEmp.get(String(emp._id));
+          let weekly = null;
+          if (c && Array.isArray(c.days)) {
+            let sum = 0;
+            for (const cd of c.days) {
+              if (cd.is_off || !cd.start_hhmm || !cd.end_hhmm) continue;
+              const [sh, sm] = cd.start_hhmm.split(':').map(Number);
+              const [eh, em] = cd.end_hhmm.split(':').map(Number);
+              sum += Math.max(0, (eh + em / 60) - (sh + sm / 60));
+            }
+            weekly = Math.round(sum * 100) / 100 || null;
+          }
+          return computeRecreation({
+            startDate: emp.start_date, month, weeklyHours: weekly, dayRate: recreationDayRate,
+          });
+        })() : null,
         vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
         sick_info: {
           policy: emp.sick_pay_policy || 'statutory',
@@ -3675,6 +3706,11 @@ h1{font-size:17px;text-align:center;margin:0 0 2px}
 <body>
 <h1>כרטיסי שכר עובדים — ${month}</h1>
 <div class="sub">גן החלומות · ${rows.length} עובדים · סה״כ לתשלום ${f(grand)}</div>
+${/-08$/.test(month) ? `<div style="border:2px solid #0e7490;background:#ecfeff;border-radius:6px;padding:6px 10px;margin:0 0 10px;font-size:11.5px;color:#0f172a;font-weight:700">
+  🌴 <span style="color:#0e7490;font-weight:800">אוגוסט — חודש תשלום דמי ההבראה השנתי.</span>
+  זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה, לפי מדרגות הוותק שבצו ההרחבה (5–10 ימים) × תעריף יום × היקף משרה.
+  עובד/ת שטרם השלימ/ה שנה — אינה זכאית השנה, ותקבל תשלום מלא באוגוסט הבא. הסכום מופיע בעמודת "הבראה" בכרטיס של כל עובד/ת זכאי/ת.
+</div>` : ''}
 ${sections}
 </body></html>`;
 }
