@@ -2692,16 +2692,25 @@ function VacationCell({ row }) {
       />
     </Tooltip>
   );
-  if (!days && balance == null) {
+  // August: the calendar's days pay nothing until applied by hand — the cell
+  // still shows them as a suggestion so the accountant knows there's a
+  // decision waiting behind the click.
+  const pendingApply = !!row.vacation_days_auto?.pending_manual_apply;
+  if (!days && balance == null && !pendingApply) {
     return workedChip || <Typography variant="body2" color="text.secondary">—</Typography>;
   }
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
       {workedChip}
       {days > 0 && <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days} ימים</Typography>}
-      {manualVal === 0 && auto > 0 && (
+      {pendingApply ? (
+        <Tooltip title={`אוגוסט: ${auto} ימי חופשה מלוח החופשות ממתינים לאישור ידני — לא משולמים ולא נשלחים לרו״ח עד שתלחץ/י "החל לטבלת השכר" בחלונית`}>
+          <Chip size="small" color="warning" variant="outlined" label={`מלוח ${auto} — לא הוחל`}
+            sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
+        </Tooltip>
+      ) : (manualVal === 0 && auto > 0 && (
         <Chip size="small" color="warning" variant="filled" label={`מלוח ${auto}`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
-      )}
+      ))}
       {days > 0 && (isGlobal
         ? <Typography variant="caption" sx={{ fontSize: '0.56rem', color: 'text.secondary' }}>בשכר התקן</Typography>
         : (pay > 0 && <Typography variant="caption" sx={{ fontSize: '0.6rem', color: 'success.dark' }}>+₪{Math.round(pay).toLocaleString('he-IL')}</Typography>))}

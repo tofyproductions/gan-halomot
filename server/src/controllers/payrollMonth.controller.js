@@ -863,9 +863,16 @@ async function getMonth(req, res, next) {
       // holiday calendar. An HOURLY employee is PAID for vacation days she used
       // (against her balance); a תקן employee's salary already covers them, so
       // no extra pay — only the balance is drawn down.
+      // AUGUST ONLY (office decision, 2026-09-02): the calendar's vacation
+      // days are a SUGGESTION, not a payment — the accountant applies them by
+      // hand (the employee's vacation dialog, or the bulk "חופשה מלוח"
+      // button, both of which write manual.vacation_days). Every other month
+      // the auto fallback keeps paying as it always has. augWindow is non-null
+      // only in August.
+      const vacationAutoGated = !!augWindow;
       const vacEffDays = (Number(manual.vacation_days) > 0)
         ? Number(manual.vacation_days)
-        : (vacationAutoInfo.total || 0);
+        : (vacationAutoGated ? 0 : (vacationAutoInfo.total || 0));
       const vacationPay = (!isTeken && vacEffDays > 0)
         ? Math.round(vacEffDays * (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100
         : 0;
@@ -1451,6 +1458,10 @@ async function getMonth(req, res, next) {
           total_days: vacationAutoInfo.total,
           details: vacationAutoInfo.details,
           source: 'kindergarten_holidays',
+          // August: calendar days exist but pay nothing until applied by hand.
+          pending_manual_apply: vacationAutoGated
+            && (vacationAutoInfo.total || 0) > 0
+            && !(Number(manual.vacation_days) > 0),
           // Closures she worked through: paid as ordinary hours, NOT drawn from
           // her balance, and surfaced so the month shows she came in on a day
           // the gan was listed as shut.
