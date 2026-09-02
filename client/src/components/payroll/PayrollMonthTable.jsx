@@ -758,6 +758,29 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
   const [newEmail, setNewEmail] = useState('');
   const iframeRef = useRef(null);
 
+  // Find-an-employee inside the rendered report: the cards carry
+  // data-emp-name, the iframe is same-origin (srcDoc), so we can scroll to and
+  // flash a match instead of making the accountant wheel through 80 cards.
+  // Repeating the search (Enter / the button) cycles through the matches.
+  const [searchQ, setSearchQ] = useState('');
+  const searchIdxRef = useRef(0);
+  const searchEmployee = (q) => {
+    const doc = iframeRef.current?.contentDocument;
+    const query = (q ?? searchQ).trim();
+    if (!doc || !query) return;
+    const cards = [...doc.querySelectorAll('table[data-emp-name]')];
+    cards.forEach(t => { t.style.outline = ''; });
+    const matches = cards.filter(t => (t.getAttribute('data-emp-name') || '').includes(query));
+    if (matches.length === 0) { toast.info(`לא נמצא עובד תואם ל"${query}"`); return; }
+    const target = matches[searchIdxRef.current % matches.length];
+    searchIdxRef.current += 1;
+    target.style.outline = '4px solid #f59e0b';
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (matches.length > 1) {
+      toast.info(`${matches.length} התאמות — לחיצה נוספת תעבור לבאה`, { autoClose: 2500 });
+    }
+  };
+
   // Print the same cards HTML shown in the preview (the accountant report).
   const handlePrint = () => {
     const w = iframeRef.current?.contentWindow;
@@ -821,6 +844,17 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
           {!loading && data && <iframe ref={iframeRef} title="preview" srcDoc={data.html} style={{ width: '100%', height: '100%', border: 'none' }} />}
         </Box>
         <Box sx={{ width: 290, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>חיפוש עובד בדוח</Typography>
+          <Stack direction="row" spacing={0.5}>
+            <TextField
+              size="small" fullWidth placeholder="שם עובד…"
+              value={searchQ}
+              onChange={(e) => { setSearchQ(e.target.value); searchIdxRef.current = 0; }}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); searchEmployee(); } }}
+              disabled={loading || !data}
+            />
+            <Button size="small" variant="outlined" onClick={() => searchEmployee()} disabled={loading || !data}>מצא</Button>
+          </Stack>
           <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>נמענים</Typography>
           <Typography variant="caption" color="text.secondary">בחר לאן לשלוח. עותק נשלח תמיד למשרד.</Typography>
           <Box sx={{ flex: 1, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
