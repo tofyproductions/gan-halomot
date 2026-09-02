@@ -24,7 +24,7 @@ const PRESET_HOLIDAYS = [
 
 export default function HolidayManager() {
   const { selectedBranch, branches } = useBranch();
-  const { years } = useAcademicYear();
+  const { years, selectedYear, setSelectedYear } = useAcademicYear();
   const [holidays, setHolidays] = useState([]);
   // Employer closures — the staff day, the parties. Stored apart because
   // they cost something different, shown here because the question this
@@ -34,7 +34,12 @@ export default function HolidayManager() {
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: {} });
   const [copyDialog, setCopyDialog] = useState({ open: false, sourceBranch: '' });
 
-  const academicYear = years.current.range;
+  // The year being VIEWED and edited — defaults to the current academic year,
+  // but the picker in the header can go one year back (or forward). The gan
+  // year rolls over on 10 August while August's salary is settled only in
+  // September, so the board that explains an August paycheck is usually the
+  // year that just closed — it has to stay reachable.
+  const academicYear = selectedYear;
 
   const fetchHolidays = useCallback(() => {
     setLoading(true);
@@ -165,7 +170,18 @@ export default function HolidayManager() {
   return (
     <Box dir="rtl" sx={{ maxWidth: 900, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>חופשות וחגים - {academicYear}</Typography>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Typography variant="h5" sx={{ fontWeight: 800 }}>חופשות וחגים</Typography>
+          <TextField
+            select size="small" value={academicYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            sx={{ minWidth: 190 }}
+          >
+            {[years.previous, years.current, years.next].map(y => (
+              <MenuItem key={y.range} value={y.range}>{y.label}</MenuItem>
+            ))}
+          </TextField>
+        </Stack>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<ImageIcon />}
             onClick={exportPoster} disabled={exportingPoster}
@@ -189,6 +205,13 @@ export default function HolidayManager() {
           </Button>
         </Stack>
       </Stack>
+
+      {academicYear === years.previous.range && (
+        <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
+          זהו הלוח של השנה שהסתיימה — הוא זה שמסביר את שכר אוגוסט, שנסגר רק בספטמבר.
+          חישוב השכר עצמו הולך לפי תאריכים, לא לפי שנת הלוח: כל רשומה שחופפת לחודש נספרת, מאיזה לוח שלא תהיה.
+        </Alert>
+      )}
 
       {/* Missing presets */}
       {missingPresets.length > 0 && (

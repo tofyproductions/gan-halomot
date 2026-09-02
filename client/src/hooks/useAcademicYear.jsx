@@ -77,6 +77,15 @@ export function getAcademicYears() {
   const startYear = isAfterCutoff ? year : year - 1;
 
   return {
+    // The just-ended year. Kept reachable because its records still matter
+    // after the 10-August rollover — August's SALARY is settled in September,
+    // from a month that belongs to the year that just closed.
+    previous: {
+      value: startYear - 1,
+      label: formatAcademicYear(`${startYear - 1}-${startYear}`),
+      hebrew: getHebrewYearFromStart(startYear - 1),
+      range: `${startYear - 1}-${startYear}`,
+    },
     current: {
       value: startYear,
       label: formatAcademicYear(`${startYear}-${startYear + 1}`),
