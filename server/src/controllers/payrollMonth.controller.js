@@ -4038,12 +4038,15 @@ async function punchIssues(month, { includePending = false } = {}) {
   const missing = missKeys.filter(isPaid).map(k => {
     const dayPunches = byDay.get(k);
     const p = dayPunches[0];
-    // A pending report that mirrors a punch the day ALREADY has (same side,
-    // same minute — the dedup guard's key) must not be offered: approving it
-    // would make the day a three-punch החתמה כפולה. Only the reports that
-    // COMPLETE the day get a button.
+    // A pending report that mirrors a punch the day ALREADY has (same minute)
+    // must not be offered: approving it would make the day a three-punch
+    // החתמה כפולה. Same MINUTE only — deliberately looser than the dedup
+    // guard's minute+side key, because a clock reading's `state` is whatever
+    // the device felt like sending (the pairing logic ignores it for good
+    // reason), so requiring the sides to match lets a hand-typed 07:24 slip
+    // past its device twin. Only reports that COMPLETE the day get a button.
     const mirrorsExisting = (pp) => dayPunches.some(cp =>
-      cp.state === pp.state && ISR_HHMM(cp.timestamp) === ISR_HHMM(pp.timestamp));
+      ISR_HHMM(cp.timestamp) === ISR_HHMM(pp.timestamp));
     return {
       ...meta(k),
       punch_hhmm: ISR_HHMM(p.timestamp),
