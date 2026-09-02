@@ -3197,7 +3197,19 @@ function PartialAbsenceCell({ row }) {
       {deductHours > 0 && <Chip size="small" color="warning" label={`${deductHours} ש׳ לקיזוז`} sx={{ height: 18, fontSize: '0.6rem', fontWeight: 700 }} />}
       {deductHours <= 0 && totalHours > 0 && !pa.made_up && <Chip size="small" color="success" variant="outlined" label="✓ אין קיזוז" sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
       {excusedCount > 0 && <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.55rem' }}>{excusedCount} אושרו · מתוך {totalHours} ש׳</Typography>}
-      {extra > 0 && <Chip size="small" color="success" variant="outlined" label={`+${extra} ש׳ תוספת`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />}
+      {/* Extra hours FOUND are not extra hours PAID — green + a plus sign is
+          the language of money already granted, so unpaid extras stay gray
+          and say so until the accountant approves them in the dialog. */}
+      {extra > 0 && (pa.extra_approved_hours || 0) <= 0 && (
+        <Tooltip title="שעות מעבר להתחייבות שנמצאו — לא אושרו לתשלום (ברירת מחדל: לא משולם). לחץ/י לאישור">
+          <Chip size="small" color="default" variant="outlined" label={`${extra} ש׳ תוספת — לא אושר`} sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />
+        </Tooltip>
+      )}
+      {extra > 0 && (pa.extra_approved_hours || 0) > 0 && (
+        <Chip size="small" color="success" variant="outlined"
+          label={`+${pa.extra_approved_hours}${pa.extra_approved_hours < extra ? ` מתוך ${extra}` : ''} ש׳ תוספת`}
+          sx={{ height: 16, fontSize: '0.58rem', fontWeight: 700 }} />
+      )}
       {pa.made_up && ded === 0 && totalHours > 0 && <Chip size="small" color="success" variant="outlined" label="✓ הושלם" sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {(pa.extra_approved_hours || 0) > 0 && <Typography variant="caption" sx={{ color: 'success.dark', fontSize: '0.62rem', fontWeight: 700 }}>שולם: +{pa.extra_approved_hours} ש׳</Typography>}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem', fontWeight: 700 }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
