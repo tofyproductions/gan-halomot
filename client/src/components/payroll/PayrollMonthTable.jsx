@@ -2751,6 +2751,7 @@ export default function PayrollMonthTable() {
         canAccounting={isAccountant || isAdmin}
         onClose={() => setPartialAbs({ open: false, row: null })}
         onSave={(payload) => partialAbs.row && patchApproval(partialAbs.row.employee_id, payload)}
+        onExamRegistered={() => fetchData({ quiet: true })}
       />
       <HolidayPayDetailDialog
         open={holidayPay.open}
@@ -3222,18 +3223,52 @@ function PartialAbsenceCell({ row }) {
 // they are NOT deducted. Unexcused hours are deducted at the committed hourly
 // value, capped at the net monthly deficit (made-up hours aren't charged). Also
 // shows overtime worked beyond the commitment.
-function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClose, onSave }) {
+function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClose, onSave, onExamRegistered }) {
   const [excused, setExcused] = useState({});
   const [reasons, setReasons] = useState({});
   const [extraAppr, setExtraAppr] = useState({});
   const [extraReasons, setExtraReasons] = useState({});
+  // Dates turned into an approved pregnancy-exam entry DURING this dialog
+  // session — shown excused immediately, before the table refetch catches up.
+  const [examRegistered, setExamRegistered] = useState({});
+  const [examBusy, setExamBusy] = useState({});
   useEffect(() => {
     if (!open || !row) return;
     const ex = {}, rs = {}, ea = {}, er = {};
     (row.partial_absence?.candidates || []).forEach(c => { ex[c.date] = !!c.excused; rs[c.date] = c.reason || ''; });
     (row.partial_absence?.extra_candidates || []).forEach(c => { ea[c.date] = !!c.approved; er[c.date] = c.reason || ''; });
     setExcused(ex); setReasons(rs); setExtraAppr(ea); setExtraReasons(er);
+    setExamRegistered({}); setExamBusy({});
   }, [open, row]);
+
+  const isPregnant = !!row?.pregnancy?.is_pregnant;
+
+  // One click from tidy: a short day of a pregnant employee becomes an
+  // APPROVED pregnancy-exam entry for exactly the missing hours — recorded in
+  // the 40h tracker (§7), certificate attachable there, and the day stops
+  // being deducted. The server auto-excuses any day with an approved exam.
+  const registerAsExam = async (c) => {
+    setExamBusy(b => ({ ...b, [c.date]: true }));
+    try {
+      await api.post('/employee-requests/admin', {
+        employee_id: row.employee_id,
+        type: 'pregnancy_exam',
+        from_date: c.date,
+        to_date: c.date,
+        exam_hours: c.shortfall_h,
+        reason: 'נרשם מתוך היעדרויות שעות — חוסר יום בדיקה',
+      });
+      toast.success(`${c.shortfall_h} ש׳ נרשמו כבדיקת היריון ב-${c.date} — היום לא יקוזז, והשעות נספרות במעקב 40 השעות`);
+      setExamRegistered(prev => ({ ...prev, [c.date]: true }));
+      setExcused(prev => ({ ...prev, [c.date]: true }));
+      setReasons(prev => ({ ...prev, [c.date]: prev[c.date] || 'בדיקת היריון' }));
+      onExamRegistered?.();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'רישום הבדיקה נכשל');
+    } finally {
+      setExamBusy(b => ({ ...b, [c.date]: false }));
+    }
+  };
   if (!row) return null;
   const pa = row.partial_absence || {};
   const cands = pa.candidates || [];
@@ -3369,6 +3404,13 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                       {cappedByMakeup && ` חלק מהשעות הושלמו בימים אחרים — הניכוי מוגבל לחוסר נטו (${netDeficit} ש׳).`}
                     </Typography>
                   </Alert>
+                  {isPregnant && (
+                    <Alert severity="info" icon="🤰" sx={{ py: 0.5, borderRadius: 2 }}>
+                      עובדת בהריון: יום חוסר עם <b>בדיקת היריון מאושרת</b> לא מקוזז — השעות משולמות במלואן לפי חוק
+                      ונספרות במעקב 40 השעות. "רשום כבדיקה" הופך יום חוסר לבדיקה מאושרת בלחיצה אחת;
+                      את האישור הרפואי מצרפים במעקב ההיריון.
+                    </Alert>
+                  )}
                   <Table size="small">
                     <TableHead>
                       <TableRow>
@@ -3381,23 +3423,52 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {cands.map(c => (
-                        <TableRow key={c.date} sx={excused[c.date] ? { bgcolor: '#ecfdf5' } : undefined}>
-                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(c.date)}</TableCell>
-                          <TableCell align="center">{c.committed_h} ש׳</TableCell>
-                          <TableCell align="center">{c.worked_h} ש׳</TableCell>
-                          <TableCell align="center" sx={{ fontWeight: 700, color: excused[c.date] ? 'text.disabled' : 'error.main' }}>{c.shortfall_h} ש׳</TableCell>
-                          <TableCell align="center">
-                            <Checkbox size="small" color="success" checked={!!excused[c.date]} disabled={disabled || !canAccounting}
-                              onChange={e => setExcused(a => ({ ...a, [c.date]: e.target.checked }))} />
-                          </TableCell>
-                          <TableCell>
-                            <TextField size="small" variant="standard" placeholder="סיבה…" fullWidth
-                              value={reasons[c.date] || ''} disabled={disabled || !canAccounting}
-                              onChange={e => setReasons(a => ({ ...a, [c.date]: e.target.value }))} />
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {cands.map(c => {
+                        const exam = c.pregnancy_exam || null;
+                        const examApproved = (!!exam && exam.status === 'approved') || !!examRegistered[c.date];
+                        const examPending = !!exam && !examApproved;
+                        return (
+                          <TableRow key={c.date} sx={excused[c.date] ? { bgcolor: examApproved ? '#fdf2f8' : '#ecfdf5' } : undefined}>
+                            <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                              {fmtDate(c.date)}
+                              {examApproved && (
+                                <Tooltip title="בדיקת היריון מאושרת — השעות משולמות לפי חוק ונספרות במעקב 40 השעות">
+                                  <Chip size="small" label="🤰 בדיקה מאושרת" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700, mr: 0.5, bgcolor: '#fce7f3', color: '#9d174d' }} />
+                                </Tooltip>
+                              )}
+                              {examPending && (
+                                <Tooltip title="נרשמה בדיקת היריון ליום זה אך היא עדיין ממתינה לאישור — היום עדיין מקוזז. אשרו במעקב ההיריון">
+                                  <Chip size="small" color="warning" variant="outlined" label="🤰 בדיקה ממתינה" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700, mr: 0.5 }} />
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                            <TableCell align="center">{c.committed_h} ש׳</TableCell>
+                            <TableCell align="center">{c.worked_h} ש׳</TableCell>
+                            <TableCell align="center" sx={{ fontWeight: 700, color: excused[c.date] ? 'text.disabled' : 'error.main' }}>{c.shortfall_h} ש׳</TableCell>
+                            <TableCell align="center">
+                              {/* An approved exam excuses the day by law — the server
+                                  enforces it regardless, so the checkbox is locked
+                                  rather than pretending the choice exists. */}
+                              <Checkbox size="small" color="success" checked={!!excused[c.date]} disabled={disabled || !canAccounting || examApproved}
+                                onChange={e => setExcused(a => ({ ...a, [c.date]: e.target.checked }))} />
+                            </TableCell>
+                            <TableCell>
+                              <Stack direction="row" spacing={0.5} alignItems="center">
+                                <TextField size="small" variant="standard" placeholder="סיבה…" fullWidth
+                                  value={reasons[c.date] || ''} disabled={disabled || !canAccounting || examApproved}
+                                  onChange={e => setReasons(a => ({ ...a, [c.date]: e.target.value }))} />
+                                {isPregnant && !exam && !examRegistered[c.date] && canAccounting && !disabled && (
+                                  <Button size="small" variant="outlined" disabled={!!examBusy[c.date]}
+                                    onClick={() => registerAsExam(c)}
+                                    sx={{ whiteSpace: 'nowrap', fontSize: '0.65rem', color: '#9d174d', borderColor: '#f9a8d4' }}>
+                                    {examBusy[c.date] ? '…' : '🤰 רשום כבדיקה'}
+                                  </Button>
+                                )}
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </>

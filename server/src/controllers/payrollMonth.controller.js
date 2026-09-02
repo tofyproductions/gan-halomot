@@ -615,6 +615,32 @@ async function getMonth(req, res, next) {
       if (!sickReqByEmp.has(eid)) sickReqByEmp.set(eid, []);
       sickReqByEmp.get(eid).push(r);
     }
+    // Pregnancy-exam absences (§7 חוק עבודת נשים) — the checkup hours the 40h
+    // tracker records (EmployeeRequest type 'pregnancy_exam'). Matched BY DATE
+    // to the partial-absence short days below: an APPROVED exam on a short day
+    // excuses it automatically (the law pays those hours in full), and a
+    // pending one is surfaced in the dialog so the accountant sees the
+    // certificate is already in — one click from tidy instead of a hunt
+    // through the documents list.
+    const examRequests = await EmployeeRequest.find({
+      type: 'pregnancy_exam',
+      status: { $ne: 'rejected' },
+      from_date: { $gte: `${month}-01`, $lte: `${month}-31` },
+      $or: [
+        { employee_id: { $in: employees.map(e => e._id) } },
+        ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+      ],
+    }).select('employee_id user_id from_date exam_hours status').lean();
+    const examByEmp = new Map(); // empId → Map(date → { id, hours, status })
+    for (const r of examRequests) {
+      const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
+      if (!eid) continue;
+      if (!examByEmp.has(eid)) examByEmp.set(eid, new Map());
+      examByEmp.get(eid).set(r.from_date, {
+        id: String(r._id), hours: Number(r.exam_hours) || 0, status: r.status,
+      });
+    }
+
     const adjByEmp = new Map();
     for (const adj of adjustments) {
       const k = String(adj.employee_id);
@@ -1110,9 +1136,22 @@ async function getMonth(req, res, next) {
       const paReasonByDate = new Map(paEntries.map(e => [e.date, e.reason || '']));
       const paHourlyValue = (isTeken && tekenSalary > 0 && commitmentInfo.committed_hours > 0)
         ? Math.round((tekenSalary / commitmentInfo.committed_hours) * 100) / 100 : 0;
-      const paCandidates = paCandidatesRaw.map(c => ({
-        ...c, excused: paExcusedDates.has(c.date), reason: paReasonByDate.get(c.date) || '',
-      }));
+      // A short day carrying an APPROVED pregnancy exam is excused by force of
+      // law (§7 — checkup hours are paid in full), no manual excusal needed;
+      // the deduction math below reads `excused` and skips it. A pending exam
+      // rides along for the dialog to display, but excuses nothing yet.
+      const empExamByDate = examByEmp.get(String(emp._id)) || new Map();
+      const paCandidates = paCandidatesRaw.map(c => {
+        const exam = empExamByDate.get(c.date) || null;
+        const examApproved = !!exam && exam.status === 'approved';
+        return {
+          ...c,
+          excused: paExcusedDates.has(c.date) || examApproved,
+          reason: paReasonByDate.get(c.date)
+            || (examApproved ? `בדיקת היריון מאושרת (${exam.hours} ש׳)` : ''),
+          pregnancy_exam: exam,
+        };
+      });
       const paTotalShortfall = Math.round(paCandidates.reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
       // Unexcused hours = what gets deducted (before the made-up cap).
       const paDeductGross = Math.round(paCandidates.filter(c => !c.excused).reduce((s, c) => s + c.shortfall_h, 0) * 100) / 100;
