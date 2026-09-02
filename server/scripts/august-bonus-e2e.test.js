@@ -208,6 +208,94 @@ console.log('ימי היערכות — עבדה 3 מימי החלון, השאר 
     near(m.estimatedTotal, SALARY, 0.02), `got ${ILS(m.estimatedTotal)}`);
 }
 
+// ═══════════════════════════════════════════════════════════ hourly employee
+//
+// An hourly employee has no salary basket and no completion to carve — her
+// bonus days are ordinary countable punches (payrollCalc keeps
+// closure_completion punches for hourly staff), so the promise takes a
+// different form: an approved day pays like a day she worked, an unapproved
+// day pays nothing at all, and a fully-approved month lands on exactly what a
+// normally-worked month would have paid.
+
+const RATE = 50;
+const hourlyEmployee = {
+  _id: 'emp-2',
+  full_name: 'עובדת שעתית לדוגמה',
+  salary_type: 'hourly',
+  branch_id: BRANCH,
+  amuta_distribution: [{ amuta_id: 'amuta-1', hourly_rate: RATE }],
+  travel_per_day: 0,
+};
+
+/** The controller does no carve for hourly — the engine's total IS the month. */
+function runHourlyMonth({ realDays, closureDays }) {
+  const punches = [
+    ...realDays.flatMap(d => punchPair(d.date, d.start, d.end)),
+    ...closureDays.flatMap(d => punchPair(d.date, d.start, d.end, 'closure_completion')),
+  ];
+  const breakdown = calculateMonthlySalary(hourlyEmployee, punches, MONTH, {});
+  return { breakdown, estimatedTotal: breakdown.estimated_total, hours: breakdown.hours };
+}
+
+const DAY_PAY = 8 * RATE; // an 8h day, no OT
+const FULL_MONTH_PAY = committedDatesOfMonth.length * DAY_PAY;
+
+console.log(`\nשעתית, חודש רגיל — עבדה את כל ${committedDatesOfMonth.length} הימים ב-₪${RATE} לשעה`);
+{
+  const m = runHourlyMonth({ realDays: allWorked, closureDays: [] });
+  check(`pays hours × rate exactly (${ILS(FULL_MONTH_PAY)})`, m.estimatedTotal === FULL_MONTH_PAY,
+    `got ${ILS(m.estimatedTotal)}`);
+}
+
+console.log(`שעתית, אישור מלא — עבדה 1–15, כל ${windowCandidates.length} ימי החלון אושרו`);
+{
+  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: closureAll });
+  check(`total equals a normally-worked month exactly (${ILS(FULL_MONTH_PAY)})`,
+    m.estimatedTotal === FULL_MONTH_PAY, `got ${ILS(m.estimatedTotal)}`);
+  check('bonus days count as ordinary paid hours',
+    m.hours.total === (preWindowDates.length + windowCandidates.length) * 8, `got ${m.hours.total}h`);
+  console.log(`    דוגמה: ${preWindowDates.length + windowCandidates.length} ימים × 8ש׳ × ₪${RATE} = ${ILS(m.estimatedTotal)}`);
+}
+
+console.log('שעתית, אף יום לא אושר — ימי החלון פשוט לא משולמים');
+{
+  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: [] });
+  const expected = preWindowDates.length * DAY_PAY;
+  check(`paid only for the days she worked (${ILS(expected)})`, m.estimatedTotal === expected,
+    `got ${ILS(m.estimatedTotal)}`);
+  console.log(`    דוגמה: ${preWindowDates.length} ימים × 8ש׳ × ₪${RATE} = ${ILS(m.estimatedTotal)}`);
+}
+
+console.log('שעתית, אישור חלקי — 6 מתוך 12');
+{
+  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: closureAll.slice(0, 6) });
+  const expected = (preWindowDates.length + 6) * DAY_PAY;
+  check(`each approved day adds exactly one day's pay (${ILS(expected)})`, m.estimatedTotal === expected,
+    `got ${ILS(m.estimatedTotal)}`);
+}
+
+console.log('שעתית, ימי היערכות — עבדה 3 מימי החלון, השאר אושרו');
+{
+  const worked3 = windowCandidates.slice(0, 3).map(c => ({ date: c.date, start: '08:00', end: '16:00' }));
+  const approvedRest = windowCandidates.slice(3).map(c => ({ date: c.date, start: '08:00', end: '16:00' }));
+  const m = runHourlyMonth({ realDays: [...workedPreWindow, ...worked3], closureDays: approvedRest });
+  check(`worked + approved days together still equal a full month (${ILS(FULL_MONTH_PAY)})`,
+    m.estimatedTotal === FULL_MONTH_PAY, `got ${ILS(m.estimatedTotal)}`);
+}
+
+console.log('שעתית, תמחור נדיב — יום בונוס של 9 שעות משולם לפי שעותיו, כולל שע״נ');
+{
+  // Unlike a global employee (capped at 100% of the salary), an hourly
+  // employee has no salary ceiling: a bonus day materialized at 9h pays
+  // 8h regular + 1h at 125%, exactly like a real 9h day would. Documented
+  // here so the difference is a decision, not a surprise.
+  const generous = [{ date: windowCandidates[0].date, start: '08:00', end: '17:00' }];
+  const m = runHourlyMonth({ realDays: workedPreWindow, closureDays: generous });
+  const expected = preWindowDates.length * DAY_PAY + (8 * RATE + 1 * RATE * 1.25);
+  check(`a 9h bonus day pays like a real 9h day (${ILS(expected)})`, m.estimatedTotal === expected,
+    `got ${ILS(m.estimatedTotal)}`);
+}
+
 if (failures) {
   console.error(`\n${failures} failure(s)`);
   process.exit(1);
