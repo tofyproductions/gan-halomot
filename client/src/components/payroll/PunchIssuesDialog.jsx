@@ -173,6 +173,23 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה')));
   };
 
+  // A "missing" day that already carries a PENDING report: the right fix is
+  // approving that report, not retyping it (the dedup guard 409s the retype).
+  // A report still waiting for the branch manager needs the explicit
+  // override flag — with a confirmation, so the bypass is never a silent click.
+  const approvePending = (item, pp) => {
+    const needsOverride = pp.status === 'pending_manager' || pp.status === 'pending';
+    if (needsOverride
+      && !window.confirm('הדיווח עדיין לא אושר ע״י מנהל/ת הסניף — לאשר בכל זאת ולעקוף את שלב המנהל?')) return undefined;
+    return withBusy(`pp|${pp.id}`,
+      api.patch(`/payroll/punches/${pp.id}/approve`, needsOverride ? { override_manager: true } : {})
+        .then(() => {
+          toast.success(`הדיווח של ${item.full_name} (${pp.hhmm}) אושר — היום הושלם`);
+          load(); onChanged && onChanged();
+        })
+        .catch(err => toast.error(err.response?.data?.error || 'האישור נכשל')));
+  };
+
   const resolveConflict = (item, decision) => withBusy(keyOf(item),
     api.post(`/payroll-month/${month}/punch-issues/fixed-conflict`, {
       employee_id: item.employee_id, date: item.date, decision,
@@ -582,6 +599,22 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                           <Chip size="small" label={`החתמה יחידה: ${item.punch_hhmm}`} />
                           {item.is_manual && <Chip size="small" variant="outlined" color="secondary" label="ידני" />}
                         </Stack>
+                        {(item.pending_punches || []).length > 0 && (
+                          <Alert severity="info" sx={{ mb: 1, py: 0.3, borderRadius: 2 }}>
+                            <Typography variant="caption" sx={{ fontWeight: 700, display: 'block' }}>
+                              כבר קיים דיווח ממתין לאישור ליום זה — אשרו אותו במקום להקליד שוב (הקלדה חוזרת תיחסם ככפולה):
+                            </Typography>
+                            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
+                              {item.pending_punches.map(pp => (
+                                <BusyButton key={pp.id} size="small" variant="contained" color="success"
+                                  loading={!!busy[`pp|${pp.id}`]} onClick={() => approvePending(item, pp)}>
+                                  אשר {pp.state === 0 ? 'כניסה' : 'יציאה'} {pp.hhmm}
+                                  {(pp.status === 'pending_manager' || pp.status === 'pending') ? ' · ממתין למנהל' : ''}
+                                </BusyButton>
+                              ))}
+                            </Stack>
+                          </Alert>
+                        )}
                         {mayEnter ? (
                           <Stack direction="row" spacing={1} alignItems="center">
                             <Typography variant="caption" color="text.secondary">השלמה:</Typography>

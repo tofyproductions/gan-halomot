@@ -3884,16 +3884,28 @@ async function punchIssues(month, { includePending = false } = {}) {
   const punches = await Punch.find({
     timestamp: { $gte: new Date(from.getTime() - 2 * 864e5), $lt: new Date(to.getTime() + 2 * 864e5) },
     ignored: { $ne: true },
-  }).select('employee_id timestamp approval_status timestamp_source created_at branch_id').lean();
+  }).select('employee_id timestamp approval_status timestamp_source created_at branch_id state').lean();
 
-  const byDay = new Map(); // 'empId|date' → punches[]
+  const byDay = new Map();      // 'empId|date' → countable punches[]
+  // PENDING reports per day, kept separately: they don't count toward the
+  // day's completeness, but a "missing" day that already carries one must say
+  // so — the fix is approving the waiting report, not typing it again (the
+  // dedup guard rightly refuses the retype as a duplicate, and without this
+  // the two screens send the accountant in a circle).
+  const pendingByDay = new Map(); // 'empId|date' → pending punches[]
   for (const p of punches) {
     if (!p.employee_id) continue;
     const s = p.approval_status || 'auto';
-    if (!includePending && s !== 'auto' && s !== 'approved') continue;
     const d = ISR_DAY(p.timestamp);
     if (d.slice(0, 7) !== month) continue;
     const k = String(p.employee_id) + '|' + d;
+    if (!includePending && s !== 'auto' && s !== 'approved') {
+      if (s !== 'rejected') {
+        if (!pendingByDay.has(k)) pendingByDay.set(k, []);
+        pendingByDay.get(k).push(p);
+      }
+      continue;
+    }
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(p);
   }
@@ -4029,6 +4041,16 @@ async function punchIssues(month, { includePending = false } = {}) {
       ...meta(k),
       punch_hhmm: ISR_HHMM(p.timestamp),
       is_manual: p.timestamp_source === 'manual',
+      // A report already filed for this day, waiting for approval — the UI
+      // offers approving it instead of retyping it (which would 409).
+      pending_punches: (pendingByDay.get(k) || [])
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        .map(pp => ({
+          id: String(pp._id),
+          hhmm: ISR_HHMM(pp.timestamp),
+          state: pp.state,
+          status: pp.approval_status,
+        })),
     };
   }).sort(byName);
 
