@@ -1081,7 +1081,14 @@ async function getMonth(req, res, next) {
       // deduction is also capped at the net monthly deficit so hours made up on
       // other days aren't charged. תקן (global) only.
       const paHasCommitment = !!commitmentInfo.has_commitment;
-      const paExcl = new Set([...holidayDates, ...leaveDates]);
+      // A Holiday(closure) record normally shields its days from the shortfall
+      // check. Inside the August-bonus window that shield is wrong: whether a
+      // record exists is exactly the dependency the fixed 16–31 policy was
+      // built to escape, and a היערכות day she worked SHORT of commitment must
+      // surface here — deduct or excuse is the accountant's per-day call, not
+      // the calendar's. Approved leave still excludes as usual.
+      const paExcl = new Set([...holidayDates].filter(d => !inAugustBonusWindow(d)));
+      for (const d of leaveDates) paExcl.add(d);
       const paCandidatesRaw = isTeken
         ? partialAbsenceCandidates(commitmentByEmp.get(String(emp._id)), breakdown.days || [], paExcl, 1)
         : [];
