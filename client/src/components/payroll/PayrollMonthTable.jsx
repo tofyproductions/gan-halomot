@@ -1110,6 +1110,25 @@ export default function PayrollMonthTable() {
   // in August (or in any month that already carries entered values, so old
   // data never disappears from view).
   const isAugustMonth = month?.slice(5, 7) === '08';
+  const [recDlg, setRecDlg] = useState({ open: false, row: null });
+  const [recSaving, setRecSaving] = useState(false);
+  // The dialog's "עדכן תאריך" — writes the employee card's start date, then
+  // refetches so the recreation figures recompute from the corrected date.
+  const saveRecStartDate = useCallback(async (newDate) => {
+    const r = recDlg.row;
+    if (!r || !newDate) return;
+    setRecSaving(true);
+    try {
+      await api.put(`/payroll/employees/${r.employee_id}`, { start_date: newDate });
+      toast.success('תאריך תחילת ההעסקה עודכן — הזכאות חושבה מחדש');
+      setRecDlg({ open: false, row: null });
+      fetchData({ quiet: true });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'עדכון התאריך נכשל');
+    } finally {
+      setRecSaving(false);
+    }
+  }, [recDlg.row, fetchData]);
   const showRecreation = isAugustMonth
     || (data?.rows || []).some(r => r.manual?.recreation && r.manual.recreation.kind !== 'empty');
 
@@ -2360,26 +2379,36 @@ export default function PayrollMonthTable() {
                       {showRecreation && (
                         <TableCell align="center">
                           <NumberOrTextCell value={r.manual.recreation} disabled={locked} onSave={v => patchManual(r.employee_id, { recreation: v })} />
-                          {/* August suggestion: the צו's figure, one click from entered.
-                              A not-yet-eligible employee gets a gray "why empty" chip
-                              instead of a number that would tempt someone to pay it. */}
-                          {r.recreation_auto && (!r.manual.recreation || r.manual.recreation.kind === 'empty') && (
-                            r.recreation_auto.basis === 'annual' ? (
-                              <Tooltip title={`ותק ${r.recreation_auto.full_years} שנים → ${r.recreation_auto.days} ימי הבראה × ₪${r.recreation_auto.day_rate} × ${Math.round(r.recreation_auto.fte * 100)}% משרה. לחץ/י להזנה`}>
-                                <Chip size="small" variant="outlined" label={`🌴 ₪${r.recreation_auto.amount.toLocaleString('he-IL')}`}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (!locked) patchManual(r.employee_id, { recreation: { kind: 'number', amount: r.recreation_auto.amount, text: '' } });
-                                  }}
-                                  sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#67e8f9' }} />
+                          {/* August: every chip opens the preview dialog — the figure
+                              is approved against its data (start date, seniority,
+                              bracket, rate), never entered blind. */}
+                          {r.recreation_auto && (!r.manual.recreation || r.manual.recreation.kind === 'empty') && (() => {
+                            const ra = r.recreation_auto;
+                            const openDlg = (e) => { e.stopPropagation(); setRecDlg({ open: true, row: r }); };
+                            if (ra.basis === 'annual') {
+                              return (
+                                <Tooltip title={`ותק ${ra.full_years} שנים → ${ra.days} ימי הבראה × ₪${ra.day_rate} × ${Math.round(ra.fte * 100)}% משרה. לחץ/י לתצוגה מקדימה ואישור`}>
+                                  <Chip size="small" variant="outlined" label={`🌴 ₪${ra.amount.toLocaleString('he-IL')}`}
+                                    onClick={openDlg}
+                                    sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#67e8f9' }} />
+                                </Tooltip>
+                              );
+                            }
+                            if (ra.basis === 'not_yet_eligible') {
+                              return (
+                                <Tooltip title={`טרם השלימה שנת עבודה (${ra.months_worked} חודשים) — אין זכאות השנה. לחץ/י לפרטים`}>
+                                  <Chip size="small" variant="outlined" label="טרם שנה" onClick={openDlg}
+                                    sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, color: 'text.disabled', cursor: 'pointer' }} />
+                                </Tooltip>
+                              );
+                            }
+                            return (
+                              <Tooltip title="תאריך תחילת ההעסקה חסר או חשוד — לחץ/י לתיקון או לרישום 'זכאית להבראה' לחישוב אצל רו״ח">
+                                <Chip size="small" color="warning" variant="outlined" label="⚠ תאריך העסקה?" onClick={openDlg}
+                                  sx={{ height: 17, fontSize: '0.58rem', fontWeight: 700, mt: 0.3, cursor: 'pointer' }} />
                               </Tooltip>
-                            ) : (
-                              <Tooltip title={`טרם השלימה שנת עבודה (${r.recreation_auto.months_worked} חודשים) — לפי הצו אין זכאות השנה; תשלום מלא באוגוסט הבא`}>
-                                <Chip size="small" variant="outlined" label="טרם שנה"
-                                  sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, color: 'text.disabled' }} />
-                              </Tooltip>
-                            )
-                          )}
+                            );
+                          })()}
                         </TableCell>
                       )}
                       <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
@@ -2709,6 +2738,22 @@ export default function PayrollMonthTable() {
           <Button onClick={() => setMgrReqDlg({ open: false, employeeId: null })}>סגור</Button>
         </DialogActions>
       </Dialog>
+      <RecreationDialog
+        open={recDlg.open}
+        row={recDlg.row}
+        locked={recDlg.row?.status === 'finalized'}
+        saving={recSaving}
+        onClose={() => setRecDlg({ open: false, row: null })}
+        onApply={(value) => {
+          if (!recDlg.row) return;
+          patchManual(recDlg.row.employee_id, { recreation: value });
+          toast.success(value.kind === 'number'
+            ? `הוזנו דמי הבראה: ₪${Number(value.amount).toLocaleString('he-IL')}`
+            : 'נרשם: זכאית להבראה — החישוב אצל רו״ח');
+          setRecDlg({ open: false, row: null });
+        }}
+        onSaveStartDate={saveRecStartDate}
+      />
       <ClosureCompletionDetailDialog
         open={closureDetail.open}
         row={closureDetail.row}
@@ -3212,6 +3257,104 @@ function AbsenceCell({ row }) {
       {noReason > 0 && <Chip size="small" color="warning" variant="filled" label={`${noReason} ללא סיבה`} sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />}
       {ded > 0 && <Typography variant="caption" sx={{ color: 'error.main', fontSize: '0.62rem' }}>−₪{Math.round(ded).toLocaleString('he-IL')}</Typography>}
     </Stack>
+  );
+}
+
+/**
+ * דמי הבראה — the August preview/approve dialog. Clicking the הבראה chip
+ * opens this instead of blind-entering a number: the accountant SEES the data
+ * the figure is computed from (start date, seniority, bracket, rate, FTE),
+ * can fix the start date in place, adjust the amount, and only then approve.
+ * When the start date is missing or untrustworthy the number path is closed —
+ * the entry becomes the text "זכאית להבראה" and the accountant computes.
+ */
+function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate, saving }) {
+  const ra = row?.recreation_auto || null;
+  const [startDate, setStartDate] = useState('');
+  const [amount, setAmount] = useState('');
+  useEffect(() => {
+    if (!open || !row) return;
+    setStartDate(ra?.start_date && ra.start_date > '1990-01-01' ? ra.start_date : '');
+    setAmount(ra?.amount != null ? String(ra.amount) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, row]);
+  if (!row) return null;
+  const basis = ra?.basis || 'unknown_start';
+  const doubtful = basis === 'unknown_start' || basis === 'suspicious_start';
+  const notYet = basis === 'not_yet_eligible';
+  const dateChanged = startDate && startDate !== (ra?.start_date || '');
+  const Line = ({ label, value }) => (
+    <Stack direction="row" spacing={1} sx={{ py: 0.4, borderBottom: '1px dashed', borderColor: 'divider' }}>
+      <Typography variant="body2" color="text.secondary" sx={{ minWidth: 170 }}>{label}</Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700 }}>{value}</Typography>
+    </Stack>
+  );
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontWeight: 700 }}>🌴 דמי הבראה — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.2} sx={{ mt: 0.5 }}>
+          {doubtful && (
+            <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              {basis === 'unknown_start'
+                ? 'לא רשום תאריך תחילת העסקה — אין לחשב סכום אצלנו.'
+                : `תאריך תחילת ההעסקה הרשום (${ra?.start_date}) נראה שגוי — אין לחשב סכום אצלנו.`}
+              {' '}עדכנו תאריך נכון למטה, או רשמו "זכאית להבראה" ורו״ח יבצע את החישוב.
+            </Alert>
+          )}
+          {notYet && (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              טרם השלימה שנת עבודה ({ra.months_worked} חודשים) — לפי צו ההרחבה אין זכאות השנה.
+              תשלום מלא יגיע באוגוסט הבא.
+            </Alert>
+          )}
+          <Stack direction="row" spacing={1} alignItems="center">
+            <TextField
+              label="תאריך תחילת העסקה" type="date" size="small" fullWidth
+              value={startDate} onChange={e => setStartDate(e.target.value)}
+              InputLabelProps={{ shrink: true }} disabled={locked}
+            />
+            <Button size="small" variant="outlined" disabled={locked || saving || !dateChanged}
+              onClick={() => onSaveStartDate(startDate)} sx={{ whiteSpace: 'nowrap' }}>
+              עדכן תאריך
+            </Button>
+          </Stack>
+          {!doubtful && ra && (
+            <Box>
+              <Line label="ותק עד סוף אוגוסט" value={`${ra.months_worked} חודשים (${ra.full_years} שנים מלאות)`} />
+              {!notYet && <Line label="ימי הבראה לפי הצו" value={`${ra.days} ימים`} />}
+              <Line label="תעריף יום" value={`₪${Number(ra.day_rate).toLocaleString('he-IL')}`} />
+              <Line label="היקף משרה" value={ra.weekly_hours
+                ? `${Math.round((ra.fte || 1) * 100)}% (${ra.weekly_hours} ש׳/שבוע)`
+                : '100% (אין התחייבות רשומה — הונחה משרה מלאה)'} />
+              {!notYet && (
+                <TextField
+                  label="סכום לאישור (ניתן לעריכה)" type="number" size="small" fullWidth sx={{ mt: 1.2 }}
+                  value={amount} onChange={e => setAmount(e.target.value)} disabled={locked}
+                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                />
+              )}
+            </Box>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2, flexWrap: 'wrap', gap: 0.5 }}>
+        {!locked && !notYet && (
+          <Button color="warning" variant="outlined" size="small" disabled={saving}
+            onClick={() => onApply({ kind: 'text', amount: null, text: 'זכאית להבראה — החישוב אצל רו״ח' })}>
+            רשום: זכאית להבראה (חישוב אצל רו״ח)
+          </Button>
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button onClick={onClose} disabled={saving}>סגור</Button>
+        {!locked && !doubtful && !notYet && (
+          <Button variant="contained" disabled={saving || !(Number(amount) > 0)}
+            onClick={() => onApply({ kind: 'number', amount: Number(amount), text: '' })}>
+            אשר והזן ₪{Number(amount || 0).toLocaleString('he-IL')}
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
   );
 }
 

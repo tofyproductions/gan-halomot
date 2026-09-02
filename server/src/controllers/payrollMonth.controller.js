@@ -1564,6 +1564,17 @@ async function getMonth(req, res, next) {
         // day rate × היקף משרה); basis 'not_yet_eligible' = no completed year,
         // nothing paid, shown so the empty cell reads as "not yet", not "missed".
         recreation_auto: isAugustMonth ? (() => {
+          // A start date we can't trust means WE don't compute money from it —
+          // the accountant does. 'unknown_start' (no date at all) and
+          // 'suspicious_start' (a pre-1990 date is a typo, not a career) both
+          // route the row to the "זכאית להבראה — חישוב אצל רו״ח" text entry.
+          if (!emp.start_date) {
+            return { basis: 'unknown_start', day_rate: recreationDayRate, start_date: null };
+          }
+          const startIso = new Date(emp.start_date).toISOString().slice(0, 10);
+          if (new Date(emp.start_date) < new Date('1990-01-01')) {
+            return { basis: 'suspicious_start', day_rate: recreationDayRate, start_date: startIso };
+          }
           const c = commitmentByEmp.get(String(emp._id));
           let weekly = null;
           if (c && Array.isArray(c.days)) {
@@ -1576,9 +1587,10 @@ async function getMonth(req, res, next) {
             }
             weekly = Math.round(sum * 100) / 100 || null;
           }
-          return computeRecreation({
+          const res = computeRecreation({
             startDate: emp.start_date, month, weeklyHours: weekly, dayRate: recreationDayRate,
           });
+          return res ? { ...res, start_date: startIso, weekly_hours: weekly } : null;
         })() : null,
         vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
         sick_info: {
