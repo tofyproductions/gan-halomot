@@ -286,7 +286,7 @@ export default function AttendanceMonitor() {
                 </div>
               )}
               {day.has_fixed_schedule && <div style={{color:'#5eead4'}}>⏱ שעות קבועות — ללא החתמה בשעון</div>}
-              {day.has_closure_completion && <div style={{color:'#f9a8d4'}}>📋 השלמת שכר אוגוסט — הגן היה סגור</div>}
+              {day.has_closure_completion && <div style={{color:'#f9a8d4'}}>📋 בונוס אוגוסט — יום חופשת קיץ בתשלום</div>}
               <div style={{marginTop:4,opacity:0.7}}>{day.punch_count} החתמות • לחץ לעריכה</div>
             </Box>
           }>
