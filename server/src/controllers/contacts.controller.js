@@ -19,18 +19,33 @@ async function generatePDF(req, res, next) {
     // משה דיין's wall got קפלן's children because nothing here ever asked.
     const filter = { is_active: true };
     filter.academic_year = normalizeYear(year) || getAcademicYears().current.range;
+
+    // The branch boundary: an admin sees all branches (or the one picked); a
+    // scoped caller is clamped to their branches even when ?branch is omitted,
+    // so leaving the picker on "all" no longer prints the whole network. The
+    // attachBranchScope middleware has already rejected a ?branch outside scope.
+    const scope = req.branchScope; // null = all branches
+    let branchIds = null;
+    if (branch && branch !== 'all') branchIds = [branch];
+    else if (Array.isArray(scope)) branchIds = scope;
+
     let branchName = '';
     if (classroom) {
       filter.classroom_id = classroom;
-    } else if (branch && branch !== 'all') {
-      const [rooms, regs, branchDoc] = await Promise.all([
-        Classroom.find({ branch_id: branch }).select('_id').lean(),
+    }
+    if (branchIds !== null) {
+      const [rooms, regs] = await Promise.all([
+        Classroom.find({ branch_id: { $in: branchIds } }).select('_id').lean(),
         // A child with no room yet still belongs to a branch — through the
         // registration.
-        Registration.find({ branch_id: branch }).select('_id').lean(),
-        Branch.findById(branch).select('name').lean(),
+        Registration.find({ branch_id: { $in: branchIds } }).select('_id').lean(),
       ]);
-      branchName = branchDoc?.name || '';
+      if (branchIds.length === 1) {
+        const branchDoc = await Branch.findById(branchIds[0]).select('name').lean();
+        branchName = branchDoc?.name || '';
+      }
+      // ANDed with any explicit classroom filter above, so a classroom outside
+      // the caller's branches matches nothing rather than leaking.
       filter.$or = [
         { classroom_id: { $in: rooms.map(r => r._id) } },
         { classroom_id: null, registration_id: { $in: regs.map(r => r._id) } },

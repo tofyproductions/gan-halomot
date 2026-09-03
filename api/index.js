@@ -14,10 +14,25 @@ const helmet = require('helmet');
 const mongoose = require('mongoose');
 
 const app = express();
+app.set('trust proxy', 1);
 
-// Security & parsing
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
+// Security & parsing — the SAME posture as the Render entry (server/src/index.js),
+// so this serverless path is not a weaker second door: the four hardening
+// directives instead of CSP disabled, and a validated CORS allowlist instead of
+// `origin: FRONTEND_URL || '*'`.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      'default-src': helmet.contentSecurityPolicy.dangerouslyDisableDefaultSrc,
+      'frame-ancestors': ["'none'"],
+      'object-src': ["'none'"],
+      'base-uri': ["'self'"],
+      'form-action': ["'self'"],
+    },
+  },
+}));
+app.use(cors(require('../server/src/config/cors')));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -55,7 +70,9 @@ app.use('/api', async (req, res, next) => {
     await connectIfNeeded();
     next();
   } catch (err) {
-    res.status(503).json({ error: 'Database unavailable', detail: err.message });
+    const body = { error: 'Database unavailable' };
+    if (process.env.NODE_ENV !== 'production') body.detail = err.message;
+    res.status(503).json(body);
   }
 });
 
