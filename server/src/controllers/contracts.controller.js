@@ -1,9 +1,31 @@
 const { Registration, Contract } = require('../models');
 const { generateContractHTML, generateContractPDF } = require('../services/contract-pdf.service');
+const { canAccessRegistration, canAccessBranch } = require('../utils/branch-scope');
+
+const isAccounting = (req) => ['system_admin', 'accountant'].includes(req.user?.role);
+
+/**
+ * May this request read this specific contract? Enrollment contracts reach a
+ * branch through their registration, employment contracts through branch_id;
+ * an employee may always read their own; and accounting/admin read all. Anything
+ * else is refused. Kept in one place so the file route and any future route
+ * answer it identically.
+ */
+async function canAccessContract(req, contract) {
+  if (!contract) return false;
+  if (isAccounting(req)) return true;
+  if (contract.employee_id && String(contract.employee_id) === String(req.user?.id)) return true;
+  if (contract.registration_id) return canAccessRegistration(req, contract.registration_id);
+  if (contract.branch_id) return canAccessBranch(req, contract.branch_id);
+  return false;
+}
 
 async function preview(req, res, next) {
   try {
     const { registrationId } = req.params;
+    if (!(await canAccessRegistration(req, registrationId))) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
     const registration = await Registration.findById(registrationId)
       .populate('classroom_id', 'name').lean();
 
@@ -22,6 +44,9 @@ async function preview(req, res, next) {
 async function generate(req, res, next) {
   try {
     const { registrationId } = req.params;
+    if (!(await canAccessRegistration(req, registrationId))) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
     const registration = await Registration.findById(registrationId)
       .populate('classroom_id', 'name').lean();
 
@@ -52,6 +77,9 @@ async function generate(req, res, next) {
 async function download(req, res, next) {
   try {
     const { registrationId } = req.params;
+    if (!(await canAccessRegistration(req, registrationId))) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
     const registration = await Registration.findById(registrationId)
       .select('contract_pdf_path child_name unique_id').lean();
 
@@ -80,12 +108,24 @@ async function listContracts(req, res, next) {
   try {
     const { registration_id, employee_id } = req.query;
     const filter = {};
+
     if (employee_id === 'me') {
+      // Anyone may list their own contracts.
       filter.employee_id = req.user.id;
-    } else if (employee_id) {
-      filter.employee_id = employee_id;
+    } else if (registration_id) {
+      // Enrollment contracts — scoped to the caller's branch via registration.
+      if (!(await canAccessRegistration(req, registration_id))) {
+        return res.status(403).json({ error: 'אין לך הרשאה לצפות בחוזים אלה' });
+      }
+      filter.registration_id = registration_id;
+    } else {
+      // Listing another employee's contracts, or all of them, exposes salary and
+      // ת.ז — accounting/admin only.
+      if (!isAccounting(req)) {
+        return res.status(403).json({ error: 'אין לך הרשאה לצפות בחוזי העסקה' });
+      }
+      if (employee_id) filter.employee_id = employee_id;
     }
-    if (registration_id) filter.registration_id = registration_id;
 
     const contracts = await Contract.find(filter)
       .select('-file_data')
@@ -135,6 +175,9 @@ async function getContractFile(req, res, next) {
   try {
     const contract = await Contract.findById(req.params.id);
     if (!contract) return res.status(404).json({ error: 'חוזה לא נמצא' });
+    if (!(await canAccessContract(req, contract))) {
+      return res.status(404).json({ error: 'חוזה לא נמצא' });
+    }
 
     const buffer = Buffer.from(contract.file_data, 'base64');
     res.setHeader('Content-Type', contract.file_mimetype || 'application/pdf');

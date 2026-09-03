@@ -78,6 +78,41 @@ function authMiddleware(req, res, next) {
 }
 
 /**
+ * Resolve the caller's branch scope once, from the database, and hang it on the
+ * request so every downstream query can be clamped to it (utils/branch-filter).
+ *
+ * This is the server-side half of the branch boundary. Before it, controllers
+ * trusted the client's ?branch parameter — omit it and getBranchFilter returned
+ * {} (every branch). Now the boundary is decided here from role and managed
+ * branches, and ?branch may only narrow within it: a branch outside the scope
+ * is refused rather than silently served.
+ *
+ * Runs after authMiddleware (needs req.user) and after the tenant context is
+ * established, so resolveBranchScope reads the right customer's User row.
+ */
+const { resolveBranchScope } = require('../utils/branch-scope');
+async function attachBranchScope(req, res, next) {
+  try {
+    const scope = await resolveBranchScope(req); // null (all) or [branchIds]
+    req.branchScope = scope;
+
+    const q = req.query.branch;
+    if (q && q !== 'all' && scope !== null) {
+      const allowed = scope.map(String).includes(String(q));
+      if (!allowed) {
+        return res.status(403).json({
+          error: 'אין לך הרשאה לצפות בסניף המבוקש.',
+          code: 'BRANCH_OUT_OF_SCOPE',
+        });
+      }
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Optional auth - attaches user if token present, continues if not
  */
 function optionalAuth(req, res, next) {
@@ -195,6 +230,6 @@ function requireBranchScope(req, res, next) {
 }
 
 module.exports = {
-  authMiddleware, optionalAuth, requireRole, requireTab, requireTabWrite,
+  authMiddleware, attachBranchScope, optionalAuth, requireRole, requireTab, requireTabWrite,
   requireBranchScope,
 };

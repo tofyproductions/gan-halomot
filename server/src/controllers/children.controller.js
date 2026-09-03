@@ -1,5 +1,15 @@
 const { Child, Registration, Classroom } = require('../models');
 const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
+const { registrationIdsInScope, canAccessRegistration } = require('../utils/branch-scope');
+
+// Fields a child edit may NOT set from the request body. registration_id and
+// branch belong to the enrollment, not the child form; is_active / hidden_*
+// have their own guarded endpoints (hide/unhide/remove). Blocking them turns
+// PUT /children/:id from a mass-assignment hole back into an edit of the child.
+const CHILD_UPDATE_BLOCKLIST = [
+  '_id', 'id', 'created_at', 'updated_at',
+  'registration_id', 'is_active', 'hidden_at', 'hidden_by_name', 'hide_note',
+];
 
 async function getAll(req, res, next) {
   try {
@@ -16,6 +26,13 @@ async function getAll(req, res, next) {
 
     if (classroom_id) {
       filter.classroom_id = classroom_id;
+    }
+
+    // The branch boundary: a child reaches a branch through its registration,
+    // so scope by the registrations the caller may see. null = all branches.
+    const regScope = await registrationIdsInScope(req);
+    if (regScope !== null) {
+      filter.registration_id = { $in: regScope };
     }
 
     // Paging, on the same terms as the employees list: only when asked for, so
@@ -81,6 +98,9 @@ async function getById(req, res, next) {
     if (!child) {
       return res.status(404).json({ error: 'Child not found' });
     }
+    if (!(await canAccessRegistration(req, child.registration_id))) {
+      return res.status(404).json({ error: 'Child not found' });
+    }
 
     child.id = child._id;
     child.classroom_name = child.classroom_id?.name || null;
@@ -101,14 +121,15 @@ async function getById(req, res, next) {
 async function update(req, res, next) {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const updates = { ...req.body };
 
-    delete updates._id;
-    delete updates.id;
-    delete updates.created_at;
+    for (const field of CHILD_UPDATE_BLOCKLIST) delete updates[field];
 
     const existing = await Child.findById(id);
     if (!existing) {
+      return res.status(404).json({ error: 'Child not found' });
+    }
+    if (!(await canAccessRegistration(req, existing.registration_id))) {
       return res.status(404).json({ error: 'Child not found' });
     }
 
@@ -136,6 +157,9 @@ async function updateClassroom(req, res, next) {
 
     const child = await Child.findById(id);
     if (!child) {
+      return res.status(404).json({ error: 'Child not found' });
+    }
+    if (!(await canAccessRegistration(req, child.registration_id))) {
       return res.status(404).json({ error: 'Child not found' });
     }
 
@@ -169,6 +193,9 @@ async function remove(req, res, next) {
     if (!child) {
       return res.status(404).json({ error: 'Child not found' });
     }
+    if (!(await canAccessRegistration(req, child.registration_id))) {
+      return res.status(404).json({ error: 'Child not found' });
+    }
 
     child.is_active = false;
     await child.save();
@@ -190,6 +217,9 @@ async function hide(req, res, next) {
   try {
     const child = await Child.findById(req.params.id);
     if (!child) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    if (!(await canAccessRegistration(req, child.registration_id))) {
+      return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    }
     child.is_active = false;
     child.hidden_at = new Date();
     child.hidden_by_name = req.user?.full_name || req.user?.username || '';
@@ -204,6 +234,9 @@ async function unhide(req, res, next) {
   try {
     const child = await Child.findById(req.params.id);
     if (!child) return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    if (!(await canAccessRegistration(req, child.registration_id))) {
+      return res.status(404).json({ error: 'ילד/ה לא נמצא/ה' });
+    }
     child.is_active = true;
     child.hidden_at = null;
     child.hidden_by_name = '';
@@ -216,7 +249,12 @@ async function unhide(req, res, next) {
 /** GET /api/children/hidden — the temporarily-removed, so they can be restored. */
 async function listHidden(req, res, next) {
   try {
-    const rows = await Child.find({ hidden_at: { $ne: null }, is_active: false })
+    const hiddenFilter = { hidden_at: { $ne: null }, is_active: false };
+    const regScope = await registrationIdsInScope(req);
+    if (regScope !== null) {
+      hiddenFilter.registration_id = { $in: regScope };
+    }
+    const rows = await Child.find(hiddenFilter)
       .populate('classroom_id', 'name')
       .sort({ hidden_at: -1 })
       .lean();

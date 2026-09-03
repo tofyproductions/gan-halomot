@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, attachBranchScope } = require('../middleware/auth');
 
 // GanFlow control plane — the customer registry, and the only place that knows
 // other customers exist. Mounted only when PLATFORM_MONGODB_URI is configured,
@@ -76,6 +76,11 @@ router.use('/parent', require('./parent.routes'));
 // /api/auth, /api/utils and /api/agent (Pi agents, own shared-secret header),
 // and all four are mounted ABOVE this line.
 router.use(authMiddleware);
+// The branch boundary, resolved once per request from the DB and hung on req.
+// Every branch-scoped query below reads it (utils/branch-filter). Must sit
+// directly after authMiddleware so req.user exists and nothing scoped runs
+// before it.
+router.use(attachBranchScope);
 router.use('/branches', require('./branch.routes'));
 // The customer's own subscription — what they pay and why. Read-only.
 router.use('/account', require('./account.routes'));

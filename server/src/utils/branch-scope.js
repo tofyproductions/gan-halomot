@@ -1,4 +1,5 @@
-const { User } = require('../models');
+const { User, Registration } = require('../models');
+const { getBranchFilter } = require('./branch-filter');
 
 /**
  * Which branches this request may act on — read from the DATABASE, not the JWT.
@@ -44,4 +45,31 @@ async function canAccessBranch(req, branchId) {
   return scope.includes(String(branchId));
 }
 
-module.exports = { resolveBranchScope, canAccessBranch };
+/**
+ * The registration ids this request may touch — for models that carry no
+ * branch_id of their own (Child, Document) and reach a branch only through
+ * their Registration. Returns null for "all branches" (admin/accountant), or
+ * the concrete id list otherwise. Uses getBranchFilter so an admin narrowing
+ * with ?branch and a manager scoped to her branches go through one code path.
+ */
+async function registrationIdsInScope(req) {
+  const bf = getBranchFilter(req, 'branch_id');
+  if (Object.keys(bf).length === 0) return null; // admin, no branch narrowing → all
+  return Registration.find(bf).distinct('_id');
+}
+
+/**
+ * Ownership check for a resource that reaches a branch through a Registration.
+ * Fails closed: an admin passes, an unknown/foreign registration is refused.
+ */
+async function canAccessRegistration(req, registrationId) {
+  const bf = getBranchFilter(req, 'branch_id');
+  if (Object.keys(bf).length === 0) return true; // admin, all branches
+  if (!registrationId) return false;
+  const reg = await Registration.findOne({ _id: registrationId, ...bf }).select('_id').lean();
+  return !!reg;
+}
+
+module.exports = {
+  resolveBranchScope, canAccessBranch, registrationIdsInScope, canAccessRegistration,
+};

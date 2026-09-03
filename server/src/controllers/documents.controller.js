@@ -1,4 +1,5 @@
 const { Registration, Child, Document } = require('../models');
+const { canAccessRegistration } = require('../utils/branch-scope');
 
 // The file is base64 inside a Mongo document, so it counts against the 16MB
 // document cap; 8MB raw (~11MB encoded) leaves comfortable room.
@@ -9,6 +10,9 @@ async function getByRegistration(req, res, next) {
     const { registrationId } = req.params;
     const registration = await Registration.findById(registrationId);
     if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+    if (!(await canAccessRegistration(req, registrationId))) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
@@ -36,6 +40,9 @@ async function upload(req, res, next) {
 
     const registration = await Registration.findById(registrationId);
     if (!registration) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+    if (!(await canAccessRegistration(req, registrationId))) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
@@ -67,6 +74,9 @@ async function download(req, res, next) {
     const { id } = req.params;
     const document = await Document.findById(id);
     if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    if (!(await canAccessRegistration(req, document.registration_id))) {
       return res.status(404).json({ error: 'Document not found' });
     }
 
