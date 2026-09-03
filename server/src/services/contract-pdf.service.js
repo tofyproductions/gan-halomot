@@ -15,6 +15,14 @@ try {
   console.error('Failed to load contract logo:', err.message);
 }
 
+// Names, id numbers and a classroom label are entered by people and end up
+// inside an HTML string that a browser renders (dangerouslySetInnerHTML on the
+// onboarding screen, and the printed PDF). Escape every one of them so a child
+// named `<img onerror=...>` is text, not script.
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+
 /**
  * Generate contract HTML string from registration data
  */
@@ -26,10 +34,10 @@ function generateContractHTML(data) {
     ? JSON.parse(data.configuration || '{}')
     : data.configuration) || {};
 
-  const childName = data.child_name || data.childName || '';
-  const parentName = data.parent_name || data.parentName || '';
-  const parentId = data.parent_id_number || data.parentId || '';
-  const classroom = data.classroom || '';
+  const childName = esc(data.child_name || data.childName || '');
+  const parentName = esc(data.parent_name || data.parentName || '');
+  const parentId = esc(data.parent_id_number || data.parentId || '');
+  const classroom = esc(data.classroom || '');
   const monthlyFee = parseFloat(data.monthly_fee || data.monthlyFee || 0);
   const regFee = parseFloat(data.registration_fee || data.regFee || 0);
   const startDate = data.start_date || data.startDate;
@@ -41,7 +49,7 @@ function generateContractHTML(data) {
   // imported old-system signature which lives inside configuration.signature
   // (digitally signed in the old app, carried over in the config JSON but never
   // copied to signature_data).
-  const signature = data.signature_data || data.signature || config.signature || '';
+  const signature = esc(data.signature_data || data.signature || config.signature || '');
 
   const augCalc = calculateAugustPayment(monthlyFee, startDate);
   const firstMonth = calculateFirstMonthPayment(monthlyFee, startDate);

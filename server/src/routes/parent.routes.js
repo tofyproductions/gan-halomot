@@ -2,6 +2,7 @@ const router = require('express').Router();
 const auth = require('../controllers/parentAuth.controller');
 const multer = require('multer');
 const { parentAuthMiddleware } = require('../middleware/parentAuth');
+const { authLimiter, otpLimiter } = require('../middleware/rateLimit');
 const { MAX_UPLOAD_BYTES } = require('../services/photo.service');
 
 // In memory: every upload is resized and forwarded to object storage at once,
@@ -25,10 +26,10 @@ const photoUpload = multer({
  * What protects these four is the one-time code and its throttles
  * (services/parentOtp.service.js), not the router.
  */
-router.post('/auth/start', auth.start);
-router.post('/auth/verify', auth.verify);
-router.post('/auth/set-password', auth.setPassword);
-router.post('/auth/login', auth.login);
+router.post('/auth/start', authLimiter, auth.start);
+router.post('/auth/verify', otpLimiter, auth.verify);
+router.post('/auth/set-password', authLimiter, auth.setPassword);
+router.post('/auth/login', authLimiter, auth.login);
 
 // Everything below needs a parent token.
 router.use(parentAuthMiddleware);

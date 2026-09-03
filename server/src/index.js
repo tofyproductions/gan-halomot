@@ -34,6 +34,10 @@ process.on('uncaughtException', (err) => { console.error('UNCAUGHT EXCEPTION:', 
 
 const app = express();
 
+// Behind Render/Vercel TLS termination: trust the first proxy so req.ip and the
+// rate limiter see the real client address rather than the proxy's.
+app.set('trust proxy', 1);
+
 // Security & parsing
 app.use(helmet({
   // A full policy would have to name every origin the application talks to,
@@ -58,7 +62,7 @@ app.use(helmet({
     },
   },
 }));
-app.use(cors({ origin: env.FRONTEND_URL || '*', credentials: true }));
+app.use(cors(require('./config/cors')));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
