@@ -20,6 +20,7 @@
     "test:august-bonus-e2e": "node scripts/august-bonus-e2e.test.js",
     "test:doc-date-match": "node scripts/doc-date-match.test.js",
     "test:recreation": "node scripts/recreation-pay.test.js",
+    "test:audit-bonus": "node scripts/payslip-audit-bonus.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",
     "test:vacations": "node scripts/vacation-calendar.test.js",
     "test:supplies": "node scripts/supplies-visibility.test.js",
