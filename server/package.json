@@ -22,6 +22,7 @@
     "test:recreation": "node scripts/recreation-pay.test.js",
     "test:audit-bonus": "node scripts/payslip-audit-bonus.test.js",
     "test:pdf-bonus-recreation": "node scripts/pdf-bonus-recreation-extract.test.js",
+    "test:inactive-effective-month": "node scripts/inactive-effective-month.test.js",
     "test:rooms": "node scripts/staff-classrooms.test.js",
     "test:vacations": "node scripts/vacation-calendar.test.js",
     "test:supplies": "node scripts/supplies-visibility.test.js",

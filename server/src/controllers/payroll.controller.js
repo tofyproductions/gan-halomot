@@ -459,6 +459,7 @@ const EMPLOYEE_FIELD_LABELS = {
   sick_pay_policy: 'מדיניות דמי מחלה', sick_balance_opening: 'יתרת מחלה פותחת',
   sick_daily_value_override: 'ערך יום מחלה', loans: 'הלוואות', bonuses: 'בונוסים',
   notes: 'הערות', permanent_note: 'הערה קבועה', is_active: 'פעיל', inactive_reason: 'סיבת אי-פעילות',
+  inactive_effective_month: 'חודש אחרון בטבלת השכר',
   work_days: 'ימי עבודה', on_maternity_leave: 'חופשת לידה', maternity_leave_from: 'לידה מתאריך',
   maternity_leave_to: 'לידה עד תאריך', is_pregnant: 'בהריון', due_date: 'צפי לידה',
   gave_birth_date: 'תאריך לידה', on_pregnancy_bedrest: 'שמירת הריון',
@@ -495,7 +496,7 @@ async function updateEmployee(req, res, next) {
       'bank_number', 'bank_branch', 'bank_account', 'bank_account_holder', 'pension_fund', 'education_fund', 'clock_aliases',
       'pension_exempt', 'bituach_leumi_exempt', 'has_army_reserve_form',
       'sick_pay_policy', 'sick_balance_opening', 'sick_daily_value_override',
-      'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'work_days',
+      'loans', 'bonuses', 'notes', 'permanent_note', 'is_active', 'inactive_reason', 'inactive_effective_month', 'work_days',
       'on_maternity_leave', 'maternity_leave_from', 'maternity_leave_to',
       'is_pregnant', 'due_date', 'gave_birth_date', 'on_pregnancy_bedrest',
     ];

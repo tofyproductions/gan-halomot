@@ -402,6 +402,12 @@ const employeeSchema = new mongoose.Schema({
   // Status
   is_active: { type: Boolean, default: true },
   inactive_reason: { type: String, default: '' }, // why the employee was deactivated
+  // Last month ('YYYY-MM') she still appears in the payroll table with real
+  // data — she worked part of it, so it stays. The month after this one is
+  // the first one she's archived out of (see getMonth's inactiveEmps query).
+  // null = no cutoff set — she keeps showing every month (legacy behavior),
+  // same as before this field existed.
+  inactive_effective_month: { type: String, default: null },
   on_maternity_leave: { type: Boolean, default: false },
   maternity_leave_from: { type: Date, default: null },
   maternity_leave_to: { type: Date, default: null },

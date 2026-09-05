@@ -727,7 +727,14 @@ export default function EmployeeManager() {
                   <TableRow key={empId} hover sx={!emp.is_active ? { bgcolor: 'rgba(0,0,0,0.04)', opacity: 0.75 } : undefined}>
                     <TableCell sx={{ fontWeight: 600 }}>
                       {emp.full_name}
-                      {!emp.is_active && <Chip label="ארכיון" size="small" sx={{ ml: 1, height: 18, fontSize: '0.65rem' }} />}
+                      {!emp.is_active && (
+                        <Tooltip title={[
+                          emp.inactive_reason || 'לא נרשמה סיבה',
+                          emp.inactive_effective_month ? `מוצגת בטבלת השכר עד ${emp.inactive_effective_month}` : null,
+                        ].filter(Boolean).join(' · ')}>
+                          <Chip label="ארכיון" size="small" sx={{ ml: 1, height: 18, fontSize: '0.65rem' }} />
+                        </Tooltip>
+                      )}
                       {unpaidRole && (
                         <Tooltip title="בעל/ת תפקיד ללא שכר — לא מופיע/ה בטבלת השכר, בייצוא לרו״ח או בבעיות בהחתמה">
                           <Chip label="ללא שכר" size="small" color="warning" variant="outlined"

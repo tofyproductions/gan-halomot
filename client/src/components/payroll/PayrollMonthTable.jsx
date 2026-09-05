@@ -380,9 +380,16 @@ function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
 }
 
 // Prompt for the reason when deactivating an employee.
-function InactiveReasonDialog({ open, row, onClose, onConfirm }) {
+function InactiveReasonDialog({ open, row, currentMonth, onClose, onConfirm }) {
   const [reason, setReason] = useState('');
-  useEffect(() => { if (open) setReason(row?.inactive_reason || ''); }, [open, row]);
+  const [effectiveMonth, setEffectiveMonth] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setReason(row?.inactive_reason || '');
+    // Default to the month being viewed — the common case is deactivating
+    // someone while looking at her last real month.
+    setEffectiveMonth(row?.inactive_effective_month || currentMonth || '');
+  }, [open, row, currentMonth]);
   if (!row) return null;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
@@ -393,11 +400,18 @@ function InactiveReasonDialog({ open, row, onClose, onConfirm }) {
           label="סיבת חוסר הפעילות" fullWidth multiline minRows={2} autoFocus
           value={reason} onChange={e => setReason(e.target.value)}
           placeholder="לדוגמה: סיום העסקה / עזבה / חופשת לידה…"
+          sx={{ mb: 2 }}
+        />
+        <TextField
+          label="חודש אחרון בטבלת השכר" type="month" fullWidth
+          value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}
+          InputLabelProps={{ shrink: true }}
+          helperText="החודש הזה עדיין יוצג (עבדה חלק ממנו) — מהחודש שאחריו היא תעבור לארכיון ולא תופיע בטבלה."
         />
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" color="warning" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>
+        <Button variant="contained" color="warning" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), effectiveMonth || null)}>
           סמן כלא פעיל
         </Button>
       </DialogActions>
@@ -1164,14 +1178,23 @@ export default function PayrollMonthTable() {
       .catch(err => { toast.error(err.response?.data?.error || 'האישור נכשל'); fetchData(); });
   }, [month, fetchData]);
 
-  // Activate / deactivate an employee (deactivation records a reason shown on the row).
-  const setEmployeeActive = useCallback((employeeId, active, reason = '') => {
+  // Activate / deactivate an employee (deactivation records a reason + the
+  // last month she still appears in the payroll table, shown on the row).
+  const setEmployeeActive = useCallback((employeeId, active, reason = '', effectiveMonth = null) => {
     setData(prev => prev && {
       ...prev,
       rows: prev.rows.map(r => r.employee_id === employeeId
-        ? { ...r, is_active: active, inactive_reason: active ? '' : (reason || r.inactive_reason) } : r),
+        ? {
+          ...r, is_active: active,
+          inactive_reason: active ? '' : (reason || r.inactive_reason),
+          inactive_effective_month: active ? null : effectiveMonth,
+        } : r),
     });
-    api.put(`/payroll/employees/${employeeId}`, { is_active: active, inactive_reason: active ? '' : reason })
+    api.put(`/payroll/employees/${employeeId}`, {
+      is_active: active,
+      inactive_reason: active ? '' : reason,
+      inactive_effective_month: active ? null : effectiveMonth,
+    })
       .then(() => fetchData())
       .catch(err => { toast.error(err.response?.data?.error || 'עדכון נכשל'); fetchData(); });
   }, [fetchData]);
@@ -2599,6 +2622,7 @@ export default function PayrollMonthTable() {
                       <TableRow key={`inact-${r.employee_id}`}>
                         <TableCell colSpan={totalCols} sx={{ bgcolor: '#fff1f2', color: '#b91c1c', fontSize: '0.72rem', fontWeight: 700, py: 0.4, borderBottom: '2px solid #fecaca' }}>
                           ⛔ עובד לא פעיל{r.inactive_reason ? ` — ${r.inactive_reason}` : ' (לא נרשמה סיבה)'}
+                          {r.inactive_effective_month && ` · מוצגת עד ${r.inactive_effective_month}, לאחר מכן בארכיון בלבד`}
                         </TableCell>
                       </TableRow>
                     );
@@ -2614,8 +2638,9 @@ export default function PayrollMonthTable() {
       <InactiveReasonDialog
         open={inactiveDlg.open}
         row={inactiveDlg.row}
+        currentMonth={month}
         onClose={() => setInactiveDlg({ open: false, row: null })}
-        onConfirm={(reason) => { if (inactiveDlg.row) setEmployeeActive(inactiveDlg.row.employee_id, false, reason); setInactiveDlg({ open: false, row: null }); }}
+        onConfirm={(reason, effectiveMonth) => { if (inactiveDlg.row) setEmployeeActive(inactiveDlg.row.employee_id, false, reason, effectiveMonth); setInactiveDlg({ open: false, row: null }); }}
       />
       <TravelDialog
         open={travelDlg.open}

@@ -454,13 +454,21 @@ async function getMonth(req, res, next) {
         .map(String),
     )];
     // Show an inactive employee if they were DEACTIVATED IN THE TABLE (they carry
-    // an inactive_reason) — they stay visible every following month until they're
-    // reactivated or removed — OR if they simply had activity this month. Old
+    // an inactive_reason) — up through inactive_effective_month (her last real
+    // month; no cutoff set means every following month, same as before this
+    // field existed) — OR if they simply had activity this month regardless of
+    // the cutoff (real punches/pay that month are never hidden). Old
     // soft-deleted staff (no reason, no activity) stay hidden.
     const inactiveEmps = await Employee.find({
       branch_id: { $in: branchIds }, is_active: false, receives_salary: { $ne: false },
       $or: [
-        { inactive_reason: { $nin: [null, ''] } },
+        {
+          inactive_reason: { $nin: [null, ''] },
+          $or: [
+            { inactive_effective_month: null },
+            { inactive_effective_month: { $gte: month } },
+          ],
+        },
         ...(relevantInactive.length ? [{ _id: { $in: relevantInactive } }] : []),
       ],
     }).populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
