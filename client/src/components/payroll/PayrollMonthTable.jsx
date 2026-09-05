@@ -382,15 +382,22 @@ function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
 // Prompt for the reason when deactivating an employee.
 function InactiveReasonDialog({ open, row, currentMonth, onClose, onConfirm }) {
   const [reason, setReason] = useState('');
+  // 'termination' = permanent, this is really the last month she's paid.
+  // 'leave' = חופשת לידה / חל״ת — she's expected back, so she must NOT get
+  // an archive cutoff: the table should keep showing her every month exactly
+  // like before this feature existed, until someone reactivates her.
+  const [kind, setKind] = useState('');
   const [effectiveMonth, setEffectiveMonth] = useState('');
   useEffect(() => {
     if (!open) return;
     setReason(row?.inactive_reason || '');
+    setKind(row?.inactive_effective_month ? 'termination' : '');
     // Default to the month being viewed — the common case is deactivating
     // someone while looking at her last real month.
     setEffectiveMonth(row?.inactive_effective_month || currentMonth || '');
   }, [open, row, currentMonth]);
   if (!row) return null;
+  const canConfirm = reason.trim() && kind && (kind === 'leave' || effectiveMonth);
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
       <DialogTitle>סימון כלא פעיל — {row.full_name}</DialogTitle>
@@ -402,16 +409,28 @@ function InactiveReasonDialog({ open, row, currentMonth, onClose, onConfirm }) {
           placeholder="לדוגמה: סיום העסקה / עזבה / חופשת לידה…"
           sx={{ mb: 2 }}
         />
-        <TextField
-          label="חודש אחרון בטבלת השכר" type="month" fullWidth
-          value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-          helperText="החודש הזה עדיין יוצג (עבדה חלק ממנו) — מהחודש שאחריו היא תעבור לארכיון ולא תופיע בטבלה."
-        />
+        <FormControl sx={{ mb: kind === 'termination' ? 1.5 : 0 }}>
+          <FormLabel sx={{ fontSize: '0.85rem' }}>סוג</FormLabel>
+          <RadioGroup value={kind} onChange={e => setKind(e.target.value)}>
+            <FormControlLabel value="termination" control={<Radio size="small" />}
+              label="סיום העסקה — לא תחזור, זה החודש האחרון שהיא מקבלת שכר" />
+            <FormControlLabel value="leave" control={<Radio size="small" />}
+              label="חופשה זמנית (חל״ת / לידה) — צפויה לחזור, ממשיכה להופיע כל חודש" />
+          </RadioGroup>
+        </FormControl>
+        {kind === 'termination' && (
+          <TextField
+            label="חודש אחרון בטבלת השכר" type="month" fullWidth
+            value={effectiveMonth} onChange={e => setEffectiveMonth(e.target.value)}
+            InputLabelProps={{ shrink: true }}
+            helperText="החודש הזה עדיין יוצג (עבדה חלק ממנו) — מהחודש שאחריו היא תעבור לארכיון ולא תופיע בטבלה."
+          />
+        )}
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" color="warning" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), effectiveMonth || null)}>
+        <Button variant="contained" color="warning" disabled={!canConfirm}
+          onClick={() => onConfirm(reason.trim(), kind === 'termination' ? effectiveMonth : null)}>
           סמן כלא פעיל
         </Button>
       </DialogActions>
