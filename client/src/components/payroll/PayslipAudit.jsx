@@ -977,8 +977,12 @@ const DIFF_FIELDS = [
   { key: 'global',       label: 'שכר תקן',          tableKey: 'global_salary_amount', payslipFn: (p) => p?.base_salary_paid ?? p?.base_salary ?? null, candidatesKey: 'base_salary_candidates', tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'global_ot',    label: 'שעות נוספות גלובלי',  tableKey: 'global_ot_amount',    payslipKey: 'global_ot_amount', tolerance: 1, currency: true, suffixKey: 'global_salary_kind' },
   { key: 'transport',    label: 'נסיעות',              tableKey: 'transport',           payslipKey: 'transport_value', tolerance: 0.5, currency: true },
-  { key: 'recup',        label: 'הבראה',               tableKey: 'recuperation',        payslipKey: null,              currency: true, infoOnly: true, note: 'לא נשלף מהתלוש אוטומטית — השוואה ידנית מול הסכום שאושר במערכת' },
-  { key: 'bonus',        label: 'בונוס',                tableKey: 'bonus',               payslipKey: null,              currency: true, infoOnly: true, note: 'כולל בונוס אישי + בונוס אוגוסט (סגירת קיץ) — לא נשלף מהתלוש אוטומטית' },
+  // Amount is never compared for הבראה — the office's policy is that the
+  // accountant alone sets the exact ₪, our system only flags eligibility.
+  // So this row compares ELIGIBLE/NOT-ELIGIBLE (system) against whether a
+  // הבראה line was found on the payslip at all, not amount against amount.
+  { key: 'recup',        label: 'הבראה — זכאות',       tableKey: 'recreation_eligible', payslipFn: (p) => p?.recreation_value != null, tolerance: 0, boolYesNo: true, note: 'משווה זכאות בלבד (כן/לא) — הסכום המדויק תמיד נקבע ע"י רו״ח' },
+  { key: 'bonus',        label: 'בונוס',                tableKey: 'bonus',               payslipKey: 'bonus_value',     tolerance: 1, currency: true, note: 'כולל בונוס אישי + בונוס אוגוסט (סגירת קיץ)' },
   { key: 'cibus',        label: 'סיבוס / שווי ארוחות', tableKey: 'cibus',               payslipKey: 'meal_value',      tolerance: 0.5, currency: true },
   { key: 'gift',         label: 'כרטיס מתנה',          tableKey: 'gift_card',           payslipKey: null,              currency: true, infoOnly: true },
   { key: 'reserve',      label: 'מילואים',              tableKey: 'reserve_duty',        payslipKey: null,              days: true, infoOnly: true },
@@ -1014,6 +1018,7 @@ function getPayslipValue(payslip, field) {
 
 function fmt(value, field) {
   if (value === null || value === undefined || value === '') return '—';
+  if (field?.boolYesNo) return value ? 'זכאית' : 'לא זכאית';
   if (typeof value !== 'number') return String(value);
   const formatted = Number.isInteger(value) ? value.toLocaleString('he-IL') : value.toFixed(2);
   if (field?.currency) return `₪${formatted}`;
@@ -1257,7 +1262,10 @@ function DiffPanel({ tableRow, payslip, cibusRow }) {
                       : fmt(r.payslipVal, r.field)}
                   </TableCell>
                   <TableCell sx={{ fontWeight: 700, color: r.status === 'gap' ? 'error.main' : 'text.disabled' }}>
-                    {r.status === 'gap' && r.delta != null
+                    {/* A ± delta is meaningless for a yes/no field — the gap-colored
+                        row and ✗ icon already say "disagreement", a signed זכאית
+                        doesn't add information. */}
+                    {r.status === 'gap' && r.delta != null && !r.field.boolYesNo
                       ? (r.delta > 0 ? '+' : '') + fmt(r.delta, r.field)
                       : '—'}
                   </TableCell>

@@ -2007,6 +2007,12 @@ function systemRowToTableRow(r) {
     advance_directive: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || null,
     gift_card: numKind(r.manual?.gift_card),
     recuperation: numKind(r.manual?.recreation),
+    // The office's policy (2026-09): our system never asserts the exact ₪ —
+    // the accountant does. So the audit can only meaningfully compare
+    // ELIGIBILITY (did we flag her as owed הבראה this month, marked either
+    // as a number or as "אצל רו״ח" text) against whether the payslip shows
+    // a הבראה line at all — never amount against amount.
+    recreation_eligible: !!(r.manual?.recreation && r.manual.recreation.kind && r.manual.recreation.kind !== 'empty'),
     bonus: bonusTotal,
     cibus: numKind(r.manual?.cibus),
     reserve_duty: numKind(r.manual?.miluim),

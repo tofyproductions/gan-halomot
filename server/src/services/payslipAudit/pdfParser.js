@@ -26,6 +26,29 @@ function num(s) {
   return Number.isFinite(n) ? n : null;
 }
 
+// A one-time payslip line item (meal/vehicle/transport/bonus/recreation) can
+// appear in TWO column orientations across pages from this vendor:
+//   format A:  "<amount> 1.00 <label>"           (amount-first)
+//   format B:  "<label>\t1.00\t<amount>"          (amount-last, tab-separated)
+// We try both and prefer the explicit "1.00" anchor so we don't pick up
+// unrelated numbers from neighboring text.
+function findValueForLabel(text, label) {
+  const lines = text.split('\n');
+  for (const line of lines) {
+    if (!line.includes(label)) continue;
+    // A: amount before "1.00 <label>"
+    const a = line.match(/([\d,]+\.\d+)\s+1\.00\s+/);
+    if (a) return num(a[1]);
+    // B: "<label>\t1.00\t<amount>"
+    const b = line.match(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[\\t\\s]+1\\.00\\s*[\\t\\s]+([\\d,]+(?:\\.\\d+)?)'));
+    if (b) return num(b[1]);
+    // Last resort: any decimal number on the same line
+    const c = line.match(/([\d,]+\.\d+)/);
+    if (c) return num(c[1]);
+  }
+  return null;
+}
+
 function parsePage(rawText, pageIndex) {
   const text = rawText;
   const result = {
@@ -55,6 +78,8 @@ function parsePage(rawText, pageIndex) {
     meal_value: null,        // שווי ארוחות / סיבוס — what the payslip actually paid
     vehicle_value: null,     // שווי שימוש ברכב
     transport_value: null,   // נסיעות — travel reimbursement
+    bonus_value: null,       // בונוס — presence/amount as printed on the payslip
+    recreation_value: null,  // הבראה — presence only matters (accountant sets the exact ₪)
     // Hours worked from line-item qty (more reliable than the header for
     // hourly employees — those show 0/0 in the header but qty in items).
     item_regular_hours: null,    // שכר יסוד qty
@@ -192,36 +217,25 @@ function parsePage(rawText, pageIndex) {
   //         —º≈¿— ¿ºº—  → שווי שימוש ברכב
   const MEAL_GARBLED   = '“ºæº–∑ ¿ºº—';
   const VEHICLE_GARBLED = '—º≈¿— ¿ºº—';
+  // Same garbled-font issue as meal/vehicle above — confirmed against 19 real
+  // payslip pages from this vendor (בונוס and הבראה never survive as plain
+  // Hebrew text, always as these exact byte sequences).
+  const BONUS_GARBLED = '»º«º∏';
+  const RECREATION_GARBLED = 'ª∑–∏ª';
 
-  // The same item appears in TWO column orientations across payslips:
-  //   format A:  "<amount> 1.00 <label>"           (amount-first)
-  //   format B:  "<label>\t1.00\t<amount>"          (amount-last, tab-separated)
-  // For format B, the trailing currency may also include trailing chars
-  // (e.g. ".00" or whole-number). We try both and prefer the explicit "1.00"
-  // anchor so we don't pick up unrelated numbers from neighboring text.
-  function findValueForLabel(label) {
-    const lines = text.split('\n');
-    for (const line of lines) {
-      if (!line.includes(label)) continue;
-      // A: amount before "1.00 <label>"
-      const a = line.match(/([\d,]+\.\d+)\s+1\.00\s+/);
-      if (a) return num(a[1]);
-      // B: "<label>\t1.00\t<amount>"
-      const b = line.match(new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*[\\t\\s]+1\\.00\\s*[\\t\\s]+([\\d,]+(?:\\.\\d+)?)'));
-      if (b) return num(b[1]);
-      // Last resort: any decimal number on the same line
-      const c = line.match(/([\d,]+\.\d+)/);
-      if (c) return num(c[1]);
-    }
-    return null;
-  }
   result.meal_value =
-    findValueForLabel(MEAL_GARBLED) ??
-    findValueForLabel('שווי ארוחות') ??
-    findValueForLabel('סיבוס');
+    findValueForLabel(text, MEAL_GARBLED) ??
+    findValueForLabel(text, 'שווי ארוחות') ??
+    findValueForLabel(text, 'סיבוס');
   result.vehicle_value =
-    findValueForLabel(VEHICLE_GARBLED) ??
-    findValueForLabel('שווי שימוש ברכב');
+    findValueForLabel(text, VEHICLE_GARBLED) ??
+    findValueForLabel(text, 'שווי שימוש ברכב');
+  result.bonus_value = findValueForLabel(text, BONUS_GARBLED);
+  // Amount is a rough reference only — הבראה rows print a day-rate column
+  // that can differ slightly from the actual paid amount (rounding), and the
+  // office's own policy is the accountant sets the exact figure anyway. What
+  // matters here is just whether a הבראה line exists on the payslip at all.
+  result.recreation_value = findValueForLabel(text, RECREATION_GARBLED);
 
   // Transport (נסיעות) appears as either an item line or — more commonly for
   // this vendor — a row of three identical money columns:
@@ -628,4 +642,4 @@ async function parsePayslipsPdf(buffer) {
   return { payslips, total_pages: r.pages.length };
 }
 
-module.exports = { parsePayslipsPdf };
+module.exports = { parsePayslipsPdf, findValueForLabel };
