@@ -417,12 +417,34 @@ async function getMonth(req, res, next) {
     // Unpaid role-holders (receives_salary:false) are deliberately absent from
     // the whole table — not a zero row. There is nothing to compute for them,
     // and a name sitting in the salary screen is an invitation to pay it.
-    const activeEmps = await Employee.find({
-      branch_id: { $in: branchIds }, is_active: true, receives_salary: { $ne: false },
-    })
-      .populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
-    const punchEmpIds = await Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } });
-    const pmEmpIds = await PayrollMonth.distinct('employee_id', { month });
+    // Independent reads with no data dependency on each other — batched so
+    // their round-trips overlap instead of stacking one after another. (Was
+    // ~15 sequential awaits before employees/branchIds even mattered; each
+    // one only costs the slowest of the batch, not the sum.)
+    const [activeEmps, punchEmpIds, pmEmpIds, amutot, customColumns, allBranches] = await Promise.all([
+      // Active employees are always shown. Inactive employees are shown ONLY
+      // if they had activity this month (punches or a payroll record), so a
+      // just-deactivated employee stays visible with their reason — without
+      // listing everyone who ever left.
+      // Unpaid role-holders (receives_salary:false) are deliberately absent
+      // from the whole table — not a zero row. There is nothing to compute
+      // for them, and a name sitting in the salary screen is an invitation
+      // to pay it.
+      Employee.find({
+        branch_id: { $in: branchIds }, is_active: true, receives_salary: { $ne: false },
+      }).populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean(),
+      Punch.distinct('employee_id', { timestamp: { $gte: from, $lt: to }, ignored: { $ne: true } }),
+      PayrollMonth.distinct('employee_id', { month }),
+      // Pull amutot to render column groups
+      Amuta.find({ is_active: true }).sort({ name: 1 }).lean(),
+      // Pull custom columns: both month-specific and "*" (all months)
+      PayrollCustomColumn.find({
+        is_active: true,
+        $or: [{ month }, { month: '*' }],
+      }).sort({ position: 1, created_at: 1 }).lean(),
+      // Build branch→amuta map for payrollCalc
+      Branch.find({}).select('_id amuta_id').lean(),
+    ]);
     // Orphan punches / payroll rows can carry a null employee_id; drop anything
     // that isn't a valid ObjectId so the $in below never receives the string
     // "null" (which would throw a CastError and fail the whole table load).
@@ -444,29 +466,140 @@ async function getMonth(req, res, next) {
     }).populate('amuta_distribution.amuta_id', 'name short_name').sort({ full_name: 1 }).lean();
     const employees = [...activeEmps, ...inactiveEmps];
 
-    // Pull amutot to render column groups
-    const amutot = await Amuta.find({ is_active: true }).sort({ name: 1 }).lean();
-
-    // Pull custom columns: both month-specific and "*" (all months)
-    const customColumns = await PayrollCustomColumn.find({
-      is_active: true,
-      $or: [{ month }, { month: '*' }],
-    }).sort({ position: 1, created_at: 1 }).lean();
-
-    // Build branch→amuta map for payrollCalc
-    const allBranches = await Branch.find({}).select('_id amuta_id').lean();
     const branchAmutaMap = new Map(
       allBranches
         .filter(b => b.amuta_id)
         .map(b => [String(b._id), String(b.amuta_id)])
     );
 
-    // Pull punches for all in-scope employees
-    const punches = await Punch.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      timestamp: { $gte: from, $lt: to },
-      ignored: { $ne: true },
-    }).sort({ timestamp: 1 }).lean();
+    const empIdList = employees.map(e => e._id);
+    const userIdList = employees.map(e => e.user_id).filter(Boolean);
+    // Self-filed requests (sick/pregnancy-exam certs) key on user_id, so
+    // matching them back to an employee needs both id lists ready up front.
+    const empUserIds = employees.filter(e => e.user_id).map(e => e.user_id);
+    const userIdToEmpId = new Map(
+      employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]),
+    );
+
+    // Kindergarten holidays / statutory dates for the requested month.
+    const [yy, mm] = month.split('-').map(Number);
+    const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
+    const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
+    // Statutory Israeli-holiday dates this month — paid via דמי חגים (not vacation).
+    const statutoryHolidayDates = new Set(getHolidaysInMonth(month).map(h => h.date));
+
+    // Everything below depends only on employees/branchIds/month fixed above,
+    // and none of these reads depend on each other's result — batched for the
+    // same reason as the first group. This used to be ~11 sequential awaits;
+    // on a slow moment that stacking was most of what made the table hang.
+    const [
+      punches, resolutionDocs, [allDocs, allCerts], existing, adjustments,
+      commitments, kindergartenHolidays, specialDays, leaveRequests,
+      sickRequests, examRequests,
+    ] = await Promise.all([
+      // Pull punches for all in-scope employees
+      Punch.find({
+        employee_id: { $in: empIdList },
+        timestamp: { $gte: from, $lt: to },
+        ignored: { $ne: true },
+      }).sort({ timestamp: 1 }).lean(),
+      // Accountant decisions for days with >2 punches. Keyed employee → date →
+      // resolution; a day without one stays provisional (span) and is flagged.
+      // Only APPROVED ones bill — a branch manager's proposal is not pay.
+      PunchResolution.find({
+        employee_id: { $in: empIdList },
+        date: { $regex: `^${month}` },
+        status: 'approved',
+      }).lean(),
+      // Attached files still awaiting the accountant's acknowledgement — shown
+      // as "📎 … ממתין בקבצים" in each employee's notes cell so files aren't
+      // missed. BOTH sources count: documents uploaded from the notes column
+      // AND the medical certificates carried by sick / vacation /
+      // pregnancy-exam requests. Fetched unfiltered by acknowledgement so the
+      // same read also yields the total file count behind each row's "קבצים"
+      // chip (metadata only — the base64 payloads are never selected).
+      Promise.all([
+        EmployeeDocument.find({ employee_id: { $in: empIdList } })
+          .select('employee_id name file_name month created_at acknowledged').sort({ created_at: -1 }).lean(),
+        EmployeeRequest.find({
+          $or: [
+            { employee_id: { $in: empIdList } },
+            ...(userIdList.length ? [{ user_id: { $in: userIdList } }] : []),
+          ],
+          medical_file_data: { $ne: null },
+        }).select('employee_id user_id type from_date to_date medical_file_name created_at cert_acknowledged')
+          .sort({ created_at: -1 }).lean(),
+      ]),
+      // Pull any existing PayrollMonth rows for these employees
+      PayrollMonth.find({
+        employee_id: { $in: empIdList },
+        month,
+      }).populate('manual.advance_deduction_preset_id').lean(),
+      // Salary adjustments — managers' ad-hoc credits/debits/hour corrections
+      SalaryAdjustment.find({
+        employee_id: { $in: empIdList },
+        month,
+        status: { $ne: 'rejected' },
+      }).populate('created_by', 'full_name').sort({ created_at: -1 }).lean(),
+      // Commitments (contracted weekly schedules) — for absence detection
+      EmployeeCommitment.find({
+        employee_id: { $in: empIdList },
+      }).lean(),
+      // Kindergarten holidays (Holiday model) for every in-scope branch that
+      // overlap with the requested month. Drives the auto vacation-days suggestion.
+      Holiday.find({
+        branch_id: { $in: branchIds },
+        start_date: { $lte: monthEnd },
+        end_date: { $gte: monthStart },
+      }).lean(),
+      // Employer-declared one-off closures (מסיבת סיום, יום צוות). branch_id
+      // null means every branch. Unlike a Holiday these do NOT draw a
+      // vacation day — see models/SpecialDay.js.
+      SpecialDay.find({
+        date: { $regex: `^${month}` },
+        $or: [{ branch_id: null }, { branch_id: { $in: branchIds } }],
+      }).lean(),
+      // Approved leave (vacation/sick) overlapping the month — those days are
+      // not absences. (date fields are YYYY-MM-DD strings, so range queries
+      // are lexical.) Field-limited: some of these requests carry a
+      // multi-megabyte base64 medical_file_data (sick/vacation certs) that
+      // nothing below ever reads — fetching it anyway turned a 20-document
+      // query into tens of megabytes over the wire and hung the whole table load.
+      EmployeeRequest.find({
+        employee_id: { $in: empIdList },
+        status: 'approved',
+        from_date: { $lte: `${month}-31` },
+        $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }],
+      }).select('employee_id from_date to_date').lean(),
+      // Approved sick certificates — this month AND history (for sick-pay
+      // brackets and the accrued-balance ceiling). Self-filed requests key on
+      // user_id, so match by employee_id OR user_id and resolve back to the employee.
+      EmployeeRequest.find({
+        type: 'sick',
+        status: 'approved',
+        from_date: { $lte: `${month}-31` },
+        $or: [
+          { employee_id: { $in: empIdList } },
+          ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+        ],
+      }).select('employee_id user_id from_date to_date pay_from_first_day').lean(),
+      // Pregnancy-exam absences (§7 חוק עבודת נשים) — the checkup hours the 40h
+      // tracker records (EmployeeRequest type 'pregnancy_exam'). Matched BY DATE
+      // to the partial-absence short days below: an APPROVED exam on a short day
+      // excuses it automatically (the law pays those hours in full), and a
+      // pending one is surfaced in the dialog so the accountant sees the
+      // certificate is already in — one click from tidy instead of a hunt
+      // through the documents list.
+      EmployeeRequest.find({
+        type: 'pregnancy_exam',
+        status: { $ne: 'rejected' },
+        from_date: { $gte: `${month}-01`, $lte: `${month}-31` },
+        $or: [
+          { employee_id: { $in: empIdList } },
+          ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+        ],
+      }).select('employee_id user_id from_date exam_hours status').lean(),
+    ]);
 
     const punchesByEmp = new Map();
     for (const p of punches) {
@@ -475,14 +608,6 @@ async function getMonth(req, res, next) {
       punchesByEmp.get(k).push(p);
     }
 
-    // Accountant decisions for days with >2 punches. Keyed employee → date →
-    // resolution; a day without one stays provisional (span) and is flagged.
-    // Only APPROVED ones bill — a branch manager's proposal is not pay.
-    const resolutionDocs = await PunchResolution.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      date: { $regex: `^${month}` },
-      status: 'approved',
-    }).lean();
     const resByEmp = new Map();
     for (const r of resolutionDocs) {
       const k = String(r.employee_id);
@@ -490,29 +615,6 @@ async function getMonth(req, res, next) {
       resByEmp.get(k).set(r.date, r);
     }
 
-    // Attached files still awaiting the accountant's acknowledgement — shown as
-    // "📎 … ממתין בקבצים" in each employee's notes cell so files aren't missed.
-    // BOTH sources count: documents uploaded from the notes column AND the
-    // medical certificates carried by sick / vacation / pregnancy-exam requests.
-    // The certificate is the more common case, so leaving it out made attached
-    // files look captionless in the table.
-    const empIdList = employees.map(e => e._id);
-    const userIdList = employees.map(e => e.user_id).filter(Boolean);
-    // Fetched unfiltered by acknowledgement so the same read also yields the
-    // total file count behind each row's "קבצים" chip (metadata only — the
-    // base64 payloads are never selected).
-    const [allDocs, allCerts] = await Promise.all([
-      EmployeeDocument.find({ employee_id: { $in: empIdList } })
-        .select('employee_id name file_name month created_at acknowledged').sort({ created_at: -1 }).lean(),
-      EmployeeRequest.find({
-        $or: [
-          { employee_id: { $in: empIdList } },
-          ...(userIdList.length ? [{ user_id: { $in: userIdList } }] : []),
-        ],
-        medical_file_data: { $ne: null },
-      }).select('employee_id user_id type from_date to_date medical_file_name created_at cert_acknowledged')
-        .sort({ created_at: -1 }).lean(),
-    ]);
     // A file belongs to ONE salary month — the one it was uploaded for (its
     // `month` context, or the month it was created in when no context was
     // recorded; a certificate goes by the date it certifies). Afterwards it
@@ -548,46 +650,10 @@ async function getMonth(req, res, next) {
     for (const d of allDocs) bump(String(d.employee_id));
     for (const c of allCerts) bump(c.employee_id ? String(c.employee_id) : empByUserId.get(String(c.user_id)));
 
-    // Pull any existing PayrollMonth rows for these employees
-    const existing = await PayrollMonth.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      month,
-    }).populate('manual.advance_deduction_preset_id').lean();
     const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
 
-    // Salary adjustments — managers' ad-hoc credits/debits/hour corrections
-    const adjustments = await SalaryAdjustment.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      month,
-      status: { $ne: 'rejected' },
-    }).populate('created_by', 'full_name').sort({ created_at: -1 }).lean();
-
-    // Commitments (contracted weekly schedules) — for absence detection
-    const commitments = await EmployeeCommitment.find({
-      employee_id: { $in: employees.map(e => e._id) },
-    }).lean();
     const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
 
-    // Kindergarten holidays (Holiday model) for every in-scope branch that
-    // overlap with the requested month. Drives the auto vacation-days suggestion.
-    const [yy, mm] = month.split('-').map(Number);
-    const monthStart = new Date(Date.UTC(yy, mm - 1, 1));
-    const monthEnd = new Date(Date.UTC(yy, mm, 0, 23, 59, 59));
-    // Statutory Israeli-holiday dates this month — paid via דמי חגים (not vacation).
-    const statutoryHolidayDates = new Set(getHolidaysInMonth(month).map(h => h.date));
-    const kindergartenHolidays = await Holiday.find({
-      branch_id: { $in: branchIds },
-      start_date: { $lte: monthEnd },
-      end_date: { $gte: monthStart },
-    }).lean();
-
-    // Employer-declared one-off closures (מסיבת סיום, יום צוות). branch_id null
-    // means every branch. Unlike a Holiday these do NOT draw a vacation day —
-    // see models/SpecialDay.js.
-    const specialDays = await SpecialDay.find({
-      date: { $regex: `^${month}` },
-      $or: [{ branch_id: null }, { branch_id: { $in: branchIds } }],
-    }).lean();
     const specialDaysByBranch = new Map();
     for (const b of branchIds) {
       specialDaysByBranch.set(String(b), specialDays.filter(
@@ -601,18 +667,6 @@ async function getMonth(req, res, next) {
       holidaysByBranch.get(k).push(h);
     }
 
-    // Approved leave (vacation/sick) overlapping the month — those days are not
-    // absences. (date fields are YYYY-MM-DD strings, so range queries are lexical.)
-    // Field-limited: some of these requests carry a multi-megabyte base64
-    // medical_file_data (sick/vacation certs) that nothing below ever reads —
-    // fetching it anyway turned a 20-document query into tens of megabytes
-    // over the wire and hung the whole table load.
-    const leaveRequests = await EmployeeRequest.find({
-      employee_id: { $in: employees.map(e => e._id) },
-      status: 'approved',
-      from_date: { $lte: `${month}-31` },
-      $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }],
-    }).select('employee_id from_date to_date').lean();
     const leaveByEmp = new Map();
     for (const r of leaveRequests) {
       const k = String(r.employee_id);
@@ -620,22 +674,6 @@ async function getMonth(req, res, next) {
       leaveByEmp.get(k).push(r);
     }
 
-    // Approved sick certificates — this month AND history (for sick-pay brackets
-    // and the accrued-balance ceiling). Self-filed requests key on user_id, so
-    // match by employee_id OR user_id and resolve back to the employee.
-    const empUserIds = employees.filter(e => e.user_id).map(e => e.user_id);
-    const userIdToEmpId = new Map(
-      employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]),
-    );
-    const sickRequests = await EmployeeRequest.find({
-      type: 'sick',
-      status: 'approved',
-      from_date: { $lte: `${month}-31` },
-      $or: [
-        { employee_id: { $in: employees.map(e => e._id) } },
-        ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
-      ],
-    }).select('employee_id user_id from_date to_date pay_from_first_day').lean();
     const sickReqByEmp = new Map();
     for (const r of sickRequests) {
       const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
@@ -643,22 +681,7 @@ async function getMonth(req, res, next) {
       if (!sickReqByEmp.has(eid)) sickReqByEmp.set(eid, []);
       sickReqByEmp.get(eid).push(r);
     }
-    // Pregnancy-exam absences (§7 חוק עבודת נשים) — the checkup hours the 40h
-    // tracker records (EmployeeRequest type 'pregnancy_exam'). Matched BY DATE
-    // to the partial-absence short days below: an APPROVED exam on a short day
-    // excuses it automatically (the law pays those hours in full), and a
-    // pending one is surfaced in the dialog so the accountant sees the
-    // certificate is already in — one click from tidy instead of a hunt
-    // through the documents list.
-    const examRequests = await EmployeeRequest.find({
-      type: 'pregnancy_exam',
-      status: { $ne: 'rejected' },
-      from_date: { $gte: `${month}-01`, $lte: `${month}-31` },
-      $or: [
-        { employee_id: { $in: employees.map(e => e._id) } },
-        ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
-      ],
-    }).select('employee_id user_id from_date exam_hours status').lean();
+
     const examByEmp = new Map(); // empId → Map(date → { id, hours, status })
     for (const r of examRequests) {
       const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
