@@ -1919,6 +1919,13 @@ function systemRowToTableRow(r) {
   const gsal = isGlobal ? _num(bd.rates?.global_salary) : null;
   const numKind = (o) => (o && o.kind === 'number' ? _num(o.amount) : null);
   const rnd = (n) => (n == null || n === '' || isNaN(Number(n)) ? null : Math.round(Number(n)));
+  // "בונוס" on a real payslip is one line covering both the personal
+  // hourly-branch bonus AND August's closure-completion bonus — they are
+  // computed and approved separately in-system but the accountant never sees
+  // two rows, so both the detail list and the gap-comparison must read this
+  // one combined figure or a fully-approved closure bonus still reads as a
+  // mismatch/absence against the payslip's single line.
+  const bonusTotal = rnd((_num(r.bonus?.effective) || 0) + (_num(comp.closure_completion_bonus?.amount) || 0));
   const perHour = isGlobal
     ? (tb?.hourly_value != null ? Math.round(tb.hourly_value * 100) / 100 : null)
     : _num(bd.rates?.hourly_rate);
@@ -1964,12 +1971,7 @@ function systemRowToTableRow(r) {
     { label: 'הבראה', value: numKind(r.manual?.recreation), currency: true },
     { label: 'כרטיס מתנה', value: numKind(r.manual?.gift_card), currency: true },
     { label: 'מילואים', value: numKind(r.manual?.miluim), currency: true },
-    // "בונוס" on a real payslip is one line covering both the personal
-    // hourly-branch bonus AND August's closure-completion bonus — they are
-    // computed and approved separately in-system but the accountant never
-    // sees two rows, so the audit must sum them or a fully-approved closure
-    // bonus still reads as a mismatch against the payslip's single figure.
-    { label: 'בונוס', value: rnd((_num(r.bonus?.effective) || 0) + (_num(comp.closure_completion_bonus?.amount) || 0)), currency: true },
+    { label: 'בונוס', value: bonusTotal, currency: true },
     { label: 'הלוואות (ניכוי)', value: rnd(ded.loans), currency: true },
     ...absenceDetail,
     { label: 'קיזוז מקדמה', value: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || '' },
@@ -2005,6 +2007,7 @@ function systemRowToTableRow(r) {
     advance_directive: r.manual?.advance_deduction_text || r.manual?.advance_deduction_preset?.label || null,
     gift_card: numKind(r.manual?.gift_card),
     recuperation: numKind(r.manual?.recreation),
+    bonus: bonusTotal,
     cibus: numKind(r.manual?.cibus),
     reserve_duty: numKind(r.manual?.miluim),
     notes: r.manual?.notes || null,
@@ -3578,4 +3581,5 @@ module.exports = {
   extractPage,
   coalesceBranchEntries,
   systemRowToTableRow,
+  persistAudit,
 };

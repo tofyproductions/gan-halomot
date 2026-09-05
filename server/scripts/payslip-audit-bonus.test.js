@@ -41,6 +41,7 @@ console.log('systemRowToTableRow — בונוס sums personal bonus + closure-co
     breakdown: { hours: {}, rates: {}, components: { closure_completion_bonus: { amount: 960 } }, deductions: {}, estimated_total: 960 },
   });
   check('closure bonus alone → 960 (was 0 before the fix)', bonusDetail(closureOnly)?.value === 960);
+  check('top-level bonus field matches (gap-comparison reads this one)', systemRowToTableRow(closureOnly).bonus === 960);
 
   const personalOnly = baseRow({ bonus: { effective: 250 } });
   check('personal bonus alone → 250', bonusDetail(personalOnly)?.value === 250);
