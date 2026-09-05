@@ -603,12 +603,16 @@ async function getMonth(req, res, next) {
 
     // Approved leave (vacation/sick) overlapping the month — those days are not
     // absences. (date fields are YYYY-MM-DD strings, so range queries are lexical.)
+    // Field-limited: some of these requests carry a multi-megabyte base64
+    // medical_file_data (sick/vacation certs) that nothing below ever reads —
+    // fetching it anyway turned a 20-document query into tens of megabytes
+    // over the wire and hung the whole table load.
     const leaveRequests = await EmployeeRequest.find({
       employee_id: { $in: employees.map(e => e._id) },
       status: 'approved',
       from_date: { $lte: `${month}-31` },
       $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }],
-    }).lean();
+    }).select('employee_id from_date to_date').lean();
     const leaveByEmp = new Map();
     for (const r of leaveRequests) {
       const k = String(r.employee_id);
@@ -631,7 +635,7 @@ async function getMonth(req, res, next) {
         { employee_id: { $in: employees.map(e => e._id) } },
         ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
       ],
-    }).lean();
+    }).select('employee_id user_id from_date to_date pay_from_first_day').lean();
     const sickReqByEmp = new Map();
     for (const r of sickRequests) {
       const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
