@@ -2396,9 +2396,15 @@ export default function PayrollMonthTable() {
                             const ra = r.recreation_auto;
                             const openDlg = (e) => { e.stopPropagation(); setRecDlg({ open: true, row: r }); };
                             if (ra.basis === 'annual') {
+                              // The office's own decision (2026-09): the EXACT figure is
+                              // the accountant's to set, always — our ₪ is a reference
+                              // estimate for their sanity-check, never a value we commit
+                              // as final. The chip must not read like an already-approved
+                              // amount, so it stays unlabeled with ₪ and leads to the same
+                              // "זכאית להבראה — אצל רו״ח" text entry as every other basis.
                               return (
-                                <Tooltip title={`ותק ${ra.full_years} שנים → ${ra.days} ימי הבראה × ₪${ra.day_rate} × ${Math.round(ra.fte * 100)}% משרה. לחץ/י לתצוגה מקדימה ואישור`}>
-                                  <Chip size="small" variant="outlined" label={`🌴 ₪${ra.amount.toLocaleString('he-IL')}`}
+                                <Tooltip title={`הערכת מערכת (לא לאישור): ותק ${ra.full_years} שנים → ${ra.days} ימי הבראה × ₪${ra.day_rate} × ${Math.round(ra.fte * 100)}% משרה ≈ ₪${ra.amount.toLocaleString('he-IL')}. הסכום הסופי נקבע ע"י רו״ח. לחץ/י לרישום`}>
+                                  <Chip size="small" variant="outlined" label="🌴 זכאית להבראה"
                                     onClick={openDlg}
                                     sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#67e8f9' }} />
                                 </Tooltip>
@@ -3281,16 +3287,9 @@ function AbsenceCell({ row }) {
 function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate, saving }) {
   const ra = row?.recreation_auto || null;
   const [startDate, setStartDate] = useState('');
-  const [amount, setAmount] = useState('');
   useEffect(() => {
     if (!open || !row) return;
     setStartDate(ra?.start_date && ra.start_date > '1990-01-01' ? ra.start_date : '');
-    // An already-entered figure is what re-opens for editing; the computed
-    // suggestion fills in only when nothing was entered yet.
-    const existing = row.manual?.recreation;
-    setAmount(existing?.kind === 'number' && existing.amount != null
-      ? String(existing.amount)
-      : (ra?.amount != null ? String(ra.amount) : ''));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row]);
   if (!row) return null;
@@ -3313,8 +3312,11 @@ function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate
           {entered && (
             <Alert severity="success" sx={{ borderRadius: 2, py: 0.3 }}>
               {entered.kind === 'number'
-                ? `הוזן כבר סכום: ₪${Number(entered.amount).toLocaleString('he-IL')} — אפשר לערוך ולאשר מחדש.`
-                : `נרשם כבר: "${entered.text}" — אישור סכום יחליף את הרישום.`}
+                // A number entered before the office's decision that the accountant
+                // always sets the final figure — nothing here writes a number anymore,
+                // so this is a leftover from before the policy, not a live option.
+                ? `נרשם סכום קודם: ₪${Number(entered.amount).toLocaleString('he-IL')} — לפי ההחלטה הנוכחית הסכום הסופי נקבע ע"י רו״ח. לחצו למטה להחליף לרישום זכאות בלבד.`
+                : `נרשם כבר: "${entered.text}".`}
             </Alert>
           )}
           {doubtful && (
@@ -3350,13 +3352,10 @@ function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate
               <Line label="היקף משרה" value={ra.weekly_hours
                 ? `${Math.round((ra.fte || 1) * 100)}% (${ra.weekly_hours} ש׳/שבוע)`
                 : '100% (אין התחייבות רשומה — הונחה משרה מלאה)'} />
-              {!notYet && (
-                <TextField
-                  label="סכום לאישור (ניתן לעריכה)" type="number" size="small" fullWidth sx={{ mt: 1.2 }}
-                  value={amount} onChange={e => setAmount(e.target.value)} disabled={locked}
-                  InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-                />
-              )}
+              {/* Reference only — the office's decision is that the EXACT figure is
+                  always the accountant's to set, so this is not an editable/approvable
+                  amount, just the estimate behind the "רשום: זכאית להבראה" button below. */}
+              {!notYet && <Line label="הערכת מערכת (לא לאישור)" value={`≈ ₪${Number(ra.amount).toLocaleString('he-IL')}`} />}
             </Box>
           )}
         </Stack>
@@ -3370,12 +3369,6 @@ function RecreationDialog({ open, row, locked, onClose, onApply, onSaveStartDate
         )}
         <Box sx={{ flex: 1 }} />
         <Button onClick={onClose} disabled={saving}>סגור</Button>
-        {!locked && !doubtful && !notYet && (
-          <Button variant="contained" disabled={saving || !(Number(amount) > 0)}
-            onClick={() => onApply({ kind: 'number', amount: Number(amount), text: '' })}>
-            אשר והזן ₪{Number(amount || 0).toLocaleString('he-IL')}
-          </Button>
-        )}
       </DialogActions>
     </Dialog>
   );
