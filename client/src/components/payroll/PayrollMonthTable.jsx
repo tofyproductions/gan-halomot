@@ -4,7 +4,7 @@ import {
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
   Chip, Autocomplete, Dialog, DialogTitle, DialogContent, DialogActions, ToggleButton, ToggleButtonGroup,
   CircularProgress, RadioGroup, FormControlLabel, Radio, Checkbox, FormControl, FormLabel,
-  InputAdornment, Alert, Menu, Divider, ListItemText, Badge,
+  InputAdornment, Alert, Menu, Divider, ListItemText, Badge, useMediaQuery,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -910,6 +910,12 @@ export default function PayrollMonthTable() {
   const isReviewer = isAdmin || isAccountant;
   const stagingMode = !isReviewer;
   const confirm = useConfirm();
+  // On mobile the toolbar/chip row above the table wraps onto many more lines
+  // than on desktop, so a fixed "100vh - 240px" cap leaves the grid almost no
+  // height — the table looked empty because its scroll area WAS empty, not
+  // because the data didn't load. Below this breakpoint let the table grow
+  // with the page instead of capping/nested-scrolling it.
+  const isNarrow = useMediaQuery('(max-width:900px)');
   // key `${employeeId}::${field}` → change item
   const [staged, setStaged] = useState({});
   const [submittingReq, setSubmittingReq] = useState(false);
@@ -1935,7 +1941,7 @@ export default function PayrollMonthTable() {
             : ''}
         </Alert>
       )}
-      <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+      <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: isNarrow ? 'none' : 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
         <Table size="small" stickyHeader sx={{
           tableLayout: 'fixed',
           minWidth: 1100,
