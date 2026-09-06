@@ -79,6 +79,7 @@ router.use(authMiddleware);
 router.use('/branches', require('./branch.routes'));
 // The customer's own subscription — what they pay and why. Read-only.
 router.use('/account', require('./account.routes'));
+router.use('/push', require('./push.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
 router.use('/registrations', require('./registration.routes'));

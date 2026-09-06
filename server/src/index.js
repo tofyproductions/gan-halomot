@@ -18,6 +18,7 @@ if (!global.gc && !process.env.GC_REEXEC) {
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const { buildAllowedOrigins, isOriginAllowed } = require('./utils/corsOrigins');
 const morgan = require('morgan');
 const path = require('path');
 const env = require('./config/env');
@@ -58,7 +59,13 @@ app.use(helmet({
     },
   },
 }));
-app.use(cors({ origin: env.FRONTEND_URL || '*', credentials: true }));
+const allowedOrigins = buildAllowedOrigins(env);
+app.use(cors({
+  origin: (origin, callback) => {
+    callback(null, isOriginAllowed(origin, allowedOrigins));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

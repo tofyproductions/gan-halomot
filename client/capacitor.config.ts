@@ -37,6 +37,11 @@ const config: CapacitorConfig = {
       backgroundColor: '#ffffff',
       overlaysWebView: false,
     },
+    PushNotifications: {
+      // FCM (Android) + APNS (iOS, once Apple unblocks). iOS prompts
+      // permission on first PushNotifications.requestPermissions() call.
+      presentationOptions: ['badge', 'sound', 'alert'],
+    },
   },
 };
 

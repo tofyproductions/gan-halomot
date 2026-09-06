@@ -84,8 +84,10 @@ const BranchCertification = require('./BranchCertification');
 const EmployeeCourse = require('./EmployeeCourse');
 const ParentLetter = require('./ParentLetter');
 const RateChangeRequest = require('./RateChangeRequest');
+const PushSubscription = require('./PushSubscription');
 
 const real = {
+  PushSubscription,
   PayrollRollup,
   User,
   Branch,

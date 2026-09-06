@@ -1,5 +1,6 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import api from '../api/client';
+import { registerNativePush, unregisterNativePush } from '../utils/nativePush';
 
 const AuthContext = createContext(null);
 
@@ -11,7 +12,7 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/auth/me')
-        .then(res => setUser(res.data.user))
+        .then(res => { setUser(res.data.user); registerNativePush(api); })
         .catch(() => { localStorage.removeItem('token'); setUser(null); })
         .finally(() => setLoading(false));
     } else {
@@ -40,6 +41,7 @@ export function AuthProvider({ children }) {
     localStorage.setItem('token', data.token);
     setUser(data.user);
     if (data.user.branch_id) localStorage.setItem('selectedBranch', data.user.branch_id);
+    registerNativePush(api);
   };
 
   // Step 1. May return { needs_password: true } (no token) → caller must then
@@ -92,6 +94,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    unregisterNativePush(api);
     localStorage.removeItem('token');
     setUser(null);
     window.location.href = '/login';

@@ -66,6 +66,11 @@ const env = {
   // Google Sheets (migration only)
   GOOGLE_SHEETS_ID: process.env.GOOGLE_SHEETS_ID,
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
+
+  // Push notifications to the native app (Android/iOS) — see fcm.service.js.
+  // The Firebase project's service-account key, pasted as one line of JSON.
+  // Without it every send is a silent no-op, same as a missing SMS key.
+  FCM_SERVICE_ACCOUNT: process.env.FCM_SERVICE_ACCOUNT,
 };
 
 module.exports = env;

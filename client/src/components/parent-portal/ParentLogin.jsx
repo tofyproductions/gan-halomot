@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
+import { registerNativePush } from '../../utils/nativePush';
 import parentTheme, { DISPLAY } from '../../theme/parentTheme';
 import Ltr from './Ltr';
 
@@ -60,6 +61,7 @@ export default function ParentLogin() {
 
   const finish = (token) => {
     localStorage.setItem(PARENT_TOKEN_KEY, token);
+    registerNativePush(parentApi);
     navigate('/parents', { replace: true });
   };
 

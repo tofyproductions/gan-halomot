@@ -32,4 +32,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- @capacitor/push-notifications registers the FCM messaging service but
+         does not declare this itself. Android 13+ treats showing a
+         notification as a runtime permission; without this line the OS
+         silently refuses every one and requestPermissions() reports denied
+         without ever prompting. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

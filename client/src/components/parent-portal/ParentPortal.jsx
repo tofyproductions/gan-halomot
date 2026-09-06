@@ -10,6 +10,7 @@ import DarkModeIcon from '@mui/icons-material/DarkMode';
 import BrightnessAutoIcon from '@mui/icons-material/BrightnessAuto';
 import { ThemeProvider } from '@mui/material/styles';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
+import { registerNativePush, unregisterNativePush } from '../../utils/nativePush';
 import { DISPLAY } from '../../theme/parentTheme';
 import useParentColorMode from '../../theme/useParentColorMode';
 import ChildDetails from './ChildDetails';
@@ -82,7 +83,7 @@ export default function ParentPortal() {
     (async () => {
       try {
         const res = await parentApi.get('/me');
-        if (!cancelled) setData(res.data);
+        if (!cancelled) { setData(res.data); registerNativePush(parentApi); }
       } catch (err) {
         if (!cancelled) setError(parentApiError(err, 'לא הצלחנו לטעון את הנתונים'));
       } finally {
@@ -95,6 +96,7 @@ export default function ParentPortal() {
   if (!token) return <Navigate to="/parents/login" replace />;
 
   const logout = () => {
+    unregisterNativePush(parentApi);
     localStorage.removeItem(PARENT_TOKEN_KEY);
     navigate('/parents/login', { replace: true });
   };
