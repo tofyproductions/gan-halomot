@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { API_ORIGIN } from '../../api/config';
 import {
   Box, Paper, Typography, Stack, Button, TextField, Chip, Divider, Alert,
   CircularProgress, Card, CardContent, LinearProgress,
@@ -11,7 +12,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { toast } from 'react-toastify';
 
 // Public routes take no JWT — plain axios instance.
-const publicApi = axios.create({ baseURL: '/api/public', timeout: 30000 });
+const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
 
 // Stable per-browser id so a return visit from the same device shows my picks.
 function getClaimantId() {

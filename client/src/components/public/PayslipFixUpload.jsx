@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { apiUrl } from '../../api/config';
 import {
   Alert, Box, Button, Chip, CircularProgress, Container, Divider, IconButton,
   Paper, Stack, TextField, Typography,
@@ -36,7 +37,7 @@ export default function PayslipFixUpload() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/public/payslip-fix/${encodeURIComponent(token)}`);
+        const res = await fetch(apiUrl(`/api/public/payslip-fix/${encodeURIComponent(token)}`));
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'הקישור אינו תקף');
         setInfo(json);
@@ -63,7 +64,7 @@ export default function PayslipFixUpload() {
         form.append(`branch_${i}`, row.branch.trim());
       });
       if (note.trim()) form.append('note', note.trim());
-      const res = await fetch(`/api/public/payslip-fix/${encodeURIComponent(token)}/upload`, { method: 'POST', body: form });
+      const res = await fetch(apiUrl(`/api/public/payslip-fix/${encodeURIComponent(token)}/upload`), { method: 'POST', body: form });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'שגיאה בהעלאה');
       setDone(json);

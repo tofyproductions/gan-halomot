@@ -21,6 +21,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DescriptionIcon from '@mui/icons-material/Description';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { apiUrl } from '../../api/config';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { useWorkMonth } from '../../hooks/useWorkMonth';
 
@@ -1338,7 +1339,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
     (async () => {
       try {
         const res = await fetch(
-          `/api/payroll/payslip-audit/history/${activePreview.auditId}/payslip-page?branch=${encodeURIComponent(activePreview.branch)}&page=${activePreview.page}${activePreview.kind ? `&kind=${encodeURIComponent(activePreview.kind)}` : ''}`,
+          apiUrl(`/api/payroll/payslip-audit/history/${activePreview.auditId}/payslip-page?branch=${encodeURIComponent(activePreview.branch)}&page=${activePreview.page}${activePreview.kind ? `&kind=${encodeURIComponent(activePreview.kind)}` : ''}`),
           { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } }
         );
         if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `שגיאה ${res.status}`);
@@ -1362,7 +1363,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
   useEffect(() => {
     if (!previewOpen || !canPreview) return;
     const params = id ? `id=${encodeURIComponent(id)}` : `name=${encodeURIComponent(name)}`;
-    fetch(`/api/payroll/payslip-audit/employee-history?${params}`, {
+    fetch(apiUrl(`/api/payroll/payslip-audit/employee-history?${params}`), {
       headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
     })
       .then((r) => r.ok ? r.json() : { occurrences: [] })
@@ -2097,7 +2098,7 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
     if (!it.round_branch || !it.page_index) { toast.info('אין עמוד תלוש שמור לעובד הזה בסבב'); return; }
     try {
       const res = await fetch(
-        `/api/payroll/payslip-audit/history/${auditId}/fix-rounds/${roundNo}/page?branch=${encodeURIComponent(it.round_branch)}&page=${it.page_index}`,
+        apiUrl(`/api/payroll/payslip-audit/history/${auditId}/fix-rounds/${roundNo}/page?branch=${encodeURIComponent(it.round_branch)}&page=${it.page_index}`),
         { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } });
       if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || `שגיאה ${res.status}`);
       const url = URL.createObjectURL(await res.blob());

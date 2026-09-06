@@ -8,6 +8,7 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import SignatureCanvas from 'react-signature-canvas';
 import axios from 'axios';
 import { toast } from 'react-toastify';
+import { API_ORIGIN } from '../../api/config';
 
 /**
  * The employee's signing page — opened from a link on her phone, no login.
@@ -16,7 +17,7 @@ import { toast } from 'react-toastify';
  * not a summary), then proves she is the right person with the last four
  * digits of her ת"ז before signing. A forwarded link on its own cannot sign.
  */
-const publicApi = axios.create({ baseURL: '/api/public', timeout: 30000 });
+const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
 
 /**
  * What happens after she signs.

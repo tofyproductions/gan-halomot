@@ -9,13 +9,14 @@ import DownloadIcon from '@mui/icons-material/Download';
 import SignatureCanvas from 'react-signature-canvas';
 import { toast } from 'react-toastify';
 import axios from 'axios';
+import { API_ORIGIN } from '../../api/config';
 import { renderHtmlToPdfDataUri } from '../../utils/contractPdf';
 import { isValidIsraeliID } from '../../utils/hebrewYear';
 
 const STEPS = ['ברוכים הבאים', 'חוזה וחתימה', 'כרטיס רישום', 'סיום'];
 
 // Use a plain axios instance (no JWT interceptor needed for public routes)
-const publicApi = axios.create({ baseURL: '/api/public', timeout: 30000 });
+const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
 
 export default function ParentOnboarding() {
   const { token } = useParams();

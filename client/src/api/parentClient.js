@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API_ORIGIN } from './config';
 
 /**
  * The parent portal's own HTTP client, sharing nothing with the staff one.
@@ -19,7 +20,7 @@ import axios from 'axios';
 export const PARENT_TOKEN_KEY = 'gan_parent_token';
 
 const parentApi = axios.create({
-  baseURL: '/api/parent',
+  baseURL: `${API_ORIGIN}/api/parent`,
   timeout: 30000,
 });
 

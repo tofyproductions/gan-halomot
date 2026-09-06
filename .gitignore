@@ -24,3 +24,19 @@ cibus-capture/
 # MongoDB on disk — scrambled, but there is no reason for it to be in the repo,
 # and a failed scramble would put real children here.
 server/.demo-data/
+
+# Capacitor — keep project files, ignore build outputs + IDE caches
+client/android/.gradle/
+client/android/build/
+client/android/app/build/
+client/android/app/release/
+client/android/local.properties
+client/android/key.properties
+client/android/.idea/
+client/android/captures/
+client/ios/App/Pods/
+client/ios/App/build/
+client/ios/App/DerivedData/
+client/ios/.DS_Store
+*.xcuserdata/
+*.xcuserstate

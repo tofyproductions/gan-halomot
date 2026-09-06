@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { API_ORIGIN, apiUrl } from './config';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: `${API_ORIGIN}/api`,
   timeout: 30000,
 });
 
@@ -97,7 +98,7 @@ export default api;
  */
 export async function openApiFile(url, { filename } = {}) {
   if (/^https?:\/\//i.test(url)) { window.open(url, '_blank', 'noopener'); return; }
-  const res = await fetch(url, {
+  const res = await fetch(apiUrl(url), {
     headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
   });
   if (!res.ok) {

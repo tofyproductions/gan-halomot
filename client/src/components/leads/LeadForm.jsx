@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
+import { API_ORIGIN } from '../../api/config';
 import {
   Box, Paper, Typography, Stack, Button, TextField, MenuItem, Alert,
   CircularProgress,
@@ -9,7 +10,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FavoriteIcon from '@mui/icons-material/Favorite';
 
 // Public — no JWT.
-const publicApi = axios.create({ baseURL: '/api/public', timeout: 30000 });
+const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
 
 /**
  * Public new-parent inquiry form. Reached from a marketed link:
