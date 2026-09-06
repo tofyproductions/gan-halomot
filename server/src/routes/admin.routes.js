@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const ctrl = require('../controllers/admin.controller');
+const dataDeletion = require('../controllers/dataDeletion.controller');
 
 router.use(authMiddleware, requireRole('system_admin'));
 
@@ -16,5 +17,10 @@ router.put('/role-tabs', ctrl.setRoleTabs);
 // SMTP diagnostics
 router.get('/email-diagnostic', ctrl.emailDiagnostic);
 router.post('/email-test', ctrl.emailTest);
+
+// Pending "delete my account" requests — see dataDeletion.service for what
+// completing one actually does.
+router.get('/data-deletion', dataDeletion.adminList);
+router.post('/data-deletion/:id/complete', dataDeletion.adminComplete);
 
 module.exports = router;

@@ -38,6 +38,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
+import DeleteAccountRequest from '../shared/DeleteAccountRequest';
 import { TAB_GROUPS, hasTabAccess } from '../../config/tabs';
 import { ganMarkerByName } from '../../utils/branchColors';
 
@@ -437,6 +438,9 @@ export default function Header() {
               <ListItemIcon sx={{ minWidth: 40 }}><LogoutIcon /></ListItemIcon>
               <ListItemText primary="התנתק" />
             </ListItemButton>
+          </ListItem>
+          <ListItem disablePadding>
+            <DeleteAccountRequest client={api} />
           </ListItem>
         </List>
       </Drawer>

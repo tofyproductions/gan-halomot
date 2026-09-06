@@ -165,6 +165,14 @@ if (require('./platform/connection').isEnabled()) {
   app.get('/privacy', landing('privacy.html'));
   app.get('/terms', landing('terms.html'));
 
+  // The kindergarten app's own policy pages — distinct from the ones above,
+  // which are "חלום" (the platform sold to other gans) marketing/legal
+  // content living on this same bare domain. These are what the Android/iOS
+  // store listings for "גן החלומות" itself point at.
+  app.get('/app/privacy', landing('app-privacy.html'));
+  app.get('/app/terms', landing('app-terms.html'));
+  app.get('/app/data-deletion', landing('app-data-deletion.html'));
+
   // The deck and the specification, as links that can be sent to somebody who
   // has no account anywhere — which is the whole requirement: a gan owner gets
   // this in a WhatsApp message and taps it on a phone.

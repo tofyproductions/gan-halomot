@@ -11,6 +11,7 @@ import BrightnessAutoIcon from '@mui/icons-material/BrightnessAuto';
 import { ThemeProvider } from '@mui/material/styles';
 import parentApi, { parentApiError, PARENT_TOKEN_KEY } from '../../api/parentClient';
 import { registerNativePush, unregisterNativePush } from '../../utils/nativePush';
+import DeleteAccountRequest from '../shared/DeleteAccountRequest';
 import { DISPLAY } from '../../theme/parentTheme';
 import useParentColorMode from '../../theme/useParentColorMode';
 import ChildDetails from './ChildDetails';
@@ -181,6 +182,7 @@ export default function ParentPortal() {
                 <LogoutIcon fontSize="small" />
               </IconButton>
             </Tooltip>
+            <DeleteAccountRequest client={parentApi} endpoint="/data-deletion/me" variant="icon" />
           </Stack>
         </Box>
 

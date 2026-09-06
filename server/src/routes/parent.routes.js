@@ -38,6 +38,9 @@ const push = require('../controllers/push.controller');
 router.post('/push/register', push.registerParent);
 router.post('/push/unregister', push.unregister);
 
+const dataDeletion = require('../controllers/dataDeletion.controller');
+router.post('/data-deletion/me', dataDeletion.requestParent);
+
 // Every one of these resolves the parent's children afresh and refuses an id
 // that is not among them — see parentPortal.controller.
 const portal = require('../controllers/parentPortal.controller');
