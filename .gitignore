@@ -40,3 +40,6 @@ client/ios/App/DerivedData/
 client/ios/.DS_Store
 *.xcuserdata/
 *.xcuserstate
+
+# Throwaway client build pointed at the local demo server (scripts/demo-server.js) — regenerate, don't commit.
+client/dist-demo/
