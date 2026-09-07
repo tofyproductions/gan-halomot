@@ -34,9 +34,15 @@ ok(!v.isBlockedForViewer('/api/employees'), 'שאר המסכים פתוחים');
 ok(v.isBlockedForViewer('/api/cibus-sync/%2e%2e/admin/users/1/role'), 'יציאה מקודדת (%2e%2e) אל /api/admin חסומה');
 ok(v.isBlockedForViewer('/api/x/../admin/users'), 'יציאה עם .. אל /api/admin חסומה');
 ok(v.isWriteBlockedForViewer('/api/x/../proposed-changes/1/decide'), 'גם כתיבה מנורמלת אל ההצעות חסומה');
+// Express is mounted case-insensitive and collapses repeated slashes, so all
+// of these reach admin.routes. The checker has to fold them the same way.
+ok(v.isBlockedForViewer('/api//admin/users'), 'לוכסן כפול לפני admin — חסום');
+ok(v.isBlockedForViewer('/api/ADMIN/users'), 'אותיות גדולות — חסום');
+ok(v.isBlockedForViewer('/api/Admin//Users/'), 'אותיות מעורבות, לוכסן כפול וסלאש בסוף — חסום');
 
 console.log('\nחסימת כתיבה על הצעות');
 ok(v.isWriteBlockedForViewer('/api/proposed-changes/1/decide'), 'הכרעה על הצעה חסומה');
+ok(v.isWriteBlockedForViewer('/api/PROPOSED-CHANGES/p1/decide'), 'גם באותיות גדולות');
 ok(!v.isWriteBlockedForViewer('/api/employees'), 'שאר המסכים לא חסומים לכתיבה');
 
 console.log('\nקבצים');
@@ -52,10 +58,12 @@ eq(v.approverFor('/api/collections/1'), 'accountant', 'גבייה → הנה"ח'
 eq(v.approverFor('/api/children/1'), 'system_admin', 'ילדים → מנהל מערכת');
 eq(v.approverFor('/api/gan-events'), 'system_admin', 'אירועים → מנהל מערכת');
 eq(v.approverFor('/api/payroll-something-else'), 'system_admin', 'קידומת דומה אך שונה → מנהל מערכת');
+eq(v.approverFor('/API/PAYROLL-MONTH/x'), 'accountant', 'אותיות גדולות → עדיין הנה"ח');
 
 console.log('\nשם המסך');
 eq(v.screenLabelFor('/api/employees/5'), 'עובדים', 'עובדים');
 eq(v.screenLabelFor('/api/payroll-month/5?month=2026-09'), 'שכר', 'שכר, בלי השאילתה');
+eq(v.screenLabelFor('/api//employees/5'), 'עובדים', 'לוכסן כפול — עדיין עובדים');
 eq(v.screenLabelFor('/api/nothing-like-this'), 'מסך אחר', 'לא ידוע');
 
 console.log('\nתקציר לכרטיס');

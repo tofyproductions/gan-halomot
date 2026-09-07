@@ -87,18 +87,33 @@ const FIELD_LABELS = {
 };
 
 /**
+ * Fold a pathname the way the router that receives it will.
+ *
+ * Express is mounted with the default `caseSensitive: false` and collapses a
+ * run of slashes, so `/api//ADMIN/users/` and `/api/admin/users` are the SAME
+ * route to it. A prefix test that does not fold the same way is not a
+ * predicate of where the request lands — it just disagrees with the router.
+ */
+function canonicalPath(path) {
+  const folded = String(path || '').toLowerCase().replace(/\/{2,}/g, '/');
+  return folded.length > 1 && folded.endsWith('/') ? folded.slice(0, -1) : folded;
+}
+
+/**
  * The path an HTTP client would actually send, not the string we were handed.
  *
  * A raw `split('?')[0]` compares the URL as typed, while undici/http normalize
  * dot segments before putting them on the wire — so `/api/cibus-sync/%2e%2e/admin/users`
  * passes a `startsWith('/api/admin')` test and then arrives at /api/admin.
- * The WHATWG parser resolves `..`, `%2e%2e` and `//` exactly as the client will.
+ * The WHATWG parser resolves `..`, `%2e%2e` and `//` exactly as the client will;
+ * canonicalPath then folds case, repeated slashes and a trailing slash the way
+ * the Express router does.
  */
 function pathOnly(url) {
   try {
-    return new URL(String(url || ''), 'http://x').pathname;
+    return canonicalPath(new URL(String(url || ''), 'http://x').pathname);
   } catch {
-    return String(url || '').split('?')[0];
+    return canonicalPath(String(url || '').split('?')[0]);
   }
 }
 
@@ -110,8 +125,13 @@ function isViewer(user) {
   return !!user && user.role === ADMIN_VIEWER;
 }
 
+/**
+ * `path` always arrives from pathOnly (lowercased, no query, no repeated or
+ * trailing slash), so the prefixes are folded the same way and compared plain.
+ */
 function startsWithPrefix(path, prefix) {
-  return path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?');
+  const p = canonicalPath(prefix);
+  return path === p || path.startsWith(p + '/');
 }
 
 function isBlockedForViewer(url) {
@@ -169,5 +189,5 @@ function viewerMessage(approver) {
 
 module.exports = {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
-  screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS,
+  screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS, pathOnly,
 };

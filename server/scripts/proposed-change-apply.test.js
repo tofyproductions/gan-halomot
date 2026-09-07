@@ -76,6 +76,11 @@ const eq = (a, b, label) => {
     await check('//evil.com/api/employees', 'כתובת מוחלטת לשרת אחר נדחית');
     await check('/api/proposed-changes/pc2/decide', 'אישור עצמי של הצעה נדחה');
     await check('/health', 'מחוץ ל-/api נדחה');
+    // Express folds case and repeated slashes; a row that says one of these
+    // lands in admin.routes with the approver's system_admin token.
+    await check('/api//admin/users/1/role', 'לוכסן כפול אל /api/admin נדחה');
+    await check('/api/ADMIN/users/1/role', 'אותיות גדולות אל /api/admin נדחות');
+    await check('/api/PROPOSED-CHANGES/p1/decide', 'הכרעה באותיות גדולות נדחית');
   }
   {
     const calls = [];

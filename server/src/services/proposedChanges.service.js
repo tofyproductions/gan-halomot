@@ -7,18 +7,19 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
   approverFor, screenLabelFor, summarizeBody, extractBranchId, viewerMessage,
-  isBlockedForViewer, isWriteBlockedForViewer,
+  isBlockedForViewer, isWriteBlockedForViewer, pathOnly,
 } = require('../utils/viewer');
 
 /**
- * The path exactly as a client would put it on the wire.
- * Stored (and replayed) normalized so the record cannot say one thing while
- * the replay does another — `/api/employees/../admin/users` is /api/admin/users.
+ * The path exactly as the router that receives it will read it.
+ * Stored (and replayed) canonical so the record cannot say one thing while
+ * the replay does another — `/api/employees/../admin/users` is /api/admin/users,
+ * and `/api//ADMIN/users/` is the same route as `/api/admin/users`.
  */
 function normalizePath(url) {
   try {
     const u = new URL(String(url || ''), 'http://x');
-    return u.pathname + u.search;
+    return pathOnly(u.pathname) + u.search;
   } catch {
     return String(url || '');
   }
@@ -128,6 +129,10 @@ function defaultTransport(url, init = {}) {
       });
       resp.on('error', reject);
     });
+    // A replay that never answers would otherwise hold the row in `applying`
+    // until the stale sweep releases it, and hold the approver's HTTP request
+    // open the whole time. destroy(err) surfaces as 'error' → { status: 0 }.
+    request.setTimeout(30000, () => request.destroy(new Error('timeout')));
     request.on('error', reject);
     if (init.body !== undefined && init.body !== null) request.write(init.body);
     request.end();
@@ -154,10 +159,15 @@ async function applyProposal(doc, approver, {
   } catch {
     return { status: 0, ok: false, error: BAD_PATH };
   }
+  // Judge the path the way the router that receives it will: `/api//ADMIN/x`
+  // and `/api/admin/x` are one route to Express, so one folded form has to
+  // answer for both. The wire still carries target.pathname untouched —
+  // Express folds it identically at the other end.
+  const canon = pathOnly(target.pathname + target.search);
   if (target.origin !== base.origin
-    || !target.pathname.startsWith('/api/')
-    || isBlockedForViewer(target.pathname)
-    || isWriteBlockedForViewer(target.pathname)) {
+    || !(canon === '/api' || canon.startsWith('/api/'))
+    || isBlockedForViewer(canon)
+    || isWriteBlockedForViewer(canon)) {
     return { status: 0, ok: false, error: BAD_PATH };
   }
 
@@ -172,7 +182,7 @@ async function applyProposal(doc, approver, {
     init.body = JSON.stringify(doc.body);
   }
   try {
-    const resp = await transport(target.toString(), init);
+    const resp = await transport(`${base.origin}${target.pathname}${target.search}`, init);
     const text = await resp.text();
     const ok = resp.status >= 200 && resp.status < 300;
     let error = '';

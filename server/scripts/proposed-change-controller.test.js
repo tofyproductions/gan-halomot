@@ -33,6 +33,10 @@ const ProposedChange = {
     const hit = () => rows.filter(r => matches(r, filter)).map(r => ({ ...r }));
     return { sort: () => ({ limit: () => ({ lean: async () => hit() }) }) };
   },
+  findById(id) {
+    const row = rows.find(r => r._id === id);
+    return { select: () => ({ lean: async () => (row ? { _id: row._id } : null) }) };
+  },
   async countDocuments(filter = {}) {
     return rows.filter(r => matches(r, filter)).length;
   },
@@ -169,6 +173,15 @@ function seed() {
     eq(applyCalls.length, 0, 'ולא הופעלה שוב');
   }
   {
+    // "gone" and "already decided" are two different answers: the claim alone
+    // cannot tell them apart, so a missing id is looked up first.
+    seed();
+    const res = fakeRes();
+    await c.decide({ user: admin, params: { id: 'nope' }, body: { decision: 'approve' } }, res, boom);
+    eq([res.statusCode, res.body.error], [404, 'ההצעה לא נמצאה'], 'מזהה שאינו קיים → 404, לא 409');
+    eq(applyCalls.length, 0, 'ובלי הפעלה');
+  }
+  {
     seed();
     const res = fakeRes();
     await c.decide({ user: admin, params: { id: 'p1' }, body: { decision: 'approve', note: 'בסדר' } }, res, boom);
@@ -220,6 +233,12 @@ function seed() {
     await c.retry({ user: admin, params: { id: 'p5' } }, res, boom);
     eq([res.statusCode, res.body.error], [409, 'אפשר לנסות שוב רק הצעה שנכשלה'], 'הצעה מאושרת → 409');
     eq(applyCalls.length, 0, 'בלי הפעלה');
+  }
+  {
+    seed();
+    const res = fakeRes();
+    await c.retry({ user: admin, params: { id: 'nope' } }, res, boom);
+    eq([res.statusCode, res.body.error], [404, 'ההצעה לא נמצאה'], 'מזהה שאינו קיים → 404');
   }
   {
     seed();

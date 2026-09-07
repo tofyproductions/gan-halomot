@@ -66,6 +66,13 @@ function fakeRes() {
     const d3 = await propose({ ...req, originalUrl: '/api/employees/../admin/users?x=1' }, r3, { models });
     eq(d3.path, '/api/admin/users?x=1', 'הנתיב נשמר מנורמל, כפי שהוא באמת יישלח');
   }
+  {
+    // Express folds case, repeated slashes and a trailing slash — the record
+    // must be folded the same way, or the checker and the router disagree.
+    const r4 = fakeRes();
+    const d4 = await propose({ ...req, originalUrl: '/api//Employees/E9/?x=1' }, r4, { models });
+    eq(d4.path, '/api/employees/e9?x=1', 'לוכסן כפול, אותיות גדולות וסלאש בסוף — נתיב קנוני אחד');
+  }
   eq(doc.approver, 'system_admin', 'המאשר');
   eq(doc.status, 'pending', 'ממתין');
   eq(doc.summary.map(r => r.label), ['שם מלא', 'שכר שעתי', 'סניף'], 'התקציר קריא');

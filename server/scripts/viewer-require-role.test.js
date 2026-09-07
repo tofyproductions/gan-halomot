@@ -75,6 +75,16 @@ function run(gate, req) {
     const r = await run(requireRole('system_admin'), mkReq('GET', '/api/admin/users', viewer()));
     ok(!r.nexted && r.res.statusCode === 403, '/api/admin חסום גם לקריאה');
   }
+  {
+    // Express is case-insensitive and collapses slashes: both of these reach
+    // admin.routes, so the gate must refuse both.
+    const r = await run(requireRole('system_admin'), mkReq('GET', '/api/ADMIN/users', viewer()));
+    ok(!r.nexted && r.res.statusCode === 403, '/api/ADMIN חסום לקריאה');
+  }
+  {
+    const r = await run(requireRole('system_admin'), mkReq('GET', '/api//admin/users', viewer()));
+    ok(!r.nexted && r.res.statusCode === 403, '/api//admin חסום לקריאה');
+  }
 
   console.log('\nכתיבות');
   proposals.length = 0;
@@ -105,6 +115,12 @@ function run(gate, req) {
     const before = proposals.length;
     const r = await run(requireRole('system_admin', 'accountant'), mkReq('POST', '/api/proposed-changes/1/decide', viewer([]), { body: { decision: 'approve' } }));
     ok(!r.nexted && r.res.statusCode === 403, 'צופה שמנסה להכריע על הצעה → 403, לא הצעה חדשה');
+    eq(proposals.length, before, 'ולא נרשמה הצעה');
+  }
+  {
+    const before = proposals.length;
+    const r = await run(requireRole('system_admin', 'accountant'), mkReq('POST', '/api/PROPOSED-CHANGES/1/decide', viewer([]), { body: { decision: 'approve' } }));
+    ok(!r.nexted && r.res.statusCode === 403, 'הכרעה באותיות גדולות → 403 גם היא');
     eq(proposals.length, before, 'ולא נרשמה הצעה');
   }
 

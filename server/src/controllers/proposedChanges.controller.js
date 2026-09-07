@@ -5,6 +5,17 @@ const { ADMIN_VIEWER } = require('../constants/roles');
 /** A replay that never reported back is abandoned after this long. */
 const STALE_APPLYING_MS = 2 * 60 * 1000;
 
+const NOT_FOUND = 'ההצעה לא נמצאה';
+
+/**
+ * The guarded claim below cannot tell "gone" from "already decided" — both
+ * come back null — so an id that does not exist is looked up once first and
+ * answered 404. The claim's own null still means 409.
+ */
+async function exists(id) {
+  return !!await ProposedChange.findById(id).select('_id').lean();
+}
+
 function decides(user) {
   return user?.role === 'system_admin' || user?.role === 'accountant';
 }
@@ -97,6 +108,7 @@ async function decide(req, res, next) {
     if (!['approve', 'reject'].includes(decision)) {
       return res.status(400).json({ error: 'decision חייב להיות approve או reject' });
     }
+    if (!await exists(req.params.id)) return res.status(404).json({ error: NOT_FOUND });
     const claimed = await ProposedChange.findOneAndUpdate(
       { _id: req.params.id, status: 'pending' },
       { $set: { ...decisionFields(req, note), status: decision === 'reject' ? 'rejected' : 'applying' } },
@@ -115,6 +127,7 @@ async function decide(req, res, next) {
  */
 async function retry(req, res, next) {
   try {
+    if (!await exists(req.params.id)) return res.status(404).json({ error: NOT_FOUND });
     const stale = new Date(Date.now() - STALE_APPLYING_MS);
     const claimed = await ProposedChange.findOneAndUpdate(
       {
