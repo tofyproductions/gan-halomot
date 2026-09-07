@@ -148,6 +148,8 @@ router.use('/employee-letters', require('./employeeLetters.routes'));
 router.use('/parent-letters', require('./parentLetters.routes'));
 // העלאות שכר קבועות — המנהלת קובעת, הנה"ח מיישמת דרך תנאי ההעסקה המתוארכים.
 router.use('/rate-changes', require('./rateChangeRequests.routes'));
+// שינויים לאישור — writes a viewer ("מנהל מערכת - לצפייה בלבד") asked for.
+router.use('/proposed-changes', require('./proposedChanges.routes'));
 router.use('/employment-contracts', require('./employmentContracts.routes'));
 router.use('/cibus-sync', require('./cibusSync.routes'));
 router.use('/stock', require('./stock.routes'));

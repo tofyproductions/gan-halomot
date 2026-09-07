@@ -56,7 +56,7 @@ export default function PunchEntryTaskGate() {
 
   // Managers only — for everyone else the endpoint answers with an empty list,
   // but there is no reason to ask at all.
-  const relevant = user && (user.role === 'branch_manager' || user.role === 'system_admin');
+  const relevant = user && ['branch_manager', 'system_admin', 'admin_viewer'].includes(user.role);
   useEffect(() => { if (relevant) load(true); }, [relevant, load]);
 
   if (!relevant || tasks.length === 0) return null;

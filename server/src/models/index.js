@@ -48,6 +48,7 @@ const PayrollCustomColumn = require('./PayrollCustomColumn');
 const SalaryAdjustment = require('./SalaryAdjustment');
 const EmployeeCommitment = require('./EmployeeCommitment');
 const PayrollChangeRequest = require('./PayrollChangeRequest');
+const ProposedChange = require('./ProposedChange');
 const BranchPricing = require('./BranchPricing');
 const SummerCamp = require('./SummerCamp');
 const EmployeeLetter = require('./EmployeeLetter');
@@ -135,6 +136,7 @@ const real = {
   SalaryAdjustment,
   EmployeeCommitment,
   PayrollChangeRequest,
+  ProposedChange,
   BranchPricing,
   SummerCamp,
   EmployeeLetter,

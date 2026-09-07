@@ -9,6 +9,7 @@ const {
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
   User, PunchEntryTask, PayrollRollup,
 } = require('../models');
+const { ADMIN_VIEWER } = require('../constants/roles');
 const env = require('../config/env');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
@@ -27,6 +28,7 @@ const {
   bonusDayMinutes,
 } = require('../services/augustBonus');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
+const { materializeScope } = require('../utils/branch-scope');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -388,23 +390,33 @@ async function getMonth(req, res, next) {
 
     const branchIds = branches.map(b => b._id);
 
+    // The two fillers below WRITE — approved Punch documents stamped with the
+    // caller's id. The table above is read at the caller's read scope; the
+    // writing is narrowed to the caller's WRITE scope, which for everybody but
+    // a viewer is the same list she just read. A viewer reads every branch and
+    // writes only the ones she manages, so opening this screen can no longer
+    // file punches into branches she does not run. Empty list → nothing to fill.
+    const fillBranchIds = materializeScope(req, branchIds);
+
     // Fill in any missing fixed-hours punches for employees who don't clock in.
     // Idempotent and bounded by today, so running it on every load simply keeps
     // the month current without ever inventing future hours. A failure here must
     // not take the salary table down with it.
-    try {
-      await materializeFixedSchedule(month, { branchIds, userId: req.user?.id || null });
-    } catch (e) {
-      console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
-    }
+    if (fillBranchIds.length) {
+      try {
+        await materializeFixedSchedule(month, { branchIds: fillBranchIds, userId: req.user?.id || null });
+      } catch (e) {
+        console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
+      }
 
-    // Same idea for "השלמת שכר אוגוסט" — fill in the committed days a flagged
-    // employee is owed for her branch's summer closure, before punches are
-    // read for the table below. Idempotent; a failure must not take the table down.
-    try {
-      await materializeClosureCompletion(month, { branchIds, userId: req.user?.id || null });
-    } catch (e) {
-      console.error('[payrollMonth] closure-completion fill failed:', e.message);
+      // Same idea for "השלמת שכר אוגוסט" — fill in the committed days a flagged
+      // employee is owed for her branch's summer closure, before punches are
+      // read for the table below. Idempotent; a failure must not take the table down.
+      try {
+        await materializeClosureCompletion(month, { branchIds: fillBranchIds, userId: req.user?.id || null });
+      } catch (e) {
+        console.error('[payrollMonth] closure-completion fill failed:', e.message);
+      }
     }
 
     // Date window for the month (used for punches + inactive-relevance).
@@ -2213,6 +2225,16 @@ function decidesPayroll(user) {
   return user?.role === 'system_admin' || user?.role === 'accountant';
 }
 
+/** The viewer files for every branch: the approval is the gate, not the scope. */
+function filesForAllBranches(user) {
+  // The real role, not the one this request is being served under:
+  // authMiddleware runs a viewer's write as a branch_manager (so every
+  // ordinary manager path behaves for her exactly as it does for a manager)
+  // and keeps the truth in `actual_role`. Staging rows for every branch is
+  // precisely the thing that must NOT follow the fallback.
+  return (user?.actual_role || user?.role) === ADMIN_VIEWER;
+}
+
 /** The branches a non-accountant user is allowed to touch. */
 function managedBranchIds(user) {
   const managed = (user?.managed_branch_ids || []).map(String);
@@ -3318,7 +3340,7 @@ async function createChangeRequest(req, res, next) {
     // A manager files for her own staff. The route let any authenticated
     // manager name any employee_id, which the review screen would then show as
     // a request from the wrong branch about someone she has never met.
-    if (!decidesPayroll(req.user)) {
+    if (!decidesPayroll(req.user) && !filesForAllBranches(req.user)) {
       const allowed = managedBranchIds(req.user);
       const outsider = emps.find(e => !allowed.includes(String(e.branch_id?._id || e.branch_id)));
       if (outsider) {
@@ -3368,7 +3390,10 @@ async function createChangeRequest(req, res, next) {
 async function listChangeRequests(req, res, next) {
   try {
     const { status, mine, month } = req.query;
-    const role = req.user?.role;
+    // `actual_role` first: authMiddleware serves a viewer's READ as
+    // system_admin so her lists cover every branch, but the requests SHE filed
+    // are hers alone — a reviewer's view of the whole queue is not.
+    const role = req.user?.actual_role || req.user?.role;
     const filter = {};
     if (status) filter.status = status;
     // The payroll table asks for its own month's pending requests, so the

@@ -1,7 +1,6 @@
 const bcrypt = require('bcryptjs');
 const { User, Setting, Employee } = require('../models');
-
-const ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'];
+const { ROLES } = require('../constants/roles');
 
 /**
  * GET /api/admin/role-tabs
@@ -69,10 +68,9 @@ async function updateUserRole(req, res, next) {
   try {
     const { id } = req.params;
     const { role, managed_branch_ids } = req.body;
-    const ALLOWED_ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook'];
     const setObj = {};
     if (role) {
-      if (!ALLOWED_ROLES.includes(role)) return res.status(400).json({ error: 'role not allowed' });
+      if (!ROLES.includes(role)) return res.status(400).json({ error: 'role not allowed' });
       setObj.role = role;
     }
     if (Array.isArray(managed_branch_ids)) {

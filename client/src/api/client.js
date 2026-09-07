@@ -25,7 +25,16 @@ api.interceptors.request.use((config) => {
 
 // Error handling + 401 redirect
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // A viewer's write was queued for approval instead of made. The screen
+    // sees a success; the person sees why nothing changed yet.
+    if (response?.status === 202 && response?.data?.proposed === true) {
+      import('react-toastify')
+        .then(({ toast }) => toast.info(response.data.message || 'השינוי נשמר וממתין לאישור', { autoClose: 7000 }))
+        .catch(() => {});
+    }
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       // Don't redirect if already on login page or login request

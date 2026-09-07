@@ -28,23 +28,42 @@ import { useAuth } from '../../hooks/useAuth';
  */
 
 const TABS = [
-  { id: 'monthly',     label: 'טבלה חודשית', icon: <TableChartIcon fontSize="small" />, component: PayrollMonthTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'commitments', label: 'התחייבויות',  icon: <EventNoteIcon fontSize="small" />, component: CommitmentsManager, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'change-requests', label: 'בקשות שינוי', icon: <RuleFolderIcon fontSize="small" />, component: PayrollChangeRequests, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'my-decisions', label: 'ההחלטות שלי', icon: <RuleFolderIcon fontSize="small" />, component: MyDecisions, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'accountant', 'branch_manager'] },
-  { id: 'distribution', label: 'הפצת תלושים ודוחות', icon: <SendIcon fontSize="small" />, component: Distribution, roles: ['system_admin', 'accountant'] },
-  { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'branch_manager'] },
+  { id: 'monthly',     label: 'טבלה חודשית', icon: <TableChartIcon fontSize="small" />, component: PayrollMonthTable, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'commitments', label: 'התחייבויות',  icon: <EventNoteIcon fontSize="small" />, component: CommitmentsManager, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'summary',     label: 'סיכום קליל',  icon: <LegendToggleIcon fontSize="small" />, component: SalaryTable, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'change-requests', label: 'בקשות שינוי', icon: <RuleFolderIcon fontSize="small" />, component: PayrollChangeRequests, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'my-decisions', label: 'ההחלטות שלי', icon: <RuleFolderIcon fontSize="small" />, component: MyDecisions, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'audit',       label: 'ביקורת תלושים', icon: <FactCheckIcon fontSize="small" />, component: PayslipAudit, roles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+  { id: 'distribution', label: 'הפצת תלושים ודוחות', icon: <SendIcon fontSize="small" />, component: Distribution, roles: ['system_admin', 'admin_viewer', 'accountant'] },
+  { id: 'raises',      label: 'בקשות העלאה', icon: <RequestPageIcon fontSize="small" />, component: SalaryRequests, roles: ['system_admin', 'admin_viewer', 'branch_manager'] },
   { id: 'settings',    label: 'הגדרות',      icon: <SettingsIcon fontSize="small" />, component: PayrollSettings, roles: ['system_admin'] },
 ];
 
 export default function PayrollPage() {
   const [params, setParams] = useSearchParams();
-  const { isAdmin, isAccountant } = useAuth();
+  const { user, isAdmin, isAccountant } = useAuth();
   const initial = params.get('tab') || 'monthly';
   const [tab, setTab] = useState(initial);
   const [pendingCount, setPendingCount] = useState(0);
+
+  /**
+   * Every row above carries a `roles` list, and nothing read it — so the tab
+   * strip showed all nine to everyone. הגדרות is system_admin only (it writes
+   * the presets and the amuta-branch map), and the viewer, whose whole role is
+   * "may not write", saw it and could open it. The list is now the one the
+   * role actually grants.
+   *
+   * While the user is still loading there is no role to filter by: show
+   * nothing rather than guess, and tell MUI there is no selection (`false`)
+   * so it does not warn about a value with no tab.
+   */
+  const visibleTabs = useMemo(
+    () => TABS.filter(t => t.roles.includes(user?.role)),
+    [user?.role],
+  );
+  // A tab named in the URL that this role does not have falls back to the
+  // first one she does — not to a blank strip with a hidden screen under it.
+  const active = visibleTabs.some(t => t.id === tab) ? tab : (visibleTabs[0]?.id || '');
 
   // Poll the pending change-request count so reviewers see a badge.
   useEffect(() => {
@@ -58,7 +77,10 @@ export default function PayrollPage() {
     return () => { alive = false; clearInterval(t); };
   }, [isAdmin, isAccountant, tab]);
 
-  const ActiveComponent = useMemo(() => TABS.find(t => t.id === tab)?.component || PayrollMonthTable, [tab]);
+  const ActiveComponent = useMemo(
+    () => visibleTabs.find(t => t.id === active)?.component || PayrollMonthTable,
+    [visibleTabs, active],
+  );
 
   const handleChange = (_, newTab) => {
     setTab(newTab);
@@ -74,7 +96,7 @@ export default function PayrollPage() {
           <Typography variant="h5" sx={{ fontWeight: 800 }}>שכר</Typography>
         </Box>
         <Tabs
-          value={tab}
+          value={visibleTabs.length ? active : false}
           onChange={handleChange}
           variant="scrollable"
           scrollButtons="auto"
@@ -83,7 +105,7 @@ export default function PayrollPage() {
             borderBottom: 1, borderColor: 'divider',
           }}
         >
-          {TABS.map(t => (
+          {visibleTabs.map(t => (
             <Tab
               key={t.id}
               value={t.id}
