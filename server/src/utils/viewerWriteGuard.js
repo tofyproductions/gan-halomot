@@ -42,9 +42,18 @@
  *     countDocuments / distinct / aggregate, so the viewer's "sees everything
  *     the admin sees" rule and the materialize fills on claimed routes are
  *     exactly as they were.
+ *   - AN AGGREGATION PIPELINE THAT WRITES IS NOT COVERED. `aggregate` is
+ *     treated as a read here (it almost always is), but a pipeline whose last
+ *     stage is `$out` or `$merge` writes a whole collection through that same
+ *     "read". Hooking `aggregate` wholesale would refuse every viewer report,
+ *     so the line is drawn at the stage list: `grep -rn '\$out\|\$merge'
+ *     server/src` finds none today, and one added later would go through
+ *     unguarded. If one is ever added, it must either carry a claim or hook
+ *     `aggregate` and inspect `this.pipeline()`.
  */
 
 const viewerContext = require('./viewerContext');
+const { isMultipart, NO_UPLOAD } = require('./viewer');
 
 /**
  * What mongoose rejects the operation with. Named and coded so the two places
@@ -73,8 +82,34 @@ const QUERY_WRITE_OPS = [
 const DOCUMENT_WRITE_OPS = ['save', 'deleteOne', 'updateOne'];
 const MODEL_WRITE_OPS = ['insertMany', 'bulkWrite'];
 
+/**
+ * A multipart request cannot become a proposal, so it is refused instead.
+ *
+ * A ProposedChange stores `body` as JSON and the replay puts that JSON back on
+ * the wire. multer has already turned the multipart body into text fields and
+ * a Buffer by the time a write reaches mongoose, so filing one here would
+ * record `content_type: multipart/form-data; boundary=…` with a JSON body: the
+ * approver would approve it, the replay would hand busboy `{"doc_type":"x"}`
+ * and the upload would fail — a proposal that can never be applied, and a file
+ * silently lost. The ungated upload routes this reaches are POST
+ * /api/documents/upload, employmentContracts.routes.js:49,
+ * registration.routes.js:43 and branchPricing.routes.js:12.
+ *
+ * The answer is the same NO_UPLOAD that decideViewerWrite rule 4 and the
+ * 403→202 wrapper give (utils/viewer.js owns the text so all three agree).
+ * Written the way propose() writes its 202 — straight onto `res` while nothing
+ * has been sent yet, which is before the wrapper's silencer can engage (it
+ * needs headersSent). The caller has already set `proposed`, so everything
+ * after this — a second write, the controller's own reply, the error handler —
+ * is silenced exactly as it is after a real proposal.
+ */
+function refuseUpload(state) {
+  if (!state.res.headersSent) state.res.status(403).json(NO_UPLOAD);
+}
+
 /** File the viewer's request for approval, from outside the guard's own reach. */
 async function fileProposal(state, operation) {
+  if (isMultipart(state.req)) return refuseUpload(state);
   // Undo the manager fallback first so the stored row records who really asked
   // (`admin_viewer`), the same way the 403→202 wrapper does before it files.
   if (typeof state.req.viewerUndoFallback === 'function') state.req.viewerUndoFallback();
@@ -105,14 +140,33 @@ async function fileProposal(state, operation) {
  *   unclaimed       — file one proposal for the request (202 goes out here) and
  *                     reject the operation, so the driver is never called.
  */
-async function guard(operation) {
-  const state = viewerContext.get();
-  if (!state || state.claimed) return;
+/**
+ * The slow half. Only ever entered on a viewer's unclaimed write, i.e. never
+ * on any of the other seven roles' requests.
+ */
+async function refuse(state, operation) {
   if (!state.proposed) {
     state.proposed = true;
     await fileProposal(state, operation);
   }
   throw new ViewerUnclaimedWriteError(operation);
+}
+
+/**
+ * The fast half, and it is deliberately SYNCHRONOUS.
+ *
+ * This runs on every write the whole application makes, for every role, for
+ * the rest of the process's life — so the "there is no viewer here" answer
+ * must cost one AsyncLocalStorage lookup and nothing else: no promise, no
+ * async frame, no string built for an operation label nobody will read (the
+ * labels are built once, when the plugin attaches the hooks). Returning
+ * `undefined` rather than a resolved promise is what mongoose wants from a
+ * synchronous pre hook, and it keeps the write on its original tick.
+ */
+function guard(operation) {
+  const state = viewerContext.get();
+  if (state === null || state.claimed) return undefined;
+  return refuse(state, operation);
 }
 
 /**
@@ -127,14 +181,20 @@ function viewerWriteGuardPlugin(schema) {
   if (schema.$viewerWriteGuard) return;
   schema.$viewerWriteGuard = true;
 
+  // The label is built HERE, once per operation per schema, and closed over —
+  // not inside the hook, where it would be a string allocated on every write
+  // the application makes and thrown away unread on all but a viewer's.
   for (const op of QUERY_WRITE_OPS) {
-    schema.pre(op, { document: false, query: true }, function () { return guard(`query:${op}`); });
+    const label = `query:${op}`;
+    schema.pre(op, { document: false, query: true }, function () { return guard(label); });
   }
   for (const op of DOCUMENT_WRITE_OPS) {
-    schema.pre(op, { document: true, query: false }, function () { return guard(`document:${op}`); });
+    const label = `document:${op}`;
+    schema.pre(op, { document: true, query: false }, function () { return guard(label); });
   }
   for (const op of MODEL_WRITE_OPS) {
-    schema.pre(op, function () { return guard(`model:${op}`); });
+    const label = `model:${op}`;
+    schema.pre(op, function () { return guard(label); });
   }
 }
 

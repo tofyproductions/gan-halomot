@@ -66,11 +66,11 @@ const eq = (a, b, label) => ok(
   `קיבלנו ${JSON.stringify(a)}, ציפינו ${JSON.stringify(b)}`,
 );
 
-function fakeReq(method, url) {
+function fakeReq(method, url, contentType = 'application/json') {
   return {
     method,
     originalUrl: url,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': contentType },
     user: { id: 'u-viewer', full_name: 'אלעד צופה', role: 'branch_manager', actual_role: 'admin_viewer' },
     body: {}, params: {}, query: {},
   };
@@ -83,8 +83,10 @@ function fakeRes() {
 }
 
 /** Run `fn` inside a fresh viewer-write context; `claimBy` claims it first. */
-function inContext(fn, { claimBy = null, method = 'POST', url = '/api/probe' } = {}) {
-  const req = fakeReq(method, url);
+function inContext(fn, {
+  claimBy = null, method = 'POST', url = '/api/probe', contentType = 'application/json',
+} = {}) {
+  const req = fakeReq(method, url, contentType);
   const res = fakeRes();
   return viewerContext.runViewerWrite(req, res, async () => {
     if (claimBy) viewerContext.claim(claimBy);
@@ -207,6 +209,45 @@ async function main() {
         `proposals=${proposals.length} status=${res.statusCode}`);
       ok(await count() === before, `${label} — המסד לא השתנה`);
     }
+  }
+
+  /* ---------------------------------------------------------------- */
+  console.log('\nהעלאת קובץ במסלול ללא שער — סירוב, לא הצעה מתה');
+  {
+    // A multipart body cannot be stored and replayed as JSON: multer has
+    // already consumed it, so a proposal filed here would carry
+    // content_type: multipart/... with a JSON body, and the replay would hand
+    // busboy an object and fail. So the guard refuses (403 VIEWER_NO_UPLOAD),
+    // does NOT file, and still rejects the write.
+    proposals.length = 0;
+    const before = await count();
+    const { out, res, state } = await inContext(
+      () => rejection(Probe.create({ name: 'uploaded' })),
+      { url: '/api/documents/upload', contentType: 'multipart/form-data; boundary=--x' },
+    );
+    eq(out?.code, 'VIEWER_UNCLAIMED_WRITE', 'הכתיבה נדחתה גם בהעלאה');
+    eq(res.statusCode, 403, 'התשובה היא 403 ולא 202');
+    eq(res.body?.code, 'VIEWER_NO_UPLOAD', 'עם הקוד VIEWER_NO_UPLOAD');
+    ok(typeof res.body?.error === 'string' && res.body.error.length > 0, 'ועם הסבר בעברית');
+    eq(proposals.length, 0, 'ולא נשמרה שום הצעה');
+    eq(state.proposed, true, 'ההקשר בכל זאת מסומן proposed — כדי להשתיק את מה שיבוא');
+    eq(await count(), before, 'והמסד לא השתנה');
+
+    // A second write in the same request answers nothing more and files nothing.
+    proposals.length = 0;
+    const r2 = await inContext(async () => {
+      const first = await rejection(Probe.create({ name: 'uploaded-1' }));
+      const second = await rejection(Probe.updateOne({ name: 'target' }, { $set: { n: 1 } }));
+      return { first, second };
+    }, { url: '/api/documents/upload', contentType: 'multipart/form-data; boundary=--x' });
+    eq(r2.out.second?.code, 'VIEWER_UNCLAIMED_WRITE', 'כתיבה שנייה בהעלאה — עדיין נדחית');
+    eq(proposals.length, 0, 'ועדיין ללא הצעה');
+    eq(r2.res.body?.code, 'VIEWER_NO_UPLOAD', 'והתשובה נשארה הסירוב הראשון');
+
+    // The refusal is the very same object middleware/auth.js answers with, so
+    // the three places that refuse an upload can never drift apart.
+    const { NO_UPLOAD } = require('../src/utils/viewer');
+    eq(res.body, NO_UPLOAD, 'וזהו בדיוק NO_UPLOAD מ-utils/viewer.js');
   }
 
   /* ---------------------------------------------------------------- */

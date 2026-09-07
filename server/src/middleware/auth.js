@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, pathOnly,
-  startsWithPrefix,
+  startsWithPrefix, NO_UPLOAD,
 } = require('../utils/viewer');
 const { ADMIN_VIEWER } = require('../constants/roles');
 const viewerContext = require('../utils/viewerContext');
@@ -38,13 +38,27 @@ function sameTenant(req, decoded) {
 const NO_ROLE_SWAP_PREFIXES = ['/api/admin', '/api/auth'];
 
 const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
-const NO_UPLOAD = {
-  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
-  code: 'VIEWER_NO_UPLOAD',
-};
 
-/** Queue this write for approval. Lazy require: the service loads the models. */
+/**
+ * Queue this write for approval. Lazy require: the service loads the models.
+ *
+ * MARKS THE CONTEXT FIRST. Under rule 3 the rest of the request runs inside a
+ * viewer-write context (utils/viewerContext), and `proposed` is the single flag
+ * that says "this request has already become a proposal". The write guard sets
+ * it before it files; this path — a gate or controller answering 403, converted
+ * to a 202 above — must set it too, or the two would disagree:
+ *   - a write reaching mongoose AFTER the conversion would find `proposed`
+ *     false and file a SECOND proposal for the same request, and
+ *   - `silenced()` below would never engage, so the controller's own reply on
+ *     top of the 202 would throw ERR_HTTP_HEADERS_SENT.
+ * Already-proposed means the request is answered: do nothing at all.
+ */
 function proposeInstead(req, res) {
+  const ctx = viewerContext.get();
+  if (ctx) {
+    if (ctx.proposed) return undefined;
+    ctx.proposed = true;
+  }
   const { propose } = require('../services/proposedChanges.service');
   return propose(req, res).catch((err) => {
     console.error('[viewer] propose failed', err.message);

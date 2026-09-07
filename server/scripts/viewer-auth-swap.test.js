@@ -52,6 +52,7 @@ require.cache[dotenvPath] = {
 };
 process.env.JWT_SECRET = 'viewer-auth-swap-test-secret';
 
+const { AsyncResource } = require('async_hooks');
 const jwt = require('jsonwebtoken');
 const env = require('../src/config/env');
 const { authMiddleware, optionalAuth, requireRole } = require('../src/middleware/auth');
@@ -89,8 +90,13 @@ const tokenFor = (who) => jwt.sign(CLAIMS[who], env.JWT_SECRET, { expiresIn: '1h
 
 /**
  * Run a middleware over a signed request; resolve with
- * { nexted, req, res, ctx } — `ctx` being the viewer-write context as seen
- * from INSIDE next(), which is where the rest of the request would run.
+ * { nexted, req, res, ctx, enter } — `ctx` being the viewer-write context as
+ * seen from INSIDE next(), which is where the rest of the request would run.
+ *
+ * `enter(fn)` runs `fn` back inside that same async context, the way a
+ * controller's own later reply does. A plain closure would NOT do: the store
+ * follows the async execution path, not the lexical one, so code called from
+ * the test body sees no context at all. AsyncResource.bind captures the path.
  */
 function run(mw, { who, method = 'GET', url, contentType = 'application/json' }) {
   return new Promise((resolve) => {
@@ -103,8 +109,13 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     const res = fakeRes();
     let nexted = false;
     let ctx = null;
-    Promise.resolve(mw(req, res, () => { nexted = true; ctx = viewerContext.get(); }))
-      .then(() => setImmediate(() => resolve({ nexted, req, res, ctx })));
+    let enter = (fn) => fn();
+    Promise.resolve(mw(req, res, () => {
+      nexted = true;
+      ctx = viewerContext.get();
+      enter = AsyncResource.bind((fn) => fn());
+    }))
+      .then(() => setImmediate(() => resolve({ nexted, req, res, ctx, enter: (fn) => enter(fn) })));
   });
 }
 
@@ -171,7 +182,7 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     // answers 403 next — requireRole on an admin-only route, requireTabWrite,
     // or the controller's own scope check — becomes the proposal.
     proposals.length = 0;
-    const { nexted, req, res, ctx } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
+    const { nexted, req, res, ctx, enter } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
     ok(nexted, 'POST /api/suppliers (עם סניפים בניהול) — ממשיך למסלול');
     eq(req.user.role, 'branch_manager', 'ובתפקיד branch_manager לבקשה הזו בלבד');
     eq(req.viewerFallback, true, 'הבקשה מסומנת viewerFallback');
@@ -184,13 +195,26 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     eq(viewerContext.get(), null, 'ומחוץ ל-next אין הקשר כלל');
     eq(proposals.length, 0, 'עדיין לא נשמרה הצעה');
 
-    res.status(403).json({ error: 'לא הסניף שלך' });
+    // Inside the context, the way the controller's own 403 really arrives.
+    enter(() => res.status(403).json({ error: 'לא הסניף שלך' }));
     await new Promise(r => setImmediate(r));
     eq(res.statusCode, 202, '403 מהבקר הפך ל-202');
     eq(res.body?.proposed, true, 'עם proposed: true');
     eq(proposals.length, 1, 'ואז נשמרה ההצעה');
     eq(req.user.role, 'admin_viewer', 'התפקיד חזר ל-admin_viewer לפני התשובה');
     eq(req.viewerFallback, undefined, 'וסימון ה-fallback הוסר');
+
+    // The conversion must ALSO mark the context. Without it the request holds
+    // two contradictory truths — "already proposed" for the response, "not yet"
+    // for the write guard — and the next mongoose write in the same request
+    // would file a SECOND proposal, while silenced() would never engage and the
+    // controller's reply on top of the 202 would throw ERR_HTTP_HEADERS_SENT.
+    eq(ctx?.proposed, true, 'וההקשר סומן proposed — כך שכתיבה נוספת לא תגיש הצעה שנייה');
+    enter(() => res.status(403).json({ error: 'הבקר מנסה לענות שוב' }));
+    await new Promise(r => setImmediate(r));
+    eq(proposals.length, 1, 'תשובה נוספת של הבקר אינה מגישה הצעה שנייה');
+    eq(res.body?.proposed, true, 'והתשובה שיצאה נשארה ה-202 של ההצעה');
+    eq(res.statusCode, 202, 'והסטטוס נשאר 202');
   }
   {
     // A 200 under the fallback passes through untouched, and still undoes it.

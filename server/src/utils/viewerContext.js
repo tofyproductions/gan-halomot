@@ -41,7 +41,7 @@ const store = new AsyncLocalStorage();
  * middlewares and three promises later still sees this store.
  */
 function runViewerWrite(req, res, fn) {
-  return store.run({
+  const state = {
     req,
     res,
     /** Did a gate deliberately let this viewer through? */
@@ -50,7 +50,43 @@ function runViewerWrite(req, res, fn) {
     claims: [],
     /** Has a proposal already been filed for this request? */
     proposed: false,
-  }, fn);
+  };
+  bindRequestEvents(req, state);
+  return store.run(state, fn);
+}
+
+/**
+ * ONE HOLE THE STORE DOES NOT CROSS BY ITSELF: a body parsed off the socket.
+ *
+ * AsyncLocalStorage follows the ASYNC path, and a plain EventEmitter listener
+ * does not create one — it runs synchronously inside whoever called `emit`.
+ * The request body arrives on the socket, so `req.emit('data'/'end')` is called
+ * from the HTTP server's own context, and everything hanging off it runs there
+ * too. multer is exactly that: it pipes `req` into busboy and calls `next()`
+ * from busboy's `finish` handler. Measured, not assumed — an express app with
+ * `als.run(state, next)` in a middleware and `multer().single()` on the route
+ * sees `als.getStore() === undefined` in the handler.
+ *
+ * That is not a cosmetic gap. It meant the whole of a multipart request — the
+ * controller, and every mongoose write it makes — ran with NO viewer context,
+ * so utils/viewerWriteGuard was inert and a viewer's upload to somebody else's
+ * branch was written for real on the four upload routes that carry no gate
+ * (documents, employment contracts, the manual registration finalize, the
+ * תמ"ת price PDF). Re-entering the store around `req.emit` puts the listeners
+ * back on the request's own context, and everything after them — the awaits,
+ * the writes — inherits it normally.
+ *
+ * Only `req` is bound, and only for a viewer's write. The response's events are
+ * left alone: they fire after the answer, and a write started from one is the
+ * fire-and-forget case the guard documents rather than a request to protect.
+ */
+function bindRequestEvents(req, state) {
+  if (!req || typeof req.emit !== 'function' || req.$viewerEmitBound) return;
+  req.$viewerEmitBound = true;
+  const original = req.emit;
+  req.emit = function boundEmit(...args) {
+    return store.run(state, () => original.apply(this, args));
+  };
 }
 
 /** The current viewer-write context, or null when there is not one. */

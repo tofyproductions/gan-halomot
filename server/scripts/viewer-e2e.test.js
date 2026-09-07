@@ -203,7 +203,10 @@ async function main() {
   /* ---------------------------------------------------------------- *
    * Seed
    * ---------------------------------------------------------------- */
-  const { User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment } = require('../src/models');
+  const {
+    User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment,
+    Registration, Document,
+  } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const branchA = await Branch.create({ name: 'תל אביב', address: 'הרצל 1' });
@@ -885,6 +888,37 @@ async function main() {
     eq(r12.body?.proposed, true, '13f עם proposed: true');
     eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
       '13f והשם לא השתנה');
+
+    // AN UNGATED MULTIPART ROUTE. POST /api/documents/upload carries no gate
+    // either, so the fallback manager reaches multer, multer parses the file,
+    // and Document.create arrives at the guard. Filing THAT as a proposal would
+    // store a JSON body under content_type: multipart/… and the replay would
+    // hand busboy an object — a proposal that can never be applied and a file
+    // quietly lost. So the guard refuses it the same way rule 4 refuses an
+    // upload from a viewer with no branches: 403 VIEWER_NO_UPLOAD, no proposal.
+    const registration = await Registration.create({
+      unique_id: 'E2E-REG-13H', child_name: 'ילד לבדיקה', parent_name: 'הורה לבדיקה',
+      branch_id: branchB._id, monthly_fee: 1000,
+      start_date: new Date('2026-09-01'), end_date: new Date('2027-08-31'),
+    });
+    const docsBefore = await Document.countDocuments({});
+    const propsBefore = await ProposedChange.countDocuments({});
+    const boundary13 = `----ganE2E13${Date.now()}`;
+    const upBody = Buffer.concat([
+      Buffer.from(`--${boundary13}\r\nContent-Disposition: form-data; name="registration_id"\r\n\r\n${registration._id}\r\n`),
+      Buffer.from(`--${boundary13}\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\nContent-Type: image/png\r\n\r\n`),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from(`\r\n--${boundary13}--\r\n`),
+    ]);
+    const up13 = await request({
+      method: 'POST', path: '/api/documents/upload', token: tokens.viewer,
+      body: upBody, headers: { 'Content-Type': `multipart/form-data; boundary=${boundary13}` },
+    });
+    eq(up13.status, 403, '13h העלאת קובץ במסלול ללא שער ע"י צופה עם סניפים → 403');
+    eq(up13.body?.code, 'VIEWER_NO_UPLOAD', '13h עם הקוד VIEWER_NO_UPLOAD');
+    eq(await Document.countDocuments({}), docsBefore, '13h ולא נוצר מסמך');
+    eq(await ProposedChange.countDocuments({}), propsBefore,
+      '13h ולא נשמרה הצעה מתה שאי אפשר להפעיל');
 
     // Every other role writes an ungated route exactly as before.
     const adminRename = await request({

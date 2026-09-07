@@ -32,6 +32,11 @@ function handleUnclaimedViewerWrite(err, req, res) {
     return true;
   }
   if (ctx) ctx.proposed = true;
+  // Undo the manager fallback before filing, exactly as the guard and the
+  // 403→202 wrapper do. Without it the stored row says the request came from a
+  // `branch_manager` — the role the fallback borrowed — and the approver reads
+  // a proposal nobody made.
+  if (typeof req.viewerUndoFallback === 'function') req.viewerUndoFallback();
   // Lazy require: the service loads src/models.
   const { propose } = require('../services/proposedChanges.service');
   propose(req, res).catch((e) => {
