@@ -41,8 +41,8 @@ const eq = (a, b, label) => {
   console.log('\nהבקשה שנשלחת');
   {
     const calls = [];
-    const fetchImpl = async (url, init) => { calls.push({ url, init }); return { status: 200, text: async () => '{"ok":true}' }; };
-    const r = await applyProposal(doc, approver, { fetchImpl, baseUrl: 'http://127.0.0.1:3001', tenantSlug: 'demo' });
+    const transport = async (url, init) => { calls.push({ url, init }); return { status: 200, text: async () => '{"ok":true}' }; };
+    const r = await applyProposal(doc, approver, { transport, baseUrl: 'http://127.0.0.1:3001', tenantSlug: 'demo' });
     eq(r, { status: 200, ok: true, error: '' }, '2xx → הצליח');
     eq(calls[0].url, 'http://127.0.0.1:3001/api/employees/e9?x=1', 'לאותו נתיב, כולל השאילתה, מול השרת עצמו');
     eq(calls[0].init.method, 'PATCH', 'באותה שיטה');
@@ -54,25 +54,50 @@ const eq = (a, b, label) => {
     eq(calls[0].init.body, JSON.stringify({ full_name: 'דנה' }), 'והגוף השמור');
   }
   {
-    const fetchImpl = async () => ({ status: 200, text: async () => '' });
-    const r = await applyProposal({ ...doc, method: 'DELETE', body: null }, approver, { fetchImpl, baseUrl: 'http://127.0.0.1:1' });
+    const transport = async () => ({ status: 200, text: async () => '' });
+    const r = await applyProposal({ ...doc, method: 'DELETE', body: null }, approver, { transport, baseUrl: 'http://127.0.0.1:1' });
     eq(r.ok, true, 'מחיקה בלי גוף — עובר');
+  }
+
+  console.log('\nנתיב שנשמר אינו מסמכות לשלוח');
+  {
+    const bad = ['נתיב לא חוקי להפעלה חוזרת'];
+    const check = async (path, label) => {
+      const calls = [];
+      const transport = async (url, init) => { calls.push({ url, init }); return { status: 200, text: async () => '' }; };
+      const r = await applyProposal({ ...doc, path }, approver, { transport, baseUrl: 'http://127.0.0.1:3001' });
+      eq([r.status, r.ok, r.error], [0, false, bad[0]], label);
+      eq(calls.length, 0, `  ${label} — לא נשלח בכלל`);
+    };
+    // The gate saw "/api/cibus-sync/..."; the wire would carry "/api/admin/...".
+    await check('/api/cibus-sync/%2e%2e/admin/users/1/role', 'יציאה מקודדת אל /api/admin נדחית');
+    await check('/api/x/../admin/users', 'יציאה עם .. אל /api/admin נדחית');
+    await check('@evil.com/x', 'נתיב בלי / מוביל נדחה (חטיפת מארח)');
+    await check('//evil.com/api/employees', 'כתובת מוחלטת לשרת אחר נדחית');
+    await check('/api/proposed-changes/pc2/decide', 'אישור עצמי של הצעה נדחה');
+    await check('/health', 'מחוץ ל-/api נדחה');
+  }
+  {
+    const calls = [];
+    const transport = async (url, init) => { calls.push({ url, init }); return { status: 200, text: async () => '' }; };
+    const r = await applyProposal(doc, approver, { transport, baseUrl: 'http://127.0.0.1:3001' });
+    eq([r.ok, calls.length, calls[0]?.url], [true, 1, 'http://127.0.0.1:3001/api/employees/e9?x=1'], 'נתיב רגיל — נשלח כרגיל');
   }
 
   console.log('\nכישלונות');
   {
-    const fetchImpl = async () => ({ status: 409, text: async () => '{"error":"החודש נעול"}' });
-    const r = await applyProposal(doc, approver, { fetchImpl, baseUrl: 'http://127.0.0.1:1' });
+    const transport = async () => ({ status: 409, text: async () => '{"error":"החודש נעול"}' });
+    const r = await applyProposal(doc, approver, { transport, baseUrl: 'http://127.0.0.1:1' });
     eq(r, { status: 409, ok: false, error: 'החודש נעול' }, 'תשובה שאינה 2xx → נכשל, עם הודעת השרת');
   }
   {
-    const fetchImpl = async () => ({ status: 500, text: async () => 'not json' });
-    const r = await applyProposal(doc, approver, { fetchImpl, baseUrl: 'http://127.0.0.1:1' });
+    const transport = async () => ({ status: 500, text: async () => 'not json' });
+    const r = await applyProposal(doc, approver, { transport, baseUrl: 'http://127.0.0.1:1' });
     eq(r, { status: 500, ok: false, error: 'not json' }, 'גוף שאינו JSON — הטקסט עצמו');
   }
   {
-    const fetchImpl = async () => { throw new Error('ECONNREFUSED'); };
-    const r = await applyProposal(doc, approver, { fetchImpl, baseUrl: 'http://127.0.0.1:1' });
+    const transport = async () => { throw new Error('ECONNREFUSED'); };
+    const r = await applyProposal(doc, approver, { transport, baseUrl: 'http://127.0.0.1:1' });
     eq(r, { status: 0, ok: false, error: 'ECONNREFUSED' }, 'אין חיבור → 0 עם השגיאה');
   }
 

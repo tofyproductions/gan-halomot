@@ -59,6 +59,13 @@ function fakeRes() {
     const d2 = await propose({ ...req, body: { branch_id: 'not-an-id' } }, r2, { models });
     eq(d2.branch_id, null, 'סניף שאינו מזהה תקין → null, לא קריסה');
   }
+  {
+    // The gate would have blocked this one, but if a path ever gets through,
+    // the record must say what the wire would carry — not what was typed.
+    const r3 = fakeRes();
+    const d3 = await propose({ ...req, originalUrl: '/api/employees/../admin/users?x=1' }, r3, { models });
+    eq(d3.path, '/api/admin/users?x=1', 'הנתיב נשמר מנורמל, כפי שהוא באמת יישלח');
+  }
   eq(doc.approver, 'system_admin', 'המאשר');
   eq(doc.status, 'pending', 'ממתין');
   eq(doc.summary.map(r => r.label), ['שם מלא', 'שכר שעתי', 'סניף'], 'התקציר קריא');

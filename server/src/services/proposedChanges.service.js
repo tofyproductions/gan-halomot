@@ -1,11 +1,28 @@
 /**
  * Queue a viewer's write for approval, and (Task 5) apply it once approved.
  */
+const http = require('http');
+const https = require('https');
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
   approverFor, screenLabelFor, summarizeBody, extractBranchId, viewerMessage,
+  isBlockedForViewer, isWriteBlockedForViewer,
 } = require('../utils/viewer');
+
+/**
+ * The path exactly as a client would put it on the wire.
+ * Stored (and replayed) normalized so the record cannot say one thing while
+ * the replay does another — `/api/employees/../admin/users` is /api/admin/users.
+ */
+function normalizePath(url) {
+  try {
+    const u = new URL(String(url || ''), 'http://x');
+    return u.pathname + u.search;
+  } catch {
+    return String(url || '');
+  }
+}
 
 function defaultModels() {
   // Lazy: the models index opens mongoose, which the tests do not want.
@@ -35,7 +52,7 @@ async function propose(req, res, { models } = {}) {
     requested_by_name: req.user?.full_name || '',
     requested_role: req.user?.role || '',
     method: String(req.method || '').toUpperCase(),
-    path: req.originalUrl || '',
+    path: normalizePath(req.originalUrl),
     host: req.headers?.host || '',
     body: req.body ?? null,
     content_type: req.headers?.['content-type'] || 'application/json',
@@ -76,13 +93,74 @@ function mintApproverToken(user, tenantSlug) {
   return jwt.sign(payload, env.JWT_SECRET, { expiresIn: 300 });
 }
 
+const BAD_PATH = 'נתיב לא חוקי להפעלה חוזרת';
+
+/**
+ * The default way a replay reaches the wire.
+ *
+ * Not `fetch`: undici owns the Host header and silently overwrites whatever we
+ * set with the connection's own authority, so on the platform every replay
+ * looked like it arrived at 127.0.0.1 and tenant resolution fell to the default
+ * connection. `http.request` sends the Host we give it. Contract is the small
+ * slice of fetch we use: `async (url, init) => ({ status, text: async () => string })`.
+ */
+function defaultTransport(url, init = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const mod = u.protocol === 'https:' ? https : http;
+    const headers = { ...(init.headers || {}) };
+    if (init.body !== undefined && init.body !== null) {
+      headers['Content-Length'] = Buffer.byteLength(init.body);
+    }
+    const request = mod.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
+      method: init.method || 'GET',
+      headers,
+    }, (resp) => {
+      const chunks = [];
+      resp.on('data', (c) => chunks.push(c));
+      resp.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        resolve({ status: resp.statusCode, text: async () => text });
+      });
+      resp.on('error', reject);
+    });
+    request.on('error', reject);
+    if (init.body !== undefined && init.body !== null) request.write(init.body);
+    request.end();
+  });
+}
+
 /**
  * Re-issue the stored request against this server as the approver.
  * Returns { status, ok, error } and never throws. Does not touch the DB.
+ *
+ * The stored path is re-checked here and not trusted: the row was written by a
+ * viewer's request and is about to be replayed with an approver's authority, so
+ * it has to land on this server, under /api, outside the viewer's blocked areas
+ * — the gate that first saw the request is not the gate that sends it.
  */
 async function applyProposal(doc, approver, {
-  fetchImpl = global.fetch, baseUrl = `http://127.0.0.1:${env.PORT}`, tenantSlug = undefined,
+  transport = defaultTransport, baseUrl = `http://127.0.0.1:${env.PORT}`, tenantSlug = undefined,
 } = {}) {
+  let target;
+  let base;
+  try {
+    base = new URL(baseUrl);
+    target = new URL(String(doc.path || ''), base);
+  } catch {
+    return { status: 0, ok: false, error: BAD_PATH };
+  }
+  if (target.origin !== base.origin
+    || !target.pathname.startsWith('/api/')
+    || isBlockedForViewer(target.pathname)
+    || isWriteBlockedForViewer(target.pathname)) {
+    return { status: 0, ok: false, error: BAD_PATH };
+  }
+
   const headers = {
     Authorization: `Bearer ${mintApproverToken(approver, tenantSlug)}`,
     'X-Proposed-Change': String(doc._id),
@@ -94,7 +172,7 @@ async function applyProposal(doc, approver, {
     init.body = JSON.stringify(doc.body);
   }
   try {
-    const resp = await fetchImpl(`${baseUrl}${doc.path}`, init);
+    const resp = await transport(target.toString(), init);
     const text = await resp.text();
     const ok = resp.status >= 200 && resp.status < 300;
     let error = '';
@@ -107,4 +185,4 @@ async function applyProposal(doc, approver, {
   }
 }
 
-module.exports = { propose, applyProposal, mintApproverToken };
+module.exports = { propose, applyProposal, mintApproverToken, defaultTransport };

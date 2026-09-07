@@ -86,8 +86,20 @@ const FIELD_LABELS = {
   type: 'סוג', start_date: 'מתאריך', end_date: 'עד תאריך',
 };
 
+/**
+ * The path an HTTP client would actually send, not the string we were handed.
+ *
+ * A raw `split('?')[0]` compares the URL as typed, while undici/http normalize
+ * dot segments before putting them on the wire — so `/api/cibus-sync/%2e%2e/admin/users`
+ * passes a `startsWith('/api/admin')` test and then arrives at /api/admin.
+ * The WHATWG parser resolves `..`, `%2e%2e` and `//` exactly as the client will.
+ */
 function pathOnly(url) {
-  return String(url || '').split('?')[0];
+  try {
+    return new URL(String(url || ''), 'http://x').pathname;
+  } catch {
+    return String(url || '').split('?')[0];
+  }
 }
 
 function isRead(req) {

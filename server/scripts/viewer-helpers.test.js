@@ -31,6 +31,9 @@ ok(v.isBlockedForViewer('/api/admin/users'), '/api/admin חסום');
 ok(v.isBlockedForViewer('/api/admin/role-tabs?x=1'), 'גם עם שאילתה');
 ok(!v.isBlockedForViewer('/api/administration'), 'רק הקידומת המדויקת, לא כל מה שמתחיל ב-admin');
 ok(!v.isBlockedForViewer('/api/employees'), 'שאר המסכים פתוחים');
+ok(v.isBlockedForViewer('/api/cibus-sync/%2e%2e/admin/users/1/role'), 'יציאה מקודדת (%2e%2e) אל /api/admin חסומה');
+ok(v.isBlockedForViewer('/api/x/../admin/users'), 'יציאה עם .. אל /api/admin חסומה');
+ok(v.isWriteBlockedForViewer('/api/x/../proposed-changes/1/decide'), 'גם כתיבה מנורמלת אל ההצעות חסומה');
 
 console.log('\nחסימת כתיבה על הצעות');
 ok(v.isWriteBlockedForViewer('/api/proposed-changes/1/decide'), 'הכרעה על הצעה חסומה');

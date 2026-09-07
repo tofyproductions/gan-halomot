@@ -36,7 +36,15 @@ const proposedChangeSchema = new mongoose.Schema({
   branch_name: { type: String, default: '' },
 
   approver: { type: String, enum: ['accountant', 'system_admin'], default: 'system_admin' },
-  status: { type: String, enum: ['pending', 'approved', 'rejected', 'failed'], default: 'pending', index: true },
+  // `applying` is the claim: one approver took the row and the replay is in
+  // flight. It exists so a second approve finds nothing to claim instead of
+  // sending the same write twice.
+  status: {
+    type: String,
+    enum: ['pending', 'applying', 'approved', 'rejected', 'failed'],
+    default: 'pending',
+    index: true,
+  },
   decided_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   decided_by_name: { type: String, default: '' },
   decided_at: { type: Date, default: null },
