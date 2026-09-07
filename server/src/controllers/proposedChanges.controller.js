@@ -16,8 +16,20 @@ async function exists(id) {
   return !!await ProposedChange.findById(id).select('_id').lean();
 }
 
+/**
+ * The role the person actually holds, not the one this read is being served
+ * under. authMiddleware presents a viewer's READ as `system_admin` so every
+ * list she opens covers all branches; `actual_role` is what she really is,
+ * and this screen is one of the few that has to know — the queue she sees is
+ * her own, not the organisation's.
+ */
+function realRole(user) {
+  return user?.actual_role || user?.role;
+}
+
 function decides(user) {
-  return user?.role === 'system_admin' || user?.role === 'accountant';
+  const role = realRole(user);
+  return role === 'system_admin' || role === 'accountant';
 }
 
 /** findOneAndUpdate hands back a document; the response wants a plain object. */
@@ -62,7 +74,7 @@ async function list(req, res, next) {
 async function count(req, res, next) {
   try {
     const filter = { status: 'pending' };
-    if (req.user?.role === ADMIN_VIEWER) filter.requested_by = req.user.id;
+    if (realRole(req.user) === ADMIN_VIEWER) filter.requested_by = req.user.id;
     const pending_count = await ProposedChange.countDocuments(filter);
     res.json({ pending_count });
   } catch (err) { next(err); }

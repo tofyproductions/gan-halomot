@@ -3374,7 +3374,10 @@ async function createChangeRequest(req, res, next) {
 async function listChangeRequests(req, res, next) {
   try {
     const { status, mine, month } = req.query;
-    const role = req.user?.role;
+    // `actual_role` first: authMiddleware serves a viewer's READ as
+    // system_admin so her lists cover every branch, but the requests SHE filed
+    // are hers alone — a reviewer's view of the whole queue is not.
+    const role = req.user?.actual_role || req.user?.role;
     const filter = {};
     if (status) filter.status = status;
     // The payroll table asks for its own month's pending requests, so the

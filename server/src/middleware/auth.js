@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
-  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart,
+  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, pathOnly,
 } = require('../utils/viewer');
 const { ADMIN_VIEWER } = require('../constants/roles');
 
@@ -20,6 +20,46 @@ const { ADMIN_VIEWER } = require('../constants/roles');
 function sameTenant(req, decoded) {
   if (!req.tenant) return true;
   return decoded && decoded.tenant === req.tenant.slug;
+}
+
+/**
+ * Prefixes where a viewer's read must stay a viewer's read.
+ *
+ *   /api/admin — she may not read it at all, and the refusal is viewerGate's
+ *     (isBlockedForViewer). Swapping the role here would hand her the admin
+ *     screens through the front door, so the swap simply does not happen
+ *     there and the existing gate still answers 403.
+ *   /api/auth  — /me and friends are how the CLIENT learns who it is talking
+ *     to. Handing it 'system_admin' would light up every write button in the
+ *     menu for somebody who may not press one. The real role must survive.
+ */
+const NO_ROLE_SWAP_PREFIXES = ['/api/admin', '/api/auth'];
+
+/**
+ * On a READ, a viewer IS the admin.
+ *
+ * The design says the viewer "sees everything the admin sees" — every list,
+ * dashboard, payroll table and payslip, across all branches. That rule lives
+ * in utils/branch-scope.js#resolveBranchScope, but 36 inline
+ * `role === 'system_admin'` tests across 17 controllers never ask it: each
+ * scopes its own query by role and quietly confines the viewer to one branch,
+ * or drops columns she is entitled to see. Sweeping all 36 would be a change
+ * in 17 files that the 37th new one silently breaks again.
+ *
+ * So the swap is made once, here, where every request already passes: on a
+ * read the token's role becomes 'system_admin' and the true role is kept as
+ * `actual_role` for the handful of places that must still tell the two apart
+ * (her own proposals list and its badge, her own payroll change requests).
+ * Writes are untouched — they arrive as `admin_viewer` and go through
+ * viewerGate exactly as before.
+ */
+function presentViewerAsAdminForReads(req) {
+  if (!isViewer(req.user) || !isRead(req)) return;
+  const path = pathOnly(req.originalUrl);
+  const blocked = NO_ROLE_SWAP_PREFIXES.some(p => path === p || path.startsWith(`${p}/`));
+  if (blocked) return;
+  req.user.actual_role = ADMIN_VIEWER;
+  req.user.role = 'system_admin';
 }
 
 function authMiddleware(req, res, next) {
@@ -75,6 +115,7 @@ function authMiddleware(req, res, next) {
     }
 
     req.user = decoded;
+    presentViewerAsAdminForReads(req);
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -92,7 +133,10 @@ function optionalAuth(req, res, next) {
   try {
     const token = header.split(' ')[1];
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    if (sameTenant(req, decoded)) req.user = decoded;
+    if (sameTenant(req, decoded)) {
+      req.user = decoded;
+      presentViewerAsAdminForReads(req);
+    }
   } catch {}
   next();
 }
@@ -164,6 +208,14 @@ function viewerWriteGate(req, res, next, roles) {
  * rule themselves:
  *   reads  — wherever a system admin may read, except /api/admin;
  *   writes — see viewerWriteGate; refused for /api/admin and for uploads.
+ *
+ * Since presentViewerAsAdminForReads (above) already turns a viewer's read
+ * into a system_admin read before any route runs, the read branch below is
+ * reached only where the swap deliberately did not happen — under /api/admin,
+ * which isBlockedForViewer refuses first — or from a caller that never went
+ * through authMiddleware (the unit tests do exactly that). It is kept because
+ * a gate that depends on an earlier middleware having run is a gate that
+ * opens the day somebody mounts a route without it.
  * Every other role passes through untouched: this returns false and the
  * caller runs its own logic.
  *
