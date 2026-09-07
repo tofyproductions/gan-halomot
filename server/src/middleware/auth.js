@@ -182,6 +182,33 @@ const NO_WRITE_GATE_PREFIXES = ['/api/auth'];
  */
 function decideViewerWrite(req, res, next) {
   if (!isViewer(req.user) || isRead(req)) return false;
+  // ALREADY DECIDED — DECIDE ONCE, AND ONLY REDO WHAT THE SECOND PASS LOST.
+  //
+  // authMiddleware is mounted globally (routes/index.js), and a dozen routers
+  // mount it AGAIN themselves — employmentContracts.routes.js:31, payroll,
+  // payrollMonth, employees. So this function runs twice on the same request,
+  // and the second run has just re-decoded the token into a FRESH req.user
+  // whose role says admin_viewer again: it looks exactly like an undecided
+  // viewer write.
+  //
+  // Left alone, rule 3 below then built a SECOND context and a SECOND 403→202
+  // wrapper, while bindRequestEvents — one-shot per request — kept req.emit
+  // pointing at the FIRST. Everything resumed from a `req` event therefore ran
+  // in the stale, unclaimed first context (multer's next(), the controller,
+  // its writes) while the gate's claim had gone into the second. A managed
+  // viewer uploading a contract for a branch she manages was refused
+  // 403 VIEWER_NO_UPLOAD by her own guard.
+  //
+  // The context, the wrapper and any claim already made survive from the first
+  // pass. All the second pass redoes is the role mutation that the fresh
+  // req.user lost, so the gates further down still see a branch_manager.
+  if (req.viewerHandled) {
+    if (req.viewerFallback) {
+      req.user.actual_role = ADMIN_VIEWER;
+      req.user.role = 'branch_manager';
+    }
+    return false;
+  }
   const path = pathOnly(req.originalUrl);
   if (NO_WRITE_GATE_PREFIXES.some(p => startsWithPrefix(path, p))) return false;
   if (isBlockedForViewer(path) || isWriteBlockedForViewer(path)) {
@@ -233,6 +260,14 @@ function decideViewerWrite(req, res, next) {
  * `actual_role` for the handful of places that must still tell the two apart
  * (her own proposals list and its badge, her own payroll change requests).
  * The WRITE is decided next door, in decideViewerWrite above.
+ *
+ * RUNNING TWICE IS SAFE, and must stay that way without a flag. A router that
+ * mounts authMiddleware a second time re-decodes the token into a fresh
+ * req.user, so this simply re-applies the same two assignments to the new
+ * object — it builds no context, installs no wrapper and records nothing, so
+ * there is nothing to duplicate. A `viewerHandled`-style guard here would be
+ * a BUG: it would skip the swap on that fresh object and the second half of
+ * the request would read as an admin_viewer instead of the admin.
  */
 function presentViewerAsAdminForReads(req) {
   if (!isViewer(req.user) || !isRead(req)) return;

@@ -79,13 +79,28 @@ function runViewerWrite(req, res, fn) {
  * Only `req` is bound, and only for a viewer's write. The response's events are
  * left alone: they fire after the answer, and a write started from one is the
  * fire-and-forget case the guard documents rather than a request to protect.
+ *
+ * THE BINDING FOLLOWS THE CURRENT STATE, NOT THE FIRST ONE. `req.emit` is
+ * wrapped once — wrapping it twice would nest the stores — but the wrapper
+ * reads `req.$viewerEmitState` at EMIT time, and that field is re-pointed on
+ * every runViewerWrite for this request. Binding the state captured at wrap
+ * time instead was a real bug: authMiddleware runs twice on routers that mount
+ * it themselves, a second context was created, and req.emit went on resuming
+ * multer inside the first — unclaimed — one, so a managed viewer's upload to
+ * her own branch was refused. middleware/auth.js#decideViewerWrite now decides
+ * once, so there should never be a second state; this keeps the binding honest
+ * if one ever appears again.
  */
 function bindRequestEvents(req, state) {
-  if (!req || typeof req.emit !== 'function' || req.$viewerEmitBound) return;
+  if (!req || typeof req.emit !== 'function') return;
+  req.$viewerEmitState = state;
+  if (req.$viewerEmitBound) return;
   req.$viewerEmitBound = true;
   const original = req.emit;
   req.emit = function boundEmit(...args) {
-    return store.run(state, () => original.apply(this, args));
+    const current = req.$viewerEmitState;
+    if (!current) return original.apply(this, args);
+    return store.run(current, () => original.apply(this, args));
   };
 }
 

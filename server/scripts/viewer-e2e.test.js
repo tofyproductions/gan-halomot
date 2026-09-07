@@ -205,7 +205,7 @@ async function main() {
    * ---------------------------------------------------------------- */
   const {
     User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment,
-    Registration, Document,
+    Registration, Document, EmploymentContract,
   } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
@@ -919,6 +919,54 @@ async function main() {
     eq(await Document.countDocuments({}), docsBefore, '13h ולא נוצר מסמך');
     eq(await ProposedChange.countDocuments({}), propsBefore,
       '13h ולא נשמרה הצעה מתה שאי אפשר להפעיל');
+
+    // A GATED MULTIPART ROUTE, AND THE DOUBLE-AUTH TRAP UNDER IT.
+    //
+    // POST /api/employment-contracts/upload puts its gate BEFORE multer
+    // (requireRole(..., 'branch_manager') at employmentContracts.routes.js:33),
+    // so the claim is made while the context is still alive and an upload for
+    // a branch she manages must LAND — this is not the ungated 13h case.
+    //
+    // It nearly did not. That router mounts authMiddleware AGAIN (:31) below
+    // the global one, so decideViewerWrite ran twice, built a second context
+    // and a second wrapper, and left req.emit bound to the FIRST — multer
+    // resumed the request inside a stale, unclaimed context and the viewer's
+    // own guard answered 403 VIEWER_NO_UPLOAD for her own branch. The decision
+    // is now made once, and the emit binding follows the current state.
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+      + '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+      + '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n'
+      + 'trailer<</Root 1 0 R>>\n%%EOF\n',
+      'latin1',
+    );
+    const contractUpload = (employeeId) => {
+      const b = `----ganE2E13i${Date.now()}${Math.random().toString(16).slice(2)}`;
+      const payload = Buffer.concat([
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="employee_id"\r\n\r\n${employeeId}\r\n`),
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="contract.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+        pdf,
+        Buffer.from(`\r\n--${b}--\r\n`),
+      ]);
+      return request({
+        method: 'POST', path: '/api/employment-contracts/upload', token: tokens.viewer,
+        body: payload, headers: { 'Content-Type': `multipart/form-data; boundary=${b}` },
+      });
+    };
+
+    const ownUp = await contractUpload(empA1._id);
+    ok(ownUp.status >= 200 && ownUp.status < 300,
+      '13i העלאת חוזה לעובדת בסניף שבניהולה (מסלול עם שער) → 2xx',
+      `status=${ownUp.status} ${ownUp.text}`);
+    eq(await EmploymentContract.countDocuments({ employee_id: empA1._id }), 1,
+      '13i ונשמר חוזה במסד');
+
+    const otherBefore = await EmploymentContract.countDocuments({ employee_id: empB1._id });
+    const otherUp = await contractUpload(empB1._id);
+    eq(otherUp.status, 403, '13j אותה העלאה לעובדת בסניף אחר → 403');
+    eq(otherUp.body?.code, 'VIEWER_NO_UPLOAD', '13j עם הקוד VIEWER_NO_UPLOAD');
+    eq(await EmploymentContract.countDocuments({ employee_id: empB1._id }), otherBefore,
+      '13j ולא נשמר חוזה');
 
     // Every other role writes an ungated route exactly as before.
     const adminRename = await request({
