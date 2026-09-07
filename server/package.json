@@ -50,7 +50,8 @@
     "demo:test": "node scripts/ganflow-demo-scramble.test.js",
     "test:sales": "node scripts/sales-pages.test.js",
     "test:rtl-badge": "node scripts/rtl-badge-position.test.js",
-    "test:viewer-role": "node scripts/viewer-role-exists.test.js"
+    "test:viewer-role": "node scripts/viewer-role-exists.test.js",
+    "test:viewer-helpers": "node scripts/viewer-helpers.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
