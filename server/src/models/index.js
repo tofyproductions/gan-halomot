@@ -1,3 +1,16 @@
+// ---------------------------------------------------------------------------
+// FIRST LINE OF THIS FILE ON PURPOSE.
+//
+// utils/viewerWriteGuard.js is the database-level fail-safe for the read-only
+// admin role: a write reaching mongoose on a viewer's request that no route
+// gate claimed is refused and filed for approval instead. It is installed as a
+// GLOBAL plugin, and mongoose bakes a schema's middleware into the model when
+// the model is compiled — a hook registered after `mongoose.model()` never runs
+// and never says so. So this must happen before the first `require('./User')`
+// below, which is why it sits above every other line here.
+// ---------------------------------------------------------------------------
+require('../utils/viewerWriteGuard').register(require('mongoose'));
+
 const User = require('./User');
 const PayrollRollup = require('./PayrollRollup');
 const Branch = require('./Branch');

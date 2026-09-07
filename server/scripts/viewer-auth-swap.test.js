@@ -52,9 +52,12 @@ require.cache[dotenvPath] = {
 };
 process.env.JWT_SECRET = 'viewer-auth-swap-test-secret';
 
+const { AsyncResource } = require('async_hooks');
+const { EventEmitter } = require('events');
 const jwt = require('jsonwebtoken');
 const env = require('../src/config/env');
 const { authMiddleware, optionalAuth, requireRole } = require('../src/middleware/auth');
+const viewerContext = require('../src/utils/viewerContext');
 
 let failures = 0;
 const ok = (cond, label, extra = '') => {
@@ -65,6 +68,23 @@ const eq = (a, b, label) => ok(
   JSON.stringify(a) === JSON.stringify(b), label,
   `קיבלנו ${JSON.stringify(a)}, ציפינו ${JSON.stringify(b)}`,
 );
+
+/**
+ * A request object that is a REAL EventEmitter.
+ *
+ * utils/viewerContext#bindRequestEvents re-enters the store around `req.emit`
+ * so that a body parsed off the socket (multer) resumes inside the viewer's
+ * context. Whether it wrapped `emit`, and which state that wrapper points at,
+ * is a thing the tests below assert — a plain object would hide both.
+ */
+function fakeReq({ who, method = 'GET', url, contentType = 'application/json' }) {
+  return Object.assign(new EventEmitter(), {
+    method,
+    originalUrl: url,
+    headers: { authorization: `Bearer ${tokenFor(who)}`, 'content-type': contentType },
+    body: {}, params: {}, query: {},
+  });
+}
 
 function fakeRes() {
   const r = { statusCode: 200, body: null, headersSent: false };
@@ -86,19 +106,29 @@ const CLAIMS = {
 };
 const tokenFor = (who) => jwt.sign(CLAIMS[who], env.JWT_SECRET, { expiresIn: '1h' });
 
-/** Run a middleware over a signed request; resolve with { nexted, req, res }. */
+/**
+ * Run a middleware over a signed request; resolve with
+ * { nexted, req, res, ctx, enter } — `ctx` being the viewer-write context as
+ * seen from INSIDE next(), which is where the rest of the request would run.
+ *
+ * `enter(fn)` runs `fn` back inside that same async context, the way a
+ * controller's own later reply does. A plain closure would NOT do: the store
+ * follows the async execution path, not the lexical one, so code called from
+ * the test body sees no context at all. AsyncResource.bind captures the path.
+ */
 function run(mw, { who, method = 'GET', url, contentType = 'application/json' }) {
   return new Promise((resolve) => {
-    const req = {
-      method,
-      originalUrl: url,
-      headers: { authorization: `Bearer ${tokenFor(who)}`, 'content-type': contentType },
-      body: {}, params: {}, query: {},
-    };
+    const req = fakeReq({ who, method, url, contentType });
     const res = fakeRes();
     let nexted = false;
-    Promise.resolve(mw(req, res, () => { nexted = true; }))
-      .then(() => setImmediate(() => resolve({ nexted, req, res })));
+    let ctx = null;
+    let enter = (fn) => fn();
+    Promise.resolve(mw(req, res, () => {
+      nexted = true;
+      ctx = viewerContext.get();
+      enter = AsyncResource.bind((fn) => fn());
+    }))
+      .then(() => setImmediate(() => resolve({ nexted, req, res, ctx, enter: (fn) => enter(fn) })));
   });
 }
 
@@ -165,19 +195,39 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     // answers 403 next — requireRole on an admin-only route, requireTabWrite,
     // or the controller's own scope check — becomes the proposal.
     proposals.length = 0;
-    const { nexted, req, res } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
+    const { nexted, req, res, ctx, enter } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
     ok(nexted, 'POST /api/suppliers (עם סניפים בניהול) — ממשיך למסלול');
     eq(req.user.role, 'branch_manager', 'ובתפקיד branch_manager לבקשה הזו בלבד');
     eq(req.viewerFallback, true, 'הבקשה מסומנת viewerFallback');
+    // ...and the rest of the request runs inside a viewer-write context, which
+    // is what lets utils/viewerWriteGuard refuse a write nobody gated.
+    ok(!!ctx, 'ההמשך רץ בתוך הקשר כתיבה של צופה');
+    eq(ctx?.claimed, false, 'שעדיין לא נתבע ע"י שום שער');
+    eq(ctx?.proposed, false, 'ושטרם הוגשה בו הצעה');
+    ok(ctx?.req === req && ctx?.res === res, 'וההקשר נושא את הבקשה והתשובה עצמן');
+    eq(viewerContext.get(), null, 'ומחוץ ל-next אין הקשר כלל');
     eq(proposals.length, 0, 'עדיין לא נשמרה הצעה');
 
-    res.status(403).json({ error: 'לא הסניף שלך' });
+    // Inside the context, the way the controller's own 403 really arrives.
+    enter(() => res.status(403).json({ error: 'לא הסניף שלך' }));
     await new Promise(r => setImmediate(r));
     eq(res.statusCode, 202, '403 מהבקר הפך ל-202');
     eq(res.body?.proposed, true, 'עם proposed: true');
     eq(proposals.length, 1, 'ואז נשמרה ההצעה');
     eq(req.user.role, 'admin_viewer', 'התפקיד חזר ל-admin_viewer לפני התשובה');
     eq(req.viewerFallback, undefined, 'וסימון ה-fallback הוסר');
+
+    // The conversion must ALSO mark the context. Without it the request holds
+    // two contradictory truths — "already proposed" for the response, "not yet"
+    // for the write guard — and the next mongoose write in the same request
+    // would file a SECOND proposal, while silenced() would never engage and the
+    // controller's reply on top of the 202 would throw ERR_HTTP_HEADERS_SENT.
+    eq(ctx?.proposed, true, 'וההקשר סומן proposed — כך שכתיבה נוספת לא תגיש הצעה שנייה');
+    enter(() => res.status(403).json({ error: 'הבקר מנסה לענות שוב' }));
+    await new Promise(r => setImmediate(r));
+    eq(proposals.length, 1, 'תשובה נוספת של הבקר אינה מגישה הצעה שנייה');
+    eq(res.body?.proposed, true, 'והתשובה שיצאה נשארה ה-202 של ההצעה');
+    eq(res.statusCode, 202, 'והסטטוס נשאר 202');
   }
   {
     // A 200 under the fallback passes through untouched, and still undoes it.
@@ -222,12 +272,86 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     ok(sp.nexted, 'POST /api/auth/set-password ממשיך כרגיל');
   }
 
+  console.log('\nauthMiddleware פעמיים על אותה בקשה — מוכרע פעם אחת');
+  {
+    // routes/index.js mounts authMiddleware globally, and a dozen routers mount
+    // it AGAIN themselves — employmentContracts.routes.js:31, payroll,
+    // payrollMonth, employees. The second run re-decodes the token into a fresh
+    // req.user whose role says admin_viewer again, so decideViewerWrite used to
+    // run rule 3 a second time: a SECOND context, a SECOND 403→202 wrapper, and
+    // req.emit still bound to the FIRST (bindRequestEvents is one-shot per
+    // request). Everything resumed from a `req` event — multer's next(), the
+    // controller after it, its writes — therefore ran in the stale, unclaimed
+    // first context while the gate's claim had gone into the second, and a
+    // managed viewer uploading a contract for HER OWN branch was refused
+    // 403 VIEWER_NO_UPLOAD by her own guard.
+    proposals.length = 0;
+    const req = fakeReq({
+      who: 'viewer', method: 'POST', url: '/api/employment-contracts/upload',
+      contentType: 'multipart/form-data; boundary=xyz',
+    });
+    const res = fakeRes();
+
+    // Count the wrappers: convert403ToProposal ASSIGNS res.json, so a setter
+    // sees one write per installation.
+    let jsonWraps = 0;
+    let jsonImpl = res.json;
+    Object.defineProperty(res, 'json', {
+      configurable: true,
+      get: () => jsonImpl,
+      set: (fn) => { jsonWraps++; jsonImpl = fn; },
+    });
+
+    let ctx1 = null;
+    let ctx2 = null;
+    let nexted2 = false;
+    let enter2 = (fn) => fn();
+    authMiddleware(req, res, () => {
+      ctx1 = viewerContext.get();
+      // ...and now the router mounts it again, inside the first one's context.
+      authMiddleware(req, res, () => {
+        nexted2 = true;
+        ctx2 = viewerContext.get();
+        enter2 = AsyncResource.bind((fn) => fn());
+      });
+    });
+
+    ok(nexted2, 'המעבר השני ממשיך למסלול');
+    ok(!!ctx1 && ctx2 === ctx1, 'ושני המעברים רואים את אותו אובייקט הקשר בדיוק',
+      `ctx1=${!!ctx1} ctx2=${!!ctx2} same=${ctx2 === ctx1}`);
+    eq(jsonWraps, 1, 'ו-res.json נעטף פעם אחת בלבד');
+    eq(req.user.role, 'branch_manager', 'התפקיד עדיין branch_manager אחרי המעבר השני');
+    eq(req.user.actual_role, 'admin_viewer', 'והתפקיד האמיתי נשמר גם על ה-req.user החדש');
+    eq(req.viewerFallback, true, 'והבקשה עדיין מסומנת viewerFallback');
+    eq(proposals.length, 0, 'ולא נוצרה הצעה');
+    eq(res.headersSent, false, 'ולא נשלחה תשובה');
+
+    // The claim a gate makes AFTER the second pass — requireRole at
+    // employmentContracts.routes.js:33 — must be the claim that multer's
+    // listeners see when the body finishes arriving.
+    enter2(() => viewerContext.claim('requireRole:branch_manager'));
+    eq(ctx1?.claimed, true, 'תביעה שנעשתה במעבר השני נרשמת בהקשר היחיד');
+
+    let seen = null;
+    req.on('end', () => { seen = viewerContext.get(); });
+    req.emit('end');
+    ok(seen === ctx1, 'ומאזין ל-req.emit רץ באותו הקשר', `seen=${!!seen}`);
+    eq(seen?.claimed, true, 'ורואה את התביעה — כך שההעלאה שלה נכתבת ולא נדחית');
+    eq(seen?.claim_reason, 'requireRole:branch_manager', 'עם הסיבה שנרשמה');
+  }
+
   console.log('\nשבעת התפקידים האחרים — כתיבה ללא שינוי');
   for (const who of ['admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook']) {
     proposals.length = 0;
-    const { nexted, req } = await run(authMiddleware, { who, method: 'POST', url: '/api/branches' });
+    const { nexted, req, ctx } = await run(authMiddleware, { who, method: 'POST', url: '/api/branches' });
     ok(nexted && req.user.role === CLAIMS[who].role && proposals.length === 0,
       `${CLAIMS[who].role} — POST ממשיך, התפקיד כשהיה, ללא הצעה`);
+    // No context means utils/viewerWriteGuard is a no-op for them: the whole
+    // fail-safe is invisible to the other seven roles.
+    ok(ctx === null, `${CLAIMS[who].role} — רץ ללא הקשר כתיבה, כלומר ללא שומר`);
+    // ...and their request object is not touched either: emit is the original.
+    ok(req.emit === EventEmitter.prototype.emit && req.$viewerEmitBound === undefined,
+      `${CLAIMS[who].role} — req.emit לא נעטף`);
   }
 
   console.log('\nתפקידים אחרים — ללא שינוי');

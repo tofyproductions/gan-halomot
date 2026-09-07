@@ -149,6 +149,25 @@ function isMultipart(req) {
   return ct.toLowerCase().startsWith('multipart/');
 }
 
+/**
+ * The one refusal a viewer's write can still get: an upload.
+ *
+ * A ProposedChange stores the request body as JSON and the replay puts that
+ * JSON back on the wire — a multipart body does not survive the round trip
+ * (busboy is handed `{"field":"value"}` and fails), so a file cannot be queued
+ * for approval and saying so is better than filing a proposal that can never
+ * be applied.
+ *
+ * It lives HERE rather than in middleware/auth.js because three places answer
+ * it and they must answer it identically: decideViewerWrite rule 4, the
+ * 403→202 wrapper, and utils/viewerWriteGuard when an ungated multipart route
+ * reaches mongoose.
+ */
+const NO_UPLOAD = {
+  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
+  code: 'VIEWER_NO_UPLOAD',
+};
+
 function approverFor(url) {
   const path = pathOnly(url);
   return ACCOUNTANT_PREFIXES.some(p => startsWithPrefix(path, p)) ? 'accountant' : 'system_admin';
@@ -190,5 +209,5 @@ function viewerMessage(approver) {
 module.exports = {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
   screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS, pathOnly,
-  startsWithPrefix,
+  startsWithPrefix, NO_UPLOAD,
 };

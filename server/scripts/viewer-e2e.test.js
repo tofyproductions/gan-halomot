@@ -203,7 +203,10 @@ async function main() {
   /* ---------------------------------------------------------------- *
    * Seed
    * ---------------------------------------------------------------- */
-  const { User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment } = require('../src/models');
+  const {
+    User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment,
+    Registration, Document, EmploymentContract,
+  } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const branchA = await Branch.create({ name: 'תל אביב', address: 'הרצל 1' });
@@ -791,6 +794,191 @@ async function main() {
     });
     eq(rown.status, 200, '12e ובסניף שבניהולה — 200, כמו כל מנהלת סניף');
     eq(rown.body?.pending, true, '12e והעדכון ממתין לאישור הנה"ח');
+  }
+
+  /* ================================================================ *
+   * 13. מסלולים ללא שער — גם לצופה שמנהלת סניפים
+   * ================================================================ */
+  head('בדיקה 13 — שומר הכתיבה במפלס מסד הנתונים');
+  {
+    // Check 12 covered the viewer with NO managed branches: she is answered by
+    // decideViewerWrite rule 4 before the route ever runs. THIS is the hole
+    // that was left — a viewer WITH managed branches continues the request as
+    // a branch_manager (rule 3), and on a route carrying no requireRole, no
+    // requireTab and no requireBranchScope nothing ever answers 403, so the
+    // 403→202 wrapper had nothing to convert and she wrote for real.
+    //
+    // src/utils/viewerWriteGuard now refuses the write at the mongoose layer:
+    // no gate claimed the request, so the proposal is filed and the operation
+    // rejected before the driver is called.
+    const nameBefore = (await Branch.findById(branchB._id).select('name').lean()).name;
+    const r = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer,
+      body: { name: 'שם ששינתה צופה עם סניפים' },
+    });
+    eq(r.status, 202, '13a PUT /api/branches/:id ע"י צופה עם סניפים בניהול → 202');
+    eq(r.body?.proposed, true, '13a התשובה מסמנת proposed: true');
+    const renameId = r.body?.id;
+    const prop = renameId ? await ProposedChange.findById(renameId).lean() : null;
+    eq(prop?.method, 'PUT', '13a נשמרה ProposedChange עם השיטה');
+    eq(prop?.path, `/api/branches/${branchB._id}`, '13a ועם הנתיב');
+    eq(prop?.requested_role, 'admin_viewer', '13a והתפקיד הרשום הוא admin_viewer, לא ה-fallback');
+    eq(prop?.status, 'pending', '13a ההצעה ממתינה');
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
+      '13a שם הסניף לא השתנה במסד');
+
+    const suppliersBefore = await Supplier.countDocuments({});
+    const rs = await request({
+      method: 'POST', path: '/api/suppliers', token: tokens.viewer,
+      body: { name: 'ספק שצופה עם סניפים ניסתה להוסיף' },
+    });
+    eq(rs.status, 202, '13b POST /api/suppliers ע"י אותה צופה → 202');
+    eq(rs.body?.proposed, true, '13b התשובה מסמנת proposed: true');
+    eq(await Supplier.countDocuments({}), suppliersBefore, '13b לא נוצר ספק');
+
+    // A CLAIMED write still lands. Two shapes of claim:
+    //   requireRole(...'branch_manager'...) — /api/payroll/manual-punches
+    //   requireBranchScope                  — /api/payroll-month/adjustments
+    const note13 = 'E2E-guard-claimed-A';
+    const rp = await request({
+      method: 'POST', path: '/api/payroll/manual-punches', token: tokens.viewer,
+      body: { employee_id: String(empA1._id), date: pastDate(13), in_time: '08:00', out_time: '16:00', note: note13 },
+    });
+    ok(rp.status === 200 || rp.status === 201, '13c החתמה בסניף שבניהולה (מסלול עם שער) עדיין נכתבת',
+      `status=${rp.status} ${rp.text}`);
+    const made13 = await punchesByNote(note13);
+    eq(made13.length, 2, '13c נוצרו שתי החתמות');
+    eq([...new Set(made13.map(p => p.approval_status))], ['pending_accountant'],
+      '13c ובמצב pending_accountant, כמו לכל מנהלת סניף');
+
+    const adjBefore = await SalaryAdjustment.countDocuments({});
+    const radj = await request({
+      method: 'POST', path: '/api/payroll-month/adjustments', token: tokens.viewer,
+      body: {
+        employee_id: String(empA2._id), month, type: 'money_add',
+        amount: 70, reason: 'E2E-guard-claimed-adjustment',
+      },
+    });
+    eq(radj.status, 200, '13d עדכון שכר בסניף שבניהולה (requireBranchScope) → 200');
+    eq(radj.body?.pending, true, '13d והעדכון ממתין לאישור הנה"ח');
+    eq(await SalaryAdjustment.countDocuments({}), adjBefore + 1, '13d ונוצר במסד');
+
+    // ...and the queued rename really happens once the admin approves it. The
+    // replay runs as the approver, with no viewer context at all, so the guard
+    // must be entirely absent from it.
+    const dec = await request({
+      method: 'POST', path: `/api/proposed-changes/${renameId}/decide`,
+      token: tokens.admin, body: { decision: 'approve' },
+    });
+    eq(dec.status, 200, '13e מנהל המערכת מאשר את שינוי השם → 200');
+    const applyStatus = dec.body?.proposal?.apply_status;
+    ok(applyStatus >= 200 && applyStatus < 300, '13e ההפעלה החוזרת החזירה 2xx',
+      `apply_status=${applyStatus} apply_error=${dec.body?.proposal?.apply_error}`);
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, 'שם ששינתה צופה עם סניפים',
+      '13e ורק עכשיו השם השתנה במסד');
+    await Branch.updateOne({ _id: branchB._id }, { $set: { name: nameBefore } });
+
+    // Check 12's viewer — the one with no managed branches — is decided before
+    // the route runs and must be untouched by any of this.
+    const r12 = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer0,
+      body: { name: 'שוב ניסיון של צופה ללא סניפים' },
+    });
+    eq(r12.status, 202, '13f צופה ללא סניפים בניהול — עדיין 202 (התנהגות בדיקה 12)');
+    eq(r12.body?.proposed, true, '13f עם proposed: true');
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
+      '13f והשם לא השתנה');
+
+    // AN UNGATED MULTIPART ROUTE. POST /api/documents/upload carries no gate
+    // either, so the fallback manager reaches multer, multer parses the file,
+    // and Document.create arrives at the guard. Filing THAT as a proposal would
+    // store a JSON body under content_type: multipart/… and the replay would
+    // hand busboy an object — a proposal that can never be applied and a file
+    // quietly lost. So the guard refuses it the same way rule 4 refuses an
+    // upload from a viewer with no branches: 403 VIEWER_NO_UPLOAD, no proposal.
+    const registration = await Registration.create({
+      unique_id: 'E2E-REG-13H', child_name: 'ילד לבדיקה', parent_name: 'הורה לבדיקה',
+      branch_id: branchB._id, monthly_fee: 1000,
+      start_date: new Date('2026-09-01'), end_date: new Date('2027-08-31'),
+    });
+    const docsBefore = await Document.countDocuments({});
+    const propsBefore = await ProposedChange.countDocuments({});
+    const boundary13 = `----ganE2E13${Date.now()}`;
+    const upBody = Buffer.concat([
+      Buffer.from(`--${boundary13}\r\nContent-Disposition: form-data; name="registration_id"\r\n\r\n${registration._id}\r\n`),
+      Buffer.from(`--${boundary13}\r\nContent-Disposition: form-data; name="file"; filename="a.png"\r\nContent-Type: image/png\r\n\r\n`),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from(`\r\n--${boundary13}--\r\n`),
+    ]);
+    const up13 = await request({
+      method: 'POST', path: '/api/documents/upload', token: tokens.viewer,
+      body: upBody, headers: { 'Content-Type': `multipart/form-data; boundary=${boundary13}` },
+    });
+    eq(up13.status, 403, '13h העלאת קובץ במסלול ללא שער ע"י צופה עם סניפים → 403');
+    eq(up13.body?.code, 'VIEWER_NO_UPLOAD', '13h עם הקוד VIEWER_NO_UPLOAD');
+    eq(await Document.countDocuments({}), docsBefore, '13h ולא נוצר מסמך');
+    eq(await ProposedChange.countDocuments({}), propsBefore,
+      '13h ולא נשמרה הצעה מתה שאי אפשר להפעיל');
+
+    // A GATED MULTIPART ROUTE, AND THE DOUBLE-AUTH TRAP UNDER IT.
+    //
+    // POST /api/employment-contracts/upload puts its gate BEFORE multer
+    // (requireRole(..., 'branch_manager') at employmentContracts.routes.js:33),
+    // so the claim is made while the context is still alive and an upload for
+    // a branch she manages must LAND — this is not the ungated 13h case.
+    //
+    // It nearly did not. That router mounts authMiddleware AGAIN (:31) below
+    // the global one, so decideViewerWrite ran twice, built a second context
+    // and a second wrapper, and left req.emit bound to the FIRST — multer
+    // resumed the request inside a stale, unclaimed context and the viewer's
+    // own guard answered 403 VIEWER_NO_UPLOAD for her own branch. The decision
+    // is now made once, and the emit binding follows the current state.
+    const pdf = Buffer.from(
+      '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+      + '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+      + '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\n'
+      + 'trailer<</Root 1 0 R>>\n%%EOF\n',
+      'latin1',
+    );
+    const contractUpload = (employeeId) => {
+      const b = `----ganE2E13i${Date.now()}${Math.random().toString(16).slice(2)}`;
+      const payload = Buffer.concat([
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="employee_id"\r\n\r\n${employeeId}\r\n`),
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="contract.pdf"\r\nContent-Type: application/pdf\r\n\r\n`),
+        pdf,
+        Buffer.from(`\r\n--${b}--\r\n`),
+      ]);
+      return request({
+        method: 'POST', path: '/api/employment-contracts/upload', token: tokens.viewer,
+        body: payload, headers: { 'Content-Type': `multipart/form-data; boundary=${b}` },
+      });
+    };
+
+    const ownUp = await contractUpload(empA1._id);
+    ok(ownUp.status >= 200 && ownUp.status < 300,
+      '13i העלאת חוזה לעובדת בסניף שבניהולה (מסלול עם שער) → 2xx',
+      `status=${ownUp.status} ${ownUp.text}`);
+    eq(await EmploymentContract.countDocuments({ employee_id: empA1._id }), 1,
+      '13i ונשמר חוזה במסד');
+
+    const otherBefore = await EmploymentContract.countDocuments({ employee_id: empB1._id });
+    const otherUp = await contractUpload(empB1._id);
+    eq(otherUp.status, 403, '13j אותה העלאה לעובדת בסניף אחר → 403');
+    eq(otherUp.body?.code, 'VIEWER_NO_UPLOAD', '13j עם הקוד VIEWER_NO_UPLOAD');
+    eq(await EmploymentContract.countDocuments({ employee_id: empB1._id }), otherBefore,
+      '13j ולא נשמר חוזה');
+
+    // Every other role writes an ungated route exactly as before.
+    const adminRename = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.admin,
+      body: { name: nameBefore, address: 'ויצמן 2' },
+    });
+    eq(adminRename.status, 200, '13g מנהל המערכת כותב במסלול ללא שער → 200 (ללא שינוי)');
+    const mgrRename = await request({
+      method: 'PUT', path: `/api/branches/${branchA._id}`, token: tokens.manager,
+      body: { address: 'הרצל 1' },
+    });
+    ok(mgrRename.status < 400, '13g ומנהלת סניף כותבת שם כשהיה', `status=${mgrRename.status}`);
   }
 
   // Referenced so lint/readers see the seeded users are deliberate.
