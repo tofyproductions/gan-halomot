@@ -3517,6 +3517,9 @@ module.exports = {
   salarySummary,
   createManualPunches,
   createPunchRequest,
+  // Exported for scripts/punch-out-of-scope.test.js: the four punch mutations
+  // all hang their refusal on this one predicate, so it is tested on its own.
+  punchOutOfScope,
   listPendingPunches,
   listPunchesForDay,
   approvePunch,
