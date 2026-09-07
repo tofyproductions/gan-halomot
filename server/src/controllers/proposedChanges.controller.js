@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { ProposedChange, User } = require('../models');
 const { applyProposal } = require('../services/proposedChanges.service');
 const { ADMIN_VIEWER } = require('../constants/roles');
@@ -13,6 +14,10 @@ const NOT_FOUND = 'ההצעה לא נמצאה';
  * answered 404. The claim's own null still means 409.
  */
 async function exists(id) {
+  // A malformed id is not a server fault: findById would throw a CastError
+  // that the error handler turns into 500, on a URL a person mistyped or a
+  // stale link carried. There is no such proposal — say so.
+  if (!mongoose.isValidObjectId(id)) return false;
   return !!await ProposedChange.findById(id).select('_id').lean();
 }
 
@@ -74,6 +79,9 @@ async function list(req, res, next) {
 async function count(req, res, next) {
   try {
     const filter = { status: 'pending' };
+    // Load-bearing, not dead: the read swap lets a viewer reach this endpoint
+    // as `system_admin`, so without the real role she would get the badge for
+    // the whole organisation's backlog.
     if (realRole(req.user) === ADMIN_VIEWER) filter.requested_by = req.user.id;
     const pending_count = await ProposedChange.countDocuments(filter);
     res.json({ pending_count });
@@ -96,6 +104,8 @@ async function runApply(doc, req) {
   }
   const result = await applyProposal(doc, { ...approver, id: String(approver._id) }, {
     tenantSlug: req.tenant ? req.tenant.slug : undefined,
+    // The approver is on this request; the stored host came off the viewer's.
+    host: req.headers?.host,
   });
   const outcome = {
     status: result.ok ? 'approved' : 'failed',

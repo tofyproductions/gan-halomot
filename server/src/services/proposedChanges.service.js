@@ -11,15 +11,31 @@ const {
 } = require('../utils/viewer');
 
 /**
+ * Collapse a run of slashes and drop a trailing one — what Express does to a
+ * path before matching, MINUS the case folding.
+ */
+function collapseSlashes(path) {
+  const p = String(path || '').replace(/\/{2,}/g, '/');
+  return p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p;
+}
+
+/**
  * The path exactly as the router that receives it will read it.
  * Stored (and replayed) canonical so the record cannot say one thing while
  * the replay does another — `/api/employees/../admin/users` is /api/admin/users,
- * and `/api//ADMIN/users/` is the same route as `/api/admin/users`.
+ * and `/api//employees/e9/` is the same route as `/api/employees/e9`.
+ *
+ * Case is NOT folded here. Express matches case-insensitively, so folding
+ * changed no route — but the stored row is also what the approver reads and
+ * what the replay puts on the wire, and a lowercased `/api/TMT/Approve` is a
+ * record of a request nobody made. Every CHECK still folds (pathOnly, in
+ * applyProposal below and in utils/viewer.js), so `/api/ADMIN/x` is refused
+ * exactly as `/api/admin/x` is.
  */
 function normalizePath(url) {
   try {
     const u = new URL(String(url || ''), 'http://x');
-    return pathOnly(u.pathname) + u.search;
+    return collapseSlashes(u.pathname) + u.search;
   } catch {
     return String(url || '');
   }
@@ -150,6 +166,7 @@ function defaultTransport(url, init = {}) {
  */
 async function applyProposal(doc, approver, {
   transport = defaultTransport, baseUrl = `http://127.0.0.1:${env.PORT}`, tenantSlug = undefined,
+  host = undefined,
 } = {}) {
   let target;
   let base;
@@ -175,7 +192,14 @@ async function applyProposal(doc, approver, {
     Authorization: `Bearer ${mintApproverToken(approver, tenantSlug)}`,
     'X-Proposed-Change': String(doc._id),
   };
-  if (doc.host) headers.Host = doc.host;
+  // Which customer this replay lands on is decided by the Host header, and
+  // `doc.host` came off the VIEWER's request — a header she can set to any
+  // value she likes. The approver is here, pressing the button, on a request
+  // of her own: her Host is the one that says where this belongs. The stored
+  // one is the fallback for a replay with no browser attached (a job, a
+  // retry), where there is nothing better to use.
+  const replayHost = host || doc.host;
+  if (replayHost) headers.Host = replayHost;
   const init = { method: doc.method, headers };
   if (doc.body !== null && doc.body !== undefined && !['GET', 'HEAD'].includes(doc.method)) {
     headers['Content-Type'] = doc.content_type || 'application/json';

@@ -85,6 +85,27 @@ function recorder(seen, reply) {
     server.close();
   }
 
+  console.log('\nהמארח של המאשרת גובר על זה שנשמר');
+  {
+    // `doc.host` came off the VIEWER's request, and a header is whatever the
+    // client says it is. When the approver is on a request of her own, her
+    // Host decides which customer the replay lands on; the stored one is the
+    // fallback for a replay with no browser attached.
+    const seen = [];
+    const server = await listen(recorder(seen, { status: 200, text: '{"ok":true}' }));
+    const { port } = server.address();
+    const doc = {
+      _id: 'pc1b', method: 'PATCH', path: '/api/employees/e9',
+      host: 'attacker.example', body: { full_name: 'דנה' },
+      content_type: 'application/json',
+    };
+    await applyProposal(doc, approver, {
+      baseUrl: `http://127.0.0.1:${port}`, host: 'gan-halomot.onrender.com',
+    });
+    eq(seen[0].host, 'gan-halomot.onrender.com', 'המארח שנשלח הוא של המאשרת');
+    server.close();
+  }
+
   console.log('\nתשובת שגיאה מהשרת');
   {
     const seen = [];
