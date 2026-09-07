@@ -3405,8 +3405,16 @@ export default function PayslipAudit() {
       const endpoint = auditMode === 'system'
         ? '/payroll/payslip-audit/run-system'
         : '/payroll/payslip-audit/run-multi';
+      // The run is the heaviest request in the app: it parses every page of a
+      // whole-organisation payslip PDF and compares each one against the month.
+      // A 26-page / 91-payslip August run takes well over the axios default of
+      // 30s, and the client aborting does NOT stop the server — it finishes and
+      // saves the audit anyway, so every "failed" retry silently added another
+      // identical row to the history. Match the server's own 5-minute request
+      // timeout instead, like every other heavy call in this file already does.
       const res = await api.post(endpoint, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000,
       });
       setAudit(res.data);
       setExpanded(null);
