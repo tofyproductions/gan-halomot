@@ -97,6 +97,96 @@ function optionalAuth(req, res, next) {
   next();
 }
 
+const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
+const NO_UPLOAD = {
+  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
+  code: 'VIEWER_NO_UPLOAD',
+};
+
+/** Queue this write for approval. Lazy require: the service loads the models. */
+function proposeInstead(req, res) {
+  const { propose } = require('../services/proposedChanges.service');
+  return propose(req, res).catch((err) => {
+    console.error('[viewer] propose failed', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'שמירת השינוי לאישור נכשלה', detail: err.message });
+  });
+}
+
+/**
+ * Under the manager fallback (below), a controller that answers 403 is saying
+ * "not one of your branches". For a viewer that is not a refusal — it is the
+ * case that goes to approval. Swap res.json once; anything but a 403 passes
+ * through untouched, and an upload stays refused because a file cannot be
+ * stored for later.
+ *
+ * Whatever the outcome, the wrapper uninstalls itself and undoes the fallback
+ * (role back to admin_viewer, viewerFallback cleared) before the response
+ * goes out — a controller that answers 200 under the fallback must not leave
+ * the rest of the request thinking it is still a branch manager.
+ */
+function convert403ToProposal(req, res) {
+  const originalJson = res.json.bind(res);
+  res.json = function (body) {
+    res.json = originalJson;
+    req.user.role = ADMIN_VIEWER;
+    delete req.viewerFallback;
+    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
+    if (isMultipart(req)) return originalJson(NO_UPLOAD);
+    res.statusCode = 200;
+    proposeInstead(req, res);
+    return res;
+  };
+}
+
+/**
+ * The manager-fallback write logic, shared by requireRole and a tab granted
+ * by override in requireTab: as a branch manager when `roles` allows managers
+ * and the viewer has managed branches (the controller's own scope check then
+ * decides, and its 403 becomes a proposal); refused for uploads; queued for
+ * approval otherwise.
+ */
+function viewerWriteGate(req, res, next, roles) {
+  const managed = req.user.managed_branch_ids || [];
+  if (roles.includes('branch_manager') && managed.length > 0) {
+    req.user.role = 'branch_manager';
+    req.viewerFallback = true;
+    convert403ToProposal(req, res);
+    return next();
+  }
+  if (isMultipart(req)) return res.status(403).json(NO_UPLOAD);
+  return proposeInstead(req, res);
+}
+
+/**
+ * The viewer role ("מנהל מערכת - לצפייה בלבד") is decided here and only here
+ * — requireRole and requireTab below both call this instead of knowing the
+ * rule themselves:
+ *   reads  — wherever a system admin may read, except /api/admin;
+ *   writes — see viewerWriteGate; refused for /api/admin and for uploads.
+ * Every other role passes through untouched: this returns false and the
+ * caller runs its own logic.
+ *
+ * Returns true when it handled the request (responded, or called next()
+ * itself) — the caller must not do anything further in that case.
+ */
+function viewerGate(req, res, next, roles) {
+  if (!isViewer(req.user)) return false;
+  if (isBlockedForViewer(req.originalUrl)) {
+    res.status(403).json(DENIED);
+    return true;
+  }
+  if (isRead(req)) {
+    if (roles.includes('system_admin') || roles.includes(ADMIN_VIEWER)) {
+      next();
+    } else {
+      res.status(403).json(DENIED);
+    }
+    return true;
+  }
+  viewerWriteGate(req, res, next, roles);
+  return true;
+}
+
 /**
  * Screen-based access control, matching what the menu actually grants.
  *
@@ -111,6 +201,15 @@ function optionalAuth(req, res, next) {
  * override, then the role defaults passed in here. All of it rides on the JWT
  * already, so no extra lookup.
  *
+ * The viewer rides the same precedence: a per-user or role-wide *removal*
+ * still 403s her, same as anyone else. A per-user or role-wide *grant* opens
+ * the tab to her too — reads pass outright, writes still go through
+ * viewerWriteGate with `defaultRoles` as the allowed-roles list, because a
+ * granted screen is not the same permission as acting for a branch that
+ * is not hers. When no override decides either way, viewerGate applies the
+ * same reads/writes rule it applies for requireRole, with `defaultRoles` as
+ * the role list.
+ *
  * Usage: requireTab('clicktac', 'system_admin', 'accountant')
  */
 function requireTab(tabId, ...defaultRoles) {
@@ -119,12 +218,19 @@ function requireTab(tabId, ...defaultRoles) {
     const u = req.user;
     const has = (list) => Array.isArray(list) && list.includes(tabId);
 
-    if (has(u.tab_overrides_remove)) return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
-    if (has(u.tab_overrides_add)) return next();
-    if (has(u.role_tab_remove)) return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
-    if (has(u.role_tab_add)) return next();
+    const tabGranted = () => {
+      if (!isViewer(u)) return next();
+      if (isRead(req)) return next();
+      return viewerWriteGate(req, res, next, defaultRoles);
+    };
+
+    if (has(u.tab_overrides_remove)) return res.status(403).json(DENIED);
+    if (has(u.tab_overrides_add)) return tabGranted();
+    if (has(u.role_tab_remove)) return res.status(403).json(DENIED);
+    if (has(u.role_tab_add)) return tabGranted();
     if (defaultRoles.includes(u.role)) return next();
-    return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
+    if (viewerGate(req, res, next, defaultRoles)) return;
+    return res.status(403).json(DENIED);
   };
 }
 
@@ -139,6 +245,10 @@ function requireTab(tabId, ...defaultRoles) {
  * without one of those roles is read-only.
  *
  * Both must pass: the tab (so revoking it revokes everything) and the role.
+ * A viewer never reaches this check on a write: requireTab's own viewer path
+ * either proposes the change or falls back to branch_manager before this
+ * callback runs, so the READ_ONLY response below is for the seven ordinary
+ * roles only.
  *
  * Usage: requireTabWrite('clicktac', 'system_admin', 'accountant')
  */
@@ -155,51 +265,11 @@ function requireTabWrite(tabId, ...roles) {
   });
 }
 
-const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
-const NO_UPLOAD = {
-  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
-  code: 'VIEWER_NO_UPLOAD',
-};
-
-/** Queue this write for approval. Lazy require: the service loads the models. */
-function proposeInstead(req, res) {
-  const { propose } = require('../services/proposedChanges.service');
-  return propose(req, res).catch((err) => {
-    if (!res.headersSent) res.status(500).json({ error: 'שמירת השינוי לאישור נכשלה', detail: err.message });
-  });
-}
-
-/**
- * Under the manager fallback (below), a controller that answers 403 is saying
- * "not one of your branches". For a viewer that is not a refusal — it is the
- * case that goes to approval. Swap res.json once; anything but a 403 passes
- * through untouched, and an upload stays refused because a file cannot be
- * stored for later.
- */
-function convert403ToProposal(req, res) {
-  const originalJson = res.json.bind(res);
-  res.json = function (body) {
-    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
-    res.json = originalJson;
-    req.user.role = ADMIN_VIEWER;
-    delete req.viewerFallback;
-    if (isMultipart(req)) return originalJson(NO_UPLOAD);
-    res.statusCode = 200;
-    proposeInstead(req, res);
-    return res;
-  };
-}
-
 /**
  * Role-based access control middleware factory
  * Usage: requireRole('system_admin', 'branch_manager')
  *
- * The viewer role ("מנהל מערכת - לצפייה בלבד") is decided here and only here:
- *   reads  — wherever a system admin may read, except /api/admin;
- *   writes — as a branch manager when the route allows managers and the
- *            viewer has managed branches (the controller's own scope check
- *            then decides, and its 403 becomes a proposal); refused for
- *            /api/admin and for uploads; queued for approval otherwise.
+ * The viewer decision itself lives in viewerGate, shared with requireTab.
  * Every other role: the plain list check, as before.
  */
 function requireRole(...roles) {
@@ -207,24 +277,9 @@ function requireRole(...roles) {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
     }
-    if (isViewer(req.user)) {
-      if (isBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
-      if (isRead(req)) {
-        if (roles.includes('system_admin') || roles.includes(ADMIN_VIEWER)) return next();
-        return res.status(403).json(DENIED);
-      }
-      const managed = req.user.managed_branch_ids || [];
-      if (roles.includes('branch_manager') && managed.length > 0) {
-        req.user.role = 'branch_manager';
-        req.viewerFallback = true;
-        convert403ToProposal(req, res);
-        return next();
-      }
-      if (isMultipart(req)) return res.status(403).json(NO_UPLOAD);
-      return proposeInstead(req, res);
-    }
+    if (viewerGate(req, res, next, roles)) return;
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
+      return res.status(403).json(DENIED);
     }
     next();
   };

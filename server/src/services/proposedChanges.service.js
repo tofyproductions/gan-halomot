@@ -44,12 +44,14 @@ async function propose(req, res, { models } = {}) {
     approver,
     status: 'pending',
   });
-  res.status(202).json({
-    proposed: true,
-    id: String(doc._id),
-    approver,
-    message: viewerMessage(approver),
-  });
+  if (!res.headersSent) {
+    res.status(202).json({
+      proposed: true,
+      id: String(doc._id),
+      approver,
+      message: viewerMessage(approver),
+    });
+  }
   return doc;
 }
 

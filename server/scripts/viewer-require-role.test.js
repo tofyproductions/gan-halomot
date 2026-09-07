@@ -28,7 +28,7 @@ Module._load = function (request, parent, ...rest) {
   return realLoad.call(this, request, parent, ...rest);
 };
 
-const { requireRole, requireBranchScope } = require('../src/middleware/auth');
+const { requireRole, requireBranchScope, requireTab, requireTabWrite } = require('../src/middleware/auth');
 
 let failures = 0;
 const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`); if (!cond) failures++; };
@@ -149,6 +149,70 @@ function run(gate, req) {
   {
     const r = await run(requireBranchScope, mkReq('GET', '/api/payroll-month/my-updates', viewer([])));
     ok(r.nexted, 'צופה עובר, גם בלי סניפים');
+  }
+
+  console.log('\n200 מהבקר תחת הגיבוי — התפקיד חוזר להיות צופה');
+  {
+    const r = await run(requireRole('system_admin', 'accountant', 'branch_manager'), mkReq('PATCH', '/api/employees/e1', viewer(['b1'])));
+    ok(r.nexted, 'השער העביר הלאה');
+    r.res.status(200).json({ ok: true });
+    await new Promise(res => setImmediate(res));
+    eq(r.res.body, { ok: true }, 'הגוף עובר כמו שהוא');
+    eq(r.req.user.role, 'admin_viewer', 'התפקיד שוחזר לצופה אחרי הצלחה, לא רק אחרי 403');
+    ok(r.req.viewerFallback === undefined, 'viewerFallback נוקה אחרי הצלחה');
+  }
+
+  console.log('\nrequireTab / requireTabWrite — הצופה');
+  {
+    const r = await run(requireTab('photos', 'system_admin', 'branch_manager'), mkReq('GET', '/api/photos', viewer()));
+    ok(r.nexted, "צופה קורא ב-requireTab('photos', 'system_admin', 'branch_manager') → next");
+  }
+  {
+    const r = await run(requireTab('photos', 'system_admin', 'branch_manager'), mkReq('POST', '/api/photos', viewer(['b1'])));
+    ok(r.nexted && r.req.user.role === 'branch_manager' && r.req.viewerFallback === true,
+      'צופה כותב עם סניפים מנוהלים → next כמנהל סניף עם viewerFallback');
+  }
+  proposals.length = 0;
+  {
+    const r = await run(requireTab('collections', 'system_admin', 'accountant'), mkReq('POST', '/api/collections', viewer(['b1'])));
+    ok(!r.nexted && r.res.statusCode === 202 && r.res.body.proposed === true,
+      "צופה כותב ב-requireTab('collections', 'system_admin', 'accountant') → 202 הצעה");
+  }
+  {
+    const req = mkReq('GET', '/api/photos', viewer());
+    req.user.tab_overrides_remove = ['photos'];
+    const r = await run(requireTab('photos', 'system_admin', 'branch_manager'), req);
+    ok(!r.nexted && r.res.statusCode === 403, 'צופה עם tab_overrides_remove על photos → 403');
+  }
+  proposals.length = 0;
+  {
+    const req = mkReq('POST', '/api/collections', viewer([]));
+    req.user.tab_overrides_add = ['collections'];
+    const r = await run(requireTab('collections', 'accountant'), req);
+    ok(!r.nexted && r.res.statusCode === 202 && r.res.body.proposed === true,
+      "צופה עם tab_overrides_add ובלי סניפים, כותב ב-requireTab('collections', 'accountant') → 202 הצעה");
+  }
+  proposals.length = 0;
+  {
+    const r = await run(requireTabWrite('clicktac', 'system_admin', 'accountant'), mkReq('POST', '/api/tmt/import', viewer([])));
+    ok(!r.nexted && r.res.statusCode === 202 && r.res.body.proposed === true && r.res.body.code !== 'READ_ONLY',
+      "צופה כותב ב-requireTabWrite('clicktac', 'system_admin', 'accountant') → 202, לא READ_ONLY");
+  }
+
+  console.log('\nrequireTab — שבעת התפקידים הקיימים, ללא שינוי');
+  {
+    const r = await run(requireTab('supplies', 'teacher'), mkReq('GET', '/api/supplies', { role: 'teacher' }));
+    ok(r.nexted, 'גננת ברשימת המסלול → next');
+  }
+  {
+    const r = await run(requireTab('supplies', 'accountant'), mkReq('GET', '/api/supplies', { role: 'teacher' }));
+    ok(!r.nexted && r.res.statusCode === 403, 'גננת לא ברשימת המסלול → 403');
+  }
+  {
+    const req = mkReq('GET', '/api/supplies', { role: 'teacher' });
+    req.user.tab_overrides_add = ['supplies'];
+    const r = await run(requireTab('supplies', 'accountant'), req);
+    ok(r.nexted, 'גננת עם tab_overrides_add → next');
   }
 
   console.log(failures ? `\n❌ ${failures} כשלונות\n` : '\n✅ הכל עבר\n');
