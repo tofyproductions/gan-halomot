@@ -55,6 +55,7 @@ process.env.JWT_SECRET = 'viewer-auth-swap-test-secret';
 const jwt = require('jsonwebtoken');
 const env = require('../src/config/env');
 const { authMiddleware, optionalAuth, requireRole } = require('../src/middleware/auth');
+const viewerContext = require('../src/utils/viewerContext');
 
 let failures = 0;
 const ok = (cond, label, extra = '') => {
@@ -86,7 +87,11 @@ const CLAIMS = {
 };
 const tokenFor = (who) => jwt.sign(CLAIMS[who], env.JWT_SECRET, { expiresIn: '1h' });
 
-/** Run a middleware over a signed request; resolve with { nexted, req, res }. */
+/**
+ * Run a middleware over a signed request; resolve with
+ * { nexted, req, res, ctx } — `ctx` being the viewer-write context as seen
+ * from INSIDE next(), which is where the rest of the request would run.
+ */
 function run(mw, { who, method = 'GET', url, contentType = 'application/json' }) {
   return new Promise((resolve) => {
     const req = {
@@ -97,8 +102,9 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     };
     const res = fakeRes();
     let nexted = false;
-    Promise.resolve(mw(req, res, () => { nexted = true; }))
-      .then(() => setImmediate(() => resolve({ nexted, req, res })));
+    let ctx = null;
+    Promise.resolve(mw(req, res, () => { nexted = true; ctx = viewerContext.get(); }))
+      .then(() => setImmediate(() => resolve({ nexted, req, res, ctx })));
   });
 }
 
@@ -165,10 +171,17 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
     // answers 403 next — requireRole on an admin-only route, requireTabWrite,
     // or the controller's own scope check — becomes the proposal.
     proposals.length = 0;
-    const { nexted, req, res } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
+    const { nexted, req, res, ctx } = await run(authMiddleware, { who: 'viewer', method: 'POST', url: '/api/suppliers' });
     ok(nexted, 'POST /api/suppliers (עם סניפים בניהול) — ממשיך למסלול');
     eq(req.user.role, 'branch_manager', 'ובתפקיד branch_manager לבקשה הזו בלבד');
     eq(req.viewerFallback, true, 'הבקשה מסומנת viewerFallback');
+    // ...and the rest of the request runs inside a viewer-write context, which
+    // is what lets utils/viewerWriteGuard refuse a write nobody gated.
+    ok(!!ctx, 'ההמשך רץ בתוך הקשר כתיבה של צופה');
+    eq(ctx?.claimed, false, 'שעדיין לא נתבע ע"י שום שער');
+    eq(ctx?.proposed, false, 'ושטרם הוגשה בו הצעה');
+    ok(ctx?.req === req && ctx?.res === res, 'וההקשר נושא את הבקשה והתשובה עצמן');
+    eq(viewerContext.get(), null, 'ומחוץ ל-next אין הקשר כלל');
     eq(proposals.length, 0, 'עדיין לא נשמרה הצעה');
 
     res.status(403).json({ error: 'לא הסניף שלך' });
@@ -225,9 +238,12 @@ function run(mw, { who, method = 'GET', url, contentType = 'application/json' })
   console.log('\nשבעת התפקידים האחרים — כתיבה ללא שינוי');
   for (const who of ['admin', 'branch_manager', 'accountant', 'class_leader', 'teacher', 'assistant', 'cook']) {
     proposals.length = 0;
-    const { nexted, req } = await run(authMiddleware, { who, method: 'POST', url: '/api/branches' });
+    const { nexted, req, ctx } = await run(authMiddleware, { who, method: 'POST', url: '/api/branches' });
     ok(nexted && req.user.role === CLAIMS[who].role && proposals.length === 0,
       `${CLAIMS[who].role} — POST ממשיך, התפקיד כשהיה, ללא הצעה`);
+    // No context means utils/viewerWriteGuard is a no-op for them: the whole
+    // fail-safe is invisible to the other seven roles.
+    ok(ctx === null, `${CLAIMS[who].role} — רץ ללא הקשר כתיבה, כלומר ללא שומר`);
   }
 
   console.log('\nתפקידים אחרים — ללא שינוי');

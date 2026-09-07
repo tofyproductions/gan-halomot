@@ -58,6 +58,7 @@
     "test:viewer-gate": "node scripts/viewer-require-role.test.js",
     "test:viewer-scope": "node scripts/viewer-branch-scope.test.js",
     "test:viewer-swap": "node scripts/viewer-auth-swap.test.js",
+    "test:viewer-guard": "node scripts/viewer-write-guard.test.js",
     "test:proposed-apply": "node scripts/proposed-change-apply.test.js",
     "test:proposed-wire": "node scripts/proposed-change-wire.test.js",
     "test:proposed-controller": "node scripts/proposed-change-controller.test.js",

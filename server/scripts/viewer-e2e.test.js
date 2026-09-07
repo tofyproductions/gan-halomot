@@ -793,6 +793,112 @@ async function main() {
     eq(rown.body?.pending, true, '12e והעדכון ממתין לאישור הנה"ח');
   }
 
+  /* ================================================================ *
+   * 13. מסלולים ללא שער — גם לצופה שמנהלת סניפים
+   * ================================================================ */
+  head('בדיקה 13 — שומר הכתיבה במפלס מסד הנתונים');
+  {
+    // Check 12 covered the viewer with NO managed branches: she is answered by
+    // decideViewerWrite rule 4 before the route ever runs. THIS is the hole
+    // that was left — a viewer WITH managed branches continues the request as
+    // a branch_manager (rule 3), and on a route carrying no requireRole, no
+    // requireTab and no requireBranchScope nothing ever answers 403, so the
+    // 403→202 wrapper had nothing to convert and she wrote for real.
+    //
+    // src/utils/viewerWriteGuard now refuses the write at the mongoose layer:
+    // no gate claimed the request, so the proposal is filed and the operation
+    // rejected before the driver is called.
+    const nameBefore = (await Branch.findById(branchB._id).select('name').lean()).name;
+    const r = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer,
+      body: { name: 'שם ששינתה צופה עם סניפים' },
+    });
+    eq(r.status, 202, '13a PUT /api/branches/:id ע"י צופה עם סניפים בניהול → 202');
+    eq(r.body?.proposed, true, '13a התשובה מסמנת proposed: true');
+    const renameId = r.body?.id;
+    const prop = renameId ? await ProposedChange.findById(renameId).lean() : null;
+    eq(prop?.method, 'PUT', '13a נשמרה ProposedChange עם השיטה');
+    eq(prop?.path, `/api/branches/${branchB._id}`, '13a ועם הנתיב');
+    eq(prop?.requested_role, 'admin_viewer', '13a והתפקיד הרשום הוא admin_viewer, לא ה-fallback');
+    eq(prop?.status, 'pending', '13a ההצעה ממתינה');
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
+      '13a שם הסניף לא השתנה במסד');
+
+    const suppliersBefore = await Supplier.countDocuments({});
+    const rs = await request({
+      method: 'POST', path: '/api/suppliers', token: tokens.viewer,
+      body: { name: 'ספק שצופה עם סניפים ניסתה להוסיף' },
+    });
+    eq(rs.status, 202, '13b POST /api/suppliers ע"י אותה צופה → 202');
+    eq(rs.body?.proposed, true, '13b התשובה מסמנת proposed: true');
+    eq(await Supplier.countDocuments({}), suppliersBefore, '13b לא נוצר ספק');
+
+    // A CLAIMED write still lands. Two shapes of claim:
+    //   requireRole(...'branch_manager'...) — /api/payroll/manual-punches
+    //   requireBranchScope                  — /api/payroll-month/adjustments
+    const note13 = 'E2E-guard-claimed-A';
+    const rp = await request({
+      method: 'POST', path: '/api/payroll/manual-punches', token: tokens.viewer,
+      body: { employee_id: String(empA1._id), date: pastDate(13), in_time: '08:00', out_time: '16:00', note: note13 },
+    });
+    ok(rp.status === 200 || rp.status === 201, '13c החתמה בסניף שבניהולה (מסלול עם שער) עדיין נכתבת',
+      `status=${rp.status} ${rp.text}`);
+    const made13 = await punchesByNote(note13);
+    eq(made13.length, 2, '13c נוצרו שתי החתמות');
+    eq([...new Set(made13.map(p => p.approval_status))], ['pending_accountant'],
+      '13c ובמצב pending_accountant, כמו לכל מנהלת סניף');
+
+    const adjBefore = await SalaryAdjustment.countDocuments({});
+    const radj = await request({
+      method: 'POST', path: '/api/payroll-month/adjustments', token: tokens.viewer,
+      body: {
+        employee_id: String(empA2._id), month, type: 'money_add',
+        amount: 70, reason: 'E2E-guard-claimed-adjustment',
+      },
+    });
+    eq(radj.status, 200, '13d עדכון שכר בסניף שבניהולה (requireBranchScope) → 200');
+    eq(radj.body?.pending, true, '13d והעדכון ממתין לאישור הנה"ח');
+    eq(await SalaryAdjustment.countDocuments({}), adjBefore + 1, '13d ונוצר במסד');
+
+    // ...and the queued rename really happens once the admin approves it. The
+    // replay runs as the approver, with no viewer context at all, so the guard
+    // must be entirely absent from it.
+    const dec = await request({
+      method: 'POST', path: `/api/proposed-changes/${renameId}/decide`,
+      token: tokens.admin, body: { decision: 'approve' },
+    });
+    eq(dec.status, 200, '13e מנהל המערכת מאשר את שינוי השם → 200');
+    const applyStatus = dec.body?.proposal?.apply_status;
+    ok(applyStatus >= 200 && applyStatus < 300, '13e ההפעלה החוזרת החזירה 2xx',
+      `apply_status=${applyStatus} apply_error=${dec.body?.proposal?.apply_error}`);
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, 'שם ששינתה צופה עם סניפים',
+      '13e ורק עכשיו השם השתנה במסד');
+    await Branch.updateOne({ _id: branchB._id }, { $set: { name: nameBefore } });
+
+    // Check 12's viewer — the one with no managed branches — is decided before
+    // the route runs and must be untouched by any of this.
+    const r12 = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer0,
+      body: { name: 'שוב ניסיון של צופה ללא סניפים' },
+    });
+    eq(r12.status, 202, '13f צופה ללא סניפים בניהול — עדיין 202 (התנהגות בדיקה 12)');
+    eq(r12.body?.proposed, true, '13f עם proposed: true');
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
+      '13f והשם לא השתנה');
+
+    // Every other role writes an ungated route exactly as before.
+    const adminRename = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.admin,
+      body: { name: nameBefore, address: 'ויצמן 2' },
+    });
+    eq(adminRename.status, 200, '13g מנהל המערכת כותב במסלול ללא שער → 200 (ללא שינוי)');
+    const mgrRename = await request({
+      method: 'PUT', path: `/api/branches/${branchA._id}`, token: tokens.manager,
+      body: { address: 'הרצל 1' },
+    });
+    ok(mgrRename.status < 400, '13g ומנהלת סניף כותבת שם כשהיה', `status=${mgrRename.status}`);
+  }
+
   // Referenced so lint/readers see the seeded users are deliberate.
   void [acc, viewer, viewer0, manager, teacher, Setting, empFixedA];
 }
