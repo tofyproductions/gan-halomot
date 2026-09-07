@@ -28,6 +28,7 @@ const {
   bonusDayMinutes,
 } = require('../services/augustBonus');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
+const { materializeScope } = require('../utils/branch-scope');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -389,23 +390,33 @@ async function getMonth(req, res, next) {
 
     const branchIds = branches.map(b => b._id);
 
+    // The two fillers below WRITE — approved Punch documents stamped with the
+    // caller's id. The table above is read at the caller's read scope; the
+    // writing is narrowed to the caller's WRITE scope, which for everybody but
+    // a viewer is the same list she just read. A viewer reads every branch and
+    // writes only the ones she manages, so opening this screen can no longer
+    // file punches into branches she does not run. Empty list → nothing to fill.
+    const fillBranchIds = materializeScope(req, branchIds);
+
     // Fill in any missing fixed-hours punches for employees who don't clock in.
     // Idempotent and bounded by today, so running it on every load simply keeps
     // the month current without ever inventing future hours. A failure here must
     // not take the salary table down with it.
-    try {
-      await materializeFixedSchedule(month, { branchIds, userId: req.user?.id || null });
-    } catch (e) {
-      console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
-    }
+    if (fillBranchIds.length) {
+      try {
+        await materializeFixedSchedule(month, { branchIds: fillBranchIds, userId: req.user?.id || null });
+      } catch (e) {
+        console.error('[payrollMonth] fixed-schedule fill failed:', e.message);
+      }
 
-    // Same idea for "השלמת שכר אוגוסט" — fill in the committed days a flagged
-    // employee is owed for her branch's summer closure, before punches are
-    // read for the table below. Idempotent; a failure must not take the table down.
-    try {
-      await materializeClosureCompletion(month, { branchIds, userId: req.user?.id || null });
-    } catch (e) {
-      console.error('[payrollMonth] closure-completion fill failed:', e.message);
+      // Same idea for "השלמת שכר אוגוסט" — fill in the committed days a flagged
+      // employee is owed for her branch's summer closure, before punches are
+      // read for the table below. Idempotent; a failure must not take the table down.
+      try {
+        await materializeClosureCompletion(month, { branchIds: fillBranchIds, userId: req.user?.id || null });
+      } catch (e) {
+        console.error('[payrollMonth] closure-completion fill failed:', e.message);
+      }
     }
 
     // Date window for the month (used for punches + inactive-relevance).

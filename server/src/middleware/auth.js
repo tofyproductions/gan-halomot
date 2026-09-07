@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, pathOnly,
+  startsWithPrefix,
 } = require('../utils/viewer');
 const { ADMIN_VIEWER } = require('../constants/roles');
 
@@ -56,7 +57,7 @@ const NO_ROLE_SWAP_PREFIXES = ['/api/admin', '/api/auth'];
 function presentViewerAsAdminForReads(req) {
   if (!isViewer(req.user) || !isRead(req)) return;
   const path = pathOnly(req.originalUrl);
-  const blocked = NO_ROLE_SWAP_PREFIXES.some(p => path === p || path.startsWith(`${p}/`));
+  const blocked = NO_ROLE_SWAP_PREFIXES.some(p => startsWithPrefix(path, p));
   if (blocked) return;
   req.user.actual_role = ADMIN_VIEWER;
   req.user.role = 'system_admin';

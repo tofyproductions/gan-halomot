@@ -26,6 +26,16 @@ console.log('\nמי צופה');
 ok(v.isViewer({ role: 'admin_viewer' }), 'admin_viewer הוא צופה');
 ok(!v.isViewer({ role: 'system_admin' }) && !v.isViewer(null), 'אף אחד אחר לא');
 
+// The one prefix test in the codebase. middleware/auth.js used to carry its
+// own inline copy for the no-role-swap list, which is exactly how
+// '/api/authorized-signers' ends up accidentally exempt from the swap.
+console.log('\nגבול הקידומת');
+ok(v.startsWithPrefix('/api/admin', '/api/admin'), 'התאמה מדויקת');
+ok(v.startsWithPrefix('/api/admin/users', '/api/admin'), 'תת-נתיב');
+ok(!v.startsWithPrefix('/api/administration', '/api/admin'), 'לא כל מה שמתחיל באותן אותיות');
+ok(v.startsWithPrefix('/api/auth/me', '/api/auth'), '/api/auth/me הוא תת-נתיב של /api/auth');
+ok(!v.startsWithPrefix('/api/authorized-signers', '/api/auth'), 'ו-/api/authorized-signers אינו');
+
 console.log('\nאזורים חסומים');
 ok(v.isBlockedForViewer('/api/admin/users'), '/api/admin חסום');
 ok(v.isBlockedForViewer('/api/admin/role-tabs?x=1'), 'גם עם שאילתה');

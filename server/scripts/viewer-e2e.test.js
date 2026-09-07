@@ -21,7 +21,7 @@
  * they asserted what
  * docs/superpowers/specs/2026-09-07-admin-viewer-role-design.md promises and
  * the server did something else. Both gaps are now closed (see CLOSED GAPS at
- * the bottom of this file) and all 68 pass. If one of them goes red again, the
+ * the bottom of this file) and all 90 pass. If one of them goes red again, the
  * server has regressed — do not relax the assertion to make the suite green.
  *
  *   node scripts/viewer-e2e.test.js
@@ -252,6 +252,27 @@ async function main() {
   const empB1 = await mkEmp('נועה כפר סבא', '310000003', branchB);
   const empB2 = await mkEmp('שירה כפר סבא', '310000004', branchB);
 
+  // Fixed-hours employees, one per branch. Without them the materializers that
+  // GET /api/payroll-month runs would have nothing to write and check 9 would
+  // pass on an empty pass, proving nothing. Every weekday is covered so the
+  // fill produces punches whatever day of the month the suite runs on.
+  const everyDay = [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, in: '08:00', out: '16:00' }));
+  const mkFixedEmp = async (name, id, branch) => {
+    const e = await mkEmp(name, id, branch);
+    await Employee.updateOne({ _id: e._id }, { $set: { fixed_schedule: { enabled: true, days: everyDay, exceptions: [], start_date: null, note: '' } } });
+    return e;
+  };
+  const empFixedA = await mkFixedEmp('קבועה תל אביב', '310000005', branchA);
+  const empFixedB = await mkFixedEmp('קבועה כפר סבא', '310000006', branchB);
+
+  // A genuine multi-branch worker: her card lives in כפר סבא, and she is also
+  // paid at תל אביב. The manager of תל אביב may sign her in — for תל אביב.
+  const empMulti = await mkEmp('רונית שני סניפים', '310000007', branchB);
+  await Employee.updateOne(
+    { _id: empMulti._id },
+    { $set: { branch_rates: [{ branch_id: branchA._id, hourly_rate: 55 }] } },
+  );
+
   const tokens = {
     admin: await login('אורי מנהל', '900000001'),
     acc: await login('חנה חשבת', '900000002'),
@@ -260,7 +281,7 @@ async function main() {
     manager: await login('רותי מנהלת', '900000005'),
     teacher: await login('מיכל גננת', '900000006'),
   };
-  console.log('נזרעו 2 סניפים, 6 משתמשים, 4 עובדים; כל המשתמשים התחברו בסיסמה');
+  console.log('נזרעו 2 סניפים, 6 משתמשים, 7 עובדים (2 בשעות קבועות, 1 דו-סניפית); כל המשתמשים התחברו בסיסמה');
 
   const month = thisMonth();
   const punchesByNote = (note) => Punch.find({ manual_note: note }).lean();
@@ -558,8 +579,116 @@ async function main() {
     eq(tc.body?.code, 'NO_BRANCH_SCOPE', '8e קוד השגיאה הוא NO_BRANCH_SCOPE');
   }
 
+  /* ================================================================ *
+   * 9. קריאה של הצופה אינה כותבת החתמות (תופעת לוואי של GET)
+   * ================================================================ */
+  head('בדיקה 9 — קריאה של הצופה אינה כותבת החתמות מחוץ לסניפיה');
+  {
+    // GET /api/payroll-month runs the fixed-schedule and closure-completion
+    // fillers, and those INSERT approved punches stamped with the caller. The
+    // viewer reads every branch, so without a narrowing her page load would
+    // file punches into every branch, in her name.
+    //
+    // כפר סבא is still untouched here: the only all-branch payroll read so far
+    // was check 1d's, by a viewer who manages תל אביב alone.
+    eq(await Punch.countDocuments({ employee_id: empFixedB._id }), 0,
+      '9a אין עדיין החתמות שעות-קבועות בסניף שאינו בניהול הצופה');
+
+    const r = await request({ path: `/api/payroll-month?month=${month}&branch=all`, token: tokens.viewer0 });
+    eq(r.status, 200, '9b צופה ללא סניפים בניהול קוראת את טבלת השכר → 200');
+    const rowNames = (r.body?.rows || []).map(x => x.full_name);
+    ok(rowNames.includes('דנה תל אביב') && rowNames.includes('נועה כפר סבא'),
+      '9b הטבלה שלה עדיין כוללת עובדות משני הסניפים',
+      `קיבלנו ${JSON.stringify(rowNames)}`);
+    eq(await Punch.countDocuments({ created_by: viewer0._id }), 0,
+      '9c הקריאה לא יצרה ולו החתמה אחת בשמה');
+    eq(await Punch.countDocuments({ employee_id: empFixedB._id }), 0,
+      '9c וגם לא נכתבה החתמה בסניף שאינו בניהולה');
+
+    // The viewer WITH a managed branch did materialize — inside her branch only.
+    const mine = await Punch.find({ created_by: viewer._id, timestamp_source: 'fixed_schedule' }).lean();
+    ok(mine.length > 0, '9d הקריאה של הצופה שמנהלת סניף אכן מילאה שעות קבועות',
+      `קיבלנו ${mine.length}`);
+    eq([...new Set(mine.map(p => String(p.branch_id)))], [String(branchA._id)],
+      '9d כל ההחתמות שנוצרו בשמה שייכות לסניף שבניהולה');
+
+    // ...and the fill genuinely works, so 9a/9c are not an empty pass.
+    const ra = await request({ path: `/api/payroll-month?month=${month}&branch=all`, token: tokens.admin });
+    eq(ra.status, 200, '9e מנהל המערכת קורא את אותה טבלה → 200');
+    ok(await Punch.countDocuments({ employee_id: empFixedB._id }) > 0,
+      '9e אצלו המילוי כן רץ — כלומר הבדיקה אינה ריקה');
+  }
+
+  /* ================================================================ *
+   * 10. החתמה ידנית — גם העובד/ת חייב/ת להיות בסניף שבניהול
+   * ================================================================ */
+  head('בדיקה 10 — ההחתמה נבדקת גם מול הסניף של העובדת');
+  {
+    // branch_id comes off the request body, so checking it alone let a manager
+    // name ANY employee and pass by writing her own branch in the field.
+    const noteX = 'E2E-manager-cross';
+    const rx = await request({
+      method: 'POST', path: '/api/payroll/manual-punches', token: tokens.manager,
+      body: {
+        employee_id: String(empB1._id), branch_id: String(branchA._id),
+        date: pastDate(10), in_time: '08:00', out_time: '16:00', note: noteX,
+      },
+    });
+    eq(rx.status, 403, '10a מנהלת תל אביב מחתימה עובדת כפר סבא עם branch_id של תל אביב → 403');
+    eq((await punchesByNote(noteX)).length, 0, '10a לא נוצרה החתמה');
+
+    const noteY = 'E2E-viewer-cross';
+    const ry = await request({
+      method: 'POST', path: '/api/payroll/manual-punches', token: tokens.viewer,
+      body: {
+        employee_id: String(empB2._id), branch_id: String(branchA._id),
+        date: pastDate(11), in_time: '08:00', out_time: '16:00', note: noteY,
+      },
+    });
+    eq(ry.status, 202, '10b אותו תרגיל אצל הצופה → 202 (נשמר לאישור)');
+    eq(ry.body?.proposed, true, '10b התשובה מסמנת proposed: true');
+    eq((await punchesByNote(noteY)).length, 0, '10b לא נוצרה החתמה לפני אישור');
+
+    // The legitimate multi-branch case still works: her card is in כפר סבא,
+    // she is also paid at תל אביב, and תל אביב is what the manager signs.
+    const noteZ = 'E2E-manager-multi';
+    const rz = await request({
+      method: 'POST', path: '/api/payroll/manual-punches', token: tokens.manager,
+      body: {
+        employee_id: String(empMulti._id), branch_id: String(branchA._id),
+        date: pastDate(12), in_time: '08:00', out_time: '16:00', note: noteZ,
+      },
+    });
+    eq(rz.status, 200, '10c מנהלת תל אביב מחתימה עובדת דו-סניפית בתל אביב → 200');
+    eq((await punchesByNote(noteZ)).length, 2, '10c נוצרו שתי החתמות');
+  }
+
+  /* ================================================================ *
+   * 11. can_decide נגזר מהתפקיד האמיתי, לא מזה שהוחלף לקריאה
+   * ================================================================ */
+  head('בדיקה 11 — כפתור ההכרעה בבקשות העלאת שכר');
+  {
+    // The read swap hands this controller `role: 'system_admin'`, so a flag
+    // computed off `req.user.role` alone would light up the decide button for
+    // a viewer — on a queue she is forbidden to decide (the write is a
+    // proposal). It must read `actual_role` first.
+    const rv = await request({ path: '/api/rate-changes', token: tokens.viewer });
+    eq(rv.status, 200, '11a צופה קוראת את תור העלאות השכר → 200');
+    eq(rv.body?.can_decide, false, '11a can_decide=false אף שהיא קוראת כמנהלת מערכת');
+
+    const rv0 = await request({ path: '/api/rate-changes', token: tokens.viewer0 });
+    eq(rv0.body?.can_decide, false, '11b גם לצופה ללא סניפים בניהול');
+
+    const ra = await request({ path: '/api/rate-changes', token: tokens.admin });
+    eq(ra.status, 200, '11c מנהל המערכת → 200');
+    eq(ra.body?.can_decide, true, '11c ואצלו can_decide=true');
+
+    const rm = await request({ path: '/api/rate-changes', token: tokens.manager });
+    eq(rm.body?.can_decide, false, '11d מנהלת סניף — מגישה, לא מכריעה');
+  }
+
   // Referenced so lint/readers see the seeded users are deliberate.
-  void [acc, viewer, viewer0, manager, teacher, Setting];
+  void [acc, viewer, viewer0, manager, teacher, Setting, empFixedA];
 }
 
 async function teardown() {
@@ -609,7 +738,26 @@ main()
  * G2  controllers/payroll.controller.js#createManualPunches had NO branch
  *     scope check, so rule 3 of the design (fall back to branch_manager, let
  *     the controller's own 403 become a proposal) had no 403 to convert.
- *     Fixed by a canAccessBranch() guard there — and by the same guard on
+ *     Fixed by a branch-scope guard there — and by the same guard on
  *     editPunch / approvePunch / rejectPunch / deletePunch, which were missing
  *     it too. Was failing: 3b.
+ *
+ * G1b The read swap turned a viewer's page load into a cross-branch write:
+ *     getMonth / attendanceByMonth run the fixed-schedule and closure
+ *     materializers on the GET, and those insert approved punches stamped with
+ *     the caller. Reading as the admin meant writing as the admin, into every
+ *     branch. Fixed with utils/branch-scope.js#materializeScope — the read
+ *     stays all-branch, the side effect is narrowed to her write scope.
+ *     Covered by check 9.
+ *
+ * G2b The punch guard checked the punch's branch and never the employee's, so
+ *     naming any employee with branch_id set to one's own branch passed.
+ *     Fixed in createManualPunches (and punchOutOfScope for the four
+ *     existing-punch mutations) by requiring BOTH sides in scope.
+ *     Covered by check 10.
+ *
+ * G3  rateChangeRequests#list computed `can_decide` off `req.user.role`, which
+ *     the read swap had already turned into 'system_admin' — so the viewer's
+ *     screen offered her a decide button for a queue she cannot decide. Now
+ *     read from `actual_role || role`. Covered by check 11.
  * ------------------------------------------------------------------ */

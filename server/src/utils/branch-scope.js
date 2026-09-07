@@ -50,4 +50,28 @@ async function canAccessBranch(req, branchId) {
   return scope.includes(String(branchId));
 }
 
-module.exports = { resolveBranchScope, canAccessBranch };
+/**
+ * Which branches a READ may materialize into.
+ *
+ * Some GETs write. `payrollMonth#getMonth` and `payroll#attendanceByMonth`
+ * both run the fixed-schedule and closure-completion fillers before reading
+ * the grid, and those fillers INSERT Punch documents stamped
+ * `approval_status: 'approved'`, `created_by`/`approval_decided_by` = the
+ * caller. Harmless for an admin, whose read scope and write scope are the
+ * same thing. Not harmless for a viewer: her read scope is every branch, so
+ * merely opening the salary screen would file approved punches into branches
+ * she does not run, in her name — the exact write the whole proposal
+ * mechanism exists to prevent.
+ *
+ * So the read stays all-branch and the side effect is narrowed to what she
+ * may actually write. `actual_role` is set by middleware/auth.js only on a
+ * read it swapped; every other caller gets the list back untouched.
+ */
+function materializeScope(req, readBranchIds) {
+  if (req?.user?.actual_role !== ADMIN_VIEWER) return readBranchIds;
+  const managed = (req.user.managed_branch_ids || []).map(String);
+  if (managed.length === 0) return [];
+  return (readBranchIds || []).filter(id => managed.includes(String(id)));
+}
+
+module.exports = { resolveBranchScope, canAccessBranch, materializeScope };

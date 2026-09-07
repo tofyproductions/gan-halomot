@@ -53,7 +53,10 @@ async function list(req, res, next) {
     const branchNames = new Map(branches.map(b => [String(b._id), b.name]));
     res.json({
       requests: rows.map(r => shape(r, empNames, branchNames)),
-      can_decide: ['system_admin', 'accountant'].includes(req.user?.role),
+      // The real role, not the one middleware/auth.js swapped in for the read:
+      // a viewer reads this queue as the admin, but she decides nothing.
+      can_decide: ['system_admin', 'accountant']
+        .includes(req.user?.actual_role || req.user?.role),
     });
   } catch (err) { next(err); }
 }

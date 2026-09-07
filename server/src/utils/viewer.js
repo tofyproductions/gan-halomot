@@ -190,4 +190,5 @@ function viewerMessage(approver) {
 module.exports = {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
   screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS, pathOnly,
+  startsWithPrefix,
 };
