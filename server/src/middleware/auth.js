@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
 const {
-  isRead, isViewer, isBlockedForViewer, isMultipart,
+  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart,
 } = require('../utils/viewer');
 const { ADMIN_VIEWER } = require('../constants/roles');
 
@@ -146,6 +146,7 @@ function convert403ToProposal(req, res) {
  * approval otherwise.
  */
 function viewerWriteGate(req, res, next, roles) {
+  if (isWriteBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
   const managed = req.user.managed_branch_ids || [];
   if (roles.includes('branch_manager') && managed.length > 0) {
     req.user.role = 'branch_manager';

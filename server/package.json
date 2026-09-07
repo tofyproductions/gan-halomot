@@ -54,7 +54,8 @@
     "test:viewer-helpers": "node scripts/viewer-helpers.test.js",
     "test:proposed-propose": "node scripts/proposed-change-propose.test.js",
     "test:viewer-gate": "node scripts/viewer-require-role.test.js",
-    "test:viewer-scope": "node scripts/viewer-branch-scope.test.js"
+    "test:viewer-scope": "node scripts/viewer-branch-scope.test.js",
+    "test:proposed-apply": "node scripts/proposed-change-apply.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

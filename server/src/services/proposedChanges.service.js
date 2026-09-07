@@ -1,6 +1,8 @@
 /**
  * Queue a viewer's write for approval, and (Task 5) apply it once approved.
  */
+const jwt = require('jsonwebtoken');
+const env = require('../config/env');
 const {
   approverFor, screenLabelFor, summarizeBody, extractBranchId, viewerMessage,
 } = require('../utils/viewer');
@@ -55,4 +57,54 @@ async function propose(req, res, { models } = {}) {
   return doc;
 }
 
-module.exports = { propose };
+/**
+ * A token for one replay: the approver's identity, five minutes, flagged.
+ * Minted here rather than borrowed from the approver's own session so the
+ * replay can run from a job later without a browser attached.
+ */
+function mintApproverToken(user, tenantSlug) {
+  const payload = {
+    id: user.id || user._id,
+    email: user.email,
+    full_name: user.full_name,
+    role: user.role,
+    branch_id: user.branch_id || null,
+    managed_branch_ids: (user.managed_branch_ids || []).map(String),
+    replay: true,
+    tenant: tenantSlug,
+  };
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: 300 });
+}
+
+/**
+ * Re-issue the stored request against this server as the approver.
+ * Returns { status, ok, error } and never throws. Does not touch the DB.
+ */
+async function applyProposal(doc, approver, {
+  fetchImpl = global.fetch, baseUrl = `http://127.0.0.1:${env.PORT}`, tenantSlug = undefined,
+} = {}) {
+  const headers = {
+    Authorization: `Bearer ${mintApproverToken(approver, tenantSlug)}`,
+    'X-Proposed-Change': String(doc._id),
+  };
+  if (doc.host) headers.Host = doc.host;
+  const init = { method: doc.method, headers };
+  if (doc.body !== null && doc.body !== undefined && !['GET', 'HEAD'].includes(doc.method)) {
+    headers['Content-Type'] = doc.content_type || 'application/json';
+    init.body = JSON.stringify(doc.body);
+  }
+  try {
+    const resp = await fetchImpl(`${baseUrl}${doc.path}`, init);
+    const text = await resp.text();
+    const ok = resp.status >= 200 && resp.status < 300;
+    let error = '';
+    if (!ok) {
+      try { error = JSON.parse(text)?.error || text; } catch { error = text; }
+    }
+    return { status: resp.status, ok, error };
+  } catch (err) {
+    return { status: 0, ok: false, error: err.message };
+  }
+}
+
+module.exports = { propose, applyProposal, mintApproverToken };

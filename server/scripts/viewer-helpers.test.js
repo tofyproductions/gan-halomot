@@ -32,6 +32,10 @@ ok(v.isBlockedForViewer('/api/admin/role-tabs?x=1'), 'גם עם שאילתה');
 ok(!v.isBlockedForViewer('/api/administration'), 'רק הקידומת המדויקת, לא כל מה שמתחיל ב-admin');
 ok(!v.isBlockedForViewer('/api/employees'), 'שאר המסכים פתוחים');
 
+console.log('\nחסימת כתיבה על הצעות');
+ok(v.isWriteBlockedForViewer('/api/proposed-changes/1/decide'), 'הכרעה על הצעה חסומה');
+ok(!v.isWriteBlockedForViewer('/api/employees'), 'שאר המסכים לא חסומים לכתיבה');
+
 console.log('\nקבצים');
 ok(v.isMultipart({ headers: { 'content-type': 'multipart/form-data; boundary=abc' } }), 'multipart מזוהה');
 ok(!v.isMultipart({ headers: { 'content-type': 'application/json' } }), 'JSON לא');

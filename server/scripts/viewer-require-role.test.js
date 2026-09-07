@@ -101,6 +101,12 @@ function run(gate, req) {
     const r = await run(requireRole('system_admin', 'accountant'), req);
     ok(!r.nexted && r.res.statusCode === 403 && r.res.body.code === 'VIEWER_NO_UPLOAD', 'העלאת קובץ → 403 עם קוד, לא הצעה');
   }
+  {
+    const before = proposals.length;
+    const r = await run(requireRole('system_admin', 'accountant'), mkReq('POST', '/api/proposed-changes/1/decide', viewer([]), { body: { decision: 'approve' } }));
+    ok(!r.nexted && r.res.statusCode === 403, 'צופה שמנסה להכריע על הצעה → 403, לא הצעה חדשה');
+    eq(proposals.length, before, 'ולא נרשמה הצעה');
+  }
 
   console.log('\n403 מהבקר תחת הגיבוי כמנהל סניף');
   proposals.length = 0;

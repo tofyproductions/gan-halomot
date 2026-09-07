@@ -11,6 +11,15 @@ const READ_METHODS = ['GET', 'HEAD', 'OPTIONS'];
 /** Prefixes (path only, no query) a viewer may not touch at all — not even to read. */
 const BLOCKED_PREFIXES = ['/api/admin'];
 
+/**
+ * Prefixes a viewer may not WRITE to, even though reading them is fine.
+ * Deciding a proposal ('/api/proposed-changes/:id/decide') is itself a
+ * write outside the manager fallback (no `branch_manager` in its allowed
+ * roles) — proposing THAT would be absurd, so it is refused outright
+ * instead of joining the queue it exists to drain.
+ */
+const WRITE_BLOCKED_PREFIXES = ['/api/proposed-changes'];
+
 /** Path prefixes whose proposals go to the accountant; everything else → system admin. */
 const ACCOUNTANT_PREFIXES = [
   '/api/payroll', '/api/payroll-month', '/api/salary-requests', '/api/rate-changes',
@@ -98,6 +107,11 @@ function isBlockedForViewer(url) {
   return BLOCKED_PREFIXES.some(p => startsWithPrefix(path, p));
 }
 
+function isWriteBlockedForViewer(url) {
+  const path = pathOnly(url);
+  return WRITE_BLOCKED_PREFIXES.some(p => startsWithPrefix(path, p));
+}
+
 function isMultipart(req) {
   const ct = req?.headers?.['content-type'] || '';
   return ct.toLowerCase().startsWith('multipart/');
@@ -142,6 +156,6 @@ function viewerMessage(approver) {
 }
 
 module.exports = {
-  isRead, isViewer, isBlockedForViewer, isMultipart, approverFor, screenLabelFor,
-  summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS,
+  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
+  screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS,
 };
