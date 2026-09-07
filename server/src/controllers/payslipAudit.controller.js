@@ -116,6 +116,47 @@ async function coalesceBranchEntries(entries) {
 const { getMonth } = require('./payrollMonth.controller');
 
 /**
+ * Look an employee up by the ת"ז printed on a payslip.
+ *
+ * Employee.israeli_id is stored left-padded to 9 digits (the pre-save hook in
+ * models/Employee.js), but the accountant's PDF prints the number the way the
+ * payroll software holds it — commonly 8 digits with the leading zero dropped,
+ * occasionally with a hyphen. An exact-string findOne therefore missed exactly
+ * those people. The comparator's own ת"ז matching already pads (its pad9), so a
+ * payslip could match its salary-table row and still resolve to no employee.
+ *
+ * It bites hardest on a payslip with NO table row — someone whose employment
+ * ended and who was archived out of the month (inactive_effective_month) still
+ * gets a final payslip, and the raw PDF number is then the ONLY identifier
+ * available. A failed lookup there means her payslip is attributed to nobody
+ * and cannot be distributed at all.
+ */
+function padId9(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 9 ? digits.padStart(9, '0') : digits;
+}
+
+/**
+ * Every stored form of israeli_id that the PDF's number could legitimately be.
+ * The padded form is what the model writes today; the raw one covers the few
+ * legacy rows that predate the normalisation hook and were never re-saved.
+ * Empty array = nothing usable to look up with.
+ */
+function payslipIdCandidates(israeliId) {
+  const padded = padId9(israeliId);
+  if (!padded) return [];
+  const raw = String(israeliId || '').trim();
+  return [...new Set([padded, raw].filter(Boolean))];
+}
+
+/** Returns an unexecuted query so callers keep chaining .select()/.populate(). */
+function findEmployeeByPayslipId(israeliId) {
+  const candidates = payslipIdCandidates(israeliId);
+  if (candidates.length === 0) return null;
+  return Employee.findOne({ israeli_id: { $in: candidates } });
+}
+
+/**
  * After an audit run completes, copy vacation balance from each parsed
  * payslip into PayrollMonth.vacation_balance_from_payslip for the same
  * (employee, year_month). Matches by israeli_id first, falls back to
@@ -133,7 +174,7 @@ async function syncVacationBalances(audit) {
       const israeliId = r.payslip?.employee_id;
       let emp = null;
       if (israeliId) {
-        emp = await Employee.findOne({ israeli_id: israeliId }).select('_id branch_id').lean();
+        emp = await findEmployeeByPayslipId(israeliId)?.select('_id branch_id').lean();
       }
       if (!emp) continue; // skip ambiguous matches — only ID-grounded sync
       await PayrollMonth.findOneAndUpdate(
@@ -2477,7 +2518,7 @@ async function sendPayslipsToEmployees(req, res) {
           for (const r of results) {
             const iid = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
             if (!iid) continue;
-            const emp = await Employee.findOne({ israeli_id: iid }).select('_id').lean();
+            const emp = await findEmployeeByPayslipId(iid)?.select('_id').lean();
             if (emp && (!selectedIds || selectedIds.has(String(emp._id)))) ids.push(emp._id);
           }
           if (ids.length) hoursPdfByEmp = await renderHoursPdfPerEmployee(ids, month, { role: 'system_admin' });
@@ -2490,7 +2531,7 @@ async function sendPayslipsToEmployees(req, res) {
         const branch = (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim();
         const page = r.payslip?.page_index || null;
         try {
-          const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
+          const emp = israeliId ? await findEmployeeByPayslipId(israeliId)?.populate('user_id', 'email').lean() : null;
           if (!emp) { out.push({ name: dispName, status: 'no_match' }); continue; }
           if (selectedIds && !selectedIds.has(String(emp._id))) continue; // not selected for this send
           if (!page || !branch) { out.push({ name: emp.full_name, status: 'no_page' }); continue; }
@@ -2546,7 +2587,7 @@ async function buildManagerBranchGroups(doc) {
     if (!page) continue;
     const sourceBranch = norm(r.__source_branch || r.table_row?.branch || '');
     const iid = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
-    const emp = iid ? await Employee.findOne({ israeli_id: iid }).select('_id full_name branch_id').lean() : null;
+    const emp = iid ? await findEmployeeByPayslipId(iid)?.select('_id full_name branch_id').lean() : null;
     const entry = {
       employee_id: emp ? String(emp._id) : null,
       name: emp ? emp.full_name : (r.payslip?.employee_name || r.table_row?.employee_name || '—'),
@@ -2856,14 +2897,16 @@ async function distributionPreview(req, res) {
       const israeliId = String(r.payslip?.employee_id || r.table_row?.israeli_id || '').trim();
       const branch = (r.__source_branch || r.table_row?.branch || '').replace(/\s+/g, ' ').trim();
       const page = r.payslip?.page_index || null;
-      const emp = israeliId ? await Employee.findOne({ israeli_id: israeliId }).populate('user_id', 'email').lean() : null;
+      const emp = israeliId ? await findEmployeeByPayslipId(israeliId)?.populate('user_id', 'email').lean() : null;
       const email = emp ? (realEmployeeEmail(emp) || '') : '';
       items.push({
         payslip_name: payslipName,
         payslip_id: israeliId,
         branch, page,
         matched: !!emp,
-        id_verified: !!(emp && israeliId && String(emp.israeli_id).trim() === israeliId),
+        // Compare the padded forms — an 8-digit number on the PDF and the same
+        // 9-digit one on the employee are the same ת"ז, not an unverified guess.
+        id_verified: !!(emp && israeliId && padId9(emp.israeli_id) === padId9(israeliId)),
         employee_id: emp ? String(emp._id) : null,
         employee_name: emp ? emp.full_name : null,
         email,
@@ -3555,6 +3598,10 @@ module.exports = {
   runAudit,
   runAuditMulti,
   runAuditSystem,
+  // Exported for scripts/payslip-id-match.test.js — the ת"ז normalisation that
+  // decides whether a payslip is attributed to an employee at all.
+  padId9,
+  payslipIdCandidates,
   listBranches,
   emailAudit,
   previewAuditEmail,
