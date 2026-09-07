@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "seed": "node scripts/seed-mongodb.js",
+    "demo:viewer": "node scripts/viewer-demo-server.js",
     "import": "node scripts/import-from-gsheets.js",
     "test:terms": "node scripts/employment-terms.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
