@@ -2891,6 +2891,14 @@ async function distributionPreview(req, res) {
     const doc = await PayslipAuditRecord.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
     const results = doc.full_result?.results || [];
+    // Employee → real branch NAME, so the dialog can offer the send one branch
+    // at a time. It cannot group by `branch` below: that is the branch of the
+    // FILE the payslip came from, and an all-branches upload tags every single
+    // payslip "כל הסניפים" — one useless group holding everyone. The manager
+    // send already groups by the employee's own branch_id; this matches it.
+    const branchNameById = new Map(
+      (await Branch.find({}).select('_id name').lean()).map(b => [String(b._id), b.name]),
+    );
     const items = [];
     for (const r of results) {
       const payslipName = r.payslip?.employee_name || r.table_row?.employee_name || '';
@@ -2899,10 +2907,16 @@ async function distributionPreview(req, res) {
       const page = r.payslip?.page_index || null;
       const emp = israeliId ? await findEmployeeByPayslipId(israeliId)?.populate('user_id', 'email').lean() : null;
       const email = emp ? (realEmployeeEmail(emp) || '') : '';
+      // Fall back to the salary-table branch, then the file's: an unmatched
+      // payslip still belongs somewhere on screen rather than in a nameless pile.
+      const employeeBranch = (emp && branchNameById.get(String(emp.branch_id)))
+        || (r.table_row?.branch || '').replace(/\s+/g, ' ').trim()
+        || '';
       items.push({
         payslip_name: payslipName,
         payslip_id: israeliId,
         branch, page,
+        employee_branch: employeeBranch,
         matched: !!emp,
         // Compare the padded forms — an 8-digit number on the PDF and the same
         // 9-digit one on the employee are the same ת"ז, not an unverified guess.

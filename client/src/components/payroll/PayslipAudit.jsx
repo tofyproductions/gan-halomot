@@ -1814,6 +1814,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   const [log, setLog] = useState(null);
   const [includeHours, setIncludeHours] = useState(true);
   const [preview, setPreview] = useState(null); // { it } — the row being previewed
+  const [collapsed, setCollapsed] = useState({}); // { [branch]: true } — branches open by default
   const [polling, setPolling] = useState(false);
   const sentAtRef = useRef(0);
 
@@ -1860,6 +1861,33 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   const allChecked = selectableIds.length > 0 && selectedIds.length === selectableIds.length;
   const someChecked = selectedIds.length > 0 && !allChecked;
 
+  // Group by the employee's OWN branch (employee_branch), not the branch of the
+  // file the payslip came from: an all-branches upload tags every payslip
+  // "כל הסניפים", so grouping by that would make one 91-row pile. The office
+  // sends branch by branch, so each group gets its own checkbox and its own
+  // send button. Each row keeps its index in `items` — the email field edits
+  // `items[i]`, and a group-local index would write to the wrong person.
+  const groups = useMemo(() => {
+    const byBranch = new Map();
+    items.forEach((it, i) => {
+      const key = it.employee_branch || it.branch || 'ללא סניף';
+      if (!byBranch.has(key)) byBranch.set(key, []);
+      byBranch.get(key).push({ it, i });
+    });
+    return [...byBranch.entries()]
+      .map(([branch, rows]) => ({ branch, rows }))
+      .sort((a, b) => a.branch.localeCompare(b.branch, 'he'));
+  }, [items]);
+
+  // Only rows that can actually be sent count towards a branch's selection.
+  const branchIds = (g) => g.rows.filter(({ it }) => it.employee_id && it.has_page).map(({ it }) => it.employee_id);
+  const branchSelected = (g) => branchIds(g).filter(id => sel[id]);
+  const toggleBranch = (g, v) => setSel(s => {
+    const next = { ...s };
+    branchIds(g).forEach(id => { next[id] = v; });
+    return next;
+  });
+
   const persistEmails = async () => {
     const updates = items.filter(it => it.employee_id).map(it => ({ employee_id: it.employee_id, email: (it.email || '').trim() }));
     try { await api.put('/payroll/payslip-audit/employees/emails', { updates }); return true; }
@@ -1867,10 +1895,12 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
   };
   const saveEmails = async () => { setBusy(true); if (await persistEmails()) toast.success('מיילים נשמרו'); setBusy(false); };
 
-  const send = async (all) => {
-    const ids = all ? [] : selectedIds;
+  // idsOverride lets a single branch be sent without disturbing the checkboxes
+  // the user already ticked elsewhere in the dialog.
+  const send = async (all, idsOverride = null, whoLabel = null) => {
+    const ids = all ? [] : (idsOverride || selectedIds);
     if (!all && ids.length === 0) { toast.error('בחר/י לפחות עובד אחד'); return; }
-    const who = all ? 'לכל העובדים המותאמים' : `ל-${ids.length} עובדים נבחרים`;
+    const who = whoLabel || (all ? 'לכל העובדים המותאמים' : `ל-${ids.length} עובדים נבחרים`);
     // In-app confirm — window.confirm can be silently suppressed by the browser
     // ("prevent additional dialogs"), making the button appear dead.
     if (!(await confirm({
@@ -1898,46 +1928,98 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
       <DialogTitle sx={{ fontWeight: 700 }}>הפצת תלושים לעובדים{audit?.year_month ? ` · ${audit.year_month}` : ''}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="caption" color="text.secondary">
-          כל תלוש מותאם לעובד לפי <b>ת"ז</b>. ערכ/י מייל לכל עובד (נשמר לעתיד), בחר/י למי לשלוח — כל עובד מקבל את התלוש שלו + דוח השעות שלו.
+          כל תלוש מותאם לעובד לפי <b>ת"ז</b> ומשויך ל<b>סניף של העובד/ת</b>. ערכ/י מייל לכל עובד (נשמר לעתיד),
+          ובחר/י למי לשלוח — סניף שלם ב"שלח סניף", או צירוף סניפים ב"שלח לנבחרים". כל עובד מקבל את התלוש שלו + דוח השעות שלו.
         </Typography>
         {loading ? <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box> : (
-          <Table size="small" sx={{ mt: 1.5 }}>
-            <TableHead>
-              <TableRow>
-                <TableCell padding="checkbox"><Checkbox size="small" checked={allChecked} indeterminate={someChecked} onChange={e => { const v = e.target.checked; const s = {}; selectableIds.forEach(id => { s[id] = v; }); setSel(s); }} /></TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>עובד</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>ת"ז</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>התאמה</TableCell>
-                <TableCell sx={{ fontWeight: 700 }}>מייל (ניתן לעריכה)</TableCell>
-                <TableCell sx={{ fontWeight: 700 }} align="center">עמוד</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {items.map((it, i) => (
-                <TableRow key={i} sx={{ bgcolor: !it.matched ? '#fef2f2' : !it.has_page ? '#fffbeb' : undefined }}>
-                  <TableCell padding="checkbox"><Checkbox size="small" disabled={!it.employee_id || !it.has_page} checked={!!sel[it.employee_id]} onChange={() => setSel(s => ({ ...s, [it.employee_id]: !s[it.employee_id] }))} /></TableCell>
-                  <TableCell sx={{ fontWeight: 600 }}>{it.employee_name || it.payslip_name || '—'}</TableCell>
-                  <TableCell dir="ltr">{it.payslip_id || '—'}</TableCell>
-                  <TableCell>
-                    {!it.matched ? <Chip size="small" color="error" label="לא הותאם" />
-                      : it.id_verified ? <Chip size="small" color="success" label='✓ ת"ז מאומת' />
-                        : <Chip size="small" color="warning" label="הותאם (בדוק)" />}
-                  </TableCell>
-                  <TableCell>
-                    <TextField size="small" fullWidth dir="ltr" placeholder="—" value={it.email || ''} disabled={!it.employee_id}
-                      onChange={e => setItems(prev => prev.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
-                  </TableCell>
-                  <TableCell align="center">
-                    {it.has_page ? (
-                      <Button size="small" variant="text" onClick={() => setPreview({ it })} sx={{ minWidth: 0, fontSize: 11 }}>
-                        תצוגה
+          <>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mt: 1.5 }}>
+              <Checkbox size="small" checked={allChecked} indeterminate={someChecked}
+                onChange={e => { const v = e.target.checked; const s = {}; selectableIds.forEach(id => { s[id] = v; }); setSel(s); }} />
+              <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                כל הסניפים ({selectedIds.length}/{selectableIds.length})
+              </Typography>
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" onClick={() => setCollapsed({})}>פתח הכל</Button>
+              <Button size="small" onClick={() => setCollapsed(Object.fromEntries(groups.map(g => [g.branch, true])))}>סגור הכל</Button>
+            </Stack>
+            <Stack spacing={1} sx={{ mt: 1 }}>
+              {groups.map(g => {
+                const ids = branchIds(g);
+                const chosen = branchSelected(g);
+                const allSel = ids.length > 0 && chosen.length === ids.length;
+                const someSel = chosen.length > 0 && !allSel;
+                const unmatched = g.rows.filter(({ it }) => !it.matched).length;
+                const noEmail = g.rows.filter(({ it }) => it.employee_id && !(it.email || '').trim()).length;
+                const isOpen = !collapsed[g.branch];
+                return (
+                  <Paper key={g.branch} variant="outlined">
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 1 }}>
+                      <Checkbox size="small" disabled={ids.length === 0} checked={allSel} indeterminate={someSel}
+                        onChange={e => toggleBranch(g, e.target.checked)} />
+                      <IconButton size="small" onClick={() => setCollapsed(c => ({ ...c, [g.branch]: isOpen }))}>
+                        {isOpen ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+                      </IconButton>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        {/* component="div": the count chips below render a <div>,
+                            which is invalid inside Typography's default <p>. */}
+                        <Typography component="div" sx={{ fontWeight: 700 }}>{g.branch}
+                          <Typography component="span" variant="caption" color="text.secondary" sx={{ mr: 1 }}>
+                            {chosen.length}/{ids.length} עובדים
+                          </Typography>
+                          {unmatched > 0 && <Chip size="small" color="error" label={`${unmatched} לא הותאמו`} sx={{ height: 16, fontSize: 10, mr: 0.5 }} />}
+                          {noEmail > 0 && <Chip size="small" color="warning" label={`${noEmail} ללא מייל`} sx={{ height: 16, fontSize: 10, mr: 0.5 }} />}
+                        </Typography>
+                      </Box>
+                      <Button size="small" variant="outlined" disabled={busy || chosen.length === 0}
+                        onClick={() => send(false, chosen, `לכל ${chosen.length} העובדים שנבחרו בסניף "${g.branch}"`)}>
+                        שלח סניף ({chosen.length})
                       </Button>
-                    ) : <Chip size="small" color="error" label="חסר" />}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </Stack>
+                    <Collapse in={isOpen} unmountOnExit>
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow>
+                            <TableCell padding="checkbox" />
+                            <TableCell sx={{ fontWeight: 700 }}>עובד</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>ת"ז</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>התאמה</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>מייל (ניתן לעריכה)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }} align="center">עמוד</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {g.rows.map(({ it, i }) => (
+                            <TableRow key={i} sx={{ bgcolor: !it.matched ? '#fef2f2' : !it.has_page ? '#fffbeb' : undefined }}>
+                              <TableCell padding="checkbox"><Checkbox size="small" disabled={!it.employee_id || !it.has_page} checked={!!sel[it.employee_id]} onChange={() => setSel(s => ({ ...s, [it.employee_id]: !s[it.employee_id] }))} /></TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>{it.employee_name || it.payslip_name || '—'}</TableCell>
+                              <TableCell dir="ltr">{it.payslip_id || '—'}</TableCell>
+                              <TableCell>
+                                {!it.matched ? <Chip size="small" color="error" label="לא הותאם" />
+                                  : it.id_verified ? <Chip size="small" color="success" label='✓ ת"ז מאומת' />
+                                    : <Chip size="small" color="warning" label="הותאם (בדוק)" />}
+                              </TableCell>
+                              <TableCell>
+                                <TextField size="small" fullWidth dir="ltr" placeholder="—" value={it.email || ''} disabled={!it.employee_id}
+                                  onChange={e => setItems(prev => prev.map((x, j) => j === i ? { ...x, email: e.target.value } : x))} />
+                              </TableCell>
+                              <TableCell align="center">
+                                {it.has_page ? (
+                                  <Button size="small" variant="text" onClick={() => setPreview({ it })} sx={{ minWidth: 0, fontSize: 11 }}>
+                                    תצוגה
+                                  </Button>
+                                ) : <Chip size="small" color="error" label="חסר" />}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </Collapse>
+                  </Paper>
+                );
+              })}
+            </Stack>
+          </>
         )}
         {log && (
           <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
