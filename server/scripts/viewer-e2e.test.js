@@ -17,11 +17,12 @@
  *   - and the connection host is asserted to be loopback before a single
  *     document is written.
  *
- * KNOWN FAILURES. Six sub-checks are red at the time of writing, and they are
- * left red on purpose: they assert what
- * docs/superpowers/specs/2026-09-07-admin-viewer-role-design.md promises, and
- * the server does something else. See GAPS at the bottom of this file — do not
- * relax the assertion to make the suite green.
+ * HISTORY. Six of these sub-checks were red when the test was first written:
+ * they asserted what
+ * docs/superpowers/specs/2026-09-07-admin-viewer-role-design.md promises and
+ * the server did something else. Both gaps are now closed (see CLOSED GAPS at
+ * the bottom of this file) and all 68 pass. If one of them goes red again, the
+ * server has regressed — do not relax the assertion to make the suite green.
  *
  *   node scripts/viewer-e2e.test.js
  */
@@ -273,7 +274,7 @@ async function main() {
     eq(r.status, 200, '1a GET /api/employees מחזיר 200');
     const names = (r.body?.employees || []).map(e => e.full_name);
     ok(names.includes('רותי מנהלת') && names.includes('מיכל גננת'),
-      '1a [פער G1] GET /api/employees מחזיר משתמשים משני הסניפים',
+      '1a GET /api/employees מחזיר משתמשים משני הסניפים',
       `קיבלנו ${JSON.stringify(names)}`);
 
     // The Employee-model list, which is what the "עובדים" screen reads.
@@ -281,7 +282,7 @@ async function main() {
     eq(rp.status, 200, '1b GET /api/payroll/employees מחזיר 200');
     const empNames = (rp.body?.employees || []).map(e => e.full_name);
     ok(empNames.includes('דנה תל אביב') && empNames.includes('נועה כפר סבא'),
-      '1b [פער G1] GET /api/payroll/employees מחזיר עובדים משני הסניפים',
+      '1b GET /api/payroll/employees מחזיר עובדים משני הסניפים',
       `קיבלנו ${JSON.stringify(empNames)}`);
 
     const ra = await request({ path: '/api/admin/users', token: tokens.viewer });
@@ -291,7 +292,7 @@ async function main() {
     eq(rm.status, 200, '1d GET /api/payroll-month מחזיר 200');
     const branchesInView = (rm.body?.branches || []).map(b => b.name);
     ok(branchesInView.includes('תל אביב') && branchesInView.includes('כפר סבא'),
-      '1d [פער G1] טבלת השכר של הצופה כוללת את שני הסניפים',
+      '1d טבלת השכר של הצופה כוללת את שני הסניפים',
       `קיבלנו ${JSON.stringify(branchesInView)}`);
   }
 
@@ -360,9 +361,9 @@ async function main() {
       body: { employee_id: String(empB1._id), date: pastDate(6), in_time: '08:00', out_time: '16:00', note: noteB },
     });
     const madeB = await punchesByNote(noteB);
-    eq(rB.status, 202, '3b [פער G2] הצופה מחתימה בסניף שאינו בניהולה → 202 (נשמר לאישור)');
-    eq(rB.body?.proposed, true, '3b [פער G2] התשובה מסמנת proposed: true');
-    eq(madeB.length, 0, '3b [פער G2] לא נוצרה החתמה לפני אישור');
+    eq(rB.status, 202, '3b הצופה מחתימה בסניף שאינו בניהולה → 202 (נשמר לאישור)');
+    eq(rB.body?.proposed, true, '3b התשובה מסמנת proposed: true');
+    eq(madeB.length, 0, '3b לא נוצרה החתמה לפני אישור');
 
     // A viewer with NO managed branches always takes the propose() path, so
     // this is the one that reliably produces the proposal checks 4 needs.
@@ -591,24 +592,24 @@ main()
   });
 
 /* ------------------------------------------------------------------ *
- * GAPS — the two things this test found, deliberately left failing.
+ * CLOSED GAPS — what this test found, and where it was fixed.
  *
- * G1  The viewer's "reads every branch" rule lives only in
- *     utils/branch-scope.js#resolveBranchScope, and the three list endpoints
- *     that matter never call it. Each does its own inline role test and so
- *     confines the viewer to her own / managed branch:
- *       - controllers/employee.controller.js#getAll      (`role !== 'system_admin'` → own branch_id)
- *       - controllers/payroll.controller.js#listEmployees (managed branches only)
- *       - controllers/payrollMonth.controller.js#getMonth (managed branches only)
- *     The design document says lists, dashboards and payroll tables cover
- *     every branch for a viewer, exactly as the admin sees them.
- *     Failing: 1a, 1b, 1d.
+ * G1  The viewer's "reads every branch" rule lived only in
+ *     utils/branch-scope.js#resolveBranchScope, and the list endpoints that
+ *     matter never called it — each did its own inline `role ===
+ *     'system_admin'` test and confined the viewer to her own / managed
+ *     branch (employee.controller#getAll, payroll.controller#listEmployees,
+ *     payrollMonth.controller#getMonth, and ~33 more sites).
+ *     Fixed in middleware/auth.js#presentViewerAsAdminForReads: on a READ
+ *     outside /api/admin and /api/auth the viewer's role becomes
+ *     'system_admin' and her true role is kept as `actual_role`, so all 36
+ *     inline tests are answered at once. See scripts/viewer-auth-swap.test.js.
+ *     Was failing: 1a, 1b, 1d.
  *
- * G2  controllers/payroll.controller.js#createManualPunches has NO branch
- *     scope check. Rule 3 of the design (fall back to branch_manager, let the
- *     controller's own 403 become a proposal) therefore has no 403 to convert:
- *     a viewer with managed branches writes a punch straight into a branch she
- *     does not manage, as `pending_accountant`. The same gap lets an ordinary
- *     branch_manager punch for any branch, so it predates this feature.
- *     Failing: 3b.
+ * G2  controllers/payroll.controller.js#createManualPunches had NO branch
+ *     scope check, so rule 3 of the design (fall back to branch_manager, let
+ *     the controller's own 403 become a proposal) had no 403 to convert.
+ *     Fixed by a canAccessBranch() guard there — and by the same guard on
+ *     editPunch / approvePunch / rejectPunch / deletePunch, which were missing
+ *     it too. Was failing: 3b.
  * ------------------------------------------------------------------ */

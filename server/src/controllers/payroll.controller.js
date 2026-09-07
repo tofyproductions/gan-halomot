@@ -18,6 +18,7 @@ const staffClassrooms = require('../services/staffClassrooms');
 const userSync = require('../services/userSync');
 const form101 = require('../services/form101');
 const { scanForm101 } = require('../services/form101Scan');
+const { canAccessBranch } = require('../utils/branch-scope');
 
 // --- helpers --------------------------------------------------------------
 
@@ -2074,6 +2075,25 @@ async function createManualPunches(req, res, next, opts = {}) {
     const punchBranchId = (req.body.branch_id && mongoose.isValidObjectId(req.body.branch_id))
       ? req.body.branch_id : emp.branch_id;
 
+    /**
+     * Whose branch is this, anyway?
+     *
+     * There was no check at all here: the route asks for a role, and a
+     * branch_manager who has one could file a punch — for anybody, in any
+     * branch, straight into `pending_accountant`. The employee portal is the
+     * one caller that must skip this (`opts.selfReport`): an employee reports
+     * her own forgotten punch, has no branch scope of her own, and
+     * createPunchRequest has already checked the branch is one she works at.
+     *
+     * canAccessBranch re-reads the role from the database, so under the
+     * viewer's branch_manager fallback it still sees `admin_viewer` on this
+     * write and answers with her managed branches — and the 403 below is what
+     * the middleware turns into a proposal for the branches she does not run.
+     */
+    if (!opts.selfReport && !(await canAccessBranch(req, punchBranchId))) {
+      return res.status(403).json({ error: 'ניתן להחתים רק בסניפים שבניהולך' });
+    }
+
     // Approval chain (accountant is final). A salary-affecting punch entered by
     // a branch manager is NOT counted until the accountant approves it.
     //   - accountant / system_admin → approved immediately (final authority)
@@ -2259,6 +2279,12 @@ async function deletePunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Same scope rule as createManualPunches above: a punch belongs to a
+    // branch, and only somebody who runs that branch may change it. Under the
+    // viewer's manager fallback this 403 becomes a proposal.
+    if (!(await canAccessBranch(req, p.branch_id))) {
+      return res.status(403).json({ error: 'ההחתמה שייכת לסניף שאינו בניהולך' });
+    }
     // Deleting a generated fixed-schedule punch means "she didn't work that
     // day". Record it as an exception, otherwise the next materialization pass
     // would simply put the day back.
@@ -2639,6 +2665,12 @@ async function approvePunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Same scope rule as createManualPunches above: a punch belongs to a
+    // branch, and only somebody who runs that branch may change it. Under the
+    // viewer's manager fallback this 403 becomes a proposal.
+    if (!(await canAccessBranch(req, p.branch_id))) {
+      return res.status(403).json({ error: 'ההחתמה שייכת לסניף שאינו בניהולך' });
+    }
     const role = req.user.role;
     const isFinal = role === 'system_admin' || role === 'accountant';
     const isManager = role === 'branch_manager' || role === 'system_admin';
@@ -2702,6 +2734,12 @@ async function rejectPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Same scope rule as createManualPunches above: a punch belongs to a
+    // branch, and only somebody who runs that branch may change it. Under the
+    // viewer's manager fallback this 403 becomes a proposal.
+    if (!(await canAccessBranch(req, p.branch_id))) {
+      return res.status(403).json({ error: 'ההחתמה שייכת לסניף שאינו בניהולך' });
+    }
     // Refusing a correction to a punch that was already counting means "keep
     // the original", not "throw the day away". Marking a real clock record
     // 'rejected' would remove hours the employee genuinely worked, which is
@@ -2737,6 +2775,12 @@ async function editPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
+    // Same scope rule as createManualPunches above: a punch belongs to a
+    // branch, and only somebody who runs that branch may change it. Under the
+    // viewer's manager fallback this 403 becomes a proposal.
+    if (!(await canAccessBranch(req, p.branch_id))) {
+      return res.status(403).json({ error: 'ההחתמה שייכת לסניף שאינו בניהולך' });
+    }
 
     /**
      * A branch manager changing a time that is ALREADY in the salary.
