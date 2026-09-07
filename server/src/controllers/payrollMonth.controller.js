@@ -9,6 +9,7 @@ const {
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
   User, PunchEntryTask, PayrollRollup,
 } = require('../models');
+const { ADMIN_VIEWER } = require('../constants/roles');
 const env = require('../config/env');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
 const {
@@ -2213,6 +2214,11 @@ function decidesPayroll(user) {
   return user?.role === 'system_admin' || user?.role === 'accountant';
 }
 
+/** The viewer files for every branch: the approval is the gate, not the scope. */
+function filesForAllBranches(user) {
+  return user?.role === ADMIN_VIEWER;
+}
+
 /** The branches a non-accountant user is allowed to touch. */
 function managedBranchIds(user) {
   const managed = (user?.managed_branch_ids || []).map(String);
@@ -3318,7 +3324,7 @@ async function createChangeRequest(req, res, next) {
     // A manager files for her own staff. The route let any authenticated
     // manager name any employee_id, which the review screen would then show as
     // a request from the wrong branch about someone she has never met.
-    if (!decidesPayroll(req.user)) {
+    if (!decidesPayroll(req.user) && !filesForAllBranches(req.user)) {
       const allowed = managedBranchIds(req.user);
       const outsider = emps.find(e => !allowed.includes(String(e.branch_id?._id || e.branch_id)));
       if (outsider) {

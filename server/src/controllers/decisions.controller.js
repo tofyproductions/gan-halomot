@@ -12,7 +12,7 @@
  * person only, and marks as new anything decided since she last looked.
  */
 const {
-  PayrollChangeRequest, EmployeeChangeRequest, RateChangeRequest, Employee, User, Punch,
+  PayrollChangeRequest, EmployeeChangeRequest, RateChangeRequest, Employee, User, Punch, ProposedChange,
 } = require('../models');
 
 /** How far back the list reaches. Older than this is history, not news. */
@@ -30,6 +30,7 @@ const HE_STATUS = {
   approved: 'אושרה',
   rejected: 'נדחתה',
   partially_approved: 'אושרה חלקית',
+  failed: 'נכשלה',
 };
 
 /** '₪1,200' / '3' / '—' — a value as the manager wrote or would read it. */
@@ -37,6 +38,23 @@ function showValue(v) {
   if (v === null || v === undefined || v === '') return '—';
   if (typeof v === 'boolean') return v ? 'כן' : 'לא';
   return String(v);
+}
+
+/** A decided proposal (a viewer's queued write) as one card on this screen. */
+function proposalToDecisionItem(p) {
+  const note = p.decision_note || (p.status === 'failed' ? (p.apply_error || '') : '');
+  return {
+    id: String(p._id),
+    kind: 'proposed',
+    kind_label: 'שינוי לאישור',
+    title: `${p.screen_label || 'מסך אחר'}${p.branch_name ? ` · ${p.branch_name}` : ''}`,
+    status: p.status,
+    status_label: HE_STATUS[p.status] || p.status,
+    decided_at: p.decided_at,
+    decided_by_name: p.decided_by_name || '',
+    note,
+    lines: (p.summary || []).map(r => ({ label: r.label, who: '', from: '', to: r.value, decision: p.status })),
+  };
 }
 
 /**
@@ -56,7 +74,7 @@ async function myDecisions(req, res, next) {
     const me = await User.findById(userId).select('decisions_seen_at').lean();
     const seenAt = me?.decisions_seen_at ? new Date(me.decisions_seen_at) : null;
 
-    const [payroll, employee, rates] = await Promise.all([
+    const [payroll, employee, rates, proposals] = await Promise.all([
       PayrollChangeRequest.find({
         requested_by: userId,
         status: { $in: ['approved', 'rejected', 'partially_approved'] },
@@ -72,6 +90,12 @@ async function myDecisions(req, res, next) {
       RateChangeRequest.find({
         requested_by: userId,
         status: { $in: ['approved', 'rejected'] },
+        decided_at: { $gte: since },
+      }).sort({ decided_at: -1 }).limit(100).lean(),
+
+      ProposedChange.find({
+        requested_by: userId,
+        status: { $in: ['approved', 'rejected', 'failed'] },
         decided_at: { $gte: since },
       }).sort({ decided_at: -1 }).limit(100).lean(),
     ]);
@@ -216,6 +240,8 @@ async function myDecisions(req, res, next) {
       });
     }
 
+    for (const p of proposals) items.push(proposalToDecisionItem(p));
+
     // A request with no decision time sorts last rather than first: Date(null)
     // is 1970, and a row with a missing timestamp is not the newest news.
     items.sort((a, b) => (
@@ -250,4 +276,4 @@ async function markSeen(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { myDecisions, markSeen, showValue };
+module.exports = { myDecisions, markSeen, showValue, proposalToDecisionItem };

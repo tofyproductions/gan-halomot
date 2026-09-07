@@ -57,7 +57,8 @@
     "test:viewer-scope": "node scripts/viewer-branch-scope.test.js",
     "test:proposed-apply": "node scripts/proposed-change-apply.test.js",
     "test:proposed-wire": "node scripts/proposed-change-wire.test.js",
-    "test:proposed-controller": "node scripts/proposed-change-controller.test.js"
+    "test:proposed-controller": "node scripts/proposed-change-controller.test.js",
+    "test:proposed-decisions": "node scripts/proposed-change-decisions.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
