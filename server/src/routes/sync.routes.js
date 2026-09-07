@@ -1,15 +1,15 @@
 const express = require('express');
 const crypto = require('crypto');
 
-const PunchEntryTask = require('../models/PunchEntryTask');
-const EmployeeRequest = require('../models/EmployeeRequest');
-const EmployeeChangeRequest = require('../models/EmployeeChangeRequest');
-// Required for their own sake, not for a reference in this file: populate()
-// resolves a ref by MODEL NAME at query time, and if nothing has registered
-// Branch or Employee yet, mongoose throws MissingSchemaError from inside the
-// query. Importing them here makes that impossible to get wrong.
-require('../models/Branch');
-require('../models/Employee');
+// Through the index, not the model files one by one. src/models/index.js
+// registers the viewer write guard (utils/viewerWriteGuard) before it requires
+// a single model, and mongoose bakes middleware into a model when the model is
+// compiled — so a file that compiles Branch or Employee by reaching past the
+// index leaves those two models permanently unguarded.
+//
+// It also does what the direct requires were here for: populate() resolves a
+// ref by MODEL NAME at query time, and the index registers every one of them.
+const { PunchEntryTask, EmployeeRequest, EmployeeChangeRequest } = require('../models');
 
 const router = express.Router();
 

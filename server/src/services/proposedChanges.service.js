@@ -49,8 +49,21 @@ function defaultModels() {
 /**
  * Save the request as a ProposedChange and answer 202.
  * Returns the saved document. `models` is injectable for tests.
+ *
+ * FILING A PROPOSAL IS ITSELF A WRITE, and utils/viewerWriteGuard refuses a
+ * write made on a viewer's request that no route gate claimed — which is
+ * exactly the request we are here to file. Left alone, the guard would refuse
+ * its own proposal and the viewer's change would be lost with a 500 instead of
+ * queued. So the whole of it runs OUTSIDE the viewer-write context, for every
+ * caller: the 403→202 wrapper in middleware/auth.js, the guard itself, and the
+ * error handler. Putting it here rather than at the three call sites means the
+ * fourth caller cannot get it wrong.
  */
-async function propose(req, res, { models } = {}) {
+function propose(req, res, opts = {}) {
+  return require('../utils/viewerContext').runOutside(() => fileProposal(req, res, opts));
+}
+
+async function fileProposal(req, res, { models } = {}) {
   const M = models || defaultModels();
   // Typed ObjectId on the document: a body carrying anything else would make
   // create() throw, and a bad branch id is not a reason to lose the request.

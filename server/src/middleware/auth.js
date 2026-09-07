@@ -5,6 +5,7 @@ const {
   startsWithPrefix,
 } = require('../utils/viewer');
 const { ADMIN_VIEWER } = require('../constants/roles');
+const viewerContext = require('../utils/viewerContext');
 
 /**
  * A valid signature is not the same as "issued for this customer".
@@ -59,18 +60,57 @@ function proposeInstead(req, res) {
  * through untouched, and an upload stays refused because a file cannot be
  * stored for later.
  *
- * Whatever the outcome, the wrapper uninstalls itself and undoes the fallback
- * (role back to admin_viewer, viewerFallback cleared) before the response
- * goes out — a controller that answers 200 under the fallback must not leave
- * the rest of the request thinking it is still a branch manager.
+ * Whatever the outcome, the wrapper undoes the fallback (role back to
+ * admin_viewer, viewerFallback cleared) before the response goes out — a
+ * controller that answers 200 under the fallback must not leave the rest of
+ * the request thinking it is still a branch manager. `req.viewerUndoFallback`
+ * exposes that undo so the write guard can do the same before it files.
+ *
+ * SECOND JOB — swallowing what comes after a proposal. utils/viewerWriteGuard
+ * refuses an unclaimed write at the mongoose layer: it files the proposal,
+ * answers 202 itself, and then REJECTS the operation so the database is never
+ * touched. The controller sees that rejection as an ordinary failure and tries
+ * to answer — `next(err)` into the error handler, or its own
+ * `res.status(500).json(...)`. Both would land on a response that has already
+ * gone out and throw ERR_HTTP_HEADERS_SENT. So once a proposal has been filed
+ * AND answered, res.status/json/send/end become no-ops that return `res`.
+ * Before that moment they are untouched — which is what lets propose() write
+ * its own 202 through them.
  */
 function convert403ToProposal(req, res) {
   const originalJson = res.json.bind(res);
-  res.json = function (body) {
-    res.json = originalJson;
+  const originalSend = typeof res.send === 'function' ? res.send.bind(res) : null;
+  const originalEnd = typeof res.end === 'function' ? res.end.bind(res) : null;
+  const originalStatus = res.status.bind(res);
+
+  // headersSent is the "already answered" half; the context flag is the "this
+  // was a proposal, not a real reply" half. Both, or we would be silencing an
+  // ordinary controller response.
+  const silenced = () => res.headersSent && viewerContext.get()?.proposed === true;
+
+  let undone = false;
+  const undo = () => {
+    if (undone) return;
+    undone = true;
     req.user.role = ADMIN_VIEWER;
     delete req.viewerFallback;
-    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
+  };
+  req.viewerUndoFallback = undo;
+
+  let converted = false;
+  res.status = function (code) {
+    if (silenced()) return res;
+    return originalStatus(code);
+  };
+  if (originalSend) res.send = function (...args) { return silenced() ? res : originalSend(...args); };
+  if (originalEnd) res.end = function (...args) { return silenced() ? res : originalEnd(...args); };
+  res.json = function (body) {
+    if (silenced()) return res;
+    undo();
+    // `converted` keeps propose()'s own 202 — which comes back through here —
+    // from being read as a fresh reply to convert.
+    if (converted || res.statusCode !== 403 || res.headersSent) return originalJson(body);
+    converted = true;
     if (isMultipart(req)) return originalJson(NO_UPLOAD);
     res.statusCode = 200;
     proposeInstead(req, res);
@@ -113,12 +153,20 @@ const NO_WRITE_GATE_PREFIXES = ['/api/auth'];
  *      that does not answers 403 — and so does requireTabWrite, and so does a
  *      controller refusing a branch that is not hers. Every one of those
  *      becomes a proposal, which is the design's "never a hard error".
+ *
+ *      ...and where NOTHING answers 403 — the 77 staff write routes that carry
+ *      no gate at all — the bet above has nothing to win with. So the rest of
+ *      the request runs inside a viewer-write context (utils/viewerContext):
+ *      every gate that lets her through claims it, and utils/viewerWriteGuard
+ *      refuses any mongoose write on a context nobody claimed, filing it as a
+ *      proposal before the database is touched.
  *   4. No managed branches → an upload is refused (a file cannot be queued),
  *      anything else is filed for approval on the spot.
  *
- * Returns true when it has already answered; the caller must not call next().
+ * Returns true when it has taken the request over — either it answered, or it
+ * called `next` itself inside the context. The caller must not call next().
  */
-function decideViewerWrite(req, res) {
+function decideViewerWrite(req, res, next) {
   if (!isViewer(req.user) || isRead(req)) return false;
   const path = pathOnly(req.originalUrl);
   if (NO_WRITE_GATE_PREFIXES.some(p => startsWithPrefix(path, p))) return false;
@@ -141,7 +189,11 @@ function decideViewerWrite(req, res) {
     req.user.role = 'branch_manager';
     req.viewerFallback = true;
     convert403ToProposal(req, res);
-    return false;
+    // The whole rest of the request runs in here — Express carries the async
+    // context across every await, so the controller five middlewares later is
+    // still inside it and so is the mongoose write it makes.
+    viewerContext.runViewerWrite(req, res, () => next());
+    return true;
   }
   if (isMultipart(req)) {
     res.status(403).json(NO_UPLOAD);
@@ -231,7 +283,7 @@ function authMiddleware(req, res, next) {
 
     req.user = decoded;
     presentViewerAsAdminForReads(req);
-    if (decideViewerWrite(req, res)) return;
+    if (decideViewerWrite(req, res, next)) return;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -258,7 +310,7 @@ function optionalAuth(req, res, next) {
   if (!sameTenant(req, decoded)) return next();
   req.user = decoded;
   presentViewerAsAdminForReads(req);
-  if (decideViewerWrite(req, res)) return;
+  if (decideViewerWrite(req, res, next)) return;
   next();
 }
 
@@ -361,7 +413,13 @@ function requireTab(tabId, ...defaultRoles) {
     const has = (list) => Array.isArray(list) && list.includes(tabId);
 
     const tabGranted = () => {
-      if (!isViewer(u)) return next();
+      // Under the manager fallback isViewer() is already false, so this is the
+      // line that lets a fallback viewer through on a tab somebody granted her.
+      // That is a deliberate yes, so it claims the write (see viewerContext).
+      if (!isViewer(u)) {
+        if (req.viewerFallback) viewerContext.claim(`requireTab:${tabId}:override`);
+        return next();
+      }
       // A tab handed to her on the permissions screen is not a key to
       // /api/admin. viewerGate refuses the blocked prefixes before anything
       // else; the override path has to do the same, on the read as well as
@@ -375,7 +433,10 @@ function requireTab(tabId, ...defaultRoles) {
     if (has(u.tab_overrides_add)) return tabGranted();
     if (has(u.role_tab_remove)) return res.status(403).json(DENIED);
     if (has(u.role_tab_add)) return tabGranted();
-    if (defaultRoles.includes(u.role)) return next();
+    if (defaultRoles.includes(u.role)) {
+      if (req.viewerFallback) viewerContext.claim(`requireTab:${tabId}`);
+      return next();
+    }
     if (viewerGate(req, res, next, defaultRoles)) return;
     return res.status(403).json(DENIED);
   };
@@ -409,6 +470,7 @@ function requireTabWrite(tabId, ...roles) {
         code: 'READ_ONLY',
       });
     }
+    if (req.viewerFallback) viewerContext.claim(`requireTabWrite:${tabId}`);
     next();
   });
 }
@@ -429,6 +491,10 @@ function requireRole(...roles) {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json(DENIED);
     }
+    // A fallback viewer reaching this line is a viewer whose route names
+    // `branch_manager` among its roles — the gate said yes on purpose, so the
+    // write guard stands down for the rest of the request.
+    if (req.viewerFallback) viewerContext.claim(`requireRole:${roles.join('|')}`);
     next();
   };
 }
@@ -451,8 +517,15 @@ function requireRole(...roles) {
 function requireBranchScope(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   const role = req.user.role;
-  if (role === 'system_admin' || role === 'accountant' || role === 'branch_manager' || role === ADMIN_VIEWER) return next();
-  if ((req.user.managed_branch_ids || []).length > 0) return next();
+  // Passing a fallback viewer here is the deliberate yes this route has to
+  // give — the controller behind it does its own branch check, and its 403 is
+  // what becomes the proposal. Claimed, so the write guard stands down.
+  const pass = (why) => {
+    if (req.viewerFallback) viewerContext.claim(`requireBranchScope:${why}`);
+    return next();
+  };
+  if (role === 'system_admin' || role === 'accountant' || role === 'branch_manager' || role === ADMIN_VIEWER) return pass('role');
+  if ((req.user.managed_branch_ids || []).length > 0) return pass('managed');
   return res.status(403).json({
     error: 'החשבון שלך אינו מוגדר כמנהל/ת סניף ולא משויכים אליו סניפים לניהול. '
       + 'אם ההרשאה ניתנה זה עתה — יש להתנתק ולהתחבר מחדש כדי לרענן אותה.',
