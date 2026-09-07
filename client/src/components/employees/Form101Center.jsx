@@ -620,7 +620,7 @@ function ScanSettings() {
  */
 export default function Form101Center() {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'system_admin' || user?.role === 'accountant';
+  const isAdmin = ['system_admin', 'accountant', 'admin_viewer'].includes(user?.role);
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
   const [tab, setTab] = useState(0);

@@ -211,7 +211,7 @@ function MissingChip({ missing }) {
 }
 
 export default function EmployeeManager() {
-  const { isAdmin, isManager, isAccountant } = useAuth();
+  const { isAdmin, isManager, isAccountant, isViewer } = useAuth();
   const navigate = useNavigate();
   // Accountant (הנה"ח) manages employees with the same add/edit rights as a
   // manager — only the visible tab set differs (handled by tab access config).
@@ -986,7 +986,7 @@ export default function EmployeeManager() {
               </TextField>
             </Stack>
             <Stack direction="row" spacing={2}>
-              {(isAdmin || isAllBranches) && (
+              {(isAdmin || isViewer || isAllBranches) && (
                 <TextField label="סניף ראשי" select required value={dialog.data.branch_id || ''}
                   onChange={e => updateField('branch_id', e.target.value)} fullWidth
                   helperText={!dialog.data.branch_id ? 'בחר סניף ראשי לעובד' : ' '}>
