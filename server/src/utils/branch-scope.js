@@ -64,8 +64,10 @@ async function canAccessBranch(req, branchId) {
  * mechanism exists to prevent.
  *
  * So the read stays all-branch and the side effect is narrowed to what she
- * may actually write. `actual_role` is set by middleware/auth.js only on a
- * read it swapped; every other caller gets the list back untouched.
+ * may actually write. `actual_role` is set by middleware/auth.js whenever it
+ * serves a viewer as somebody else — the read swap, and the branch_manager
+ * write fallback; every other caller gets the list back untouched. (Only the
+ * two GETs above call this, so the write fallback never reaches it.)
  */
 function materializeScope(req, readBranchIds) {
   if (req?.user?.actual_role !== ADMIN_VIEWER) return readBranchIds;

@@ -36,6 +36,121 @@ function sameTenant(req, decoded) {
  */
 const NO_ROLE_SWAP_PREFIXES = ['/api/admin', '/api/auth'];
 
+const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
+const NO_UPLOAD = {
+  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
+  code: 'VIEWER_NO_UPLOAD',
+};
+
+/** Queue this write for approval. Lazy require: the service loads the models. */
+function proposeInstead(req, res) {
+  const { propose } = require('../services/proposedChanges.service');
+  return propose(req, res).catch((err) => {
+    console.error('[viewer] propose failed', err.message);
+    if (!res.headersSent) res.status(500).json({ error: 'שמירת השינוי לאישור נכשלה', detail: err.message });
+  });
+}
+
+/**
+ * Under the manager fallback (decideViewerWrite below), whatever answers 403
+ * is saying "not one of your branches" — a controller's scope check,
+ * requireRole on a route managers may not use, requireTabWrite's READ_ONLY. For a viewer that is not a refusal — it is the
+ * case that goes to approval. Swap res.json once; anything but a 403 passes
+ * through untouched, and an upload stays refused because a file cannot be
+ * stored for later.
+ *
+ * Whatever the outcome, the wrapper uninstalls itself and undoes the fallback
+ * (role back to admin_viewer, viewerFallback cleared) before the response
+ * goes out — a controller that answers 200 under the fallback must not leave
+ * the rest of the request thinking it is still a branch manager.
+ */
+function convert403ToProposal(req, res) {
+  const originalJson = res.json.bind(res);
+  res.json = function (body) {
+    res.json = originalJson;
+    req.user.role = ADMIN_VIEWER;
+    delete req.viewerFallback;
+    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
+    if (isMultipart(req)) return originalJson(NO_UPLOAD);
+    res.statusCode = 200;
+    proposeInstead(req, res);
+    return res;
+  };
+}
+
+
+/**
+ * Prefixes where a viewer's WRITE is left alone.
+ *
+ *   /api/auth — her own account. Choosing a password, logging out, enrolling
+ *     a passkey: proposing those to the admin would be absurd, and
+ *     set-password is the ONE write a must_change_password token exists to
+ *     make.
+ */
+const NO_WRITE_GATE_PREFIXES = ['/api/auth'];
+
+/**
+ * On a WRITE, a viewer never writes — decided once, here, for every route.
+ *
+ * This used to live in requireRole/requireTab, which meant it only ran on a
+ * route that carried one of them. 77 staff write routes carry neither
+ * (branches, suppliers, products, orders, discounts, holidays, activities,
+ * registrations, collections, children, archives, gantt, the content bank,
+ * contracts, the supply list, recruitment), and on those the viewer simply
+ * wrote: PUT /api/branches/:id answered 200 and no proposal was ever filed.
+ * A rule that depends on somebody remembering to attach a gate is not the
+ * rule — so it moves next to the read swap, where every authenticated request
+ * already passes exactly once.
+ *
+ * In order:
+ *   1. /api/auth — untouched (above).
+ *   2. /api/admin, /api/proposed-changes — 403, and no proposal. Deciding a
+ *      proposal is not a thing to propose.
+ *   3. She holds managed branches → the request continues as a branch_manager
+ *      (this request only; the JWT is untouched) with the 403→202 wrapper
+ *      installed. requireRole then sees `branch_manager`: a route that allows
+ *      managers passes and the controller's own scope check decides; a route
+ *      that does not answers 403 — and so does requireTabWrite, and so does a
+ *      controller refusing a branch that is not hers. Every one of those
+ *      becomes a proposal, which is the design's "never a hard error".
+ *   4. No managed branches → an upload is refused (a file cannot be queued),
+ *      anything else is filed for approval on the spot.
+ *
+ * Returns true when it has already answered; the caller must not call next().
+ */
+function decideViewerWrite(req, res) {
+  if (!isViewer(req.user) || isRead(req)) return false;
+  const path = pathOnly(req.originalUrl);
+  if (NO_WRITE_GATE_PREFIXES.some(p => startsWithPrefix(path, p))) return false;
+  if (isBlockedForViewer(path) || isWriteBlockedForViewer(path)) {
+    res.status(403).json(DENIED);
+    return true;
+  }
+  // From here the request is decided. The flag says so, so viewerGate below —
+  // kept as a fallback for a router mounted without this middleware — does not
+  // decide it a second time and file the change twice.
+  req.viewerHandled = true;
+  if ((req.user.managed_branch_ids || []).length > 0) {
+    // `actual_role` on the write for the same reason it is set on the read:
+    // a handful of places must still be able to tell who this really is.
+    // payrollMonth#createChangeRequest is the one that matters — the design
+    // says a viewer stages payroll rows for EVERY branch, and it recognises
+    // her by role. Under the fallback the role says branch_manager, so the
+    // truth has to travel beside it.
+    req.user.actual_role = ADMIN_VIEWER;
+    req.user.role = 'branch_manager';
+    req.viewerFallback = true;
+    convert403ToProposal(req, res);
+    return false;
+  }
+  if (isMultipart(req)) {
+    res.status(403).json(NO_UPLOAD);
+    return true;
+  }
+  proposeInstead(req, res);
+  return true;
+}
+
 /**
  * On a READ, a viewer IS the admin.
  *
@@ -51,8 +166,7 @@ const NO_ROLE_SWAP_PREFIXES = ['/api/admin', '/api/auth'];
  * read the token's role becomes 'system_admin' and the true role is kept as
  * `actual_role` for the handful of places that must still tell the two apart
  * (her own proposals list and its badge, her own payroll change requests).
- * Writes are untouched — they arrive as `admin_viewer` and go through
- * viewerGate exactly as before.
+ * The WRITE is decided next door, in decideViewerWrite above.
  */
 function presentViewerAsAdminForReads(req) {
   if (!isViewer(req.user) || !isRead(req)) return;
@@ -117,6 +231,7 @@ function authMiddleware(req, res, next) {
 
     req.user = decoded;
     presentViewerAsAdminForReads(req);
+    if (decideViewerWrite(req, res)) return;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Invalid or expired token' });
@@ -124,63 +239,27 @@ function authMiddleware(req, res, next) {
 }
 
 /**
- * Optional auth - attaches user if token present, continues if not
+ * Optional auth - attaches user if token present, continues if not.
+ *
+ * A token that IS present gets the same treatment as under authMiddleware:
+ * a viewer's read is the admin's read, and her write is decided rather than
+ * performed. A route that lets anonymous callers through is not a route that
+ * lets a viewer write.
  */
 function optionalAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     return next();
   }
+  let decoded = null;
   try {
-    const token = header.split(' ')[1];
-    const decoded = jwt.verify(token, env.JWT_SECRET);
-    if (sameTenant(req, decoded)) {
-      req.user = decoded;
-      presentViewerAsAdminForReads(req);
-    }
-  } catch {}
+    decoded = jwt.verify(header.split(' ')[1], env.JWT_SECRET);
+  } catch { return next(); }
+  if (!sameTenant(req, decoded)) return next();
+  req.user = decoded;
+  presentViewerAsAdminForReads(req);
+  if (decideViewerWrite(req, res)) return;
   next();
-}
-
-const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
-const NO_UPLOAD = {
-  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
-  code: 'VIEWER_NO_UPLOAD',
-};
-
-/** Queue this write for approval. Lazy require: the service loads the models. */
-function proposeInstead(req, res) {
-  const { propose } = require('../services/proposedChanges.service');
-  return propose(req, res).catch((err) => {
-    console.error('[viewer] propose failed', err.message);
-    if (!res.headersSent) res.status(500).json({ error: 'שמירת השינוי לאישור נכשלה', detail: err.message });
-  });
-}
-
-/**
- * Under the manager fallback (below), a controller that answers 403 is saying
- * "not one of your branches". For a viewer that is not a refusal — it is the
- * case that goes to approval. Swap res.json once; anything but a 403 passes
- * through untouched, and an upload stays refused because a file cannot be
- * stored for later.
- *
- * Whatever the outcome, the wrapper uninstalls itself and undoes the fallback
- * (role back to admin_viewer, viewerFallback cleared) before the response
- * goes out — a controller that answers 200 under the fallback must not leave
- * the rest of the request thinking it is still a branch manager.
- */
-function convert403ToProposal(req, res) {
-  const originalJson = res.json.bind(res);
-  res.json = function (body) {
-    res.json = originalJson;
-    req.user.role = ADMIN_VIEWER;
-    delete req.viewerFallback;
-    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
-    if (isMultipart(req)) return originalJson(NO_UPLOAD);
-    res.statusCode = 200;
-    proposeInstead(req, res);
-    return res;
-  };
 }
 
 /**
@@ -191,6 +270,13 @@ function convert403ToProposal(req, res) {
  * approval otherwise.
  */
 function viewerWriteGate(req, res, next, roles) {
+  // authMiddleware decided this request already (decideViewerWrite) and left
+  // the flag behind. Either it answered — in which case nothing here ever runs
+  // — or it swapped the role to branch_manager, in which case isViewer() is
+  // false and viewerGate never reaches this line. Arriving anyway means a
+  // caller invoked the gate on a request that was refused upstream, so the
+  // answer is the refusal, not a second proposal on top of the first.
+  if (req.viewerHandled) return res.status(403).json(DENIED);
   if (isWriteBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
   const managed = req.user.managed_branch_ids || [];
   if (roles.includes('branch_manager') && managed.length > 0) {
@@ -210,13 +296,15 @@ function viewerWriteGate(req, res, next, roles) {
  *   reads  — wherever a system admin may read, except /api/admin;
  *   writes — see viewerWriteGate; refused for /api/admin and for uploads.
  *
- * Since presentViewerAsAdminForReads (above) already turns a viewer's read
- * into a system_admin read before any route runs, the read branch below is
- * reached only where the swap deliberately did not happen — under /api/admin,
- * which isBlockedForViewer refuses first — or from a caller that never went
- * through authMiddleware (the unit tests do exactly that). It is kept because
- * a gate that depends on an earlier middleware having run is a gate that
- * opens the day somebody mounts a route without it.
+ * Both halves of that rule are now applied by authMiddleware itself — the
+ * read swap (presentViewerAsAdminForReads) and the write decision
+ * (decideViewerWrite) — before any route runs. So this is a FALLBACK: it is
+ * reached only where the swap deliberately did not happen (under /api/admin,
+ * which isBlockedForViewer refuses first), or from a caller that never went
+ * through authMiddleware — a router mounted without it, and the unit tests,
+ * which do exactly that. It is kept because a gate that depends on an earlier
+ * middleware having run is a gate that opens the day somebody mounts a route
+ * without it; `req.viewerHandled` keeps the two from deciding twice.
  * Every other role passes through untouched: this returns false and the
  * caller runs its own logic.
  *
@@ -274,6 +362,11 @@ function requireTab(tabId, ...defaultRoles) {
 
     const tabGranted = () => {
       if (!isViewer(u)) return next();
+      // A tab handed to her on the permissions screen is not a key to
+      // /api/admin. viewerGate refuses the blocked prefixes before anything
+      // else; the override path has to do the same, on the read as well as
+      // on the write, or a single role-wide grant reopens them.
+      if (isBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
       if (isRead(req)) return next();
       return viewerWriteGate(req, res, next, defaultRoles);
     };
@@ -299,10 +392,11 @@ function requireTab(tabId, ...defaultRoles) {
  * without one of those roles is read-only.
  *
  * Both must pass: the tab (so revoking it revokes everything) and the role.
- * A viewer never reaches this check on a write: requireTab's own viewer path
- * either proposes the change or falls back to branch_manager before this
- * callback runs, so the READ_ONLY response below is for the seven ordinary
- * roles only.
+ * A viewer reaches this check only under the branch_manager fallback, and
+ * only when `roles` does not include managers — in which case the READ_ONLY
+ * 403 below is exactly the refusal that authMiddleware's wrapper turns into a
+ * proposal, which is what the design asks for. For the seven ordinary roles
+ * it is the plain refusal it has always been.
  *
  * Usage: requireTabWrite('clicktac', 'system_admin', 'accountant')
  */

@@ -203,7 +203,7 @@ async function main() {
   /* ---------------------------------------------------------------- *
    * Seed
    * ---------------------------------------------------------------- */
-  const { User, Branch, Employee, ProposedChange, Punch, Setting } = require('../src/models');
+  const { User, Branch, Employee, ProposedChange, Punch, Setting, Supplier, SalaryAdjustment } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const branchA = await Branch.create({ name: 'תל אביב', address: 'הרצל 1' });
@@ -709,6 +709,88 @@ async function main() {
 
     const rm = await request({ path: '/api/rate-changes', token: tokens.manager });
     eq(rm.body?.can_decide, false, '11d מנהלת סניף — מגישה, לא מכריעה');
+  }
+
+  /* ================================================================ *
+   * 12. מסלולים ללא requireRole/requireTab — הצופה עדיין אינה כותבת
+   * ================================================================ */
+  head('בדיקה 12 — מסלולים ללא שער תפקידים');
+  {
+    // The C1 hole: /api/branches, /api/suppliers and 75 more staff write
+    // routes carry no requireRole and no requireTab, and the viewer decision
+    // used to live inside those two. So PUT /api/branches/:id answered 200,
+    // the branch was renamed, and nothing was ever filed. The decision now
+    // sits in authMiddleware, which every one of them passes.
+    const nameBefore = (await Branch.findById(branchB._id).select('name').lean()).name;
+    const r = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer0,
+      body: { name: 'שם שהצופה ניסתה לשנות' },
+    });
+    eq(r.status, 202, '12a PUT /api/branches/:id (מסלול ללא שער) → 202');
+    eq(r.body?.proposed, true, '12a התשובה מסמנת proposed: true');
+    const renameId = r.body?.id;
+    const prop = renameId ? await ProposedChange.findById(renameId).lean() : null;
+    eq(prop?.method, 'PUT', '12a נשמרה ProposedChange עם השיטה');
+    eq(prop?.path, `/api/branches/${branchB._id}`, '12a ועם הנתיב');
+    eq(prop?.screen_label, 'סניפים', '12a תווית המסך היא "סניפים"');
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, nameBefore,
+      '12a שם הסניף לא השתנה במסד');
+
+    const suppliersBefore = await Supplier.countDocuments({});
+    const rs = await request({
+      method: 'POST', path: '/api/suppliers', token: tokens.viewer0,
+      body: { name: 'ספק שהצופה ניסתה להוסיף' },
+    });
+    eq(rs.status, 202, '12b POST /api/suppliers → 202');
+    eq(rs.body?.proposed, true, '12b התשובה מסמנת proposed: true');
+    eq(await Supplier.countDocuments({}), suppliersBefore, '12b לא נוצר ספק');
+
+    // ...and the queued rename really happens once it is approved.
+    const dec = await request({
+      method: 'POST', path: `/api/proposed-changes/${renameId}/decide`,
+      token: tokens.admin, body: { decision: 'approve' },
+    });
+    eq(dec.status, 200, '12c מנהל המערכת מאשר את שינוי השם → 200');
+    eq(dec.body?.proposal?.status, 'approved', '12c ההצעה אושרה');
+    const applyStatus = dec.body?.proposal?.apply_status;
+    ok(applyStatus >= 200 && applyStatus < 300, '12c ההפעלה החוזרת החזירה 2xx',
+      `apply_status=${applyStatus} apply_error=${dec.body?.proposal?.apply_error}`);
+    eq((await Branch.findById(branchB._id).select('name').lean()).name, 'שם שהצופה ניסתה לשנות',
+      '12c ורק עכשיו השם השתנה במסד');
+    // Put it back so nothing downstream reads a renamed branch.
+    await Branch.updateOne({ _id: branchB._id }, { $set: { name: nameBefore } });
+  }
+  {
+    // I2: a route gated only by requireBranchScope. The viewer holds branches,
+    // so she continues as a branch_manager and the controller's own scope
+    // check answers 403 for another branch's employee — which the wrapper
+    // installed in authMiddleware turns into a proposal instead of a wall.
+    const adjBefore = await SalaryAdjustment.countDocuments({});
+    const r = await request({
+      method: 'POST', path: '/api/payroll-month/adjustments', token: tokens.viewer,
+      body: {
+        employee_id: String(empB1._id), month, type: 'money_add',
+        amount: 120, reason: 'E2E-viewer-adjustment',
+      },
+    });
+    eq(r.status, 202, '12d עדכון שכר לעובדת סניף אחר (requireBranchScope בלבד) → 202');
+    eq(r.body?.proposed, true, '12d התשובה מסמנת proposed: true');
+    eq(await SalaryAdjustment.countDocuments({}), adjBefore, '12d לא נוצר עדכון שכר');
+    const prop = await ProposedChange.findById(r.body?.id).lean();
+    eq(prop?.approver, 'accountant', '12d ההצעה מנותבת להנה"ח');
+    eq(prop?.screen_label, 'שכר', '12d תווית המסך היא "שכר"');
+
+    // The same call for her OWN branch is an ordinary manager action: filed as
+    // a pending adjustment, not as a proposal.
+    const rown = await request({
+      method: 'POST', path: '/api/payroll-month/adjustments', token: tokens.viewer,
+      body: {
+        employee_id: String(empA1._id), month, type: 'money_add',
+        amount: 90, reason: 'E2E-viewer-adjustment-own',
+      },
+    });
+    eq(rown.status, 200, '12e ובסניף שבניהולה — 200, כמו כל מנהלת סניף');
+    eq(rown.body?.pending, true, '12e והעדכון ממתין לאישור הנה"ח');
   }
 
   // Referenced so lint/readers see the seeded users are deliberate.

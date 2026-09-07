@@ -2227,7 +2227,12 @@ function decidesPayroll(user) {
 
 /** The viewer files for every branch: the approval is the gate, not the scope. */
 function filesForAllBranches(user) {
-  return user?.role === ADMIN_VIEWER;
+  // The real role, not the one this request is being served under:
+  // authMiddleware runs a viewer's write as a branch_manager (so every
+  // ordinary manager path behaves for her exactly as it does for a manager)
+  // and keeps the truth in `actual_role`. Staging rows for every branch is
+  // precisely the thing that must NOT follow the fallback.
+  return (user?.actual_role || user?.role) === ADMIN_VIEWER;
 }
 
 /** The branches a non-accountant user is allowed to touch. */
