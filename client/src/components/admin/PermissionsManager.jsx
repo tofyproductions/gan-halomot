@@ -16,6 +16,7 @@ import { toast } from 'react-toastify';
 
 const ROLE_LABELS = {
   system_admin: 'מנהל מערכת',
+  admin_viewer: 'מנהל מערכת - לצפייה בלבד',
   branch_manager: 'מנהל סניף',
   accountant: 'הנה"ח',
   class_leader: 'גננת אחראית',

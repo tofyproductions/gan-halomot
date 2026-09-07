@@ -122,7 +122,7 @@ function AppRoutes() {
         <Route path="tmt-reconcile" element={<Navigate to="/external-enrollment?view=tmt" replace />} />
         <Route path="collections" element={<CollectionsTable />} />
         <Route path="pricing" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <PricingManager />
           </ProtectedRoute>
         } />
@@ -134,7 +134,7 @@ function AppRoutes() {
         <Route path="orders/:id/edit" element={<OrderForm />} />
         <Route path="orders/:id" element={<OrderView />} />
         <Route path="stock" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'class_leader', 'cook']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'cook']}>
             <StockPage />
           </ProtectedRoute>
         } />
@@ -142,12 +142,12 @@ function AppRoutes() {
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
         <Route path="payroll" element={
-          <ProtectedRoute roles={['system_admin', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'accountant']}>
             <PayrollPage />
           </ProtectedRoute>
         } />
         <Route path="payroll-updates" element={
-          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'accountant', 'branch_manager']}>
             <PayrollUpdates />
           </ProtectedRoute>
         } />
@@ -155,7 +155,7 @@ function AppRoutes() {
             Separate from /payroll on purpose: that page is the salary table,
             with every employee's rate and net on it. */}
         <Route path="branch-payslips" element={
-          <ProtectedRoute roles={['system_admin', 'accountant', 'branch_manager']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'accountant', 'branch_manager']}>
             <BranchPayslips />
           </ProtectedRoute>
         } />
@@ -186,7 +186,7 @@ function AppRoutes() {
         {/* Editing the lists reshapes the board for every branch, so it stays
             with the people who answer for that. The server enforces the same. */}
         <Route path="nursery/settings" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager']}>
             <NurserySettings />
           </ProtectedRoute>
         } />
@@ -196,32 +196,32 @@ function AppRoutes() {
         <Route path="classes" element={<ClassTrackingPage />} />
         <Route path="maintenance" element={<MaintenancePage />} />
         <Route path="events" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager']}>
             <EventsPage />
           </ProtectedRoute>
         } />
         <Route path="leads" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <LeadsPage />
           </ProtectedRoute>
         } />
         <Route path="recruitment" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <RecruitmentPage />
           </ProtectedRoute>
         } />
         <Route path="parent-letters" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <ParentLettersPage />
           </ProtectedRoute>
         } />
         <Route path="branch-certifications" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <BranchCertificationsPage />
           </ProtectedRoute>
         } />
         <Route path="courses" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <CoursesPage />
           </ProtectedRoute>
         } />
@@ -235,7 +235,7 @@ function AppRoutes() {
         <Route path="employee-requests" element={<RequestsManager />} />
         <Route path="employee-letters" element={<EmployeeLetters />} />
         <Route path="form-101" element={
-          <ProtectedRoute roles={['system_admin', 'branch_manager', 'accountant']}>
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <Form101Center />
           </ProtectedRoute>
         } />

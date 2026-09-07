@@ -8,61 +8,64 @@
 
 export const EMPLOYEE_ROLES = ['teacher', 'assistant', 'class_leader', 'cook'];
 
+// 'admin_viewer' (מנהל מערכת - לצפייה בלבד) is listed wherever 'system_admin'
+// is: the viewer sees every screen the admin sees. Edit rights are decided by
+// the server per request, not by the tab.
 export const TAB_GROUPS = [
   {
     label: 'ניהול',
     items: [
       // Management overview (child counts, branch KPIs) — NOT for regular staff.
-      { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The supervised branches enroll in קליקטאק and are approved by משרד
       // התמ"ת, so their intake is two files rather than the registration flow —
       // and one page, because neither file answers anything on its own.
       // The id stays 'clicktac': per-user tab permissions are stored by id, and
       // renaming it would revoke the screen from whoever was granted it by hand.
-      { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
-      { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'accountant'] },
+      { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+      { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
-      { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       // The equipment-list poster sent to parents (diapers, sheets, a change
       // of clothes) — one shared list, export-to-PNG. Same audience as the
       // documents above, so it sits beside them rather than under חופשות.
-      { id: 'parent_supply_list', label: 'רשימת ציוד', path: '/parent-supply-list', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'parent_supply_list', label: 'רשימת ציוד', path: '/parent-supply-list', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
       // אש — with the expiry dates the mail digest watches.
-      { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
     ],
   },
   {
     label: 'כוח אדם',
     items: [
-      { id: 'employees',          label: 'עובדים',  path: '/employees',          defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'employees',          label: 'עובדים',  path: '/employees',          defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       // Candidates from the website's recruitment form. A branch manager sees
       // only the gans she holds — enforced per row on the server, not by the
       // branch dropdown, because these are private phone numbers of people who
       // do not work here.
-      { id: 'recruitment',        label: 'גיוס',    path: '/recruitment',        defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'recruitment',        label: 'גיוס',    path: '/recruitment',        defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The salary table itself is accountant/admin. A branch manager files what
       // she knows from 'עדכוני שכר' instead — she has no business seeing every
       // employee's rate and net in order to record a bonus.
-      { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'accountant'] },
-      { id: 'payroll_updates',    label: 'עדכוני שכר חודשי', path: '/payroll-updates', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
+      { id: 'payroll',            label: 'שכר',     path: '/payroll',            defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      { id: 'payroll_updates',    label: 'עדכוני שכר חודשי', path: '/payroll-updates', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
       // A payslip that was already SENT to the employee, unlike the salary
       // table above it. It is the document her staff bring to her when they
       // think a month is wrong, so she can answer without the accountant.
-      { id: 'branch_payslips',    label: 'תלושי עובדים', path: '/branch-payslips', defaultRoles: ['system_admin', 'accountant', 'branch_manager'] },
-      { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'branch_manager'] },
-      { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'branch_manager'] },
-      { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
-      { id: 'form_101',           label: 'טופסי 101', path: '/form-101',           defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'branch_payslips',    label: 'תלושי עובדים', path: '/branch-payslips', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+      { id: 'holidays',           label: 'חופשות',  path: '/holidays',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
+      { id: 'employee_requests',  label: 'בקשות',   path: '/employee-requests',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
+      { id: 'employee_letters',   label: 'מסמכים לעובד', path: '/employee-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      { id: 'form_101',           label: 'טופסי 101', path: '/form-101',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       // The tracking sheet, moved in: every עובדת's מד"א and התנהלות בטוחה,
       // when they run out, and the certificate one click away.
-      { id: 'courses',            label: 'קורסים והכשרות', path: '/courses',       defaultRoles: ['system_admin', 'branch_manager', 'accountant'] },
+      { id: 'courses',            label: 'קורסים והכשרות', path: '/courses',       defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
     ],
   },
   {
@@ -71,47 +74,47 @@ export const TAB_GROUPS = [
       // The infant rooms' daily board. Open to the people actually in the
       // room — a teacher needs it more than anyone, and a board filled in by
       // management is a board filled in by somebody who was not there.
-      { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       // Same gate as the board: the person who notices the wipes ran out is in
       // the room, not the office.
-      { id: 'supplies',   label: 'מה חסר',      path: '/supplies', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      { id: 'supplies',   label: 'מה חסר',      path: '/supplies', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       // Parents correct their own details and the change is live at once; this
       // is where the gan finds out. A class leader is on the list because an
       // allergy is their business before it is management's.
-      { id: 'parent_changes', label: 'עדכונים מהורים', path: '/parent-changes', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader'] },
+      { id: 'parent_changes', label: 'עדכונים מהורים', path: '/parent-changes', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant', 'class_leader'] },
       // Whoever takes the photographs uploads them. Requiring a manager means
       // they are uploaded a week later, or not at all.
-      { id: 'photos', label: 'תמונות', path: '/photos', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      { id: 'photos', label: 'תמונות', path: '/photos', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       // Choosing the photograph that goes on the gift. The person who knows
       // which one looks like the child is in the room, not the office — but
       // OPENING a round sets dates for every branch, so the server keeps that
       // to management.
-      { id: 'gifts', label: 'מתנות', path: '/gifts', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
-      { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
-      { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'accountant'] },
-      { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'branch_manager'] },
+      { id: 'gifts', label: 'מתנות', path: '/gifts', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'] },
+      { id: 'gantt',      label: 'גאנט',       path: '/gantt',      defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
+      { id: 'classes',    label: 'מעקב חוגים', path: '/classes',    defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'accountant'] },
+      { id: 'events',     label: 'אירועים',    path: '/events',     defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // What the gan tells the families. A teacher writes it — she is the one
       // who knows the trip is on Thursday — and only a branch manager publishes
       // it, takes it to WhatsApp, or spends the SMS budget on it. The server
       // enforces that split; this only decides who sees the screen.
-      { id: 'announcements', label: 'הודעות לגן', path: '/announcements', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher'] },
+      { id: 'announcements', label: 'הודעות לגן', path: '/announcements', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher'] },
       // What the families reported in advance. Read-only, and open to whoever
       // opens the room: a teacher who finds out at 8am that a child is not
       // coming finds out when the child does not come.
-      { id: 'absences', label: 'היעדרויות', path: '/absences', defaultRoles: ['system_admin', 'branch_manager', 'accountant', 'class_leader', 'teacher'] },
+      { id: 'absences', label: 'היעדרויות', path: '/absences', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant', 'class_leader', 'teacher'] },
       // Who may collect a child. SEEING it is wide on purpose — the person at
       // the door is whoever is closing the room — and only a manager grants.
-      { id: 'pickup', label: 'מורשי איסוף', path: '/pickup', defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      { id: 'pickup', label: 'מורשי איסוף', path: '/pickup', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       { id: 'contacts',   label: 'דף קשר',     path: '/contacts',   defaultRoles: null },
     ],
   },
   {
     label: 'אחזקה ולוגיסטיקה',
     items: [
-      { id: 'orders',       label: 'הזמנות',     path: '/orders',       defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
-      { id: 'stock',        label: 'מעקב מלאי',  path: '/stock',        defaultRoles: ['system_admin', 'branch_manager', 'class_leader', 'cook'] },
-      { id: 'suppliers',    label: 'ספקים',      path: '/suppliers',    defaultRoles: ['system_admin', 'accountant'] },
-      { id: 'maintenance',  label: 'אחזקה',      path: '/maintenance',  defaultRoles: ['system_admin', 'branch_manager', 'class_leader'] },
+      { id: 'orders',       label: 'הזמנות',     path: '/orders',       defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
+      { id: 'stock',        label: 'מעקב מלאי',  path: '/stock',        defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'cook'] },
+      { id: 'suppliers',    label: 'ספקים',      path: '/suppliers',    defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      { id: 'maintenance',  label: 'אחזקה',      path: '/maintenance',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
     ],
   },
   {

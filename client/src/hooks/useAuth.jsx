@@ -103,14 +103,21 @@ export function AuthProvider({ children }) {
   const isAuthenticated = !!user;
   const isAdmin = user?.role === 'system_admin';
   const isAccountant = user?.role === 'accountant';
+  // "מנהל מערכת - לצפייה בלבד": reads what the admin reads across every
+  // branch; acts as a branch manager inside managed_branch_ids; every other
+  // write is queued for approval by the server (202 {proposed:true}).
+  const isViewer = user?.role === 'admin_viewer';
   const isManager = user?.role === 'branch_manager' || isAdmin;
   // Can use the cross-branch "כל הסניפים" view: admins always; accountants
   // (they need cross-branch payroll consolidation); managers who oversee
-  // more than one branch (multi-branch heads like Lidor).
-  const canSeeAllBranches = isAdmin || isAccountant || (user?.managed_branch_ids?.length || 0) > 1;
+  // more than one branch (multi-branch heads like Lidor); viewers always.
+  const canSeeAllBranches = isAdmin || isAccountant || isViewer || (user?.managed_branch_ids?.length || 0) > 1;
+  /** May this person edit rows of this branch directly? */
+  const managesBranch = (branchId) => isAdmin
+    || (user?.managed_branch_ids || []).map(String).includes(String(branchId));
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isManager, canSeeAllBranches }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager, canSeeAllBranches, managesBranch }}>
       {children}
     </AuthContext.Provider>
   );
