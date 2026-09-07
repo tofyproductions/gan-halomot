@@ -1,11 +1,13 @@
 const { Branch, User } = require('../models');
+const { ADMIN_VIEWER } = require('../constants/roles');
 
 async function getAll(req, res, next) {
   try {
     const filter = { is_active: true };
-    // Non-admins see only the branches they manage. system_admin and
-    // accountant always see all branches (accountant needs cross-branch
-    // visibility for payroll consolidation).
+    // Non-admins see only the branches they manage. system_admin, accountant
+    // and admin_viewer always see all branches (accountant needs cross-branch
+    // visibility for payroll consolidation; admin_viewer reads everything —
+    // this is a GET, so her read-only scope is never at risk here).
     //
     // Re-read role + managed branches from the DB rather than trusting the JWT:
     // a token issued before a role/branch change would otherwise keep showing
@@ -17,7 +19,7 @@ async function getAll(req, res, next) {
     const role = dbUser?.role || req.user?.role;
     const managedRaw = dbUser ? (dbUser.managed_branch_ids || []) : (req.user?.managed_branch_ids || []);
     const userBranchId = dbUser ? dbUser.branch_id : req.user?.branch_id;
-    if (role && role !== 'system_admin' && role !== 'accountant') {
+    if (role && role !== 'system_admin' && role !== 'accountant' && role !== ADMIN_VIEWER) {
       const managed = managedRaw.map(String);
       if (managed.length > 0) {
         filter._id = { $in: managed };

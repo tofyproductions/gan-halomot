@@ -315,6 +315,30 @@ async function main() {
     ok(branchesInView.includes('תל אביב') && branchesInView.includes('כפר סבא'),
       '1d טבלת השכר של הצופה כוללת את שני הסניפים',
       `קיבלנו ${JSON.stringify(branchesInView)}`);
+
+    // GET /api/branches: a viewer must see every branch, including one
+    // (viewer0) with no managed branches at all — she is still a viewer, not
+    // a manager with nothing assigned. A branch_manager stays scoped to her
+    // own branch, unchanged.
+    const rb = await request({ path: '/api/branches', token: tokens.viewer });
+    eq(rb.status, 200, '1e GET /api/branches מחזיר 200 לצופה');
+    const branchNames = (rb.body?.branches || []).map(b => b.name);
+    ok(branchNames.includes('תל אביב') && branchNames.includes('כפר סבא'),
+      '1e הצופה רואה את שני הסניפים',
+      `קיבלנו ${JSON.stringify(branchNames)}`);
+
+    const rb0 = await request({ path: '/api/branches', token: tokens.viewer0 });
+    eq(rb0.status, 200, '1f GET /api/branches מחזיר 200 לצופה ללא סניפים בניהול');
+    const branchNames0 = (rb0.body?.branches || []).map(b => b.name);
+    ok(branchNames0.includes('תל אביב') && branchNames0.includes('כפר סבא'),
+      '1f גם צופה ללא סניפים בניהול רואה את שני הסניפים',
+      `קיבלנו ${JSON.stringify(branchNames0)}`);
+
+    const rbm = await request({ path: '/api/branches', token: tokens.manager });
+    eq(rbm.status, 200, '1g GET /api/branches מחזיר 200 למנהלת סניף');
+    const branchNamesM = (rbm.body?.branches || []).map(b => b.name);
+    eq(branchNamesM, ['תל אביב'],
+      '1g מנהלת סניף רואה רק את הסניף שבניהולה (התנהגות קיימת, ללא שינוי)');
   }
 
   /* ================================================================ *
