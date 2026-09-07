@@ -1,4 +1,6 @@
 const { User } = require('../models');
+const { isRead } = require('./viewer');
+const { ADMIN_VIEWER } = require('../constants/roles');
 
 /**
  * Which branches this request may act on — read from the DATABASE, not the JWT.
@@ -33,6 +35,10 @@ async function resolveBranchScope(req) {
   }
 
   if (role === 'system_admin' || role === 'accountant') return null;
+  // The viewer reads every branch and writes only the ones she manages. A
+  // viewer with no managed branches writes nowhere — her own branch_id is
+  // where she is listed, not what she runs.
+  if (role === ADMIN_VIEWER) return isRead(req) ? null : managed;
   if (managed.length) return managed;
   return ownBranch ? [ownBranch] : [];
 }

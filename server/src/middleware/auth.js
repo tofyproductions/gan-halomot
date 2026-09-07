@@ -1,5 +1,9 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
+const {
+  isRead, isViewer, isBlockedForViewer, isMultipart,
+} = require('../utils/viewer');
+const { ADMIN_VIEWER } = require('../constants/roles');
 
 /**
  * A valid signature is not the same as "issued for this customer".
@@ -151,14 +155,73 @@ function requireTabWrite(tabId, ...roles) {
   });
 }
 
+const DENIED = { error: 'אין לך הרשאה לפעולה זו' };
+const NO_UPLOAD = {
+  error: 'אי אפשר לשמור העלאת קובץ לאישור. העלאה אפשרית רק בסניפים שבניהולך — או דרך מנהל המערכת.',
+  code: 'VIEWER_NO_UPLOAD',
+};
+
+/** Queue this write for approval. Lazy require: the service loads the models. */
+function proposeInstead(req, res) {
+  const { propose } = require('../services/proposedChanges.service');
+  return propose(req, res).catch((err) => {
+    if (!res.headersSent) res.status(500).json({ error: 'שמירת השינוי לאישור נכשלה', detail: err.message });
+  });
+}
+
+/**
+ * Under the manager fallback (below), a controller that answers 403 is saying
+ * "not one of your branches". For a viewer that is not a refusal — it is the
+ * case that goes to approval. Swap res.json once; anything but a 403 passes
+ * through untouched, and an upload stays refused because a file cannot be
+ * stored for later.
+ */
+function convert403ToProposal(req, res) {
+  const originalJson = res.json.bind(res);
+  res.json = function (body) {
+    if (res.statusCode !== 403 || res.headersSent) return originalJson(body);
+    res.json = originalJson;
+    req.user.role = ADMIN_VIEWER;
+    delete req.viewerFallback;
+    if (isMultipart(req)) return originalJson(NO_UPLOAD);
+    res.statusCode = 200;
+    proposeInstead(req, res);
+    return res;
+  };
+}
+
 /**
  * Role-based access control middleware factory
  * Usage: requireRole('system_admin', 'branch_manager')
+ *
+ * The viewer role ("מנהל מערכת - לצפייה בלבד") is decided here and only here:
+ *   reads  — wherever a system admin may read, except /api/admin;
+ *   writes — as a branch manager when the route allows managers and the
+ *            viewer has managed branches (the controller's own scope check
+ *            then decides, and its 403 becomes a proposal); refused for
+ *            /api/admin and for uploads; queued for approval otherwise.
+ * Every other role: the plain list check, as before.
  */
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (isViewer(req.user)) {
+      if (isBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
+      if (isRead(req)) {
+        if (roles.includes('system_admin') || roles.includes(ADMIN_VIEWER)) return next();
+        return res.status(403).json(DENIED);
+      }
+      const managed = req.user.managed_branch_ids || [];
+      if (roles.includes('branch_manager') && managed.length > 0) {
+        req.user.role = 'branch_manager';
+        req.viewerFallback = true;
+        convert403ToProposal(req, res);
+        return next();
+      }
+      if (isMultipart(req)) return res.status(403).json(NO_UPLOAD);
+      return proposeInstead(req, res);
     }
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'אין לך הרשאה לפעולה זו' });
@@ -185,7 +248,7 @@ function requireRole(...roles) {
 function requireBranchScope(req, res, next) {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   const role = req.user.role;
-  if (role === 'system_admin' || role === 'accountant' || role === 'branch_manager') return next();
+  if (role === 'system_admin' || role === 'accountant' || role === 'branch_manager' || role === ADMIN_VIEWER) return next();
   if ((req.user.managed_branch_ids || []).length > 0) return next();
   return res.status(403).json({
     error: 'החשבון שלך אינו מוגדר כמנהל/ת סניף ולא משויכים אליו סניפים לניהול. '
