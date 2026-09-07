@@ -58,7 +58,8 @@
     "test:proposed-apply": "node scripts/proposed-change-apply.test.js",
     "test:proposed-wire": "node scripts/proposed-change-wire.test.js",
     "test:proposed-controller": "node scripts/proposed-change-controller.test.js",
-    "test:proposed-decisions": "node scripts/proposed-change-decisions.test.js"
+    "test:proposed-decisions": "node scripts/proposed-change-decisions.test.js",
+    "test:viewer-e2e": "node scripts/viewer-e2e.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
