@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Menu, Select, IconButton, Tooltip,
   Chip, Divider, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
-  ListSubheader, useMediaQuery, useTheme,
+  ListSubheader, useMediaQuery, useTheme, Badge,
 } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import MenuIcon from '@mui/icons-material/Menu';
@@ -33,8 +33,10 @@ import HandymanIcon from '@mui/icons-material/Handyman';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CelebrationIcon from '@mui/icons-material/Celebration';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import RuleFolderIcon from '@mui/icons-material/RuleFolder';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
+import { usePendingProposals } from '../../hooks/usePendingProposals';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
@@ -70,6 +72,7 @@ const ICON_BY_TAB = {
   my_documents: DescriptionIcon,
   my_attendance: AccessTimeIcon,
   my_updates: NotificationsIcon,
+  proposed_changes: RuleFolderIcon,
 };
 
 // Nav structure now lives in client/src/config/tabs.js (TAB_GROUPS).
@@ -84,6 +87,7 @@ export default function Header() {
   const [navMenu, setNavMenu] = useState(null); // { anchorEl, group } — open category dropdown
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
+  const pendingProposals = usePendingProposals();
   // Selected gan marker colour — drives the branch switcher's own colour so
   // the switcher always shows the current gan's colour (synced with payroll).
   const selectedBranchObj = branches.find(b => (b._id || b.id) === selectedBranch);
@@ -240,7 +244,9 @@ export default function Header() {
                         sx={{ gap: 1.2, fontSize: '0.85rem', fontWeight: isActive ? 700 : 500, minHeight: 40, minWidth: 170 }}
                       >
                         <Icon sx={{ fontSize: '1.15rem', color: isActive ? 'primary.main' : 'text.secondary' }} />
-                        {item.label}
+                        {item.id === 'proposed_changes' && pendingProposals > 0
+                          ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                          : item.label}
                       </MenuItem>
                     );
                   })}
@@ -388,7 +394,9 @@ export default function Header() {
                           <Icon />
                         </ListItemIcon>
                         <ListItemText
-                          primary={item.label}
+                          primary={item.id === 'proposed_changes' && pendingProposals > 0
+                            ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                            : item.label}
                           primaryTypographyProps={{ fontWeight: isActive ? 800 : 600, fontSize: '0.95rem' }}
                         />
                       </ListItemButton>

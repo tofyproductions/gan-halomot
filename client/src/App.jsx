@@ -62,6 +62,7 @@ import BranchPayslips from './components/payroll/BranchPayslips';
 import ContractSigning from './components/employees/ContractSigning';
 import PayslipFixUpload from './components/public/PayslipFixUpload';
 import PermissionsManager from './components/admin/PermissionsManager';
+import ProposedChanges from './components/admin/ProposedChanges';
 import MyAccount from './components/account/MyAccount';
 import StockPage from './components/stock/StockPage';
 import PricingManager from './components/pricing/PricingManager';
@@ -240,6 +241,11 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="salary-requests" element={<Navigate to="/payroll?tab=raises" replace />} />
+        <Route path="proposed-changes" element={
+          <ProtectedRoute tab="proposed_changes">
+            <ProposedChanges />
+          </ProtectedRoute>
+        } />
         <Route path="admin/permissions" element={
           <ProtectedRoute roles={['system_admin']}>
             <PermissionsManager />

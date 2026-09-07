@@ -26,6 +26,9 @@ export const TAB_GROUPS = [
       // renaming it would revoke the screen from whoever was granted it by hand.
       { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      // שינויים שביקש "מנהל מערכת - לצפייה בלבד" ומחכים למשרד. The viewer
+      // sees his own list on the same screen.
+      { id: 'proposed_changes', label: 'שינויים לאישור', path: '/proposed-changes', defaultRoles: ['system_admin', 'accountant', 'admin_viewer'] },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
       { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
