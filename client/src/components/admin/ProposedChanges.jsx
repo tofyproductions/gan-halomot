@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, Stack, Card, CardContent, Button, Chip, Tabs, Tab,
   Table, TableBody, TableCell, TableHead, TableRow, TableContainer, Paper,
@@ -104,27 +104,42 @@ function ProposalCard({ item, canDecide, onDecided }) {
   );
 }
 
+// Mirrors the server's own "open" bucket (status=pending returns pending +
+// applying) plus `failed`, so a replay that failed after approval keeps
+// showing in "ממתינים" instead of silently vanishing on the next refetch.
+const isOpen = (s) => s === 'pending' || s === 'applying' || s === 'failed';
+
 export default function ProposedChanges() {
   const { isAdmin, isAccountant } = useAuth();
   const canDecide = isAdmin || isAccountant;
   const [tab, setTab] = useState('pending');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const reqRef = useRef(0);
 
   const load = useCallback(() => {
+    const reqId = ++reqRef.current;
     setLoading(true);
-    const params = tab === 'pending' ? { status: 'pending' } : {};
-    api.get('/proposed-changes', { params })
-      .then(res => setItems(tab === 'pending'
-        ? res.data.items
-        : res.data.items.filter(i => i.status !== 'pending' && i.status !== 'applying')))
-      .catch(() => toast.error('טעינת ההצעות נכשלה'))
-      .finally(() => setLoading(false));
-  }, [tab]);
+    api.get('/proposed-changes')
+      .then(res => {
+        if (reqRef.current !== reqId) return;
+        setItems(res.data.items);
+      })
+      .catch(() => {
+        if (reqRef.current !== reqId) return;
+        setItems([]);
+        toast.error('טעינת ההצעות נכשלה');
+      })
+      .finally(() => {
+        if (reqRef.current !== reqId) return;
+        setLoading(false);
+      });
+  }, []);
   useEffect(() => { load(); }, [load]);
 
-  const onDecided = (p) => setItems(list => list.map(i => (i._id === p._id ? p : i))
-    .filter(i => tab !== 'pending' || i.status === 'pending' || i.status === 'applying' || i.status === 'failed'));
+  const onDecided = (p) => setItems(list => list.map(i => (i._id === p._id ? p : i)));
+
+  const visible = items.filter(i => (tab === 'pending' ? isOpen(i.status) : !isOpen(i.status)));
 
   return (
     <Box dir="rtl">
@@ -138,9 +153,9 @@ export default function ProposedChanges() {
         <Tab value="pending" label="ממתינים" />
         <Tab value="history" label="היסטוריה" />
       </Tabs>
-      {loading ? <CircularProgress /> : items.length === 0
+      {loading ? <CircularProgress /> : visible.length === 0
         ? <Alert severity="success">{tab === 'pending' ? 'אין שינויים שממתינים לאישור' : 'אין היסטוריה עדיין'}</Alert>
-        : items.map(it => <ProposalCard key={it._id} item={it} canDecide={canDecide} onDecided={onDecided} />)}
+        : visible.map(it => <ProposalCard key={it._id} item={it} canDecide={canDecide} onDecided={onDecided} />)}
     </Box>
   );
 }
