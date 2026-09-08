@@ -37,8 +37,23 @@ const SOURCES = {
     label: 'קליקטאק',
     endpoint: '/external-enrollments',
     accept: '.xlsx,.xls',
-    note: 'עמודת "מוסד" בקובץ רושמת את שם היישוב בלבד, ואינה מבחינה בין שני סניפים באותו יישוב. '
-      + 'הסניף נקבע כאן ולא מהקובץ — בחירה שגויה תשייך את כל הקבוצה לגן הלא נכון.',
+    note: 'עמודת "מוסד" (או "מעון") בקובץ רושמת את שם היישוב בלבד, ואינה מבחינה בין שני סניפים '
+      + 'באותו יישוב. הסניף נקבע כאן ולא מהקובץ — בחירה שגויה תשייך את כל הקבוצה לגן הלא נכון.',
+    /**
+     * Both exports, through one button.
+     *
+     * The alternative — two buttons — asks the operator to know which file she
+     * downloaded twenty minutes ago, and the price of guessing wrong is a
+     * cohort filed under the wrong report. The server reads the header row and
+     * decides, so all this has to do is say that either is welcome and what
+     * each one brings.
+     */
+    both: [
+      ['ייצוא הנרשמים (Registrations Export)', 'פרטי הילד/ה, שני ההורים, טלפונים, מיילים ואמצעי התשלום. '
+        + 'בלעדיו אי אפשר לקלוט ילד/ה למערכת.'],
+      ['ייצוא החוזים (contracts_export)', 'הכיתה שקליקטאק שיבצה אליה, הדרגה, סוג המימון ותאריכי החוזה. '
+        + 'אין בו הורים כלל.'],
+    ],
   },
   tmt: {
     label: 'תמ״ת',
@@ -131,7 +146,8 @@ export default function EmunahEnrollment() {
       setUpload(u => ({ ...u, saving: false, result: res.data }));
       setReloadKey(k => k + 1);
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בקליטת הקובץ');
+      toast.error(err.response?.data?.error
+        || `שגיאה בקליטת הקובץ (${err.response?.status || 'אין תגובה מהשרת'})`);
       setUpload(u => ({ ...u, saving: false }));
     }
   };
@@ -242,6 +258,21 @@ export default function EmunahEnrollment() {
           קליטת קובץ {SOURCES[upload.source]?.label}
         </DialogTitle>
         <DialogContent>
+          {!!SOURCES[upload.source]?.both && (
+            <Alert severity="info" icon={false} sx={{ mb: 2 }}>
+              <AlertTitle>שני הקבצים של קליקטאק נקלטים כאן</AlertTitle>
+              המערכת מזהה לבד לפי כותרות הקובץ איזה משניהם הועלה, וממזגת אותם לשורה אחת לכל ילד/ה.
+              <List dense sx={{ py: 0 }}>
+                {SOURCES[upload.source].both.map(([name, what]) => (
+                  <ListItem key={name} sx={{ py: 0, px: 0, alignItems: 'flex-start' }}>
+                    <ListItemText primary={name} secondary={what}
+                      primaryTypographyProps={{ fontWeight: 700, variant: 'body2' }} />
+                  </ListItem>
+                ))}
+              </List>
+            </Alert>
+          )}
+
           <Alert severity="warning" icon={false} sx={{ mb: 2 }}>
             {SOURCES[upload.source]?.note}
             <Box sx={{ mt: 1 }}>
@@ -265,9 +296,20 @@ export default function EmunahEnrollment() {
 
           {upload.result && (
             <Alert severity="success" sx={{ mt: 2 }}>
-              <AlertTitle>נקלטו {upload.result.parsed} שורות</AlertTitle>
+              <AlertTitle>
+                נקלטו {upload.result.parsed} שורות
+                {upload.result.export_label ? ` — ${upload.result.export_label}` : ''}
+              </AlertTitle>
               חדשים: {upload.result.created} · עודכנו: {upload.result.updated} ·
-              {' '}ללא שינוי: {upload.result.unchanged} · ירדו מהקובץ: {upload.result.missing ?? 0}
+              {' '}ללא שינוי: {upload.result.unchanged}
+              {upload.result.export_type === 'contracts'
+                ? '' : ` · ירדו מהקובץ: ${upload.result.missing ?? 0}`}
+              {upload.result.export_type === 'contracts' && upload.result.missing_parents > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <b>{upload.result.missing_parents}</b> ילדים בסניף עדיין ללא פרטי הורים —
+                  יש לקלוט גם את ייצוא הנרשמים כדי שאפשר יהיה לקלוט אותם למערכת.
+                </Box>
+              )}
               {!!(upload.result.details?.missing?.length || upload.result.missing_names?.length) && (
                 <Box sx={{ mt: 1 }}>
                   <b>ירדו מהרשימה:</b>{' '}
