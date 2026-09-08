@@ -12,6 +12,10 @@ const {
 } = require('../services/academic-year.service');
 const { generateUniqueId } = require('../utils/id-generator');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { canAccessBranch } = require('../utils/branch-scope');
+
+/** One refusal, one wording — every write below names a branch. */
+const NOT_YOUR_BRANCH = { error: 'אין לך הרשאה לסניף זה' };
 
 /**
  * קליטת רישומים מקליקטאק — the review queue between an external export and
@@ -114,6 +118,14 @@ async function importFile(req, res, next) {
     if (!req.file) return res.status(400).json({ error: 'לא נבחר קובץ' });
     const branchId = req.body?.branch_id;
     if (!branchId) return res.status(400).json({ error: 'יש לבחור סניף — הקובץ עצמו לא מבחין בין סניפי כפר סבא' });
+    // The branch arrives in the BODY, so without this the gate on the route is
+    // the only thing between a caller and any gan in the system. That was
+    // survivable while only admins and accountants could reach the route (they
+    // hold every branch anyway); it stops being survivable the moment the
+    // clicktac_write grant lets other people in. Whoever holds the grant passes
+    // here — resolveBranchScope returns null for them — and everybody else is
+    // held to the branches they actually have.
+    if (!await canAccessBranch(req, branchId)) return res.status(403).json(NOT_YOUR_BRANCH);
     const branch = await Branch.findById(branchId).lean();
     if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
 
@@ -484,6 +496,8 @@ async function createClassroom(req, res, next) {
     if (!branch_id || !name || !academic_year) {
       return res.status(400).json({ error: 'חסרים סניף, שם כיתה או שנה' });
     }
+    // A branch manager reaches this route, and the branch is a body field.
+    if (!await canAccessBranch(req, branch_id)) return res.status(403).json(NOT_YOUR_BRANCH);
     // Required, not merely validated. A room with no age group is invisible to
     // this very screen — see the note on categoryError in classroom.controller.
     if (!category) {
@@ -650,6 +664,8 @@ async function promote(req, res, next) {
   try {
     const doc = await ExternalEnrollment.findById(req.params.id).lean();
     if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    // The row carries its own branch — the id in the path does not say which.
+    if (!await canAccessBranch(req, doc.branch_id)) return res.status(403).json(NOT_YOUR_BRANCH);
     if (doc.review?.status === 'imported') {
       return res.status(409).json({ error: 'הרשומה כבר יובאה למערכת' });
     }
@@ -705,6 +721,13 @@ async function promoteBulk(req, res, next) {
       // eslint-disable-next-line no-await-in-loop
       const doc = await ExternalEnrollment.findById(id).lean();
       if (!doc) { skipped.push({ id, error: 'לא נמצאה' }); continue; }
+      // Reported per row rather than aborting, like every other refusal here:
+      // a list that spans two gans should import the half it may.
+      // eslint-disable-next-line no-await-in-loop
+      if (!await canAccessBranch(req, doc.branch_id)) {
+        skipped.push({ id, child: doc.child?.full_name, error: 'אין לך הרשאה לסניף זה' });
+        continue;
+      }
       if (doc.review?.status === 'imported') { skipped.push({ id, child: doc.child.full_name, error: 'כבר יובאה' }); continue; }
       if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
         skipped.push({ id, child: doc.child.full_name, error: 'כבר קיים/ת במערכת' });
@@ -748,6 +771,12 @@ async function setReview(req, res, next) {
     if (!['pending', 'ignored'].includes(status)) {
       return res.status(400).json({ error: 'סטטוס לא תקין' });
     }
+    // Read before write: the row's branch is the only thing that says whether
+    // this caller may touch it, and findByIdAndUpdate would have written first.
+    const before = await ExternalEnrollment.findById(req.params.id).select('branch_id').lean();
+    if (!before) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    if (!await canAccessBranch(req, before.branch_id)) return res.status(403).json(NOT_YOUR_BRANCH);
+
     const doc = await ExternalEnrollment.findByIdAndUpdate(
       req.params.id,
       { $set: { 'review.status': status, 'review.note': req.body?.note || '' } },
@@ -785,6 +814,8 @@ async function setPlacement(req, res, next) {
 
     const doc = await ExternalEnrollment.findById(req.params.id);
     if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
+    // A branch manager reaches this route; the row says which gan it belongs to.
+    if (!await canAccessBranch(req, doc.branch_id)) return res.status(403).json(NOT_YOUR_BRANCH);
     if (doc.review?.status === 'imported') {
       return res.status(409).json({
         error: `${doc.child.full_name} כבר נקלט/ה למערכת — שיבוץ הכיתה משתנה במסך הכיתות`,
@@ -846,6 +877,7 @@ async function deleteData(req, res, next) {
   try {
     const branchId = req.query.branch;
     if (!branchId || branchId === 'all') return res.status(400).json({ error: 'יש לבחור סניף' });
+    if (!await canAccessBranch(req, branchId)) return res.status(403).json(NOT_YOUR_BRANCH);
     const academicYear = normalizeYear(req.query.year || '');
     if (!/^\d{4}-\d{4}$/.test(academicYear)) return res.status(400).json({ error: 'יש לבחור שנת לימודים' });
 
