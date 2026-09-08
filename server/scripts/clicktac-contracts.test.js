@@ -172,6 +172,26 @@ function request({ method = 'GET', path, token, body, headers = {} }) {
   });
 }
 
+/**
+ * Same as request(), but resolves the raw response Buffer instead of a utf8
+ * string — request() decodes-then-reencodes as utf8, which corrupts a binary
+ * body like an .xlsx workbook. Needed only for the export download in check 22.
+ */
+function requestBuffer({ method = 'GET', path, token, headers = {} }) {
+  return new Promise((resolve, reject) => {
+    const h = { ...headers };
+    if (token) h.Authorization = `Bearer ${token}`;
+    const req = http.request({ host: '127.0.0.1', port: PORT, path, method, headers: h }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, buffer: Buffer.concat(chunks) }));
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('timeout')));
+    req.end();
+  });
+}
+
 /** multipart/form-data, hand-built — the import route is behind multer. */
 function upload({ token, path, fileName, buffer, fields = {} }) {
   const boundary = `----ganTest${Date.now()}`;
@@ -1312,6 +1332,93 @@ async function main() {
       '22q אף שורה אינה נושאת את תת־המסמך standing_order');
     ok(!body.includes(LONG_CARD) && !body.includes(LONG_CARD.replace(/-/g, '')),
       '22u מספר הכרטיס המלא — עם מקפים או בלעדיהם — אינו מופיע בגוף התשובה בכלל');
+
+    /**
+     * THE SAME DATA, AS THE WORKBOOK. תנאי התשלום, הכיתה, הדרגה, השכ"ל שהיא
+     * מייצרת, המקור וההתרעה — כל אלה נדרשו על ידי הבעלים כעמודות בגיליון
+     * "הכל", כדי שאפשר יהיה לעבוד על הרשימה בלי לפתוח כל שורה במסך. אותם
+     * הילדים, אותו ה-branch, בלי קליטה נוספת.
+     */
+    const { BranchPricing } = require('../src/models');
+    await BranchPricing.findOneAndUpdate(
+      { branch_id: branch._id, academic_year: YEAR },
+      { $set: {
+        branch_id: branch._id,
+        academic_year: YEAR,
+        pricing_type: 'subsidized',
+        age_groups: ['תינוק', 'פעוט', 'בוגר'],
+        tiers: [
+          { label: 'דרגה 1', prices: [100, 110, 120] },
+          { label: 'דרגה 2', prices: [200, 210, 220] },
+          { label: 'דרגה 3', prices: [300, 310, 320] },
+          { label: 'דרגה 4', prices: [400, 410, 420] },
+        ],
+      } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
+    const exportRes = await requestBuffer({
+      token, path: `/api/tmt/reconcile/export?branch=${branchId}&year=${encodeURIComponent(YEAR)}`,
+    });
+    ok(exportRes.status === 200, '22v הייצוא נטען', String(exportRes.status));
+    const wb = XLSX.read(exportRes.buffer, { type: 'buffer' });
+    ok(wb.SheetNames.includes('הכל'), '22w יש גיליון "הכל"');
+
+    const EXPECTED_HEADERS = [
+      'שם הילד/ה', 'ת"ז', 'תאריך לידה', 'שכבת גיל', 'גיל ב־1.9', 'חודשים ב־1.9',
+      'שובץ ידנית ל', 'מסקנה', 'פעולה נדרשת', 'חריגות', 'החלטת תמ"ת', 'תאריך כניסה בתמ"ת',
+      'ברשימת תמ"ת', 'סטטוס קליקטאק', 'חתימה', 'אמצעי תשלום', 'אמצעי תשלום — כפי שנרשם',
+      'כיתה', 'דרגה', 'שכ"ל לפי דרגה', 'התרעת תשלום', 'מקור', 'חסר פרטי הורים',
+      'שכ"ל — אמצעי', 'כרטיס (4 ספרות)', 'דמי רישום — אמצעי', 'סכום בקובץ', 'מספר קבלה',
+      'הו"ק', 'ממשיך', 'חותם שני', 'הורה 1', 'טלפון 1', 'הורה 2', 'טלפון 2',
+      'איש קשר תמ"ת', 'טלפון תמ"ת', 'מייל', 'כתובת', 'במערכת',
+    ];
+    const asRows = XLSX.utils.sheet_to_json(wb.Sheets['הכל'], { header: 1, defval: '' });
+    const headerRow = asRows[0] || [];
+    eq(headerRow, EXPECTED_HEADERS,
+      '22x כותרות גיליון "הכל" כוללות את עמודות בקשה 20/1, בסדר הנכון');
+
+    const idx = Object.fromEntries(EXPECTED_HEADERS.map((h, i) => [h, i]));
+    const dataRows = asRows.slice(1);
+    const kidRow = dataRows.find(r => String(r[idx['ת"ז']]) === kid.idNumber);
+    ok(!!kidRow, '22y שורת הדס נחמיאס נמצאת בגיליון "הכל"');
+    eq(kidRow?.[idx['כיתה']], kid.cls, '22z הכיתה יצאה לגיליון');
+    eq(String(kidRow?.[idx['דרגה']]), String(kid.tier), '22aa והדרגה');
+    eq(kidRow?.[idx['שכ"ל לפי דרגה']], 410, '22ab שכר הלימוד לפי הדרגה, מהמטריצה שהוגדרה לבדיקה');
+    ok(typeof kidRow?.[idx['שכ"ל לפי דרגה']] === 'number', '22ac ויצא כמספר, לא כטקסט');
+    eq(kidRow?.[idx['התרעת תשלום']], '', '22ad אין התרעת תשלום — ההו"ק מלאה');
+    eq(kidRow?.[idx['מקור']], 'נרשמים+חוזים', '22ae המקור — שני הקבצים');
+    eq(kidRow?.[idx['חסר פרטי הורים']], '', '22af יש פרטי הורים — התא ריק, לא "לא"');
+    eq(kidRow?.[idx['שכ"ל — אמצעי']], 'הוראת קבע', '22ag אמצעי התשלום לשכ"ל, כלשון הקובץ');
+    eq(kidRow?.[idx['כרטיס (4 ספרות)']], '7788', '22ah ארבע ספרות כרטיס שכר הלימוד');
+    eq(kidRow?.[idx['דמי רישום — אמצעי']], 'כרטיס אשראי', '22ai אמצעי דמי הרישום');
+    eq(kidRow?.[idx['סכום בקובץ']], 350, '22aj הסכום הכללי שבקובץ, כמספר');
+    ok(typeof kidRow?.[idx['סכום בקובץ']] === 'number', '22ak ויצא כמספר, לא כטקסט');
+    eq(kidRow?.[idx['מספר קבלה']], 'RC-22001', '22al מספר הקבלה');
+    eq(kidRow?.[idx['הו"ק']], 'קיימת', '22am ההו"ק — מילה, לא חשבון');
+    eq(kidRow?.[idx['ממשיך']], '', '22an לא סומן/ה כממשיך/ה');
+    eq(kidRow?.[idx['חותם שני']], 'נחתם', '22ao והחותם השני יצא לעמודה שלו — כמידע בלבד');
+
+    const contractOnlyRow = dataRows.find(r => String(r[idx['ת"ז']]) === contractOnly.idNumber);
+    ok(!!contractOnlyRow, '22ap שורת החוזה-בלבד נמצאת בגיליון');
+    eq(contractOnlyRow?.[idx['מקור']], 'חוזים', '22aq מקורה — ייצוא החוזים בלבד');
+    eq(contractOnlyRow?.[idx['חסר פרטי הורים']], 'כן', '22ar וחסרת פרטי הורים');
+
+    // הממצא "חותם שני טרם חתם בקליקטאק" בוטל — לא רק אצל הדס, בשום גיליון.
+    const wholeBook = wb.SheetNames
+      .map(name => JSON.stringify(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: '' })))
+      .join('\n');
+    ok(!wholeBook.includes('טרם נחתם'),
+      '22as הממצא "חותם שני טרם חתם בקליקטאק" אינו מופיע באף גיליון בקובץ');
+
+    // ואותה הגנה על פרטי הבנק כמו על ה-JSON למעלה — הפעם על הקובץ כולו,
+    // כל גיליון וכל תא, ולא רק על שורת הדס.
+    ok(!wholeBook.includes('99887766'), '22at מספר החשבון אינו מופיע באף תא, באף גיליון');
+    ok(!wholeBook.includes('דנה נחמיאס'), '22au ושם בעל החשבון אינו');
+    ok(!wholeBook.includes(LONG_CARD) && !wholeBook.includes(LONG_CARD.replace(/-/g, '')),
+      '22av והכרטיס המלא (עם מקפים או בלעדיהם) אינו מופיע באף תא, באף גיליון');
+
+    await BranchPricing.deleteMany({ branch_id: branch._id });
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
