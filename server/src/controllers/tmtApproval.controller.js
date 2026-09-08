@@ -317,8 +317,13 @@ async function buildReconciliation({ branchId, academicYear, req }) {
       .select('-raw')
       .populate('branch_id', 'name')
       .lean(),
+    // standing_order IS read here and never sent: reconcile() needs the bank
+    // code and account number to tell a הו"ק that is merely waiting for the
+    // bank details from one that is complete, and it builds each row out of a
+    // fixed list of fields, so nothing from the sub-document reaches the wire.
+    // Excluding it would have reported every הו"ק family as incomplete.
     ExternalEnrollment.find({ branch_id: branchId, academic_year: academicYear })
-      .select('-standing_order -raw')
+      .select('-raw')
       .lean(),
   ]);
 
@@ -629,7 +634,16 @@ async function exportReconcile(req, res, next) {
       placed_group: r.age_group_override || '',
       verdict: r.verdict_label,
       action: r.verdict_action,
-      issues: r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`).join(' · '),
+      // The payment alert rides in the flags column rather than in one of its
+      // own: the sheet is printed and worked through line by line, and a
+      // family to call about their הו"ק is the same kind of item as a name
+      // that does not match. The raw method is in its own column beside it,
+      // because "מזומן — לא מתקבל" is the verdict and not what the file said.
+      issues: [
+        ...r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`),
+        ...(r.clicktac?.payment_alert ? [r.clicktac.payment_alert.label] : []),
+      ].join(' · '),
+      payment_method: r.clicktac?.payment_method || '',
       tmt_decision: r.tmt?.decision || '',
       tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
@@ -653,6 +667,7 @@ async function exportReconcile(req, res, next) {
       ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
       ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
+      ['payment_method', 'אמצעי תשלום'],
       ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],

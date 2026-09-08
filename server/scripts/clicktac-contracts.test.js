@@ -127,7 +127,9 @@ function contractRow({ id, first, last, idNumber, idType = 'ת.ז.', birth, cls,
 
 const REGISTRATIONS_HEADER = Object.values(COLUMNS);
 
-function registrationRow({ first, last, idNumber, birth, parentFirst, parentPhone }) {
+function registrationRow({
+  first, last, idNumber, birth, parentFirst, parentPhone, method = 'כרטיס אשראי',
+}) {
   const [y, m, d] = birth;
   const by = {
     [COLUMNS.institution]: 'הרצליה',
@@ -147,7 +149,7 @@ function registrationRow({ first, last, idNumber, birth, parentFirst, parentPhon
     [COLUMNS.p1_email]: 'a@b.co.il',
     [COLUMNS.p1_address]: 'הרצל 1',
     [COLUMNS.status]: 'התקבל',
-    [COLUMNS.tuition_method]: 'כרטיס אשראי',
+    [COLUMNS.tuition_method]: method,
   };
   return REGISTRATIONS_HEADER.map(h => by[h] ?? '');
 }
@@ -166,10 +168,21 @@ const contractsFile = () => sheetBuffer(
   'Worksheet 1',
 );
 
+/**
+ * צורת התשלום של כל משפחה — שלוש מהארבע צריכות טיפול.
+ *
+ * אור משלמת בכרטיס אשראי ואין עליה מה לומר. נועם במזומן, והגן אינו מקבל
+ * מזומן. אצל שירה לא נבחר אמצעי תשלום בכלל. איתי בהוראת קבע — אמצעי שהגן מקבל
+ * — אבל אף אחת מעמודות ההו"ק אינה מלאה בקובץ הזה, ולכן היא חסרה ולא שגויה.
+ * הסדר הוא הסדר של KIDS ואז EXTRA_KID.
+ */
+const METHODS = ['כרטיס אשראי', 'מזומן', '', 'הו"ק'];
+
 const registrationsFile = () => sheetBuffer(
   REGISTRATIONS_HEADER,
   [...KIDS, EXTRA_KID].map((k, i) => registrationRow({
     ...k, parentFirst: `הורה${i + 1}`, parentPhone: `05000000${i + 1}`,
+    method: METHODS[i],
   })),
   'Sheet1',
 );
@@ -434,6 +447,12 @@ async function main() {
     eq(data?.summary?.missing_parents, 3, '5j המונה סופר את שלושתם');
     eq(data?.summary?.with_contract, 3, '5k ולשלושתם יש חוזה');
 
+    // בייצוא החוזים אין עמודת תשלום בכלל. לסמן את השורות האלה כ"לא הוגדר
+    // אמצעי תשלום" זה לשלוח את המשרד להתקשר למשפחה על קובץ שאיש עוד לא העלה —
+    // והמסך כבר אומר עליהן את הדבר הנכון, "חסר פרטי הורים".
+    eq(row?.payment_alert, null, '5o שורת חוזים אינה מסומנת כחסרת אמצעי תשלום');
+    eq(data?.summary?.payment_alerts, 0, '5p ואין ולו התרעת תשלום אחת');
+
     // The card the office reads: contracts in, registrations still missing.
     ok(!!data?.last_import?.contracts, '5l "קובץ אחרון" יודע על קליטת החוזים');
     eq(data?.last_import?.contracts?.export_type, 'contracts', '5m ומסומן כייצוא חוזים');
@@ -481,6 +500,27 @@ async function main() {
     eq(data?.summary?.missing_parents, 0, '7m המונה התאפס');
     ok(!!data?.last_import?.registrations && !!data?.last_import?.contracts,
       '7n "קובץ אחרון" מציג שני תאריכים');
+
+    /* ---- אמצעי התשלום, ברגע שייצוא הנרשמים הגיע ---- */
+    const byName = (n) => data.enrollments.find(e => e.child.full_name === n);
+    eq(byName('אור אבוחצירא')?.payment_alert, null, '7o כרטיס אשראי — אין התרעה');
+    eq(byName('נועם כהן')?.payment_alert?.code, 'cash', '7p מזומן מסומן');
+    eq(byName('נועם כהן')?.payment_alert?.label, 'מזומן — לא מתקבל', '7q עם התווית לעובדת המשרד');
+    eq(byName('שירה לוי')?.payment_alert?.code, 'missing', '7r ושורה בלי אמצעי תשלום כלל');
+    // הו"ק היא אמצעי שהגן מקבל — מה שחסר הוא פרטי הבנק, וזאת שיחת טלפון
+    // אחרת. הבדיקה הזאת עוברת רק אם list באמת קורא את standing_order.
+    eq(byName('איתי מזרחי')?.payment_alert?.code, 'incomplete', '7s והו"ק בלי פרטי בנק');
+    eq(data?.summary?.payment_alerts, 3, '7t המונה סופר את שלוש ההתרעות');
+
+    // ...ופרטי הבנק עצמם עדיין אינם חוצים את החוט. זה מה שאפשר את החישוב, ואם
+    // מישהו יסיר את הסינון בעתיד — כאן זה ייתפס.
+    ok(data.enrollments.every(e => e.standing_order === undefined),
+      '7u ופרטי הבנק אינם מוחזרים בטבלה');
+
+    // מה שקליקטאק באמת כותבת, כפי שהוא — כדי שהמשרד יראה מתי התוויות משתנות.
+    const methods = data?.payment_methods || [];
+    eq(methods.find(m => m.value === 'כרטיס אשראי')?.count, 1, '7v ספירת הערכים הגולמיים');
+    eq(methods.find(m => m.value === '')?.count, 1, '7w והריק נספר גם הוא');
   }
 
   head('בדיקה 8 — ועכשיו אפשר לקלוט');

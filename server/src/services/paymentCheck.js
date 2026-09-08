@@ -101,6 +101,27 @@ function paymentAlert(enrollment, standingOrder) {
 }
 
 /**
+ * The alert for a stored ExternalEnrollment row, sources rule included.
+ *
+ * A row that has only ever been in the CONTRACTS export has no payment method
+ * because that file has no payment column — not because the family failed to
+ * choose one. Flagging it as `missing` would put a family on the chase list
+ * over a file nobody uploaded yet, and it would say the wrong thing twice: the
+ * screen already marks that row "חסר פרטי הורים", which is the accurate
+ * complaint and names the actual fix (upload the registrations export).
+ *
+ * The `sources`-less rows predate the contracts export entirely and were all
+ * registrations rows — the same reading `sourcesOf` applies in the controller.
+ */
+function paymentAlertFor(doc) {
+  const sources = Array.isArray(doc?.sources) ? doc.sources.filter(Boolean) : [];
+  if ((sources.length ? sources : ['registrations']).includes('registrations')) {
+    return paymentAlert(doc?.enrollment, doc?.standing_order);
+  }
+  return null;
+}
+
+/**
  * What the vendor actually writes, counted.
  *
  * The empty string is a value like any other here — "how many families have no
@@ -119,4 +140,6 @@ function paymentMethodCounts(docs = []) {
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'he'));
 }
 
-module.exports = { paymentAlert, paymentMethodCounts, normalizeMethod, LABELS };
+module.exports = {
+  paymentAlert, paymentAlertFor, paymentMethodCounts, normalizeMethod, LABELS,
+};

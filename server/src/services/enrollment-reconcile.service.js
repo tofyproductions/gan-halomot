@@ -23,6 +23,7 @@
 const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
+const { paymentAlertFor } = require('./paymentCheck');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -453,6 +454,21 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
         sources: ct.sources?.length ? ct.sources : ['registrations'],
         missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations')
           || !String(ct.parent1?.first_name || '').trim(),
+        /**
+         * איך המשפחה משלמת — ומה צריך טיפול.
+         *
+         * `payment_method` is ClickTac's own free text, carried raw so the
+         * screen can show WHAT the file said rather than only that something
+         * is wrong with it. `payment_alert` is the verdict on it — cash (which
+         * the gan does not accept), no method at all, or a הו"ק the bank
+         * details never arrived for.
+         *
+         * Recomputed here rather than read from `computed.payment_alert`: the
+         * stored copy is an index for counting, and rows imported before the
+         * check existed do not have one. See services/paymentCheck.js.
+         */
+        payment_method: String(ct.enrollment?.tuition_method || '').trim(),
+        payment_alert: paymentAlertFor(ct),
         class_name: ct.contract?.class_name || '',
         // The subsidy bracket the whole fee hangs on — the number that was in
         // neither file until the contracts export was accepted. Shown, not yet
@@ -504,6 +520,10 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       // list that says "upload the registrations export too", not "call these
       // families", because there is nobody to call yet.
       missing_parents: by(r => !!r.clicktac?.missing_parents),
+      // מזומן / לא הוגדר / הו"ק ללא בנק — families to call before September.
+      // Counted over the same rows as every other counter here, so the card
+      // and the chip agree with what filtering on it actually shows.
+      payment_alerts: by(r => !!r.clicktac?.payment_alert),
       with_contract: by(r => !!r.clicktac?.class_name || !!r.clicktac?.tier),
       issues: issueCounts,
     },

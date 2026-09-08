@@ -7,7 +7,7 @@ const {
 const {
   parseSheet, parseContractsSheet, identifyHeader, AGE_GROUPS,
 } = require('../services/clicktac.service');
-const { paymentAlert } = require('../services/paymentCheck');
+const { paymentAlertFor, paymentMethodCounts } = require('../services/paymentCheck');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -728,9 +728,12 @@ async function list(req, res, next) {
     if (req.query.status) filter['review.status'] = req.query.status;
 
     const docs = await ExternalEnrollment.find(filter)
-      // standing_order and raw are deliberately absent: a list request is not
-      // a reason to put 64 families' bank accounts on the wire.
-      .select('-standing_order -raw')
+      // `raw` is deliberately absent. `standing_order` is READ and then
+      // stripped below, one line before the response is built: a הו"ק with no
+      // bank details is one of the three payment alerts, and it cannot be told
+      // from a complete one without looking at them. A list request is still
+      // not a reason to put 64 families' bank accounts on the wire.
+      .select('-raw')
       .populate('branch_id', 'name')
       .populate('review.matched_registration_id', 'child_name academic_year monthly_fee')
       .sort({ 'child.full_name': 1 })
@@ -751,7 +754,7 @@ async function list(req, res, next) {
     }
 
     res.json({
-      enrollments: filtered.map(d => ({
+      enrollments: filtered.map(({ standing_order: bank, ...d }) => ({
         ...d,
         id: d._id,
         branch_name: d.branch_id?.name || '',
@@ -761,6 +764,11 @@ async function list(req, res, next) {
         // 'registrations'.
         sources: sourcesOf(d),
         missing_parents: !hasParents(d),
+        // Recomputed rather than read from `computed.payment_alert`: the
+        // stored copy is what the counters are built from, and the rows
+        // imported before this check existed do not have one. `bank` above is
+        // destructured out of the response in the same breath it is used.
+        payment_alert: paymentAlertFor({ ...d, standing_order: bank }),
       })),
       summary: {
         total: docs.length,
@@ -772,7 +780,15 @@ async function list(req, res, next) {
         disagree_age_group: docs.filter(d => d.computed?.agrees_with_source === false).length,
         missing_parents: docs.filter(d => !hasParents(d)).length,
         with_contract: docs.filter(d => !!d.contract).length,
+        // מזומן / לא הוגדר / הו"ק ללא בנק. Counted over the same rows as
+        // every other counter above — the whole queue, before the search box
+        // and the filters narrow it.
+        payment_alerts: docs.filter(d => !!paymentAlertFor(d)).length,
       },
+      // What ClickTac actually writes in `צורת תשלום שכ"ל`, counted. The rule
+      // above matches on a substring precisely because these strings are the
+      // vendor's and can change; this is how the office sees when they have.
+      payment_methods: paymentMethodCounts(docs),
       last_import: await lastClickTacImports(filter),
     });
   } catch (error) {

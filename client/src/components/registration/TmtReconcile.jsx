@@ -113,6 +113,15 @@ export default function TmtReconcile({
    * with the child if it sat among them.
    */
   const [missingParentsOnly, setMissingParentsOnly] = useState(false);
+  /**
+   * "Show me only the families whose payment method needs handling."
+   *
+   * Alongside `missingParentsOnly` and for the same reason: מזומן, לא הוגדר
+   * and הו"ק ללא בנק are facts about how the family pays, not anomalies in the
+   * ministry's comparison, and filing them among the issues would read as a
+   * problem with the child's record.
+   */
+  const [paymentAlertOnly, setPaymentAlertOnly] = useState(false);
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
   const [detail, setDetail] = useState(null);
@@ -159,10 +168,11 @@ export default function TmtReconcile({
     if (verdictFilter && r.verdict !== verdictFilter) return false;
     if (issueFilter && !r.issues.some(i => i.code === issueFilter)) return false;
     if (missingParentsOnly && !r.clicktac?.missing_parents) return false;
+    if (paymentAlertOnly && !r.clicktac?.payment_alert) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return r.child_name.toLowerCase().includes(q) || String(r.id_number).includes(q);
-  }), [rows, verdictFilter, issueFilter, missingParentsOnly, search]);
+  }), [rows, verdictFilter, issueFilter, missingParentsOnly, paymentAlertOnly, search]);
 
   const handleUpload = async () => {
     if (!uploadDlg.file) return toast.error('יש לבחור קובץ');
@@ -358,6 +368,14 @@ export default function TmtReconcile({
             <StatCard label="חסר פרטי הורים" value={summary.missing_parents || 0} color="error"
               active={missingParentsOnly} hint="להעלות גם את ייצוא הנרשמים"
               onClick={() => setMissingParentsOnly(v => !v)} />
+            {/* מזומן אינו מתקבל, ומשפחה בלי אמצעי תשלום צריכה טלפון — שתי
+                עובדות שהיו בקובץ מהיום הראשון ואף אחד לא ראה אותן. Red only
+                when there is something to do: a branch where every family is
+                on a credit card should not have a red card sitting there. */}
+            <StatCard label="אמצעי תשלום — לטיפול" value={summary.payment_alerts || 0}
+              color={summary.payment_alerts ? 'error' : 'info'}
+              active={paymentAlertOnly} hint={'מזומן / לא הוגדר / הו"ק חסרה'}
+              onClick={() => setPaymentAlertOnly(v => !v)} />
             <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
               hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
@@ -383,6 +401,12 @@ export default function TmtReconcile({
                 variant={missingParentsOnly ? 'filled' : 'outlined'}
                 label={`חסר פרטי הורים (${summary.missing_parents})`}
                 onClick={() => setMissingParentsOnly(v => !v)} />
+            )}
+            {!!summary.payment_alerts && (
+              <Chip size="small" color="error"
+                variant={paymentAlertOnly ? 'filled' : 'outlined'}
+                label={`אמצעי תשלום — התרעה (${summary.payment_alerts})`}
+                onClick={() => setPaymentAlertOnly(v => !v)} />
             )}
             <Box sx={{ flex: 1 }} />
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
@@ -511,6 +535,20 @@ export default function TmtReconcile({
                               color={SEVERITY_COLOR[i.severity] || 'default'} />
                           </Tooltip>
                         ))}
+                        {/* Filled rather than outlined, unlike every issue
+                            beside it: this one is not a discrepancy between
+                            two lists, it is money that will not arrive. The
+                            tooltip carries the vendor's own wording, because
+                            the rule matches on a substring and the office has
+                            to be able to see what it actually matched. */}
+                        {r.clicktac?.payment_alert && (
+                          <Tooltip title={r.clicktac.payment_method
+                            ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
+                            : 'בקליקטאק לא נרשמה צורת תשלום כלל'}>
+                            <Chip size="small" color="error"
+                              label={r.clicktac.payment_alert.label} />
+                          </Tooltip>
+                        )}
                       </Stack>
                     </TableCell>
                     <TableCell>
