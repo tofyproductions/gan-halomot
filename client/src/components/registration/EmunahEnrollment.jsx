@@ -174,6 +174,19 @@ export default function EmunahEnrollment() {
 
   const shared = { branchId, year, embedded: true, reloadKey, canImport, canPlace };
 
+  // "נקלטו" means the row landed somewhere that changes something the office
+  // sees — created, updated, or left unchanged because it already matched.
+  // cross_branch and skipped_duplicate rows are NOT absorbed: they are
+  // reported separately below, and a headline that counts `parsed` alone
+  // shows green even when every row bounced.
+  const absorbed = upload.result
+    ? (upload.result.created || 0) + (upload.result.updated || 0) + (upload.result.unchanged || 0)
+    : 0;
+  const importSeverity = absorbed === 0 ? 'warning' : 'success';
+  const importHeadline = absorbed === 0
+    ? 'לא נקלטו שורות'
+    : `נקלטו ${absorbed} מתוך ${upload.result?.parsed ?? 0} שורות`;
+
   return (
     <Box dir="rtl" sx={{ p: 2 }}>
       <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
@@ -295,9 +308,9 @@ export default function EmunahEnrollment() {
           </Stack>
 
           {upload.result && (
-            <Alert severity="success" sx={{ mt: 2 }}>
+            <Alert severity={importSeverity} sx={{ mt: 2 }}>
               <AlertTitle>
-                נקלטו {upload.result.parsed} שורות
+                {importHeadline}
                 {upload.result.export_label ? ` — ${upload.result.export_label}` : ''}
               </AlertTitle>
               חדשים: {upload.result.created} · עודכנו: {upload.result.updated} ·

@@ -442,8 +442,12 @@ async function main() {
    * test of the server rather than of the fixture.
    */
   await ExternalEnrollment.syncIndexes();
-  ok((await ExternalEnrollment.collection.indexes()).some(i => i.unique),
+  const indexesAfterSync = await ExternalEnrollment.collection.indexes();
+  ok(indexesAfterSync.some(i => i.unique),
     '0a האינדקס הייחודי קיים — אחרת בדיקה 12 חסרת משמעות');
+  ok(indexesAfterSync.some(i => i.unique
+    && JSON.stringify(i.key) === JSON.stringify({ source: 1, academic_year: 1, 'child.id_number': 1 })),
+    '0b צורת האינדקס הייחודי היא source+academic_year+child.id_number');
 
   const branchId = String(branch._id);
   const importContracts = () => upload({
@@ -759,6 +763,50 @@ async function main() {
     });
     ok(promote.status === 201, '14e והקליטה למערכת מצליחה',
       `${promote.status} ${promote.text?.slice(0, 200)}`);
+  }
+
+  head('בדיקה 15 — תאריך לידה לא קריא בייצוא הנרשמים אינו מוחק שכבת גיל שכבר חושבה');
+  {
+    // אור אבוחצירא שוב, אבל בקובץ נרשמים משלה שבו תא תאריך הלידה ריק — בדיוק
+    // כמו תא שנכתב ביד ולא נקרא. keepFilledChildFields כבר שומר על
+    // child.birth_date במקרה הזה; הבדיקה הזאת היא על computed, ש-Object.assign
+    // דורס בשלמותו (ר' ההערה מעל השורה 454) ולפני התיקון היה יוצא null.
+    await wipe();
+    const kid = {
+      id: '337301', first: 'דניאל', last: 'פרץ', idNumber: '245555559', birth: [2025, 2, 10],
+      cls: 'בוגרים א', tier: 3,
+    };
+    const contracts = sheetBuffer(CONTRACTS_HEADER, [contractRow(kid)], 'Worksheet 1');
+    const c1 = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_export_one.xlsx', buffer: contracts,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(c1.body?.created, 1, '15a שורת החוזה נוצרה');
+
+    const before = await listRows();
+    const beforeRow = before.enrollments.find(e => e.child.full_name === 'דניאל פרץ');
+    ok(!!beforeRow?.computed?.age_group, '15b שכבת הגיל חושבה מהחוזה', beforeRow?.computed?.age_group);
+
+    const regRow = registrationRow({ ...kid, parentFirst: 'הורה15', parentPhone: '0500000015' });
+    const birthIdx = REGISTRATIONS_HEADER.indexOf(COLUMNS.birth_date);
+    regRow[birthIdx] = ''; // התא הלא קריא
+    const registrations = sheetBuffer(REGISTRATIONS_HEADER, [regRow], 'Sheet1');
+    const r1 = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'registrations_export_one.xlsx', buffer: registrations,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(r1.body?.updated, 1, '15c שורת הנרשמים מוזגה לאותה שורה');
+
+    const after = await listRows();
+    const afterRow = after.enrollments.find(e => e.child.full_name === 'דניאל פרץ');
+    eq(afterRow?.child?.birth_date, beforeRow?.child?.birth_date,
+      '15d תאריך הלידה של הילד נשאר (keepFilledChildFields)');
+    eq(afterRow?.computed?.age_group, beforeRow?.computed?.age_group,
+      '15e שכבת הגיל המחושבת לא נמחקה');
+    eq(afterRow?.computed?.age_months, beforeRow?.computed?.age_months,
+      '15f וגם חודשי הגיל נשארו');
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

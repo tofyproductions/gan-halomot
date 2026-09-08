@@ -460,6 +460,15 @@ async function importRegistrationsExport({ req, res, next, branch, branchId, row
         // rather than by mutating the object Object.assign just installed, so
         // mongoose records every one of them as changed.
         for (const [key, value] of Object.entries(keptChild)) existing.set(`child.${key}`, value);
+        // Same trap as `child`: Object.assign just installed `doc.computed`
+        // wholesale. If this file's birth-date cell was unreadable, that
+        // computed is all nulls — mirror the contracts-path guard (~:718) and
+        // keep the age this row already had rather than erasing it.
+        if (doc.computed?.age_months == null && before.computed?.age_months != null) {
+          existing.set('computed.age_months', before.computed.age_months);
+          existing.set('computed.age_group', before.computed.age_group);
+          existing.set('computed.agrees_with_source', before.computed.agrees_with_source);
+        }
         existing.presence = {
           is_present: true,
           first_seen_at: existing.presence?.first_seen_at || now,
