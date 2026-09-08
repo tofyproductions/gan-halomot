@@ -205,7 +205,11 @@ export default function Header() {
             group keeps the bar compact; the group opens a menu of its tabs. */}
         <Stack direction="row" alignItems="center" spacing={0.3} sx={{ display: { xs: 'none', md: 'flex' } }}>
           {TAB_GROUPS.map((group) => {
-            const visibleItems = group.items.filter(item => hasTabAccess(user, item.id));
+            // `item.path` — some tab ids are permissions rather than screens
+            // (clicktac_write: the right to ACT on רישום חיצוני). They are
+            // granted on the permissions screen like any tab and have no page
+            // to navigate to, so the menu skips them.
+            const visibleItems = group.items.filter(item => item.path && hasTabAccess(user, item.id));
             if (visibleItems.length === 0) return null;
             const groupActive = visibleItems.some(it => location.pathname === it.path);
             const open = navMenu?.group === group.label;
@@ -370,7 +374,8 @@ export default function Header() {
 
         <List sx={{ pt: 0 }}>
           {TAB_GROUPS.map((group) => {
-            const visibleItems = group.items.filter(item => hasTabAccess(user, item.id));
+            // Same rule as the desktop bar: a write grant is not a page.
+            const visibleItems = group.items.filter(item => item.path && hasTabAccess(user, item.id));
             if (visibleItems.length === 0) return null;
             return (
               <Box key={group.label}>

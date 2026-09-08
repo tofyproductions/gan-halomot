@@ -10,6 +10,7 @@ import GroupsIcon from '@mui/icons-material/Groups';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { hasTabAccess } from '../../config/tabs';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 import TmtReconcile from './TmtReconcile';
 import ClassPlacement from './ClassPlacement';
@@ -53,12 +54,17 @@ const SOURCES = {
  *
  * The tab grants the screen — that is how a back-office manager gets to read
  * it. Uploading a ministry file, undoing one, or turning seventy children into
- * registrations is a different thing, and until the app has a permission of
- * its own for that it stays with the roles that always had it. The server
- * enforces the same split; this only keeps the buttons off a screen that would
- * answer them with 403.
+ * registrations is a different thing, and it now has a permission of its own:
+ * the tab id 'clicktac_write', handed out per user or per role on the
+ * permissions screen like any tab (client/src/config/tabs.js). So this asks
+ * hasTabAccess rather than the role — which is the whole point, since the
+ * people the office wants doing it are a מנהל מערכת לצפייה בלבד and one
+ * back-office employee, neither of whom is an admin. system_admin and
+ * accountant hold it by default, so nothing changes for them.
+ *
+ * Placing a child in a room stays where it was: it is the branch manager's own
+ * call on her own gan, and it never depended on the roles above.
  */
-const CAN_IMPORT = ['system_admin', 'accountant'];
 const CAN_PLACE = ['system_admin', 'accountant', 'branch_manager'];
 
 export default function EmunahEnrollment() {
@@ -73,8 +79,8 @@ export default function EmunahEnrollment() {
   const year = getEnrollmentYear();
 
   const { user } = useAuth();
-  const canImport = CAN_IMPORT.includes(user?.role);
-  const canPlace = CAN_PLACE.includes(user?.role);
+  const canImport = hasTabAccess(user, 'clicktac_write');
+  const canPlace = CAN_PLACE.includes(user?.role) || canImport;
 
   const [branches, setBranches] = useState([]);
   const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');

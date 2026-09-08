@@ -25,6 +25,28 @@ export const TAB_GROUPS = [
       // The id stays 'clicktac': per-user tab permissions are stored by id, and
       // renaming it would revoke the screen from whoever was granted it by hand.
       { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+      // NOT A SCREEN — a WRITE GRANT, and that is why `path` is null.
+      //
+      // Seeing רישום חיצוני and acting on it are two different things: the tab
+      // above is what a branch manager needs in order to READ her own gan's
+      // queue, and uploading a קליקטאק or תמ"ת file, undoing an upload,
+      // applying a comparison or turning seventy children into registrations is
+      // not the same permission. Until now "acting" was hard-wired to
+      // system_admin/accountant, so the one person the office actually wanted
+      // to hand it to — a מנהל מערכת לצפייה בלבד, or one back-office employee —
+      // could not be given it without making her an admin.
+      //
+      // So the permission itself became a tab id. Granting it per user (or
+      // per role) on the permissions screen works exactly like granting a
+      // screen, hasTabAccess(user, 'clicktac_write') answers "may this person
+      // act there" with the same precedence (per-user override > role override
+      // > default roles), and the server reads the very same grant off the JWT
+      // (middleware/auth.js#requireTabWrite). Holding it means acting for EVERY
+      // branch — the point of the grant is the person who files for all of them
+      // — while removing the 'clicktac' tab above still revokes everything.
+      //
+      // `path: null` keeps it out of the menu; Header.jsx filters on it.
+      { id: 'clicktac_write', label: 'רישום חיצוני — קליטת קבצים ופעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'clicktac' },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
       // שינויים שביקש "מנהל מערכת - לצפייה בלבד" ומחכים למשרד. The viewer
       // sees his own list on the same screen.
