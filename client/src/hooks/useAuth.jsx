@@ -12,7 +12,14 @@ export function AuthProvider({ children }) {
     const token = localStorage.getItem('token');
     if (token) {
       api.get('/auth/me')
-        .then(res => { setUser(res.data.user); registerNativePush(api); })
+        .then(res => {
+          // /me hands back a fresh token whenever the DB and the old token's
+          // claims disagree (a permission just granted/revoked) — store it so
+          // the very next request is judged on the new claims, not the stale
+          // ones still in localStorage.
+          if (res.data.token) localStorage.setItem('token', res.data.token);
+          setUser(res.data.user); registerNativePush(api);
+        })
         .catch(() => { localStorage.removeItem('token'); setUser(null); })
         .finally(() => setLoading(false));
     } else {
@@ -29,7 +36,11 @@ export function AuthProvider({ children }) {
     const refresh = () => {
       if (document.hidden) return;
       api.get('/auth/me')
-        .then(res => { if (!cancelled) setUser(res.data.user); })
+        .then(res => {
+          if (cancelled) return;
+          if (res.data.token) localStorage.setItem('token', res.data.token);
+          setUser(res.data.user);
+        })
         .catch(() => { /* transient — keep the current session */ });
     };
     const id = setInterval(refresh, 60_000);
@@ -90,6 +101,7 @@ export function AuthProvider({ children }) {
     const { data } = await api.post('/auth/set-password', { password });
     if (data && data.token) applyAuth(data);
     const me = await api.get('/auth/me');
+    if (me.data.token) localStorage.setItem('token', me.data.token);
     setUser(me.data.user);
   };
 

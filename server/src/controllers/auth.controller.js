@@ -366,6 +366,51 @@ async function logout(req, res, next) {
   }
 }
 
+/** Order-insensitive, id-shaped comparison — ObjectId vs its string are equal. */
+function sameIdList(a, b) {
+  const sa = new Set((a || []).map(String));
+  const sb = new Set((b || []).map(String));
+  if (sa.size !== sb.size) return false;
+  for (const x of sa) if (!sb.has(x)) return false;
+  return true;
+}
+
+/**
+ * Does the SIGNED token still say what a token minted right now would say?
+ *
+ * `decoded` is `req.user` — whatever was in the JWT the caller presented.
+ * `fresh` is `makeToken(...).user` — the payload built the exact same way
+ * `login` builds it, from the record as it stands this instant. Comparing
+ * the two is the only way to know whether the gates (requireTab/requireRole
+ * in middleware/auth.js, which read nothing but the signed token) are still
+ * judging this person on what the permissions screen says about her now.
+ *
+ * `?? ''` on the scalars: a field `makeToken` omits when it's undefined never
+ * makes it into the signed JSON at all, so `decoded.branch_id` comes back
+ * undefined for a branch-less user while `fresh.branch_id` is undefined too —
+ * both must normalize to the same empty string, not to `'undefined'` vs `''`.
+ */
+function tokenClaimsDiffer(decoded, fresh) {
+  const s = (x) => String(x ?? '');
+  // `actual_role` first: on a read, middleware/auth.js presents an
+  // admin_viewer to the controllers as a system_admin, and `req.user.role` is
+  // the swapped value rather than the one the token was signed with. /api/auth
+  // is on that middleware's no-swap list today, so this never fires — but if
+  // it ever came off that list, comparing the swapped role against the record
+  // would find a difference on every single call and mint a token per /me.
+  if (s(decoded.actual_role || decoded.role) !== s(fresh.role)) return true;
+  if (s(decoded.branch_id) !== s(fresh.branch_id)) return true;
+  if (!sameIdList(decoded.managed_branch_ids, fresh.managed_branch_ids)) return true;
+  if (!sameIdList(decoded.tab_overrides_add, fresh.tab_overrides_add)) return true;
+  if (!sameIdList(decoded.tab_overrides_remove, fresh.tab_overrides_remove)) return true;
+  if (!sameIdList(decoded.role_tab_add, fresh.role_tab_add)) return true;
+  if (!sameIdList(decoded.role_tab_remove, fresh.role_tab_remove)) return true;
+  if (s(decoded.custom_role_id) !== s(fresh.custom_role_id)) return true;
+  if (!!decoded.must_change_password !== !!fresh.must_change_password) return true;
+  if (!!decoded.password_set !== !!fresh.password_set) return true;
+  return false;
+}
+
 async function me(req, res, next) {
   try {
     const user = await User.findById(req.user.id)
@@ -375,6 +420,35 @@ async function me(req, res, next) {
       return res.status(404).json({ error: 'User not found' });
     }
     const roleTabs = await effectiveRoleTabs(user);
+
+    /**
+     * The token is the GATE's source of truth — every requireTab/requireRole
+     * check in middleware/auth.js reads req.user, which is the decoded JWT
+     * and nothing else. This response is the SCREEN's source of truth — it
+     * always re-reads the user, which is why the buttons an admin just
+     * unlocked show up here immediately. Until now those two could disagree
+     * for as long as the caller kept her old token: the screen said yes and
+     * every write 403'd, because the token she carried was minted before the
+     * grant. Minting a replacement HERE, the moment the two are found to
+     * differ, keeps them equal without asking for a re-login — the client
+     * stores whatever `token` comes back and uses it from the next request on.
+     *
+     * Never for a support session or a proposal replay: neither is `login`'s
+     * territory (mintApproverToken and the support flow build their own
+     * narrower payloads, with claims this function knows nothing about —
+     * `support`/`support_by`, `replay`), and both are already short-lived
+     * enough that a permission change mid-session isn't the problem they
+     * exist to solve.
+     */
+    let freshToken = null;
+    if (!req.user.support && !req.user.replay) {
+      const rememberMe = (Number(req.user.exp) - Number(req.user.iat)) > 2 * 86400;
+      const fresh = makeToken(user, rememberMe, roleTabs, req);
+      if (tokenClaimsDiffer(req.user, fresh.user)) {
+        freshToken = fresh.token;
+      }
+    }
+
     res.json({
       user: {
         ...user.toObject(),
@@ -386,6 +460,7 @@ async function me(req, res, next) {
         custom_role_id: roleTabs.custom_role_id,
         custom_role_name: roleTabs.custom_role_name,
       },
+      ...(freshToken ? { token: freshToken } : {}),
     });
   } catch (error) {
     next(error);
