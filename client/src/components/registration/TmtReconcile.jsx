@@ -67,6 +67,9 @@ function StatCard({ label, value, color, onClick, active, hint }) {
   );
 }
 
+/** שני הייצואים של קליקטאק, בשם שהמשרד קורא להם. */
+const SOURCE_LABEL = { registrations: 'נרשמים', contracts: 'חוזים' };
+
 /** The counts behind one upload, on one line. */
 function ImportLine({ imp }) {
   return (
@@ -571,6 +574,16 @@ export default function TmtReconcile({
                                 <Chip size="small" color="error" label="חסר פרטי הורים" />
                               </Tooltip>
                             )}
+                            {/* מאיזה קובץ הגיע/ה — פר שורה, ולא רק כתאריך
+                                בכרטיס למעלה. שתי השורות נראות זהות בטבלה, וזה
+                                מה שמסביר למה לאחת יש דרגה ולשנייה טלפון. */}
+                            <Stack direction="row" spacing={0.5}>
+                              {(r.clicktac.sources || []).map(src => (
+                                <Chip key={src} size="small" variant="outlined"
+                                  sx={{ height: 18, fontSize: '0.65rem' }}
+                                  label={SOURCE_LABEL[src] || src} />
+                              ))}
+                            </Stack>
                           </Stack>
                         )
                         : <Typography variant="caption" color="error">לא נרשם</Typography>}

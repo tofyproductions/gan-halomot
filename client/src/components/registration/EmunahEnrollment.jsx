@@ -310,6 +310,23 @@ export default function EmunahEnrollment() {
                   יש לקלוט גם את ייצוא הנרשמים כדי שאפשר יהיה לקלוט אותם למערכת.
                 </Box>
               )}
+              {/* שורות שלא נכתבו. שתיהן נגמרות מחוץ למערכת — אחת בתיקון ת"ז
+                  בקליקטאק, השנייה בהעלאה מחדש מול הסניף הנכון — ולכן שתיהן
+                  מציגות שמות ולא רק מספר. */}
+              {upload.result.skipped_duplicate > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <b>{upload.result.skipped_label || 'דילוג — ת"ז חסרה או כפולה'}
+                    {' '}({upload.result.skipped_duplicate}):</b>{' '}
+                  {(upload.result.skipped_names || []).join(', ')}
+                </Box>
+              )}
+              {upload.result.cross_branch > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <b>{upload.result.cross_branch_label || 'לא נקלט — הילד/ה רשום/ה בסניף אחר'}
+                    {' '}({upload.result.cross_branch}):</b>{' '}
+                  {(upload.result.cross_branch_names || []).join(', ')}
+                </Box>
+              )}
               {!!(upload.result.details?.missing?.length || upload.result.missing_names?.length) && (
                 <Box sx={{ mt: 1 }}>
                   <b>ירדו מהרשימה:</b>{' '}
