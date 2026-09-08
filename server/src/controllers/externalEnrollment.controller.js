@@ -10,6 +10,7 @@ const {
 const {
   paymentAlertFor, paymentMethodCounts, paymentMethodFor,
 } = require('../services/paymentCheck');
+const { tierFeeFor } = require('../services/tier-fee.service');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -943,6 +944,21 @@ async function list(req, res, next) {
       filtered = filtered.filter(d => !hasParents(d));
     }
 
+    /**
+     * The matrices behind `fee_by_tier`, one per (branch, year) in the queue.
+     *
+     * The queue is not one branch — an admin sees every gan at once — so the
+     * pricing document cannot be loaded once, and it must not be loaded per
+     * row either. Loaded per distinct pair, which for the real screen is one
+     * or four reads.
+     */
+    const pricingKey = (d) => `${String(d.branch_id?._id || d.branch_id)}|${d.academic_year}`;
+    const pricingByKey = new Map(docs.map(d => [pricingKey(d), null]));
+    await Promise.all([...pricingByKey.keys()].map(async (key) => {
+      const [branchId, year] = key.split('|');
+      pricingByKey.set(key, await branchPricingFor(branchId, year));
+    }));
+
     res.json({
       enrollments: filtered.map(({ standing_order: bank, ...d }) => ({
         ...d,
@@ -963,6 +979,21 @@ async function list(req, res, next) {
         // ones with a problem. Null for a contracts-only row, which has no
         // payment column behind it at all.
         payment_method_kind: paymentMethodFor(d),
+        /**
+         * שכר הלימוד שהדרגה של המשפחה מייצרת — או null.
+         *
+         * The number the screen shows beside the דרגה, and the number this row
+         * will actually be billed when it is promoted (see promoteOne). Null
+         * for a child with no tier, a private branch, or a matrix that does not
+         * price this combination — all three of which mean "a person still has
+         * to choose", and saying so with an empty cell is more honest than
+         * showing a zero.
+         */
+        fee_by_tier: tierFeeFor({
+          pricing: pricingByKey.get(pricingKey(d)),
+          tier: d.contract?.tier,
+          ageGroup: effectiveAgeGroup(d),
+        })?.fee ?? null,
       })),
       summary: {
         total: docs.length,
@@ -1023,26 +1054,52 @@ async function getOne(req, res, next) {
  * child, and it is now stored on the row (`contract.tier`) and shown next to
  * the child.
  *
- * It is stored and shown, not yet applied. Pricing here is a matrix handed to
- * the client, which picks the cell and posts a `monthly_fee`; the server never
- * computes a fee from a tier at all. Wiring the per-row tier into that would
- * mean moving the pricing decision to the server, which is a larger change
- * than this one and belongs with whoever owns the fee screen. Until then the
- * office has, for the first time, the actual number per child in front of it.
+ * AND IT IS NOW APPLIED. The matrix below is still handed to the client for
+ * the children who have no tier, but a child whose contract names one is
+ * priced on the server, off this same document — see promoteOne and
+ * services/tier-fee.service.js. The screen shows the number rather than asking
+ * for it, and the registration records which row produced it.
  *
  * The matrix columns are the state's: עד 15 חודש / 15–24 חודש / מעל 24 חודש —
  * the same two boundaries the export's own age groups fall on, which is what
  * makes the computed age group usable for picking a column.
  */
+
+/**
+ * The branch's price matrix for a gan year, or null.
+ *
+ * ONE PLACE, BECAUSE THE YEAR IS WRITTEN THREE WAYS. BranchPricing's
+ * `academic_year` is whatever the screen that saved it sent, and the screens do
+ * not agree: the pricing editor offers `תשפ"ז` with an ASCII double quote,
+ * `hebrewYearForStart` produces `תשפ״ז` with a gershayim (U+05F4), and some
+ * rows carry the plain "2026-2027". They are the same year and they are three
+ * different strings, so a lookup that knows one of them finds no matrix, prices
+ * every child manually, and says nothing — which is exactly the silent failure
+ * this whole change exists to end. All the spellings are asked for at once.
+ */
+function yearSpellings(year) {
+  const hebrew = hebrewYearForStart(Number(year.split('-')[0]));
+  return [...new Set([
+    year,
+    hebrew,
+    hebrew.replace(/״/g, '"'),   // the pricing editor's own spelling
+    hebrew.replace(/"/g, '״'),
+  ])];
+}
+
+async function branchPricingFor(branchId, academicYear) {
+  if (!branchId) return null;
+  const year = normalizeYear(academicYear || enrollmentYear());
+  return BranchPricing.findOne({
+    branch_id: branchId,
+    academic_year: { $in: yearSpellings(year) },
+  }).lean();
+}
+
 async function pricing(req, res, next) {
   try {
     const year = normalizeYear(req.query.year || enrollmentYear());
-    const hebrew = hebrewYearForStart(Number(year.split('-')[0]));
-    // BranchPricing stores the year in Hebrew letters, not as "YYYY-YYYY".
-    const doc = await BranchPricing.findOne({
-      branch_id: req.query.branch,
-      $or: [{ academic_year: hebrew }, { academic_year: year }],
-    }).lean();
+    const doc = await branchPricingFor(req.query.branch, year);
     if (!doc) return res.json({ pricing: null, age_groups: AGE_GROUPS.map(g => g.name) });
     res.json({
       pricing: {
@@ -1182,9 +1239,65 @@ async function createClassroom(req, res, next) {
  * this system holds no signature, and `configuration.external_source` records
  * where it was signed instead — a completed registration with no signature is
  * flagged on the registrations page, and that flag would be a lie here.
+ *
+ * THE FEE IS DECIDED HERE AND NOWHERE ELSE. Three paths reach this function —
+ * the single promote, the bulk promote and the placement confirm — and until
+ * now each of them passed a number a screen had picked. The contracts export
+ * carries the family's own דרגה, so the number is derivable, and deriving it in
+ * one place is the only way the three paths can agree. `opts.monthly_fee` is
+ * still honoured for every child the matrix cannot price; `monthly_fee_override`
+ * beats the tier and says a person meant to.
  */
 async function promoteOne(doc, opts) {
-  const { monthly_fee, registration_fee, classroom_id, userId } = opts;
+  const { registration_fee, classroom_id, userId } = opts;
+
+  /**
+   * WHICH NUMBER, AND WHY THAT ONE.
+   *
+   * The order is the order of authority. A human who typed a figure into the
+   * override beat the matrix on purpose and must not be second-guessed. Then
+   * the family's own דרגה off their signed contract, which is the state's
+   * answer and the one that can be defended to a parent. Then whatever the
+   * screen sent, which is where every fee came from before this existed and is
+   * still where the private branches and the un-priced tiers come from.
+   *
+   * `opts.pricing` is the branch's matrix, loaded by the caller so a bulk run
+   * of seventy children does not read the same document seventy times. Passing
+   * `null` explicitly means "priced manually, do not look" — passing nothing
+   * makes this load it, which is what keeps a future fourth caller correct by
+   * default.
+   */
+  const pricingDoc = opts.pricing !== undefined
+    ? opts.pricing
+    : await branchPricingFor(doc.branch_id, doc.academic_year);
+  const byTier = tierFeeFor({
+    pricing: pricingDoc,
+    tier: doc.contract?.tier,
+    ageGroup: effectiveAgeGroup(doc),
+  });
+
+  const override = opts.monthly_fee_override;
+  const hasOverride = override !== undefined && override !== null && override !== ''
+    && Number.isFinite(Number(override));
+
+  let monthly_fee;
+  let feeSource;
+  let feeTier = '';
+  if (hasOverride) {
+    monthly_fee = Number(override);
+    feeSource = 'override';
+    // Kept even on an override: "the matrix said 1,410 and somebody chose
+    // 1,200" is the fact worth having six months later, and dropping the tier
+    // here would leave only the number nobody can explain.
+    feeTier = byTier?.tier_label || '';
+  } else if (byTier) {
+    monthly_fee = byTier.fee;
+    feeSource = 'tier';
+    feeTier = byTier.tier_label;
+  } else {
+    monthly_fee = Number(opts.monthly_fee ?? 0) || 0;
+    feeSource = 'manual';
+  }
 
   const parentName = `${doc.parent1?.first_name || ''} ${doc.parent1?.last_name || ''}`.trim();
   const [y1, y2] = doc.academic_year.split('-').map(Number);
@@ -1200,6 +1313,8 @@ async function promoteOne(doc, opts) {
     parent_phone: doc.parent1?.phone || null,
     parent_email: doc.parent1?.email || null,
     monthly_fee,
+    fee_source: feeSource,
+    fee_tier: feeTier,
     registration_fee: registration_fee || 0,
     start_date: new Date(Date.UTC(y1, 8, 1)),
     end_date: new Date(Date.UTC(y2, 7, 31)),
@@ -1346,6 +1461,19 @@ async function promote(req, res, next) {
     if (!Number.isFinite(monthlyFee) || monthlyFee < 0) {
       return res.status(400).json({ error: 'שכר לימוד לא תקין' });
     }
+    /**
+     * BACKWARD COMPATIBLE ON PURPOSE. `monthly_fee` still means what it always
+     * meant — the fee a screen picked — and it is still what a child with no
+     * דרגה is billed. `monthly_fee_override` is the new, louder word: it beats
+     * the tier, and it exists so that overriding the state's matrix is
+     * something a caller has to say rather than something it does by accident
+     * because it happened to post a number.
+     */
+    const overrideRaw = req.body?.monthly_fee_override;
+    const hasOverride = overrideRaw !== undefined && overrideRaw !== null && overrideRaw !== '';
+    if (hasOverride && !(Number.isFinite(Number(overrideRaw)) && Number(overrideRaw) >= 0)) {
+      return res.status(400).json({ error: 'שכר לימוד לא תקין' });
+    }
     if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
       return res.status(409).json({
         error: `${doc.child.full_name} כבר קיים/ת במערכת`,
@@ -1356,6 +1484,7 @@ async function promote(req, res, next) {
 
     const registration = await promoteOne(doc, {
       monthly_fee: monthlyFee,
+      monthly_fee_override: hasOverride ? Number(overrideRaw) : undefined,
       registration_fee: Number(req.body?.registration_fee) || 0,
       // The room decided on the placement screen, unless this call names one.
       classroom_id: req.body?.classroom_id || doc.placement?.classroom_id || null,
@@ -1375,6 +1504,12 @@ async function promote(req, res, next) {
  * differently from a בוגר, and a single number applied to seventy children
  * would be wrong for most of them.
  *
+ * AND IT IS NOW THE FALLBACK, NOT THE RULE. A child whose contract names a
+ * דרגה is priced off that child's own row of the matrix, which is the whole
+ * point of the contracts export — `fees_by_age_group` is what the children
+ * WITHOUT a tier are billed. `override_tier: true` says the caller means these
+ * numbers to beat the matrix, and only then do they.
+ *
  * Each failure is reported with its reason instead of aborting the run — a
  * duplicate in the middle of a list should not leave half of it imported with
  * nothing saying which half.
@@ -1385,6 +1520,22 @@ async function promoteBulk(req, res, next) {
     if (!ids.length) return res.status(400).json({ error: 'לא נבחרו רשומות' });
     const fees = req.body?.fees_by_age_group || {};
     const regFee = Number(req.body?.registration_fee) || 0;
+    const overrideTier = ['1', 'true', true].includes(req.body?.override_tier);
+    /**
+     * One matrix per branch, for the whole run.
+     *
+     * A bulk promote is seventy rows and they are almost always one branch;
+     * loading the pricing document per row would be seventy identical reads,
+     * and loading it once outside the loop would be wrong for the list that
+     * spans two gans. Keyed by branch and year, which is exactly what the
+     * document is unique on.
+     */
+    const pricingCache = new Map();
+    const pricingFor = async (branchId, year) => {
+      const key = `${branchId}|${year}`;
+      if (!pricingCache.has(key)) pricingCache.set(key, await branchPricingFor(branchId, year));
+      return pricingCache.get(key);
+    };
 
     // One lookup for the whole batch instead of one User.findById per row —
     // canAccessBranch(req, branchId) just calls resolveBranchScope(req) and
@@ -1426,6 +1577,9 @@ async function promoteBulk(req, res, next) {
         // eslint-disable-next-line no-await-in-loop
         const reg = await promoteOne(doc, {
           monthly_fee: fee,
+          monthly_fee_override: overrideTier ? fee : undefined,
+          // eslint-disable-next-line no-await-in-loop
+          pricing: await pricingFor(doc.branch_id, doc.academic_year),
           registration_fee: regFee,
           // The classroom follows the child's age group, which is the whole
           // point of computing it. One classroom for everybody would put a
@@ -1650,4 +1804,7 @@ module.exports = {
   // Used by the placement board's confirm step, which is the same act of
   // creating a registration seen from the other end.
   promoteOne,
+  // …and the matrix that step prices with, so the two screens read the same
+  // document through the same year-format tolerance.
+  branchPricingFor,
 };

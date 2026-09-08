@@ -83,6 +83,7 @@ const METHOD_LEGEND = [
 /** The three groups a child can be placed in. The state's brackets, our rooms. */
 const AGE_GROUPS = ['תינוק', 'פעוט', 'בוגר'];
 
+const fmtMoney = (n) => `${Number(n || 0).toLocaleString('he-IL')} ₪`;
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '—');
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('he-IL') : '—');
 
@@ -697,6 +698,16 @@ export default function TmtReconcile({
                             דרגה {r.clicktac.tier === '' ? '—' : r.clicktac.tier}
                             {r.clicktac.tuition_type ? ` · ${r.clicktac.tuition_type}` : ''}
                           </Typography>
+                          {/* The tier alone is a number nobody can act on —
+                              "דרגה 4" means nothing without the branch's
+                              matrix in front of you. This is what it costs,
+                              and it is the fee the child will actually be
+                              billed on the placement board. */}
+                          {r.clicktac.fee_by_tier != null && (
+                            <Typography variant="caption" color="success.main" display="block" fontWeight={700}>
+                              שכ״ל לפי דרגה: {fmtMoney(r.clicktac.fee_by_tier)}
+                            </Typography>
+                          )}
                         </>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>

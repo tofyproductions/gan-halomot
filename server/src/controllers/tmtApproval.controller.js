@@ -1,17 +1,16 @@
 const XLSX = require('xlsx');
 const {
   TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child,
-  BranchPricing,
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
   promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
-  withImporterName,
+  withImporterName, branchPricingFor,
 } = require('./externalEnrollment.controller');
 const {
-  normalizeYear, enrollmentYear, formatAcademicYear, hebrewYearForStart,
+  normalizeYear, enrollmentYear, formatAcademicYear,
 } = require('../services/academic-year.service');
 
 /**
@@ -313,7 +312,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     };
   }
 
-  const [tmtAll, ctDocs] = await Promise.all([
+  const [tmtAll, ctDocs, pricing] = await Promise.all([
     TmtApproval.find({ academic_year: academicYear })
       .select('-raw')
       .populate('branch_id', 'name')
@@ -326,6 +325,10 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     ExternalEnrollment.find({ branch_id: branchId, academic_year: academicYear })
       .select('-raw')
       .lean(),
+    // The branch's price matrix, so every row can carry the fee its own דרגה
+    // prices. Read here rather than inside reconcile() because that function
+    // is pure and has no database — and read once for the whole screen.
+    branchPricingFor(branchId, academicYear),
   ]);
 
   const ctIds = new Set(ctDocs.map(d => normalizeId(d.child?.id_number)).filter(Boolean));
@@ -342,6 +345,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     branchId,
     academicYear,
     branchName: branch.name,
+    pricing,
   });
   // The size of each side, which the verdicts alone cannot tell you: a branch
   // with no תמ"ת file and a branch whose every child was refused produce the
@@ -771,13 +775,7 @@ async function placement(req, res, next) {
       // Children already filed into a room for this year — places already taken.
       Child.find({ academic_year: academicYear, is_active: true, classroom_id: { $ne: null } })
         .select('classroom_id child_name').lean(),
-      BranchPricing.findOne({
-        branch_id: branchId,
-        $or: [
-          { academic_year: hebrewYearForStart(Number(academicYear.split('-')[0])) },
-          { academic_year: academicYear },
-        ],
-      }).lean(),
+      branchPricingFor(branchId, academicYear),
     ]);
 
     // A name with a replacement character in it is a corrupted row, not a room
@@ -810,6 +808,12 @@ async function placement(req, res, next) {
       parent_name: r.clicktac.parent1_name || '',
       parent_phone: r.clicktac.parent1_phone || '',
       issues: r.issues.filter(i => i.severity !== 'info').map(i => i.label),
+      // The דרגה off the family's signed contract, and what it prices here.
+      // The confirm step bills exactly this number (promoteOne prices it
+      // again from the same matrix), so the board shows it before committing
+      // instead of asking for a figure it can already work out.
+      tier: r.clicktac.tier || '',
+      fee_by_tier: r.clicktac.fee_by_tier ?? null,
     }));
 
     const groups = Object.entries(AGE_GROUP_TO_CATEGORY).map(([group, category]) => {
@@ -907,6 +911,21 @@ async function confirmPlacement(req, res, next) {
 
     const fees = req.body?.fees_by_age_group || {};
     const regFee = Number(req.body?.registration_fee) || 0;
+    /**
+     * `fees_by_age_group` IS THE FALLBACK NOW.
+     *
+     * A child whose contract names a דרגה is billed off that child's own row of
+     * the branch's matrix — the fee the board already showed beside their name.
+     * These per-group numbers still price everybody the matrix cannot: a
+     * private branch, a blank tier, a combination the matrix has no cell for.
+     * `override_tier` is how somebody says they mean these numbers to win
+     * anyway, and it is a deliberate word rather than a side effect of posting
+     * a fee.
+     */
+    const overrideTier = ['1', 'true', true].includes(req.body?.override_tier);
+    // One matrix for the whole run — this route is one branch and one year by
+    // construction, and promoteOne would otherwise read it once per child.
+    const pricing = await branchPricingFor(branchId, academicYear);
 
     const rooms = await Classroom.find({ branch_id: branchId, academic_year: academicYear })
       .select('name category capacity').lean();
@@ -963,13 +982,22 @@ async function confirmPlacement(req, res, next) {
       try {
         const reg = await promoteOne(doc.toObject(), {
           monthly_fee: fee,
+          monthly_fee_override: overrideTier ? fee : undefined,
+          pricing,
           registration_fee: regFee,
           classroom_id: room._id,
           userId: req.user?.id || null,
         });
         placed.push({
           id: a.id, child: name, classroom: room.name, age_group: group,
-          monthly_fee: fee, registration_id: reg._id,
+          // The fee that was ACTUALLY written, not the one this loop offered —
+          // for a child with a דרגה those are different numbers, and reporting
+          // the offer would tell the office something untrue about what it
+          // just committed.
+          monthly_fee: reg.monthly_fee,
+          fee_source: reg.fee_source,
+          fee_tier: reg.fee_tier,
+          registration_id: reg._id,
         });
       } catch (e) {
         skipped.push({ id: a.id, child: name, error: e.message });

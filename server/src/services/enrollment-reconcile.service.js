@@ -24,6 +24,7 @@ const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
 const { paymentAlertFor, paymentMethodFor } = require('./paymentCheck');
+const { tierFeeFor } = require('./tier-fee.service');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -340,7 +341,14 @@ function verdictFor(tmt, ct, { branchId } = {}) {
  * כפר סבא is caught, and it is a real thing that happens when a family applies
  * to two of the network's gans.
  */
-function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchName = '' }) {
+function reconcile({
+  tmtDocs = [], ctDocs = [], branchId, academicYear, branchName = '',
+  // The branch's price matrix, when the caller loaded one. Optional on
+  // purpose: this function is pure and the fee is one more derived column, so
+  // a caller that has no matrix (or does not care) gets rows with a null
+  // `fee_by_tier` rather than an exception.
+  pricing = null,
+}) {
   const tmtById = new Map();
   for (const t of tmtDocs) {
     const id = normalizeId(t.child?.id_number);
@@ -485,9 +493,23 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
         payment_alert: paymentAlertFor(ct),
         class_name: ct.contract?.class_name || '',
         // The subsidy bracket the whole fee hangs on — the number that was in
-        // neither file until the contracts export was accepted. Shown, not yet
-        // applied; see the note on pricing() in the controller.
+        // neither file until the contracts export was accepted.
         tier: ct.contract?.tier || '',
+        /**
+         * What that bracket actually costs this child, off the branch's matrix.
+         *
+         * The tier alone is a number nobody can act on; "דרגה 4" means nothing
+         * without the matrix in front of you. This is the fee the child will
+         * be billed when they are promoted (promoteOne prices from the same
+         * two functions), shown here so the office sees it before it commits
+         * rather than after. Null when there is no tier, no matrix, or no cell
+         * — all three of which mean a person still has to choose.
+         */
+        fee_by_tier: tierFeeFor({
+          pricing,
+          tier: ct.contract?.tier,
+          ageGroup: ct.placement?.age_group_override || ct.computed?.age_group || ct.child?.age_group,
+        })?.fee ?? null,
         tuition_type: ct.contract?.tuition_type || '',
         contract_start: ct.contract?.start_date || null,
         contract_end: ct.contract?.end_date || null,

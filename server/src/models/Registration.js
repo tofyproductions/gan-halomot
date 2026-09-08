@@ -14,6 +14,26 @@ const registrationSchema = new mongoose.Schema({
   fee_effective_from: { type: String, default: null },    // YYYY-MM: new fee applies from this month
   previous_monthly_fee: { type: Number, default: null },  // the old fee before the change
   registration_fee: { type: Number, default: 0 },
+
+  /**
+   * WHERE THE MONTHLY FEE CAME FROM — the question a parent asks in February.
+   *
+   * 'tier'     the state's price matrix, crossed with the דרגה on the family's
+   *            signed contract. `fee_tier` names the row, so the number can be
+   *            re-derived and defended without opening ClickTac.
+   * 'override' a person deliberately typed a different number than the tier
+   *            priced. Recorded so that "the fee does not match the matrix" is
+   *            a decision somebody made rather than a bug to hunt.
+   * 'manual'   nobody had a tier to go on — a private branch, a matrix that
+   *            does not cover this child, or a fee typed before any of this
+   *            existed. The old behaviour, named.
+   *
+   * Blank on every registration written before this field existed, and that is
+   * honest: those fees came from a screen that recorded nothing.
+   */
+  fee_source: { type: String, enum: ['tier', 'override', 'manual', ''], default: '' },
+  /** The tier row the fee was read off — "דרגה 4". Only with fee_source 'tier'. */
+  fee_tier: { type: String, default: '' },
   start_date: { type: Date, required: true },
   end_date: { type: Date, required: true },
 

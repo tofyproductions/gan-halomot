@@ -3,7 +3,7 @@ import {
   Box, Stack, Typography, Card, Chip, Button, TextField, MenuItem, Dialog,
   DialogTitle, DialogContent, DialogActions, Alert, AlertTitle, CircularProgress,
   Table, TableHead, TableBody, TableRow, TableCell, LinearProgress, Tooltip,
-  IconButton, Divider,
+  IconButton, Divider, Checkbox, FormControlLabel,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoAwesomeMotionIcon from '@mui/icons-material/AutoAwesomeMotion';
@@ -34,6 +34,8 @@ import { useConfirm } from '../shared/ConfirmProvider';
  * places than the licence allows, so both are shown and the smaller one is
  * named as the one that binds.
  */
+
+const fmtMoney = (n) => `${Number(n || 0).toLocaleString('he-IL')} ₪`;
 
 const CATEGORY_LABEL = {
   'תינוקייה': 'תינוקות',
@@ -67,6 +69,15 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   const [assign, setAssign] = useState({});      // enrollmentId -> classroomId
   const [fees, setFees] = useState({});
   const [tier, setTier] = useState('');
+  /**
+   * "Charge everybody the numbers I typed, not the ones their contracts say."
+   *
+   * Off by default and deliberately hard to hit by accident: the state's
+   * matrix crossed with the family's own דרגה is the defensible number, and a
+   * screen that quietly overruled it would put us back where we started —
+   * one figure applied to a whole cohort.
+   */
+  const [overrideTier, setOverrideTier] = useState(false);
   const [regFee, setRegFee] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
@@ -133,6 +144,24 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
       afterConfirm: (cap.seated || 0) + assigned,
     };
   }, [data, assign]);
+
+  /**
+   * How many of the children on this board the matrix already prices.
+   *
+   * Counted over the WHOLE board rather than per group, because the question
+   * the money card answers is "do I have to type anything at all here", and
+   * that is one question. `rest` is the children the per-group fields below
+   * are actually for.
+   */
+  const byTier = useMemo(() => {
+    const kids = (data?.groups || []).flatMap(g => g.children);
+    const count = kids.filter(c => c.fee_by_tier != null).length;
+    return { count, total: kids.length, rest: kids.length - count };
+  }, [data]);
+
+  // Locked while the matrix is doing the pricing and nobody asked to overrule
+  // it — an editable field that changes nothing is a lie the screen tells.
+  const feesLocked = byTier.count > 0 && byTier.rest === 0 && !overrideTier;
 
   const saveLicence = async () => {
     try {
@@ -255,6 +284,9 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
         fees_by_age_group: Object.fromEntries(
           Object.entries(fees).map(([k, v]) => [k, Number(v) || 0]),
         ),
+        // Only when somebody ticked the box. Without it these figures price
+        // the children the matrix cannot, and nothing else.
+        override_tier: overrideTier,
         registration_fee: Number(regFee) || 0,
       });
       setResult(res.data);
@@ -437,6 +469,7 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                         <TableCell>ילד/ה</TableCell>
                         <TableCell>גיל ב־1.9</TableCell>
                         <TableCell>הורה</TableCell>
+                        <TableCell>שכ״ל</TableCell>
                         <TableCell>חריגות</TableCell>
                         <TableCell>כיתה</TableCell>
                       </TableRow>
@@ -462,6 +495,29 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                             <Typography variant="caption" color="text.secondary" display="block" dir="ltr">
                               {c.parent_phone}
                             </Typography>
+                          </TableCell>
+                          {/* THE FEE THIS CHILD WILL ACTUALLY BE BILLED.
+                              The דרגה comes off the family's own signed
+                              contract and the matrix prices it, so the board
+                              shows the number instead of asking for one. A
+                              child with no tier falls back to the per-group
+                              figure typed below, which is what every child
+                              used to get. */}
+                          <TableCell>
+                            {c.fee_by_tier != null ? (
+                              <>
+                                <Typography variant="body2" fontWeight={700} color="success.main">
+                                  {fmtMoney(c.fee_by_tier)}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  דרגה {c.tier}
+                                </Typography>
+                              </>
+                            ) : (
+                              <Typography variant="caption" color="text.disabled">
+                                {c.tier ? `דרגה ${c.tier} — לא במחירון` : 'לפי השכבה'}
+                              </Typography>
+                            )}
                           </TableCell>
                           <TableCell>
                             {c.issues.map(i => (
@@ -537,17 +593,38 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
             {/* ---------- the money ---------- */}
             <Card variant="outlined" sx={{ p: 2, mb: 1 }}>
               <Typography variant="subtitle1" fontWeight={800} gutterBottom>שכר לימוד</Typography>
-              <Alert severity="info" sx={{ mb: 1.5 }}>
-                שכר הלימוד אינו קיים באף אחד מהקבצים — דרגת הסבסוד היא נתון על הכנסת המשפחה
-                שלא מופיע בהם. נבחר כאן מתוך מחירון הסניף.
-              </Alert>
+              {/* WHO IS PRICED BY WHOM. The children whose contract names a
+                  דרגה are priced by the state's matrix and this card does not
+                  decide anything about them; the fields below exist for the
+                  rest. Saying which is which by number is the difference
+                  between a screen that looks ignorable and one that is. */}
+              {byTier.count > 0 ? (
+                <Alert severity="success" sx={{ mb: 1.5 }}>
+                  <AlertTitle>
+                    {byTier.count} מתוך {byTier.total} ייקלטו לפי הדרגה שבייצוא החוזים
+                  </AlertTitle>
+                  שכר הלימוד שלהם נקבע לפי דרגת הסבסוד של המשפחה כפול שכבת הגיל, מתוך מחירון
+                  הסניף — הסכום מופיע ליד כל ילד/ה בטבלאות שלמעלה.
+                  {byTier.rest > 0
+                    ? ` ל־${byTier.rest} ילדים אין דרגה במחירון, והסכומים כאן הם שלהם.`
+                    : ' אין ילד/ה שדורש/ת סכום ידני.'}
+                </Alert>
+              ) : (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  שכר הלימוד אינו קיים באף אחד מהקבצים — דרגת הסבסוד היא נתון על הכנסת המשפחה
+                  שלא מופיע בהם. נבחר כאן מתוך מחירון הסניף.
+                </Alert>
+              )}
               {/* Leaving it empty is allowed and is a decision, so it is stated
                   here beside the fields rather than blocking the button — a
                   child certain to attend should not be kept out of the gan's
-                  own screens until an income bracket arrives. */}
-              {!Object.values(fees).some(v => Number(v) > 0) && (
+                  own screens until an income bracket arrives. Only raised for
+                  the children the tier does NOT price: warning a manager about
+                  a blank field that will not be read is how a warning stops
+                  being read. */}
+              {byTier.rest > 0 && !Object.values(fees).some(v => Number(v) > 0) && (
                 <Alert severity="warning" sx={{ mb: 1.5 }}>
-                  <AlertTitle>לא הוזן שכר לימוד — הילדים ייקלטו עם 0 ₪</AlertTitle>
+                  <AlertTitle>לא הוזן שכר לימוד — {byTier.rest} ילדים ייקלטו עם 0 ₪</AlertTitle>
                   הם ייכנסו לכיתות, לנוכחות ולכל שאר המסכים כרגיל, ובגבייה יופיעו כחייבים
                   0 ₪ עד שיוזן סכום. הרישומים מסומנים כ״שכר לימוד טרם נקבע״ כדי שאפשר יהיה
                   לאתר אותם ולעדכן בבת אחת.
@@ -556,6 +633,7 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
               <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap alignItems="center">
                 {!!data.pricing?.tiers?.length && (
                   <TextField select size="small" label="דרגה" sx={{ minWidth: 160 }}
+                    disabled={feesLocked}
                     value={tier} onChange={e => applyTier(e.target.value)}>
                     {data.pricing.tiers.map(t => (
                       <MenuItem key={t.label} value={t.label}>{t.label}</MenuItem>
@@ -564,11 +642,34 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                 )}
                 {['תינוק', 'פעוט', 'בוגר'].map(gname => (
                   <TextField key={gname} size="small" label={gname} type="number" sx={{ width: 110 }}
+                    disabled={feesLocked}
                     value={fees[gname] ?? ''} onChange={e => setFees(f => ({ ...f, [gname]: e.target.value }))} />
                 ))}
                 <TextField size="small" label="דמי רישום" type="number" sx={{ width: 120 }}
                   value={regFee} onChange={e => setRegFee(e.target.value)} />
               </Stack>
+              {/* THE WAY OUT, AND IT HAS TO BE DELIBERATE. The matrix is the
+                  state's answer and it is right nearly always; when it is not
+                  — a family whose bracket changed and whose contract was never
+                  re-signed — somebody has to be able to overrule it. Ticking
+                  this sends `override_tier`, and the server records the
+                  registration's fee as an override with the tier it beat, so
+                  the gap can be explained in February. */}
+              {byTier.count > 0 && (
+                <FormControlLabel
+                  sx={{ mt: 1 }}
+                  control={<Checkbox size="small" checked={overrideTier}
+                    onChange={e => setOverrideTier(e.target.checked)} />}
+                  label={(
+                    <Typography variant="body2">
+                      לעקוף את הדרגה — לחייב את כל הילדים לפי הסכומים שהוזנו כאן
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        העקיפה נרשמת על כל רישום ביחד עם הדרגה שנעקפה.
+                      </Typography>
+                    </Typography>
+                  )}
+                />
+              )}
               {!data.pricing && (
                 <Alert severity="warning" sx={{ mt: 1 }}>
                   לא הוגדר מחירון לסניף לשנה זו. אפשר להזין סכומים ידנית.
