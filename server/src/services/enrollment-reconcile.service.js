@@ -250,7 +250,11 @@ function paymentTermsFor(ct) {
     // דמי רישום — the one-off, with the receipt that proves it was taken.
     registration_fee_method: String(e.registration_fee_method || '').trim(),
     registration_fee_card_last4: String(e.registration_fee_card_last4 || '').trim(),
-    registration_fee_amount: Number(e.amount || 0) || 0,
+    // The file's generic "סכום תשלום" column — not necessarily דמי רישום.
+    // ClickTac has no column that says which payment this amount belongs to,
+    // so this is reported on its own line and never folded into the
+    // registration-fee line above it.
+    amount_in_file: Number(e.amount || 0) || 0,
     receipt_number: String(e.receipt_number || '').trim(),
     voucher_number: String(e.voucher_number || '').trim(),
     /**

@@ -69,6 +69,18 @@ const AGE_GROUPS = ['תינוק', 'פעוט', 'בוגר'];
  * contracts file arrives, 'contracts' is the row with a דרגה and nobody to
  * phone. Birth dates are spread across the two boundaries (15 and 24 months at
  * 1 September) so all three age groups appear.
+ *
+ * PINNED AGAINST 1.9.2026. `academicYear` (viewer-demo-server.js) is
+ * `enrollmentYear()` — today's calendar year, not a constant — so the "gan
+ * year starts 1 September" arithmetic in computedFor() moves with the clock.
+ * Every `ageGroup` below was chosen so the file's own age group matches what
+ * the birth date computes to AGAINST 1.9.2026 specifically (this file was
+ * written in 2026, i.e. the demo runs against academic year 2026-2027). Only
+ * `age_disagreement` is deliberately wrong; every other row must stay
+ * boundary-consistent or it starts throwing an unintended age mismatch of its
+ * own, on top of whatever it was actually seeded to demonstrate. Re-check the
+ * months-at-1.9.2026 math (ageInMonths/ageGroupFor in clicktac.service.js) if
+ * this ever needs to keep working past 2027.
  */
 const COHORT = [
   {
@@ -110,7 +122,7 @@ const COHORT = [
   },
   {
     key: 'cash', first: 'אליה', last: 'בן חמו', idNumber: '249000060',
-    birth: [2025, 5, 17], only: 'registrations', ageGroup: 'תינוק',
+    birth: [2025, 5, 17], only: 'registrations', ageGroup: 'פעוט',
     method: 'מזומן', regFeeMethod: 'מזומן', amount: 350,
     tmt: 'approved',
   },
@@ -123,7 +135,7 @@ const COHORT = [
   },
   {
     key: 'not_applicable', first: 'ליאם', last: 'פרץ', idNumber: '249000086',
-    birth: [2025, 4, 8], only: 'both', cls: 'תינוקות א', tier: 14, ageGroup: 'תינוק',
+    birth: [2025, 4, 8], only: 'both', cls: 'תינוקות א', tier: 14, ageGroup: 'פעוט',
     // The vendor's dropdown for "somebody else pays". Reads as לא הוגדר, and
     // that is the point of seeding it.
     method: 'לא רלוונטי',
@@ -131,7 +143,7 @@ const COHORT = [
   },
   {
     key: 'contract_only_a', first: 'רוני', last: 'אשכנזי', idNumber: '249000094',
-    birth: [2024, 9, 14], only: 'contracts', cls: 'בוגרים ב', tier: 5, ageGroup: 'בוגר',
+    birth: [2024, 9, 14], only: 'contracts', cls: 'בוגרים ב', tier: 5, ageGroup: 'פעוט',
     tmt: 'approved',
   },
   {

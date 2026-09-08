@@ -1231,11 +1231,19 @@ async function main() {
       id: '337302', first: 'איתן', last: 'ורדי', idNumber: '246666668',
       birth: [2025, 4, 2], cls: 'פעוטות ב', tier: 5,
     };
+    // כאן קליקטאק כתב את המספר המלא (או מסוכה) בתא, לא רק ארבע ספרות — הבדיקה
+    // האמיתית של 22r-22u היא שהמנתח קוצר אותו לפני שהוא נשמר, ולא הצג בלבד.
+    const kidLongCard = {
+      id: '337303', first: 'עידו', last: 'בר', idNumber: '245555559',
+      birth: [2025, 5, 6], cls: 'פעוטות א', tier: 4,
+    };
+    const LONG_CARD = '4580-1234-5678-9012';
     await upload({
       token, path: '/api/external-enrollments/import',
       fileName: 'contracts_terms.xlsx',
       buffer: sheetBuffer(CONTRACTS_HEADER,
-        [contractRow(kid), contractRow(contractOnly)], 'Worksheet 1'),
+        [contractRow(kid), contractRow(contractOnly), contractRow(kidLongCard)],
+        'Worksheet 1'),
       fields: { branch_id: branchId, academic_year: YEAR },
     });
     await upload({
@@ -1247,6 +1255,11 @@ async function main() {
         regFeeMethod: 'כרטיס אשראי', regFeeCard: '4242', receipt: 'RC-22001',
         amount: 350, voucher: 'SH-9001', tuitionCard: '7788', secondSigner: 'נחתם',
         soBank: '12', soBranch: '345', soAccount: '99887766', soHolder: 'דנה נחמיאס',
+      }), registrationRow({
+        ...kidLongCard, parentFirst: 'הורה22ב', parentPhone: '0500000023',
+        method: 'כרטיס אשראי',
+        regFeeMethod: 'כרטיס אשראי', regFeeCard: LONG_CARD,
+        tuitionCard: LONG_CARD,
       })], 'Sheet1'),
       fields: { branch_id: branchId, academic_year: YEAR },
     });
@@ -1265,7 +1278,9 @@ async function main() {
     eq(terms?.tuition_card_last4, '7788', '22d ארבע ספרות הכרטיס של שכר הלימוד');
     eq(terms?.registration_fee_method, 'כרטיס אשראי', '22e צורת תשלום דמי הרישום');
     eq(terms?.registration_fee_card_last4, '4242', '22f והכרטיס שלה — אחר');
-    eq(terms?.registration_fee_amount, 350, '22g סכום דמי הרישום');
+    // סכום תשלום הוא עמודה כללית בקובץ — אין בה שום דבר שמייחס אותה לדמי
+    // רישום ולכן היא נקראת amount_in_file ולא registration_fee_amount.
+    eq(terms?.amount_in_file, 350, '22g הסכום הכללי שבקובץ, בלי לייחס אותו לדמי רישום');
     eq(terms?.receipt_number, 'RC-22001', '22h מספר הקבלה');
     eq(terms?.voucher_number, 'SH-9001', '22i מספר השובר');
     eq(terms?.second_signer, 'נחתם', '22j והחותם השני');
@@ -1276,6 +1291,13 @@ async function main() {
     const contractRowOut = rows.find(r => r.id_number === contractOnly.idNumber);
     eq(contractRowOut?.clicktac?.payment_terms, null,
       '22m לשורה שרק מייצוא החוזים אין תנאי תשלום — לקובץ ההוא אין עמודת תשלום');
+
+    // הכרטיס המלא (או המסוכה) שקליקטאק כתב בתא — המנתח קוצר אותו לפני
+    // השמירה, כך ש-9012 בלבד יוצא, גם כשהתא עצמו הכיל 16 ספרות ומקפים.
+    const termsLong = rows.find(r => r.id_number === kidLongCard.idNumber)?.clicktac?.payment_terms;
+    ok(!!termsLong, '22r לשורת הכרטיס המלא יש תנאי תשלום');
+    eq(termsLong?.tuition_card_last4, '9012', '22s רק ארבע הספרות האחרונות של שכר הלימוד נשמרות');
+    eq(termsLong?.registration_fee_card_last4, '9012', '22t וגם של דמי הרישום, אחר או לא');
 
     /**
      * הבדיקה שבאמת מגינה: הגוף כולו, ולא שדה ספציפי. אם מישהו יחזיר יום אחד
@@ -1288,6 +1310,8 @@ async function main() {
       '22p ואין בו בכלל שדה של פרטי בנק');
     ok(rows.every(r => r.clicktac?.standing_order === undefined),
       '22q אף שורה אינה נושאת את תת־המסמך standing_order');
+    ok(!body.includes(LONG_CARD) && !body.includes(LONG_CARD.replace(/-/g, '')),
+      '22u מספר הכרטיס המלא — עם מקפים או בלעדיהם — אינו מופיע בגוף התשובה בכלל');
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

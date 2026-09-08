@@ -127,16 +127,27 @@ const SO_LABEL = { complete: 'קיימת', missing: 'חסרה' };
  */
 function paymentTermLines(terms) {
   if (!terms) return [];
-  const card = (last4) => (last4 ? ` · כרטיס ****${last4}` : '');
+  // Defensive: the server already stores only the last 4 digits, but this
+  // truncates again so a full card number never renders even if that ever
+  // regresses upstream.
+  const card = (v) => {
+    const digits = String(v || '').replace(/\D/g, '').slice(-4);
+    return digits ? ` · כרטיס ****${digits}` : '';
+  };
   const lines = [
     `שכ"ל: ${terms.tuition_method || 'לא נרשם'}${card(terms.tuition_card_last4)}`,
   ];
-  if (terms.registration_fee_method || terms.registration_fee_amount) {
+  // הקובץ אומר "דמי רישום" רק כשיש שיטת תשלום לצידה — אחרת "סכום בקובץ" הוא
+  // סתם עמודת סכום כללית שאין שום דבר שמייחס אותה לדמי רישום, ולכן היא
+  // מוצגת כשורה נפרדת ומשלה, ולא כחלק מהמשפט על דמי הרישום.
+  if (terms.registration_fee_method) {
     lines.push([
-      `דמי רישום: ${terms.registration_fee_method || 'לא נרשם'}`,
-      terms.registration_fee_amount ? fmtMoney(terms.registration_fee_amount) : '',
+      `דמי רישום: ${terms.registration_fee_method}`,
       terms.receipt_number ? `קבלה ${terms.receipt_number}` : '',
     ].filter(Boolean).join(' · '));
+  }
+  if (terms.amount_in_file) {
+    lines.push(`סכום בקובץ: ${fmtMoney(terms.amount_in_file)}`);
   }
   if (terms.standing_order_status) {
     lines.push(`הו"ק: ${SO_LABEL[terms.standing_order_status] || terms.standing_order_status}`);
@@ -633,7 +644,13 @@ export default function TmtReconcile({
                       cannot be read at all. */}
                   <TableCell>תשלום</TableCell>
                   <TableCell>כיתה / דרגה</TableCell>
-                  <TableCell />
+                  {/* The eye/detail button — pinned to the inline-end edge
+                      (physically the left in this RTL table) so it survives
+                      the sideways scroll the table above is built for. Below
+                      ~1320px the eleven columns push it off the visible
+                      width entirely; sticky keeps every row one click away
+                      no matter how far right the horizontal scroll sits. */}
+                  <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -810,7 +827,7 @@ export default function TmtReconcile({
                         </Tooltip>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }}>
                       <IconButton size="small" onClick={() => setDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
                     </TableCell>
                   </TableRow>
