@@ -198,6 +198,20 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   }, [typedFee, groupOf, tierFeeOf, overrideTier]);
 
   /**
+   * Whether the number `feeOf` is about to show is a typed/overridden amount
+   * rather than the state matrix's own price. Two ways in: the override
+   * checkbox is on and a value was typed for this child's group, or the
+   * matrix simply has no tier price for this child at all — either way the
+   * number on screen is not "the דרגה", so the fee column and the summary
+   * card both need to say so instead of dressing it up in the tier's green.
+   */
+  const isOverrideFee = useCallback((c) => {
+    const g = groupOf(c);
+    if (overrideTier && typedFee(g) !== null) return true;
+    return tierFeeOf(c) == null;
+  }, [groupOf, overrideTier, typedFee, tierFeeOf]);
+
+  /**
    * How many of the children on this board the matrix already prices.
    *
    * Counted over the WHOLE board rather than per group, because the question
@@ -217,16 +231,41 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   }, [allKids, tierFeeOf]);
 
   /**
+   * The same board split three ways for the summary card: priced by the
+   * state's matrix, priced by a typed/overridden amount, and priced at
+   * nothing — so the card can say what is actually about to be billed
+   * (which changes the moment the override checkbox is ticked) rather than
+   * only what the matrix alone would say.
+   */
+  const feeSourceCounts = useMemo(() => {
+    let tier = 0, manual = 0, none = 0;
+    for (const c of allKids) {
+      if (isOverrideFee(c)) {
+        if (feeOf(c) > 0) manual++; else none++;
+      } else if (feeOf(c) > 0) {
+        tier++;
+      } else {
+        none++;
+      }
+    }
+    return { tier, manual, none, total: allKids.length };
+  }, [allKids, isOverrideFee, feeOf]);
+
+  /**
    * The children who would be enrolled owing nothing.
    *
    * Counted on the RESOLVED fee rather than on "has no tier", because the two
    * are different lists: a child whose tier the matrix does not price and whose
    * group field is blank, and — once somebody ticks the override — a child the
    * matrix priced perfectly well whose group field is blank too.
+   *
+   * Restricted to children with a room assigned right now: `assign[c.id]` is
+   * exactly what `confirm` reads, so a child not yet given a room is not
+   * about to be submitted at all and should not swell this warning.
    */
   const zeroFeeCount = useMemo(
-    () => allKids.filter(c => !(feeOf(c) > 0)).length,
-    [allKids, feeOf],
+    () => allKids.filter(c => assign[c.id] && !(feeOf(c) > 0)).length,
+    [allKids, feeOf, assign],
   );
 
   // Locked while the matrix is doing the pricing and nobody asked to overrule
@@ -591,19 +630,24 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                               to the בוגר column of her own דרגה, which is the
                               number that will be written. */}
                           <TableCell>
-                            {tierFeeOf(c) != null ? (
+                            {isOverrideFee(c) ? (
+                              <>
+                                <Typography variant="body2" fontWeight={700} color="warning.main">
+                                  {fmtMoney(feeOf(c))}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ידני
+                                </Typography>
+                              </>
+                            ) : (
                               <>
                                 <Typography variant="body2" fontWeight={700} color="success.main">
-                                  {fmtMoney(tierFeeOf(c))}
+                                  {fmtMoney(feeOf(c))}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
                                   דרגה {c.tier} · {groupOf(c)}
                                 </Typography>
                               </>
-                            ) : (
-                              <Typography variant="caption" color="text.disabled">
-                                {c.tier ? `דרגה ${c.tier} — לא במחירון` : 'לפי השכבה'}
-                              </Typography>
                             )}
                           </TableCell>
                           <TableCell>
@@ -688,13 +732,14 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
               {byTier.count > 0 ? (
                 <Alert severity="success" sx={{ mb: 1.5 }}>
                   <AlertTitle>
-                    {byTier.count} מתוך {byTier.total} ייקלטו לפי הדרגה שבייצוא החוזים
+                    {feeSourceCounts.tier} מתוך {feeSourceCounts.total} ייקלטו לפי הדרגה שבייצוא החוזים
+                    {feeSourceCounts.manual > 0 ? ` · ${feeSourceCounts.manual} לפי סכום ידני` : ''}
                   </AlertTitle>
                   שכר הלימוד שלהם נקבע לפי דרגת הסבסוד של המשפחה כפול שכבת הגיל, מתוך מחירון
                   הסניף — הסכום מופיע ליד כל ילד/ה בטבלאות שלמעלה.
-                  {byTier.rest > 0
-                    ? ` ל־${byTier.rest} ילדים אין דרגה במחירון, והסכומים כאן הם שלהם.`
-                    : ' אין ילד/ה שדורש/ת סכום ידני.'}
+                  {feeSourceCounts.none > 0
+                    ? ` ל־${feeSourceCounts.none} ילדים אין סכום שנקבע, והם ייקלטו עם 0 ₪ אם לא יעודכן.`
+                    : ' אין ילד/ה שייקלט/תיקלט בלי סכום שנקבע.'}
                 </Alert>
               ) : (
                 <Alert severity="info" sx={{ mb: 1.5 }}>
