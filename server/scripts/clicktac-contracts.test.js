@@ -809,6 +809,78 @@ async function main() {
       '15f וגם חודשי הגיל נשארו');
   }
 
+  head('בדיקה 16 — אותו שם ואותו תאריך לידה, ת"ז שונה — שני ילדים');
+  {
+    await wipe();
+    /**
+     * THE CASE THIS PREVENTS. שני אחים על שם אותה סבתא, או תאומים — אותו שם
+     * משפחה, אותו תאריך לידה, ות"ז שונה. כלל המיזוג השני (שם + תאריך לידה)
+     * קיים כי רוב הילדים במערכת בלי ת"ז שמורה בכלל, אבל בלי אימות מול הת"ז
+     * הוא היה מוזג את השני לתוך הראשון — והשני היה מקבל את הכיתה, הדרגה
+     * והחוזה של הראשון, ושורה אחת פשוט נעלמת בלי שאף אחד יידע.
+     */
+    const twins = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400020', first: 'מעיין', last: 'דהן', idNumber: '246666664',
+        birth: [2025, 3, 12], cls: 'בוגרים א', tier: 4,
+      }),
+      contractRow({
+        id: '400021', first: 'מעיין', last: 'דהן', idNumber: '247777772',
+        birth: [2025, 3, 12], cls: 'בוגרים ב', tier: 9,
+      }),
+    ], 'Worksheet 1');
+    const res = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_twins.xlsx', buffer: twins,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(res.status, 200, '16a הקובץ נקלט');
+    eq(res.body?.created, 2, '16b ונוצרו שתי שורות — לא אחת');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 2, '16c ובטבלה שני ילדים');
+    const tiers = data.enrollments.map(e => e.contract?.tier).sort();
+    eq(tiers, ['4', '9'], '16d ולכל אחד/ת הדרגה של עצמו/ה — אף אחת לא נדרסה');
+  }
+
+  head('בדיקה 17 — אותו שם ותאריך לידה, ת"ז רק בצד אחד — אותו ילד');
+  {
+    await wipe();
+    // המקרה שבשבילו הכלל השני נכתב מלכתחילה: ייצוא החוזים כותב דרכון או
+    // משאיר את התא ריק, וייצוא הנרשמים מחזיק ת"ז. צד אחד שותק, ולכן אין
+    // סתירה — וזה אותו ילד, שאסור שיופיע פעמיים.
+    const blankIdContract = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400030', first: 'יהלי', last: 'אזולאי', idNumber: '',
+        birth: [2025, 4, 18], cls: 'בוגרים א', tier: 5,
+      }),
+    ], 'Worksheet 1');
+    const c = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_blank_one.xlsx', buffer: blankIdContract,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(c.body?.created, 1, '17a שורת החוזה נוצרה בלי ת"ז');
+
+    const withId = sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+      first: 'יהלי', last: 'אזולאי', idNumber: '248888880', birth: [2025, 4, 18],
+      parentFirst: 'הורה17', parentPhone: '0500000017',
+    })], 'Sheet1');
+    const r = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'Registrations Export.xlsx', buffer: withId,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(r.body?.created, 0, '17b ולא נוצרה שורה שנייה');
+    eq(r.body?.updated, 1, '17c אלא אותה שורה מולאה');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 1, '17d ובטבלה ילד/ה אחד/ת');
+    const row = data.enrollments[0];
+    eq(row?.contract?.tier, '5', '17e הדרגה מהחוזה');
+    eq(row?.child?.id_number, '248888880', '17f והת"ז מהנרשמים');
+  }
+
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
 }
 

@@ -83,6 +83,27 @@ function childIdOf(reg, child) {
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 
 /**
+ * May these two records be the same child, as far as their id numbers say?
+ *
+ * TWO DIFFERENT NUMBERS ARE A REFUSAL, NOT A TIE-BREAK. Matching on name plus
+ * birth date exists because most of the children in this system have no ת"ז
+ * stored at all, and without it a passport in one file and a ת"ז in the other
+ * would double every child who has both. But two siblings born on the same day
+ * with the same name is not a hypothetical — cousins share a grandmother's
+ * name, twins share a birthday, and a family that registers both writes two
+ * rows that differ in exactly one field: the ת"ז. Merging them puts one
+ * child's דרגה, class and contract onto the other and deletes a row nobody
+ * knows is gone.
+ *
+ * So the name+birth rule may only fire when the ids do not CONTRADICT: at
+ * least one side has to be silent. When both sides carry a number and the
+ * numbers agree, the id rule has already matched and this never runs.
+ */
+function idsAgree(a, b) {
+  return !a || !b || a === b;
+}
+
+/**
  * The age group a child is actually placed in.
  *
  * A manager's decision first — it was made against the child's real age on 1
@@ -146,8 +167,13 @@ function matchExisting(doc, registrations, childByReg) {
   }
   const wantName = normalizeChildName(doc.child.full_name);
   const wantBirth = dayKey(doc.child.birth_date);
+  // …and only where the two ת"ז do not contradict each other. See idsAgree:
+  // the same name and the same birthday with two different numbers is two
+  // children, and tying the import to the wrong registration would file a
+  // sibling's row against their brother's.
   const byNameBirth = registrations.find(r => normalizeChildName(r.child_name) === wantName
-    && dayKey(r.child_birth_date) === wantBirth);
+    && dayKey(r.child_birth_date) === wantBirth
+    && idsAgree(wantId, childIdOf(r, childByReg.get(String(r._id)))));
   if (byNameBirth) return { reg: byNameBirth, by: 'name_birth' };
   return { reg: null, by: '' };
 }
@@ -164,10 +190,14 @@ function matchExisting(doc, registrations, childByReg) {
  *
  *   1. the ת"ז, inside this branch and year. It is the child's own number and
  *      it is what both files carry, once the punctuation is stripped.
- *   2. name + birth date, inside this branch and year. The contracts export
- *      writes a passport for the children who have one, and passports do not
- *      compare with the ת"ז the registrations export holds; without this
- *      fallback those children would double.
+ *   2. name + birth date, inside this branch and year, AND ONLY WHERE THE TWO
+ *      ID NUMBERS DO NOT CONTRADICT. The contracts export writes a passport
+ *      for the children who have one, and passports do not compare with the
+ *      ת"ז the registrations export holds; without this fallback those
+ *      children would double. But two children can share a name and a
+ *      birthday, and then the ת"ז is the only thing that tells them apart —
+ *      so a candidate whose id is present and different is refused. See
+ *      idsAgree.
  *   3. the ת"ז ACROSS branches. Not a merge rule so much as a collision guard:
  *      the unique index is (source, academic_year, child.id_number) and knows
  *      nothing about branches, so a child filed against the wrong gan last
@@ -194,8 +224,14 @@ async function findMergeTarget({ child, academicYear, candidates }) {
   const wantName = normalizeChildName(child.full_name);
   const wantBirth = dayKey(child.birth_date);
   if (wantName && wantBirth) {
+    // VERIFIED WITH THE ת"ז. Two rows may share a name and a birthday and
+    // still be two children — siblings named for the same grandmother, twins
+    // — and the one field that separates them is the id number. When both
+    // sides carry one and they differ, this is not the same child and the row
+    // falls through to be created. See idsAgree.
     const byNameBirth = candidates.find(d => normalizeChildName(d.child?.full_name) === wantName
-      && dayKey(d.child?.birth_date) === wantBirth);
+      && dayKey(d.child?.birth_date) === wantBirth
+      && idsAgree(wantId, idKey(d.child)));
     if (byNameBirth) return { target: byNameBirth, by: 'name_birth' };
   }
 
