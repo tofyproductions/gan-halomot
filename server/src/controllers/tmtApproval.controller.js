@@ -8,6 +8,7 @@ const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcil
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
   promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
+  withImporterName,
 } = require('./externalEnrollment.controller');
 const {
   normalizeYear, enrollmentYear, formatAcademicYear, hebrewYearForStart,
@@ -375,8 +376,10 @@ async function reconcileBranch(req, res, next) {
       ...result,
       academic_year_label: formatAcademicYear(academicYear),
       last_import: {
-        tmt: lastTmt || null,
-        clicktac: lastCt || null,
+        // Flattened the same way for all four, so the one component that
+        // renders an upload line reads the same field whichever it is given.
+        tmt: withImporterName(lastTmt),
+        clicktac: withImporterName(lastCt),
         clicktac_registrations: lastClickTac.registrations,
         clicktac_contracts: lastClickTac.contracts,
       },

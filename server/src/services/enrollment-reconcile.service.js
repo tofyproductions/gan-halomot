@@ -452,8 +452,11 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
          * the same reading the importer applies.
          */
         sources: ct.sources?.length ? ct.sources : ['registrations'],
-        missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations')
-          || !String(ct.parent1?.first_name || '').trim(),
+        // The test is `sources` alone — the same one `hasParents` applies, and
+        // for the same reason: the registrations export does carry rows with
+        // blank parent columns, and those rows are promotable. See the note on
+        // hasParents in externalEnrollment.controller.
+        missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations'),
         /**
          * איך המשפחה משלמת — ומה צריך טיפול.
          *

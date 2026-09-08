@@ -46,7 +46,7 @@ const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 
 const {
-  COLUMNS, CONTRACT_COLUMNS, detectExportType, parseContractsRow, parseDate,
+  COLUMNS, CONTRACT_COLUMNS, detectExportType, parseContractsRow, parseDate, idKey,
 } = require('../src/services/clicktac.service');
 
 const PASSWORD = 'test1234';
@@ -93,18 +93,21 @@ const CONTRACTS_HEADER = Object.values(CONTRACT_COLUMNS);
  * One contracts row. The dates go in as bare Excel serials, exactly as the
  * real export has them — that is the shape the parser has to survive.
  */
-function contractRow({ id, first, last, idNumber, idType = 'ת.ז.', birth, cls, tier }) {
+function contractRow({
+  id, first, last, idNumber, idType = 'ת.ז.', birth, cls, tier,
+  nickname = '', medicalNotes = '',
+}) {
   const by = {
     [CONTRACT_COLUMNS.contract_id]: id,
     [CONTRACT_COLUMNS.child_first]: first,
     [CONTRACT_COLUMNS.child_last]: last,
-    [CONTRACT_COLUMNS.nickname]: '',
+    [CONTRACT_COLUMNS.nickname]: nickname,
     [CONTRACT_COLUMNS.birth_date]: excelSerial(...birth),
     [CONTRACT_COLUMNS.birth_date_hebrew]: 'ל׳ בשבט',
     [CONTRACT_COLUMNS.id_type]: idType,
     [CONTRACT_COLUMNS.id_number]: idNumber,
     [CONTRACT_COLUMNS.health_fund]: 'מכבי',
-    [CONTRACT_COLUMNS.medical_notes]: '',
+    [CONTRACT_COLUMNS.medical_notes]: medicalNotes,
     [CONTRACT_COLUMNS.registered_at]: excelSerial(2026, 5, 3),
     [CONTRACT_COLUMNS.status]: 'התקבל',
     [CONTRACT_COLUMNS.age_group]: 'פעוט',
@@ -156,7 +159,13 @@ function registrationRow({
 
 /** The three children both files share, plus one only the registrations has. */
 const KIDS = [
-  { id: '337198', first: 'אור', last: 'אבוחצירא', idNumber: '241111117', birth: [2025, 1, 20], cls: 'בוגרים א', tier: 0 },
+  {
+    id: '337198', first: 'אור', last: 'אבוחצירא', idNumber: '241111117', birth: [2025, 1, 20],
+    cls: 'בוגרים א', tier: 0,
+    // שלושת השדות שרק ייצוא החוזים ממלא. הכינוי הוא איך קוראים לה בכיתה,
+    // וההערה הרפואית היא אלרגיה. אף אחד משלושתם אינו בייצוא הנרשמים.
+    nickname: 'אורי', medicalNotes: 'אלרגיה לבוטנים',
+  },
   { id: '337199', first: 'נועם', last: 'כהן', idNumber: '242222225', birth: [2025, 3, 5], cls: 'בוגרים ב', tier: 7 },
   { id: '337200', first: 'שירה', last: 'לוי', idNumber: '243333333', birth: [2024, 11, 2], cls: 'בוגרים א', tier: 12 },
 ];
@@ -351,6 +360,21 @@ function unitChecks() {
     eq(parseDate(''), null, '4d ריק');
     // Without the guard this read as the year 1234.
     eq(parseDate('1234'), null, '4e מספר שאינו סריאל סביר אינו תאריך');
+    // שנה דו-ספרתית — קליקטאק כותבת אותה כשמישהו הקליד את התא ביד. `new Date`
+    // קרא את זה בסדר האמריקאי, 9 בינואר, וילד/ה שנולד/ה בספטמבר יצא/ה ילידת
+    // ינואר בלי שאף אחד ידע. עדיף בלי תאריך מאשר עם תאריך שגוי.
+    eq(parseDate('01/09/26'), null, '4f שנה דו-ספרתית אינה נקראת — ולא בסדר האמריקאי');
+    eq(parseDate('2026-09-01')?.toISOString().slice(0, 10), '2026-09-01', '4g ISO עדיין נקרא');
+
+    head('בדיקה 4ב — מפתח הזהות: דרכון אינו ספרות');
+    // שני דרכונים שונים לחלוטין שמצטמצמים לאותן שש ספרות. זה מה שקרה כשהמפתח
+    // היה replace(/\D/g,''): הילד השני נבלע בשורה של הראשון.
+    ok(idKey({ id_number: 'AB123456', id_type: 'דרכון' })
+      !== idKey({ id_number: 'CD123456', id_type: 'דרכון' }),
+      '4h שני דרכונים שונים הם שני מפתחות שונים');
+    eq(idKey({ id_number: 'ab123456' }), 'AB123456', '4i אותיות — נשמר כמו שהוא, באותיות גדולות');
+    eq(idKey({ id_number: '241-111-117' }), '241111117', '4j ת"ז — ספרות בלבד, כדי ששני הקבצים ייפגשו');
+    eq(idKey({ id_number: '' }), '', '4k ריק נשאר ריק');
   }
 }
 
@@ -392,6 +416,9 @@ async function main() {
 
   const { User, Branch, ExternalEnrollment, EnrollmentImport } = require('../src/models');
   const branch = await Branch.create({ name: 'הרצליה', address: 'סוקולוב 1' });
+  // הסניף השני קיים כדי שאפשר יהיה להעלות קובץ מול הסניף הלא נכון — הטעות
+  // שהמערכת הייתה בולעת בשקט. שני סניפי כפר סבא הם המקרה האמיתי.
+  const otherBranch = await Branch.create({ name: 'כפר סבא ב', address: 'ויצמן 2' });
   await User.create({
     email: 'admin@ct.local', full_name: 'אורי מנהל', id_number: '900000001',
     role: 'system_admin', branch_id: branch._id, position: 'מנהל מערכת',
@@ -403,6 +430,20 @@ async function main() {
   });
   const token = login.body?.token;
   if (!token) throw new Error(`התחברות נכשלה: ${login.status} ${login.text}`);
+
+  /**
+   * THE UNIQUE INDEX HAS TO ACTUALLY EXIST HERE.
+   *
+   * `(source, academic_year, child.id_number)` is declared on the schema and is
+   * long since built in production, but in this harness mongoose's background
+   * index build does not finish against the ephemeral mongod — the collection
+   * came up with `_id_` and nothing else, and the collision this file is about
+   * simply could not happen. Building it explicitly is what makes בדיקה 12 a
+   * test of the server rather than of the fixture.
+   */
+  await ExternalEnrollment.syncIndexes();
+  ok((await ExternalEnrollment.collection.indexes()).some(i => i.unique),
+    '0a האינדקס הייחודי קיים — אחרת בדיקה 12 חסרת משמעות');
 
   const branchId = String(branch._id);
   const importContracts = () => upload({
@@ -444,6 +485,10 @@ async function main() {
     eq(row?.parent1?.first_name, '', '5g אין הורה — ולא הומצא אחד');
     eq(row?.contract?.class_name, 'בוגרים א', '5h הכיתה נשמרה');
     eq(row?.contract?.tier, '0', '5i והדרגה');
+    // שלושת השדות שרק הקובץ הזה מביא.
+    eq(row?.child?.nickname, 'אורי', '5q הכינוי נשמר');
+    eq(row?.child?.id_type, 'ת.ז.', '5r סוג מספר הזהות נשמר');
+    eq(row?.child?.medical_notes, 'אלרגיה לבוטנים', '5s וההערה הרפואית');
     eq(data?.summary?.missing_parents, 3, '5j המונה סופר את שלושתם');
     eq(data?.summary?.with_contract, 3, '5k ולשלושתם יש חוזה');
 
@@ -497,6 +542,15 @@ async function main() {
     eq(row?.parent1?.phone, '050000001', '7j הטלפון נקלט');
     eq(row?.contract?.class_name, 'בוגרים א', '7k והחוזה לא נדרס');
     eq(row?.contract?.tier, '0', '7l הדרגה שרדה את הקליטה השנייה');
+    /* ---- ומה שרק ייצוא החוזים ידע עליו לא נמחק ---- *
+     * המיזוג של ייצוא הנרשמים הוא Object.assign שמחליף את כל ענף `child`
+     * בבת אחת, ולפרסר של הנרשמים אין בכלל את שלושת השדות האלה. עד התיקון הם
+     * נמחקו כאן בשקט — ושום העלאה חוזרת לא החזירה אותם, כי ה-hash של קובץ
+     * החוזים לא זז ולכן הקליטה החוזרת נקראה "ללא שינוי". medical_notes היא
+     * רשימת אלרגיות. */
+    eq(row?.child?.nickname, 'אורי', '7x הכינוי שרד את קליטת הנרשמים');
+    eq(row?.child?.id_type, 'ת.ז.', '7y וסוג מספר הזהות');
+    eq(row?.child?.medical_notes, 'אלרגיה לבוטנים', '7z וההערה הרפואית — אלרגיה אינה נמחקת');
     eq(data?.summary?.missing_parents, 0, '7m המונה התאפס');
     ok(!!data?.last_import?.registrations && !!data?.last_import?.contracts,
       '7n "קובץ אחרון" מציג שני תאריכים');
@@ -575,6 +629,136 @@ async function main() {
     const changed = after.enrollments.filter(e => (e.changes || []).length
       !== (before.enrollments.find(b => b.id === e.id)?.changes || []).length);
     eq(changed.length, 0, '10e ולא נרשמו שינויים חדשים באף שורה');
+  }
+
+  /* ------------------------------------------------------------ *
+   * (e) the three ways a row does NOT get written
+   * ------------------------------------------------------------ */
+  head('בדיקה 11 — שני דרכונים שונים הם שני ילדים');
+  {
+    await wipe();
+    // ספרות זהות, אותיות שונות. עד התיקון המפתח היה הספרות בלבד, ולכן השני
+    // התמזג לתוך השורה של הראשון וקיבל את הכיתה והדרגה שלו.
+    const twoPassports = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400001', first: 'ליאם', last: 'סמית', idNumber: 'AB123456', idType: 'דרכון',
+        birth: [2025, 4, 4], cls: 'בוגרים א', tier: 3,
+      }),
+      contractRow({
+        id: '400002', first: 'אמה', last: 'ג׳ונס', idNumber: 'CD123456', idType: 'דרכון',
+        birth: [2025, 6, 9], cls: 'בוגרים ב', tier: 9,
+      }),
+    ], 'Worksheet 1');
+    const res = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_passports.xlsx', buffer: twoPassports,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    ok(res.status === 200, '11a הקובץ נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
+    eq(res.body?.created, 2, '11b נוצרו שתי שורות — ולא אחת');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 2, '11c ובטבלה שני ילדים');
+    const liam = data.enrollments.find(e => e.child.full_name === 'ליאם סמית');
+    const emma = data.enrollments.find(e => e.child.full_name === 'אמה ג׳ונס');
+    eq(liam?.contract?.tier, '3', '11d הדרגה של הראשון');
+    eq(emma?.contract?.tier, '9', '11e והדרגה של השנייה — לא נדרסה');
+  }
+
+  head('בדיקה 12 — שתי שורות בלי ת"ז אינן מפילות את הקליטה');
+  {
+    await wipe();
+    // האינדקס הייחודי הוא (source, academic_year, child.id_number) והוא
+    // מאנדקס גם את המחרוזת הריקה. השורה השנייה התנגשה בראשונה וזרקה E11000
+    // מאמצע הלולאה: 500, חצי קובץ כתוב, ואף אחד לא ידע איזה חצי.
+    const blankIds = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400010', first: 'יובל', last: 'ברק', idNumber: '', birth: [2025, 2, 2],
+        cls: 'בוגרים א', tier: 1,
+      }),
+      contractRow({
+        id: '400011', first: 'רוני', last: 'שגב', idNumber: '', birth: [2025, 7, 7],
+        cls: 'בוגרים ב', tier: 2,
+      }),
+    ], 'Worksheet 1');
+    const res = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_blank_ids.xlsx', buffer: blankIds,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(res.status, 200, '12a הקליטה מסתיימת בהצלחה ולא ב-500');
+    eq(res.body?.created, 1, '12b שורה אחת נכתבה');
+    eq(res.body?.skipped_duplicate, 1, '12c והשנייה נספרה כדילוג');
+    eq(res.body?.skipped_names, ['רוני שגב'], '12d בשמה, כדי שאפשר יהיה לתקן בקליקטאק');
+    ok(/ת"ז/.test(res.body?.skipped_label || ''), '12e והסיבה כתובה', res.body?.skipped_label);
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 1, '12f ובמסד יש שורה אחת — לא אפס ולא שגיאה');
+  }
+
+  head('בדיקה 13 — קובץ חוזים מול הסניף הלא נכון אינו נבלע');
+  {
+    await wipe();
+    const first = await importContracts();
+    eq(first.body?.created, 3, '13a שלושת הילדים נקלטו בהרצליה');
+    const before = await listRows();
+    const beforeRow = before.enrollments.find(e => e.child.full_name === 'אור אבוחצירא');
+
+    const wrong = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_export_1739.xlsx', buffer: contractsFile(),
+      fields: { branch_id: String(otherBranch._id), academic_year: YEAR },
+    });
+    eq(wrong.status, 200, '13b ההעלאה מוחזרת עם תשובה, לא עם שגיאה');
+    eq(wrong.body?.created, 0, '13c ולא נוצרה ולו שורה אחת בסניף השני');
+    eq(wrong.body?.updated, 0, '13d ולא עודכן דבר');
+    eq(wrong.body?.cross_branch, 3, '13e שלוש השורות נספרו כשייכות לסניף אחר');
+    eq(wrong.body?.cross_branch_names?.length, 3, '13f ודווחו בשמן');
+    ok(/סניף אחר/.test(wrong.body?.cross_branch_label || ''),
+      '13g עם המשפט שאומר מה קרה', wrong.body?.cross_branch_label);
+
+    const after = await listRows();
+    eq(after?.enrollments?.length, 3, '13h מספר השורות לא זז');
+    const afterRow = after.enrollments.find(e => e.child.full_name === 'אור אבוחצירא');
+    eq(String(afterRow?.branch_id), String(beforeRow?.branch_id), '13i והשורה נשארה בסניף שלה');
+    eq((afterRow?.changes || []).length, (beforeRow?.changes || []).length,
+      '13j ולא נרשם עליה שום שינוי');
+  }
+
+  head('בדיקה 14 — שורת נרשמים בלי שם הורה עדיין נקלטת');
+  {
+    await wipe();
+    // ייצוא הנרשמים כן מכיל שורות שעמודות ההורה בהן ריקות — משפחה שהוקלדה
+    // ביד, מחזור ישן. השורות האלה היו ניתנות לקליטה לפני שייצוא החוזים היה
+    // קיים, והן צריכות להישאר כאלה: החסימה קיימת בשביל שורת חוזים בלבד, שאין
+    // בה עמודת הורה בכלל. אחרת המסך שולח את המשרד להעלות קובץ שכבר הועלה.
+    const noParent = sheetBuffer(
+      REGISTRATIONS_HEADER,
+      [registrationRow({
+        first: 'תמר', last: 'פרץ', idNumber: '245555558', birth: [2025, 5, 5],
+        parentFirst: '', parentPhone: '',
+      })],
+      'Sheet1',
+    );
+    const res = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'Registrations Export.xlsx', buffer: noParent,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(res.body?.created, 1, '14a השורה נקלטה');
+
+    const data = await listRows();
+    const row = data.enrollments.find(e => e.child.full_name === 'תמר פרץ');
+    eq(row?.parent1?.first_name, '', '14b ואכן אין בה שם הורה');
+    eq(row?.missing_parents, false, '14c ובכל זאת היא אינה מסומנת כחסרת פרטי הורים');
+    eq(data?.summary?.missing_parents, 0, '14d והמונה אינו סופר אותה');
+
+    const promote = await request({
+      method: 'POST', token, path: `/api/external-enrollments/${row?.id}/promote`,
+      body: { monthly_fee: 1500 },
+    });
+    ok(promote.status === 201, '14e והקליטה למערכת מצליחה',
+      `${promote.status} ${promote.text?.slice(0, 200)}`);
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

@@ -197,8 +197,20 @@ function parseDate(value) {
     // through to `new Date(s)` would read "1234" as the year 1234.
     return null;
   }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
+  // ISO, the only other shape worth accepting — it is what this system's own
+  // stored dates serialise to, so a re-parse of a value that has been through
+  // the database has to survive.
+  //
+  // EVERYTHING ELSE IS REFUSED, and `new Date(s)` is deliberately gone. It
+  // read "01/09/26" — a two-digit year, which ClickTac does write when the
+  // cell was typed by hand — as the 9th of January in the American order, so a
+  // child born in September came out born in January and nothing anywhere said
+  // so. A date this function cannot read is better absent than wrong.
+  if (/^\d{4}-\d{2}-\d{2}([T ].*)?$/.test(s)) {
+    const d = new Date(s.length === 10 ? `${s}T00:00:00Z` : s);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
 }
 
 const str = (v) => (v == null ? '' : String(v).trim());
@@ -409,6 +421,33 @@ function parseIdNumber(value, idType) {
   const raw = str(value);
   if (!raw) return '';
   if (/דרכון/.test(str(idType))) return raw;
+  return raw.replace(/\D/g, '');
+}
+
+/**
+ * The value two records are the same child BY.
+ *
+ * Every comparison of one child against another — the merge, the match against
+ * an existing registration — goes through this, and it must never be
+ * `replace(/\D/g, '')`. `AB123456` and `CD123456` are two different passports
+ * and two different children; stripping the letters leaves `123456` for both,
+ * and the second one silently merges into the first's row, taking its class,
+ * its דרגה and its contract with it.
+ *
+ * So: a passport keeps every character (upper-cased, because the two exports
+ * do not agree on case), and only a number that is actually a number is
+ * reduced to its digits — which is what makes a ת"ז written `241111117` in one
+ * file and `241-111-117` in the other compare equal.
+ *
+ * A Latin letter anywhere in the value is enough to treat it as a passport
+ * even when `id_type` is missing: the ת"ז has none, and the records this
+ * system stores outside the ClickTac queue (a Registration, a Child) carry no
+ * type at all.
+ */
+function idKey(child) {
+  const raw = str(child?.id_number);
+  if (!raw) return '';
+  if (/דרכון/.test(str(child?.id_type)) || /[A-Za-z]/.test(raw)) return raw.toUpperCase();
   return raw.replace(/\D/g, '');
 }
 
@@ -627,6 +666,6 @@ module.exports = {
   COLUMNS, CONTRACT_COLUMNS, AGE_GROUPS, CONTRACT_ONLY_COLUMNS, WRONG_EXPORT_MESSAGE,
   parseRow, parseSheet, missingColumns, missingContractColumns,
   looksLikeContractsExport, detectExportType, identifyHeader, validateHeader,
-  parseContractsRow, parseContractsSheet, hashContract, parseIdNumber,
+  parseContractsRow, parseContractsSheet, hashContract, parseIdNumber, idKey,
   ageInMonths, ageGroupFor, computedFor, parseDate, hashPayload,
 };
