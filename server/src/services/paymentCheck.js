@@ -64,8 +64,13 @@ const STANDING_ORDER_HINTS = ['הוראת קבע', 'הוראתקבע', 'הוק']
  * somebody else — and it is NOT a payment method. Read as `other` it would sit
  * in the queue as a value nobody has to do anything about; read as `none` it
  * joins the families whose method was never decided, which is what it is.
+ *
+ * BOTH SPELLINGS. Hebrew writes the word with a ו and with a ב and the office
+ * types whichever it types; a spelling this list does not know reads as `other`
+ * and carries "לא רלבנטי" into the table as though it were a payment method
+ * somebody chose.
  */
-const NOT_APPLICABLE = 'לא רלוונטי';
+const NOT_APPLICABLE = ['לא רלוונטי', 'לא רלבנטי'];
 
 /**
  * The methods, in the order they are tested — which is the order of how
@@ -115,7 +120,7 @@ const KIND_LABELS = {
  */
 function classifyPaymentMethod(raw) {
   const method = normalizeMethod(raw);
-  if (!method || method.includes(NOT_APPLICABLE)) {
+  if (!method || NOT_APPLICABLE.some(v => method.includes(v))) {
     return { kind: 'none', label: KIND_LABELS.none };
   }
   const hit = METHOD_RULES.find(r => r.hints.some(h => method.includes(h)));

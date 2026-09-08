@@ -69,7 +69,14 @@ const METHOD_STYLE = {
   other: { color: 'default', variant: 'outlined' },
 };
 
-/** The legend under the cards — the same order the chips are ranked in. */
+/**
+ * The legend under the cards — the same order the chips are ranked in.
+ *
+ * `other` is labelled by what it MEANS rather than by "אחר", because no chip in
+ * the table ever says "אחר": an unrecognised method keeps the vendor's own text
+ * as its label (see classifyPaymentMethod), so a legend entry reading "אחר"
+ * describes a chip nobody can find. The grey chips are the file's own words.
+ */
 const METHOD_LEGEND = [
   ['standing_order', 'הוראת קבע'],
   ['credit_card', 'כרטיס אשראי'],
@@ -77,7 +84,7 @@ const METHOD_LEGEND = [
   ['cheque', "צ'ק"],
   ['cash', 'מזומן'],
   ['none', 'לא הוגדר'],
-  ['other', 'אחר'],
+  ['other', 'אחר (טקסט מהקובץ)'],
 ];
 
 /** The three groups a child can be placed in. The state's brackets, our rooms. */

@@ -146,18 +146,88 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
   }, [data, assign]);
 
   /**
+   * THE ROOM DECIDES THE GROUP, AND THE GROUP DECIDES THE FEE.
+   *
+   * `confirmPlacement` bills the age group of the room the child was actually
+   * put in — a תינוקת moved into a בוגרים room is billed as a בוגרת — so a fee
+   * worked out from the group the FILES gave her would be a number this screen
+   * showed and the server then did not charge. Every fee below is therefore
+   * read off `assign[child.id]`, the room selected right now, which is the same
+   * input the confirm step reads.
+   */
+  const groupByCategory = useMemo(() => Object.fromEntries(
+    (data?.groups || []).map(g => [g.category, g.age_group]),
+  ), [data]);
+
+  const roomById = useMemo(() => Object.fromEntries(
+    (data?.classrooms || []).map(r => [String(r.id), r]),
+  ), [data]);
+
+  /** The group this child is heading for: the selected room's, else the board's. */
+  const groupOf = useCallback((c) => {
+    const room = roomById[String(assign[c.id] || '')];
+    return (room && groupByCategory[room.category]) || c.group || '';
+  }, [roomById, groupByCategory, assign]);
+
+  /** What the family's דרגה prices for the group they are heading for, or null. */
+  const tierFeeOf = useCallback((c) => {
+    const g = groupOf(c);
+    if (c.fees_by_group && g in c.fees_by_group) return c.fees_by_group[g] ?? null;
+    // An older server that only sent one number: it is only about c.group.
+    return g === c.group ? (c.fee_by_tier ?? null) : null;
+  }, [groupOf]);
+
+  /** A per-group field, as a decision: null = left blank, and blank is not 0. */
+  const typedFee = useCallback((g) => {
+    const v = fees[g];
+    if (v === undefined || v === null || String(v).trim() === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }, [fees]);
+
+  /**
+   * The number this child will be billed — the SAME order of authority
+   * promoteOne uses: an explicit override, then the דרגה, then what was typed.
+   */
+  const feeOf = useCallback((c) => {
+    const typed = typedFee(groupOf(c));
+    if (overrideTier && typed !== null) return typed;
+    const byTierFee = tierFeeOf(c);
+    if (byTierFee != null) return byTierFee;
+    return typed ?? 0;
+  }, [typedFee, groupOf, tierFeeOf, overrideTier]);
+
+  /**
    * How many of the children on this board the matrix already prices.
    *
    * Counted over the WHOLE board rather than per group, because the question
    * the money card answers is "do I have to type anything at all here", and
    * that is one question. `rest` is the children the per-group fields below
-   * are actually for.
+   * are actually for. Recomputed as rooms are picked, since the room is what
+   * decides which cell of the matrix a child is priced from.
    */
+  const allKids = useMemo(
+    () => (data?.groups || []).flatMap(g => g.children),
+    [data],
+  );
+
   const byTier = useMemo(() => {
-    const kids = (data?.groups || []).flatMap(g => g.children);
-    const count = kids.filter(c => c.fee_by_tier != null).length;
-    return { count, total: kids.length, rest: kids.length - count };
-  }, [data]);
+    const count = allKids.filter(c => tierFeeOf(c) != null).length;
+    return { count, total: allKids.length, rest: allKids.length - count };
+  }, [allKids, tierFeeOf]);
+
+  /**
+   * The children who would be enrolled owing nothing.
+   *
+   * Counted on the RESOLVED fee rather than on "has no tier", because the two
+   * are different lists: a child whose tier the matrix does not price and whose
+   * group field is blank, and — once somebody ticks the override — a child the
+   * matrix priced perfectly well whose group field is blank too.
+   */
+  const zeroFeeCount = useMemo(
+    () => allKids.filter(c => !(feeOf(c) > 0)).length,
+    [allKids, feeOf],
+  );
 
   // Locked while the matrix is doing the pricing and nobody asked to overrule
   // it — an editable field that changes nothing is a lie the screen tells.
@@ -281,8 +351,19 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
         branch_id: branchId,
         academic_year: year,
         assignments,
+        /**
+         * SENT AS TYPED, BLANKS INCLUDED — `Number('') || 0` was a bug.
+         *
+         * Coercing an untouched field to 0 told the server a number had been
+         * chosen for that group, and under `override_tier` the server obeys:
+         * a manager overruling the matrix for one group used to zero the fee
+         * of every child in the groups she never touched. An empty string
+         * reaches the server as an empty string and reads there as "nothing
+         * was said about this group" (see feeEntry); a typed 0 is still a
+         * typed 0 and still overrides.
+         */
         fees_by_age_group: Object.fromEntries(
-          Object.entries(fees).map(([k, v]) => [k, Number(v) || 0]),
+          Object.entries(fees).map(([k, v]) => [k, v === undefined || v === null ? '' : String(v).trim()]),
         ),
         // Only when somebody ticked the box. Without it these figures price
         // the children the matrix cannot, and nothing else.
@@ -502,15 +583,21 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
                               shows the number instead of asking for one. A
                               child with no tier falls back to the per-group
                               figure typed below, which is what every child
-                              used to get. */}
+                              used to get.
+
+                              READ OFF THE ROOM SELECTED RIGHT NOW, because the
+                              room is what the confirm step bills by: move a
+                              תינוקת into a בוגרים room and this cell changes
+                              to the בוגר column of her own דרגה, which is the
+                              number that will be written. */}
                           <TableCell>
-                            {c.fee_by_tier != null ? (
+                            {tierFeeOf(c) != null ? (
                               <>
                                 <Typography variant="body2" fontWeight={700} color="success.main">
-                                  {fmtMoney(c.fee_by_tier)}
+                                  {fmtMoney(tierFeeOf(c))}
                                 </Typography>
                                 <Typography variant="caption" color="text.secondary">
-                                  דרגה {c.tier}
+                                  דרגה {c.tier} · {groupOf(c)}
                                 </Typography>
                               </>
                             ) : (
@@ -618,13 +705,17 @@ export default function ClassPlacement({ open, onClose, branchId, branchName, ye
               {/* Leaving it empty is allowed and is a decision, so it is stated
                   here beside the fields rather than blocking the button — a
                   child certain to attend should not be kept out of the gan's
-                  own screens until an income bracket arrives. Only raised for
-                  the children the tier does NOT price: warning a manager about
-                  a blank field that will not be read is how a warning stops
-                  being read. */}
-              {byTier.rest > 0 && !Object.values(fees).some(v => Number(v) > 0) && (
+                  own screens until an income bracket arrives.
+
+                  COUNTED ON THE RESOLVED FEE, not on "has no tier". The two
+                  lists differ the moment the override is ticked: children the
+                  matrix priced perfectly well are then billed from group
+                  fields that may be blank, and a warning that only ever looked
+                  at the un-priced children would have stayed silent while a
+                  whole board went in at ₪0. */}
+              {zeroFeeCount > 0 && (
                 <Alert severity="warning" sx={{ mb: 1.5 }}>
-                  <AlertTitle>לא הוזן שכר לימוד — {byTier.rest} ילדים ייקלטו עם 0 ₪</AlertTitle>
+                  <AlertTitle>לא הוזן שכר לימוד — {zeroFeeCount} ילדים ייקלטו עם 0 ₪</AlertTitle>
                   הם ייכנסו לכיתות, לנוכחות ולכל שאר המסכים כרגיל, ובגבייה יופיעו כחייבים
                   0 ₪ עד שיוזן סכום. הרישומים מסומנים כ״שכר לימוד טרם נקבע״ כדי שאפשר יהיה
                   לאתר אותם ולעדכן בבת אחת.
