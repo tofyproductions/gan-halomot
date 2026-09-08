@@ -17,6 +17,21 @@ const { ADMIN_VIEWER } = require('../constants/roles');
  * a database hiccup denies rather than opens.
  */
 async function resolveBranchScope(req) {
+  /**
+   * A WRITE GRANT on a screen is a grant for every branch.
+   *
+   * `clicktac_write` (middleware/auth.js#requireTabWrite,
+   * client/src/config/tabs.js) exists for the one person the office wants
+   * filing רישום חיצוני — the ministry file for כפר סבא, the ClickTac export
+   * for תל אביב, all of them. Scoping her to whatever branches happen to hang
+   * off her account would grant the permission and then refuse the work.
+   *
+   * The flag is request-local and set in exactly one place: requireTabWrite,
+   * on a request that just passed the grant. Nothing in a token or a database
+   * row can produce it.
+   */
+  if (req?.tabWriteGrant) return null;
+
   const uid = req.user?.id || req.user?._id;
   let role = req.user?.role;
   let managed = (req.user?.managed_branch_ids || []).map(String);

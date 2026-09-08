@@ -431,6 +431,35 @@ function viewerGate(req, res, next, roles) {
 }
 
 /**
+ * The tab precedence, on its own, as a pure function of the token.
+ *
+ * Both requireTab (a SCREEN) and requireTabWrite (a WRITE GRANT — see below)
+ * answer "did an override decide this tab id?", and the answer has to be the
+ * same rule in both places, and the same rule the client uses
+ * (client/src/config/tabs.js#hasTabAccess):
+ *
+ *   per-user remove  → 'deny'
+ *   per-user add     → 'allow'
+ *   role-wide remove → 'deny'
+ *   role-wide add    → 'allow'
+ *   nothing said     → 'default'
+ *
+ * `defaultRoles` is deliberately NOT a parameter. The two callers do different
+ * things with 'default' — requireTab lets the role default through with its own
+ * claim, requireTabWrite reads it as "no grant, fall back to the roles that
+ * always had it" — so resolving it in here would flatten a distinction both of
+ * them need.
+ */
+function tabDecision(user, tabId) {
+  const has = (list) => Array.isArray(list) && list.includes(tabId);
+  if (has(user?.tab_overrides_remove)) return 'deny';
+  if (has(user?.tab_overrides_add)) return 'allow';
+  if (has(user?.role_tab_remove)) return 'deny';
+  if (has(user?.role_tab_add)) return 'allow';
+  return 'default';
+}
+
+/**
  * Screen-based access control, matching what the menu actually grants.
  *
  * requireRole below asks only "what is your role", and the app's permissions
@@ -459,7 +488,6 @@ function requireTab(tabId, ...defaultRoles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
     const u = req.user;
-    const has = (list) => Array.isArray(list) && list.includes(tabId);
 
     const tabGranted = () => {
       // Under the manager fallback isViewer() is already false, so this is the
@@ -478,10 +506,9 @@ function requireTab(tabId, ...defaultRoles) {
       return viewerWriteGate(req, res, next, defaultRoles);
     };
 
-    if (has(u.tab_overrides_remove)) return res.status(403).json(DENIED);
-    if (has(u.tab_overrides_add)) return tabGranted();
-    if (has(u.role_tab_remove)) return res.status(403).json(DENIED);
-    if (has(u.role_tab_add)) return tabGranted();
+    const decision = tabDecision(u, tabId);
+    if (decision === 'deny') return res.status(403).json(DENIED);
+    if (decision === 'allow') return tabGranted();
     if (defaultRoles.includes(u.role)) {
       if (req.viewerFallback) viewerContext.claim(`requireTab:${tabId}`);
       return next();
@@ -495,33 +522,77 @@ function requireTab(tabId, ...defaultRoles) {
  * Seeing a screen and acting on it are two different grants.
  *
  * requireTab above opens a screen to whoever the permissions screen handed it
- * — which is what a back-office manager needs to READ רישום לאמונה. It is not
+ * — which is what a back-office manager needs to READ רישום חיצוני. It is not
  * what she should have to upload a ministry file, undo one, or turn seventy
- * children into registrations. Until the app has a permission of its own for
- * that, acting stays with the roles that always had it, and a granted tab
- * without one of those roles is read-only.
+ * children into registrations. So acting needs one of the roles that always
+ * had it, and a granted tab without one of those roles is read-only.
  *
- * Both must pass: the tab (so revoking it revokes everything) and the role.
- * A viewer reaches this check only under the branch_manager fallback, and
+ * ...OR THE ACTION GRANT ITSELF. `<tabId>_write` is a tab id that is not a
+ * screen: `clicktac_write` is "may act on רישום חיצוני", handed out per user or
+ * per role on the permissions screen exactly like a tab
+ * (client/src/config/tabs.js, path: null so the menu skips it), and read here
+ * off the same JWT with the same precedence. That is what lets the office give
+ * uploads to one מנהל מערכת לצפייה בלבד and to one back-office employee,
+ * whatever her role, without making either of them an admin — which was the
+ * only way to do it before.
+ *
+ * The grant is decided FIRST, and holding it stands in for the screen: acting
+ * on a screen implies seeing it, and requiring the admin to tick two boxes
+ * where one of them is implied is how a permission ends up half-granted. What
+ * it does not do is survive a REMOVAL of the screen — `tab_overrides_remove`
+ * on 'clicktac' still revokes everything, which is the "revoking the tab
+ * revokes everything" rule the roles path has always had.
+ *
+ * When the pass comes from the grant, `req.tabWriteGrant` records it: the grant
+ * means "act on this screen for EVERY branch" and utils/branch-scope.js reads
+ * that flag. It is request-local and set nowhere else.
+ *
+ * A viewer reaches the roles path only under the branch_manager fallback, and
  * only when `roles` does not include managers — in which case the READ_ONLY
  * 403 below is exactly the refusal that authMiddleware's wrapper turns into a
- * proposal, which is what the design asks for. For the seven ordinary roles
- * it is the plain refusal it has always been.
+ * proposal, which is what the design asks for. Grant her `clicktac_write` and
+ * she passes here for real instead, uploads included. For the seven ordinary
+ * roles, ungranted, it is the plain refusal it has always been.
  *
  * Usage: requireTabWrite('clicktac', 'system_admin', 'accountant')
  */
 function requireTabWrite(tabId, ...roles) {
+  const grantId = `${tabId}_write`;
   const tabGate = requireTab(tabId, ...roles);
-  return (req, res, next) => tabGate(req, res, () => {
-    if (!roles.includes(req.user?.role)) {
-      return res.status(403).json({
-        error: 'יש לך הרשאת צפייה בלבד במסך זה',
-        code: 'READ_ONLY',
-      });
+
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    const u = req.user;
+
+    if (tabDecision(u, grantId) === 'allow' && tabDecision(u, tabId) !== 'deny') {
+      // Under the manager fallback isViewer() is already false — this is the
+      // line that hands a viewer the uploads she was granted, so it claims the
+      // write (see utils/viewerContext).
+      if (!isViewer(u)) {
+        req.tabWriteGrant = tabId;
+        if (req.viewerFallback) viewerContext.claim(`requireTabWrite:grant:${tabId}`);
+        return next();
+      }
+      // A raw viewer — a router mounted without authMiddleware, or the unit
+      // tests. Same rule requireTab's override path applies: never a key to
+      // /api/admin, reads pass, writes go through the viewer gate rather than
+      // straight to the database.
+      if (isBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
+      if (isRead(req)) { req.tabWriteGrant = tabId; return next(); }
+      return viewerWriteGate(req, res, next, roles);
     }
-    if (req.viewerFallback) viewerContext.claim(`requireTabWrite:${tabId}`);
-    next();
-  });
+
+    return tabGate(req, res, () => {
+      if (!roles.includes(req.user?.role)) {
+        return res.status(403).json({
+          error: 'יש לך הרשאת צפייה בלבד במסך זה',
+          code: 'READ_ONLY',
+        });
+      }
+      if (req.viewerFallback) viewerContext.claim(`requireTabWrite:${tabId}`);
+      next();
+    });
+  };
 }
 
 /**
@@ -584,5 +655,5 @@ function requireBranchScope(req, res, next) {
 
 module.exports = {
   authMiddleware, optionalAuth, requireRole, requireTab, requireTabWrite,
-  requireBranchScope,
+  requireBranchScope, tabDecision,
 };

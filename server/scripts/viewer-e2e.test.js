@@ -981,6 +981,154 @@ async function main() {
     ok(mgrRename.status < 400, '13g ומנהלת סניף כותבת שם כשהיה', `status=${mgrRename.status}`);
   }
 
+  /* ================================================================ *
+   * 14. הרשאת פעולה למסך רישום חיצוני (clicktac_write)
+   * ================================================================ */
+  head('בדיקה 14 — הרשאת קליטת קבצים ברישום חיצוני');
+  {
+    // The screen's actions — uploading a קליקטאק or תמ"ת file, undoing an
+    // upload, applying a comparison — used to be system_admin/accountant only,
+    // so the two people the office wanted doing it (a מנהל מערכת לצפייה בלבד,
+    // and one back-office employee) could not be given it at all. The
+    // permission is now a tab id of its own, handed out on the permissions
+    // screen: `clicktac_write`, and holding it means acting for EVERY branch.
+    const XLSX = require('xlsx');
+    const { TmtApproval, ExternalEnrollment } = require('../src/models');
+
+    /** A ministry export, minimal but genuinely parseable. */
+    const tmtFile = (idNumber, name) => {
+      const aoa = [
+        ['מסמך זה חסוי'],
+        ['שם פרטי', 'שם משפחה', 'תעודת זהות', 'תאריך לידה', 'החלטה', 'קבוצת גיל', 'טלפון'],
+        [name, 'בדיקה', idNumber, '01/03/2025', 'התקבל', 'תינוקות', '0501234567'],
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Sheet1');
+      return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    };
+
+    /** A ClickTac registrations export, same idea. */
+    const clicktacFile = (idNumber, name) => {
+      const aoa = [
+        ['שם פרטי של הנרשם', 'שם משפחה של הנרשם', 'ת.ז הנרשם', 'תאריך לידה',
+          'שנת לימודים', 'טלפון של הרושם הראשון'],
+        [name, 'בדיקה', idNumber, '01/03/2025', 'תשפ"ז', '0501234567'],
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Sheet1');
+      return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    };
+
+    const uploadSheet = ({ path, token, buffer, branchId }) => {
+      const b = `----ganE2E14${Date.now()}${Math.random().toString(16).slice(2)}`;
+      const payload = Buffer.concat([
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="branch_id"\r\n\r\n${branchId}\r\n`),
+        Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="tmt.xlsx"\r\n`
+          + 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n'),
+        buffer,
+        Buffer.from(`\r\n--${b}--\r\n`),
+      ]);
+      return request({
+        method: 'POST', path, token, body: payload,
+        headers: { 'Content-Type': `multipart/form-data; boundary=${b}` },
+      });
+    };
+
+    // ---- before the grant: refused, and nothing filed --------------------
+    const before0 = await TmtApproval.countDocuments({ branch_id: branchB._id });
+    const noGrant = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.viewer,
+      buffer: tmtFile('318000001', 'לפני'), branchId: String(branchB._id),
+    });
+    eq(noGrant.status, 403, '14a צופה בלי ההרשאה מעלה קובץ תמ"ת → 403');
+    eq(noGrant.body?.code, 'VIEWER_NO_UPLOAD', '14a עם הקוד VIEWER_NO_UPLOAD');
+    eq(await TmtApproval.countDocuments({ branch_id: branchB._id }), before0,
+      '14a ולא נוצרה שורה');
+
+    // ---- the admin ticks the box on the permissions screen ---------------
+    const grant = await request({
+      method: 'PATCH', path: `/api/admin/users/${viewer._id}/tabs`, token: tokens.admin,
+      body: { add: ['clicktac_write'], remove: [] },
+    });
+    eq(grant.status, 200, '14b מנהל המערכת מעניק את ההרשאה במסך ההרשאות → 200');
+    ok((grant.body?.user?.tab_overrides_add || []).includes('clicktac_write'),
+      '14b ההרשאה נשמרה על המשתמשת', JSON.stringify(grant.body?.user?.tab_overrides_add));
+
+    // The grant rides on the JWT, so it takes effect on the next login —
+    // exactly what the app tells a user whose permissions just changed.
+    const stale = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.viewer,
+      buffer: tmtFile('318000002', 'טוקן ישן'), branchId: String(branchB._id),
+    });
+    eq(stale.status, 403, '14c הטוקן הישן עדיין אינו נושא את ההרשאה → 403');
+    tokens.viewer = await login('אלעד צופה', '900000003');
+
+    // ---- after the grant: an upload for a branch she does NOT manage -----
+    const granted = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.viewer,
+      buffer: tmtFile('318000003', 'אחרי'), branchId: String(branchB._id),
+    });
+    ok(granted.status >= 200 && granted.status < 300,
+      '14d אותה צופה, עם ההרשאה, מעלה קובץ תמ"ת לסניף שאינו בניהולה → 2xx',
+      `status=${granted.status} ${granted.text}`);
+    const row = await TmtApproval.findOne({ 'child.id_number': '318000003' }).lean();
+    ok(!!row, '14d ונוצרה שורת תמ"ת');
+    eq(String(row?.branch_id || ''), String(branchB._id), '14d תחת כפר סבא — הסניף שאינו בניהולה');
+
+    const ce = await uploadSheet({
+      path: '/api/external-enrollments/import', token: tokens.viewer,
+      buffer: clicktacFile('318000004', 'קליקטאק'), branchId: String(branchB._id),
+    });
+    ok(ce.status >= 200 && ce.status < 300,
+      '14e וגם קובץ קליקטאק לאותו סניף → 2xx', `status=${ce.status} ${ce.text}`);
+    const ceRow = await ExternalEnrollment.findOne({ 'child.id_number': '318000004' }).lean();
+    eq(String(ceRow?.branch_id || ''), String(branchB._id), '14e הרשומה נשמרה תחת כפר סבא');
+
+    // ---- a viewer WITHOUT the grant is unchanged ------------------------
+    const beforeV0 = await TmtApproval.countDocuments({});
+    const v0 = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.viewer0,
+      buffer: tmtFile('318000005', 'ורד'), branchId: String(branchB._id),
+    });
+    eq(v0.status, 403, '14f צופה אחרת, ללא ההרשאה → 403');
+    eq(v0.body?.code, 'VIEWER_NO_UPLOAD', '14f עם הקוד VIEWER_NO_UPLOAD');
+    eq(await TmtApproval.countDocuments({}), beforeV0, '14f ולא נוצר דבר');
+
+    // ---- any role can be granted: a teacher, with both boxes ticked ------
+    const beforeT = await TmtApproval.countDocuments({});
+    const tNo = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.teacher,
+      buffer: tmtFile('318000006', 'גננת'), branchId: String(branchB._id),
+    });
+    eq(tNo.status, 403, '14g גננת בלי ההרשאה → 403');
+    eq(await TmtApproval.countDocuments({}), beforeT, '14g ולא נוצר דבר');
+
+    const tGrant = await request({
+      method: 'PATCH', path: `/api/admin/users/${teacher._id}/tabs`, token: tokens.admin,
+      body: { add: ['clicktac', 'clicktac_write'], remove: [] },
+    });
+    eq(tGrant.status, 200, '14h מנהל המערכת מעניק לגננת את המסך ואת ההרשאה → 200');
+    tokens.teacher = await login('מיכל גננת', '900000006');
+
+    const tYes = await uploadSheet({
+      path: '/api/tmt/import', token: tokens.teacher,
+      buffer: tmtFile('318000007', 'גננת מורשית'), branchId: String(branchB._id),
+    });
+    ok(tYes.status >= 200 && tYes.status < 300,
+      '14i ואז היא מעלה קובץ לכל סניף → 2xx (כל תפקיד ניתן להסמכה)',
+      `status=${tYes.status} ${tYes.text}`);
+    ok(!!await TmtApproval.findOne({ 'child.id_number': '318000007' }).lean(),
+      '14i ונוצרה שורה');
+
+    // Put the teacher back as she was, so nothing downstream reads a granted
+    // teacher by accident.
+    await request({
+      method: 'PATCH', path: `/api/admin/users/${teacher._id}/tabs`, token: tokens.admin,
+      body: { add: [], remove: [] },
+    });
+    tokens.teacher = await login('מיכל גננת', '900000006');
+  }
+
   // Referenced so lint/readers see the seeded users are deliberate.
   void [acc, viewer, viewer0, manager, teacher, Setting, empFixedA];
 }

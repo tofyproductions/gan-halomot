@@ -49,6 +49,23 @@ const eq = (a, b, label) => {
   eq(await resolveBranchScope(req('m1', 'POST')), ['b2', 'b3'], 'מנהל סניף — ללא שינוי');
   eq(await resolveBranchScope(req('t1', 'GET')), ['b4'], 'גננת — ללא שינוי');
 
+  console.log('\nהרשאת פעולה למסך (req.tabWriteGrant) — כל הסניפים');
+  // `clicktac_write` means "act on רישום חיצוני for EVERY branch": the person
+  // it is granted to files the ministry's list for כפר סבא and the ClickTac
+  // export for תל אביב. requireTabWrite sets the flag on the request when the
+  // pass came from the grant, and nowhere else.
+  const granted = (id, method) => ({ method, user: { id, role: 'x' }, tabWriteGrant: 'clicktac' });
+  eq(await resolveBranchScope(granted('m1', 'POST')), null,
+    'מנהלת סניף עם הרשאת הפעולה כותבת בכל הסניפים');
+  eq(await resolveBranchScope(req('m1', 'POST')), ['b2', 'b3'],
+    'ובלי ההרשאה — רק הסניפים שבניהולה (ללא שינוי)');
+  eq(await resolveBranchScope(granted('v1', 'POST')), null,
+    'צופה עם הרשאת הפעולה כותבת בכל הסניפים');
+  eq(await resolveBranchScope(req('v1', 'POST')), ['b1'],
+    'ובלי ההרשאה — רק הסניפים שבניהולה (ללא שינוי)');
+  eq(await resolveBranchScope(granted('t1', 'POST')), null,
+    'גם גננת שקיבלה את ההרשאה — כל הסניפים');
+
   console.log(failures ? `\n❌ ${failures} כשלונות\n` : '\n✅ הכל עבר\n');
   process.exit(failures ? 1 : 0);
 })();
