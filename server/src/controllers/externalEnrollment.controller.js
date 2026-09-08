@@ -12,7 +12,7 @@ const {
 } = require('../services/academic-year.service');
 const { generateUniqueId } = require('../utils/id-generator');
 const { getBranchFilter } = require('../utils/branch-filter');
-const { canAccessBranch } = require('../utils/branch-scope');
+const { canAccessBranch, resolveBranchScope } = require('../utils/branch-scope');
 
 /** One refusal, one wording — every write below names a branch. */
 const NOT_YOUR_BRANCH = { error: 'אין לך הרשאה לסניף זה' };
@@ -715,6 +715,11 @@ async function promoteBulk(req, res, next) {
     const fees = req.body?.fees_by_age_group || {};
     const regFee = Number(req.body?.registration_fee) || 0;
 
+    // One lookup for the whole batch instead of one User.findById per row —
+    // canAccessBranch(req, branchId) just calls resolveBranchScope(req) and
+    // tests the id against it, and that scope does not change row to row.
+    const scope = await resolveBranchScope(req);
+
     const imported = [];
     const skipped = [];
     for (const id of ids) {
@@ -723,8 +728,7 @@ async function promoteBulk(req, res, next) {
       if (!doc) { skipped.push({ id, error: 'לא נמצאה' }); continue; }
       // Reported per row rather than aborting, like every other refusal here:
       // a list that spans two gans should import the half it may.
-      // eslint-disable-next-line no-await-in-loop
-      if (!await canAccessBranch(req, doc.branch_id)) {
+      if (!(scope === null || scope.includes(String(doc.branch_id)))) {
         skipped.push({ id, child: doc.child?.full_name, error: 'אין לך הרשאה לסניף זה' });
         continue;
       }

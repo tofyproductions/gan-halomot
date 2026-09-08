@@ -536,12 +536,18 @@ function requireTab(tabId, ...defaultRoles) {
  * whatever her role, without making either of them an admin — which was the
  * only way to do it before.
  *
- * The grant is decided FIRST, and holding it stands in for the screen: acting
- * on a screen implies seeing it, and requiring the admin to tick two boxes
- * where one of them is implied is how a permission ends up half-granted. What
- * it does not do is survive a REMOVAL of the screen — `tab_overrides_remove`
- * on 'clicktac' still revokes everything, which is the "revoking the tab
- * revokes everything" rule the roles path has always had.
+ * The grant is decided FIRST — `tabDecision(user, '<tabId>_write')` — with the
+ * same precedence as everywhere else, and that decision is authoritative:
+ *
+ *   'deny'    → 403 READ_ONLY, full stop. Even for a role in `roles`. This is
+ *               what lets the office take uploads away from one accountant
+ *               without touching the role, or the screen.
+ *   'allow'   → pass on the grant, PROVIDED the screen itself is not denied
+ *               (acting implies seeing it, but does not survive a REMOVAL of
+ *               the screen — `tab_overrides_remove` on 'clicktac' still
+ *               revokes everything).
+ *   'default' → nobody said anything about the grant — fall back to the role
+ *               list, exactly as before this existed.
  *
  * When the pass comes from the grant, `req.tabWriteGrant` records it: the grant
  * means "act on this screen for EVERY branch" and utils/branch-scope.js reads
@@ -564,7 +570,20 @@ function requireTabWrite(tabId, ...roles) {
     if (!req.user) return res.status(401).json({ error: 'Authentication required' });
     const u = req.user;
 
-    if (tabDecision(u, grantId) === 'allow' && tabDecision(u, tabId) !== 'deny') {
+    const grantDecision = tabDecision(u, grantId);
+
+    // An explicit deny of the grant is authoritative, over any role — this is
+    // what lets the office take uploads away from a system_admin/accountant
+    // without touching the role or the screen. Checked before the role list,
+    // so it beats it rather than being beaten by it.
+    if (grantDecision === 'deny') {
+      return res.status(403).json({
+        error: 'יש לך הרשאת צפייה בלבד במסך זה',
+        code: 'READ_ONLY',
+      });
+    }
+
+    if (grantDecision === 'allow' && tabDecision(u, tabId) !== 'deny') {
       // Under the manager fallback isViewer() is already false — this is the
       // line that hands a viewer the uploads she was granted, so it claims the
       // write (see utils/viewerContext).
@@ -576,9 +595,10 @@ function requireTabWrite(tabId, ...roles) {
       // A raw viewer — a router mounted without authMiddleware, or the unit
       // tests. Same rule requireTab's override path applies: never a key to
       // /api/admin, reads pass, writes go through the viewer gate rather than
-      // straight to the database.
+      // straight to the database. The grant only widens write scope, so it is
+      // not recorded on a plain read.
       if (isBlockedForViewer(req.originalUrl)) return res.status(403).json(DENIED);
-      if (isRead(req)) { req.tabWriteGrant = tabId; return next(); }
+      if (isRead(req)) { return next(); }
       return viewerWriteGate(req, res, next, roles);
     }
 

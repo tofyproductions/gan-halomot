@@ -136,12 +136,37 @@ const teacher = (over = {}) => ({ id: 't', full_name: 'מיכל גננת', role:
     ok(!r.nexted && r.res.statusCode === 403, `${role} עם המסך בלבד → 403 (ללא שינוי)`);
   }
   {
-    // The grant ADDS people; it does not take the screen away from the roles
-    // that always had it. Removing 'clicktac_write' from an admin therefore
-    // changes nothing — to stop an admin acting here, remove 'clicktac'.
+    // An explicit DENY of the grant is authoritative, over any role — this is
+    // what lets the office take uploads away from a system_admin/accountant
+    // without touching the role or the screen. tabDecision(grantId) is
+    // checked FIRST, so it beats the role list rather than the role list
+    // beating it.
     const req = mkReq('POST', '/api/tmt/import', { id: 'a', role: 'system_admin', tab_overrides_remove: ['clicktac_write'] });
     const r = await run(gate(), req);
-    ok(r.nexted, 'הסרת ההרשאה ממנהל מערכת אינה שוללת ממנו את המסך — התפקיד עדיין עובר');
+    ok(!r.nexted && r.res.statusCode === 403 && r.res.body?.code === 'READ_ONLY',
+      'הסרה אישית של ההרשאה ממנהל מערכת → 403 READ_ONLY, גם שהתפקיד תמיד יכל',
+      `status=${r.res.statusCode} ${JSON.stringify(r.res.body)}`);
+  }
+  {
+    const req = mkReq('POST', '/api/tmt/import', { id: 'a', role: 'accountant', tab_overrides_remove: ['clicktac_write'] });
+    const r = await run(gate(), req);
+    ok(!r.nexted && r.res.statusCode === 403 && r.res.body?.code === 'READ_ONLY',
+      'הסרה אישית של ההרשאה מהנהלת חשבונות → 403 READ_ONLY',
+      `status=${r.res.statusCode} ${JSON.stringify(r.res.body)}`);
+  }
+  {
+    const req = mkReq('POST', '/api/tmt/import', { id: 'a', role: 'system_admin', role_tab_remove: ['clicktac_write'] });
+    const r = await run(gate(), req);
+    ok(!r.nexted && r.res.statusCode === 403 && r.res.body?.code === 'READ_ONLY',
+      'הסרה לכל התפקיד של מנהלי מערכת → 403 READ_ONLY, גם למנהל מערכת בודד',
+      `status=${r.res.statusCode} ${JSON.stringify(r.res.body)}`);
+  }
+  {
+    // No override on the grant at all — the default path, unchanged.
+    const req = mkReq('POST', '/api/tmt/import', { id: 'a', role: 'accountant' });
+    const r = await run(gate(), req);
+    ok(r.nexted, 'הנהלת חשבונות בלי שום חריגה על ההרשאה → next (ברירת מחדל של התפקיד)');
+    eq(r.req.tabWriteGrant, undefined, 'בלי tabWriteGrant — עברה בזכות התפקיד');
   }
   {
     const req = mkReq('POST', '/api/tmt/import', { id: 'a', role: 'system_admin', tab_overrides_remove: ['clicktac'] });
