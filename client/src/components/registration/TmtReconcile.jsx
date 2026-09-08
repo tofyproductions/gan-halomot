@@ -43,9 +43,54 @@ const VERDICT_STYLE = {
 
 const SEVERITY_COLOR = { critical: 'error', warning: 'warning', info: 'info', ok: 'default' };
 
+/**
+ * אמצעי התשלום — צבע לכל שיטה.
+ *
+ * ONE COLOUR PER METHOD, AND THE EYE DOES THE READING. Sixty rows of Hebrew
+ * free text in a narrow column are not something anybody reads; a column of
+ * colours is. Green is the method the gan wants (הוראת קבע), blue and teal are
+ * methods it accepts without a word (אשראי, העברה בנקאית), orange is the one
+ * it accepts and would rather not (צ'ק), and red is the two that stop the
+ * money — מזומן, which is refused, and a family that never chose at all, which
+ * is drawn as an outline because there is nothing there rather than something
+ * wrong. Grey is a label the vendor invented since this was written.
+ *
+ * `variant` is part of the encoding, not decoration: the two reds have to be
+ * told apart at a glance, and so do "the office decided nothing" and "the
+ * family decided nothing".
+ */
+const METHOD_STYLE = {
+  standing_order: { color: 'success', variant: 'filled' },
+  credit_card: { color: 'primary', variant: 'filled' },
+  bank_transfer: { color: 'info', variant: 'filled' },
+  cheque: { color: 'warning', variant: 'filled' },
+  cash: { color: 'error', variant: 'filled' },
+  none: { color: 'error', variant: 'outlined' },
+  other: { color: 'default', variant: 'outlined' },
+};
+
+/**
+ * The legend under the cards — the same order the chips are ranked in.
+ *
+ * `other` is labelled by what it MEANS rather than by "אחר", because no chip in
+ * the table ever says "אחר": an unrecognised method keeps the vendor's own text
+ * as its label (see classifyPaymentMethod), so a legend entry reading "אחר"
+ * describes a chip nobody can find. The grey chips are the file's own words.
+ */
+const METHOD_LEGEND = [
+  ['standing_order', 'הוראת קבע'],
+  ['credit_card', 'כרטיס אשראי'],
+  ['bank_transfer', 'העברה בנקאית'],
+  ['cheque', "צ'ק"],
+  ['cash', 'מזומן'],
+  ['none', 'לא הוגדר'],
+  ['other', 'אחר (טקסט מהקובץ)'],
+];
+
 /** The three groups a child can be placed in. The state's brackets, our rooms. */
 const AGE_GROUPS = ['תינוק', 'פעוט', 'בוגר'];
 
+const fmtMoney = (n) => `${Number(n || 0).toLocaleString('he-IL')} ₪`;
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '—');
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('he-IL') : '—');
 
@@ -125,6 +170,15 @@ export default function TmtReconcile({
    * problem with the child's record.
    */
   const [paymentAlertOnly, setPaymentAlertOnly] = useState(false);
+  /**
+   * "Show me the families paying by cheque."
+   *
+   * Its own filter and not part of the one above, because it is not the same
+   * errand. The alert list is phone calls that have to happen before September;
+   * this is a list somebody works through when there is time, to move families
+   * onto a standing order. Merging them would bury the urgent half.
+   */
+  const [chequeOnly, setChequeOnly] = useState(false);
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
   const [detail, setDetail] = useState(null);
@@ -171,11 +225,15 @@ export default function TmtReconcile({
     if (verdictFilter && r.verdict !== verdictFilter) return false;
     if (issueFilter && !r.issues.some(i => i.code === issueFilter)) return false;
     if (missingParentsOnly && !r.clicktac?.missing_parents) return false;
-    if (paymentAlertOnly && !r.clicktac?.payment_alert) return false;
+    // Errors only — the card counts errors only, and a filter that shows more
+    // rows than the number on the card it sits under is a bug the office
+    // reports as "the screen is lying".
+    if (paymentAlertOnly && r.clicktac?.payment_alert?.severity !== 'error') return false;
+    if (chequeOnly && r.clicktac?.payment_method_kind?.kind !== 'cheque') return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return r.child_name.toLowerCase().includes(q) || String(r.id_number).includes(q);
-  }), [rows, verdictFilter, issueFilter, missingParentsOnly, paymentAlertOnly, search]);
+  }), [rows, verdictFilter, issueFilter, missingParentsOnly, paymentAlertOnly, chequeOnly, search]);
 
   const handleUpload = async () => {
     if (!uploadDlg.file) return toast.error('יש לבחור קובץ');
@@ -374,14 +432,32 @@ export default function TmtReconcile({
             {/* מזומן אינו מתקבל, ומשפחה בלי אמצעי תשלום צריכה טלפון — שתי
                 עובדות שהיו בקובץ מהיום הראשון ואף אחד לא ראה אותן. Red only
                 when there is something to do: a branch where every family is
-                on a credit card should not have a red card sitting there. */}
-            <StatCard label="אמצעי תשלום — לטיפול" value={summary.payment_alerts || 0}
+                on a credit card should not have a red card sitting there.
+
+                The cheques ride in the hint rather than in the number: they
+                are accepted, and the number on this card is the list of calls
+                that have to be made. */}
+            <StatCard label="אמצעי תשלום" value={summary.payment_alerts || 0}
               color={summary.payment_alerts ? 'error' : 'info'}
-              active={paymentAlertOnly} hint={'מזומן / לא הוגדר / הו"ק חסרה'}
+              active={paymentAlertOnly}
+              hint={`לטיפול ${summary.payment_alerts || 0} · צ'קים ${summary.payment_warnings || 0}`}
               onClick={() => setPaymentAlertOnly(v => !v)} />
             <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
               hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
+          </Stack>
+
+          {/* The key to the colours in the אמצעי תשלום column. Written out
+              once here rather than left to be learned from tooltips: the whole
+              point of colouring the column is that it can be read without
+              hovering over anything. */}
+          <Stack direction="row" spacing={1} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
+            <Typography variant="caption" color="text.secondary">אמצעי תשלום:</Typography>
+            {METHOD_LEGEND.map(([kind, label]) => (
+              <Chip key={kind} size="small" label={label}
+                color={METHOD_STYLE[kind].color} variant={METHOD_STYLE[kind].variant}
+                sx={{ height: 20, fontSize: '0.68rem' }} />
+            ))}
           </Stack>
 
           <Stack direction="row" spacing={1.5} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
@@ -410,6 +486,14 @@ export default function TmtReconcile({
                 variant={paymentAlertOnly ? 'filled' : 'outlined'}
                 label={`אמצעי תשלום — התרעה (${summary.payment_alerts})`}
                 onClick={() => setPaymentAlertOnly(v => !v)} />
+            )}
+            {/* Beside the alert chip and never inside it — accepted, and worth
+                a call when there is time. */}
+            {!!summary.payment_warnings && (
+              <Chip size="small" color="warning"
+                variant={chequeOnly ? 'filled' : 'outlined'}
+                label={`צ'קים (${summary.payment_warnings})`}
+                onClick={() => setChequeOnly(v => !v)} />
             )}
             <Box sx={{ flex: 1 }} />
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
@@ -538,19 +622,41 @@ export default function TmtReconcile({
                               color={SEVERITY_COLOR[i.severity] || 'default'} />
                           </Tooltip>
                         ))}
-                        {/* Filled rather than outlined, unlike every issue
-                            beside it: this one is not a discrepancy between
-                            two lists, it is money that will not arrive. The
-                            tooltip carries the vendor's own wording, because
-                            the rule matches on a substring and the office has
-                            to be able to see what it actually matched. */}
-                        {r.clicktac?.payment_alert && (
-                          <Tooltip title={r.clicktac.payment_method
-                            ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
-                            : 'בקליקטאק לא נרשמה צורת תשלום כלל'}>
-                            <Chip size="small" color="error"
-                              label={r.clicktac.payment_alert.label} />
+                        {/* HOW THE FAMILY PAYS — on every row that came from
+                            the registrations export, not only on the ones
+                            with a problem. The colour is the whole message
+                            (see METHOD_STYLE), and the tooltip carries the
+                            vendor's own wording, because the rule matches on
+                            a substring and the office has to be able to see
+                            what it actually matched. */}
+                        {r.clicktac?.payment_method_kind && (
+                          <Tooltip title={[
+                            r.clicktac.payment_method
+                              ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
+                              : 'בקליקטאק לא נרשמה צורת תשלום כלל',
+                            // The soft advice lives here rather than as a
+                            // second chip — "מומלץ לעבור להו"ק" is a
+                            // suggestion, and a table is not the place to
+                            // argue with sixty families at once.
+                            r.clicktac.payment_alert?.severity === 'warning'
+                              ? r.clicktac.payment_alert.label : '',
+                          ].filter(Boolean).join(' · ')}>
+                            <Chip size="small"
+                              color={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.color || 'default'}
+                              variant={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.variant || 'outlined'}
+                              label={r.clicktac.payment_method_kind.label} />
                           </Tooltip>
+                        )}
+                        {/* And the verdict on it, when there is one. Kept
+                            separate from the chip above: "הו"ק" and "הו"ק ללא
+                            פרטי בנק" are two different facts, and folding them
+                            into one chip loses the first one. Errors only —
+                            a cheque already says everything it has to say in
+                            orange, and repeating it here would put a second
+                            chip on a third of the table. */}
+                        {r.clicktac?.payment_alert?.severity === 'error' && (
+                          <Chip size="small" color="error"
+                            label={r.clicktac.payment_alert.label} />
                         )}
                       </Stack>
                     </TableCell>
@@ -599,6 +705,16 @@ export default function TmtReconcile({
                             דרגה {r.clicktac.tier === '' ? '—' : r.clicktac.tier}
                             {r.clicktac.tuition_type ? ` · ${r.clicktac.tuition_type}` : ''}
                           </Typography>
+                          {/* The tier alone is a number nobody can act on —
+                              "דרגה 4" means nothing without the branch's
+                              matrix in front of you. This is what it costs,
+                              and it is the fee the child will actually be
+                              billed on the placement board. */}
+                          {r.clicktac.fee_by_tier != null && (
+                            <Typography variant="caption" color="success.main" display="block" fontWeight={700}>
+                              שכ״ל לפי דרגה: {fmtMoney(r.clicktac.fee_by_tier)}
+                            </Typography>
+                          )}
                         </>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>

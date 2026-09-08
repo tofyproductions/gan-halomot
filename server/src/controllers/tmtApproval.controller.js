@@ -1,17 +1,16 @@
 const XLSX = require('xlsx');
 const {
   TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child,
-  BranchPricing,
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
   promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
-  withImporterName,
+  withImporterName, branchPricingFor, feeEntry,
 } = require('./externalEnrollment.controller');
 const {
-  normalizeYear, enrollmentYear, formatAcademicYear, hebrewYearForStart,
+  normalizeYear, enrollmentYear, formatAcademicYear,
 } = require('../services/academic-year.service');
 
 /**
@@ -313,7 +312,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     };
   }
 
-  const [tmtAll, ctDocs] = await Promise.all([
+  const [tmtAll, ctDocs, pricing] = await Promise.all([
     TmtApproval.find({ academic_year: academicYear })
       .select('-raw')
       .populate('branch_id', 'name')
@@ -326,6 +325,10 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     ExternalEnrollment.find({ branch_id: branchId, academic_year: academicYear })
       .select('-raw')
       .lean(),
+    // The branch's price matrix, so every row can carry the fee its own דרגה
+    // prices. Read here rather than inside reconcile() because that function
+    // is pure and has no database — and read once for the whole screen.
+    branchPricingFor(branchId, academicYear),
   ]);
 
   const ctIds = new Set(ctDocs.map(d => normalizeId(d.child?.id_number)).filter(Boolean));
@@ -342,6 +345,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     branchId,
     academicYear,
     branchName: branch.name,
+    pricing,
   });
   // The size of each side, which the verdicts alone cannot tell you: a branch
   // with no תמ"ת file and a branch whose every child was refused produce the
@@ -646,7 +650,13 @@ async function exportReconcile(req, res, next) {
         ...r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`),
         ...(r.clicktac?.payment_alert ? [r.clicktac.payment_alert.label] : []),
       ].join(' · '),
-      payment_method: r.clicktac?.payment_method || '',
+      // Two columns, because they answer two questions. The kind is what the
+      // sheet is sorted and skimmed by — "הוראת קבע", "צ'ק" — and the raw cell
+      // beside it is what ClickTac actually wrote, which is the only way to
+      // see a label change from the workbook. The verdict itself rides in the
+      // flags column above, cheques included.
+      payment_method: r.clicktac?.payment_method_kind?.label || '',
+      payment_method_raw: r.clicktac?.payment_method || '',
       tmt_decision: r.tmt?.decision || '',
       tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
@@ -670,7 +680,7 @@ async function exportReconcile(req, res, next) {
       ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
       ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
-      ['payment_method', 'אמצעי תשלום'],
+      ['payment_method', 'אמצעי תשלום'], ['payment_method_raw', 'אמצעי תשלום — כפי שנרשם'],
       ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],
@@ -765,13 +775,7 @@ async function placement(req, res, next) {
       // Children already filed into a room for this year — places already taken.
       Child.find({ academic_year: academicYear, is_active: true, classroom_id: { $ne: null } })
         .select('classroom_id child_name').lean(),
-      BranchPricing.findOne({
-        branch_id: branchId,
-        $or: [
-          { academic_year: hebrewYearForStart(Number(academicYear.split('-')[0])) },
-          { academic_year: academicYear },
-        ],
-      }).lean(),
+      branchPricingFor(branchId, academicYear),
     ]);
 
     // A name with a replacement character in it is a corrupted row, not a room
@@ -804,6 +808,21 @@ async function placement(req, res, next) {
       parent_name: r.clicktac.parent1_name || '',
       parent_phone: r.clicktac.parent1_phone || '',
       issues: r.issues.filter(i => i.severity !== 'info').map(i => i.label),
+      // The דרגה off the family's signed contract, and what it prices here.
+      tier: r.clicktac.tier || '',
+      // What the tier costs in the group this child is in right now.
+      fee_by_tier: r.clicktac.fee_by_tier ?? null,
+      /**
+       * …and in each of the other two, because the ROOM decides the group.
+       *
+       * The dropdown beside this child offers every room in the year, and
+       * confirmPlacement bills the group of the room they end up in — so a
+       * single number here would be a promise about a group the manager may
+       * be about to change. The screen picks the entry for the selected room
+       * and the confirm step then bills exactly that, which is what makes the
+       * board's fee column true rather than nearly true.
+       */
+      fees_by_group: r.clicktac.fees_by_group || null,
     }));
 
     const groups = Object.entries(AGE_GROUP_TO_CATEGORY).map(([group, category]) => {
@@ -901,6 +920,21 @@ async function confirmPlacement(req, res, next) {
 
     const fees = req.body?.fees_by_age_group || {};
     const regFee = Number(req.body?.registration_fee) || 0;
+    /**
+     * `fees_by_age_group` IS THE FALLBACK NOW.
+     *
+     * A child whose contract names a דרגה is billed off that child's own row of
+     * the branch's matrix — the fee the board already showed beside their name.
+     * These per-group numbers still price everybody the matrix cannot: a
+     * private branch, a blank tier, a combination the matrix has no cell for.
+     * `override_tier` is how somebody says they mean these numbers to win
+     * anyway, and it is a deliberate word rather than a side effect of posting
+     * a fee.
+     */
+    const overrideTier = ['1', 'true', true].includes(req.body?.override_tier);
+    // One matrix for the whole run — this route is one branch and one year by
+    // construction, and promoteOne would otherwise read it once per child.
+    const pricing = await branchPricingFor(branchId, academicYear);
 
     const rooms = await Classroom.find({ branch_id: branchId, academic_year: academicYear })
       .select('name category capacity').lean();
@@ -936,14 +970,19 @@ async function confirmPlacement(req, res, next) {
       // whatever the files said. That keeps the fee column and the room from
       // ever disagreeing.
       const group = categoryToGroup[room.category] || effectiveAgeGroup(doc.toObject());
-      // Absent reads as zero, which enrols the child with the fee still open —
-      // the deliberate state, recorded as `fee_pending` in promoteOne. Only a
-      // negative or unparseable figure stops a child, because that is a typo.
-      const fee = Number(fees[group] ?? 0);
-      if (!Number.isFinite(fee) || fee < 0) {
+      /**
+       * Absent reads as "nothing was said about this group", which is not the
+       * same as ₪0 — see feeEntry. For a child the matrix prices, a blank group
+       * field leaves the matrix's number alone even under `override_tier`; for
+       * a child it does not, the fee stays open at 0, the deliberate state.
+       * Only a present, unparseable or negative figure stops a child.
+       */
+      const entered = feeEntry(fees[group]);
+      if (entered.invalid) {
         skipped.push({ id: a.id, child: name, error: `שכר לימוד לא תקין לשכבה "${group}"` });
         continue;
       }
+      const fee = entered.value ?? 0;
 
       doc.placement = {
         age_group_override: group,
@@ -957,13 +996,23 @@ async function confirmPlacement(req, res, next) {
       try {
         const reg = await promoteOne(doc.toObject(), {
           monthly_fee: fee,
+          // A blank group is not an override of zero — see feeEntry.
+          monthly_fee_override: overrideTier && entered.value !== null ? entered.value : undefined,
+          pricing,
           registration_fee: regFee,
           classroom_id: room._id,
           userId: req.user?.id || null,
         });
         placed.push({
           id: a.id, child: name, classroom: room.name, age_group: group,
-          monthly_fee: fee, registration_id: reg._id,
+          // The fee that was ACTUALLY written, not the one this loop offered —
+          // for a child with a דרגה those are different numbers, and reporting
+          // the offer would tell the office something untrue about what it
+          // just committed.
+          monthly_fee: reg.monthly_fee,
+          fee_source: reg.fee_source,
+          fee_tier: reg.fee_tier,
+          registration_id: reg._id,
         });
       } catch (e) {
         skipped.push({ id: a.id, child: name, error: e.message });

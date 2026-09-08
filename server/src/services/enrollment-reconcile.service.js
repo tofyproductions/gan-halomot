@@ -23,7 +23,8 @@
 const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
-const { paymentAlertFor } = require('./paymentCheck');
+const { paymentAlertFor, paymentMethodFor } = require('./paymentCheck');
+const { tierFeeFor, tierFeesByGroup } = require('./tier-fee.service');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -340,7 +341,14 @@ function verdictFor(tmt, ct, { branchId } = {}) {
  * כפר סבא is caught, and it is a real thing that happens when a family applies
  * to two of the network's gans.
  */
-function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchName = '' }) {
+function reconcile({
+  tmtDocs = [], ctDocs = [], branchId, academicYear, branchName = '',
+  // The branch's price matrix, when the caller loaded one. Optional on
+  // purpose: this function is pure and the fee is one more derived column, so
+  // a caller that has no matrix (or does not care) gets rows with a null
+  // `fee_by_tier` rather than an exception.
+  pricing = null,
+}) {
   const tmtById = new Map();
   for (const t of tmtDocs) {
     const id = normalizeId(t.child?.id_number);
@@ -471,12 +479,49 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
          * check existed do not have one. See services/paymentCheck.js.
          */
         payment_method: String(ct.enrollment?.tuition_method || '').trim(),
+        /**
+         * The method NAMED — `{ kind, label }`, or null for a row that has
+         * only ever been in the contracts export and therefore has no payment
+         * column behind it at all.
+         *
+         * This is what the screen colours by. `payment_alert` below is still
+         * only the families to chase; most rows have no alert and every row
+         * has a method, and "how does this family pay" is a question the
+         * office reads off the table rather than opens a record for.
+         */
+        payment_method_kind: paymentMethodFor(ct),
         payment_alert: paymentAlertFor(ct),
         class_name: ct.contract?.class_name || '',
         // The subsidy bracket the whole fee hangs on — the number that was in
-        // neither file until the contracts export was accepted. Shown, not yet
-        // applied; see the note on pricing() in the controller.
+        // neither file until the contracts export was accepted.
         tier: ct.contract?.tier || '',
+        /**
+         * What that bracket actually costs this child, off the branch's matrix.
+         *
+         * The tier alone is a number nobody can act on; "דרגה 4" means nothing
+         * without the matrix in front of you. This is the fee the child will
+         * be billed when they are promoted (promoteOne prices from the same
+         * two functions), shown here so the office sees it before it commits
+         * rather than after. Null when there is no tier, no matrix, or no cell
+         * — all three of which mean a person still has to choose.
+         */
+        fee_by_tier: tierFeeFor({
+          pricing,
+          tier: ct.contract?.tier,
+          ageGroup: ct.placement?.age_group_override || ct.computed?.age_group || ct.child?.age_group,
+        })?.fee ?? null,
+        /**
+         * The SAME tier priced in all three age groups.
+         *
+         * `fee_by_tier` above is one number, worked out from the group this
+         * child is in right now — and on the placement board the manager can
+         * move the child into a room of another group, at which point the
+         * confirm bills the new group and the number on screen was a promise
+         * about the old one. The whole line travels instead, so the screen can
+         * re-read it from whichever room is selected and show what will
+         * actually be charged. Nulls where the matrix has no cell.
+         */
+        fees_by_group: tierFeesByGroup({ pricing, tier: ct.contract?.tier }),
         tuition_type: ct.contract?.tuition_type || '',
         contract_start: ct.contract?.start_date || null,
         contract_end: ct.contract?.end_date || null,
@@ -526,7 +571,14 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       // מזומן / לא הוגדר / הו"ק ללא בנק — families to call before September.
       // Counted over the same rows as every other counter here, so the card
       // and the chip agree with what filtering on it actually shows.
-      payment_alerts: by(r => !!r.clicktac?.payment_alert),
+      //
+      // ERRORS ONLY. A cheque is now an alert as well, and a soft one: the gan
+      // accepts cheques and would simply rather not. Counting it here would
+      // grow the "לטיפול" number by families nobody has to phone, which is how
+      // a work list stops being worked.
+      payment_alerts: by(r => r.clicktac?.payment_alert?.severity === 'error'),
+      // The soft half, on its own number — today that is the cheques.
+      payment_warnings: by(r => r.clicktac?.payment_alert?.severity === 'warning'),
       with_contract: by(r => !!r.clicktac?.class_name || !!r.clicktac?.tier),
       issues: issueCounts,
     },

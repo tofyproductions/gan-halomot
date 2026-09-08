@@ -809,6 +809,477 @@ async function main() {
       '15f וגם חודשי הגיל נשארו');
   }
 
+  head('בדיקה 16 — אותו שם ואותו תאריך לידה, ת"ז שונה — שני ילדים');
+  {
+    await wipe();
+    /**
+     * THE CASE THIS PREVENTS. שני אחים על שם אותה סבתא, או תאומים — אותו שם
+     * משפחה, אותו תאריך לידה, ות"ז שונה. כלל המיזוג השני (שם + תאריך לידה)
+     * קיים כי רוב הילדים במערכת בלי ת"ז שמורה בכלל, אבל בלי אימות מול הת"ז
+     * הוא היה מוזג את השני לתוך הראשון — והשני היה מקבל את הכיתה, הדרגה
+     * והחוזה של הראשון, ושורה אחת פשוט נעלמת בלי שאף אחד יידע.
+     */
+    const twins = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400020', first: 'מעיין', last: 'דהן', idNumber: '246666664',
+        birth: [2025, 3, 12], cls: 'בוגרים א', tier: 4,
+      }),
+      contractRow({
+        id: '400021', first: 'מעיין', last: 'דהן', idNumber: '247777772',
+        birth: [2025, 3, 12], cls: 'בוגרים ב', tier: 9,
+      }),
+    ], 'Worksheet 1');
+    const res = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_twins.xlsx', buffer: twins,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(res.status, 200, '16a הקובץ נקלט');
+    eq(res.body?.created, 2, '16b ונוצרו שתי שורות — לא אחת');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 2, '16c ובטבלה שני ילדים');
+    const tiers = data.enrollments.map(e => e.contract?.tier).sort();
+    eq(tiers, ['4', '9'], '16d ולכל אחד/ת הדרגה של עצמו/ה — אף אחת לא נדרסה');
+  }
+
+  head('בדיקה 17 — אותו שם ותאריך לידה, ת"ז רק בצד אחד — אותו ילד');
+  {
+    await wipe();
+    // המקרה שבשבילו הכלל השני נכתב מלכתחילה: ייצוא החוזים כותב דרכון או
+    // משאיר את התא ריק, וייצוא הנרשמים מחזיק ת"ז. צד אחד שותק, ולכן אין
+    // סתירה — וזה אותו ילד, שאסור שיופיע פעמיים.
+    const blankIdContract = sheetBuffer(CONTRACTS_HEADER, [
+      contractRow({
+        id: '400030', first: 'יהלי', last: 'אזולאי', idNumber: '',
+        birth: [2025, 4, 18], cls: 'בוגרים א', tier: 5,
+      }),
+    ], 'Worksheet 1');
+    const c = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_blank_one.xlsx', buffer: blankIdContract,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(c.body?.created, 1, '17a שורת החוזה נוצרה בלי ת"ז');
+
+    const withId = sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+      first: 'יהלי', last: 'אזולאי', idNumber: '248888880', birth: [2025, 4, 18],
+      parentFirst: 'הורה17', parentPhone: '0500000017',
+    })], 'Sheet1');
+    const r = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'Registrations Export.xlsx', buffer: withId,
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(r.body?.created, 0, '17b ולא נוצרה שורה שנייה');
+    eq(r.body?.updated, 1, '17c אלא אותה שורה מולאה');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 1, '17d ובטבלה ילד/ה אחד/ת');
+    const row = data.enrollments[0];
+    eq(row?.contract?.tier, '5', '17e הדרגה מהחוזה');
+    eq(row?.child?.id_number, '248888880', '17f והת"ז מהנרשמים');
+  }
+
+  head('בדיקה 18 — הדרגה מייצור החוזים קובעת את שכר הלימוד');
+  {
+    /**
+     * THE STORY. שכר הלימוד במעון מסובסד הוא תא במטריצה של המדינה: דרגת
+     * הסבסוד של המשפחה כפול שכבת הגיל של הילד/ה. הדרגה לא הייתה באף קובץ, ולכן
+     * המסך ביקש דרגה אחת והחיל אותה על מחזור שלם — שגוי לכל משפחה שהכנסתה שונה
+     * מזו שהוקלדה. ייצוא החוזים מביא את הדרגה לכל ילד/ה בנפרד, ומכאן השרת הוא
+     * שמתמחר, ולא המסך.
+     *
+     * המטריצה: שלוש שכבות גיל × שלוש דרגות. הילדים כאן כולם פעוטות ב-1.9
+     * (עמודה 1), ולכן דרגה 2 היא 2,100 ₪.
+     */
+    const { BranchPricing } = require('../src/models');
+    const MATRIX = {
+      age_groups: ['תינוק', 'פעוט', 'בוגר'],
+      tiers: [
+        { label: 'דרגה 1', prices: [1000, 1100, 1200] },
+        { label: 'דרגה 2', prices: [2000, 2100, 2200] },
+        { label: 'דרגה 3', prices: [3000, 3100, 3200] },
+      ],
+    };
+    const setPricing = (patch) => BranchPricing.findOneAndUpdate(
+      { branch_id: branch._id, academic_year: YEAR },
+      // YEAR is written with an ASCII double quote — exactly the spelling the
+      // pricing editor saves — while hebrewYearForStart produces a gershayim.
+      // That the lookup finds this document at all is half of what 18 tests.
+      { $set: { branch_id: branch._id, academic_year: YEAR, ...patch } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
+    /**
+     * One child, both files, promoted — and the registration that came out.
+     *
+     * A FRESH ת"ז EVERY TIME. `wipe()` clears the ClickTac queue and not the
+     * Registrations it produced, so reusing one id would make the second run
+     * match the first run's registration and be refused as a duplicate — which
+     * is correct behaviour and useless as a fixture.
+     */
+    let tierCase = 0;
+    const promoteWithTier = async (tier, body = {}) => {
+      await wipe();
+      tierCase += 1;
+      const kid = {
+        id: `4001${tier}${tierCase}`, first: 'רותם', last: `בר${tierCase}`,
+        idNumber: `24999000${tierCase}`,
+        birth: [2025, 3, 3], cls: 'בוגרים א', tier,
+      };
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'contracts_tier.xlsx',
+        buffer: sheetBuffer(CONTRACTS_HEADER, [contractRow(kid)], 'Worksheet 1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'Registrations Export.xlsx',
+        buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+          ...kid, parentFirst: 'הורה18', parentPhone: '0500000018',
+        })], 'Sheet1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      const data = await listRows();
+      const row = data.enrollments[0];
+      const res = await request({
+        method: 'POST', token, path: `/api/external-enrollments/${row.id}/promote`,
+        body: { monthly_fee: 1500, ...body },
+      });
+      return { res, reg: res.body?.registration, row };
+    };
+
+    await setPricing({ pricing_type: 'subsidized', ...MATRIX });
+
+    // ---- the cell the tier prices ----
+    {
+      const { res, reg, row } = await promoteWithTier(2);
+      ok(res.status === 201, '18a הקליטה מצליחה', `${res.status} ${res.text?.slice(0, 200)}`);
+      eq(row?.computed?.age_group, 'פעוט', '18b הילד/ה פעוט/ה ב-1.9 — עמודה 1');
+      eq(row?.fee_by_tier, 2100, '18c והמסך מראה את שכר הלימוד לפי הדרגה עוד לפני הקליטה');
+      eq(reg?.monthly_fee, 2100, '18d הרישום נוצר עם התא מהמטריצה — ולא עם 1,500 שנשלחו');
+      eq(reg?.fee_source, 'tier', '18e ומתועד מאיפה המספר הגיע');
+      eq(reg?.fee_tier, 'דרגה 2', '18f ואיזו שורה במטריצה');
+    }
+
+    // ---- no tier: the request's fee, exactly as before ----
+    {
+      const { reg, row } = await promoteWithTier(0);
+      eq(row?.fee_by_tier, null, '18g דרגה 0 היא "לא ידוע" — אין מה להראות');
+      eq(reg?.monthly_fee, 1500, '18h ולכן נקלט עם מה שהמסך שלח');
+      eq(reg?.fee_source, 'manual', '18i ומסומן ככזה');
+    }
+
+    // ---- a tier the branch does not price ----
+    {
+      const { reg, row } = await promoteWithTier(9);
+      eq(row?.fee_by_tier, null, '18j דרגה שאינה במטריצה של הסניף אינה ממציאה מחיר');
+      eq(reg?.monthly_fee, 1500, '18k והסכום נשאר של המסך');
+      eq(reg?.fee_source, 'manual', '18l ומסומן ככזה');
+    }
+
+    // ---- an explicit override beats the matrix ----
+    {
+      const { reg } = await promoteWithTier(2, { monthly_fee_override: 1234 });
+      eq(reg?.monthly_fee, 1234, '18m מי שביקש במפורש לעקוף — עוקף');
+      eq(reg?.fee_source, 'override', '18n והעקיפה מתועדת');
+      eq(reg?.fee_tier, 'דרגה 2', '18o ביחד עם הדרגה שנעקפה — כדי שאפשר יהיה להסביר את הפער');
+    }
+
+    // ---- a private branch has no matrix at all ----
+    {
+      await setPricing({ pricing_type: 'private', fixed_monthly_fee: 3000 });
+      const { reg, row } = await promoteWithTier(2);
+      eq(row?.fee_by_tier, null, '18p במעון פרטי אין מטריצת דרגות');
+      eq(reg?.monthly_fee, 1500, '18q והסכום הוא של המסך');
+      eq(reg?.fee_source, 'manual', '18r ומסומן ככזה');
+    }
+    await setPricing({ pricing_type: 'subsidized', ...MATRIX });
+  }
+
+  /* ================================================================== *
+   * בדיקה 19 — התוויות האמיתיות של טבלת המדינה
+   *
+   * THE MATCH WAS INERT AGAINST THE ONLY TABLE ANYBODY USES. עורך המחירון
+   * זורע את שורות משרד העבודה כלשונן — "דרגה 3 (0–2,330)" — ושמירה שומרת
+   * אותן מילה במילה. כלל ההתאמה הקודם שרשר את כל הספרות שבתווית, כך ש"דרגה
+   * 3 (0–2,330)" הפך ל-"302330" ולא התאים לשום דרגה. עשר מתוך שתים עשרה
+   * השורות המשווקות היו בלתי נגישות, וכל התכונה הייתה no-op שקט בייצור.
+   *
+   * התוויות כאן מועתקות מילה במילה מ-PricingManager.jsx, ושמות העמודות הם
+   * DEFAULT_AGE_GROUPS האמיתיים — לא ניסוח שהומצא לטובת הבדיקה.
+   * ================================================================== */
+  head('בדיקה 19 — טבלת המדינה האמיתית: כל דרגה מוצאת את השורה שלה');
+  {
+    const { tierFeeFor, tierIndex, ageGroupIndex } = require('../src/services/tier-fee.service');
+
+    // ---- verbatim from client/src/components/pricing/PricingManager.jsx ----
+    const DEFAULT_AGE_GROUPS = ['עד 15 חודש', '15–24 חודש', 'מעל 24 חודש'];
+    const TMT_5786 = [
+      { label: 'דרגה 3 (0–2,330)', prices: [1157, 938, 941] },
+      { label: 'דרגה 4 (2,331–2,880)', prices: [1401, 1109, 1113] },
+      { label: 'דרגה 5 (2,881–3,330)', prices: [1663, 1318, 1323] },
+      { label: 'דרגה 6 (3,331–3,880)', prices: [1748, 1377, 1382] },
+      { label: 'דרגה 7 (3,881–4,440)', prices: [2011, 1549, 1554] },
+      { label: 'דרגה 8 (4,441–4,880)', prices: [2180, 1703, 1709] },
+      { label: 'דרגה 9 (4,881–5,440)', prices: [2328, 1811, 1817] },
+      { label: 'דרגה 10 (5,441–5,880)', prices: [2432, 1908, 1914] },
+      { label: 'דרגה 11 (5,881–6,660)', prices: [3936, 2917, 2587] },
+      { label: 'דרגה 12 (מעל 6,660)', prices: [3936, 2917, 2587] },
+      { label: 'דרגה 14', prices: [1054, 835, 837] },
+      { label: 'דרגה 15', prices: [952, 731, 734] },
+    ];
+    const state = { pricing_type: 'subsidized', age_groups: DEFAULT_AGE_GROUPS, tiers: TMT_5786 };
+
+    // כל דרגה מוצאת את שורתה שלה — לא את זו שלפניה ולא אף אחת.
+    const misrouted = TMT_5786
+      .map((t, i) => ({ n: Number(t.label.match(/\d+/)[0]), want: i, got: tierIndex(t.label.match(/\d+/)[0], TMT_5786) }))
+      .filter(x => x.got !== x.want);
+    eq(misrouted, [], '19a כל 12 הדרגות בטבלת המדינה מוצאות את השורה שלהן');
+
+    // הראיה שזה לא היה כך: 3 ו-4 הן שתי שורות שכנות עם מחירים שונים.
+    eq(tierFeeFor({ pricing: state, tier: '3', ageGroup: 'תינוק' })?.fee, 1157,
+      '19b דרגה 3, תינוק — השורה הראשונה');
+    eq(tierFeeFor({ pricing: state, tier: '4', ageGroup: 'תינוק' })?.fee, 1401,
+      '19c דרגה 4 אינה מתומחרת לפי שורת דרגה 3');
+    eq(tierFeeFor({ pricing: state, tier: '15', ageGroup: 'בוגר' })?.fee, 734,
+      '19d ודרגה 15 — האחרונה, למרות שהיא השורה ה-12');
+    eq(tierFeeFor({ pricing: state, tier: '12', ageGroup: 'פעוט' })?.fee, 2917,
+      '19e דרגה 12 עם טווח "מעל 6,660" בתווית');
+
+    // 13 אינה בטבלה — והמיפוי לפי מיקום היה מתמחר אותה משורה כלשהי.
+    eq(tierFeeFor({ pricing: state, tier: '13', ageGroup: 'תינוק' }), null,
+      '19f דרגה 13 אינה בטבלת המדינה — ואין המצאה של מחיר');
+    eq(tierFeeFor({ pricing: state, tier: '1', ageGroup: 'תינוק' }), null,
+      '19g וגם דרגה 1 — הטבלה מתחילה ב-3');
+    eq(tierFeeFor({ pricing: state, tier: '2', ageGroup: 'תינוק' }), null,
+      '19h וגם דרגה 2, שהמיפוי לפי מיקום היה מתמחר משורת דרגה 4');
+
+    // התוויות הנקיות שמגיעות מייבוא ה-PDF — "דרגה N" בלבד.
+    {
+      const clean = {
+        pricing_type: 'subsidized',
+        age_groups: DEFAULT_AGE_GROUPS,
+        tiers: [
+          { label: 'דרגה 3', prices: [1157, 938, 941] },
+          { label: 'דרגה 4', prices: [1401, 1109, 1113] },
+        ],
+      };
+      eq(tierFeeFor({ pricing: clean, tier: '4', ageGroup: 'פעוט' })?.fee, 1109,
+        '19i גם התוויות הנקיות "דרגה N" עובדות');
+      eq(tierFeeFor({ pricing: clean, tier: 4, ageGroup: 'פעוט' })?.fee, 1109,
+        '19j והדרגה יכולה להגיע כמספר, כפי שאקסל מוסר אותה');
+    }
+
+    /* ---- עמודות: המיפוי לפי מיקום תקף רק למטריצה בת שלוש עמודות ---- */
+    eq(ageGroupIndex('תינוק', DEFAULT_AGE_GROUPS), 0, '19k שלוש עמודות — תינוק היא הראשונה');
+    eq(ageGroupIndex('בוגר', DEFAULT_AGE_GROUPS), 2, '19l ובוגר האחרונה');
+    eq(ageGroupIndex('בוגר', ['עד 15 חודש', 'מעל 15 חודש']), -1,
+      '19m מטריצה בת שתי עמודות אינה הטבלה שהכלל מכיר — ולא מנחשים עמודה');
+    eq(ageGroupIndex('בוגר', ['א', 'ב', 'ג', 'ד']), -1,
+      '19n וגם לא מטריצה בת ארבע');
+    eq(ageGroupIndex('בוגר', ['תינוק', 'פעוט', 'בוגר', 'על-יסודי']), 2,
+      '19o אבל שם שמופיע בכותרת מנצח בכל מספר עמודות');
+    {
+      const twoCol = {
+        pricing_type: 'subsidized',
+        age_groups: ['עד 15 חודש', 'מעל 15 חודש'],
+        tiers: [{ label: 'דרגה 3', prices: [1157, 938] }],
+      };
+      eq(tierFeeFor({ pricing: twoCol, tier: '3', ageGroup: 'תינוק' }), null,
+        '19p ומטריצה בת שתי עמודות אינה מתמחרת — היא שולחת לשאול אדם');
+    }
+  }
+
+  {
+    const { BranchPricing } = require('../src/models');
+    const setPricing = (patch) => BranchPricing.findOneAndUpdate(
+      { branch_id: branch._id, academic_year: YEAR },
+      { $set: { branch_id: branch._id, academic_year: YEAR, ...patch } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    const MATRIX = {
+      age_groups: ['תינוק', 'פעוט', 'בוגר'],
+      tiers: [
+        { label: 'דרגה 1', prices: [1000, 1100, 1200] },
+        { label: 'דרגה 2', prices: [2000, 2100, 2200] },
+        { label: 'דרגה 3', prices: [3000, 3100, 3200] },
+      ],
+    };
+    await setPricing({ pricing_type: 'subsidized', ...MATRIX });
+
+    /* ================================================================ *
+     * בדיקה 20 — החדר קובע את השכבה, והשכבה קובעת את המחיר
+     *
+     * THE BOARD PROMISED A NUMBER THE CONFIRM DID NOT CHARGE. לוח השיבוץ
+     * הראה את שכר הלימוד לפי שכבת הגיל שחושבה מהקבצים, אבל הרשימה הנפתחת
+     * ליד כל ילד/ה מציעה כל חדר בשנה — ו-confirmPlacement מחייב לפי שכבת
+     * החדר שאליו שובצו בפועל. תינוקת ששובצה לחדר בוגרים חויבה לפי עמודת
+     * הבוגרים ועל המסך הופיעה עמודת התינוקות.
+     *
+     * מכאן השרת מוסר `fees_by_group` — אותה דרגה בשלוש השכבות — והמסך קורא
+     * את התא של החדר שנבחר. כאן נבדק ששני הצדדים אומרים בדיוק אותו מספר.
+     * ================================================================ */
+    head('בדיקה 20 — תינוקת בחדר בוגרים מחויבת לפי עמודת הבוגרים');
+    {
+      const { Classroom } = require('../src/models');
+      // הכיתות נשמרות בשנה המנורמלית — אותה מחרוזת שהקליטה כותבת על הרשומה,
+      // ואותה מחרוזת ש-confirmPlacement מחפש לפיה.
+      const { normalizeYear } = require('../src/services/academic-year.service');
+      const ROOM_YEAR = normalizeYear(YEAR);
+      await Classroom.deleteMany({ branch_id: branch._id });
+      const [babyRoom, seniorRoom] = await Classroom.create([
+        { name: 'תינוקייה א', category: 'תינוקייה', academic_year: ROOM_YEAR, branch_id: branch._id, capacity: 10 },
+        { name: 'בוגרים א', category: 'בוגרים', academic_year: ROOM_YEAR, branch_id: branch._id, capacity: 20 },
+      ]);
+      ok(!!babyRoom && !!seniorRoom, '20a שני חדרים — תינוקייה ובוגרים');
+
+      await wipe();
+      // נולדה במרץ 2026 — בת חצי שנה ב-1 בספטמבר, כלומר תינוקת מובהקת.
+      const baby = {
+        id: '5001', first: 'שירה', last: 'תינוקת', idNumber: '249880001',
+        birth: [2026, 3, 1], cls: 'תינוקות א', tier: 3,
+      };
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'contracts_baby.xlsx',
+        buffer: sheetBuffer(CONTRACTS_HEADER, [contractRow(baby)], 'Worksheet 1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'Registrations Export.xlsx',
+        buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+          ...baby, parentFirst: 'הורה20', parentPhone: '0500000020',
+        })], 'Sheet1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+
+      const row = (await listRows()).enrollments[0];
+      eq(row?.computed?.age_group, 'תינוק', '20b לפי הקבצים היא תינוקת');
+      eq(row?.fee_by_tier, 3000, '20c ולפי שכבתה שלה דרגה 3 היא 3,000 ₪');
+      // אותה דרגה, שלוש השכבות — זה מה שמאפשר למסך להראות את התא הנכון.
+      eq(row?.fees_by_group, { 'תינוק': 3000, 'פעוט': 3100, 'בוגר': 3200 },
+        '20d והשרת מוסר את כל שורת הדרגה, לא רק תא אחד');
+
+      const res = await request({
+        method: 'POST', token, path: '/api/tmt/placement/confirm',
+        body: {
+          branch_id: branchId,
+          academic_year: YEAR,
+          assignments: [{ id: row.id, classroom_id: String(seniorRoom._id) }],
+          fees_by_age_group: {},
+          registration_fee: 0,
+        },
+      });
+      const placed = res.body?.details?.[0];
+      ok(res.status === 200 && res.body?.placed === 1,
+        '20e השיבוץ לחדר הבוגרים מצליח', `${res.status} ${JSON.stringify(res.body?.skipped)}`);
+      eq(placed?.age_group, 'בוגר', '20f החדר קבע את השכבה');
+      eq(placed?.monthly_fee, 3200, '20g והחיוב הוא עמודת הבוגרים של דרגה 3');
+      eq(placed?.monthly_fee, row?.fees_by_group?.['בוגר'],
+        '20h — בדיוק המספר ש-fees_by_group הבטיח למסך');
+      eq(placed?.fee_source, 'tier', '20i ומקורו בדרגה, לא בסכום ידני');
+      eq(placed?.fee_tier, 'דרגה 3', '20j עם שם השורה במחירון');
+    }
+
+    /* ================================================================ *
+     * בדיקה 21 — שדה שכבה ריק אינו "לעקוף ל-0"
+     *
+     * `Number('' ?? 0)` הוא 0, ולכן שכבה שאיש לא נגע בה נשלחה כאילו מישהו
+     * בחר עבורה אפס — ועם `override_tier` השרת ציית ומחק שכר לימוד שהדרגה
+     * של המשפחה תמחרה נכון. מנהלת שעוקפת את המטריצה לבוגרים אינה מאפסת בכך
+     * את התינוקות.
+     * ================================================================ */
+    head('בדיקה 21 — עקיפת דרגה: שכבה שנשארה ריקה נשארת לפי המחירון');
+    {
+      const { Classroom } = require('../src/models');
+      const seniorRoom = await Classroom.findOne({ branch_id: branch._id, category: 'בוגרים' });
+      await wipe();
+      const kid = {
+        id: '5002', first: 'נועם', last: 'בוגר', idNumber: '249880002',
+        birth: [2024, 1, 5], cls: 'בוגרים א', tier: 3,
+      };
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'contracts_override.xlsx',
+        buffer: sheetBuffer(CONTRACTS_HEADER, [contractRow(kid)], 'Worksheet 1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'Registrations Export.xlsx',
+        buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+          ...kid, parentFirst: 'הורה21', parentPhone: '0500000021',
+        })], 'Sheet1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      const row = (await listRows()).enrollments[0];
+
+      const res = await request({
+        method: 'POST', token, path: '/api/tmt/placement/confirm',
+        body: {
+          branch_id: branchId,
+          academic_year: YEAR,
+          assignments: [{ id: row.id, classroom_id: String(seniorRoom._id) }],
+          // העקיפה מסומנת, אבל שכבת הבוגרים נשארה ריקה — כפי שהמסך שולח אותה.
+          fees_by_age_group: { 'תינוק': '1111', 'פעוט': '', 'בוגר': '' },
+          override_tier: true,
+          registration_fee: 0,
+        },
+      });
+      const placed = res.body?.details?.[0];
+      ok(res.status === 200 && res.body?.placed === 1,
+        '21a הקליטה מצליחה', `${res.status} ${JSON.stringify(res.body?.skipped)}`);
+      eq(placed?.monthly_fee, 3200, '21b שדה ריק אינו עקיפה — המחיר נשאר של הדרגה');
+      eq(placed?.fee_source, 'tier', '21c ומסומן ככזה');
+    }
+
+    /* ---- ואפס שהוקלד במפורש עדיין עוקף ---- */
+    {
+      const { Classroom } = require('../src/models');
+      const seniorRoom = await Classroom.findOne({ branch_id: branch._id, category: 'בוגרים' });
+      await wipe();
+      const kid = {
+        id: '5003', first: 'איתי', last: 'אפס', idNumber: '249880003',
+        birth: [2024, 1, 5], cls: 'בוגרים א', tier: 3,
+      };
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'contracts_zero.xlsx',
+        buffer: sheetBuffer(CONTRACTS_HEADER, [contractRow(kid)], 'Worksheet 1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      await upload({
+        token, path: '/api/external-enrollments/import',
+        fileName: 'Registrations Export.xlsx',
+        buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+          ...kid, parentFirst: 'הורה21ב', parentPhone: '0500000022',
+        })], 'Sheet1'),
+        fields: { branch_id: branchId, academic_year: YEAR },
+      });
+      const row = (await listRows()).enrollments[0];
+      const res = await request({
+        method: 'POST', token, path: '/api/tmt/placement/confirm',
+        body: {
+          branch_id: branchId,
+          academic_year: YEAR,
+          assignments: [{ id: row.id, classroom_id: String(seniorRoom._id) }],
+          fees_by_age_group: { 'בוגר': '0' },
+          override_tier: true,
+          registration_fee: 0,
+        },
+      });
+      const placed = res.body?.details?.[0];
+      eq(placed?.monthly_fee, 0, '21d אפס שהוקלד הוא החלטה — והוא עוקף');
+      eq(placed?.fee_source, 'override', '21e ומתועד כעקיפה');
+      eq(placed?.fee_tier, 'דרגה 3', '21f עם הדרגה שנעקפה');
+    }
+    await BranchPricing.deleteMany({ branch_id: branch._id });
+  }
+
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
 }
 
