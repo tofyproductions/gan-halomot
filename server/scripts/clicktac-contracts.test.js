@@ -46,7 +46,7 @@ const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 
 const {
-  COLUMNS, CONTRACT_COLUMNS, detectExportType, parseContractsRow, parseDate, idKey,
+  COLUMNS, detectExportType, parseContractsRow, parseDate, idKey,
 } = require('../src/services/clicktac.service');
 
 const PASSWORD = 'test1234';
@@ -73,89 +73,17 @@ const head = (t) => console.log(`\n${t}`);
 /* ================================================================== *
  * The two files, built as real xlsx and read back the way importFile
  * reads an upload.
+ *
+ * The row builders live in scripts/lib/clicktac-fixtures.js — extracted, not
+ * rewritten, because scripts/demo-clicktac-seed.js builds the demo database by
+ * running the REAL importers over these same sheets. See the note at the top
+ * of that file for why a hand-written mongoose document would not do.
  * ================================================================== */
 
-/** Excel's own day count for a date — what an unformatted date cell holds. */
-function excelSerial(y, m, d) {
-  return Math.round((Date.UTC(y, m - 1, d) / 86400000) + 25569);
-}
-
-function sheetBuffer(header, rows, sheetName) {
-  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
-
-const CONTRACTS_HEADER = Object.values(CONTRACT_COLUMNS);
-
-/**
- * One contracts row. The dates go in as bare Excel serials, exactly as the
- * real export has them — that is the shape the parser has to survive.
- */
-function contractRow({
-  id, first, last, idNumber, idType = 'ת.ז.', birth, cls, tier,
-  nickname = '', medicalNotes = '',
-}) {
-  const by = {
-    [CONTRACT_COLUMNS.contract_id]: id,
-    [CONTRACT_COLUMNS.child_first]: first,
-    [CONTRACT_COLUMNS.child_last]: last,
-    [CONTRACT_COLUMNS.nickname]: nickname,
-    [CONTRACT_COLUMNS.birth_date]: excelSerial(...birth),
-    [CONTRACT_COLUMNS.birth_date_hebrew]: 'ל׳ בשבט',
-    [CONTRACT_COLUMNS.id_type]: idType,
-    [CONTRACT_COLUMNS.id_number]: idNumber,
-    [CONTRACT_COLUMNS.health_fund]: 'מכבי',
-    [CONTRACT_COLUMNS.medical_notes]: medicalNotes,
-    [CONTRACT_COLUMNS.registered_at]: excelSerial(2026, 5, 3),
-    [CONTRACT_COLUMNS.status]: 'התקבל',
-    [CONTRACT_COLUMNS.age_group]: 'פעוט',
-    [CONTRACT_COLUMNS.admin_notes]: '',
-    [CONTRACT_COLUMNS.institution]: 'הרצליה',
-    [CONTRACT_COLUMNS.year]: YEAR,
-    [CONTRACT_COLUMNS.class_name]: cls,
-    [CONTRACT_COLUMNS.tuition_type]: 'מימון משרד הכלכלה',
-    [CONTRACT_COLUMNS.tier]: tier,
-    [CONTRACT_COLUMNS.start_date]: excelSerial(2026, 9, 1),
-    [CONTRACT_COLUMNS.end_date]: excelSerial(2027, 8, 31),
-    [CONTRACT_COLUMNS.tags]: 'ספטמבר',
-    [CONTRACT_COLUMNS.created_by]: 'אלון',
-    [CONTRACT_COLUMNS.created_at]: excelSerial(2026, 5, 3),
-    [CONTRACT_COLUMNS.updated_by]: 'אלון',
-    [CONTRACT_COLUMNS.updated_at]: excelSerial(2026, 5, 3),
-  };
-  return CONTRACTS_HEADER.map(h => by[h] ?? '');
-}
-
-const REGISTRATIONS_HEADER = Object.values(COLUMNS);
-
-function registrationRow({
-  first, last, idNumber, birth, parentFirst, parentPhone, method = 'כרטיס אשראי',
-}) {
-  const [y, m, d] = birth;
-  const by = {
-    [COLUMNS.institution]: 'הרצליה',
-    [COLUMNS.year]: YEAR,
-    [COLUMNS.child_first]: first,
-    [COLUMNS.child_last]: last,
-    [COLUMNS.child_id]: idNumber,
-    [COLUMNS.birth_date]: `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`,
-    [COLUMNS.age_group]: 'פעוט',
-    [COLUMNS.gender]: 'זכר',
-    [COLUMNS.health_fund]: 'כללית',
-    [COLUMNS.p1_first]: parentFirst,
-    [COLUMNS.p1_last]: last,
-    [COLUMNS.p1_id]: '311111111',
-    [COLUMNS.p1_relation]: 'אם',
-    [COLUMNS.p1_phone]: parentPhone,
-    [COLUMNS.p1_email]: 'a@b.co.il',
-    [COLUMNS.p1_address]: 'הרצל 1',
-    [COLUMNS.status]: 'התקבל',
-    [COLUMNS.tuition_method]: method,
-  };
-  return REGISTRATIONS_HEADER.map(h => by[h] ?? '');
-}
+const {
+  excelSerial, sheetBuffer, CONTRACTS_HEADER, REGISTRATIONS_HEADER,
+  contractRow, registrationRow,
+} = require('./lib/clicktac-fixtures');
 
 /** The three children both files share, plus one only the registrations has. */
 const KIDS = [
@@ -1278,6 +1206,88 @@ async function main() {
       eq(placed?.fee_tier, 'דרגה 3', '21f עם הדרגה שנעקפה');
     }
     await BranchPricing.deleteMany({ branch_id: branch._id });
+  }
+
+  head('בדיקה 22 — תנאי התשלום מגיעים למסך ההצלבה, ופרטי הבנק לא');
+  {
+    /**
+     * THE STORY. המשרד רואה בטבלה צ׳יפ צבעוני של אמצעי התשלום, וזה כל מה שהיה
+     * לו: איזה כרטיס, איזו קבלה, האם יש הו"ק בכלל — כל אלה היו בקובץ מהיום
+     * הראשון ולא הוצגו באף מקום. `payment_terms` הוא הבלוק הזה.
+     *
+     * AND THE HALF THAT MUST NOT TRAVEL. reconcile() קורא את standing_order —
+     * בלעדיו כל משפחה בהו"ק הייתה מדווחת כחסרת פרטי בנק — ולכן הבדיקה כאן היא
+     * לא "השדה לא נטען" אלא "השדה נטען ולא יצא": קוד בנק, מספר חשבון ושם בעל
+     * החשבון אינם מופיעים בגוף התשובה בשום צורה. אותה בדיקה בדיוק שיש על
+     * /external-enrollments (5k), על הנתיב השני.
+     */
+    await wipe();
+    const kid = {
+      id: '337301', first: 'הדס', last: 'נחמיאס', idNumber: '247777775',
+      birth: [2025, 3, 11], cls: 'פעוטות א', tier: 4,
+    };
+    // רק בייצוא החוזים — לקובץ הזה אין עמודת תשלום בכלל, ולכן אין לשורה תנאים.
+    const contractOnly = {
+      id: '337302', first: 'איתן', last: 'ורדי', idNumber: '246666668',
+      birth: [2025, 4, 2], cls: 'פעוטות ב', tier: 5,
+    };
+    await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_terms.xlsx',
+      buffer: sheetBuffer(CONTRACTS_HEADER,
+        [contractRow(kid), contractRow(contractOnly)], 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'Registrations Export.xlsx',
+      buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({
+        ...kid, parentFirst: 'הורה22', parentPhone: '0500000022',
+        method: 'הוראת קבע',
+        regFeeMethod: 'כרטיס אשראי', regFeeCard: '4242', receipt: 'RC-22001',
+        amount: 350, voucher: 'SH-9001', tuitionCard: '7788', secondSigner: 'נחתם',
+        soBank: '12', soBranch: '345', soAccount: '99887766', soHolder: 'דנה נחמיאס',
+      })], 'Sheet1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+
+    const res = await request({
+      token,
+      path: `/api/tmt/reconcile?branch=${branchId}&year=${encodeURIComponent(YEAR)}`,
+    });
+    ok(res.status === 200, '22a מסך ההצלבה נטען', `${res.status} ${res.text?.slice(0, 200)}`);
+    const rows = res.body?.rows || [];
+    const merged = rows.find(r => r.id_number === kid.idNumber);
+    const terms = merged?.clicktac?.payment_terms;
+
+    ok(!!terms, '22b לשורה שהגיעה גם מייצוא הנרשמים יש תנאי תשלום');
+    eq(terms?.tuition_method, 'הוראת קבע', '22c צורת תשלום שכ"ל, כלשון הקובץ');
+    eq(terms?.tuition_card_last4, '7788', '22d ארבע ספרות הכרטיס של שכר הלימוד');
+    eq(terms?.registration_fee_method, 'כרטיס אשראי', '22e צורת תשלום דמי הרישום');
+    eq(terms?.registration_fee_card_last4, '4242', '22f והכרטיס שלה — אחר');
+    eq(terms?.registration_fee_amount, 350, '22g סכום דמי הרישום');
+    eq(terms?.receipt_number, 'RC-22001', '22h מספר הקבלה');
+    eq(terms?.voucher_number, 'SH-9001', '22i מספר השובר');
+    eq(terms?.second_signer, 'נחתם', '22j והחותם השני');
+    // המילה היחידה שהו"ק מייצרת בתשובה.
+    eq(terms?.standing_order_status, 'complete', '22k ההו"ק מדווחת כקיימת — מילה, לא חשבון');
+    eq(merged?.clicktac?.payment_alert, null, '22l ולכן אין התרעה על פרטי בנק חסרים');
+
+    const contractRowOut = rows.find(r => r.id_number === contractOnly.idNumber);
+    eq(contractRowOut?.clicktac?.payment_terms, null,
+      '22m לשורה שרק מייצוא החוזים אין תנאי תשלום — לקובץ ההוא אין עמודת תשלום');
+
+    /**
+     * הבדיקה שבאמת מגינה: הגוף כולו, ולא שדה ספציפי. אם מישהו יחזיר יום אחד
+     * את standing_order לתשובה — בשם אחר, בתוך אובייקט אחר — היא תיפול.
+     */
+    const body = JSON.stringify(res.body);
+    ok(!body.includes('99887766'), '22n מספר החשבון אינו בגוף התשובה');
+    ok(!body.includes('דנה נחמיאס'), '22o ושם בעל החשבון אינו בו');
+    ok(!/"(bank|account|holder_name)"\s*:/.test(body),
+      '22p ואין בו בכלל שדה של פרטי בנק');
+    ok(rows.every(r => r.clicktac?.standing_order === undefined),
+      '22q אף שורה אינה נושאת את תת־המסמך standing_order');
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
