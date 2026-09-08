@@ -7,7 +7,9 @@ const {
 const {
   parseSheet, parseContractsSheet, identifyHeader, AGE_GROUPS, idKey,
 } = require('../services/clicktac.service');
-const { paymentAlertFor, paymentMethodCounts } = require('../services/paymentCheck');
+const {
+  paymentAlertFor, paymentMethodCounts, paymentMethodFor,
+} = require('../services/paymentCheck');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -921,6 +923,10 @@ async function list(req, res, next) {
         // imported before this check existed do not have one. `bank` above is
         // destructured out of the response in the same breath it is used.
         payment_alert: paymentAlertFor({ ...d, standing_order: bank }),
+        // How the family pays, named — shown for every row, not only for the
+        // ones with a problem. Null for a contracts-only row, which has no
+        // payment column behind it at all.
+        payment_method_kind: paymentMethodFor(d),
       })),
       summary: {
         total: docs.length,
@@ -935,7 +941,12 @@ async function list(req, res, next) {
         // מזומן / לא הוגדר / הו"ק ללא בנק. Counted over the same rows as
         // every other counter above — the whole queue, before the search box
         // and the filters narrow it.
-        payment_alerts: docs.filter(d => !!paymentAlertFor(d)).length,
+        //
+        // ERRORS ONLY, since a cheque became an alert too — see the note on
+        // severity in services/paymentCheck.
+        payment_alerts: docs.filter(d => paymentAlertFor(d)?.severity === 'error').length,
+        // The soft half — today, the families paying by cheque.
+        payment_warnings: docs.filter(d => paymentAlertFor(d)?.severity === 'warning').length,
       },
       // What ClickTac actually writes in `צורת תשלום שכ"ל`, counted. The rule
       // above matches on a substring precisely because these strings are the

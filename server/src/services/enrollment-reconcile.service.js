@@ -23,7 +23,7 @@
 const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
-const { paymentAlertFor } = require('./paymentCheck');
+const { paymentAlertFor, paymentMethodFor } = require('./paymentCheck');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -471,6 +471,17 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
          * check existed do not have one. See services/paymentCheck.js.
          */
         payment_method: String(ct.enrollment?.tuition_method || '').trim(),
+        /**
+         * The method NAMED — `{ kind, label }`, or null for a row that has
+         * only ever been in the contracts export and therefore has no payment
+         * column behind it at all.
+         *
+         * This is what the screen colours by. `payment_alert` below is still
+         * only the families to chase; most rows have no alert and every row
+         * has a method, and "how does this family pay" is a question the
+         * office reads off the table rather than opens a record for.
+         */
+        payment_method_kind: paymentMethodFor(ct),
         payment_alert: paymentAlertFor(ct),
         class_name: ct.contract?.class_name || '',
         // The subsidy bracket the whole fee hangs on — the number that was in
@@ -526,7 +537,14 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       // מזומן / לא הוגדר / הו"ק ללא בנק — families to call before September.
       // Counted over the same rows as every other counter here, so the card
       // and the chip agree with what filtering on it actually shows.
-      payment_alerts: by(r => !!r.clicktac?.payment_alert),
+      //
+      // ERRORS ONLY. A cheque is now an alert as well, and a soft one: the gan
+      // accepts cheques and would simply rather not. Counting it here would
+      // grow the "לטיפול" number by families nobody has to phone, which is how
+      // a work list stops being worked.
+      payment_alerts: by(r => r.clicktac?.payment_alert?.severity === 'error'),
+      // The soft half, on its own number — today that is the cheques.
+      payment_warnings: by(r => r.clicktac?.payment_alert?.severity === 'warning'),
       with_contract: by(r => !!r.clicktac?.class_name || !!r.clicktac?.tier),
       issues: issueCounts,
     },

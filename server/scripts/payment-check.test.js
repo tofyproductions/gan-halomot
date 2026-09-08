@@ -29,6 +29,7 @@
  */
 const {
   paymentAlert, paymentAlertFor, paymentMethodCounts, normalizeMethod, LABELS,
+  classifyPaymentMethod, paymentMethodFor,
 } = require('../src/services/paymentCheck');
 
 let failures = 0;
@@ -178,6 +179,72 @@ head('בדיקה 7 — ספירת הערכים הגולמיים');
   eq(counts.find(c => c.value === 'מזומן')?.count, 1, '7c ומזומן');
   eq(paymentMethodCounts([]), [], '7d רשימה ריקה');
   eq(paymentMethodCounts(), [], '7e ובלי ארגומנט בכלל');
+}
+
+/* ================================================================== */
+head('בדיקה 8 — לכל שיטה שם משלה, כדי שיהיה לה צבע משלה');
+{
+  const kindOf = (v) => classifyPaymentMethod(v).kind;
+
+  eq(kindOf('הוראת קבע'), 'standing_order', '8a הוראת קבע');
+  eq(kindOf('הו"ק'), 'standing_order', '8b וגם בקיצור');
+  eq(kindOf('הרשאה לחיוב חשבון'), 'standing_order', '8c והרשאה לחיוב היא אותו דבר');
+  eq(kindOf('כרטיס אשראי'), 'credit_card', '8d כרטיס אשראי');
+  eq(kindOf('אשראי'), 'credit_card', '8e וגם מילה אחת');
+  eq(kindOf('העברה בנקאית'), 'bank_transfer', '8f העברה בנקאית — שיטה מתקבלת');
+  eq(kindOf("צ'ק"), 'cheque', '8g צ׳ק עם גרש ASCII');
+  eq(kindOf('צ׳ק'), 'cheque', '8h וגם עם גרש עברי');
+  eq(kindOf('שיקים'), 'cheque', '8i וגם ברבים');
+  eq(kindOf('המחאה'), 'cheque', '8j וגם בשמה הרשמי');
+  eq(kindOf('מזומן'), 'cash', '8k מזומן');
+  eq(kindOf(''), 'none', '8l ריק');
+  eq(kindOf(undefined), 'none', '8m ו-undefined');
+  eq(kindOf('אפליקציית ביט'), 'other', '8n תווית שאיננו מכירים היא "אחר", לא שגיאה');
+  // The raw text survives as the label — otherwise a label ClickTac invented
+  // last week becomes invisible the moment it is classified.
+  eq(classifyPaymentMethod('  אפליקציית ביט  ').label, 'אפליקציית ביט',
+    '8o והתווית של "אחר" היא מה שהספק כתב');
+
+  // Order of the rules, where a family wrote more than one thing.
+  eq(kindOf('מזומן / העברה בנקאית'), 'cash', '8p חצי במזומן הוא מזומן');
+  eq(kindOf('הוראת קבע באשראי'), 'standing_order', '8q הוראת קבע גוברת על אשראי');
+}
+
+/* ================================================================== */
+head('בדיקה 9 — "לא רלוונטי" אינו אמצעי תשלום');
+{
+  eq(classifyPaymentMethod('לא רלוונטי').kind, 'none', '9a לא רלוונטי הוא "לא הוגדר"');
+  eq(codeOf('לא רלוונטי'), 'missing', '9b ולכן ההתרעה היא "לא הוגדר אמצעי תשלום"');
+  eq(paymentAlert({ tuition_method: 'לא רלוונטי' }).severity, 'error', '9c והיא שגיאה');
+}
+
+/* ================================================================== */
+head('בדיקה 10 — צ׳ק מתקבל, ומסומן ברכות');
+{
+  eq(codeOf("צ'ק"), 'cheque', '10a לצ׳ק יש קוד משלו');
+  eq(paymentAlert({ tuition_method: "צ'ק" }).severity, 'warning',
+    '10b והוא אזהרה — לא שגיאה, כי הגן מקבל צ׳קים');
+  eq(paymentAlert({ tuition_method: "צ'ק" }).label, LABELS.cheque, '10c התווית');
+  eq(LABELS.cheque, 'צ\'ק — מומלץ לעבור להו"ק', '10d התווית עצמה — המלצה, לא סירוב');
+  // The three that stop the money stay errors, and that is what the counter
+  // on the screen counts.
+  eq(paymentAlert({ tuition_method: 'מזומן' }).severity, 'error', '10e מזומן נשאר שגיאה');
+  eq(paymentAlert({ tuition_method: '' }).severity, 'error', '10f וגם "לא הוגדר"');
+  eq(paymentAlert({ tuition_method: 'הו"ק' }).severity, 'error', '10g וגם הו"ק ללא בנק');
+  // העברה בנקאית — מתקבלת, ואין עליה מה לומר בכלל.
+  eq(codeOf('העברה בנקאית'), null, '10h והעברה בנקאית אינה מעלה דבר');
+}
+
+/* ================================================================== */
+head('בדיקה 11 — הצ׳יפ של השיטה, לפי אותו כלל מקורות');
+{
+  eq(paymentMethodFor({ sources: ['contracts'], enrollment: {} }), null,
+    '11a שורת חוזים בלבד — אין צ׳יפ, כי אין בקובץ עמודת תשלום');
+  eq(paymentMethodFor({ sources: ['registrations'], enrollment: { tuition_method: "צ'ק" } })?.kind,
+    'cheque', '11b שורת נרשמים מסווגת');
+  eq(paymentMethodFor({ enrollment: { tuition_method: '' } })?.kind, 'none',
+    '11c ושורה ישנה בלי sources נקראת כשורת נרשמים');
+  eq(paymentMethodFor(undefined)?.kind, 'none', '11d ושורה שאינה קיימת אינה מפילה כלום');
 }
 
 console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

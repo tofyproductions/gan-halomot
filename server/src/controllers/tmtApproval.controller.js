@@ -646,7 +646,13 @@ async function exportReconcile(req, res, next) {
         ...r.issues.map(i => `${i.label}${i.detail ? ` (${i.detail})` : ''}`),
         ...(r.clicktac?.payment_alert ? [r.clicktac.payment_alert.label] : []),
       ].join(' · '),
-      payment_method: r.clicktac?.payment_method || '',
+      // Two columns, because they answer two questions. The kind is what the
+      // sheet is sorted and skimmed by — "הוראת קבע", "צ'ק" — and the raw cell
+      // beside it is what ClickTac actually wrote, which is the only way to
+      // see a label change from the workbook. The verdict itself rides in the
+      // flags column above, cheques included.
+      payment_method: r.clicktac?.payment_method_kind?.label || '',
+      payment_method_raw: r.clicktac?.payment_method || '',
       tmt_decision: r.tmt?.decision || '',
       tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
@@ -670,7 +676,7 @@ async function exportReconcile(req, res, next) {
       ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
       ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
-      ['payment_method', 'אמצעי תשלום'],
+      ['payment_method', 'אמצעי תשלום'], ['payment_method_raw', 'אמצעי תשלום — כפי שנרשם'],
       ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],

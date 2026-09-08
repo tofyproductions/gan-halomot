@@ -44,8 +44,16 @@ const partySchema = new mongoose.Schema({
  * written into it by a future caller and then quietly counted.
  */
 const paymentAlertSchema = new mongoose.Schema({
-  code: { type: String, enum: ['cash', 'missing', 'incomplete'], required: true },
+  code: { type: String, enum: ['cash', 'missing', 'incomplete', 'cheque'], required: true },
   label: { type: String, default: '' },
+  /**
+   * `error` stops the money — cash, no method, a הו"ק with no bank behind it.
+   * `warning` is the one the owner asked for by name: a cheque is accepted,
+   * the gan would simply rather have a standing order. Counting the two in one
+   * number would put families nobody has to call onto the chase list, so the
+   * severity is stored rather than inferred from the code by every reader.
+   */
+  severity: { type: String, enum: ['error', 'warning'], default: 'error' },
 }, { _id: false });
 
 /**
