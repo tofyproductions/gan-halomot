@@ -616,6 +616,19 @@ function sheetFrom(rows, columns) {
 
 const dateCell = (d) => (d ? new Date(d).toLocaleDateString('he-IL', { timeZone: 'UTC' }) : '');
 
+/** Same label the standing-order status maps to on the reconcile screen. */
+const STANDING_ORDER_LABEL = { complete: 'קיימת', missing: 'חסרה' };
+
+/** Which ClickTac export(s) this row has actually been seen in. */
+function sourceLabel(sources) {
+  const list = sources?.length ? sources : ['registrations'];
+  const hasReg = list.includes('registrations');
+  const hasContract = list.includes('contracts');
+  if (hasReg && hasContract) return 'נרשמים+חוזים';
+  if (hasContract) return 'חוזים';
+  return 'נרשמים';
+}
+
 /**
  * GET /api/tmt/reconcile/export?branch=&year=
  *
@@ -657,6 +670,31 @@ async function exportReconcile(req, res, next) {
       // flags column above, cheques included.
       payment_method: r.clicktac?.payment_method_kind?.label || '',
       payment_method_raw: r.clicktac?.payment_method || '',
+      // The contract half of the row — כיתה ודרגה only ever exist once the
+      // contracts export has been read, and the fee is what that דרגה costs
+      // off the branch's own matrix (see fee_by_tier in the reconcile
+      // service). Built field by field, same as the rest of asRow, so a raw
+      // ct object (and its bank sub-document) never gets near the sheet.
+      class_name: r.clicktac?.class_name || '',
+      tier: r.clicktac?.tier || '',
+      fee_by_tier: r.clicktac?.fee_by_tier ?? '',
+      payment_alert: r.clicktac?.payment_alert?.label || '',
+      // Which upload(s) this child has actually been seen in — the same test
+      // the screen and missing_parents apply, spelled out for the sheet.
+      source: sourceLabel(r.clicktac?.sources),
+      missing_parents: r.clicktac?.missing_parents ? 'כן' : '',
+      // תנאי התשלום, out of payment_terms — bank fields excluded there by
+      // construction (paymentTermsFor), so nothing here can leak them.
+      pt_tuition_method: r.clicktac?.payment_terms?.tuition_method || '',
+      pt_tuition_card_last4: r.clicktac?.payment_terms?.tuition_card_last4 || '',
+      pt_registration_fee_method: r.clicktac?.payment_terms?.registration_fee_method || '',
+      pt_amount_in_file: r.clicktac?.payment_terms?.amount_in_file ?? '',
+      pt_receipt_number: r.clicktac?.payment_terms?.receipt_number || '',
+      pt_standing_order: STANDING_ORDER_LABEL[r.clicktac?.payment_terms?.standing_order_status] || '',
+      pt_continuing: r.clicktac?.payment_terms?.continuing ? 'כן' : '',
+      // Informational only — see the note in enrollment-reconcile.service on
+      // why a second signer still waiting no longer raises a finding.
+      pt_second_signer: r.clicktac?.payment_terms?.second_signer || '',
       tmt_decision: r.tmt?.decision || '',
       tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
@@ -681,6 +719,12 @@ async function exportReconcile(req, res, next) {
       ['tmt_present', 'ברשימת תמ"ת'],
       ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
       ['payment_method', 'אמצעי תשלום'], ['payment_method_raw', 'אמצעי תשלום — כפי שנרשם'],
+      ['class_name', 'כיתה'], ['tier', 'דרגה'], ['fee_by_tier', 'שכ"ל לפי דרגה'],
+      ['payment_alert', 'התרעת תשלום'], ['source', 'מקור'], ['missing_parents', 'חסר פרטי הורים'],
+      ['pt_tuition_method', 'שכ"ל — אמצעי'], ['pt_tuition_card_last4', 'כרטיס (4 ספרות)'],
+      ['pt_registration_fee_method', 'דמי רישום — אמצעי'], ['pt_amount_in_file', 'סכום בקובץ'],
+      ['pt_receipt_number', 'מספר קבלה'], ['pt_standing_order', 'הו"ק'],
+      ['pt_continuing', 'ממשיך'], ['pt_second_signer', 'חותם שני'],
       ['parent1', 'הורה 1'], ['parent1_phone', 'טלפון 1'],
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],
