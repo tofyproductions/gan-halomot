@@ -4,13 +4,15 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, Checkbox,
   TextField, MenuItem, Button, CircularProgress, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions, Select,
-  InputLabel, FormControl, OutlinedInput, ListItemText,
+  InputLabel, FormControl, OutlinedInput, ListItemText, ListSubheader,
 } from '@mui/material';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LockResetIcon from '@mui/icons-material/LockReset';
 import SaveIcon from '@mui/icons-material/Save';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
-import { TAB_GROUPS, ALL_TABS, isDefaultAllowed, roleHasTab } from '../../config/tabs';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import BookmarkAddIcon from '@mui/icons-material/BookmarkAdd';
+import { TAB_GROUPS, ALL_TABS, isDefaultAllowed, roleHasTab, customRoleHasTab } from '../../config/tabs';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
 
@@ -25,15 +27,36 @@ const ROLE_LABELS = {
   cook: 'מבשלת',
 };
 
+/**
+ * The custom role this user holds, out of the loaded list.
+ *
+ * `custom_role_id` arrives from /api/admin/users as a plain string (the
+ * controller flattens the populated document on purpose) so this is a lookup,
+ * not an unwrap.
+ */
+function customRoleOf(user, customRoles = []) {
+  if (!user?.custom_role_id) return null;
+  return customRoles.find(r => String(r._id) === String(user.custom_role_id)) || null;
+}
+
+/** What this person's role is CALLED on screen — the custom name wins. */
+function roleLabelOf(user, customRoles = []) {
+  const cr = customRoleOf(user, customRoles);
+  if (cr) return cr.name;
+  return ROLE_LABELS[user?.role] || user?.role || '';
+}
+
 // State per user-tab cell. We track only effective allowed (true/false).
-// On save we diff against the ROLE-EFFECTIVE access (role default + role-wide
-// override) so a per-user override is only stored when it genuinely differs.
-function computeOverrides(user, allowedMap, roleTabs = {}) {
+// On save we diff against the ROLE-EFFECTIVE access — the custom role's lists
+// when she holds one, otherwise role default + role-wide override — so a
+// per-user override is only stored when it genuinely differs from what the
+// role already gives her.
+function computeOverrides(user, allowedMap, roleTabs = {}, customRole = null) {
   const add = [];
   const remove = [];
   for (const tab of ALL_TABS) {
     const allowed = !!allowedMap[tab.id];
-    const def = roleHasTab(user.role, tab.id, roleTabs);
+    const def = roleHasTab(user.role, tab.id, roleTabs, customRole);
     if (allowed && !def) add.push(tab.id);
     if (!allowed && def) remove.push(tab.id);
   }
@@ -41,11 +64,11 @@ function computeOverrides(user, allowedMap, roleTabs = {}) {
 }
 
 // Effective per-user access. Mirrors hasTabAccess precedence:
-// per-user override > role-wide override > role default.
-function effectiveMap(user, roleTabs = {}) {
+// per-user override > role layer (custom role, else role-wide override) > default.
+function effectiveMap(user, roleTabs = {}, customRole = null) {
   const m = {};
   for (const tab of ALL_TABS) {
-    let allowed = roleHasTab(user.role, tab.id, roleTabs); // default + role-wide
+    let allowed = roleHasTab(user.role, tab.id, roleTabs, customRole);
     if ((user.tab_overrides_add || []).includes(tab.id)) allowed = true;
     if ((user.tab_overrides_remove || []).includes(tab.id)) allowed = false;
     m[tab.id] = allowed;
@@ -53,30 +76,65 @@ function effectiveMap(user, roleTabs = {}) {
   return m;
 }
 
-function RoleDialog({ open, user, branches, onClose, onSaved }) {
-  const [role, setRole] = useState('');
+function RoleDialog({ open, user, branches, customRoles, onClose, onSaved, onRoleCreated }) {
+  // One dropdown, two kinds of answer. 'role:<builtin>' or 'custom:<id>' —
+  // keeping them as two pieces of state is how a screen ends up sending both
+  // and meaning neither.
+  const [choice, setChoice] = useState('role:teacher');
   const [managed, setManaged] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [nameDialog, setNameDialog] = useState(null);   // the "build a role" name
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     if (open && user) {
-      setRole(user.role || 'teacher');
+      setChoice(user.custom_role_id ? `custom:${user.custom_role_id}` : `role:${user.role || 'teacher'}`);
       setManaged((user.managed_branch_ids || []).map(b => b._id || b.id || b));
     }
   }, [open, user]);
 
   if (!user) return null;
 
+  const chosenCustom = choice.startsWith('custom:')
+    ? (customRoles || []).find(r => String(r._id) === choice.slice(7))
+    : null;
+
   const save = async () => {
     setSaving(true);
     try {
-      const res = await api.patch(`/admin/users/${user._id}/role`, { role, managed_branch_ids: managed });
+      const body = chosenCustom
+        ? { custom_role_id: chosenCustom._id, managed_branch_ids: managed }
+        : { role: choice.slice(5), custom_role_id: null, managed_branch_ids: managed };
+      const res = await api.patch(`/admin/users/${user._id}/role`, body);
       onSaved(res.data.user);
-      toast.success('עודכן');
+      toast.success('עודכן. שינויים נכנסים לתוקף אחרי התחברות מחדש.');
       onClose();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
     } finally { setSaving(false); }
+  };
+
+  /**
+   * "הקם תפקיד מההרשאות של משתמש/ת זה".
+   *
+   * The server computes her EFFECTIVE tab set and expresses it as a difference
+   * from her base role's defaults — the client does not send a tab list,
+   * because the client's idea of what she has is a render of the same data and
+   * sending it back would make the role depend on which screen built it.
+   */
+  const createFromUser = async () => {
+    const name = String(nameDialog || '').trim();
+    if (!name) return;
+    setCreating(true);
+    try {
+      const { data } = await api.post(`/admin/custom-roles/from-user/${user._id}`, { name });
+      setNameDialog(null);
+      onRoleCreated(data.role, data.user);
+      toast.success(`התפקיד "${data.role.name}" הוקם והוקצה ל${user.full_name || user.email}. שינויים נכנסים לתוקף אחרי התחברות מחדש.`);
+      onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    } finally { setCreating(false); }
   };
 
   return (
@@ -84,9 +142,30 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
       <DialogTitle>תפקיד וסניפים — {user.full_name || user.email}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          <TextField select label="תפקיד" value={role} onChange={e => setRole(e.target.value)} fullWidth>
-            {Object.entries(ROLE_LABELS).map(([k, v]) => <MenuItem key={k} value={k}>{v}</MenuItem>)}
+          <TextField select label="תפקיד" value={choice} onChange={e => setChoice(e.target.value)} fullWidth>
+            {Object.entries(ROLE_LABELS).map(([k, v]) => (
+              <MenuItem key={k} value={`role:${k}`}>{v}</MenuItem>
+            ))}
+            {(customRoles || []).length > 0 && <Divider />}
+            {(customRoles || []).length > 0 && (
+              <ListSubheader sx={{ fontWeight: 800 }}>תפקידים מותאמים</ListSubheader>
+            )}
+            {(customRoles || []).map(r => (
+              <MenuItem key={r._id} value={`custom:${r._id}`}>{r.name}</MenuItem>
+            ))}
           </TextField>
+          {chosenCustom && (
+            <Typography variant="caption" sx={{ mt: -1, color: 'text.secondary' }}>
+              על בסיס {ROLE_LABELS[chosenCustom.base_role] || chosenCustom.base_role} — כל
+              כללי הסניפים והאישורים ימשיכו לעבוד לפי תפקיד הבסיס.
+            </Typography>
+          )}
+          <Button
+            size="small" variant="outlined" startIcon={<BookmarkAddIcon />}
+            onClick={() => setNameDialog(`${user.full_name || user.email} — תפקיד`)}
+          >
+            הקם תפקיד מההרשאות של משתמש/ת זה
+          </Button>
           <Stack direction="row" spacing={1}>
             <Button size="small" onClick={() => setManaged(branches.map(b => b._id || b.id))}>
               כל הסניפים
@@ -131,6 +210,29 @@ function RoleDialog({ open, user, branches, onClose, onSaved }) {
         <Button onClick={onClose}>ביטול</Button>
         <Button variant="contained" onClick={save} disabled={saving}>שמור</Button>
       </DialogActions>
+
+      <Dialog open={nameDialog !== null} onClose={() => setNameDialog(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>הקמת תפקיד מההרשאות הקיימות</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            ההרשאות שיש כרגע ל<b>{user.full_name || user.email}</b> יהפכו לתפקיד בשם שתבחר/י,
+            והיא תשויך אליו. מכאן והלאה אפשר להקצות אותו לעובדים נוספים ולערוך אותו במקום אחד.
+          </Typography>
+          <TextField
+            autoFocus fullWidth label="שם התפקיד"
+            value={nameDialog || ''} onChange={e => setNameDialog(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setNameDialog(null)}>ביטול</Button>
+          <Button
+            variant="contained" onClick={createFromUser}
+            disabled={creating || !String(nameDialog || '').trim()}
+          >
+            {creating ? 'מקים…' : 'הקם תפקיד'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 }
@@ -160,21 +262,30 @@ export default function PermissionsManager() {
   const [roleTabs, setRoleTabs] = useState({});
   const [roleTabsDirty, setRoleTabsDirty] = useState(false);
   const [savingRoleTabs, setSavingRoleTabs] = useState(false);
+  // Named permission sets built from a person's own tabs. They sit in the same
+  // "הרשאות לפי תפקיד" panel as the eight built-ins, because to whoever is
+  // using this screen that is what they are.
+  const [customRoles, setCustomRoles] = useState([]);
+  const [customRolesDirty, setCustomRolesDirty] = useState({});   // roleId -> true
+  const [deleteRole, setDeleteRole] = useState(null);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
     setLoading(true);
     try {
-      const [usersRes, branchesRes, roleTabsRes] = await Promise.all([
+      const [usersRes, branchesRes, roleTabsRes, customRes] = await Promise.all([
         api.get('/admin/users'),
         api.get('/branches'),
         api.get('/admin/role-tabs'),
+        api.get('/admin/custom-roles'),
       ]);
       setUsers(usersRes.data.users || []);
       setUnlinked(usersRes.data.unlinked_employees || []);
       setBranches(branchesRes.data.branches || []);
       setRoleTabs(roleTabsRes.data.role_tabs || {});
+      setCustomRoles(customRes.data.roles || []);
+      setCustomRolesDirty({});
       setRoleTabsDirty(false);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בטעינת משתמשים');
@@ -183,22 +294,26 @@ export default function PermissionsManager() {
     }
   }
 
+  // The role layer to measure this person against — her custom role when she
+  // holds one, and only then the role-wide override for her role.
+  const roleLayerOf = (user) => customRoleOf(user, customRoles);
+
   function getCellValue(user, tabId) {
     const userEdits = edits[user._id];
     if (userEdits && tabId in userEdits) return userEdits[tabId];
-    return effectiveMap(user, roleTabs)[tabId];
+    return effectiveMap(user, roleTabs, roleLayerOf(user))[tabId];
   }
 
   function isCellOverride(user, tabId) {
     const value = getCellValue(user, tabId);
-    const def = roleHasTab(user.role, tabId, roleTabs);
+    const def = roleHasTab(user.role, tabId, roleTabs, roleLayerOf(user));
     return value !== def;
   }
 
   function isUserDirty(user) {
     const userEdits = edits[user._id];
     if (!userEdits) return false;
-    const eff = effectiveMap(user, roleTabs);
+    const eff = effectiveMap(user, roleTabs, roleLayerOf(user));
     return Object.entries(userEdits).some(([k, v]) => eff[k] !== v);
   }
 
@@ -206,7 +321,9 @@ export default function PermissionsManager() {
     setEdits(prev => {
       const userEdits = { ...(prev[userId] || {}) };
       const user = users.find(u => u._id === userId);
-      const current = (tabId in userEdits) ? userEdits[tabId] : effectiveMap(user, roleTabs)[tabId];
+      const current = (tabId in userEdits)
+        ? userEdits[tabId]
+        : effectiveMap(user, roleTabs, customRoleOf(user, customRoles))[tabId];
       userEdits[tabId] = !current;
       return { ...prev, [userId]: userEdits };
     });
@@ -235,10 +352,11 @@ export default function PermissionsManager() {
   }
 
   async function saveUser(user) {
-    const eff = effectiveMap(user, roleTabs);
+    const layer = roleLayerOf(user);
+    const eff = effectiveMap(user, roleTabs, layer);
     const userEdits = edits[user._id] || {};
     const merged = { ...eff, ...userEdits };
-    const { add, remove } = computeOverrides(user, merged, roleTabs);
+    const { add, remove } = computeOverrides(user, merged, roleTabs, layer);
     setSaving(s => ({ ...s, [user._id]: true }));
     try {
       const res = await api.patch(`/admin/users/${user._id}/tabs`, { add, remove });
@@ -295,18 +413,67 @@ export default function PermissionsManager() {
     setRoleTabsDirty(true);
   }
 
+  /**
+   * The same click, on a custom role's row.
+   *
+   * A custom role's lists are a difference from its BASE role's defaults, not
+   * from the role-wide override — the override is the thing it replaces — so
+   * the toggle is written against isDefaultAllowed({ role: base_role }).
+   */
+  function toggleCustomRoleTab(roleId, tabId) {
+    setCustomRoles(prev => prev.map(r => {
+      if (String(r._id) !== String(roleId)) return r;
+      const tab = ALL_TABS.find(t => t.id === tabId);
+      const isDefault = isDefaultAllowed({ role: r.base_role }, tab);
+      const currentlyOn = customRoleHasTab(r, tabId);
+      const add = (r.tab_add || []).filter(t => t !== tabId);
+      const remove = (r.tab_remove || []).filter(t => t !== tabId);
+      const want = !currentlyOn;
+      if (want !== isDefault) (want ? add : remove).push(tabId);
+      return { ...r, tab_add: add, tab_remove: remove };
+    }));
+    setCustomRolesDirty(prev => ({ ...prev, [roleId]: true }));
+  }
+
+  // One button saves the panel — the eight built-in rows and the custom-role
+  // rows below them. Two save buttons on one panel is a panel half saved.
   async function saveRoleTabs() {
     setSavingRoleTabs(true);
     try {
-      await api.put('/admin/role-tabs', { role_tabs: roleTabs });
+      if (roleTabsDirty) await api.put('/admin/role-tabs', { role_tabs: roleTabs });
+      const dirtyIds = Object.keys(customRolesDirty).filter(id => customRolesDirty[id]);
+      for (const id of dirtyIds) {
+        const r = customRoles.find(x => String(x._id) === String(id));
+        if (!r) continue;
+        await api.patch(`/admin/custom-roles/${id}`, {
+          tab_add: r.tab_add || [], tab_remove: r.tab_remove || [],
+        });
+      }
       setRoleTabsDirty(false);
-      toast.success('הרשאות התפקידים נשמרו — חלות על כל בעלי התפקיד');
+      setCustomRolesDirty({});
+      toast.success('הרשאות התפקידים נשמרו — חלות על כל בעלי התפקיד. שינויים נכנסים לתוקף אחרי התחברות מחדש.');
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
     } finally {
       setSavingRoleTabs(false);
     }
   }
+
+  async function confirmDeleteRole() {
+    const role = deleteRole;
+    if (!role) return;
+    try {
+      const { data } = await api.delete(`/admin/custom-roles/${role._id}`);
+      setDeleteRole(null);
+      toast.success(`התפקיד "${role.name}" נמחק. ${data.reverted || 0} משתמשים חזרו לתפקיד הבסיס.`);
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+    }
+  }
+
+  const roleTabsPanelDirty = roleTabsDirty
+    || Object.values(customRolesDirty).some(Boolean);
 
   if (loading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress /></Box>;
@@ -351,7 +518,7 @@ export default function PermissionsManager() {
           <Box sx={{ flex: 1 }} />
           <Button
             variant="contained" size="small" startIcon={<SaveIcon />}
-            disabled={!roleTabsDirty || savingRoleTabs} onClick={saveRoleTabs}
+            disabled={!roleTabsPanelDirty || savingRoleTabs} onClick={saveRoleTabs}
           >
             {savingRoleTabs ? 'שומר…' : 'שמור הרשאות תפקיד'}
           </Button>
@@ -393,8 +560,76 @@ export default function PermissionsManager() {
               </Stack>
             </Stack>
           ))}
+
+          {customRoles.length > 0 && <Divider sx={{ my: 1 }}>תפקידים מותאמים</Divider>}
+          {customRoles.map(cr => (
+            <Stack key={cr._id} direction="row" spacing={1} alignItems="flex-start" useFlexGap flexWrap="wrap">
+              <Stack sx={{ minWidth: 110 }} spacing={0.2}>
+                <Chip
+                  size="small"
+                  label={cr.name}
+                  color="secondary"
+                  sx={{ fontWeight: 700, maxWidth: 160 }}
+                />
+                <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.62rem' }}>
+                  על בסיס {ROLE_LABELS[cr.base_role] || cr.base_role}
+                  {cr.user_count ? ` · ${cr.user_count} משתמשים` : ' · אין משתמשים'}
+                </Typography>
+              </Stack>
+              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ flex: 1 }}>
+                {ALL_TABS.map(t => {
+                  const on = customRoleHasTab(cr, t.id);
+                  const overridden = (cr.tab_add || []).includes(t.id) || (cr.tab_remove || []).includes(t.id);
+                  return (
+                    <Chip
+                      key={t.id} size="small" clickable
+                      label={t.label}
+                      onClick={() => toggleCustomRoleTab(cr._id, t.id)}
+                      color={on ? 'secondary' : 'default'}
+                      variant={on ? 'filled' : 'outlined'}
+                      sx={{
+                        height: 22, fontSize: '0.7rem',
+                        opacity: on ? 1 : 0.5,
+                        border: overridden ? '2px solid #a78bfa' : undefined,
+                      }}
+                    />
+                  );
+                })}
+              </Stack>
+              <Tooltip title="מחיקת התפקיד">
+                <IconButton size="small" color="error" onClick={() => setDeleteRole(cr)}>
+                  <DeleteOutlineIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            </Stack>
+          ))}
         </Stack>
+        {customRoles.length === 0 && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+            אין עדיין תפקידים מותאמים. אפשר להקים אחד מהרשאות של עובד/ת קיים/ת —
+            לחיצה על שם התפקיד בטבלה למטה, ואז "הקם תפקיד מההרשאות של משתמש/ת זה".
+          </Typography>
+        )}
       </Paper>
+
+      {/* Deleting a role never deletes people: its holders keep the base role
+          they already carry, which is what `role` in the database has been all
+          along. */}
+      <Dialog open={Boolean(deleteRole)} onClose={() => setDeleteRole(null)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle>מחיקת התפקיד "{deleteRole?.name}"</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning">
+            המשתמשים יחזרו לתפקיד הבסיס
+            {deleteRole ? ` (${ROLE_LABELS[deleteRole.base_role] || deleteRole.base_role})` : ''}
+            {deleteRole?.user_count ? ` — ${deleteRole.user_count} משתמשים` : ''}.
+            ההרשאות שהתפקיד הוסיף להם ייעלמו בהתחברות הבאה.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteRole(null)}>ביטול</Button>
+          <Button color="error" variant="contained" onClick={confirmDeleteRole}>מחק תפקיד</Button>
+        </DialogActions>
+      </Dialog>
 
       {unlinked.length > 0 && (
         <Alert severity="warning" sx={{ mb: 2 }}>
@@ -480,13 +715,17 @@ export default function PermissionsManager() {
                     <Stack spacing={0.3}>
                       <Box sx={{ fontWeight: 700, fontSize: '0.85rem' }}>{user.full_name || user.email}</Box>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                        <Tooltip title="לחץ לעריכת תפקיד וסניפים מנוהלים">
+                        <Tooltip title={customRoleOf(user, customRoles)
+                          ? `תפקיד מותאם על בסיס ${ROLE_LABELS[user.role] || user.role} — לחץ לעריכת תפקיד וסניפים מנוהלים`
+                          : 'לחץ לעריכת תפקיד וסניפים מנוהלים'}>
                           <Chip
                             size="small"
-                            label={ROLE_LABELS[user.role] || user.role}
+                            label={roleLabelOf(user, customRoles)}
                             onClick={() => setRoleDialog({ open: true, user })}
                             icon={<AdminPanelSettingsIcon sx={{ fontSize: 14 }} />}
-                            color={user.role === 'branch_manager' ? 'primary' : user.role === 'system_admin' ? 'error' : 'default'}
+                            color={customRoleOf(user, customRoles) ? 'secondary'
+                              : user.role === 'branch_manager' ? 'primary'
+                                : user.role === 'system_admin' ? 'error' : 'default'}
                             sx={{ fontSize: '0.65rem', height: 20, cursor: 'pointer', '&:hover': { boxShadow: 1 } }}
                           />
                         </Tooltip>
@@ -584,8 +823,17 @@ export default function PermissionsManager() {
         open={roleDialog.open}
         user={roleDialog.user}
         branches={branches}
+        customRoles={customRoles}
         onClose={() => setRoleDialog({ open: false, user: null })}
         onSaved={(fresh) => setUsers(prev => prev.map(u => u._id === fresh._id ? { ...u, ...fresh } : u))}
+        onRoleCreated={(role, fresh) => {
+          setCustomRoles(prev => [...prev.filter(r => String(r._id) !== String(role._id)), role]
+            .sort((a, b) => String(a.name).localeCompare(String(b.name), 'he')));
+          setUsers(prev => prev.map(u => u._id === fresh._id ? { ...u, ...fresh } : u));
+          // Her per-user overrides ARE the role now — drop any half-finished
+          // edit of them, or the next save would write them straight back.
+          setEdits(prev => { const n = { ...prev }; delete n[fresh._id]; return n; });
+        }}
       />
     </Box>
   );
