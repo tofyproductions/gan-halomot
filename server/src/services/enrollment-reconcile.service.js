@@ -109,10 +109,6 @@ const ISSUES = {
     label: 'ילד רווחה — סימון שונה',
     severity: 'info',
   },
-  unsigned: {
-    label: 'טרם נחתם בקליקטאק',
-    severity: 'warning',
-  },
   tmt_contact_unknown: {
     label: 'טלפון תמ"ת אינו של אף אחד מההורים',
     severity: 'info',
@@ -358,9 +354,12 @@ function issuesFor(tmt, ct, { branchId }) {
     }
   }
 
-  if (ct && ct.enrollment?.second_signer === 'ממתין לחתימה') {
-    add('unsigned', 'חותם שני טרם חתם — הרישום אינו שלם');
-  }
+  // NOTE: a second signer still waiting on ClickTac used to raise an
+  // 'unsigned' finding here. The owner does not consider it relevant — the
+  // raw second_signer value still rides on the row (clicktac.second_signer,
+  // and in payment_terms.second_signer) for anyone who wants to look, but it
+  // is informational only and no longer surfaces as an anomaly, a chip, or a
+  // counter.
 
   return found;
 }
