@@ -12,6 +12,7 @@
 require('../utils/viewerWriteGuard').register(require('mongoose'));
 
 const User = require('./User');
+const CustomRole = require('./CustomRole');
 const PayrollRollup = require('./PayrollRollup');
 const Branch = require('./Branch');
 const Classroom = require('./Classroom');
@@ -106,6 +107,7 @@ const real = {
   DataDeletionRequest,
   PayrollRollup,
   User,
+  CustomRole,
   Branch,
   Classroom,
   Registration,

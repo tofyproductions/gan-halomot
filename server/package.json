@@ -64,7 +64,9 @@
     "test:proposed-controller": "node scripts/proposed-change-controller.test.js",
     "test:proposed-decisions": "node scripts/proposed-change-decisions.test.js",
     "test:tab-grant": "node scripts/tab-write-grant.test.js",
-    "test:viewer-e2e": "node scripts/viewer-e2e.test.js"
+    "test:viewer-e2e": "node scripts/viewer-e2e.test.js",
+  "test:custom-roles": "node scripts/custom-roles.test.js",
+  "test:tabs-sync": "node scripts/tabs-constant-sync.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

@@ -26,6 +26,17 @@ const userSchema = new mongoose.Schema({
     enum: ROLES,
     default: 'teacher',
   },
+  /**
+   * A named permission set built from somebody's actual tabs — see
+   * models/CustomRole.js. Null for almost everyone.
+   *
+   * `role` above is NOT replaced by it and stays equal to the custom role's
+   * `base_role`, so every branch-scope rule and every requireRole in the
+   * codebase keeps reading one field and keeps being right. The custom role
+   * moves the TAB layer only: when it is set, the JWT's role_tab_add /
+   * role_tab_remove come from it instead of from the role-wide override.
+   */
+  custom_role_id: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomRole', default: null },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
   // Branches the user manages. For branch_manager / accountant roles this is
   // the source of truth for "which branches am I allowed to see". Defaults

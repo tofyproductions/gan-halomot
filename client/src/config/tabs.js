@@ -184,12 +184,35 @@ export function hasTabAccess(user, tabId) {
   return isDefaultAllowed(user, tab);
 }
 
-/** Effective access for a ROLE (default + role-wide override) — admin UI helper. */
-export function roleHasTab(role, tabId, roleTabs = {}) {
+/**
+ * Effective access for a ROLE (default + role-wide override) — admin UI helper.
+ *
+ * `customRole` is the fourth line only because a custom role is not a fourth
+ * precedence level: it REPLACES the role layer for whoever holds it. Pass it
+ * and the role-wide override for the base role is not consulted at all, which
+ * is exactly what the server does when it mints the token
+ * (auth.controller#effectiveRoleTabs).
+ */
+export function roleHasTab(role, tabId, roleTabs = {}, customRole = null) {
+  if (customRole) return customRoleHasTab(customRole, tabId);
   const tab = TAB_BY_ID[tabId];
   if (!tab) return false;
   const entry = roleTabs[role] || {};
   if ((entry.remove || []).includes(tabId)) return false;
   if ((entry.add || []).includes(tabId)) return true;
   return isDefaultAllowed({ role }, tab);
+}
+
+/**
+ * Effective access for a CUSTOM role — its own add/remove lists over the
+ * DEFAULTS of its base role. See server/src/models/CustomRole.js.
+ *
+ * `customRole` is `{ base_role, tab_add, tab_remove }`.
+ */
+export function customRoleHasTab(customRole, tabId) {
+  const tab = TAB_BY_ID[tabId];
+  if (!tab || !customRole) return false;
+  if ((customRole.tab_remove || []).includes(tabId)) return false;
+  if ((customRole.tab_add || []).includes(tabId)) return true;
+  return isDefaultAllowed({ role: customRole.base_role }, tab);
 }
