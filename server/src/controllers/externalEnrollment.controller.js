@@ -5,8 +5,9 @@ const {
   EnrollmentImport,
 } = require('../models');
 const {
-  parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
+  parseSheet, validateHeader, AGE_GROUPS,
 } = require('../services/clicktac.service');
+const { paymentAlert } = require('../services/paymentCheck');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -134,14 +135,9 @@ async function importFile(req, res, next) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null, raw: false });
     if (!rows.length) return res.status(400).json({ error: 'הגיליון ריק' });
 
-    const missing = missingColumns(rows[0]);
-    if (missing.length) {
-      return res.status(400).json({
-        error: `חסרות עמודות בקובץ: ${missing.join(', ')}`,
-        code: 'MISSING_COLUMNS',
-        expected: Object.values(COLUMNS),
-      });
-    }
+    // Wrong-file first, missing-columns second — see validateHeader.
+    const headerError = validateHeader(rows[0]);
+    if (headerError) return res.status(400).json(headerError);
 
     const parsed = parseSheet(rows, {
       branchId,

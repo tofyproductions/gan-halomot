@@ -264,8 +264,55 @@ function missingColumns(row) {
   return required.filter(k => !(COLUMNS[k] in row)).map(k => COLUMNS[k]);
 }
 
+/**
+ * ClickTac's OTHER export.
+ *
+ * The vendor's portal offers two downloads whose file names differ by one word
+ * — contracts_export_*.xlsx and the registrations export — and only the second
+ * one carries the parents, the phones and the payment method. The first is a
+ * billing sheet: one row per contract, with שכר לימוד, דרגה and מעון and not a
+ * single parent column.
+ *
+ * Someone downloaded the wrong one and was told "חסרות עמודות בקובץ: שם פרטי
+ * של הנרשם, …", which is true and useless: the file is not a broken
+ * registrations export, it is a different report, and the fix is to go back to
+ * the portal rather than to hunt for a missing column. Two of the three
+ * contract-only headers is enough to say so — one alone could be a coincidence
+ * in some future version of the registrations export, and requiring all three
+ * would miss a file where the vendor renamed one.
+ */
+const CONTRACT_ONLY_COLUMNS = ['שכר לימוד', 'דרגה', 'מעון'];
+
+const WRONG_EXPORT_MESSAGE = 'זה ייצוא החוזים של קליקטאק. המערכת צריכה את ייצוא הנרשמים '
+  + '(Registrations Export) — הדוח שכולל את פרטי ההורים ואמצעי התשלום.';
+
+function looksLikeContractsExport(row) {
+  return CONTRACT_ONLY_COLUMNS.filter(c => c in (row || {})).length >= 2;
+}
+
+/**
+ * Is this header row usable? `null` when it is, otherwise the 400 body.
+ *
+ * One function so the wrong-file answer and the missing-column answer cannot
+ * drift apart between the importer and its test.
+ */
+function validateHeader(row) {
+  const missing = missingColumns(row);
+  if (!missing.length) return null;
+  // Checked BEFORE the generic message: a contracts export is missing the same
+  // columns, and naming them sends the reader looking for the wrong thing.
+  if (looksLikeContractsExport(row)) {
+    return { error: WRONG_EXPORT_MESSAGE, code: 'WRONG_EXPORT_TYPE' };
+  }
+  return {
+    error: `חסרות עמודות בקובץ: ${missing.join(', ')}`,
+    code: 'MISSING_COLUMNS',
+    expected: Object.values(COLUMNS),
+  };
+}
+
 module.exports = {
-  COLUMNS, AGE_GROUPS,
-  parseRow, parseSheet, missingColumns,
+  COLUMNS, AGE_GROUPS, CONTRACT_ONLY_COLUMNS, WRONG_EXPORT_MESSAGE,
+  parseRow, parseSheet, missingColumns, looksLikeContractsExport, validateHeader,
   ageInMonths, ageGroupFor, parseDate, hashPayload,
 };
