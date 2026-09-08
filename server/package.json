@@ -65,8 +65,11 @@
     "test:proposed-decisions": "node scripts/proposed-change-decisions.test.js",
     "test:tab-grant": "node scripts/tab-write-grant.test.js",
     "test:viewer-e2e": "node scripts/viewer-e2e.test.js",
-  "test:custom-roles": "node scripts/custom-roles.test.js",
-  "test:tabs-sync": "node scripts/tabs-constant-sync.test.js"
+    "test:custom-roles": "node scripts/custom-roles.test.js",
+    "test:clicktac-file-type": "node scripts/clicktac-file-type.test.js",
+    "test:tabs-sync": "node scripts/tabs-constant-sync.test.js",
+    "test:clicktac-contracts": "node scripts/clicktac-contracts.test.js",
+    "test:payment-check": "node scripts/payment-check.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

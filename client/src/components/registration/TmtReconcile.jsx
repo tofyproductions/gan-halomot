@@ -67,6 +67,24 @@ function StatCard({ label, value, color, onClick, active, hint }) {
   );
 }
 
+/** שני הייצואים של קליקטאק, בשם שהמשרד קורא להם. */
+const SOURCE_LABEL = { registrations: 'נרשמים', contracts: 'חוזים' };
+
+/** The counts behind one upload, on one line. */
+function ImportLine({ imp }) {
+  return (
+    <Typography variant="caption" color="text.secondary" display="block">
+      {imp.file_name} · {imp.parsed} שורות · חדשים {imp.created} · עודכנו {imp.updated} ·
+      {' '}ללא שינוי {imp.unchanged}
+      {/* The contracts export never reports anyone as gone — its silence about
+          a child is not evidence, since the two files list different
+          populations at different moments. */}
+      {imp.export_type === 'contracts' ? '' : ` · הוסרו ${imp.missing}`}
+      {imp.imported_by_name ? ` · ${imp.imported_by_name}` : ''}
+    </Typography>
+  );
+}
+
 /**
  * `embedded` — rendered inside רישום לאמונה, which owns the branch, the year
  * and both uploads. The screen then drops its own copies of those controls.
@@ -89,6 +107,24 @@ export default function TmtReconcile({
   const [search, setSearch] = useState('');
   const [verdictFilter, setVerdictFilter] = useState('');
   const [issueFilter, setIssueFilter] = useState('');
+  /**
+   * "Show me only the children with a contract and no family."
+   *
+   * Kept apart from `issueFilter` on purpose: the issues are the ministry's
+   * anomalies, computed from comparing the two LISTS. This is a statement
+   * about which FILES have been uploaded, and it would read as a data problem
+   * with the child if it sat among them.
+   */
+  const [missingParentsOnly, setMissingParentsOnly] = useState(false);
+  /**
+   * "Show me only the families whose payment method needs handling."
+   *
+   * Alongside `missingParentsOnly` and for the same reason: מזומן, לא הוגדר
+   * and הו"ק ללא בנק are facts about how the family pays, not anomalies in the
+   * ministry's comparison, and filing them among the issues would read as a
+   * problem with the child's record.
+   */
+  const [paymentAlertOnly, setPaymentAlertOnly] = useState(false);
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
   const [detail, setDetail] = useState(null);
@@ -134,10 +170,12 @@ export default function TmtReconcile({
   const visible = useMemo(() => rows.filter(r => {
     if (verdictFilter && r.verdict !== verdictFilter) return false;
     if (issueFilter && !r.issues.some(i => i.code === issueFilter)) return false;
+    if (missingParentsOnly && !r.clicktac?.missing_parents) return false;
+    if (paymentAlertOnly && !r.clicktac?.payment_alert) return false;
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return r.child_name.toLowerCase().includes(q) || String(r.id_number).includes(q);
-  }), [rows, verdictFilter, issueFilter, search]);
+  }), [rows, verdictFilter, issueFilter, missingParentsOnly, paymentAlertOnly, search]);
 
   const handleUpload = async () => {
     if (!uploadDlg.file) return toast.error('יש לבחור קובץ');
@@ -152,7 +190,8 @@ export default function TmtReconcile({
       setUploadDlg(d => ({ ...d, saving: false, result: res.data }));
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'שגיאה בקליטת הקובץ');
+      toast.error(err.response?.data?.error
+        || `שגיאה בקליטת הקובץ (${err.response?.status || 'אין תגובה מהשרת'})`);
       setUploadDlg(d => ({ ...d, saving: false }));
     }
   };
@@ -257,7 +296,17 @@ export default function TmtReconcile({
   };
 
   const lastTmt = data?.last_import?.tmt;
-  const lastCt = data?.last_import?.clicktac;
+  /**
+   * ClickTac publishes TWO exports and they are uploaded independently: the
+   * registrations export carries the family, the contracts export carries the
+   * class and the דרגה. "The last ClickTac file" is therefore two dates, and
+   * one of them being three weeks old is exactly the thing this card exists to
+   * show. `clicktac` (the newer of the two) is still read as a fallback, so a
+   * branch whose history predates the split still sees its date.
+   */
+  const lastCtReg = data?.last_import?.clicktac_registrations ?? data?.last_import?.clicktac;
+  const lastCtContracts = data?.last_import?.clicktac_contracts;
+  const lastCt = lastCtReg || lastCtContracts;
 
   return (
     <Box sx={{ p: 2 }}>
@@ -315,6 +364,21 @@ export default function TmtReconcile({
             <StatCard label='להזין תאריך כניסה בתמ"ת' value={summary.needs_absorption_date || 0} color="warning"
               active={issueFilter === 'needs_absorption_date'} hint={`${summary.absorbed || 0} כבר עם תאריך`}
               onClick={() => setIssueFilter(issueFilter === 'needs_absorption_date' ? '' : 'needs_absorption_date')} />
+            {/* Registered in ClickTac's CONTRACTS export and nowhere else.
+                Not "call these families" — there is nobody to call yet, since
+                the contracts export has no parent in it. The fix is the other
+                upload, and the hint says so. */}
+            <StatCard label="חסר פרטי הורים" value={summary.missing_parents || 0} color="error"
+              active={missingParentsOnly} hint="להעלות גם את ייצוא הנרשמים"
+              onClick={() => setMissingParentsOnly(v => !v)} />
+            {/* מזומן אינו מתקבל, ומשפחה בלי אמצעי תשלום צריכה טלפון — שתי
+                עובדות שהיו בקובץ מהיום הראשון ואף אחד לא ראה אותן. Red only
+                when there is something to do: a branch where every family is
+                on a credit card should not have a red card sitting there. */}
+            <StatCard label="אמצעי תשלום — לטיפול" value={summary.payment_alerts || 0}
+              color={summary.payment_alerts ? 'error' : 'info'}
+              active={paymentAlertOnly} hint={'מזומן / לא הוגדר / הו"ק חסרה'}
+              onClick={() => setPaymentAlertOnly(v => !v)} />
             <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
               hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
@@ -335,6 +399,18 @@ export default function TmtReconcile({
                 </ToggleButton>
               ))}
             </ToggleButtonGroup>
+            {!!summary.missing_parents && (
+              <Chip size="small" color="error"
+                variant={missingParentsOnly ? 'filled' : 'outlined'}
+                label={`חסר פרטי הורים (${summary.missing_parents})`}
+                onClick={() => setMissingParentsOnly(v => !v)} />
+            )}
+            {!!summary.payment_alerts && (
+              <Chip size="small" color="error"
+                variant={paymentAlertOnly ? 'filled' : 'outlined'}
+                label={`אמצעי תשלום — התרעה (${summary.payment_alerts})`}
+                onClick={() => setPaymentAlertOnly(v => !v)} />
+            )}
             <Box sx={{ flex: 1 }} />
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
             <Button size="small" startIcon={<ContactPhoneIcon />} onClick={openContacts}>דף קשר</Button>
@@ -349,25 +425,38 @@ export default function TmtReconcile({
 
           {(lastTmt || lastCt) && (
             <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
-              {[['תמ"ת', lastTmt], ['קליקטאק', lastCt]].map(([label, imp]) => (
-                <Card key={label} sx={{ p: 1.5, flex: 1, minWidth: 280 }}>
-                  <Typography variant="subtitle2" fontWeight={700}>
-                    קובץ {label} אחרון — {imp ? fmtDateTime(imp.created_at) : 'טרם הועלה'}
-                  </Typography>
-                  {imp && (
-                    <Typography variant="caption" color="text.secondary">
-                      {imp.file_name} · {imp.parsed} שורות · חדשים {imp.created} · עודכנו {imp.updated} ·
-                      {' '}ללא שינוי {imp.unchanged} · הוסרו {imp.missing}
-                      {imp.imported_by_name ? ` · ${imp.imported_by_name}` : ''}
+              <Card sx={{ p: 1.5, flex: 1, minWidth: 280 }}>
+                <Typography variant="subtitle2" fontWeight={700}>
+                  קובץ תמ"ת אחרון — {lastTmt ? fmtDateTime(lastTmt.created_at) : 'טרם הועלה'}
+                </Typography>
+                {lastTmt && <ImportLine imp={lastTmt} />}
+                {!!lastTmt?.details?.missing?.length && (
+                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
+                    ירדו מהרשימה: {lastTmt.details.missing.join(', ')}
+                  </Alert>
+                )}
+              </Card>
+
+              {/* Two lines, because there are two ClickTac files and they are
+                  uploaded separately. A branch current on one and stale on the
+                  other used to read as "up to date". */}
+              <Card sx={{ p: 1.5, flex: 1, minWidth: 280 }}>
+                <Typography variant="subtitle2" fontWeight={700}>קובץ קליקטאק אחרון</Typography>
+                {[['נרשמים', lastCtReg], ['חוזים', lastCtContracts]].map(([label, imp]) => (
+                  <Box key={label} sx={{ mt: 0.5 }}>
+                    <Typography variant="body2" fontWeight={600}
+                      color={imp ? 'text.primary' : 'text.disabled'}>
+                      {label} — {imp ? fmtDateTime(imp.created_at) : 'טרם הועלה'}
                     </Typography>
-                  )}
-                  {!!imp?.details?.missing?.length && (
-                    <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
-                      ירדו מהרשימה: {imp.details.missing.join(', ')}
-                    </Alert>
-                  )}
-                </Card>
-              ))}
+                    {imp && <ImportLine imp={imp} />}
+                  </Box>
+                ))}
+                {!!lastCtReg?.details?.missing?.length && (
+                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
+                    ירדו מהרשימה: {lastCtReg.details.missing.join(', ')}
+                  </Alert>
+                )}
+              </Card>
             </Stack>
           )}
 
@@ -390,6 +479,7 @@ export default function TmtReconcile({
                   <TableCell>חריגות</TableCell>
                   <TableCell>תמ"ת</TableCell>
                   <TableCell>קליקטאק</TableCell>
+                  <TableCell>כיתה / דרגה</TableCell>
                   <TableCell />
                 </TableRow>
               </TableHead>
@@ -448,6 +538,20 @@ export default function TmtReconcile({
                               color={SEVERITY_COLOR[i.severity] || 'default'} />
                           </Tooltip>
                         ))}
+                        {/* Filled rather than outlined, unlike every issue
+                            beside it: this one is not a discrepancy between
+                            two lists, it is money that will not arrive. The
+                            tooltip carries the vendor's own wording, because
+                            the rule matches on a substring and the office has
+                            to be able to see what it actually matched. */}
+                        {r.clicktac?.payment_alert && (
+                          <Tooltip title={r.clicktac.payment_method
+                            ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
+                            : 'בקליקטאק לא נרשמה צורת תשלום כלל'}>
+                            <Chip size="small" color="error"
+                              label={r.clicktac.payment_alert.label} />
+                          </Tooltip>
+                        )}
                       </Stack>
                     </TableCell>
                     <TableCell>
@@ -457,8 +561,46 @@ export default function TmtReconcile({
                     </TableCell>
                     <TableCell>
                       {r.clicktac
-                        ? r.clicktac.status
+                        ? (
+                          <Stack spacing={0.5} alignItems="flex-start">
+                            <span>{r.clicktac.status}</span>
+                            {/* The row exists because a contract was signed and
+                                nothing else — no parent, no phone, no payment
+                                method. It cannot be promoted, and saying so
+                                here is cheaper than finding out at the import
+                                button. */}
+                            {r.clicktac.missing_parents && (
+                              <Tooltip title="הילד/ה מופיע/ה רק בייצוא החוזים של קליקטאק. יש לקלוט גם את ייצוא הנרשמים כדי לקבל הורים, טלפון ואמצעי תשלום.">
+                                <Chip size="small" color="error" label="חסר פרטי הורים" />
+                              </Tooltip>
+                            )}
+                            {/* מאיזה קובץ הגיע/ה — פר שורה, ולא רק כתאריך
+                                בכרטיס למעלה. שתי השורות נראות זהות בטבלה, וזה
+                                מה שמסביר למה לאחת יש דרגה ולשנייה טלפון. */}
+                            <Stack direction="row" spacing={0.5}>
+                              {(r.clicktac.sources || []).map(src => (
+                                <Chip key={src} size="small" variant="outlined"
+                                  sx={{ height: 18, fontSize: '0.65rem' }}
+                                  label={SOURCE_LABEL[src] || src} />
+                              ))}
+                            </Stack>
+                          </Stack>
+                        )
                         : <Typography variant="caption" color="error">לא נרשם</Typography>}
+                    </TableCell>
+                    {/* From the contracts export, and nowhere else in either
+                        system: the class ClickTac put the child in and the
+                        subsidy tier the whole fee hangs on. */}
+                    <TableCell>
+                      {r.clicktac?.class_name || r.clicktac?.tier ? (
+                        <>
+                          <Typography variant="body2">{r.clicktac.class_name || '—'}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            דרגה {r.clicktac.tier === '' ? '—' : r.clicktac.tier}
+                            {r.clicktac.tuition_type ? ` · ${r.clicktac.tuition_type}` : ''}
+                          </Typography>
+                        </>
+                      ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>
                     <TableCell>
                       <IconButton size="small" onClick={() => setDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
@@ -466,7 +608,7 @@ export default function TmtReconcile({
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">אין רשומות להצגה</Typography>
                   </TableCell></TableRow>
                 )}

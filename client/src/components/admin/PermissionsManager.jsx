@@ -526,7 +526,7 @@ export default function PermissionsManager() {
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
           לחיצה על טאב מוסיפה/מסירה אותו לכל בעלי התפקיד במכה אחת. מלא = יש גישה, מתאר = אין.
           שינוי פר-משתמש (בטבלה למטה) גובר על הגדרת התפקיד.
-          שינוי הרשאות נכנס לתוקף אחרי שהמשתמש/ת מתנתק/ת ומתחבר/ת מחדש.
+          שינוי הרשאות נכנס לתוקף אצל המשתמש/ת ברענון המסך הבא (או בהתחברות מחדש).
         </Typography>
         <Stack spacing={1}>
           {Object.entries(ROLE_LABELS).map(([role, label]) => (
@@ -675,7 +675,7 @@ export default function PermissionsManager() {
 
       <Alert severity="info" sx={{ mb: 2 }}>
         כל תפקיד מקבל ברירת מחדל של טאבים. סימון <b>V</b> = יש גישה, ריק = אין. תאים בצבע סגול = override (חורג מברירת המחדל של התפקיד). שינויים נשמרים פר משתמש.
-        שינוי הרשאות נכנס לתוקף אחרי שהמשתמש/ת מתנתק/ת ומתחבר/ת מחדש.
+        שינוי הרשאות נכנס לתוקף אצל המשתמש/ת ברענון המסך הבא (או בהתחברות מחדש).
       </Alert>
 
       <Paper sx={{ overflow: 'auto', maxWidth: '100%' }}>

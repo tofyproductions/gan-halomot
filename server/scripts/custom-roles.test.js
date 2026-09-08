@@ -19,7 +19,11 @@
  *   - a per-user override still beats the role (check 7), same precedence as
  *     always;
  *   - deleting the role leaves its holders as ordinary teachers, not as people
- *     with no permissions (check 10).
+ *     with no permissions (check 10);
+ *   - and a permission granted while somebody is signed in reaches her without
+ *     a re-login (check 13). The gates read the SIGNED TOKEN and nothing else,
+ *     so until /api/auth/me started handing back a replacement the screen said
+ *     yes and every write answered 403 — for as long as she kept the tab open.
  *
  * THE DATABASE IS EPHEMERAL AND LOCAL — same harness as viewer-e2e.test.js:
  * dotenv is stubbed out of require.cache before anything can read server/.env
@@ -120,10 +124,10 @@ async function waitForServer() {
   throw new Error('השרת לא ענה על /api/health');
 }
 
-async function login(full_name, id_number) {
+async function login(full_name, id_number, rememberMe = false) {
   const r = await request({
     method: 'POST', path: '/api/auth/login-password',
-    body: { full_name, id_number, password: PASSWORD },
+    body: { full_name, id_number, password: PASSWORD, rememberMe },
   });
   if (r.status !== 200 || !r.body?.token) {
     throw new Error(`התחברות נכשלה עבור ${full_name}: ${r.status} ${r.text}`);
@@ -219,8 +223,8 @@ async function main() {
     email: 'michal@roles.local', full_name: 'מיכל גננת', id_number: '910000003',
     role: 'teacher', branch_id: branchB._id, position: 'גננת',
   });
-  // The control: an ordinary teacher, touched by nothing here.
-  await mkUser({
+  // The control: an ordinary teacher, touched by nothing here until check 13.
+  const ronit = await mkUser({
     email: 'plain@roles.local', full_name: 'רונית גננת', id_number: '910000004',
     role: 'teacher', branch_id: branchB._id, position: 'גננת',
   });
@@ -505,6 +509,97 @@ async function main() {
       token: adminToken, body: { custom_role_id: '000000000000000000000000' },
     });
     eq(bad.status, 404, '12d תפקיד מותאם שאינו קיים מוחזר כ-404');
+  }
+
+  /* ================================================================ *
+   * 13. הרשאה שניתנה עכשיו — בלי להתנתק ולהתחבר מחדש
+   *
+   * שני מקורות אמת שיכולים לא להסכים: המסך קורא את /api/auth/me, שתמיד קורא
+   * מחדש מהמסד; השערים — requireTab/requireTabWrite — קוראים אך ורק את הטוקן
+   * החתום. אחרי מתן הרשאה הכפתור הופיע והלחיצה עליו החזירה 403, עד ההתחברות
+   * הבאה. התיקון: /me משווה בין הטוקן שהגיע לבין מה שטוקן שנטבע עכשיו היה
+   * אומר, ואם הם נבדלים הוא מחזיר טוקן חדש בגוף התשובה.
+   * ================================================================ */
+  head('בדיקה 13 — הרשאה חדשה נכנסת לתוקף ברענון המסך');
+  {
+    // כתובת חוקית בצורתה שאין מאחוריה רשומה: אם השער מסרב נקבל 403 לפניה, ואם
+    // הוא מאשר נקבל 404 מהבקר. כך ההבדל בין "אין הרשאה" ל"יש" הוא חד־משמעי
+    // ואינו תלוי בנתונים שנזרעו.
+    const GHOST = '000000000000000000000009';
+    const writeAttempt = (token) => request({
+      method: 'PUT', token,
+      path: `/api/external-enrollments/${GHOST}/placement`,
+      body: { age_group: '' },
+    });
+
+    // התחברות טרייה — אחרי כל שינויי ההרשאות שקדמו כאן, כדי שהטוקן שבידה יהיה
+    // מעודכן. בלי זה "התקבל טוקן חדש" היה עובר מסיבה אחרת לגמרי.
+    const oldToken = await login('רונית גננת', '910000004');
+    const before = await request({ path: '/api/auth/me', token: oldToken });
+    eq(before.status, 200, '13a /me עונה');
+    ok(!before.body?.token, '13b וכל עוד דבר לא השתנה — אין טוקן חדש בתשובה');
+
+    const denied = await writeAttempt(oldToken);
+    eq(denied.status, 403, '13c גננת רגילה אינה יכולה לכתוב במסך הרישום');
+
+    const patch = await request({
+      method: 'PATCH', path: `/api/admin/users/${ronit._id}/tabs`,
+      token: adminToken, body: { add: ['clicktac', 'clicktac_write'], remove: [] },
+    });
+    eq(patch.status, 200, '13d המנהל נותן לה את המסך ואת הרשאת הכתיבה');
+
+    // אותו טוקן ישן בדיוק — זה כל העניין. הדפדפן שלה לא התנתק.
+    const after = await request({ path: '/api/auth/me', token: oldToken });
+    eq(after.status, 200, '13e /me עם הטוקן הישן עדיין עונה');
+    const newToken = after.body?.token;
+    ok(!!newToken, '13f ומחזיר טוקן חדש');
+    ok(newToken !== oldToken, '13g שאינו הטוקן הישן');
+
+    const oldClaims = claims(oldToken);
+    const newClaims = claims(newToken || oldToken);
+    ok((newClaims.tab_overrides_add || []).includes('clicktac')
+      && (newClaims.tab_overrides_add || []).includes('clicktac_write'),
+    '13h ובתוכו — ההרשאות החדשות',
+    JSON.stringify(newClaims.tab_overrides_add));
+    // הטוקן החדש הוא אותה משתמשת ואותו תפקיד בסיס. אילו היה מוחלף כאן משהו
+    // מהם, זו הייתה הסלמת הרשאות ולא רענון שלהן.
+    eq(String(newClaims.id), String(ronit._id), '13i אותה משתמשת');
+    eq(newClaims.role, 'teacher', '13j ואותו תפקיד בסיס — לא הסלמה');
+
+    // "זכור אותי" הוא החלטה של המשתמשת בהתחברות, ורענון הרשאות אינו הזדמנות
+    // לשנות אותה: התחברות רגילה נשארת 24 שעות ולא הופכת ל-30 יום.
+    eq(newClaims.exp - newClaims.iat, oldClaims.exp - oldClaims.iat,
+      '13k ותוקף הטוקן נשמר בדיוק כפי שהיה');
+    eq(oldClaims.exp - oldClaims.iat, 86400, '13l (התחברות בלי "זכור אותי" — 24 שעות)');
+
+    // עכשיו השער והמסך אומרים אותו דבר.
+    const allowed = await writeAttempt(newToken);
+    eq(allowed.status, 404, '13m עם הטוקן החדש הכתיבה עוברת את השער');
+    ok(tabAllowed(newToken, 'clicktac', CLICKTAC_ROLES), '13n והמסך נפתח לה');
+
+    // והטוקן הישן עדיין מסרב — הוא לא הפך לתקף למפרע, ואין כאן טוקן שני חי.
+    const stillDenied = await writeAttempt(oldToken);
+    eq(stillDenied.status, 403, '13o הטוקן הישן ממשיך להיחסם');
+
+    // קריאה שנייה עם הטוקן החדש: אין מה להחליף, ולכן אין החלפה. בלי זה כל
+    // רענון מסך היה מטביע טוקן חדש ומאפס את שעון התפוגה שלה בכל דקה.
+    const settled = await request({ path: '/api/auth/me', token: newToken });
+    ok(!settled.body?.token, '13p וקריאה נוספת עם הטוקן החדש כבר לא מחליפה דבר');
+
+    /* ---- "זכור אותי" — 30 יום, וגם הם נשמרים ---- */
+    const rememberToken = await login('רונית גננת', '910000004', true);
+    const rememberClaims = claims(rememberToken);
+    eq(rememberClaims.exp - rememberClaims.iat, 30 * 86400, '13q התחברות עם "זכור אותי"');
+
+    await request({
+      method: 'PATCH', path: `/api/admin/users/${ronit._id}/tabs`,
+      token: adminToken, body: { add: ['clicktac', 'clicktac_write', 'gantt'], remove: [] },
+    });
+    const refreshed = await request({ path: '/api/auth/me', token: rememberToken });
+    const refreshedClaims = claims(refreshed.body?.token || rememberToken);
+    ok(!!refreshed.body?.token, '13r גם כאן מוחזר טוקן חדש');
+    eq(refreshedClaims.exp - refreshedClaims.iat, 30 * 86400,
+      '13s והוא נשאר בן 30 יום — לא הוחזר ל-24 שעות');
   }
 
   /* ================================================================ */

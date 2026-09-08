@@ -5,8 +5,9 @@ const {
   EnrollmentImport,
 } = require('../models');
 const {
-  parseSheet, missingColumns, COLUMNS, AGE_GROUPS,
+  parseSheet, parseContractsSheet, identifyHeader, AGE_GROUPS, idKey,
 } = require('../services/clicktac.service');
+const { paymentAlertFor, paymentMethodCounts } = require('../services/paymentCheck');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -28,10 +29,53 @@ const NOT_YOUR_BRANCH = { error: 'אין לך הרשאה לסניף זה' };
  * what is already here, and becomes a registration only when someone says so.
  */
 
-/** The ת"ז of a child, wherever this system happens to keep it. */
+/**
+ * Which of ClickTac's two exports a stored row has been in.
+ *
+ * Every row written before the contracts export was supported came from the
+ * registrations export — that was the only file there was — so an absent or
+ * empty list means 'registrations' rather than "unknown". Reading it as
+ * unknown would lock every one of those rows out of promotion.
+ */
+function sourcesOf(doc) {
+  const s = Array.isArray(doc?.sources) ? doc.sources.filter(Boolean) : [];
+  return s.length ? s : ['registrations'];
+}
+
+/**
+ * Can this row become a registration?
+ *
+ * A contracts-only row is a real child with a real contract and NO parent: no
+ * name, no phone, no email, no payment method. Promoting it would create a
+ * Registration whose parent_name is empty and whose family nobody can reach,
+ * and the gap would only surface when someone tried to call them.
+ *
+ * THE TEST IS `sources` AND ONLY `sources`. It was briefly also
+ * `parent1.first_name`, which was wrong in the one direction that matters: the
+ * registrations export does carry rows whose parent columns are blank — an
+ * older cohort, a family entered by hand — and those rows were promotable
+ * before the contracts export existed and are promotable now. Refusing them
+ * told the office to upload a file it had already uploaded, with no way
+ * forward. What this guard is for is the OTHER thing: a row that has only ever
+ * been in the contracts export, which has no parent columns at all, so
+ * promoting it would create a Registration whose family nobody can reach.
+ */
+function hasParents(doc) {
+  return sourcesOf(doc).includes('registrations');
+}
+
+const NO_PARENTS_MESSAGE = 'חסרים פרטי הורים — יש לקלוט גם את ייצוא הנרשמים מקליקטאק';
+
+/**
+ * The ת"ז — or passport — of a child, wherever this system happens to keep it,
+ * in the shape everything else compares against. See `idKey`: a Registration
+ * carries no id TYPE, so the letters in the value are the only evidence that
+ * it is a passport and must not be reduced to its digits.
+ */
 function childIdOf(reg, child) {
-  return String(child?.child_id_number || reg?.configuration?.registration_card?.childIdNumber || '')
-    .replace(/\D/g, '');
+  return idKey({
+    id_number: child?.child_id_number || reg?.configuration?.registration_card?.childIdNumber || '',
+  });
 }
 
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
@@ -93,7 +137,7 @@ function diffFields(existing, doc) {
  * match anything and the fallback is the only thing that will.
  */
 function matchExisting(doc, registrations, childByReg) {
-  const wantId = String(doc.child.id_number || '').replace(/\D/g, '');
+  const wantId = idKey(doc.child);
   if (wantId) {
     const byId = registrations.find(r => childIdOf(r, childByReg.get(String(r._id))) === wantId);
     if (byId) return { reg: byId, by: 'id_number' };
@@ -107,11 +151,150 @@ function matchExisting(doc, registrations, childByReg) {
 }
 
 /**
+ * The row this parsed child belongs to — the whole merge, in one function.
+ *
+ * BOTH IMPORTS CALL IT, which is the point: whichever export arrives second
+ * has to land on the row the first one created, and a rule written twice would
+ * eventually be two rules. Registrations-then-contracts and
+ * contracts-then-registrations must produce the same single row.
+ *
+ * The order is the order of certainty:
+ *
+ *   1. the ת"ז, inside this branch and year. It is the child's own number and
+ *      it is what both files carry, once the punctuation is stripped.
+ *   2. name + birth date, inside this branch and year. The contracts export
+ *      writes a passport for the children who have one, and passports do not
+ *      compare with the ת"ז the registrations export holds; without this
+ *      fallback those children would double.
+ *   3. the ת"ז ACROSS branches. Not a merge rule so much as a collision guard:
+ *      the unique index is (source, academic_year, child.id_number) and knows
+ *      nothing about branches, so a child filed against the wrong gan last
+ *      week would make this import throw E11000 instead of merging. This is
+ *      also exactly what the registrations importer did before the contracts
+ *      export existed, so nothing about that path changes.
+ *
+ * `candidates` is every row already stored for this branch and year — a few
+ * hundred at the very most, and comparing them in memory is what lets rule 2
+ * exist at all (it is not expressible as an index lookup).
+ *
+ * IT RETURNS WHICH RULE FIRED, not only the row. Rule 3 is the one the callers
+ * have to be able to tell apart: it reaches outside the branch, and a contracts
+ * file uploaded against the wrong gan must not be quietly absorbed by the right
+ * one. See `importContractsExport`.
+ */
+async function findMergeTarget({ child, academicYear, candidates }) {
+  const wantId = idKey(child);
+  if (wantId) {
+    const byId = candidates.find(d => idKey(d.child) === wantId);
+    if (byId) return { target: byId, by: 'id_number' };
+  }
+
+  const wantName = normalizeChildName(child.full_name);
+  const wantBirth = dayKey(child.birth_date);
+  if (wantName && wantBirth) {
+    const byNameBirth = candidates.find(d => normalizeChildName(d.child?.full_name) === wantName
+      && dayKey(d.child?.birth_date) === wantBirth);
+    if (byNameBirth) return { target: byNameBirth, by: 'name_birth' };
+  }
+
+  if (child.id_number) {
+    const anywhere = await ExternalEnrollment.findOne({
+      source: 'clicktac',
+      academic_year: academicYear,
+      'child.id_number': child.id_number,
+    });
+    if (anywhere) return { target: anywhere, by: 'cross_branch' };
+  }
+  return { target: null, by: '' };
+}
+
+/**
+ * Fill a field the other export left blank — and only then.
+ *
+ * The two files overlap on the child (both carry a name, a birth date, a
+ * קופת חולים) and they do not always agree, because they were filled in at
+ * different moments by different people. Whichever export wrote a value first
+ * keeps it; the second one only supplies what is missing. Letting the later
+ * file win would mean a re-upload of an old contracts export could quietly
+ * revert a name that was corrected in the registrations export.
+ */
+function fillBlanks(target, source, fields) {
+  let changed = false;
+  for (const f of fields) {
+    const incoming = source[f];
+    if (incoming === undefined || incoming === null || incoming === '') continue;
+    const current = target[f];
+    if (current !== undefined && current !== null && current !== '') continue;
+    target[f] = incoming;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * The child fields a stored row already has and the incoming one is silent
+ * about — the mirror image of `fillBlanks`, for the one place that cannot use
+ * it.
+ *
+ * The registrations merge is `Object.assign(existing, doc, …)`, which replaces
+ * the WHOLE `child` path in one go. `parseRow` produces no `nickname`, no
+ * `id_type` and no `medical_notes` — three fields only the contracts export
+ * fills — so a registrations upload after a contracts upload erased all three
+ * off every merged row. Nothing healed it either: `content_hash_contracts` is
+ * untouched by that path, so re-uploading the contracts file read as
+ * "unchanged" and put nothing back. `medical_notes` is an allergy list.
+ *
+ * Written generically rather than as those three names, because the next field
+ * only one of the two exports carries would have gone the same way silently.
+ */
+function keepFilledChildFields(existingChild, incomingChild) {
+  const kept = {};
+  for (const [key, value] of Object.entries(existingChild || {})) {
+    if (key === '_id') continue;
+    if (value === undefined || value === null || value === '') continue;
+    const incoming = incomingChild?.[key];
+    if (incoming === undefined || incoming === null || incoming === '') kept[key] = value;
+  }
+  return kept;
+}
+
+/**
+ * ת"ז ריקה או כפולה — a row that cannot be written, said in the one sentence
+ * the office can act on.
+ *
+ * The unique index is (source, academic_year, child.id_number) and it indexes
+ * the empty string like any other value, so the SECOND child in a file whose
+ * ת"ז column was left blank collides with the first. Before this it threw
+ * E11000 out of the middle of the loop: a 500, half the file written, and no
+ * way to tell which half.
+ */
+const DUPLICATE_ID_LABEL = 'דילוג — ת"ז חסרה או כפולה';
+const isDuplicateKeyError = (err) => err?.code === 11000;
+
+/** The other reason a contracts row is not written. See importContractsExport. */
+const CROSS_BRANCH_LABEL = 'לא נקלט — הילד/ה רשום/ה בסניף אחר';
+
+/** The child fields the contracts export can supply. */
+const CONTRACT_CHILD_FIELDS = [
+  'first_name', 'last_name', 'full_name', 'nickname', 'id_number', 'id_type',
+  'birth_date', 'health_fund', 'medical_notes', 'age_group',
+];
+
+/**
  * POST /api/external-enrollments/import   (multipart: file, branch_id, academic_year?)
  *
- * The branch is a parameter and never a column. `מוסד` reads "כפר סבא" on every
- * row and two branches answer to that; filing a whole cohort under the wrong
- * gan is not a mistake anyone would notice quickly.
+ * ONE BUTTON, TWO FILES. ClickTac publishes a registrations export and a
+ * contracts export, and the office needs both: the first is the only place the
+ * parents and the payment method exist, the second is the only place the class
+ * and the subsidy tier (דרגה) exist. Asking someone to pick the right upload
+ * button for a file they downloaded twenty minutes ago is asking for the
+ * cohort to be filed wrong, so the HEADER decides which file this is and the
+ * import branches on that.
+ *
+ * The branch is a parameter and never a column, in either file. `מוסד` and
+ * `מעון` both read "כפר סבא" on every row and two branches answer to that;
+ * filing a whole cohort under the wrong gan is not a mistake anyone would
+ * notice quickly.
  */
 async function importFile(req, res, next) {
   try {
@@ -134,15 +317,30 @@ async function importFile(req, res, next) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null, raw: false });
     if (!rows.length) return res.status(400).json({ error: 'הגיליון ריק' });
 
-    const missing = missingColumns(rows[0]);
-    if (missing.length) {
-      return res.status(400).json({
-        error: `חסרות עמודות בקובץ: ${missing.join(', ')}`,
-        code: 'MISSING_COLUMNS',
-        expected: Object.values(COLUMNS),
-      });
-    }
+    // Which of the two — or neither, in which case this is the refusal that
+    // names both accepted exports instead of listing columns.
+    const verdict = identifyHeader(rows[0]);
+    if (!verdict.type) return res.status(400).json(verdict);
 
+    const ctx = { req, res, next, branch, branchId, rows, sheetName };
+    return verdict.type === 'contracts'
+      ? importContractsExport(ctx)
+      : importRegistrationsExport(ctx);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * The registrations export — the original import, unchanged in what it does.
+ *
+ * What IS new: it may now land on a row the contracts export created. That row
+ * has a child, a contract and no parents, and this file is the half it was
+ * waiting for — so it is filled in place rather than duplicated, and gains
+ * 'registrations' in `sources`, which is what unlocks promotion for it.
+ */
+async function importRegistrationsExport({ req, res, next, branch, branchId, rows, sheetName }) {
+  try {
     const parsed = parseSheet(rows, {
       branchId,
       sourceFile: req.file.originalname || '',
@@ -163,11 +361,22 @@ async function importFile(req, res, next) {
     const children = await Child.find({}).select('registration_id child_id_number').lean();
     const childByReg = new Map(children.map(c => [String(c.registration_id), c]));
 
+    // Every row already stored for this branch and year — the pool the merge
+    // matches against. Loaded once: the contracts export may have created rows
+    // under a passport number or under a ת"ז written differently, and finding
+    // them needs the name+birth comparison that no index can do.
+    const candidates = await ExternalEnrollment.find({
+      source: 'clicktac',
+      branch_id: branchId,
+      academic_year: parsed[0].academic_year,
+    });
+
     let created = 0; let updated = 0; let unchanged = 0;
     const results = [];
     const now = new Date();
     const seen = new Set();
     const updateDetails = [];
+    const skippedNames = [];
 
     for (const doc of parsed) {
       const { reg, by } = matchExisting(doc, registrations, childByReg);
@@ -177,19 +386,33 @@ async function importFile(req, res, next) {
         matched_by: by,
       };
       doc.imported_by = req.user?.id || null;
-      seen.add(String(doc.child.id_number).replace(/\D/g, ''));
+      seen.add(idKey(doc.child));
 
-      const existing = await ExternalEnrollment.findOne({
-        source: 'clicktac',
-        academic_year: doc.academic_year,
-        'child.id_number': doc.child.id_number,
+      const { target: existing } = await findMergeTarget({
+        child: doc.child,
+        academicYear: doc.academic_year,
+        candidates,
       });
 
       if (!existing) {
-        await ExternalEnrollment.create({
-          ...doc,
-          presence: { is_present: true, first_seen_at: now, last_seen_at: now, missing_since: null },
-        });
+        let fresh;
+        try {
+          fresh = await ExternalEnrollment.create({
+            ...doc,
+            presence: { is_present: true, first_seen_at: now, last_seen_at: now, missing_since: null },
+          });
+        } catch (err) {
+          // The unique index refused this row — almost always a second child
+          // whose ת"ז column is blank. One skipped row is not a reason to lose
+          // the other seventy: the file is written, the name is reported, and
+          // the office fixes the ת"ז in ClickTac and uploads again.
+          if (!isDuplicateKeyError(err)) throw err;
+          skippedNames.push(doc.child.full_name);
+          continue;
+        }
+        // So a child listed twice in one file merges with itself instead of
+        // being created twice.
+        candidates.push(fresh);
         created += 1;
         results.push({ child: doc.child.full_name, action: 'created' });
       } else if (existing.content_hash === doc.content_hash && existing.presence?.is_present !== false) {
@@ -204,11 +427,48 @@ async function importFile(req, res, next) {
         // The placement is a decision somebody made, not data from the file.
         // A fresh export must not undo it.
         const keepPlacement = existing.placement;
-        const changes = diffFields(existing.toObject(), doc);
+        const wasContractsOnly = !sourcesOf(existing).includes('registrations');
+        const before = existing.toObject();
+        // Object.assign below replaces the whole `child` path and this file has
+        // nothing to say about half of it. See keepFilledChildFields.
+        const keptChild = keepFilledChildFields(before.child, doc.child);
+        // Diffed against what the row will ACTUALLY hold, not against `doc` —
+        // otherwise a field this file could not read would be written into the
+        // change log as "cleared" while the old value quietly stayed put.
+        const changes = diffFields(before, { ...doc, child: { ...doc.child, ...keptChild } });
         if (existing.presence?.is_present === false) {
           changes.push({ label: 'נוכחות בקובץ קליקטאק', from: 'הוסר/ה', to: 'חזר/ה' });
         }
-        Object.assign(existing, doc, { review: keepReview, placement: keepPlacement });
+        // The row the contracts export created is finally getting its family.
+        // Worth recording as a change in its own right: "the parents arrived"
+        // is the event that turns a row nobody could act on into one that can
+        // be promoted, and it is not visible in any of the TRACKED fields
+        // (they were all blank before, so they read as ordinary fills).
+        if (wasContractsOnly) {
+          changes.push({ label: 'פרטי הורים', from: 'חסרים', to: 'נקלטו מייצוא הנרשמים' });
+        }
+        // `doc` carries no `contract` key, so Object.assign leaves the
+        // contracts half alone — but `sources` IS in it, hard-coded to
+        // ['registrations'], and would drop 'contracts' on the floor.
+        const mergedSources = [...new Set([...sourcesOf(existing), 'registrations'])];
+        Object.assign(existing, doc, {
+          review: keepReview,
+          placement: keepPlacement,
+          sources: mergedSources,
+        });
+        // ...and put back what only the other export knows. Set path by path
+        // rather than by mutating the object Object.assign just installed, so
+        // mongoose records every one of them as changed.
+        for (const [key, value] of Object.entries(keptChild)) existing.set(`child.${key}`, value);
+        // Same trap as `child`: Object.assign just installed `doc.computed`
+        // wholesale. If this file's birth-date cell was unreadable, that
+        // computed is all nulls — mirror the contracts-path guard (~:718) and
+        // keep the age this row already had rather than erasing it.
+        if (doc.computed?.age_months == null && before.computed?.age_months != null) {
+          existing.set('computed.age_months', before.computed.age_months);
+          existing.set('computed.age_group', before.computed.age_group);
+          existing.set('computed.agrees_with_source', before.computed.agrees_with_source);
+        }
         existing.presence = {
           is_present: true,
           first_seen_at: existing.presence?.first_seen_at || now,
@@ -244,7 +504,12 @@ async function importFile(req, res, next) {
     });
     const missingNames = [];
     for (const doc of gone) {
-      if (seen.has(String(doc.child.id_number).replace(/\D/g, ''))) continue;
+      if (seen.has(idKey(doc.child))) continue;
+      // A row that has only ever been in the CONTRACTS export was never in
+      // this file to begin with, so its absence from it says nothing. Marking
+      // it "הוסר/ה מהקובץ" would report a family as withdrawn on the strength
+      // of a file that does not list them either way.
+      if (!sourcesOf(doc).includes('registrations')) continue;
       doc.presence.is_present = false;
       doc.presence.missing_since = now;
       doc.changes.push({ at: now, field: 'נוכחות בקובץ קליקטאק', from: 'רשום/ה', to: 'הוסר/ה מהקובץ' });
@@ -263,7 +528,7 @@ async function importFile(req, res, next) {
     const hiddenKids = await Child.find({ hidden_at: { $ne: null }, is_active: false })
       .select('child_name child_id_number').lean();
     for (const kid of hiddenKids) {
-      const idNum = String(kid.child_id_number || '').replace(/\D/g, '');
+      const idNum = idKey({ id_number: kid.child_id_number });
       if (!idNum || !seen.has(idNum)) continue;
       await Child.updateOne(
         { _id: kid._id },
@@ -274,6 +539,7 @@ async function importFile(req, res, next) {
 
     const batch = await EnrollmentImport.create({
       source: 'clicktac',
+      export_type: 'registrations',
       branch_id: branchId,
       academic_year: parsed[0]?.academic_year || '',
       file_name: req.file.originalname || '',
@@ -292,9 +558,11 @@ async function importFile(req, res, next) {
       imported_by: req.user?.id || null,
     });
 
-    res.json({
+    return res.json({
       branch: branch.name,
       sheet: sheetName,
+      export_type: 'registrations',
+      export_label: 'ייצוא הנרשמים',
       rows: rows.length,
       parsed: parsed.length,
       created,
@@ -302,14 +570,306 @@ async function importFile(req, res, next) {
       unchanged,
       missing: missingNames.length,
       missing_names: missingNames.slice(0, 50),
+      // Rows the unique index refused — see DUPLICATE_ID_LABEL. Reported by
+      // name, because the fix is in ClickTac and it needs a child to point at.
+      skipped_duplicate: skippedNames.length,
+      skipped_names: skippedNames.slice(0, 50),
+      skipped_label: DUPLICATE_ID_LABEL,
       restored: restoredNames.length,
       restored_names: restoredNames.slice(0, 50),
       results: results.slice(0, 50),
       import_id: batch._id,
     });
   } catch (error) {
-    next(error);
+    return next(error);
   }
+}
+
+/**
+ * The contracts export.
+ *
+ * WHAT IT MAY AND MAY NOT DO. It writes the `contract` sub-document, it fills
+ * child fields the other file left blank, and it creates a row for a child the
+ * registrations export has not reached yet. It does NOT touch parent1/parent2,
+ * enrollment or standing_order — it has nothing to put there — and it does NOT
+ * run the "who disappeared" sweep: the two files list different populations at
+ * different moments in the summer, and a child missing from the contracts
+ * export has not been removed from ClickTac, they simply have not signed yet.
+ *
+ * Its no-op check is `content_hash_contracts`, its own hash, so re-uploading
+ * the same contracts file changes nothing even if the registrations export has
+ * moved half the phone numbers since.
+ */
+async function importContractsExport({ req, res, next, branch, branchId, rows, sheetName }) {
+  try {
+    const parsed = parseContractsSheet(rows, {
+      branchId,
+      sourceFile: req.file.originalname || '',
+    });
+    if (req.body?.academic_year) {
+      const forced = normalizeYear(req.body.academic_year);
+      for (const d of parsed) d.academic_year = forced;
+    }
+    if (!parsed.length || !parsed[0].academic_year) {
+      return res.status(400).json({ error: 'לא נמצאו שורות עם שנת לימודים' });
+    }
+
+    const academicYear = parsed[0].academic_year;
+    const registrations = await Registration.find({}).lean();
+    const children = await Child.find({}).select('registration_id child_id_number').lean();
+    const childByReg = new Map(children.map(c => [String(c.registration_id), c]));
+
+    const candidates = await ExternalEnrollment.find({
+      source: 'clicktac',
+      branch_id: branchId,
+      academic_year: academicYear,
+    });
+
+    let created = 0; let updated = 0; let unchanged = 0;
+    const now = new Date();
+    const results = [];
+    const updateDetails = [];
+    const skippedNames = [];
+    const crossBranchNames = [];
+
+    for (const row of parsed) {
+      const { target: existing, by } = await findMergeTarget({
+        child: row.child,
+        academicYear,
+        candidates,
+      });
+
+      /**
+       * THE CHILD IS SOMEBODY ELSE'S.
+       *
+       * Rule 3 of the merge deliberately reaches across branches, because the
+       * unique index does too and a row filed against the wrong gan would
+       * otherwise throw. For the REGISTRATIONS export that is right — it is
+       * the whole record, and a family that moved should follow its row.
+       *
+       * Here it is wrong. The branch is not in this file; it is whatever was
+       * selected in the dialog, and selecting the wrong one of the two כפר סבא
+       * branches takes a click. Merging would write הרצליה's classes and
+       * דרגות onto כפר סבא's rows, under כפר סבא's name, with nothing on any
+       * screen saying it happened. So the row is refused and reported, and the
+       * office uploads it against the right branch.
+       */
+      if (existing && by === 'cross_branch'
+        && String(existing.branch_id) !== String(branchId)) {
+        crossBranchNames.push(row.child.full_name);
+        continue;
+      }
+
+      const contract = { ...row.contract, imported_at: now };
+
+      if (!existing) {
+        // A child with a contract and no family yet. Created rather than
+        // skipped: the class and the דרגה are real facts about a real child,
+        // and the office needs to SEE that the registration is the half that
+        // is missing — which is exactly what the "חסר פרטי הורים" flag says.
+        const { reg, by: matchedBy } = matchExisting(row, registrations, childByReg);
+        let fresh;
+        try {
+          fresh = await ExternalEnrollment.create({
+            source: 'clicktac',
+            source_file: req.file.originalname || '',
+            imported_by: req.user?.id || null,
+            branch_id: branchId,
+            academic_year: academicYear,
+            child: row.child,
+            contract,
+            computed: row.computed,
+            sources: ['contracts'],
+            review: {
+              status: 'pending',
+              matched_registration_id: reg?._id || null,
+              matched_by: matchedBy,
+            },
+            presence: { is_present: true, first_seen_at: now, last_seen_at: now, missing_since: null },
+            // Namespaced so it can never be mistaken for a registrations hash —
+            // see the note on the two hashes in the model.
+            content_hash: `contracts:${row.content_hash_contracts}`,
+            content_hash_contracts: row.content_hash_contracts,
+          });
+        } catch (err) {
+          // Two children in one file with a blank ת"ז — the second one hits the
+          // unique index, which treats '' as a value like any other. Skipped by
+          // name instead of taking the whole import down mid-write.
+          if (!isDuplicateKeyError(err)) throw err;
+          skippedNames.push(row.child.full_name);
+          continue;
+        }
+        candidates.push(fresh);
+        created += 1;
+        results.push({ child: row.child.full_name, action: 'created' });
+        continue;
+      }
+
+      if (existing.content_hash_contracts === row.content_hash_contracts) {
+        existing.presence.last_seen_at = now;
+        await existing.save();
+        unchanged += 1;
+        continue;
+      }
+
+      const before = existing.toObject();
+      const changes = contractChanges(before, contract);
+      const gainedContract = !before.contract;
+
+      existing.contract = contract;
+      existing.content_hash_contracts = row.content_hash_contracts;
+      existing.sources = [...new Set([...sourcesOf(existing), 'contracts'])];
+      // Only the blanks. A name corrected in the registrations export outranks
+      // whatever the contracts export still says — see fillBlanks.
+      fillBlanks(existing.child, row.child, CONTRACT_CHILD_FIELDS);
+      // The age group follows the birth date, and the contracts export may
+      // have just supplied one for a row that had none.
+      if (!existing.computed?.age_months && row.computed.age_months != null) {
+        existing.computed.age_months = row.computed.age_months;
+        existing.computed.age_group = row.computed.age_group;
+        existing.computed.agrees_with_source = row.computed.agrees_with_source;
+      }
+      existing.presence.last_seen_at = now;
+      if (gainedContract) {
+        changes.unshift({ label: 'חוזה', from: '—', to: contract.class_name || 'נקלט' });
+      }
+      for (const c of changes) {
+        existing.changes.push({ at: now, field: c.label, from: c.from, to: c.to });
+      }
+      await existing.save();
+
+      if (!changes.length) { unchanged += 1; continue; }
+      updated += 1;
+      results.push({ child: existing.child.full_name, action: 'updated' });
+      updateDetails.push({
+        name: existing.child.full_name,
+        changes: changes.map(c => `${c.label}: ${c.from} ← ${c.to}`),
+      });
+    }
+
+    const batch = await EnrollmentImport.create({
+      source: 'clicktac',
+      export_type: 'contracts',
+      branch_id: branchId,
+      academic_year: academicYear,
+      file_name: req.file.originalname || '',
+      sheet_name: sheetName,
+      rows: rows.length,
+      parsed: parsed.length,
+      created,
+      updated,
+      unchanged,
+      // Always zero, and deliberately: this file's silence about a child is
+      // not evidence of anything. See the note above.
+      missing: 0,
+      details: {
+        created: results.filter(r => r.action === 'created').map(r => r.child).slice(0, 100),
+        updated: updateDetails.slice(0, 100),
+        missing: [],
+      },
+      imported_by: req.user?.id || null,
+    });
+
+    // How many rows in this branch and year still have no family behind them.
+    // The number the office acts on after uploading contracts first.
+    const missingParents = (await ExternalEnrollment.find({
+      source: 'clicktac', branch_id: branchId, academic_year: academicYear,
+    }).select('sources parent1.first_name').lean()).filter(d => !hasParents(d)).length;
+
+    return res.json({
+      branch: branch.name,
+      sheet: sheetName,
+      export_type: 'contracts',
+      export_label: 'ייצוא החוזים',
+      rows: rows.length,
+      parsed: parsed.length,
+      created,
+      updated,
+      unchanged,
+      missing: 0,
+      missing_names: [],
+      missing_parents: missingParents,
+      // Rows the unique index refused (blank/duplicate ת"ז) and rows that
+      // belong to another branch — both skipped, both named, because both are
+      // fixed outside this system and then re-uploaded.
+      skipped_duplicate: skippedNames.length,
+      skipped_names: skippedNames.slice(0, 50),
+      skipped_label: DUPLICATE_ID_LABEL,
+      cross_branch: crossBranchNames.length,
+      cross_branch_names: crossBranchNames.slice(0, 50),
+      cross_branch_label: CROSS_BRANCH_LABEL,
+      restored: 0,
+      restored_names: [],
+      results: results.slice(0, 50),
+      import_id: batch._id,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/** What moved between the stored contract and the one this file carries. */
+const CONTRACT_TRACKED = [
+  { path: 'class_name', label: 'כיתה' },
+  { path: 'tier', label: 'דרגה' },
+  { path: 'tuition_type', label: 'סוג מימון' },
+  { path: 'status', label: 'סטטוס בחוזה' },
+  { path: 'start_date', label: 'תחילת חוזה' },
+  { path: 'end_date', label: 'סיום חוזה' },
+];
+
+function contractChanges(existing, contract) {
+  const before = existing.contract || {};
+  return CONTRACT_TRACKED
+    .map(({ path, label }) => ({
+      label, from: asText(before[path]), to: asText(contract[path]),
+    }))
+    .filter(c => c.from !== c.to);
+}
+
+/**
+ * Who uploaded it, flattened onto the record.
+ *
+ * `imported_by` is populated to a user document, and every screen that shows an
+ * upload wants one string. Doing it here rather than in the component is what
+ * makes the "last file" card and the upload-history table read the same field:
+ * the card was asking for `imported_by_name` on an object that only ever had
+ * `imported_by`, and silently showed nothing.
+ */
+function withImporterName(imp) {
+  if (!imp) return null;
+  return {
+    ...imp,
+    imported_by_name: imp.imported_by?.full_name || imp.imported_by?.username || '',
+  };
+}
+
+/**
+ * The latest upload of EACH ClickTac export, for a branch/year scope.
+ *
+ * "When was the last ClickTac file uploaded" stopped being one question the
+ * moment there were two files: a branch can be current on registrations and
+ * three weeks behind on contracts, and one date cannot say so.
+ *
+ * Batches written before `export_type` existed have no such field, and every
+ * one of them was a registrations upload — hence the `$exists: false` arm,
+ * which is the same reading `sourcesOf` applies to the rows themselves.
+ */
+async function lastClickTacImports(scope = {}) {
+  const base = { source: 'clicktac' };
+  if (scope.branch_id) base.branch_id = scope.branch_id;
+  if (scope.academic_year) base.academic_year = scope.academic_year;
+
+  const latest = (where) => EnrollmentImport.findOne({ ...base, ...where })
+    .sort({ created_at: -1 })
+    .populate('imported_by', 'full_name username')
+    .lean();
+
+  const [registrations, contracts] = await Promise.all([
+    latest({ $or: [{ export_type: 'registrations' }, { export_type: { $exists: false } }] }),
+    latest({ export_type: 'contracts' }),
+  ]);
+  return { registrations: withImporterName(registrations), contracts: withImporterName(contracts) };
 }
 
 /** GET /api/external-enrollments — the queue. Never includes bank details. */
@@ -320,28 +880,47 @@ async function list(req, res, next) {
     if (req.query.status) filter['review.status'] = req.query.status;
 
     const docs = await ExternalEnrollment.find(filter)
-      // standing_order and raw are deliberately absent: a list request is not
-      // a reason to put 64 families' bank accounts on the wire.
-      .select('-standing_order -raw')
+      // `raw` is deliberately absent. `standing_order` is READ and then
+      // stripped below, one line before the response is built: a הו"ק with no
+      // bank details is one of the three payment alerts, and it cannot be told
+      // from a complete one without looking at them. A list request is still
+      // not a reason to put 64 families' bank accounts on the wire.
+      .select('-raw')
       .populate('branch_id', 'name')
       .populate('review.matched_registration_id', 'child_name academic_year monthly_fee')
       .sort({ 'child.full_name': 1 })
       .lean();
 
     const q = String(req.query.q || '').trim().toLowerCase();
-    const filtered = q
+    let filtered = q
       ? docs.filter(d => d.child.full_name?.toLowerCase().includes(q)
         || String(d.child.id_number).includes(q)
         || `${d.parent1?.first_name} ${d.parent1?.last_name}`.toLowerCase().includes(q)
         || `${d.parent2?.first_name} ${d.parent2?.last_name}`.toLowerCase().includes(q))
       : docs;
+    // The work list after a contracts-first upload: children with a contract
+    // and no family behind them, who cannot be promoted until the
+    // registrations export arrives.
+    if (['1', 'true'].includes(String(req.query.missing_parents || ''))) {
+      filtered = filtered.filter(d => !hasParents(d));
+    }
 
     res.json({
-      enrollments: filtered.map(d => ({
+      enrollments: filtered.map(({ standing_order: bank, ...d }) => ({
         ...d,
         id: d._id,
         branch_name: d.branch_id?.name || '',
         branch_id: d.branch_id?._id || d.branch_id,
+        // Normalised for the client rather than left to it: an old row has no
+        // `sources` at all, and every consumer would have to know that means
+        // 'registrations'.
+        sources: sourcesOf(d),
+        missing_parents: !hasParents(d),
+        // Recomputed rather than read from `computed.payment_alert`: the
+        // stored copy is what the counters are built from, and the rows
+        // imported before this check existed do not have one. `bank` above is
+        // destructured out of the response in the same breath it is used.
+        payment_alert: paymentAlertFor({ ...d, standing_order: bank }),
       })),
       summary: {
         total: docs.length,
@@ -351,7 +930,18 @@ async function list(req, res, next) {
         matched: docs.filter(d => d.review?.matched_registration_id).length,
         cancelled: docs.filter(d => d.enrollment?.status === 'ביטל רישום').length,
         disagree_age_group: docs.filter(d => d.computed?.agrees_with_source === false).length,
+        missing_parents: docs.filter(d => !hasParents(d)).length,
+        with_contract: docs.filter(d => !!d.contract).length,
+        // מזומן / לא הוגדר / הו"ק ללא בנק. Counted over the same rows as
+        // every other counter above — the whole queue, before the search box
+        // and the filters narrow it.
+        payment_alerts: docs.filter(d => !!paymentAlertFor(d)).length,
       },
+      // What ClickTac actually writes in `צורת תשלום שכ"ל`, counted. The rule
+      // above matches on a substring precisely because these strings are the
+      // vendor's and can change; this is how the office sees when they have.
+      payment_methods: paymentMethodCounts(docs),
+      last_import: await lastClickTacImports(filter),
     });
   } catch (error) {
     next(error);
@@ -375,11 +965,23 @@ async function getOne(req, res, next) {
 /**
  * GET /api/external-enrollments/pricing?branch=&year=
  *
- * The tuition is NOT in the export — ClickTac carries the funding type, not
- * the amount, and the subsidy tier (דרגה) that decides the price is a property
- * of the family's income that this file does not include. So the price comes
- * from the branch's own state matrix, and the tier is chosen per child at
- * import.
+ * The tuition is NOT in either export — ClickTac carries the funding type
+ * ("מימון משרד הכלכלה"), never an amount. So the price comes from the branch's
+ * own state matrix, crossed with the family's subsidy tier (דרגה).
+ *
+ * WHERE THE TIER NOW COMES FROM. It used to come from nowhere: the
+ * registrations export does not have it, so the screen asked for ONE tier and
+ * applied it to a whole import, which is wrong for every family whose income
+ * differs from the one that was typed. The contracts export DOES carry it, per
+ * child, and it is now stored on the row (`contract.tier`) and shown next to
+ * the child.
+ *
+ * It is stored and shown, not yet applied. Pricing here is a matrix handed to
+ * the client, which picks the cell and posts a `monthly_fee`; the server never
+ * computes a fee from a tier at all. Wiring the per-row tier into that would
+ * mean moving the pricing decision to the server, which is a larger change
+ * than this one and belongs with whoever owns the fee screen. Until then the
+ * office has, for the first time, the actual number per child in front of it.
  *
  * The matrix columns are the state's: עד 15 חודש / 15–24 חודש / מעל 24 חודש —
  * the same two boundaries the export's own age groups fall on, which is what
@@ -577,6 +1179,15 @@ async function promoteOne(doc, opts) {
         gender: doc.child.gender,
         standing_order: doc.standing_order || {},
         tuition_method: doc.enrollment?.tuition_method || '',
+        // From the contracts export, when it has been uploaded. The tier is
+        // the one thing that explains a fee after the fact — a registration
+        // billed 1,410 with no record of which דרגה produced it is a number
+        // nobody can defend to a parent six months later.
+        contract_class: doc.contract?.class_name || '',
+        contract_tier: doc.contract?.tier || '',
+        contract_tuition_type: doc.contract?.tuition_type || '',
+        contract_start: doc.contract?.start_date || null,
+        contract_end: doc.contract?.end_date || null,
       },
       medical_alerts: doc.child.has_allergy ? doc.child.allergy_detail : '',
     },
@@ -669,6 +1280,19 @@ async function promote(req, res, next) {
     if (doc.review?.status === 'imported') {
       return res.status(409).json({ error: 'הרשומה כבר יובאה למערכת' });
     }
+    /**
+     * A contract without a family.
+     *
+     * The contracts export brings the class and the דרגה and not one parent
+     * column, so a row that has only been in it would become a Registration
+     * with an empty parent_name, no phone and no email — a child in the system
+     * whose family nobody can reach, discovered in October. Refused here
+     * rather than filled with placeholders: the missing half exists, it is one
+     * upload away, and saying so is more useful than inventing it.
+     */
+    if (!hasParents(doc)) {
+      return res.status(400).json({ error: NO_PARENTS_MESSAGE, code: 'MISSING_PARENTS' });
+    }
     // Zero is allowed and means "not decided yet" — see promoteOne. A missing
     // or negative figure is still refused: that is a mistake, not a decision.
     const monthlyFee = Number(req.body?.monthly_fee ?? 0);
@@ -733,6 +1357,14 @@ async function promoteBulk(req, res, next) {
         continue;
       }
       if (doc.review?.status === 'imported') { skipped.push({ id, child: doc.child.full_name, error: 'כבר יובאה' }); continue; }
+      // Same refusal as the single promote, reported per row rather than
+      // aborting: a branch that uploaded contracts first has a list where some
+      // children have their family and some do not, and the half that can be
+      // imported should be.
+      if (!hasParents(doc)) {
+        skipped.push({ id, child: doc.child.full_name, error: NO_PARENTS_MESSAGE, code: 'MISSING_PARENTS' });
+        continue;
+      }
       if (doc.review?.matched_registration_id && !req.body?.allow_duplicate) {
         skipped.push({ id, child: doc.child.full_name, error: 'כבר קיים/ת במערכת' });
         continue;
@@ -787,7 +1419,11 @@ async function setReview(req, res, next) {
       { new: true },
     ).lean();
     if (!doc) return res.status(404).json({ error: 'רשומה לא נמצאה' });
-    res.json({ enrollment: { ...doc, id: doc._id } });
+    // Same strip as `list`. This route answers a click on a chip in a table —
+    // it is not the detail view — and a status change is no reason to put the
+    // family's bank account and the whole raw spreadsheet row on the wire.
+    const { standing_order: _bank, raw: _raw, ...rest } = doc;
+    res.json({ enrollment: { ...rest, id: doc._id } });
   } catch (error) {
     next(error);
   }
@@ -961,6 +1597,9 @@ async function contacts(req, res, next) {
 module.exports = {
   importFile, list, getOne, pricing, promote, promoteBulk, setReview, contacts,
   classroomPlan, createClassroom, setPlacement, deleteData, effectiveAgeGroup,
+  // The merge rules, so the reconciliation view and the tests read the same
+  // answer the importer wrote rather than each deciding for themselves.
+  sourcesOf, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports, withImporterName,
   // Used by the placement board's confirm step, which is the same act of
   // creating a registration seen from the other end.
   promoteOne,

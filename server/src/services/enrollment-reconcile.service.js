@@ -23,6 +23,7 @@
 const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
+const { paymentAlertFor } = require('./paymentCheck');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -437,6 +438,48 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
         address: ct.parent1?.address || ct.parent2?.address || '',
         is_present: ct.presence?.is_present !== false,
         missing_since: ct.presence?.missing_since || null,
+
+        /**
+         * WHICH ClickTac export this child has actually been in, and what the
+         * contracts export said.
+         *
+         * `missing_parents` is the one the screen acts on: a row that has only
+         * ever been in the contracts export has a class and a דרגה and not one
+         * parent, cannot be promoted, and looks identical to a complete row
+         * until somebody tries. Rows written before the contracts export was
+         * supported have no `sources` at all and are registrations rows by
+         * construction — an empty list therefore reads as ['registrations'],
+         * the same reading the importer applies.
+         */
+        sources: ct.sources?.length ? ct.sources : ['registrations'],
+        // The test is `sources` alone — the same one `hasParents` applies, and
+        // for the same reason: the registrations export does carry rows with
+        // blank parent columns, and those rows are promotable. See the note on
+        // hasParents in externalEnrollment.controller.
+        missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations'),
+        /**
+         * איך המשפחה משלמת — ומה צריך טיפול.
+         *
+         * `payment_method` is ClickTac's own free text, carried raw so the
+         * screen can show WHAT the file said rather than only that something
+         * is wrong with it. `payment_alert` is the verdict on it — cash (which
+         * the gan does not accept), no method at all, or a הו"ק the bank
+         * details never arrived for.
+         *
+         * Recomputed here rather than read from `computed.payment_alert`: the
+         * stored copy is an index for counting, and rows imported before the
+         * check existed do not have one. See services/paymentCheck.js.
+         */
+        payment_method: String(ct.enrollment?.tuition_method || '').trim(),
+        payment_alert: paymentAlertFor(ct),
+        class_name: ct.contract?.class_name || '',
+        // The subsidy bracket the whole fee hangs on — the number that was in
+        // neither file until the contracts export was accepted. Shown, not yet
+        // applied; see the note on pricing() in the controller.
+        tier: ct.contract?.tier || '',
+        tuition_type: ct.contract?.tuition_type || '',
+        contract_start: ct.contract?.start_date || null,
+        contract_end: ct.contract?.end_date || null,
       } : null,
     });
   }
@@ -476,6 +519,15 @@ function reconcile({ tmtDocs = [], ctDocs = [], branchId, academicYear, branchNa
       in_clicktac: by(r => r.in_clicktac),
       already_imported: by(r => r.clicktac?.review_status === 'imported'),
       placed_by_hand: by(r => !!r.age_group_override),
+      // Registered in ClickTac's contracts export and nowhere else — the work
+      // list that says "upload the registrations export too", not "call these
+      // families", because there is nobody to call yet.
+      missing_parents: by(r => !!r.clicktac?.missing_parents),
+      // מזומן / לא הוגדר / הו"ק ללא בנק — families to call before September.
+      // Counted over the same rows as every other counter here, so the card
+      // and the chip agree with what filtering on it actually shows.
+      payment_alerts: by(r => !!r.clicktac?.payment_alert),
+      with_contract: by(r => !!r.clicktac?.class_name || !!r.clicktac?.tier),
       issues: issueCounts,
     },
   };

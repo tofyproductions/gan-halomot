@@ -14,6 +14,25 @@ const mongoose = require('mongoose');
  */
 const enrollmentImportSchema = new mongoose.Schema({
   source: { type: String, enum: ['tmt', 'clicktac'], required: true, index: true },
+
+  /**
+   * WHICH ClickTac export this upload was.
+   *
+   * The vendor publishes two, they go through the same button, and they bring
+   * different halves of the child — so "when was the last ClickTac file
+   * uploaded" is two questions, not one. A branch can be fully up to date on
+   * registrations and three weeks stale on contracts, and before this field
+   * existed the history could not say so.
+   *
+   * Meaningless for source 'tmt', which has one file; it keeps the default
+   * rather than being made conditional, since nothing reads it there.
+   */
+  export_type: {
+    type: String,
+    enum: ['registrations', 'contracts'],
+    default: 'registrations',
+    index: true,
+  },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
   academic_year: { type: String, required: true, index: true },
 
