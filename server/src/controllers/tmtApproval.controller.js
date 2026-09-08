@@ -7,7 +7,7 @@ const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcil
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
   promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
-  withImporterName, branchPricingFor,
+  withImporterName, branchPricingFor, feeEntry,
 } = require('./externalEnrollment.controller');
 const {
   normalizeYear, enrollmentYear, formatAcademicYear,
@@ -809,11 +809,20 @@ async function placement(req, res, next) {
       parent_phone: r.clicktac.parent1_phone || '',
       issues: r.issues.filter(i => i.severity !== 'info').map(i => i.label),
       // The דרגה off the family's signed contract, and what it prices here.
-      // The confirm step bills exactly this number (promoteOne prices it
-      // again from the same matrix), so the board shows it before committing
-      // instead of asking for a figure it can already work out.
       tier: r.clicktac.tier || '',
+      // What the tier costs in the group this child is in right now.
       fee_by_tier: r.clicktac.fee_by_tier ?? null,
+      /**
+       * …and in each of the other two, because the ROOM decides the group.
+       *
+       * The dropdown beside this child offers every room in the year, and
+       * confirmPlacement bills the group of the room they end up in — so a
+       * single number here would be a promise about a group the manager may
+       * be about to change. The screen picks the entry for the selected room
+       * and the confirm step then bills exactly that, which is what makes the
+       * board's fee column true rather than nearly true.
+       */
+      fees_by_group: r.clicktac.fees_by_group || null,
     }));
 
     const groups = Object.entries(AGE_GROUP_TO_CATEGORY).map(([group, category]) => {
@@ -961,14 +970,19 @@ async function confirmPlacement(req, res, next) {
       // whatever the files said. That keeps the fee column and the room from
       // ever disagreeing.
       const group = categoryToGroup[room.category] || effectiveAgeGroup(doc.toObject());
-      // Absent reads as zero, which enrols the child with the fee still open —
-      // the deliberate state, recorded as `fee_pending` in promoteOne. Only a
-      // negative or unparseable figure stops a child, because that is a typo.
-      const fee = Number(fees[group] ?? 0);
-      if (!Number.isFinite(fee) || fee < 0) {
+      /**
+       * Absent reads as "nothing was said about this group", which is not the
+       * same as ₪0 — see feeEntry. For a child the matrix prices, a blank group
+       * field leaves the matrix's number alone even under `override_tier`; for
+       * a child it does not, the fee stays open at 0, the deliberate state.
+       * Only a present, unparseable or negative figure stops a child.
+       */
+      const entered = feeEntry(fees[group]);
+      if (entered.invalid) {
         skipped.push({ id: a.id, child: name, error: `שכר לימוד לא תקין לשכבה "${group}"` });
         continue;
       }
+      const fee = entered.value ?? 0;
 
       doc.placement = {
         age_group_override: group,
@@ -982,7 +996,8 @@ async function confirmPlacement(req, res, next) {
       try {
         const reg = await promoteOne(doc.toObject(), {
           monthly_fee: fee,
-          monthly_fee_override: overrideTier ? fee : undefined,
+          // A blank group is not an override of zero — see feeEntry.
+          monthly_fee_override: overrideTier && entered.value !== null ? entered.value : undefined,
           pricing,
           registration_fee: regFee,
           classroom_id: room._id,

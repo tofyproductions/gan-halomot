@@ -10,7 +10,7 @@ const {
 const {
   paymentAlertFor, paymentMethodCounts, paymentMethodFor,
 } = require('../services/paymentCheck');
-const { tierFeeFor } = require('../services/tier-fee.service');
+const { tierFeeFor, tierFeesByGroup } = require('../services/tier-fee.service');
 const {
   normalizeYear, enrollmentYear, hebrewYearForStart, academicYearOf, normalizeChildName,
 } = require('../services/academic-year.service');
@@ -116,6 +116,32 @@ function effectiveAgeGroup(doc) {
     || doc.computed?.age_group
     || doc.child?.age_group
     || '';
+}
+
+/**
+ * One cell of `fees_by_age_group`, read as a DECISION rather than as a number.
+ *
+ * `{ value: number|null, invalid: boolean }` — `null` means the group was left
+ * empty and nobody said anything about it; a number means somebody typed one,
+ * including a typed 0.
+ *
+ * WHY THE DIFFERENCE IS THE WHOLE POINT. With `override_tier` ticked, these
+ * figures beat the state's matrix — and `Number('' ?? 0)` is 0, so an untouched
+ * group field used to become an explicit "bill these children ₪0", wiping a
+ * fee the family's own דרגה had priced correctly. A manager who overrules the
+ * matrix for the בוגרים does not thereby zero the תינוקות. An empty group is no
+ * override for that group; only a figure that was actually entered is one.
+ *
+ * A value that is present and unparseable is a typo and still refuses — that is
+ * a mistake, not a decision.
+ */
+function feeEntry(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return { value: null, invalid: false };
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return { value: null, invalid: true };
+  return { value: n, invalid: false };
 }
 
 /**
@@ -994,6 +1020,19 @@ async function list(req, res, next) {
           tier: d.contract?.tier,
           ageGroup: effectiveAgeGroup(d),
         })?.fee ?? null,
+        /**
+         * …and the same דרגה in each of the three age groups.
+         *
+         * `fee_by_tier` is about the group this child is in today; the room a
+         * manager puts them in decides the group they are BILLED in, and the
+         * placement board lets that change under the screen's feet. Both
+         * readers hand over the whole tier line so no screen has to guess a
+         * cell it was not given.
+         */
+        fees_by_group: tierFeesByGroup({
+          pricing: pricingByKey.get(pricingKey(d)),
+          tier: d.contract?.tier,
+        }),
       })),
       summary: {
         total: docs.length,
@@ -1076,24 +1115,52 @@ async function getOne(req, res, next) {
  * different strings, so a lookup that knows one of them finds no matrix, prices
  * every child manually, and says nothing — which is exactly the silent failure
  * this whole change exists to end. All the spellings are asked for at once.
+ *
+ * RETURNED IN ORDER OF PREFERENCE, because more than one of them can exist at
+ * the same time: the gershayim spelling (what this system writes), then the
+ * ASCII-quote one (what the pricing editor writes), then the bare Gregorian
+ * range (the oldest rows). A `findOne` over the set would have taken whichever
+ * one Mongo reached first — the same branch and year answering with two
+ * different price lists on two different requests, with no way to tell which.
  */
 function yearSpellings(year) {
   const hebrew = hebrewYearForStart(Number(year.split('-')[0]));
+  const gershayim = hebrew.replace(/"/g, '״');
   return [...new Set([
+    gershayim,
+    gershayim.replace(/״/g, '"'),   // the pricing editor's own spelling
     year,
-    hebrew,
-    hebrew.replace(/״/g, '"'),   // the pricing editor's own spelling
-    hebrew.replace(/"/g, '״'),
   ])];
 }
 
 async function branchPricingFor(branchId, academicYear) {
   if (!branchId) return null;
   const year = normalizeYear(academicYear || enrollmentYear());
-  return BranchPricing.findOne({
+  const spellings = yearSpellings(year);
+  const docs = await BranchPricing.find({
     branch_id: branchId,
-    academic_year: { $in: yearSpellings(year) },
+    academic_year: { $in: spellings },
   }).lean();
+  if (!docs.length) return null;
+  /**
+   * TWO MATRICES FOR ONE YEAR IS A DATA PROBLEM AND IT HAS TO BE SAID OUT LOUD.
+   * The unique index is on (branch, academic_year) and the spellings are
+   * different strings, so nothing stops a branch from holding a תשפ״ז list and
+   * a תשפ"ז list with different prices. Picking one silently is how a family
+   * gets billed off a list nobody knew was still there.
+   */
+  if (docs.length > 1) {
+    console.warn(
+      `[pricing] סניף ${branchId}: ${docs.length} מחירונים לשנה ${year} — ` +
+      `${docs.map(d => JSON.stringify(d.academic_year)).join(', ')}. ` +
+      'נבחר הראשון לפי סדר העדיפות.',
+    );
+  }
+  const rank = (d) => {
+    const i = spellings.indexOf(d.academic_year);
+    return i < 0 ? spellings.length : i;
+  };
+  return docs.slice().sort((a, b) => rank(a) - rank(b))[0];
 }
 
 async function pricing(req, res, next) {
@@ -1568,16 +1635,18 @@ async function promoteBulk(req, res, next) {
         continue;
       }
       const group = effectiveAgeGroup(doc);
-      const fee = Number(fees[group] ?? 0);
-      if (!Number.isFinite(fee) || fee < 0) {
+      const entered = feeEntry(fees[group]);
+      if (entered.invalid) {
         skipped.push({ id, child: doc.child.full_name, error: `שכר לימוד לא תקין לשכבה "${group}"` });
         continue;
       }
+      const fee = entered.value ?? 0;
       try {
         // eslint-disable-next-line no-await-in-loop
         const reg = await promoteOne(doc, {
           monthly_fee: fee,
-          monthly_fee_override: overrideTier ? fee : undefined,
+          // A BLANK GROUP IS NOT AN OVERRIDE OF ZERO. See feeEntry.
+          monthly_fee_override: overrideTier && entered.value !== null ? entered.value : undefined,
           // eslint-disable-next-line no-await-in-loop
           pricing: await pricingFor(doc.branch_id, doc.academic_year),
           registration_fee: regFee,
@@ -1807,4 +1876,7 @@ module.exports = {
   // …and the matrix that step prices with, so the two screens read the same
   // document through the same year-format tolerance.
   branchPricingFor,
+  // …and the rule that tells "the manager typed 0" from "the manager typed
+  // nothing", which decides whether the state's matrix is overruled.
+  feeEntry,
 };

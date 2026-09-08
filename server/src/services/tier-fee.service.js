@@ -37,33 +37,41 @@
  */
 const AGE_GROUP_ORDER = ['תינוק', 'פעוט', 'בוגר'];
 
-/** The digits in a label, or '' — "דרגה 1" -> "1", "1" -> "1", "דרגה" -> "". */
-const digitsOf = (v) => String(v ?? '').replace(/\D/g, '');
+/**
+ * The tier NUMBER a label names — its FIRST run of digits, or ''.
+ *
+ * ALL THE DIGITS WOULD BE THE WRONG ANSWER, and it was: the real state table
+ * (PricingManager's TMT_5786, saved verbatim by the editor) labels its rows
+ * "דרגה 3 (0–2,330)" — income bracket and all — and concatenating every digit
+ * in that turns דרגה 3 into "302330", which matches nothing. Ten of the twelve
+ * shipped rows were unreachable and the whole feature was silently a no-op.
+ *
+ * The first number in the label is the דרגה; everything after it is the
+ * bracket the state prints beside it. "דרגה 3" -> "3", "3" -> "3",
+ * "דרגה 3 (0–2,330)" -> "3", "דרגה" -> "".
+ */
+const tierNumberOf = (v) => String(v ?? '').match(/\d+/)?.[0] || '';
 
 /**
  * Which row of the matrix this contract's דרגה is, or -1.
  *
  * THE LABEL FORMAT IS THE BRANCH'S, NOT OURS. A pricing document is typed in by
- * hand and its rows have been seen as "דרגה 1", as "1", and as "דרגה 1 (עד
- * 4,000 ₪)". Comparing the whole string would match none of them, so the match
- * is on the DIGITS in the label — which is the tier number, and the only part
- * of it the state actually names.
+ * hand — or seeded from the state's own table — and its rows have been seen as
+ * "דרגה 1", as "1", and as "דרגה 3 (0–2,330)". Comparing the whole string would
+ * match none of them, so the match is on the tier NUMBER, which is the only
+ * part of a label the state actually names.
  *
- * The fallback is the row's position, and it is deliberately narrow: it applies
- * only when NO row in the matrix has a digit in its label at all (a branch that
- * typed "דרגה ראשונה", or left the labels blank). Then and only then, tier N is
- * the Nth row, one-based, because that is what "דרגה 1" means everywhere else
- * in this system. Using position as a general fallback would silently price a
- * child from the wrong row the moment one label is mistyped.
+ * THERE IS NO POSITIONAL FALLBACK, deliberately. The state's own table starts
+ * at דרגה 3 and skips דרגה 13, so "tier N is the Nth row" is false for every
+ * real matrix — it priced דרגה 4 off the דרגה 3 row. A tier no label names is a
+ * tier this branch does not price, and the caller asks a person instead.
  */
 function tierIndex(tier, tiers = []) {
-  const want = digitsOf(tier);
+  const want = Number(tierNumberOf(tier));
+  // 0 is "no tier" (see tierFeeFor) and a label with no number yields 0 too,
+  // so a numeric compare never marries the two.
   if (!want) return -1;
-  const byLabel = tiers.findIndex(t => digitsOf(t?.label) === want);
-  if (byLabel >= 0) return byLabel;
-  if (tiers.some(t => digitsOf(t?.label))) return -1;
-  const n = Number(want);
-  return n >= 1 && n <= tiers.length ? n - 1 : -1;
+  return tiers.findIndex(t => Number(tierNumberOf(t?.label)) === want);
 }
 
 /**
@@ -72,15 +80,21 @@ function tierIndex(tier, tiers = []) {
  * The branch's own wording wins when it happens to match — a branch that typed
  * its columns as תינוק / פעוט / בוגר means exactly those — and otherwise the
  * position is used, because the columns are the same three brackets in the same
- * order whatever they are called. A matrix with a different number of columns
- * than three is a matrix this rule does not understand, and it says so by
- * failing the bounds check below rather than by picking a neighbour.
+ * order whatever they are called.
+ *
+ * AND POSITION ONLY WHEN THERE ARE EXACTLY THREE COLUMNS. The positional rule
+ * is a claim about a specific matrix: three columns, the state's three
+ * brackets, in the state's order. A branch that priced two columns or four is
+ * not that matrix, and mapping בוגר to column 2 of a four-column table would
+ * bill a family off a bracket nobody chose. Fewer or more columns than the
+ * three we know means the name has to match or nothing does.
  */
 function ageGroupIndex(ageGroup, ageGroups = []) {
   const group = String(ageGroup || '').trim();
   if (!group) return -1;
   const byName = ageGroups.findIndex(g => String(g || '').trim() === group);
   if (byName >= 0) return byName;
+  if (ageGroups.length !== AGE_GROUP_ORDER.length) return -1;
   return AGE_GROUP_ORDER.indexOf(group);
 }
 
@@ -101,7 +115,7 @@ function ageGroupIndex(ageGroup, ageGroups = []) {
 function tierFeeFor({ pricing, tier, ageGroup } = {}) {
   if (!pricing || pricing.pricing_type !== 'subsidized') return null;
   // '' and '0' are both "no tier" — see above.
-  if (!Number(digitsOf(tier))) return null;
+  if (!Number(tierNumberOf(tier))) return null;
 
   const tiers = Array.isArray(pricing.tiers) ? pricing.tiers : [];
   const row = tierIndex(tier, tiers);
@@ -119,11 +133,34 @@ function tierFeeFor({ pricing, tier, ageGroup } = {}) {
   return {
     fee,
     tier: String(tier).trim(),
-    tier_label: tiers[row]?.label || `דרגה ${digitsOf(tier)}`,
+    tier_label: tiers[row]?.label || `דרגה ${tierNumberOf(tier)}`,
     tier_index: row,
     age_group: String(ageGroup || '').trim(),
     age_group_index: col,
   };
 }
 
-module.exports = { tierFeeFor, tierIndex, ageGroupIndex, AGE_GROUP_ORDER };
+/**
+ * What this child's דרגה costs in EVERY age group — `{ תינוק, פעוט, בוגר }`,
+ * each a number or null.
+ *
+ * BECAUSE THE ROOM DECIDES THE GROUP, AND THE ROOM IS PICKED AFTER THE BOARD IS
+ * DRAWN. The placement screen shows a fee beside each child and then lets the
+ * manager move that child into any room in the year — and `confirmPlacement`
+ * bills the group of the room they landed in, not the group they were computed
+ * into. One number per child was therefore a number that could be quietly
+ * wrong by the time the button was pressed. The row carries the whole tier
+ * line instead, and the screen re-reads it from whichever room is selected, so
+ * what the board promises and what the confirm writes are the same arithmetic.
+ */
+function tierFeesByGroup({ pricing, tier } = {}) {
+  const out = {};
+  for (const group of AGE_GROUP_ORDER) {
+    out[group] = tierFeeFor({ pricing, tier, ageGroup: group })?.fee ?? null;
+  }
+  return out;
+}
+
+module.exports = {
+  tierFeeFor, tierFeesByGroup, tierIndex, ageGroupIndex, tierNumberOf, AGE_GROUP_ORDER,
+};

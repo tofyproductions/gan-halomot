@@ -24,7 +24,7 @@ const { normalizeChildName } = require('./academic-year.service');
 const { normalizeId, normalizePhone, canonicalAgeGroup, ABSORBED_DECISION } = require('./tmt.service');
 const { ageInMonths, ageGroupFor } = require('./clicktac.service');
 const { paymentAlertFor, paymentMethodFor } = require('./paymentCheck');
-const { tierFeeFor } = require('./tier-fee.service');
+const { tierFeeFor, tierFeesByGroup } = require('./tier-fee.service');
 
 /** ClickTac's own wording for a registration the family withdrew. */
 const CANCELLED = 'ביטל רישום';
@@ -510,6 +510,18 @@ function reconcile({
           tier: ct.contract?.tier,
           ageGroup: ct.placement?.age_group_override || ct.computed?.age_group || ct.child?.age_group,
         })?.fee ?? null,
+        /**
+         * The SAME tier priced in all three age groups.
+         *
+         * `fee_by_tier` above is one number, worked out from the group this
+         * child is in right now — and on the placement board the manager can
+         * move the child into a room of another group, at which point the
+         * confirm bills the new group and the number on screen was a promise
+         * about the old one. The whole line travels instead, so the screen can
+         * re-read it from whichever room is selected and show what will
+         * actually be charged. Nulls where the matrix has no cell.
+         */
+        fees_by_group: tierFeesByGroup({ pricing, tier: ct.contract?.tier }),
         tuition_type: ct.contract?.tuition_type || '',
         contract_start: ct.contract?.start_date || null,
         contract_end: ct.contract?.end_date || null,
