@@ -94,6 +94,70 @@ const fmtMoney = (n) => `${Number(n || 0).toLocaleString('he-IL')} ₪`;
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL') : '—');
 const fmtDateTime = (d) => (d ? new Date(d).toLocaleString('he-IL') : '—');
 
+/**
+ * הגיל בשתי צורות — אחת לעמודה, אחת ל־tooltip.
+ *
+ * "שנתיים ו-4 חודשים (28 חודשים)" is the right sentence and the wrong cell: at
+ * 1440px it wrapped to four lines and pushed every row in the table to four
+ * lines with it, which is what made the screen unreadable once the contract
+ * columns arrived. The cell gets "2 ש׳ 4 ח׳" — same information, one line —
+ * and the sentence stays one hover away.
+ */
+const compactAge = (a) => {
+  if (!a) return '—';
+  if (!a.years) return `${a.months} ח׳`;
+  return a.months_remainder ? `${a.years} ש׳ ${a.months_remainder} ח׳` : `${a.years} ש׳`;
+};
+
+/** Every cell that must never wrap: identity and numbers, which are read across. */
+const NOWRAP = { whiteSpace: 'nowrap' };
+
+/** Chips inside a one-line row — the table's own size, not MUI's. */
+const TIGHT_CHIP = { height: 20, fontSize: '0.7rem' };
+
+/** הו"ק — קיימת או חסרה, ולעולם לא פרטי הבנק. See paymentTermsFor on the server. */
+const SO_LABEL = { complete: 'קיימת', missing: 'חסרה' };
+
+/**
+ * תנאי התשלום כטקסט — the same block in the row's tooltip and in the dialog.
+ *
+ * Returned as lines rather than as JSX so the tooltip and the card can each
+ * lay it out their own way: the tooltip wants it dense, the dialog wants it
+ * spaced. The bank fields are not here because they never left the server.
+ */
+function paymentTermLines(terms) {
+  if (!terms) return [];
+  // Defensive: the server already stores only the last 4 digits, but this
+  // truncates again so a full card number never renders even if that ever
+  // regresses upstream.
+  const card = (v) => {
+    const digits = String(v || '').replace(/\D/g, '').slice(-4);
+    return digits ? ` · כרטיס ****${digits}` : '';
+  };
+  const lines = [
+    `שכ"ל: ${terms.tuition_method || 'לא נרשם'}${card(terms.tuition_card_last4)}`,
+  ];
+  // הקובץ אומר "דמי רישום" רק כשיש שיטת תשלום לצידה — אחרת "סכום בקובץ" הוא
+  // סתם עמודת סכום כללית שאין שום דבר שמייחס אותה לדמי רישום, ולכן היא
+  // מוצגת כשורה נפרדת ומשלה, ולא כחלק מהמשפט על דמי הרישום.
+  if (terms.registration_fee_method) {
+    lines.push([
+      `דמי רישום: ${terms.registration_fee_method}`,
+      terms.receipt_number ? `קבלה ${terms.receipt_number}` : '',
+    ].filter(Boolean).join(' · '));
+  }
+  if (terms.amount_in_file) {
+    lines.push(`סכום בקובץ: ${fmtMoney(terms.amount_in_file)}`);
+  }
+  if (terms.standing_order_status) {
+    lines.push(`הו"ק: ${SO_LABEL[terms.standing_order_status] || terms.standing_order_status}`);
+  }
+  if (terms.voucher_number) lines.push(`שובר: ${terms.voucher_number}`);
+  lines.push(`${terms.continuing ? 'ילד/ה ממשיך/ה' : 'רישום חדש'}`
+    + (terms.second_signer ? ` · חותם שני: ${terms.second_signer}` : ''));
+  return lines;
+}
+
 /** A count that is only worth showing when it is not zero. */
 function StatCard({ label, value, color, onClick, active, hint }) {
   return (
@@ -451,12 +515,16 @@ export default function TmtReconcile({
               once here rather than left to be learned from tooltips: the whole
               point of colouring the column is that it can be read without
               hovering over anything. */}
-          <Stack direction="row" spacing={1} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap alignItems="center">
-            <Typography variant="caption" color="text.secondary">אמצעי תשלום:</Typography>
+          {/* ONE LINE, and it scrolls rather than wraps. A legend that reflows
+              onto a second row pushes the table down and reads as content;
+              this is a ruler, and a ruler belongs at the edge of the page. */}
+          <Stack direction="row" spacing={0.75} sx={{ mb: 1.5, overflowX: 'auto', pb: 0.5 }}
+            flexWrap="nowrap" alignItems="center">
+            <Typography variant="caption" color="text.secondary" sx={NOWRAP}>אמצעי תשלום:</Typography>
             {METHOD_LEGEND.map(([kind, label]) => (
               <Chip key={kind} size="small" label={label}
                 color={METHOD_STYLE[kind].color} variant={METHOD_STYLE[kind].variant}
-                sx={{ height: 20, fontSize: '0.68rem' }} />
+                sx={{ height: 18, fontSize: '0.65rem' }} />
             ))}
           </Stack>
 
@@ -544,10 +612,15 @@ export default function TmtReconcile({
             </Stack>
           )}
 
-          <Card>
-            <Table size="small">
+          {/* ELEVEN COLUMNS DO NOT FIT IN 1440px AND SHOULD NOT TRY. Squeezing
+              them wrapped the name to two lines, the age to four and the dates
+              to two, and a table whose every row is four lines tall cannot be
+              scanned — which is the whole job of this screen. The table keeps
+              its natural width and the container scrolls sideways. */}
+          <Card sx={{ overflowX: 'auto' }}>
+            <Table size="small" sx={{ minWidth: 1320 }}>
               <TableHead>
-                <TableRow>
+                <TableRow sx={{ '& th': NOWRAP }}>
                   <TableCell>שם הילד/ה</TableCell>
                   <TableCell>ת״ז</TableCell>
                   <TableCell>תאריך לידה</TableCell>
@@ -563,32 +636,49 @@ export default function TmtReconcile({
                   <TableCell>חריגות</TableCell>
                   <TableCell>תמ"ת</TableCell>
                   <TableCell>קליקטאק</TableCell>
+                  {/* ITS OWN COLUMN AS OF THIS WEEK. The method chip used to
+                      ride inside חריגות, which put it in a different place on
+                      every row — after nought, one or four anomaly chips — and
+                      made it invisible on exactly the rows that have none. A
+                      column of colours can be read down; a chip that moves
+                      cannot be read at all. */}
+                  <TableCell>תשלום</TableCell>
                   <TableCell>כיתה / דרגה</TableCell>
-                  <TableCell />
+                  {/* The eye/detail button — pinned to the inline-end edge
+                      (physically the left in this RTL table) so it survives
+                      the sideways scroll the table above is built for. Below
+                      ~1320px the eleven columns push it off the visible
+                      width entirely; sticky keeps every row one click away
+                      no matter how far right the horizontal scroll sits. */}
+                  <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }} />
                 </TableRow>
               </TableHead>
               <TableBody>
                 {visible.map(r => (
                   <TableRow key={r.id_number} hover>
-                    <TableCell>{r.child_name}</TableCell>
-                    <TableCell>{r.id_number}</TableCell>
-                    <TableCell>
-                      {fmtDate(r.birth_date)}
-                      {r.age_source && (
-                        <Typography variant="caption" color="text.disabled" display="block">
-                          לפי {r.age_source}
-                        </Typography>
-                      )}
+                    <TableCell sx={NOWRAP}>{r.child_name}</TableCell>
+                    <TableCell sx={NOWRAP}>{r.id_number}</TableCell>
+                    {/* The source of the birth date used to be a second line
+                        under every date in the table — sixty repetitions of
+                        "לפי תמ"ת" to answer a question asked about two rows.
+                        It is a tooltip now. */}
+                    <TableCell sx={NOWRAP}>
+                      <Tooltip title={r.age_source ? `תאריך הלידה לפי ${r.age_source}` : ''}>
+                        <span>{fmtDate(r.birth_date)}</span>
+                      </Tooltip>
                     </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" fontWeight={600}>
-                        {r.age_at_year_start?.label || '—'}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        לפי הגיל: {r.age_at_year_start?.suggested_group || '—'}
-                        {r.age_group && r.age_group !== r.age_at_year_start?.suggested_group
-                          ? ` · בקבצים: ${r.age_group}` : ''}
-                      </Typography>
+                    {/* Compact on the line, complete on hover. See compactAge. */}
+                    <TableCell sx={NOWRAP}>
+                      <Tooltip title={[
+                        r.age_at_year_start?.label || '',
+                        `לפי הגיל: ${r.age_at_year_start?.suggested_group || '—'}`,
+                        r.age_group && r.age_group !== r.age_at_year_start?.suggested_group
+                          ? `בקבצים: ${r.age_group}` : '',
+                      ].filter(Boolean).join(' · ')}>
+                        <Typography variant="body2" fontWeight={600} component="span">
+                          {compactAge(r.age_at_year_start)}
+                        </Typography>
+                      </Tooltip>
                     </TableCell>
                     <TableCell>
                       <TextField
@@ -614,53 +704,25 @@ export default function TmtReconcile({
                       <Chip size="small" label={VERDICT_STYLE[r.verdict]?.short || r.verdict}
                         color={VERDICT_STYLE[r.verdict]?.color || 'default'} />
                     </TableCell>
+                    {/* ANOMALIES ONLY. The payment chip used to live here and
+                        it was never an anomaly — it is a fact about every
+                        family, and filing it among the ministry's findings
+                        both hid it and made the rows with real findings look
+                        worse than they are. It has its own column now. */}
                     <TableCell>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
                         {r.issues.map(i => (
                           <Tooltip key={i.code} title={i.detail || ''}>
                             <Chip size="small" variant="outlined" label={i.label}
-                              color={SEVERITY_COLOR[i.severity] || 'default'} />
+                              color={SEVERITY_COLOR[i.severity] || 'default'} sx={TIGHT_CHIP} />
                           </Tooltip>
                         ))}
-                        {/* HOW THE FAMILY PAYS — on every row that came from
-                            the registrations export, not only on the ones
-                            with a problem. The colour is the whole message
-                            (see METHOD_STYLE), and the tooltip carries the
-                            vendor's own wording, because the rule matches on
-                            a substring and the office has to be able to see
-                            what it actually matched. */}
-                        {r.clicktac?.payment_method_kind && (
-                          <Tooltip title={[
-                            r.clicktac.payment_method
-                              ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
-                              : 'בקליקטאק לא נרשמה צורת תשלום כלל',
-                            // The soft advice lives here rather than as a
-                            // second chip — "מומלץ לעבור להו"ק" is a
-                            // suggestion, and a table is not the place to
-                            // argue with sixty families at once.
-                            r.clicktac.payment_alert?.severity === 'warning'
-                              ? r.clicktac.payment_alert.label : '',
-                          ].filter(Boolean).join(' · ')}>
-                            <Chip size="small"
-                              color={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.color || 'default'}
-                              variant={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.variant || 'outlined'}
-                              label={r.clicktac.payment_method_kind.label} />
-                          </Tooltip>
-                        )}
-                        {/* And the verdict on it, when there is one. Kept
-                            separate from the chip above: "הו"ק" and "הו"ק ללא
-                            פרטי בנק" are two different facts, and folding them
-                            into one chip loses the first one. Errors only —
-                            a cheque already says everything it has to say in
-                            orange, and repeating it here would put a second
-                            chip on a third of the table. */}
-                        {r.clicktac?.payment_alert?.severity === 'error' && (
-                          <Chip size="small" color="error"
-                            label={r.clicktac.payment_alert.label} />
+                        {!r.issues.length && (
+                          <Typography variant="caption" color="text.disabled">—</Typography>
                         )}
                       </Stack>
                     </TableCell>
-                    <TableCell>
+                    <TableCell sx={NOWRAP}>
                       {r.tmt
                         ? `${r.tmt.decision}${r.tmt.is_present ? '' : ' (הוסר/ה)'}`
                         : <Typography variant="caption" color="error">לא ברשימה</Typography>}
@@ -669,7 +731,7 @@ export default function TmtReconcile({
                       {r.clicktac
                         ? (
                           <Stack spacing={0.5} alignItems="flex-start">
-                            <span>{r.clicktac.status}</span>
+                            <Typography variant="body2" sx={NOWRAP}>{r.clicktac.status}</Typography>
                             {/* The row exists because a contract was signed and
                                 nothing else — no parent, no phone, no payment
                                 method. It cannot be promoted, and saying so
@@ -677,7 +739,7 @@ export default function TmtReconcile({
                                 button. */}
                             {r.clicktac.missing_parents && (
                               <Tooltip title="הילד/ה מופיע/ה רק בייצוא החוזים של קליקטאק. יש לקלוט גם את ייצוא הנרשמים כדי לקבל הורים, טלפון ואמצעי תשלום.">
-                                <Chip size="small" color="error" label="חסר פרטי הורים" />
+                                <Chip size="small" color="error" label="חסר פרטי הורים" sx={TIGHT_CHIP} />
                               </Tooltip>
                             )}
                             {/* מאיזה קובץ הגיע/ה — פר שורה, ולא רק כתאריך
@@ -694,37 +756,84 @@ export default function TmtReconcile({
                         )
                         : <Typography variant="caption" color="error">לא נרשם</Typography>}
                     </TableCell>
-                    {/* From the contracts export, and nowhere else in either
-                        system: the class ClickTac put the child in and the
-                        subsidy tier the whole fee hangs on. */}
-                    <TableCell>
-                      {r.clicktac?.class_name || r.clicktac?.tier ? (
-                        <>
-                          <Typography variant="body2">{r.clicktac.class_name || '—'}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            דרגה {r.clicktac.tier === '' ? '—' : r.clicktac.tier}
-                            {r.clicktac.tuition_type ? ` · ${r.clicktac.tuition_type}` : ''}
-                          </Typography>
-                          {/* The tier alone is a number nobody can act on —
-                              "דרגה 4" means nothing without the branch's
-                              matrix in front of you. This is what it costs,
-                              and it is the fee the child will actually be
-                              billed on the placement board. */}
-                          {r.clicktac.fee_by_tier != null && (
-                            <Typography variant="caption" color="success.main" display="block" fontWeight={700}>
-                              שכ״ל לפי דרגה: {fmtMoney(r.clicktac.fee_by_tier)}
-                            </Typography>
+                    {/* ---- תשלום ---- */}
+                    <TableCell sx={NOWRAP}>
+                      {r.clicktac?.payment_method_kind ? (
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          {/* HOW THE FAMILY PAYS. The colour is the whole
+                              message (see METHOD_STYLE); the tooltip carries
+                              the vendor's own wording — the rule matches on a
+                              substring and the office has to be able to see
+                              what it matched — and, since this week, the terms
+                              behind it. */}
+                          <Tooltip title={(
+                            <Box>
+                              <Box sx={{ fontWeight: 700, mb: 0.5 }}>
+                                {r.clicktac.payment_method
+                                  ? `צורת תשלום בקליקטאק: ${r.clicktac.payment_method}`
+                                  : 'בקליקטאק לא נרשמה צורת תשלום כלל'}
+                              </Box>
+                              {paymentTermLines(r.clicktac.payment_terms).map((l, i) => (
+                                <Box key={i}>{l}</Box>
+                              ))}
+                              {/* The soft advice sits here rather than as a
+                                  second chip — "מומלץ לעבור להו"ק" is a
+                                  suggestion, and a table is not the place to
+                                  argue with sixty families at once. */}
+                              {r.clicktac.payment_alert?.severity === 'warning' && (
+                                <Box sx={{ mt: 0.5 }}>{r.clicktac.payment_alert.label}</Box>
+                              )}
+                            </Box>
+                          )}>
+                            <Chip size="small" sx={TIGHT_CHIP}
+                              color={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.color || 'default'}
+                              variant={METHOD_STYLE[r.clicktac.payment_method_kind.kind]?.variant || 'outlined'}
+                              label={r.clicktac.payment_method_kind.label} />
+                          </Tooltip>
+                          {/* And the verdict on it, when there is one. Kept
+                              separate from the chip above: "הו"ק" and "הו"ק
+                              ללא פרטי בנק" are two different facts, and
+                              folding them into one chip loses the first.
+                              Errors only — a cheque already says everything it
+                              has to say in orange. */}
+                          {r.clicktac.payment_alert?.severity === 'error' && (
+                            <Chip size="small" color="error" sx={TIGHT_CHIP}
+                              label={r.clicktac.payment_alert.label} />
                           )}
-                        </>
+                        </Stack>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>
+                    {/* From the contracts export, and nowhere else in either
+                        system: the class ClickTac put the child in and the
+                        subsidy tier the whole fee hangs on. On ONE line —
+                        "דרגה 7 · 1,410 ₪", because the tier alone is a number
+                        nobody can act on ("דרגה 4" means nothing without the
+                        branch's matrix in front of you) and the two of them
+                        stacked cost three lines on every contract row. */}
                     <TableCell>
+                      {r.clicktac?.class_name || r.clicktac?.tier ? (
+                        <Tooltip title={r.clicktac.tuition_type || ''}>
+                          <Box>
+                            <Typography variant="body2" sx={NOWRAP}>
+                              {r.clicktac.class_name || '—'}
+                            </Typography>
+                            <Typography variant="caption" sx={NOWRAP}
+                              color={r.clicktac.fee_by_tier != null ? 'success.main' : 'text.secondary'}
+                              fontWeight={r.clicktac.fee_by_tier != null ? 700 : 400}>
+                              דרגה {r.clicktac.tier === '' ? '—' : r.clicktac.tier}
+                              {r.clicktac.fee_by_tier != null ? ` · ${fmtMoney(r.clicktac.fee_by_tier)}` : ''}
+                            </Typography>
+                          </Box>
+                        </Tooltip>
+                      ) : <Typography variant="caption" color="text.disabled">—</Typography>}
+                    </TableCell>
+                    <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }}>
                       <IconButton size="small" onClick={() => setDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
                     </TableCell>
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={11} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={12} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">אין רשומות להצגה</Typography>
                   </TableCell></TableRow>
                 )}
@@ -869,6 +978,32 @@ export default function TmtReconcile({
                         {detail.clicktac.parent2_name} · {detail.clicktac.parent2_phone}
                       </Typography>
                       <Typography variant="body2">{detail.clicktac.address}</Typography>
+
+                      {/* ---- תנאי תשלום ----
+                          Everything the office needs before it picks up the
+                          phone, in the one place a person opens when they are
+                          about to. The bank details are NOT here and never
+                          travelled — the list response carries "קיימת / חסרה"
+                          and nothing else (see paymentTermsFor on the server);
+                          the record screen is where a הו"ק is actually filed. */}
+                      {detail.clicktac.payment_terms && (
+                        <>
+                          <Divider sx={{ my: 1 }} />
+                          <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                            תנאי תשלום
+                          </Typography>
+                          {paymentTermLines(detail.clicktac.payment_terms).map((l, i) => (
+                            <Typography key={i} variant="body2">{l}</Typography>
+                          ))}
+                          {detail.clicktac.payment_alert && (
+                            <Alert sx={{ mt: 1, py: 0 }}
+                              severity={detail.clicktac.payment_alert.severity === 'error' ? 'error' : 'warning'}>
+                              {detail.clicktac.payment_alert.label}
+                            </Alert>
+                          )}
+                        </>
+                      )}
+
                       {detail.clicktac.review_status === 'imported' && (
                         <Alert severity="info" sx={{ mt: 1 }}>הרשומה כבר נקלטה למערכת כרישום</Alert>
                       )}

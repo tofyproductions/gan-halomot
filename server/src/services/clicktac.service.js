@@ -214,6 +214,10 @@ function parseDate(value) {
 }
 
 const str = (v) => (v == null ? '' : String(v).trim());
+// ClickTac's "פרטי כרטיס אשראי …" cell holds the card number as typed —
+// sometimes masked, sometimes not. We only ever want the last 4 digits;
+// never store or forward anything longer than that.
+const last4 = (v) => str(v).replace(/\D/g, '').slice(-4);
 const bool = (v) => {
   const s = str(v).toUpperCase();
   if (!s) return false;
@@ -282,9 +286,9 @@ function parseRow(row, { branchId, sourceFile = '' }) {
     portal: str(c('portal')),
     receipt_number: str(c('receipt')),
     registration_fee_method: str(c('reg_fee_method')),
-    registration_fee_card_last4: str(c('reg_fee_card')),
+    registration_fee_card_last4: last4(c('reg_fee_card')),
     tuition_method: str(c('tuition_method')),
-    tuition_card_last4: str(c('tuition_card')),
+    tuition_card_last4: last4(c('tuition_card')),
     voucher_number: str(c('voucher')),
     amount: Number(str(c('amount')).replace(/[^\d.-]/g, '')) || 0,
   };

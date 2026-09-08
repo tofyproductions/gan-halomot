@@ -13,6 +13,15 @@
  * never read — MONGODB_URI etc. are set before src/index.js is required.
  *
  * Usage: node scripts/viewer-demo-server.js
+ *        DEMO_CLICKTAC=1 node scripts/viewer-demo-server.js
+ *
+ * DEMO_CLICKTAC=1 also seeds the רישום חיצוני screen for תל אביב — a twelve
+ * child cohort covering every payment method the colour column paints, two
+ * contracts-only rows, a price matrix so the דרגה shows a fee, and a תמ"ת
+ * approval list to compare against. Off by default because it is a second
+ * database of a different shape and most runs of this script are about roles.
+ * See scripts/demo-clicktac-seed.js.
+ *
  * Leaves the API listening on :3001 (same as normal dev), unless that port
  * is already taken, in which case set PORT yourself before running.
  */
@@ -35,8 +44,18 @@ async function main() {
 
   const mongoose = require('mongoose');
   await mongoose.connect(uri);
-  const logins = await seed();
+  const { logins, clicktac } = await seed();
   await mongoose.disconnect();
+
+  if (clicktac) {
+    console.log('\n--- רישום חיצוני (תל אביב, %s) ---', clicktac.academic_year);
+    console.log(`  ייצוא חוזים: ${clicktac.contracts} שורות`);
+    console.log(`  ייצוא נרשמים: ${clicktac.registrations} שורות`);
+    console.log(`  רשימת תמ"ת: ${clicktac.tmt} אישורים`);
+    console.log(`  סה"כ ילדים בהצלבה: ${clicktac.cohort}`);
+  } else {
+    console.log('\n(ללא נתוני קליקטאק — הרץ עם DEMO_CLICKTAC=1 כדי לזרוע את מסך רישום חיצוני)');
+  }
 
   console.log(`Demo database seeded. Starting server on :${process.env.PORT} ...`);
   require('../src/index.js');
@@ -122,12 +141,38 @@ async function seed() {
   }
   if (punchDocs.length > 0) await Punch.insertMany(punchDocs);
 
-  return [
-    { role: admin.role, full_name: admin.full_name, id_number: admin.id_number, email: admin.email },
-    { role: acc.role, full_name: acc.full_name, id_number: acc.id_number, email: acc.email },
-    { role: viewer.role, full_name: viewer.full_name, id_number: viewer.id_number, email: viewer.email },
-    { role: manager.role, full_name: manager.full_name, id_number: manager.id_number, email: manager.email },
-  ];
+  /**
+   * רישום חיצוני, when asked for.
+   *
+   * The cohort is pushed through the REAL ClickTac importers rather than
+   * written as documents — see the note at the top of demo-clicktac-seed.js.
+   * It is the admin who "uploads" it, because the screen shows who did and a
+   * blank name in the history dialog reads as a bug.
+   */
+  let clicktac = null;
+  if (process.env.DEMO_CLICKTAC === '1') {
+    const { enrollmentYear } = require('../src/services/academic-year.service');
+    const { seedClickTacDemo } = require('./demo-clicktac-seed');
+    const academicYear = enrollmentYear();
+    clicktac = {
+      academic_year: academicYear,
+      ...await seedClickTacDemo({
+        branch: branchTA,
+        user: { id: String(admin._id), role: admin.role },
+        academicYear,
+      }),
+    };
+  }
+
+  return {
+    logins: [
+      { role: admin.role, full_name: admin.full_name, id_number: admin.id_number, email: admin.email },
+      { role: acc.role, full_name: acc.full_name, id_number: acc.id_number, email: acc.email },
+      { role: viewer.role, full_name: viewer.full_name, id_number: viewer.id_number, email: viewer.email },
+      { role: manager.role, full_name: manager.full_name, id_number: manager.id_number, email: manager.email },
+    ],
+    clicktac,
+  };
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

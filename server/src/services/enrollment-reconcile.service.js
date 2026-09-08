@@ -213,6 +213,66 @@ function parentPhones(ct) {
 }
 
 /**
+ * תנאי התשלום — what the office reads before it phones a family, and nothing
+ * a bank account could be emptied with.
+ *
+ * WHAT TRAVELS AND WHAT DOES NOT. The bank sub-document IS read on this path —
+ * `paymentAlert` cannot tell a complete הו"ק from one still waiting on the
+ * details without it — and it stops here: the standing order leaves as ONE
+ * WORD, קיימת or חסרה. A list of sixty children is not a place an account
+ * number belongs, and the single-record dialog fetches its own copy for the
+ * one case where somebody actually has to file it. See the select() note in
+ * tmtApproval.controller#buildReconciliation.
+ *
+ * WHY THE METHODS ARE CARRIED RAW. `payment_method_kind` is the colour and it
+ * is deliberately coarse — five kinds over free text the vendor changes at
+ * will. These two fields are what the file literally said, which is what the
+ * office has to see when it disagrees with the colour, and דמי רישום has no
+ * chip at all: it is a second, separate payment, usually on a different card.
+ *
+ * Null for a row that has only ever been in the contracts export. That file
+ * has no payment columns, so "no terms" there is a fact about which upload has
+ * happened and not about the family — the same rule paymentMethodFor applies,
+ * and it is reused rather than restated.
+ */
+function paymentTermsFor(ct) {
+  if (!ct || !paymentMethodFor(ct)) return null;
+  const e = ct.enrollment || {};
+  const so = ct.standing_order || {};
+  // Both halves or nothing: a הו"ק cannot be filed with either one missing,
+  // which is the same test paymentAlert makes.
+  const hasBank = !!String(so.bank || '').trim() && !!String(so.account || '').trim();
+  const wantsStandingOrder = paymentMethodFor(ct)?.kind === 'standing_order';
+  return {
+    // שכ"ל — the recurring money.
+    tuition_method: String(e.tuition_method || '').trim(),
+    tuition_card_last4: String(e.tuition_card_last4 || '').trim(),
+    // דמי רישום — the one-off, with the receipt that proves it was taken.
+    registration_fee_method: String(e.registration_fee_method || '').trim(),
+    registration_fee_card_last4: String(e.registration_fee_card_last4 || '').trim(),
+    // The file's generic "סכום תשלום" column — not necessarily דמי רישום.
+    // ClickTac has no column that says which payment this amount belongs to,
+    // so this is reported on its own line and never folded into the
+    // registration-fee line above it.
+    amount_in_file: Number(e.amount || 0) || 0,
+    receipt_number: String(e.receipt_number || '').trim(),
+    voucher_number: String(e.voucher_number || '').trim(),
+    /**
+     * 'complete' / 'missing' / '' — never the bank fields themselves.
+     *
+     * Empty for a family that is not on a standing order at all and never
+     * filled the columns in: saying "חסרה" about them would read as a problem
+     * with a family that does not have one and does not need one.
+     */
+    standing_order_status: (wantsStandingOrder || hasBank)
+      ? (hasBank ? 'complete' : 'missing')
+      : '',
+    continuing: !!e.continuing,
+    second_signer: String(e.second_signer || '').trim(),
+  };
+}
+
+/**
  * Compare one child's two records and list what disagrees.
  *
  * Only called when the child is on both sides — a child missing from one list
@@ -491,6 +551,17 @@ function reconcile({
          */
         payment_method_kind: paymentMethodFor(ct),
         payment_alert: paymentAlertFor(ct),
+        /**
+         * תנאי התשלום, in full — שכ"ל, דמי רישום, קבלה, שובר, הו"ק כן/לא.
+         *
+         * The chip above is one colour and it answers one question. This is
+         * what the office actually has to know before it calls: which card the
+         * שכ"ל sits on, whether the registration fee was taken and against what
+         * receipt, and whether the standing order exists at all. It was in the
+         * file from the first upload and no screen ever showed it. Bank fields
+         * excluded by construction — see paymentTermsFor.
+         */
+        payment_terms: paymentTermsFor(ct),
         class_name: ct.contract?.class_name || '',
         // The subsidy bracket the whole fee hangs on — the number that was in
         // neither file until the contracts export was accepted.
@@ -586,6 +657,6 @@ function reconcile({
 }
 
 module.exports = {
-  reconcile, compareNames, issuesFor, verdictFor, ageAtYearStart,
+  reconcile, compareNames, issuesFor, verdictFor, ageAtYearStart, paymentTermsFor,
   VERDICTS, ISSUES, CANCELLED,
 };
