@@ -1,0 +1,550 @@
+#!/usr/bin/env node
+/**
+ * שני הייצואים של קליקטאק, דרך אותו כפתור, לשורה אחת לכל ילד/ה.
+ *
+ * THE STORY THIS TEST TELLS. בפורטל של קליקטאק יש שני דוחות ואף אחד מהם אינו
+ * הילד/ה השלם/ה. ייצוא הנרשמים מביא את המשפחה — שני הורים, טלפונים, אמצעי
+ * תשלום, הוראת קבע — ואין בו לא כיתה ולא דרגה. ייצוא החוזים מביא בדיוק את מה
+ * שחסר שם — הכיתה שאליה שובצו, סוג המימון, הדרגה שממנה נגזר כל שכר הלימוד,
+ * ותאריכי החוזה — ואין בו אף עמודת הורה.
+ *
+ * המשרד צריך את שניהם. עד עכשיו הדרגה נבחרה ידנית פעם אחת לכל קליטה והוחלה על
+ * כל הילדים, כי היא פשוט לא הייתה בקובץ.
+ *
+ * WHAT MUST HOLD:
+ *   1. הכותרות — ולא שם הקובץ — מחליטות איזה ייצוא זה. שם הקובץ משתנה בדרך.
+ *   2. שורת חוזה מתפרשת נכון: תאריכי אקסל מספריים הופכים לתאריכים, ת"ז נשארת
+ *      ספרות בלבד (ודרכון נשאר כמו שהוא), הדרגה נשמרת גם כשהיא 0.
+ *   3. קליטת חוזים בלבד יוצרת שורות — עם כיתה ודרגה, בלי הורים — ואי אפשר
+ *      לקלוט אותן למערכת: התשובה היא הודעה שאומרת בדיוק איזה קובץ חסר.
+ *   4. קליטת הנרשמים אחר כך ממלאת את אותן שורות ולא יוצרת כפילות, וממנה
+ *      והלאה אפשר לקלוט.
+ *   5. וגם בסדר ההפוך — נרשמים ואז חוזים — יוצא אותו מספר שורות.
+ *   6. קליטה חוזרת של אותו קובץ חוזים אינה משנה דבר.
+ *
+ * THE DATABASE IS EPHEMERAL AND LOCAL. mongodb-memory-server מריץ mongod אמיתי
+ * בתיקייה זמנית, ו-dotenv מנוטרל לפני שמשהו טוען אותו — server/.env במכונה
+ * הזאת מצביע על הפרודקשן ואסור שייקרא. תבנית ההרמה מועתקת מ-viewer-e2e.test.js.
+ *
+ *   node scripts/clicktac-contracts.test.js
+ */
+const net = require('net');
+const http = require('http');
+
+/* ------------------------------------------------------------------ *
+ * 1. Nothing may read server/.env. Stub dotenv before anything loads it.
+ * ------------------------------------------------------------------ */
+const dotenvPath = require.resolve('dotenv');
+require.cache[dotenvPath] = {
+  id: dotenvPath, filename: dotenvPath, loaded: true, children: [], paths: [],
+  exports: { config: () => ({ parsed: {} }), parse: () => ({}) },
+};
+
+const XLSX = require('xlsx');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
+
+const {
+  COLUMNS, CONTRACT_COLUMNS, detectExportType, parseContractsRow, parseDate,
+} = require('../src/services/clicktac.service');
+
+const PASSWORD = 'test1234';
+const YEAR = 'תשפ"ז';
+
+let failures = 0;
+let checks = 0;
+
+function ok(cond, label, detail = '') {
+  checks++;
+  if (cond) console.log(`  ✅ ${label}`);
+  else { failures++; console.log(`  ❌ ${label}${detail ? `  (${detail})` : ''}`); }
+  return !!cond;
+}
+
+const eq = (actual, expected, label) => ok(
+  JSON.stringify(actual) === JSON.stringify(expected),
+  label,
+  `קיבלנו ${JSON.stringify(actual)}, ציפינו ${JSON.stringify(expected)}`,
+);
+
+const head = (t) => console.log(`\n${t}`);
+
+/* ================================================================== *
+ * The two files, built as real xlsx and read back the way importFile
+ * reads an upload.
+ * ================================================================== */
+
+/** Excel's own day count for a date — what an unformatted date cell holds. */
+function excelSerial(y, m, d) {
+  return Math.round((Date.UTC(y, m - 1, d) / 86400000) + 25569);
+}
+
+function sheetBuffer(header, rows, sheetName) {
+  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
+const CONTRACTS_HEADER = Object.values(CONTRACT_COLUMNS);
+
+/**
+ * One contracts row. The dates go in as bare Excel serials, exactly as the
+ * real export has them — that is the shape the parser has to survive.
+ */
+function contractRow({ id, first, last, idNumber, idType = 'ת.ז.', birth, cls, tier }) {
+  const by = {
+    [CONTRACT_COLUMNS.contract_id]: id,
+    [CONTRACT_COLUMNS.child_first]: first,
+    [CONTRACT_COLUMNS.child_last]: last,
+    [CONTRACT_COLUMNS.nickname]: '',
+    [CONTRACT_COLUMNS.birth_date]: excelSerial(...birth),
+    [CONTRACT_COLUMNS.birth_date_hebrew]: 'ל׳ בשבט',
+    [CONTRACT_COLUMNS.id_type]: idType,
+    [CONTRACT_COLUMNS.id_number]: idNumber,
+    [CONTRACT_COLUMNS.health_fund]: 'מכבי',
+    [CONTRACT_COLUMNS.medical_notes]: '',
+    [CONTRACT_COLUMNS.registered_at]: excelSerial(2026, 5, 3),
+    [CONTRACT_COLUMNS.status]: 'התקבל',
+    [CONTRACT_COLUMNS.age_group]: 'פעוט',
+    [CONTRACT_COLUMNS.admin_notes]: '',
+    [CONTRACT_COLUMNS.institution]: 'הרצליה',
+    [CONTRACT_COLUMNS.year]: YEAR,
+    [CONTRACT_COLUMNS.class_name]: cls,
+    [CONTRACT_COLUMNS.tuition_type]: 'מימון משרד הכלכלה',
+    [CONTRACT_COLUMNS.tier]: tier,
+    [CONTRACT_COLUMNS.start_date]: excelSerial(2026, 9, 1),
+    [CONTRACT_COLUMNS.end_date]: excelSerial(2027, 8, 31),
+    [CONTRACT_COLUMNS.tags]: 'ספטמבר',
+    [CONTRACT_COLUMNS.created_by]: 'אלון',
+    [CONTRACT_COLUMNS.created_at]: excelSerial(2026, 5, 3),
+    [CONTRACT_COLUMNS.updated_by]: 'אלון',
+    [CONTRACT_COLUMNS.updated_at]: excelSerial(2026, 5, 3),
+  };
+  return CONTRACTS_HEADER.map(h => by[h] ?? '');
+}
+
+const REGISTRATIONS_HEADER = Object.values(COLUMNS);
+
+function registrationRow({ first, last, idNumber, birth, parentFirst, parentPhone }) {
+  const [y, m, d] = birth;
+  const by = {
+    [COLUMNS.institution]: 'הרצליה',
+    [COLUMNS.year]: YEAR,
+    [COLUMNS.child_first]: first,
+    [COLUMNS.child_last]: last,
+    [COLUMNS.child_id]: idNumber,
+    [COLUMNS.birth_date]: `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`,
+    [COLUMNS.age_group]: 'פעוט',
+    [COLUMNS.gender]: 'זכר',
+    [COLUMNS.health_fund]: 'כללית',
+    [COLUMNS.p1_first]: parentFirst,
+    [COLUMNS.p1_last]: last,
+    [COLUMNS.p1_id]: '311111111',
+    [COLUMNS.p1_relation]: 'אם',
+    [COLUMNS.p1_phone]: parentPhone,
+    [COLUMNS.p1_email]: 'a@b.co.il',
+    [COLUMNS.p1_address]: 'הרצל 1',
+    [COLUMNS.status]: 'התקבל',
+    [COLUMNS.tuition_method]: 'כרטיס אשראי',
+  };
+  return REGISTRATIONS_HEADER.map(h => by[h] ?? '');
+}
+
+/** The three children both files share, plus one only the registrations has. */
+const KIDS = [
+  { id: '337198', first: 'אור', last: 'אבוחצירא', idNumber: '241111117', birth: [2025, 1, 20], cls: 'בוגרים א', tier: 0 },
+  { id: '337199', first: 'נועם', last: 'כהן', idNumber: '242222225', birth: [2025, 3, 5], cls: 'בוגרים ב', tier: 7 },
+  { id: '337200', first: 'שירה', last: 'לוי', idNumber: '243333333', birth: [2024, 11, 2], cls: 'בוגרים א', tier: 12 },
+];
+const EXTRA_KID = { first: 'איתי', last: 'מזרחי', idNumber: '244444441', birth: [2025, 2, 14] };
+
+const contractsFile = () => sheetBuffer(
+  CONTRACTS_HEADER,
+  KIDS.map(k => contractRow(k)),
+  'Worksheet 1',
+);
+
+const registrationsFile = () => sheetBuffer(
+  REGISTRATIONS_HEADER,
+  [...KIDS, EXTRA_KID].map((k, i) => registrationRow({
+    ...k, parentFirst: `הורה${i + 1}`, parentPhone: `05000000${i + 1}`,
+  })),
+  'Sheet1',
+);
+
+/* ================================================================== *
+ * HTTP plumbing (same shape as viewer-e2e.test.js)
+ * ================================================================== */
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const { port } = srv.address();
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+let PORT = 0;
+
+function request({ method = 'GET', path, token, body, headers = {} }) {
+  return new Promise((resolve, reject) => {
+    const h = { ...headers };
+    let payload = null;
+    if (body !== undefined && body !== null) {
+      if (Buffer.isBuffer(body)) {
+        payload = body;
+      } else {
+        payload = Buffer.from(JSON.stringify(body));
+        h['Content-Type'] = h['Content-Type'] || 'application/json';
+      }
+      h['Content-Length'] = payload.length;
+    }
+    if (token) h.Authorization = `Bearer ${token}`;
+    const req = http.request({ host: '127.0.0.1', port: PORT, path, method, headers: h }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* not json */ }
+        resolve({ status: res.statusCode, body: json, text });
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(30000, () => req.destroy(new Error('timeout')));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+/** multipart/form-data, hand-built — the import route is behind multer. */
+function upload({ token, path, fileName, buffer, fields = {} }) {
+  const boundary = `----ganTest${Date.now()}`;
+  const parts = [];
+  for (const [k, v] of Object.entries(fields)) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`, 'utf8',
+    ));
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\n`
+    + 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\r\n\r\n',
+    'utf8',
+  ));
+  parts.push(buffer);
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+  return request({
+    method: 'POST', path, token, body: Buffer.concat(parts),
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+  });
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function waitForServer() {
+  for (let i = 0; i < 100; i++) {
+    try {
+      const r = await request({ path: '/api/health' });
+      if (r.status === 200) return true;
+    } catch { /* not up yet */ }
+    await sleep(200);
+  }
+  throw new Error('השרת לא ענה על /api/health');
+}
+
+/* ================================================================== */
+
+let mongod = null;
+let server = null;
+
+/* ---- part 1: the pure functions, no database at all ---- */
+
+function unitChecks() {
+  head('בדיקה 1 — הכותרות מחליטות איזה קובץ זה');
+  {
+    const rowsOf = (buf) => {
+      const wb = XLSX.read(buf, { type: 'buffer' });
+      return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null, raw: false });
+    };
+    const contractsRow = rowsOf(contractsFile())[0];
+    const registrationsRow = rowsOf(registrationsFile())[0];
+
+    eq(detectExportType(contractsRow), 'contracts', '1a ייצוא החוזים מזוהה');
+    eq(detectExportType(registrationsRow), 'registrations', '1b ייצוא הנרשמים מזוהה');
+    // Two of the three contract columns, but no id column — not identifiable,
+    // and must not be guessed at.
+    eq(detectExportType({ 'מעון': '', 'דרגה': '' }), null, '1c גיליון שאינו אף אחד מהשניים — null');
+    eq(detectExportType([]), null, '1d גיליון ריק — null');
+    // The name is not evidence: the same header would be read the same way
+    // whatever the file on disk is called.
+    eq(detectExportType(CONTRACTS_HEADER), 'contracts', '1e הזיהוי הוא לפי הכותרות, גם כרשימה');
+  }
+
+  head('בדיקה 2 — פירוק שורת חוזה');
+  {
+    const wb = XLSX.read(contractsFile(), { type: 'buffer' });
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null, raw: false });
+    const parsed = parseContractsRow(rows[0], { sourceFile: 'contracts_export_991.xlsx' });
+
+    eq(parsed.child.full_name, 'אור אבוחצירא', '2a שם מלא');
+    eq(parsed.child.id_number, '241111117', '2b ת"ז — ספרות בלבד');
+    eq(parsed.child.id_type, 'ת.ז.', '2c סוג מספר הזהות נשמר');
+    // The whole point of the serial handling: 45677 is a date, not a number.
+    eq(parsed.child.birth_date?.toISOString().slice(0, 10), '2025-01-20',
+      '2d תאריך לידה — סריאל אקסל הומר לתאריך');
+    eq(parsed.contract.start_date?.toISOString().slice(0, 10), '2026-09-01', '2e תחילת חוזה');
+    eq(parsed.contract.end_date?.toISOString().slice(0, 10), '2027-08-31', '2f סיום חוזה');
+    eq(parsed.contract.class_name, 'בוגרים א', '2g הכיתה');
+    // 0 is a REAL tier. A numeric coercion of a blank cell would give every
+    // child in the file this same value, which is why it is kept as a string.
+    eq(parsed.contract.tier, '0', '2h דרגה 0 נשמרת ואינה נעלמת');
+    eq(parsed.contract.status, 'התקבל', '2i הסטטוס');
+    eq(parsed.contract.tuition_type, 'מימון משרד הכלכלה', '2j שכר לימוד הוא סוג מימון, לא סכום');
+    eq(parsed.contract.institution, 'הרצליה', '2k מעון — נשמר כעובדה, ואינו הסניף');
+    eq(parsed.academic_year, '2026-2027', '2l שנת הלימודים תורגמה');
+    ok(parsed.computed.age_group === 'פעוט' || parsed.computed.age_group === 'בוגר',
+      '2m שכבת גיל חושבה', `age_group=${parsed.computed.age_group} months=${parsed.computed.age_months}`);
+    ok(!('parent1' in parsed), '2n אין הורים בשורת חוזה — ואין המצאה של שדות ריקים');
+  }
+
+  head('בדיקה 3 — דרכון אינו ת"ז');
+  {
+    const wb = XLSX.read(
+      sheetBuffer(CONTRACTS_HEADER, [contractRow({
+        ...KIDS[0], idNumber: 'X12-345A', idType: 'דרכון',
+      })], 'Worksheet 1'),
+      { type: 'buffer' },
+    );
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null, raw: false });
+    const parsed = parseContractsRow(rows[0]);
+    // Stripping the letters would collapse two different passports onto the
+    // same digits, and merge two children into one row.
+    eq(parsed.child.id_number, 'X12-345A', '3a מספר דרכון נשמר כמו שהוא');
+  }
+
+  head('בדיקה 4 — parseDate');
+  {
+    eq(parseDate('01/09/2026')?.toISOString().slice(0, 10), '2026-09-01', '4a DD/MM/YYYY');
+    eq(parseDate(String(excelSerial(2026, 9, 1)))?.toISOString().slice(0, 10), '2026-09-01',
+      '4b סריאל אקסל');
+    // The real value out of `תאריך יצירה` — a serial with the time of day on
+    // it. The fraction must not push it onto the wrong day.
+    eq(parseDate('46196.38')?.toISOString().slice(0, 10), '2026-06-23', '4c סריאל עם שעה');
+    eq(parseDate(''), null, '4d ריק');
+    // Without the guard this read as the year 1234.
+    eq(parseDate('1234'), null, '4e מספר שאינו סריאל סביר אינו תאריך');
+  }
+}
+
+/* ---- part 2: end to end, against the real server ---- */
+
+async function main() {
+  console.log('=== קליקטאק — שני הייצואים דרך כפתור אחד ===');
+
+  unitChecks();
+
+  mongod = await MongoMemoryServer.create({ instance: { dbName: 'gan_clicktac_contracts' } });
+  PORT = await freePort();
+
+  process.env.MONGODB_URI = mongod.getUri();
+  process.env.JWT_SECRET = 'clicktac-contracts-secret';
+  process.env.PARENT_SECRET = 'clicktac-contracts-parent-secret';
+  process.env.DISABLE_JOBS = '1';
+  process.env.PORT = String(PORT);
+  process.env.FRONTEND_URL = 'http://localhost:4173';
+  process.env.NODE_ENV = 'development';
+  process.env.GC_REEXEC = '1';
+  delete process.env.PLATFORM_MONGODB_URI;
+
+  const express = require('express');
+  const originalListen = express.application.listen;
+  express.application.listen = function patched(...args) {
+    server = originalListen.apply(this, args);
+    return server;
+  };
+  require('../src/index.js');
+  await waitForServer();
+  express.application.listen = originalListen;
+
+  const host = String(mongoose.connection.host || '');
+  if (!/^(127\.0\.0\.1|localhost|::1)$/.test(host)) {
+    throw new Error(`מסד הנתונים אינו מקומי (${host}) — עוצרים`);
+  }
+  console.log(`\nשרת עלה על :${PORT}, מסד נתונים בזיכרון (${host})`);
+
+  const { User, Branch, ExternalEnrollment, EnrollmentImport } = require('../src/models');
+  const branch = await Branch.create({ name: 'הרצליה', address: 'סוקולוב 1' });
+  await User.create({
+    email: 'admin@ct.local', full_name: 'אורי מנהל', id_number: '900000001',
+    role: 'system_admin', branch_id: branch._id, position: 'מנהל מערכת',
+    password_hash: await bcrypt.hash(PASSWORD, 10), password_set: true, is_active: true,
+  });
+  const login = await request({
+    method: 'POST', path: '/api/auth/login-password',
+    body: { full_name: 'אורי מנהל', id_number: '900000001', password: PASSWORD },
+  });
+  const token = login.body?.token;
+  if (!token) throw new Error(`התחברות נכשלה: ${login.status} ${login.text}`);
+
+  const branchId = String(branch._id);
+  const importContracts = () => upload({
+    token, path: '/api/external-enrollments/import',
+    fileName: 'contracts_export_1739.xlsx', buffer: contractsFile(),
+    fields: { branch_id: branchId, academic_year: YEAR },
+  });
+  const importRegistrations = () => upload({
+    token, path: '/api/external-enrollments/import',
+    fileName: 'Registrations Export.xlsx', buffer: registrationsFile(),
+    fields: { branch_id: branchId, academic_year: YEAR },
+  });
+  const listRows = async () => {
+    const r = await request({ token, path: `/api/external-enrollments?year=${encodeURIComponent(YEAR)}` });
+    return r.body;
+  };
+  const wipe = async () => {
+    await ExternalEnrollment.deleteMany({});
+    await EnrollmentImport.deleteMany({});
+  };
+
+  /* ------------------------------------------------------------ *
+   * (a) contracts first
+   * ------------------------------------------------------------ */
+  head('בדיקה 5 — קליטת קובץ חוזים בלבד');
+  let firstRowId = null;
+  {
+    const res = await importContracts();
+    ok(res.status === 200, '5a הקובץ נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
+    eq(res.body?.export_type, 'contracts', '5b המערכת זיהתה שזה ייצוא החוזים');
+    eq(res.body?.created, 3, '5c נוצרו 3 שורות');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 3, '5d ובטבלה יש 3 שורות');
+    const row = data.enrollments.find(e => e.child.full_name === 'אור אבוחצירא');
+    firstRowId = row?.id;
+    eq(row?.sources, ['contracts'], '5e המקור הוא ייצוא החוזים בלבד');
+    eq(row?.missing_parents, true, '5f והשורה מסומנת כחסרת פרטי הורים');
+    eq(row?.parent1?.first_name, '', '5g אין הורה — ולא הומצא אחד');
+    eq(row?.contract?.class_name, 'בוגרים א', '5h הכיתה נשמרה');
+    eq(row?.contract?.tier, '0', '5i והדרגה');
+    eq(data?.summary?.missing_parents, 3, '5j המונה סופר את שלושתם');
+    eq(data?.summary?.with_contract, 3, '5k ולשלושתם יש חוזה');
+
+    // The card the office reads: contracts in, registrations still missing.
+    ok(!!data?.last_import?.contracts, '5l "קובץ אחרון" יודע על קליטת החוזים');
+    eq(data?.last_import?.contracts?.export_type, 'contracts', '5m ומסומן כייצוא חוזים');
+    eq(data?.last_import?.registrations, null, '5n וייצוא הנרשמים — טרם הועלה');
+  }
+
+  head('בדיקה 6 — שורה בלי הורים אינה נקלטת למערכת');
+  {
+    const res = await request({
+      method: 'POST', token, path: `/api/external-enrollments/${firstRowId}/promote`,
+      body: { monthly_fee: 1500 },
+    });
+    eq(res.status, 400, '6a הקליטה נדחית');
+    eq(res.body?.code, 'MISSING_PARENTS', '6b עם קוד שאפשר לתפוס');
+    ok(/ייצוא הנרשמים/.test(res.body?.error || ''),
+      '6c וההודעה אומרת איזה קובץ חסר', res.body?.error);
+
+    const bulk = await request({
+      method: 'POST', token, path: '/api/external-enrollments/promote-bulk',
+      body: { ids: [firstRowId], fees_by_age_group: { 'פעוט': 1500, 'בוגר': 1500 } },
+    });
+    eq(bulk.body?.imported, 0, '6d גם בקליטה מרובה — אף אחד לא נקלט');
+    eq(bulk.body?.skipped?.[0]?.code, 'MISSING_PARENTS', '6e ואותה סיבה מדווחת פר שורה');
+  }
+
+  head('בדיקה 7 — ואז ייצוא הנרשמים, לאותם ילדים');
+  {
+    const res = await importRegistrations();
+    ok(res.status === 200, '7a הקובץ נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
+    eq(res.body?.export_type, 'registrations', '7b זוהה כייצוא הנרשמים');
+    // The three already exist — they must be FILLED, not duplicated.
+    eq(res.body?.created, 1, '7c נוצרה שורה אחת בלבד (הילד/ה הרביעי/ת)');
+    eq(res.body?.updated, 3, '7d ושלוש שורות מוזגו');
+    eq(res.body?.missing, 0, '7e ואף אחד לא סומן כמי שירד מהקובץ');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 4, '7f סה"כ 4 שורות — בלי כפילויות');
+    const row = data.enrollments.find(e => e.child.full_name === 'אור אבוחצירא');
+    eq(row?.id, firstRowId, '7g וזו אותה שורה שנוצרה מהחוזים');
+    eq(row?.sources, ['contracts', 'registrations'], '7h שני המקורות רשומים בה');
+    eq(row?.missing_parents, false, '7i היא כבר לא חסרת הורים');
+    eq(row?.parent1?.phone, '050000001', '7j הטלפון נקלט');
+    eq(row?.contract?.class_name, 'בוגרים א', '7k והחוזה לא נדרס');
+    eq(row?.contract?.tier, '0', '7l הדרגה שרדה את הקליטה השנייה');
+    eq(data?.summary?.missing_parents, 0, '7m המונה התאפס');
+    ok(!!data?.last_import?.registrations && !!data?.last_import?.contracts,
+      '7n "קובץ אחרון" מציג שני תאריכים');
+  }
+
+  head('בדיקה 8 — ועכשיו אפשר לקלוט');
+  {
+    const res = await request({
+      method: 'POST', token, path: `/api/external-enrollments/${firstRowId}/promote`,
+      body: { monthly_fee: 1500 },
+    });
+    ok(res.status === 201, '8a הקליטה מצליחה', `${res.status} ${res.text?.slice(0, 200)}`);
+    const src = res.body?.registration?.configuration?.external_source;
+    eq(src?.contract_tier, '0', '8b והדרגה נרשמת על הרישום — מספר שאפשר להסביר בדיעבד');
+    eq(src?.contract_class, 'בוגרים א', '8c יחד עם הכיתה מהחוזה');
+  }
+
+  /* ------------------------------------------------------------ *
+   * (c) the reverse order
+   * ------------------------------------------------------------ */
+  head('בדיקה 9 — הסדר ההפוך: נרשמים ואז חוזים');
+  {
+    await wipe();
+    const first = await importRegistrations();
+    eq(first.body?.created, 4, '9a ייצוא הנרשמים יצר 4 שורות');
+
+    const second = await importContracts();
+    ok(second.status === 200, '9b וייצוא החוזים נקלט אחריו', `${second.status} ${second.text?.slice(0, 200)}`);
+    eq(second.body?.created, 0, '9c בלי ליצור ולו שורה אחת חדשה');
+    eq(second.body?.updated, 3, '9d ושלוש שורות קיבלו את החוזה');
+
+    const data = await listRows();
+    eq(data?.enrollments?.length, 4, '9e עדיין 4 שורות — אותו מספר כמו בסדר ההפוך');
+    const row = data.enrollments.find(e => e.child.full_name === 'נועם כהן');
+    eq(row?.sources, ['registrations', 'contracts'], '9f שני המקורות');
+    eq(row?.contract?.tier, '7', '9g הדרגה מהחוזה');
+    eq(row?.parent1?.phone, '050000002', '9h וההורה מהנרשמים');
+    // The one child the contracts file never mentioned.
+    const extra = data.enrollments.find(e => e.child.full_name === 'איתי מזרחי');
+    eq(extra?.sources, ['registrations'], '9i ילד/ה שאינו/ה בקובץ החוזים נשאר/ת עם מקור אחד');
+    eq(extra?.contract, null, '9j ובלי חוזה');
+    eq(data?.summary?.missing_parents, 0, '9k ואף אחד אינו חסר הורים');
+  }
+
+  head('בדיקה 10 — קליטה חוזרת של אותו קובץ חוזים אינה משנה דבר');
+  {
+    const before = await listRows();
+    const res = await importContracts();
+    eq(res.body?.created, 0, '10a לא נוצר כלום');
+    eq(res.body?.updated, 0, '10b ולא עודכן כלום');
+    eq(res.body?.unchanged, 3, '10c שלוש השורות זוהו כלא-משתנות');
+
+    const after = await listRows();
+    eq(after?.enrollments?.length, before?.enrollments?.length, '10d מספר השורות לא זז');
+    const changed = after.enrollments.filter(e => (e.changes || []).length
+      !== (before.enrollments.find(b => b.id === e.id)?.changes || []).length);
+    eq(changed.length, 0, '10e ולא נרשמו שינויים חדשים באף שורה');
+  }
+
+  console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
+}
+
+main()
+  .catch((err) => { console.error('\n💥', err); failures++; })
+  .finally(async () => {
+    try { if (server) await new Promise(r => server.close(r)); } catch { /* closing */ }
+    try { await mongoose.disconnect(); } catch { /* disconnecting */ }
+    try { if (mongod) await mongod.stop(); } catch { /* stopping */ }
+    process.exit(failures === 0 ? 0 : 1);
+  });

@@ -6,7 +6,9 @@ const {
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
 const { AGE_GROUPS } = require('../services/clicktac.service');
-const { promoteOne, effectiveAgeGroup } = require('./externalEnrollment.controller');
+const {
+  promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
+} = require('./externalEnrollment.controller');
 const {
   normalizeYear, enrollmentYear, formatAcademicYear, hebrewYearForStart,
 } = require('../services/academic-year.service');
@@ -352,17 +354,27 @@ async function reconcileBranch(req, res, next) {
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
 
-    const [lastTmt, lastCt] = await Promise.all([
+    const [lastTmt, lastCt, lastClickTac] = await Promise.all([
       EnrollmentImport.findOne({ source: 'tmt', branch_id: branchId, academic_year: academicYear })
         .sort({ created_at: -1 }).populate('imported_by', 'full_name username').lean(),
       EnrollmentImport.findOne({ source: 'clicktac', branch_id: branchId, academic_year: academicYear })
         .sort({ created_at: -1 }).populate('imported_by', 'full_name username').lean(),
+      // ClickTac publishes TWO exports and they are uploaded independently, so
+      // "the last ClickTac file" is two dates. `clicktac` above stays the most
+      // recent of either, because every caller that already reads it means
+      // "has anything come in at all".
+      lastClickTacImports({ branch_id: branchId, academic_year: academicYear }),
     ]);
 
     res.json({
       ...result,
       academic_year_label: formatAcademicYear(academicYear),
-      last_import: { tmt: lastTmt || null, clicktac: lastCt || null },
+      last_import: {
+        tmt: lastTmt || null,
+        clicktac: lastCt || null,
+        clicktac_registrations: lastClickTac.registrations,
+        clicktac_contracts: lastClickTac.contracts,
+      },
       dictionaries: { verdicts: VERDICTS, issues: ISSUES },
     });
   } catch (error) {
@@ -889,6 +901,14 @@ async function confirmPlacement(req, res, next) {
       if (doc.review?.status === 'imported') { skipped.push({ id: a.id, child: name, error: 'כבר נקלט/ה' }); continue; }
       if (String(doc.branch_id) !== String(branchId)) {
         skipped.push({ id: a.id, child: name, error: 'שייך/ת לסניף אחר' }); continue;
+      }
+
+      // The same refusal the promote endpoints give: a child known only from
+      // ClickTac's contracts export has no family behind them, and placing
+      // them in a room would create a registration nobody can phone.
+      if (!hasParents(doc.toObject())) {
+        skipped.push({ id: a.id, child: name, error: NO_PARENTS_MESSAGE, code: 'MISSING_PARENTS' });
+        continue;
       }
 
       const room = roomById.get(String(a.classroom_id));
