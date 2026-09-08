@@ -27,6 +27,42 @@ async function roleTabOverrides(role) {
   } catch { return { add: [], remove: [] }; }
 }
 
+/**
+ * The role layer for THIS person — a custom role's lists, or the role-wide
+ * override for her role.
+ *
+ * A custom role REPLACES the role-wide override rather than merging with it.
+ * Merging would mean two role-layer answers to one question ("does this role
+ * get 'employees'?"), and an admin editing the תפקיד row on the permissions
+ * screen would silently move the tabs of people who are not on that row.
+ *
+ * Everything that mints a token goes through here, so a custom role holder is
+ * never issued a token carrying her base role's override by accident — which
+ * is what happens when one of the six call sites is forgotten.
+ */
+async function effectiveRoleTabs(user) {
+  const customId = user?.custom_role_id?._id || user?.custom_role_id;
+  if (!customId) return { ...(await roleTabOverrides(user?.role)), custom_role_id: null, custom_role_name: null };
+  try {
+    const { CustomRole } = require('../models');
+    // Already populated? Then no second lookup.
+    const role = user.custom_role_id?.name
+      ? user.custom_role_id
+      : await CustomRole.findById(customId).lean();
+    // A role deleted out from under a stale reference falls back to the
+    // ordinary role-wide override rather than to no permissions at all.
+    if (!role) return { ...(await roleTabOverrides(user?.role)), custom_role_id: null, custom_role_name: null };
+    return {
+      add: Array.isArray(role.tab_add) ? role.tab_add : [],
+      remove: Array.isArray(role.tab_remove) ? role.tab_remove : [],
+      custom_role_id: String(role._id),
+      custom_role_name: role.name || null,
+    };
+  } catch {
+    return { ...(await roleTabOverrides(user?.role)), custom_role_id: null, custom_role_name: null };
+  }
+}
+
 const RP_NAME = 'גן החלומות';
 const RP_ID = env.NODE_ENV === 'production' ? 'gan-halomot.onrender.com' : 'localhost';
 const ORIGIN = env.NODE_ENV === 'production'
@@ -53,6 +89,12 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     tab_overrides_remove: user.tab_overrides_remove || [],
     role_tab_add: roleTabs.add || [],
     role_tab_remove: roleTabs.remove || [],
+    // Which named permission set this person holds, if any. `role` above is
+    // still the base role and is what every authorisation check reads; these
+    // two are for the screens that have to SAY what she is.
+    custom_role_id: roleTabs.custom_role_id
+      || (user.custom_role_id ? String(user.custom_role_id._id || user.custom_role_id) : null),
+    custom_role_name: roleTabs.custom_role_name || user.custom_role_id?.name || null,
     password_set: !!user.password_set,
     // Carried in the token so every request can be refused without a database
     // lookup. Cleared the moment a password is chosen — and the new token
@@ -217,7 +259,7 @@ async function resetWithCode(req, res, next) {
 
     // Signed in on the spot. Sending them back to a login screen to type the
     // password they chose four seconds ago is a step that only loses people.
-    res.json({ ok: true, ...makeToken(user, rememberMe, await roleTabOverrides(user.role), req) });
+    res.json({ ok: true, ...makeToken(user, rememberMe, await effectiveRoleTabs(user), req) });
   } catch (error) {
     next(error);
   }
@@ -262,7 +304,7 @@ async function login(req, res, next) {
       });
     }
 
-    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role), req);
+    const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     result.password_prompt = true; // no password chosen yet → nag on the client
     res.json(result);
@@ -286,7 +328,7 @@ async function loginWithPassword(req, res, next) {
     if (!ok) {
       return res.status(401).json({ error: 'סיסמה שגויה' });
     }
-    const result = makeToken(user, rememberMe, await roleTabOverrides(user.role), req);
+    const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     res.json(result);
   } catch (error) {
@@ -310,7 +352,7 @@ async function setPassword(req, res, next) {
     // A fresh token, because the old one still says the password must change
     // and would keep refusing every other request. Without this the person
     // chooses a password and is locked out by the choice.
-    res.json({ ok: true, password_set: true, ...makeToken(user, false, await roleTabOverrides(user.role), req) });
+    res.json({ ok: true, password_set: true, ...makeToken(user, false, await effectiveRoleTabs(user), req) });
   } catch (error) {
     next(error);
   }
@@ -332,7 +374,7 @@ async function me(req, res, next) {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    const roleTabs = await roleTabOverrides(user.role);
+    const roleTabs = await effectiveRoleTabs(user);
     res.json({
       user: {
         ...user.toObject(),
@@ -341,6 +383,8 @@ async function me(req, res, next) {
         hasWebauthn: (user.webauthn_credentials || []).length > 0,
         role_tab_add: roleTabs.add,
         role_tab_remove: roleTabs.remove,
+        custom_role_id: roleTabs.custom_role_id,
+        custom_role_name: roleTabs.custom_role_name,
       },
     });
   } catch (error) {
@@ -499,7 +543,7 @@ async function webauthnAuthVerify(req, res, next) {
     user.webauthn_challenge = null;
     await user.save();
 
-    const result = makeToken(user, true, await roleTabOverrides(user.role), req); // biometric = always remember
+    const result = makeToken(user, true, await effectiveRoleTabs(user), req); // biometric = always remember
     res.json(result);
   } catch (error) {
     next(error);
@@ -507,6 +551,7 @@ async function webauthnAuthVerify(req, res, next) {
 }
 
 module.exports = {
+  effectiveRoleTabs,
   login, loginWithPassword, setPassword, logout, me,
   forgotPassword, resetWithCode,
   webauthnRegisterOptions, webauthnRegisterVerify,
