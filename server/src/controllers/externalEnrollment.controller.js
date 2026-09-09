@@ -886,7 +886,7 @@ async function importContractsExport({ req, res, next, branch, branchId, rows, s
         continue;
       }
 
-      const wasGone = existing.contract?.present === false;
+      const wasGone = existing.contract?.present === false || existing.presence?.is_present === false;
       if (existing.content_hash_contracts === row.content_hash_contracts && !wasGone) {
         existing.presence.last_seen_at = now;
         await existing.save();
@@ -898,7 +898,10 @@ async function importContractsExport({ req, res, next, branch, branchId, rows, s
       const before = existing.toObject();
       const changes = contractChanges(before, contract);
       const gainedContract = !before.contract;
-      if (wasGone) changes.push({ label: 'נוכחות בקובץ החוזים', from: 'הוסר/ה', to: 'חזר/ה' });
+      if (wasGone) changes.push({ label: 'נוכחות בקובץ קליקטאק', from: 'הוסר/ה', to: 'חזר/ה' });
+      // In THIS file = in ClickTac. See the sweep below for the other direction.
+      existing.set('presence.is_present', true);
+      existing.set('presence.missing_since', null);
 
       existing.contract = contract;
       existing.content_hash_contracts = row.content_hash_contracts;
@@ -955,20 +958,29 @@ async function importContractsExport({ req, res, next, branch, branchId, rows, s
      * comparison decides what two flags add up to: gone from one file is a
      * finding, gone from both is a child who left.
      *
-     * Only rows this file has listed before are swept — a registrations-only
-     * row was never in it. And only this branch's rows: a child of another
-     * מעון that is (wrongly) filed here was set aside above and is not in
-     * `seen`, so it IS swept, which is the right outcome for a misfiled row.
+     * EVERY row of this branch and year is swept, whichever export brought it.
+     * The first version spared registrations-only rows ("this file never
+     * listed them"); the owner's rule is that the newest file is the roster,
+     * and two children cancelled in ClickTac stayed "התקבל" for a day under
+     * the gentler reading. A row of another מעון that is (wrongly) filed
+     * here was set aside above and is not in `seen`, so it is swept too —
+     * the right outcome for a misfiled row.
      */
     const missingNames = [];
     for (const doc of candidates) {
       if (seen.has(idKey(doc.child))) continue;
-      if (!sourcesOf(doc).includes('contracts')) continue;
-      if (doc.contract?.present === false) continue;
+      if (doc.presence?.is_present === false && doc.contract?.present !== true) continue;
       snapshots.take(doc);
-      doc.set('contract.present', false);
-      doc.set('contract.missing_since', now);
-      doc.changes.push({ at: now, field: 'נוכחות בקובץ החוזים', from: 'בקובץ', to: 'הוסר/ה מהקובץ' });
+      if (sourcesOf(doc).includes('contracts') && doc.contract && doc.contract.present !== false) {
+        doc.set('contract.present', false);
+        doc.set('contract.missing_since', now);
+        doc.changes.push({ at: now, field: 'נוכחות בקובץ החוזים', from: 'בקובץ', to: 'הוסר/ה מהקובץ' });
+      }
+      if (doc.presence?.is_present !== false) {
+        doc.set('presence.is_present', false);
+        doc.set('presence.missing_since', now);
+        doc.changes.push({ at: now, field: 'נוכחות בקובץ קליקטאק', from: 'רשום/ה', to: 'הוסר/ה מהקובץ' });
+      }
       await doc.save();
       missingNames.push(doc.child.full_name);
     }

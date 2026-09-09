@@ -1553,22 +1553,30 @@ async function main() {
     eq(row?.child?.nickname, 'אורי', '24g הכינוי שרד');
   }
 
-  head('בדיקה 25 — קובץ חוזים מסמן מי ירד ממנו, ומי שירד מכל הרשימות עובר לארכיון');
+  head('בדיקה 25 — הקובץ האחרון הוא הרשימה: מי שאינו בו ירד, ומי שירד מכל הרשימות עובר לארכיון');
   {
     await wipeAll();
-    await uploadContracts(KIDS.map(k => contractRow(k)));
+    // Four registered (one of them, איתי, never signs a contract); then the
+    // contracts roster with three. איתי is not on it — so he is not in
+    // ClickTac, whichever file first brought him.
+    await importRegistrations();
+    const first = await uploadContracts(KIDS.map(k => contractRow(k)));
+    eq(first.body?.missing, 1, '25a0 ילד/ה שרק בייצוא הנרשמים ואינו/ה בקובץ החוזים — ירד/ה');
+    eq(first.body?.missing_names, ['איתי מזרחי'], '25a1 ושמו מדווח');
     const second = await uploadContracts([contractRow(KIDS[0]), contractRow(KIDS[1])], 'contracts_export_2027.xlsx');
-    eq(second.body?.missing, 1, '25a אחד ירד מקובץ החוזים');
+    eq(second.body?.missing, 1, '25a אחד נוסף ירד מקובץ החוזים');
     eq(second.body?.missing_names, ['שירה לוי'], '25b ושמו מדווח');
     const gone = (await listRows()).enrollments.find(e => e.child.id_number === KIDS[2].idNumber);
     eq(gone?.contract?.present, false, '25c השורה מסומנת כנעדרת מקובץ החוזים');
+    eq(gone?.presence?.is_present, false, '25c2 ומקליקטאק בכלל');
     ok(gone?.changes?.some(c => c.field === 'נוכחות בקובץ החוזים'), '25d עם רישום בהיסטוריה');
 
     let rec = await reconcileNow();
     ok(!rec?.rows?.some(r => r.id_number === KIDS[2].idNumber), '25e בהצלבה — אינה בטבלה');
     ok(rec?.archived?.some(r => r.id_number === KIDS[2].idNumber && r.verdict === 'gone'),
       '25f אלא בארכיון, כמי שהוסר/ה מכל הרשימות');
-    eq(rec?.summary?.archived, 1, '25g והמונה');
+    ok(rec?.archived?.some(r => r.id_number === EXTRA_KID.idNumber), '25f2 וגם איתי');
+    eq(rec?.summary?.archived, 2, '25g והמונה');
 
     // Back in the registrations export: no longer gone — one list still names her.
     await importRegistrations();
@@ -1582,7 +1590,7 @@ async function main() {
     await uploadContracts(KIDS.map(k => contractRow(k)), 'contracts_export_2028.xlsx');
     const restored = (await listRows()).enrollments.find(e => e.child.id_number === KIDS[2].idNumber);
     eq(restored?.contract?.present, true, '25k קובץ חוזים שכולל אותה שוב — חזרה');
-    ok(restored?.changes?.some(c => c.field === 'נוכחות בקובץ החוזים' && c.to === 'חזר/ה'), '25l ונרשם');
+    ok(restored?.changes?.some(c => c.field === 'נוכחות בקובץ קליקטאק' && c.to === 'חזר/ה'), '25l ונרשם');
   }
 
   head('בדיקה 26 — ביטול העלאה: רק האחרונה, ובדיוק');
@@ -1807,7 +1815,8 @@ async function main() {
     await uploadContracts(KIDS.map(k => contractRow(k)));
     await uploadContracts([contractRow(KIDS[0])], 'contracts_later.xlsx');   // two gone from contracts
     const old = new Date(Date.now() - 40 * 24 * 3600 * 1000);
-    await ExternalEnrollment.updateMany({ 'contract.present': false }, { $set: { 'contract.missing_since': old } });
+    await ExternalEnrollment.updateMany({ 'presence.is_present': false },
+      { $set: { 'contract.missing_since': old, 'presence.missing_since': old } });
     // one of the two has a note — protected
     await ReconcileDecision.create({ branch_id: branch._id, academic_year: '2026-2027', id_number: KIDS[2].idNumber, note: 'לבדוק' });
     // a ministry row dropped 40 days ago, nobody registered

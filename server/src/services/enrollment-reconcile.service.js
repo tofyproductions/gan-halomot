@@ -382,10 +382,17 @@ function partyWithOverride(party, override) {
  */
 function clicktacLive(ct) {
   if (!ct) return false;
-  const sources = ct.sources?.length ? ct.sources : ['registrations'];
-  const regLive = sources.includes('registrations') && ct.presence?.is_present !== false;
-  const contractLive = sources.includes('contracts') && ct.contract && ct.contract.present !== false;
-  return regLive || contractLive;
+  /**
+   * THE LATEST FILE IS THE TRUTH — that is the owner's rule, stated on
+   * 09.09.2026 over two cancelled children who stayed "התקבל" because they
+   * had only ever been in an older registrations export and the newer
+   * contracts export "had nothing to say" about them. It does: the contracts
+   * export is the roster of everyone with a signed agreement, and a child
+   * not in it is not enrolled. So `presence.is_present` now means "in the
+   * most recent ClickTac upload, whichever file", and it alone decides.
+   * `contract.present` stays as the finer fact for the contracts half.
+   */
+  return ct.presence?.is_present !== false;
 }
 
 /** ClickTac's own "ממשיך" — the registrations file's flag, else the contract's. */
@@ -486,11 +493,12 @@ function issuesFor(tmt, ct, { branchId, matchedBy = 'id', decision = null } = {}
   // that child is `gone` and is not on the table at all (see reconcile()).
   if (ct) {
     const sources = ct.sources?.length ? ct.sources : ['registrations'];
-    if (sources.includes('registrations') && ct.presence?.is_present === false) {
-      add('clicktac_removed', `הופיע/ה בקובץ הנרשמים עד ${fmtDate(ct.presence.missing_since)}, ואינו/ה בקובץ האחרון`);
-    }
-    if (sources.includes('contracts') && ct.contract && ct.contract.present === false) {
-      add('contract_removed', `הופיע/ה בקובץ החוזים עד ${fmtDate(ct.contract.missing_since)}, ואינו/ה בקובץ האחרון`);
+    if (ct.presence?.is_present === false) {
+      add('clicktac_removed', `הופיע/ה בקליקטאק עד ${fmtDate(ct.presence.missing_since)}, ואינו/ה בקובץ האחרון`);
+    } else if (sources.includes('contracts') && ct.contract && ct.contract.present === false) {
+      // Still in ClickTac (a newer registrations file lists the child) but
+      // dropped from the contracts roster — the agreement went, not the family.
+      add('contract_removed', `הופיע/ה בקובץ החוזים עד ${fmtDate(ct.contract.missing_since)}, ואינו/ה בקובץ החוזים האחרון`);
     }
   }
 
@@ -806,16 +814,21 @@ function reconcile({
         } : null,
       } : null,
       has_note: !!decision?.note,
+      // ClickTac first, on every identity field: it is the file the office can
+      // CORRECT, and a correction made there has to show up here at once —
+      // the ministry's copy is the comparison, reported as a finding where it
+      // still disagrees. (It used to be the other way round, on the argument
+      // that the state's record is the state's own; the owner overruled that
+      // on 09.09.2026 when a birth date fixed in ClickTac did not move.)
       birth_date: ct?.child?.birth_date || tmt?.child?.birth_date || null,
       age_group: canonicalAgeGroup(ct?.child?.age_group || tmt?.child?.age_group || ''),
       computed_age_group: ct?.computed?.age_group || '',
-      // תמ"ת first: on identity — the name, the ת"ז, the birth date — the
-      // ministry's record is the state's own and wins over a form a parent
-      // filled in. Where they disagree it is reported as a finding as well.
+      // Same rule as birth_date above: ClickTac's date, the ministry's as the
+      // comparison.
       age_at_year_start: ageAtYearStart(
-        tmt?.child?.birth_date || ct?.child?.birth_date, academicYear,
+        ct?.child?.birth_date || tmt?.child?.birth_date, academicYear,
       ),
-      age_source: tmt?.child?.birth_date ? 'תמ"ת' : (ct?.child?.birth_date ? 'קליקטאק' : ''),
+      age_source: ct?.child?.birth_date ? 'קליקטאק' : (tmt?.child?.birth_date ? 'תמ"ת' : ''),
       // The manager's own decision, when one has been made. It beats both files.
       age_group_override: ct?.placement?.age_group_override || '',
       verdict,

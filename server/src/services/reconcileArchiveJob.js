@@ -28,30 +28,17 @@ async function tick(now = new Date()) {
   const decided = new Set((await ReconcileDecision.find({}).select('id_number academic_year').lean())
     .map(d => `${d.academic_year}|${d.id_number}`));
 
-  /* ---- ClickTac: gone from BOTH exports it was ever in ---- */
+  /* ---- ClickTac: not in the latest upload for 30 days (see clicktacLive) ---- */
   const ctCandidates = await ExternalEnrollment.find({
     'review.status': { $ne: 'imported' },
-    $or: [
-      { 'presence.is_present': false },
-      { 'contract.present': false },
-    ],
-  }).select('child.id_number academic_year sources presence contract.present contract.missing_since branch_id').lean();
+    'presence.is_present': false,
+    'presence.missing_since': { $lte: cutoff },
+  }).select('child.id_number academic_year').lean();
 
   const ctToDelete = [];
-  const ctGoneIds = new Set();
   for (const d of ctCandidates) {
-    const sources = d.sources?.length ? d.sources : ['registrations'];
-    const regGone = !sources.includes('registrations') || d.presence?.is_present === false;
-    const contractGone = !sources.includes('contracts') || d.contract?.present === false;
-    if (!regGone || !contractGone) continue;
-    const since = Math.max(
-      d.presence?.missing_since ? new Date(d.presence.missing_since).getTime() : 0,
-      d.contract?.missing_since ? new Date(d.contract.missing_since).getTime() : 0,
-    );
-    if (!since || since > cutoff.getTime()) continue;
     if (decided.has(`${d.academic_year}|${normalizeId(d.child?.id_number)}`)) continue;
     ctToDelete.push(d._id);
-    ctGoneIds.add(`${d.academic_year}|${normalizeId(d.child?.id_number)}`);
   }
 
   /* ---- The ministry's list: dropped, and not still registered with us ---- */
@@ -59,13 +46,8 @@ async function tick(now = new Date()) {
     .select('child.id_number academic_year').lean();
   const stillHere = new Set((await ExternalEnrollment.find({
     academic_year: { $in: [...new Set(tmtCandidates.map(t => t.academic_year))] },
-  }).select('child.id_number academic_year sources presence contract.present').lean())
-    .filter((d) => {
-      const sources = d.sources?.length ? d.sources : ['registrations'];
-      const regLive = sources.includes('registrations') && d.presence?.is_present !== false;
-      const contractLive = sources.includes('contracts') && d.contract?.present !== false;
-      return regLive || contractLive;
-    })
+    'presence.is_present': { $ne: false },
+  }).select('child.id_number academic_year').lean())
     .map(d => `${d.academic_year}|${normalizeId(d.child?.id_number)}`));
   const tmtToDelete = tmtCandidates
     .filter(t => !stillHere.has(`${t.academic_year}|${normalizeId(t.child?.id_number)}`))
