@@ -1373,4 +1373,7 @@ module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
   exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
   isTmtSupervised, undoImport, putDecision, resolveIssue, reopenIssue,
+  // The comparison itself, so the daily urgent-findings digest reads exactly
+  // what the screen reads rather than recomputing its own version of it.
+  buildReconciliation,
 };

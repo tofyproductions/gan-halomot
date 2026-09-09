@@ -378,6 +378,27 @@ connectDB().then(() => {
       setTimeout(runArchive, 10 * 60 * 1000);
       setInterval(runArchive, 24 * 60 * 60 * 1000);
     }
+
+    // שכבת גיל שונה: mail the office + עינת every morning there is an open
+    // one, hourly and self-limiting like the compliance digest.
+    const reconcileDigest = require('./services/reconcileDigestJob');
+    const runReconcileDigest = () => reconcileDigest.tick()
+      .then(r => { if (r?.sent) console.log(`[reconcile-digest] ${r.total} urgent to ${r.to.length} recipients`); })
+      .catch(e => console.error('[reconcile-digest] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runReconcileDigest, 6 * 60 * 1000);
+      setInterval(runReconcileDigest, 60 * 60 * 1000);
+    }
+
+    // תזכורת חודשית להעלאת קליקטאק: SMS + מייל לעינת ב-11 לחודש, hourly check.
+    const reconcileReminder = require('./services/reconcileUploadReminderJob');
+    const runReconcileReminder = () => reconcileReminder.tick()
+      .then(r => { if (r?.needing) console.log(`[reconcile-reminder] ${r.needing.length} branches need a ClickTac file`); })
+      .catch(e => console.error('[reconcile-reminder] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runReconcileReminder, 7 * 60 * 1000);
+      setInterval(runReconcileReminder, 60 * 60 * 1000);
+    }
   });
 });
 

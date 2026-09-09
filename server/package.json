@@ -69,7 +69,8 @@
     "test:clicktac-file-type": "node scripts/clicktac-file-type.test.js",
     "test:tabs-sync": "node scripts/tabs-constant-sync.test.js",
     "test:clicktac-contracts": "node scripts/clicktac-contracts.test.js",
-    "test:payment-check": "node scripts/payment-check.test.js"
+    "test:payment-check": "node scripts/payment-check.test.js",
+    "test:reconcile-alerts": "node scripts/reconcile-alerts.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

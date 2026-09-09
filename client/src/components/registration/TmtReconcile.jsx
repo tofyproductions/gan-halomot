@@ -3,8 +3,9 @@ import {
   Box, Typography, Card, Stack, Chip, Button, TextField, InputAdornment, MenuItem,
   Table, TableHead, TableBody, TableRow, TableCell, Dialog, DialogTitle, DialogContent,
   DialogActions, Alert, AlertTitle, CircularProgress, Tooltip, IconButton, Divider,
-  ToggleButton, ToggleButtonGroup, List, ListItem, ListItemText,
+  ToggleButton, ToggleButtonGroup, List, ListItem, ListItemText, Popover,
 } from '@mui/material';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import SearchIcon from '@mui/icons-material/Search';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
@@ -345,6 +346,16 @@ export default function TmtReconcile({
   const [deciding, setDeciding] = useState(false);
   const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null, error: null });
   const [historyDlg, setHistoryDlg] = useState({ open: false, loading: false, imports: [] });
+  /**
+   * "קבצים אחרונים" — hidden until asked for.
+   *
+   * This used to be two full-width Cards sitting above the table on every
+   * load: file names, four counts each, every warning spelled out — for a
+   * fact the office checks once in a while, not every time the screen opens.
+   * A small button now opens the same information as a Popover; closed, it
+   * costs one line.
+   */
+  const [filesAnchor, setFilesAnchor] = useState(null);
   const [undoDlg, setUndoDlg] = useState({ open: false, imp: null, saving: false, result: null, error: null });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
   const [saving, setSaving] = useState({});
@@ -809,6 +820,12 @@ export default function TmtReconcile({
                 onClick={() => setChequeOnly(v => !v)} />
             )}
             <Box sx={{ flex: 1 }} />
+            <Tooltip title="קבצים אחרונים">
+              <IconButton size="small" onClick={e => setFilesAnchor(e.currentTarget)}
+                color={filesAnchor ? 'primary' : 'default'}>
+                <InfoOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
             <Button size="small" startIcon={<ContactPhoneIcon />} onClick={openContacts}>דף קשר</Button>
             <Button size="small" startIcon={<DownloadIcon />} onClick={handleExport}>ייצוא לאקסל</Button>
@@ -820,68 +837,79 @@ export default function TmtReconcile({
             )}
           </Stack>
 
-          {(lastTmt || lastCt) && (
-            <Stack direction="row" spacing={2} sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
-              <Card sx={{ p: 1.5, flex: 1, minWidth: 280 }}>
-                <Typography variant="subtitle2" fontWeight={700}>
-                  קובץ תמ"ת אחרון — {lastTmt ? fmtDateTime(lastTmt.created_at) : 'טרם הועלה'}
+          {/* ---- קבצים אחרונים ----
+              A Popover rather than a page fixture: the same facts as before
+              (file, date, counts, warnings), read on demand instead of taking
+              two Cards' worth of height on every load. */}
+          <Popover
+            open={!!filesAnchor} anchorEl={filesAnchor} onClose={() => setFilesAnchor(null)}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+          >
+            <Box sx={{ p: 1.5, minWidth: 320, maxWidth: 400 }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary" display="block" sx={{ mb: 1 }}>
+                קבצים אחרונים
+              </Typography>
+
+              <Typography variant="body2" fontWeight={600}
+                color={lastTmt ? 'text.primary' : 'text.disabled'}>
+                תמ"ת — {lastTmt ? fmtDateTime(lastTmt.created_at) : 'טרם הועלה'}
+              </Typography>
+              {lastTmt && <ImportLine imp={lastTmt} />}
+              {!!lastTmt?.details?.missing?.length && (
+                <Typography variant="caption" color="warning.main" display="block">
+                  ירדו מהרשימה: {lastTmt.details.missing.join(', ')}
                 </Typography>
-                {lastTmt && <ImportLine imp={lastTmt} />}
-                {!!lastTmt?.details?.missing?.length && (
-                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
-                    ירדו מהרשימה: {lastTmt.details.missing.join(', ')}
-                  </Alert>
-                )}
-              </Card>
+              )}
+
+              <Divider sx={{ my: 1 }} />
 
               {/* Two lines, because there are two ClickTac files and they are
                   uploaded separately. A branch current on one and stale on the
                   other used to read as "up to date". */}
-              <Card sx={{ p: 1.5, flex: 1, minWidth: 280 }}>
-                <Typography variant="subtitle2" fontWeight={700}>קובץ קליקטאק אחרון</Typography>
-                {[['נרשמים', lastCtReg], ['חוזים', lastCtContracts]].map(([label, imp]) => (
-                  <Box key={label} sx={{ mt: 0.5 }}>
-                    <Typography variant="body2" fontWeight={600}
-                      color={imp ? 'text.primary' : 'text.disabled'}>
-                      {label} — {imp ? fmtDateTime(imp.created_at) : 'טרם הועלה'}
-                    </Typography>
-                    {imp && <ImportLine imp={imp} />}
-                  </Box>
-                ))}
-                {!!lastCtReg?.details?.missing?.length && (
-                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
-                    ירדו מקובץ הנרשמים: {lastCtReg.details.missing.join(', ')}
-                  </Alert>
-                )}
-                {!!lastCtContracts?.details?.missing?.length && (
-                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
-                    ירדו מקובץ החוזים: {lastCtContracts.details.missing.join(', ')}
-                  </Alert>
-                )}
-                {!!lastCtContracts?.details?.other_institution?.length && (
-                  <Alert severity="info" sx={{ mt: 1, py: 0 }}>
-                    לא נקלטו — מעון אחר ({lastCtContracts.details.other_institution.length})
-                  </Alert>
-                )}
-                {/* Last year's file — the fact behind "ממשיך" and the
-                    source of last year's debts. Uploaded through the same
-                    button with the "שנה קודמת" box ticked. */}
-                <Box sx={{ mt: 0.5 }}>
+              {[['נרשמים', lastCtReg], ['חוזים', lastCtContracts]].map(([label, imp]) => (
+                <Box key={label} sx={{ mt: 0.5 }}>
                   <Typography variant="body2" fontWeight={600}
-                    color={lastPrevYear ? 'text.primary' : 'text.disabled'}>
-                    שנה קודמת ({data.previous_year_label || '—'}) — {lastPrevYear ? fmtDateTime(lastPrevYear.created_at) : 'טרם הועלה'}
+                    color={imp ? 'text.primary' : 'text.disabled'}>
+                    קליקטאק · {label} — {imp ? fmtDateTime(imp.created_at) : 'טרם הועלה'}
                   </Typography>
-                  {lastPrevYear
-                    ? <ImportLine imp={lastPrevYear} />
-                    : (
-                      <Typography variant="caption" color="text.secondary">
-                        להעלאה: "קליטת קובץ קליקטאק" ← לסמן "זהו קובץ של שנה קודמת"
-                      </Typography>
-                    )}
+                  {imp && <ImportLine imp={imp} />}
                 </Box>
-              </Card>
-            </Stack>
-          )}
+              ))}
+              {!!lastCtReg?.details?.missing?.length && (
+                <Typography variant="caption" color="warning.main" display="block">
+                  ירדו מקובץ הנרשמים: {lastCtReg.details.missing.join(', ')}
+                </Typography>
+              )}
+              {!!lastCtContracts?.details?.missing?.length && (
+                <Typography variant="caption" color="warning.main" display="block">
+                  ירדו מקובץ החוזים: {lastCtContracts.details.missing.join(', ')}
+                </Typography>
+              )}
+              {!!lastCtContracts?.details?.other_institution?.length && (
+                <Typography variant="caption" color="info.main" display="block">
+                  לא נקלטו — מעון אחר ({lastCtContracts.details.other_institution.length})
+                </Typography>
+              )}
+
+              <Divider sx={{ my: 1 }} />
+
+              {/* Last year's file — the fact behind "ממשיך" and the source
+                  of last year's debts. Uploaded through the same button with
+                  the "שנה קודמת" box ticked. */}
+              <Typography variant="body2" fontWeight={600}
+                color={lastPrevYear ? 'text.primary' : 'text.disabled'}>
+                שנה קודמת ({data.previous_year_label || '—'}) — {lastPrevYear ? fmtDateTime(lastPrevYear.created_at) : 'טרם הועלה'}
+              </Typography>
+              {lastPrevYear
+                ? <ImportLine imp={lastPrevYear} />
+                : (
+                  <Typography variant="caption" color="text.secondary">
+                    להעלאה: "קליטת קובץ קליקטאק" ← לסמן "זהו קובץ של שנה קודמת"
+                  </Typography>
+                )}
+            </Box>
+          </Popover>
 
           {/* ELEVEN COLUMNS DO NOT FIT IN 1440px AND SHOULD NOT TRY. Squeezing
               them wrapped the name to two lines, the age to four and the dates
