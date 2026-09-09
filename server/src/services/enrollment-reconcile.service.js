@@ -208,6 +208,20 @@ const ISSUES = {
     severity: 'critical',
     color: '#ff7043',
   },
+  /**
+   * Last year's ClickTac file, uploaded for exactly this: "ממשיך" is a box
+   * somebody ticked, and the file from the year before is the fact.
+   */
+  prev_year_mismatch: {
+    label: 'ממשיך — לא תואם לקובץ שנה שעברה',
+    severity: 'info',
+    color: '#3949ab',
+  },
+  prev_year_debt: {
+    label: 'חוב משנה שעברה',
+    severity: 'note',
+    color: '#6d4c41',
+  },
 };
 
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2, note: 3 };
@@ -650,7 +664,20 @@ function reconcile({
    * the files' own.
    */
   decisions = null,
+  /**
+   * Last year's ClickTac rows for the same branch, when that file has been
+   * uploaded — ExternalEnrollment docs of `academic_year` = the year before.
+   * `null` when no such upload exists; then nothing is said about last year.
+   */
+  prevYearDocs = null,
+  prevYear = '',
 }) {
+  const prevById = new Map();
+  for (const p of prevYearDocs || []) {
+    const id = ctId(p);
+    if (id) prevById.set(id, p);
+  }
+  const prevLoaded = Array.isArray(prevYearDocs) && prevYearDocs.length > 0;
   const decisionFor = (...ids) => {
     if (!decisions) return null;
     for (const id of ids) if (id && decisions.get(id)) return decisions.get(id);
@@ -730,6 +757,36 @@ function reconcile({
     const decision = decisionFor(id, ct ? ctId(ct) : null);
     const verdict = verdictFor(tmt, ct, { branchId, decision });
     let issues = issuesFor(tmt, ct, { branchId, matchedBy: by, decision });
+
+    /**
+     * LAST YEAR, when its file is here. Was the child with us, and did they
+     * leave money on the table. Matched by ת"ז against last year's rows —
+     * the same key as everything else.
+     */
+    const prev = prevLoaded ? (prevById.get(id) || (ct ? prevById.get(ctId(ct)) : null) || null) : null;
+    const prevYearInfo = prevLoaded ? {
+      year: prevYear,
+      present: !!prev,
+      status: prev?.enrollment?.status || prev?.contract?.status || '',
+      class_name: prev?.contract?.class_name || '',
+      balance: prev?.contract?.balance ?? null,
+      family_balance: prev?.contract?.family_balance ?? null,
+    } : null;
+    if (prevYearInfo && ct) {
+      const says = clicktacContinuing(ct);
+      if (says != null && says !== prevYearInfo.present) {
+        issues.push({
+          code: 'prev_year_mismatch', ...ISSUES.prev_year_mismatch,
+          detail: `קליקטאק: ${says ? 'ממשיך/ה' : 'רישום חדש'} · בקובץ ${prevYear}: ${prevYearInfo.present ? 'היה/תה' : 'לא היה/תה'}`,
+        });
+      }
+      if (typeof prevYearInfo.balance === 'number' && prevYearInfo.balance < 0) {
+        issues.push({
+          code: 'prev_year_debt', ...ISSUES.prev_year_debt,
+          detail: `₪${(-prevYearInfo.balance).toLocaleString('he-IL')} לפי קובץ ${prevYear}`,
+        });
+      }
+    }
     for (const i of issues) i.snapshot = snapshotFor(i, tmt, ct, { branchId });
 
     /**
@@ -814,6 +871,8 @@ function reconcile({
         } : null,
       } : null,
       has_note: !!decision?.note,
+      // Null until last year's file is uploaded. See prevYearDocs.
+      prev_year: prevYearInfo,
       // ClickTac first, on every identity field: it is the file the office can
       // CORRECT, and a correction made there has to show up here at once —
       // the ministry's copy is the comparison, reported as a finding where it
@@ -1023,6 +1082,12 @@ function reconcile({
       // Findings a person closed and a later file reopened — the ones to look at first.
       reopened: by(r => r.issues.some(i => i.changed_since_resolved)),
       parent_fixes_pending: by(r => r.decision?.parent_overrides?.pending),
+      // Last year's file: whether it is here, and who still owes from it.
+      prev_year_loaded: prevLoaded,
+      prev_year: prevYear,
+      prev_year_rows: prevLoaded ? prevYearDocs.length : 0,
+      prev_year_debtors: by(r => typeof r.prev_year?.balance === 'number' && r.prev_year.balance < 0),
+      prev_year_returning: by(r => r.prev_year?.present),
       approved: by(r => r.verdict === 'approved'),
       missing_registration: by(r => r.verdict === 'missing_registration'),
       missing_approval: by(r => r.verdict === 'missing_approval'),

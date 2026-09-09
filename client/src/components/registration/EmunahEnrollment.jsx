@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Box, Stack, Typography, TextField, MenuItem, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Alert, AlertTitle,
-  Chip, List, ListItem, ListItemText, Divider,
+  Chip, List, ListItem, ListItemText, Divider, Checkbox, FormControlLabel,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
@@ -82,6 +82,12 @@ const SOURCES = {
  */
 const CAN_PLACE = ['system_admin', 'accountant', 'branch_manager'];
 
+/** "2025-2026" for "2026-2027". */
+const previousYear = (y) => {
+  const m = /^(\d{4})-(\d{4})$/.exec(String(y || ''));
+  return m ? `${Number(m[1]) - 1}-${Number(m[2]) - 1}` : y;
+};
+
 export default function EmunahEnrollment() {
   /**
   * One year, and it is not chosen.
@@ -129,7 +135,7 @@ export default function EmunahEnrollment() {
    */
   const isTmtBranch = branch ? (branch.tmt_supervised ?? !/קפלן/.test(branch.name || '')) : true;
 
-  const openUpload = (source) => setUpload({ open: true, source, file: null, saving: false, result: null });
+  const openUpload = (source) => setUpload({ open: true, source, file: null, saving: false, result: null, prevYear: false });
 
   const doUpload = async () => {
     const src = SOURCES[upload.source];
@@ -140,7 +146,9 @@ export default function EmunahEnrollment() {
       const form = new FormData();
       form.append('file', upload.file);
       form.append('branch_id', branchId);
-      form.append('academic_year', year);
+      // Last year's file goes in under last year — the server refuses a file
+      // whose own year disagrees with this, in either direction.
+      form.append('academic_year', upload.prevYear ? previousYear(year) : year);
       const res = await api.post(`${src.endpoint}/import`, form,
         { headers: { 'Content-Type': 'multipart/form-data' } });
       setUpload(u => ({ ...u, saving: false, result: res.data }));
@@ -289,9 +297,31 @@ export default function EmunahEnrollment() {
           <Alert severity="warning" icon={false} sx={{ mb: 2 }}>
             {SOURCES[upload.source]?.note}
             <Box sx={{ mt: 1 }}>
-              נקלט לסניף <b>{branch?.name || '—'}</b> · שנת <b>{formatAcademicYear(year)}</b>
+              נקלט לסניף <b>{branch?.name || '—'}</b> · שנת{' '}
+              <b>{formatAcademicYear(upload.prevYear ? previousYear(year) : year)}</b>
             </Box>
           </Alert>
+
+          {/* ---- קובץ שנה קודמת ----
+              The same two exports, downloaded for LAST year, uploaded under
+              last year. The comparison then knows who was actually here — the
+              fact behind the "ממשיך" tick — and who still owes from it. */}
+          {upload.source === 'clicktac' && (
+            <FormControlLabel sx={{ mb: 1, alignItems: 'flex-start' }}
+              control={<Checkbox checked={!!upload.prevYear}
+                onChange={e => setUpload(u => ({ ...u, prevYear: e.target.checked }))} />}
+              label={(
+                <Box>
+                  <Typography variant="body2" fontWeight={600}>
+                    זהו קובץ של שנה קודמת ({formatAcademicYear(previousYear(year))})
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    נקלט תחת שנה שעברה ולא נוגע ברשימת השנה. משמש להשוואת "ילד ממשיך" ולהצגת חוב משנה שעברה.
+                    קובץ שהשנה שלו לא תואמת לסימון — נדחה.
+                  </Typography>
+                </Box>
+              )} />
+          )}
 
           <Stack direction="row" spacing={1} alignItems="center">
             <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} disabled={upload.saving}>

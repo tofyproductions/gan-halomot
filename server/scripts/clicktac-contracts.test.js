@@ -1395,6 +1395,7 @@ async function main() {
       'שכ"ל — אמצעי', 'כרטיס (4 ספרות)', 'דמי רישום — אמצעי', 'סכום בקובץ', 'מספר קבלה',
       'הו"ק', 'ממשיך', 'חותם שני', 'הורה 1', 'טלפון 1', 'הורה 2', 'טלפון 2',
       'איש קשר תמ"ת', 'טלפון תמ"ת', 'מייל', 'כתובת', 'במערכת', 'הערה', 'תיקון הורים',
+      'היה/תה בשנה שעברה', 'כיתה שנה שעברה', 'מאזן שנה שעברה',
     ];
     const asRows = XLSX.utils.sheet_to_json(wb.Sheets['הכל'], { header: 1, defval: '' });
     const headerRow = asRows[0] || [];
@@ -1834,6 +1835,66 @@ async function main() {
     ok(!(await TmtApproval.findOne({ _id: t._id })), '29e שורת התמ"ת הישנה נמחקה');
     ok(!!(await TmtApproval.findOne({ _id: t2._id })), '29f ושורת התמ"ת מאתמול — לא');
     await ReconcileDecision.deleteMany({});
+  }
+
+  head('בדיקה 30 — קובץ שנה קודמת: נדחה בלי הסימון, נקלט איתו, ומשווה ממשיכים וחובות');
+  {
+    await wipeAll();
+    await importRegistrations();
+    // Last year's contracts file: אור and נועם were here; נועם still owes.
+    const LAST_YEAR = 'תשפ"ו';
+    const prevRows = [
+      contractRow({ ...KIDS[0], year: LAST_YEAR, cls: 'תינוקות', tier: 3, balance: 0 }),
+      contractRow({ ...KIDS[1], year: LAST_YEAR, cls: 'תינוקות', tier: 5, balance: -1865 }),
+    ];
+    const asCurrent = await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_5786.xlsx',
+      buffer: sheetBuffer(CONTRACTS_HEADER, prevRows, 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    eq(asCurrent.status, 400, '30a קובץ של תשפ"ו שהועלה כתשפ"ז — נדחה');
+    eq(asCurrent.body?.code, 'YEAR_MISMATCH', '30b עם קוד');
+    ok(/תשפ/.test(asCurrent.body?.error || ''), '30c וההודעה מציינת את השנים', asCurrent.body?.error);
+    eq((await listRows()).enrollments.length, 4, '30d ורשימת השנה לא נגעה — 4 ילדים, אף אחד לא סומן כנעדר');
+
+    const asPrev = await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_5786.xlsx',
+      buffer: sheetBuffer(CONTRACTS_HEADER, prevRows, 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: LAST_YEAR },
+    });
+    ok(asPrev.status === 200, '30e עם השנה הנכונה — נקלט', `${asPrev.status} ${asPrev.text?.slice(0, 200)}`);
+    eq(asPrev.body?.created, 2, '30f שתי שורות של שנה שעברה');
+    eq((await listRows()).enrollments.length, 4, '30g ורשימת השנה עדיין 4 — הקובץ הישן לא מתערבב');
+
+    // This year's registrations: אור is ticked "ממשיך" (true), נועם is not
+    // (but was here), שירה is ticked (but was not).
+    await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'Registrations Export.xlsx',
+      buffer: sheetBuffer(REGISTRATIONS_HEADER, [
+        registrationRow({ ...KIDS[0], parentFirst: 'א', parentPhone: '0500000001', continuing: 'כן' }),
+        registrationRow({ ...KIDS[1], parentFirst: 'ב', parentPhone: '0500000002', continuing: '' }),
+        registrationRow({ ...KIDS[2], parentFirst: 'ג', parentPhone: '0500000003', continuing: 'כן' }),
+      ], 'Sheet1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    const rec = await reconcileNow();
+    eq(rec.summary?.prev_year_loaded, true, '30h ההצלבה יודעת שיש קובץ שנה קודמת');
+    eq(rec.previous_year, '2025-2026', '30i ואיזו שנה');
+    ok(!!rec.last_import?.previous_year, '30j והכרטיס "קובץ אחרון" מציג אותו');
+    const or = rec.rows.find(r => r.id_number === KIDS[0].idNumber);
+    const noam = rec.rows.find(r => r.id_number === KIDS[1].idNumber);
+    const shira = rec.rows.find(r => r.id_number === KIDS[2].idNumber);
+    eq(or?.prev_year?.present, true, '30k אור — היה/תה בשנה שעברה');
+    eq(or?.prev_year?.class_name, 'תינוקות', '30l עם הכיתה של אז');
+    ok(!or?.issues?.some(i => i.code === 'prev_year_mismatch'), '30m מסומן/ת ממשיך/ה והיה/תה — אין חריגה');
+    eq(noam?.prev_year?.balance, -1865, '30n נועם — חוב משנה שעברה');
+    ok(noam?.issues?.some(i => i.code === 'prev_year_debt' && /1,865/.test(i.detail)), '30o מדווח כהערה', JSON.stringify(noam?.issues));
+    ok(noam?.issues?.some(i => i.code === 'prev_year_mismatch'), '30p ולא סומן ממשיך אף שהיה — חריגה');
+    eq(shira?.prev_year?.present, false, '30q שירה — לא היתה');
+    ok(shira?.issues?.some(i => i.code === 'prev_year_mismatch'), '30r אבל סומנה ממשיכה — חריגה');
+    eq(rec.summary?.prev_year_debtors, 1, '30s מונה החייבים משנה שעברה');
+    eq(rec.summary?.prev_year_returning, 2, '30t ומונה הממשיכים בפועל');
+    await ExternalEnrollment.deleteMany({ academic_year: '2025-2026' });
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

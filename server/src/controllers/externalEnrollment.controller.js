@@ -420,6 +420,35 @@ function applyFamily(existing, row) {
 }
 
 /**
+ * THE FILE'S OWN YEAR MUST AGREE WITH THE YEAR IT IS FILED UNDER.
+ *
+ * Both exports carry `שנת לימודים` on every row, and the screen always sends
+ * the intake year — so last year's file, uploaded for the comparison of
+ * continuing children, would have been forced into THIS year and, under the
+ * "latest file is the roster" rule, would have marked the whole current
+ * cohort gone. The screen now sends the previous year when the box is
+ * ticked; and whichever it sends, a file that says otherwise is refused with
+ * the two years named, before a row is written.
+ *
+ * Silent when the file carries no year (an older, hand-edited sheet) or the
+ * request names none.
+ */
+function yearMismatch(parsed, requestedYear) {
+  if (!requestedYear) return null;
+  const wanted = normalizeYear(requestedYear);
+  const years = [...new Set(parsed.map(d => d.academic_year).filter(Boolean))];
+  if (!years.length || years.includes(wanted)) return null;
+  const label = (y) => `${y} ${hebrewYearForStart(Number(String(y).split('-')[0])) || ''}`.trim();
+  return {
+    error: `הקובץ הוא של שנת ${years.map(label).join(' / ')}, וההעלאה היא לשנת ${label(wanted)}. `
+      + 'לקובץ של שנה קודמת — לסמן "קובץ שנה קודמת" בחלון ההעלאה.',
+    code: 'YEAR_MISMATCH',
+    file_years: years,
+    requested_year: wanted,
+  };
+}
+
+/**
  * POST /api/external-enrollments/import   (multipart: file, branch_id, academic_year?)
  *
  * ONE BUTTON, TWO FILES. ClickTac publishes a registrations export and a
@@ -484,6 +513,8 @@ async function importRegistrationsExport({ req, res, next, branch, branchId, row
       branchId,
       sourceFile: req.file.originalname || '',
     });
+    const yearClash = yearMismatch(parsed, req.body?.academic_year);
+    if (yearClash) return res.status(400).json(yearClash);
     if (req.body?.academic_year) {
       const forced = normalizeYear(req.body.academic_year);
       for (const d of parsed) d.academic_year = forced;
@@ -755,6 +786,8 @@ async function importContractsExport({ req, res, next, branch, branchId, rows, s
       branchId,
       sourceFile: req.file.originalname || '',
     });
+    const yearClash = yearMismatch(allParsed, req.body?.academic_year);
+    if (yearClash) return res.status(400).json(yearClash);
     if (req.body?.academic_year) {
       const forced = normalizeYear(req.body.academic_year);
       for (const d of allParsed) d.academic_year = forced;

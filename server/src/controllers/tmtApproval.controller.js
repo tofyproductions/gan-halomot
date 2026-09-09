@@ -299,6 +299,13 @@ async function listApprovals(req, res, next) {
   }
 }
 
+/** "2025-2026" for "2026-2027"; '' when the year is not in that shape. */
+function previousYear(academicYear) {
+  const m = /^(\d{4})-(\d{4})$/.exec(String(academicYear || ''));
+  if (!m) return '';
+  return `${Number(m[1]) - 1}-${Number(m[2]) - 1}`;
+}
+
 /**
  * Load both lists and compare them.
  *
@@ -320,7 +327,10 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     };
   }
 
-  const [tmtAll, ctDocs, pricing, decisionDocs] = await Promise.all([
+  // The year before — "2025-2026" for "2026-2027" — for the continuing-child
+  // and last-year-debt checks, when that file has been uploaded.
+  const prevYear = previousYear(academicYear);
+  const [tmtAll, ctDocs, pricing, decisionDocs, prevYearDocs] = await Promise.all([
     TmtApproval.find({ academic_year: academicYear })
       .select('-raw')
       .populate('branch_id', 'name')
@@ -339,6 +349,11 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     branchPricingFor(branchId, academicYear),
     // What people decided — notes, closed findings, overrides. See the model.
     ReconcileDecision.find({ branch_id: branchId, academic_year: academicYear }).lean(),
+    prevYear
+      ? ExternalEnrollment.find({ branch_id: branchId, academic_year: prevYear })
+        .select('child.id_number child.full_name enrollment.status contract.status contract.class_name contract.balance contract.family_balance')
+        .lean()
+      : [],
   ]);
   const decisions = new Map(decisionDocs.map(d => [d.id_number, d]));
 
@@ -358,6 +373,8 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     branchName: branch.name,
     pricing,
     decisions,
+    prevYearDocs: prevYearDocs.length ? prevYearDocs : null,
+    prevYear,
   });
   // The size of each side, which the verdicts alone cannot tell you: a branch
   // with no תמ"ת file and a branch whose every child was refused produce the
@@ -376,7 +393,8 @@ async function reconcileBranch(req, res, next) {
     const { result, error, status, code } = await buildReconciliation({ branchId, academicYear, req });
     if (error) return res.status(status).json({ error, code });
 
-    const [lastTmt, lastCt, lastClickTac] = await Promise.all([
+    const prevYear = previousYear(academicYear);
+    const [lastTmt, lastCt, lastClickTac, lastPrevYear] = await Promise.all([
       // NEVER the snapshots: they are whole rows as they were, bank account
       // included. They exist for the undo and for nothing else. See
       // EnrollmentImport.snapshots.
@@ -391,11 +409,19 @@ async function reconcileBranch(req, res, next) {
       // recent of either, because every caller that already reads it means
       // "has anything come in at all".
       lastClickTacImports({ branch_id: branchId, academic_year: academicYear }),
+      // Last year's file, if it was ever uploaded — either export.
+      prevYear
+        ? EnrollmentImport.findOne({ source: 'clicktac', branch_id: branchId, academic_year: prevYear })
+          .select('-snapshots -created_ids')
+          .sort({ created_at: -1 }).populate('imported_by', 'full_name username').lean()
+        : null,
     ]);
 
     res.json({
       ...result,
       academic_year_label: formatAcademicYear(academicYear),
+      previous_year: prevYear,
+      previous_year_label: prevYear ? formatAcademicYear(prevYear) : '',
       last_import: {
         // Flattened the same way for all four, so the one component that
         // renders an upload line reads the same field whichever it is given.
@@ -403,6 +429,7 @@ async function reconcileBranch(req, res, next) {
         clicktac: withImporterName(lastCt),
         clicktac_registrations: lastClickTac.registrations,
         clicktac_contracts: lastClickTac.contracts,
+        previous_year: withImporterName(lastPrevYear),
       },
       dictionaries: { verdicts: VERDICTS, issues: ISSUES },
     });
@@ -751,6 +778,10 @@ async function exportReconcile(req, res, next) {
       // What the office wrote and decided — see ReconcileDecision.
       note: r.decision?.note || '',
       parent_fix: r.decision?.parent_overrides?.pending ? 'לתקן בקליקטאק' : '',
+      // Last year's file — blank columns until it is uploaded.
+      prev_year_present: r.prev_year ? (r.prev_year.present ? 'כן' : 'לא') : '',
+      prev_year_class: r.prev_year?.class_name || '',
+      prev_year_balance: r.prev_year?.balance ?? '',
     });
 
     const COLS_FULL = [
@@ -774,6 +805,8 @@ async function exportReconcile(req, res, next) {
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],
       ['email', 'מייל'], ['address', 'כתובת'], ['review', 'במערכת'],
       ['note', 'הערה'], ['parent_fix', 'תיקון הורים'],
+      ['prev_year_present', 'היה/תה בשנה שעברה'], ['prev_year_class', 'כיתה שנה שעברה'],
+      ['prev_year_balance', 'מאזן שנה שעברה'],
     ];
     const COLS_CONTACT = [
       ['child_name', 'שם הילד/ה'], ['id_number', 'ת"ז'], ['age_group', 'שכבת גיל'],

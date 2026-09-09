@@ -619,6 +619,7 @@ export default function TmtReconcile({
   const lastCtReg = data?.last_import?.clicktac_registrations ?? data?.last_import?.clicktac;
   const lastCtContracts = data?.last_import?.clicktac_contracts;
   const lastCt = lastCtReg || lastCtContracts;
+  const lastPrevYear = data?.last_import?.previous_year;
 
   return (
     <Box sx={{ p: 2 }}>
@@ -705,6 +706,13 @@ export default function TmtReconcile({
               color={summary.balance_due ? 'error' : 'info'} active={balanceDueOnly}
               hint="לפי עמודת מאזן בקובץ החוזים"
               onClick={() => setBalanceDueOnly(v => !v)} />
+            {summary.prev_year_loaded && (
+              <StatCard label="חוב משנה שעברה" value={summary.prev_year_debtors || 0}
+                color={summary.prev_year_debtors ? 'error' : 'info'}
+                active={issueFilter === 'prev_year_debt'}
+                hint={`${summary.prev_year_returning || 0} היו בקובץ ${data.previous_year_label || ''}`}
+                onClick={() => setIssueFilter(issueFilter === 'prev_year_debt' ? '' : 'prev_year_debt')} />
+            )}
             {!!summary.private && (
               <StatCard label='בגן ללא תמ"ת' value={summary.private} color="secondary"
                 active={verdictFilter === 'private'} hint="החלטה שלך — לא במסגרת המשרד"
@@ -855,6 +863,22 @@ export default function TmtReconcile({
                     לא נקלטו — מעון אחר ({lastCtContracts.details.other_institution.length})
                   </Alert>
                 )}
+                {/* Last year's file — the fact behind "ממשיך" and the
+                    source of last year's debts. Uploaded through the same
+                    button with the "שנה קודמת" box ticked. */}
+                <Box sx={{ mt: 0.5 }}>
+                  <Typography variant="body2" fontWeight={600}
+                    color={lastPrevYear ? 'text.primary' : 'text.disabled'}>
+                    שנה קודמת ({data.previous_year_label || '—'}) — {lastPrevYear ? fmtDateTime(lastPrevYear.created_at) : 'טרם הועלה'}
+                  </Typography>
+                  {lastPrevYear
+                    ? <ImportLine imp={lastPrevYear} />
+                    : (
+                      <Typography variant="caption" color="text.secondary">
+                        להעלאה: "קליטת קובץ קליקטאק" ← לסמן "זהו קובץ של שנה קודמת"
+                      </Typography>
+                    )}
+                </Box>
               </Card>
             </Stack>
           )}
@@ -1103,6 +1127,14 @@ export default function TmtReconcile({
                     </TableCell>
                     <TableCell>
                       <BalanceCell balance={r.clicktac?.balance} family={r.clicktac?.family_balance} />
+                      {/* Last year's debt, under this year's balance — the
+                          one number the office asked to see before it takes
+                          a returning family. */}
+                      {typeof r.prev_year?.balance === 'number' && r.prev_year.balance < 0 && (
+                        <Typography variant="caption" color="error.main" display="block" sx={NOWRAP}>
+                          שנה שעברה: חוב {fmtMoney(-r.prev_year.balance)}
+                        </Typography>
+                      )}
                     </TableCell>
                     <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }}>
                       <IconButton size="small" onClick={() => openDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
@@ -1292,6 +1324,34 @@ export default function TmtReconcile({
                   {detail.age_group_override ? ` · שובץ ידנית ל${detail.age_group_override}` : ''}
                 </Typography>
               </Card>
+
+              {/* ---- שנה שעברה ----
+                  Only once last year's file is here; then for every child,
+                  including the ones who were not in it — that is the point. */}
+              {detail.prev_year && (
+                <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>
+                    שנה שעברה ({data.previous_year_label || detail.prev_year.year})
+                  </Typography>
+                  {detail.prev_year.present ? (
+                    <Typography variant="body2">
+                      היה/תה בגן
+                      {detail.prev_year.class_name ? ` · כיתה ${detail.prev_year.class_name}` : ''}
+                      {detail.prev_year.status ? ` · ${detail.prev_year.status}` : ''}
+                      {typeof detail.prev_year.balance === 'number' ? (
+                        <Box component="span" sx={{ mr: 1, fontWeight: detail.prev_year.balance < 0 ? 700 : 400 }}
+                          color={detail.prev_year.balance < 0 ? 'error.main' : 'text.primary'}>
+                          {' · '}
+                          {detail.prev_year.balance < 0 ? `חוב ${fmtMoney(-detail.prev_year.balance)}`
+                            : detail.prev_year.balance > 0 ? `זכות ${fmtMoney(detail.prev_year.balance)}` : 'מאוזן'}
+                        </Box>
+                      ) : ''}
+                    </Typography>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">לא היה/תה בקובץ של שנה שעברה — רישום חדש</Typography>
+                  )}
+                </Card>
+              )}
 
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
                 <Card variant="outlined" sx={{ p: 1.5, flex: 1 }}>
