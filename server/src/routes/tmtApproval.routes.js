@@ -37,6 +37,12 @@ router.put('/decisions/:idNumber', decide, ctrl.putDecision);
 router.post('/decisions/:idNumber/resolve', decide, ctrl.resolveIssue);
 router.delete('/decisions/:idNumber/resolve/:code', decide, ctrl.reopenIssue);
 
+// A real, on-demand send of both alerts — the only way to prove the email
+// half actually arrives, since its credentials exist only on this server.
+// admin/accountant only, narrower than `decide` above: this sends a real SMS
+// and a real email, not a decision scoped to one child.
+router.post('/alerts/test', allow('system_admin', 'accountant'), ctrl.sendTestAlerts);
+
 // Undoing a whole upload. Deliberately admin/accountant only: it removes the
 // ministry's answer for a whole gan and a whole year in one call.
 router.delete('/data', allow('system_admin', 'accountant'), ctrl.deleteData);

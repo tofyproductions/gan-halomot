@@ -32,9 +32,21 @@ const { isTmtSupervised } = require('../controllers/tmtApproval.controller');
 const DAY_OF_MONTH = 11;
 const SEND_HOUR = 9;
 const THRESHOLD_DAYS = 30;
-const SENT_KEY = 'reconcile_upload_reminder_last_sent';   // 'YYYY-MM'
 const RECIPIENT_NAME = 'עינת רוה';
 const RECIPIENTS_KEY = 'reconcile_alert_emails';
+
+/**
+ * TWO KEYS, NOT ONE. The SMS provider and the email provider are unrelated
+ * services and fail independently — this ran once in development with real
+ * SMS credentials and no email credentials at all, and the SMS went through
+ * while the email failed. A single monthly "sent" flag would have to choose
+ * between re-texting her every hour until the email problem is fixed, or
+ * marking the whole month done while she never got the email. Each channel
+ * remembers its OWN last successful month, so a stuck email keeps retrying
+ * hourly through the day without ever sending a second text.
+ */
+const SMS_SENT_KEY = 'reconcile_upload_reminder_sms_last_sent';     // 'YYYY-MM'
+const EMAIL_SENT_KEY = 'reconcile_upload_reminder_email_last_sent'; // 'YYYY-MM'
 
 function monthKeyInIsrael(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -107,19 +119,31 @@ async function recipientPhone() {
   return user?.phone || null;
 }
 
-/** Build and send. Returns what it did, so a manual trigger can report it. */
-async function send({ dryRun = false, now = new Date() } = {}) {
+/**
+ * Build and send — EACH CHANNEL GATED BY ITS OWN MONTHLY KEY (see the note on
+ * SMS_SENT_KEY/EMAIL_SENT_KEY). `force` bypasses both gates, for a manual
+ * "send now" trigger where re-sending on purpose is the whole point.
+ */
+async function send({ dryRun = false, now = new Date(), force = false } = {}) {
   const needing = await branchesNeedingUpload(now);
   const text = messageText(needing);
+  const monthKey = monthKeyInIsrael(now);
 
-  const [phone, emails] = await Promise.all([recipientPhone(), recipientEmails()]);
+  const [phone, emails, smsDone, emailDone] = await Promise.all([
+    recipientPhone(), recipientEmails(),
+    Setting.findOne({ key: SMS_SENT_KEY }).lean(),
+    Setting.findOne({ key: EMAIL_SENT_KEY }).lean(),
+  ]);
   const result = { needing, sms: null, email: null };
 
-  if (phone) {
+  if (!force && smsDone?.value === monthKey) {
+    result.sms = { skipped: 'already sent this month' };
+  } else if (phone) {
     if (!dryRun) {
       try {
         await sendSms({ to: phone, text });
         result.sms = { to: phone, ok: true };
+        await Setting.findOneAndUpdate({ key: SMS_SENT_KEY }, { $set: { value: monthKey } }, { upsert: true });
       } catch (err) {
         result.sms = { to: phone, ok: false, error: err.message };
       }
@@ -130,11 +154,20 @@ async function send({ dryRun = false, now = new Date() } = {}) {
     result.sms = { ok: false, error: `לא נמצא משתמש פעיל בשם "${RECIPIENT_NAME}"` };
   }
 
-  if (emails.length) {
+  if (!force && emailDone?.value === monthKey) {
+    result.email = { skipped: 'already sent this month' };
+  } else if (emails.length) {
     if (!dryRun) {
-      await dispatchEmail({ to: emails, subject: 'תזכורת חודשית — קליקטאק', html: emailHtml(needing) });
+      try {
+        await dispatchEmail({ to: emails, subject: 'תזכורת חודשית — קליקטאק', html: emailHtml(needing) });
+        result.email = { to: emails, ok: true };
+        await Setting.findOneAndUpdate({ key: EMAIL_SENT_KEY }, { $set: { value: monthKey } }, { upsert: true });
+      } catch (err) {
+        result.email = { to: emails, ok: false, error: err.message };
+      }
+    } else {
+      result.email = { to: emails, dry_run: true };
     }
-    result.email = { to: emails, ok: true };
   } else {
     result.email = { ok: false, error: `הגדרה '${RECIPIENTS_KEY}' ריקה — אין כתובת מייל של עינת` };
   }
@@ -143,22 +176,20 @@ async function send({ dryRun = false, now = new Date() } = {}) {
 }
 
 /**
- * The hourly tick. Fires once, on the 11th of the month, at or after 09:00
- * Israel time — unconditionally, whatever the branches say.
+ * The hourly tick. On the 11th, at or after 09:00 Israel time, every hour —
+ * so a channel that failed once keeps retrying through the day, without ever
+ * re-sending a channel that already succeeded this month (see `send`).
  */
 async function tick(trigger = 'schedule') {
   const now = new Date();
   if (trigger === 'schedule') {
     if (dayInIsrael(now) !== DAY_OF_MONTH) return { skipped: 'not the 11th' };
     if (hourInIsrael(now) < SEND_HOUR) return { skipped: 'before send hour' };
-    const key = monthKeyInIsrael(now);
-    const last = await Setting.findOne({ key: SENT_KEY }).lean();
-    if (last?.value === key) return { skipped: 'already sent this month' };
-    const result = await send({ now });
-    await Setting.findOneAndUpdate({ key: SENT_KEY }, { $set: { value: key } }, { upsert: true });
-    return result;
+    return send({ now });
   }
-  return send({ now });
+  // A manual trigger sends for real, on purpose, whether or not this month's
+  // channels already succeeded.
+  return send({ now, force: true });
 }
 
 module.exports = {

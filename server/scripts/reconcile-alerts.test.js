@@ -121,7 +121,7 @@ async function main() {
     ok(/מעודכנים/.test(textEmpty), '1g בלי חוסרים — הודעה חיובית, לא רשימה ריקה', textEmpty);
   }
 
-  head('בדיקה 2 — התזכורת החודשית: שליחה בפועל');
+  head('בדיקה 2 — התזכורת החודשית: שליחה בפועל, וכל ערוץ עם המנעול החודשי שלו');
   {
     const reminder = require('../src/services/reconcileUploadReminderJob');
     sentSms.length = 0; sentEmails.length = 0;
@@ -134,23 +134,36 @@ async function main() {
     eq(r1.email?.ok, false, '2d אין הגדרת מייל — לא נשלח');
     eq(sentEmails.length, 0, '2e ואף מייל לא יצא בפועל');
 
+    /**
+     * המנעול החודשי הוא לכל ערוץ בנפרד. קריאה חוזרת בלי force לא שולחת שוב
+     * SMS שכבר יצא החודש — גם אם המייל עדיין ממתין להגדרה. זה בדיוק המצב
+     * שקרה בפועל: SMS יצא עם פרטי ההתחברות האמיתיים, המייל נכשל כי ספק
+     * המייל קיים רק ב-Render ולא בסביבה המקומית.
+     */
+    sentSms.length = 0;
+    const r1b = await reminder.send({ now });
+    eq(r1b.sms?.skipped, 'already sent this month', '2f בלי force — ה-SMS לא נשלח שוב החודש');
+    eq(sentSms.length, 0, '2g ובאמת לא יצא כלום');
+
     await Setting.create({ key: reminder.RECIPIENTS_KEY, value: ['einat.real@example.com'] });
     sentSms.length = 0; sentEmails.length = 0;
-    const r2 = await reminder.send({ now });
-    eq(r2.email?.ok, true, '2f עכשיו יש הגדרה — נשלח');
-    eq(sentEmails.length, 1, '2g מייל אחד יצא');
-    eq(sentEmails[0].to, ['einat.real@example.com'], '2h לכתובת שהוגדרה');
-    ok(sentSms.length === 1, '2i וה-SMS יצא שוב, בלי תלות במייל');
+    // force — כמו טריגר ידני: שולח בכל ערוץ, גם אם כבר נשלח החודש.
+    const r2 = await reminder.send({ now, force: true });
+    eq(r2.email?.ok, true, '2h עכשיו יש הגדרה — המייל נשלח');
+    eq(sentEmails.length, 1, '2i מייל אחד יצא');
+    eq(sentEmails[0].to, ['einat.real@example.com'], '2j לכתובת שהוגדרה');
+    ok(sentSms.length === 1, '2k וה-SMS נשלח שוב כי force ביקש זאת מפורשות');
 
     // בלי משתמשת בשם "עינת רוה" — אין טלפון, ה-SMS נכשל בבירור, בלי לזרוק.
     await User.updateOne({ full_name: 'עינת רוה' }, { $set: { is_active: false } });
     sentSms.length = 0;
-    const r3 = await reminder.send({ now });
-    eq(r3.sms?.ok, false, '2j בלי משתמשת פעילה — ה-SMS מדווח כשל ברור');
-    ok(/עינת רוה/.test(r3.sms?.error || ''), '2k וההודעה אומרת את מי לא מצאנו', r3.sms?.error);
-    eq(sentSms.length, 0, '2l ולא נשלח כלום בפועל');
+    const r3 = await reminder.send({ now, force: true });
+    eq(r3.sms?.ok, false, '2l בלי משתמשת פעילה — ה-SMS מדווח כשל ברור');
+    ok(/עינת רוה/.test(r3.sms?.error || ''), '2m וההודעה אומרת את מי לא מצאנו', r3.sms?.error);
+    eq(sentSms.length, 0, '2n ולא נשלח כלום בפועל');
     await User.updateOne({ full_name: 'עינת רוה' }, { $set: { is_active: true } });
     await Setting.deleteMany({ key: reminder.RECIPIENTS_KEY });
+    await Setting.deleteMany({ key: /reconcile_upload_reminder_.*_last_sent/ });
   }
 
   head('בדיקה 3 — הדיגסט היומי: שכבת גיל שונה בלבד, פר סניף, בלי כפילויות');

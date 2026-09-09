@@ -356,6 +356,15 @@ export default function TmtReconcile({
    * costs one line.
    */
   const [filesAnchor, setFilesAnchor] = useState(null);
+  /**
+   * שליחת בדיקה לעינת — a REAL SMS and REAL email, on demand.
+   *
+   * The provider credentials (SMS4Free, GAS/Resend/SMTP) live only on this
+   * server, so this is the one way to prove either alert actually arrives.
+   * `force: true` on the server side, always — a test that silently no-ops
+   * because "this month is already sent" would not have told anyone anything.
+   */
+  const [testAlertsDlg, setTestAlertsDlg] = useState({ open: false, sending: false, result: null, error: null });
   const [undoDlg, setUndoDlg] = useState({ open: false, imp: null, saving: false, result: null, error: null });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
   const [saving, setSaving] = useState({});
@@ -459,6 +468,16 @@ export default function TmtReconcile({
     () => api.post(`/tmt/decisions/${row.id_number}/resolve`, { ...scope, code, choice }),
     'החריגה נסגרה',
   );
+  const sendTestAlerts = async () => {
+    setTestAlertsDlg(d => ({ ...d, sending: true, error: null }));
+    try {
+      const res = await api.post('/tmt/alerts/test');
+      setTestAlertsDlg(d => ({ ...d, sending: false, result: res.data }));
+    } catch (err) {
+      setTestAlertsDlg(d => ({ ...d, sending: false, error: err.response?.data?.error || 'שגיאה בשליחה' }));
+    }
+  };
+
   const reopen = (row, code) => decisionCall(
     () => api.delete(`/tmt/decisions/${row.id_number}/resolve/${code}`, { params: { branch: branchId, year } }),
     'החריגה נפתחה מחדש',
@@ -908,8 +927,74 @@ export default function TmtReconcile({
                     להעלאה: "קליטת קובץ קליקטאק" ← לסמן "זהו קובץ של שנה קודמת"
                   </Typography>
                 )}
+
+              {canImport && (
+                <>
+                  <Divider sx={{ my: 1 }} />
+                  <Button size="small" fullWidth color="secondary" variant="outlined"
+                    onClick={() => { setFilesAnchor(null); setTestAlertsDlg({ open: true, sending: false, result: null, error: null }); }}>
+                    שליחת בדיקה לעינת (SMS + מייל)
+                  </Button>
+                </>
+              )}
             </Box>
           </Popover>
+
+          {/* ---- שליחת בדיקה לעינת ----
+              A real SMS and a real email, right now — see sendTestAlerts.
+              The dialog says so before the button is live, because the
+              action is not reversible: she gets a text either way. */}
+          <Dialog open={testAlertsDlg.open}
+            onClose={() => setTestAlertsDlg({ open: false, sending: false, result: null, error: null })}
+            maxWidth="sm" fullWidth>
+            <DialogTitle>שליחת בדיקה לעינת</DialogTitle>
+            <DialogContent>
+              {!testAlertsDlg.result && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  זו שליחה אמיתית — SMS לטלפון של עינת רוה ומייל לכתובת שהוגדרה,
+                  לא סימולציה. משמש לוודא שההתראות באמת מגיעות.
+                </Alert>
+              )}
+              {testAlertsDlg.error && <Alert severity="error" sx={{ mb: 2 }}>{testAlertsDlg.error}</Alert>}
+              {testAlertsDlg.result && (
+                <Stack spacing={1.5}>
+                  <Card variant="outlined" sx={{ p: 1.5 }}>
+                    <Typography variant="subtitle2" fontWeight={700} gutterBottom>תזכורת חודשית — קליקטאק</Typography>
+                    <Typography variant="body2" color={testAlertsDlg.result.reminder?.sms?.ok ? 'success.main' : 'error.main'}>
+                      SMS: {testAlertsDlg.result.reminder?.sms?.ok
+                        ? `נשלח ל-${testAlertsDlg.result.reminder.sms.to}`
+                        : (testAlertsDlg.result.reminder?.sms?.error || 'לא נשלח')}
+                    </Typography>
+                    <Typography variant="body2" color={testAlertsDlg.result.reminder?.email?.ok ? 'success.main' : 'error.main'}>
+                      מייל: {testAlertsDlg.result.reminder?.email?.ok
+                        ? `נשלח ל-${(testAlertsDlg.result.reminder.email.to || []).join(', ')}`
+                        : (testAlertsDlg.result.reminder?.email?.error || 'לא נשלח')}
+                    </Typography>
+                  </Card>
+                  <Card variant="outlined" sx={{ p: 1.5 }}>
+                    <Typography variant="subtitle2" fontWeight={700} gutterBottom>דיגסט — שכבת גיל שונה</Typography>
+                    {testAlertsDlg.result.digest?.empty ? (
+                      <Typography variant="body2" color="text.secondary">אין כרגע אף חריגה פתוחה — לא נשלח מייל, וזה תקין.</Typography>
+                    ) : (
+                      <Typography variant="body2" color={testAlertsDlg.result.digest?.sent ? 'success.main' : 'error.main'}>
+                        {testAlertsDlg.result.digest?.sent
+                          ? `נשלח ל-${(testAlertsDlg.result.digest.to || []).join(', ')} (${testAlertsDlg.result.digest.total} ילדים)`
+                          : (testAlertsDlg.result.digest?.error || 'לא נשלח')}
+                      </Typography>
+                    )}
+                  </Card>
+                </Stack>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setTestAlertsDlg({ open: false, sending: false, result: null, error: null })}>סגירה</Button>
+              {!testAlertsDlg.result && (
+                <Button variant="contained" color="warning" onClick={sendTestAlerts} disabled={testAlertsDlg.sending}>
+                  {testAlertsDlg.sending ? 'שולח…' : 'שליחה אמיתית עכשיו'}
+                </Button>
+              )}
+            </DialogActions>
+          </Dialog>
 
           {/* ELEVEN COLUMNS DO NOT FIT IN 1440px AND SHOULD NOT TRY. Squeezing
               them wrapped the name to two lines, the age to four and the dates

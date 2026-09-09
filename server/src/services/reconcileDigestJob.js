@@ -128,7 +128,11 @@ async function send({ dryRun = false } = {}) {
   const to = await recipients();
   if (!to.length) return { sent: false, no_recipients: true, total: data.rows.length };
   if (!dryRun) {
-    await dispatchEmail({ to, subject: `שכבת גיל שונה — ${data.rows.length} לטיפול`, html });
+    try {
+      await dispatchEmail({ to, subject: `שכבת גיל שונה — ${data.rows.length} לטיפול`, html });
+    } catch (err) {
+      return { sent: false, error: err.message, to, total: data.rows.length };
+    }
   }
   return { sent: true, to, total: data.rows.length, hash: hashOf(data) };
 }

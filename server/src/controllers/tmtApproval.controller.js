@@ -1349,6 +1349,28 @@ async function reopenIssue(req, res, next) {
   }
 }
 
+/**
+ * POST /api/tmt/alerts/test — send both alerts for real, right now, on
+ * purpose. The one way to prove the email half actually arrives: the
+ * provider credentials (GAS/Resend/SMTP) live only in this server's own
+ * environment, so nothing run from a laptop can exercise them. `force: true`
+ * on the reminder means it goes out even if this month's SMS or email
+ * already succeeded — that repetition is the point of asking for a test.
+ */
+async function sendTestAlerts(req, res, next) {
+  try {
+    const reminder = require('../services/reconcileUploadReminderJob');
+    const digest = require('../services/reconcileDigestJob');
+    const [reminderResult, digestResult] = await Promise.all([
+      reminder.send({ force: true }),
+      digest.send(),
+    ]);
+    res.json({ reminder: reminderResult, digest: digestResult });
+  } catch (error) {
+    next(error);
+  }
+}
+
 /** DELETE /api/tmt/imports/:id — undo one ministry upload, the latest one. */
 async function undoImport(req, res, next) {
   try {
@@ -1373,6 +1395,7 @@ module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
   exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
   isTmtSupervised, undoImport, putDecision, resolveIssue, reopenIssue,
+  sendTestAlerts,
   // The comparison itself, so the daily urgent-findings digest reads exactly
   // what the screen reads rather than recomputing its own version of it.
   buildReconciliation,
