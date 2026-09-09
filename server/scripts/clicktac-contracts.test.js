@@ -82,7 +82,7 @@ const head = (t) => console.log(`\n${t}`);
 
 const {
   excelSerial, sheetBuffer, CONTRACTS_HEADER, REGISTRATIONS_HEADER,
-  contractRow, registrationRow,
+  contractRow, registrationRow, LEGACY_CONTRACTS_HEADER, legacyContractRow,
 } = require('./lib/clicktac-fixtures');
 
 /** The three children both files share, plus one only the registrations has. */
@@ -656,18 +656,39 @@ async function main() {
     const before = await listRows();
     const beforeRow = before.enrollments.find(e => e.child.full_name === 'אור אבוחצירא');
 
-    const wrong = await upload({
+    /* ---- (i) a file of ANOTHER CITY: refused outright ----
+     * The file says מעון "הרצליה" on every row and the upload is aimed at
+     * כפר סבא. Since 09.2026 the vendor's export is one sheet for the whole
+     * organisation, and the row's מעון is read — not to pick the branch, but
+     * to refuse a row that plainly belongs elsewhere. Every row refused = the
+     * whole file refused, with a code, before anything is written. */
+    const wrongCity = await upload({
       token, path: '/api/external-enrollments/import',
       fileName: 'contracts_export_1739.xlsx', buffer: contractsFile(),
       fields: { branch_id: String(otherBranch._id), academic_year: YEAR },
     });
-    eq(wrong.status, 200, '13b ההעלאה מוחזרת עם תשובה, לא עם שגיאה');
-    eq(wrong.body?.created, 0, '13c ולא נוצרה ולו שורה אחת בסניף השני');
-    eq(wrong.body?.updated, 0, '13d ולא עודכן דבר');
-    eq(wrong.body?.cross_branch, 3, '13e שלוש השורות נספרו כשייכות לסניף אחר');
-    eq(wrong.body?.cross_branch_names?.length, 3, '13f ודווחו בשמן');
+    eq(wrongCity.status, 400, '13b קובץ של מעון אחר נדחה');
+    eq(wrongCity.body?.code, 'OTHER_INSTITUTION', '13b2 עם קוד שאפשר לתפוס');
+    ok(/הרצליה/.test(wrongCity.body?.error || ''), '13b3 וההודעה אומרת של איזה מעון הקובץ', wrongCity.body?.error);
+
+    /* ---- (ii) the SAME city, the other branch: the cross-branch guard ----
+     * "הרצליה ב" answers to מעון "הרצליה" exactly as the two כפר סבא gans
+     * answer to "כפר סבא". The מעון column cannot tell them apart; the
+     * cross-branch merge rule is what still catches the child filed under
+     * the sibling branch. */
+    const sameCity = await Branch.create({ name: 'הרצליה ב', address: 'הנשיא 3' });
+    const wrong = await upload({
+      token, path: '/api/external-enrollments/import',
+      fileName: 'contracts_export_1739.xlsx', buffer: contractsFile(),
+      fields: { branch_id: String(sameCity._id), academic_year: YEAR },
+    });
+    eq(wrong.status, 200, '13c ההעלאה מוחזרת עם תשובה, לא עם שגיאה');
+    eq(wrong.body?.created, 0, '13d ולא נוצרה ולו שורה אחת בסניף השני');
+    eq(wrong.body?.updated, 0, '13e ולא עודכן דבר');
+    eq(wrong.body?.cross_branch, 3, '13f שלוש השורות נספרו כשייכות לסניף אחר');
+    eq(wrong.body?.cross_branch_names?.length, 3, '13g ודווחו בשמן');
     ok(/סניף אחר/.test(wrong.body?.cross_branch_label || ''),
-      '13g עם המשפט שאומר מה קרה', wrong.body?.cross_branch_label);
+      '13g2 עם המשפט שאומר מה קרה', wrong.body?.cross_branch_label);
 
     const after = await listRows();
     eq(after?.enrollments?.length, 3, '13h מספר השורות לא זז');
@@ -1367,7 +1388,9 @@ async function main() {
     const EXPECTED_HEADERS = [
       'שם הילד/ה', 'ת"ז', 'תאריך לידה', 'שכבת גיל', 'גיל ב־1.9', 'חודשים ב־1.9',
       'שובץ ידנית ל', 'מסקנה', 'פעולה נדרשת', 'חריגות', 'החלטת תמ"ת', 'תאריך כניסה בתמ"ת',
-      'ברשימת תמ"ת', 'סטטוס קליקטאק', 'חתימה', 'אמצעי תשלום', 'אמצעי תשלום — כפי שנרשם',
+      'ברשימת תמ"ת', 'סטטוס קליקטאק', 'בקובץ קליקטאק', 'חתימה',
+      'מאזן בקליקטאק', 'מאזן משפחתי', 'שכ"ל בחוזה', 'ממשיך (חוזה)',
+      'אמצעי תשלום', 'אמצעי תשלום — כפי שנרשם',
       'כיתה', 'דרגה', 'שכ"ל לפי דרגה', 'התרעת תשלום', 'מקור', 'חסר פרטי הורים',
       'שכ"ל — אמצעי', 'כרטיס (4 ספרות)', 'דמי רישום — אמצעי', 'סכום בקובץ', 'מספר קבלה',
       'הו"ק', 'ממשיך', 'חותם שני', 'הורה 1', 'טלפון 1', 'הורה 2', 'טלפון 2',
@@ -1419,6 +1442,260 @@ async function main() {
       '22av והכרטיס המלא (עם מקפים או בלעדיהם) אינו מופיע באף תא, באף גיליון');
 
     await BranchPricing.deleteMany({ branch_id: branch._id });
+  }
+
+  /* ================================================================ *
+   * September 2026 — the wider contracts export, the contracts sweep,
+   * latest-file-wins, the name+birth fallback, and undoing an upload.
+   * ================================================================ */
+  const { TmtApproval } = require('../src/models');
+  const reconcileNow = async () => {
+    const r = await request({
+      token, path: `/api/tmt/reconcile?branch=${branchId}&year=${encodeURIComponent(YEAR)}`,
+    });
+    return r.body;
+  };
+  const listImports = async () => {
+    const r = await request({ token, path: `/api/tmt/imports?branch=${branchId}&year=${encodeURIComponent(YEAR)}` });
+    return r.body?.imports || [];
+  };
+  const uploadContracts = (rows, fileName = 'contracts_export_2026.xlsx') => upload({
+    token, path: '/api/external-enrollments/import', fileName,
+    buffer: sheetBuffer(CONTRACTS_HEADER, rows, 'Worksheet 1'),
+    fields: { branch_id: branchId, academic_year: YEAR },
+  });
+  const wipeAll = async () => { await wipe(); await TmtApproval.deleteMany({}); };
+  const tmtRow = (kid, patch = {}) => TmtApproval.create({
+    source: 'tmt', source_file: 'child-list.xls', branch_id: branch._id, academic_year: '2026-2027',
+    child: {
+      first_name: kid.first, last_name: kid.last, full_name: `${kid.first} ${kid.last}`,
+      id_number: kid.idNumber, birth_date: new Date(Date.UTC(...[kid.birth[0], kid.birth[1] - 1, kid.birth[2]])),
+      age_group: 'פעוט', source_age_group: 'פעוטות',
+    },
+    contact: { name: 'הורה תמ"ת', phone: '0509999999', email: '' },
+    ministry: { decision: 'התקבל', is_approved: true, absorbed_at: new Date('2026-09-01') },
+    presence: { is_present: true, first_seen_at: new Date(), last_seen_at: new Date(), missing_since: null },
+    content_hash: `t-${kid.idNumber}-${Math.random()}`,
+    ...patch,
+  });
+
+  head('בדיקה 23 — ייצוא החוזים הרחב: הורים, מאזן וממשיך מגיעים מהחוזה');
+  {
+    await wipeAll();
+    // A child no earlier test promoted — a Registration outlives wipe().
+    const FRESH = { id: '337400', first: 'טליה', last: 'שרעבי', idNumber: '248888884', birth: [2025, 2, 2], cls: 'פעוטות א', tier: 3 };
+    const withFamily = contractRow({
+      ...FRESH, parentFirst: 'שפרה', parentLast: 'אבוחצירא', parentPhone: '0523064664',
+      parentEmail: 'shifa@example.com', parentId: '311111111',
+      parent2First: 'שי', parent2Last: 'בוחבוט', parent2Phone: '0523064665',
+      address: 'סוקולוב 16', city: 'הרצליה', balance: -4539, familyBalance: -4539,
+      continuing: 'TRUE', tuitionAmount: 3102,
+    });
+    const res = await uploadContracts([withFamily, contractRow(KIDS[1])]);
+    ok(res.status === 200, '23a הקובץ נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
+    eq(res.body?.created, 2, '23b שתי שורות נוצרו');
+
+    const data = await listRows();
+    const a = data.enrollments.find(e => e.child.id_number === FRESH.idNumber);
+    const b = data.enrollments.find(e => e.child.id_number === KIDS[1].idNumber);
+    eq(a?.parent1?.phone, '0523064664', '23c הטלפון של ההורה הגיע מקובץ החוזים');
+    eq(a?.parent1?.first_name, 'שפרה', '23d ושמה');
+    eq(a?.parent2?.phone, '0523064665', '23e וגם ההורה השני');
+    eq(a?.parent1?.address, 'סוקולוב 16, הרצליה', '23f הכתובת — רחוב ועיר');
+    eq(a?.missing_parents, false, '23g השורה אינה "חסרת פרטי הורים" — יש למי להתקשר');
+    eq(b?.missing_parents, true, '23h ושורה בלי הורה בקובץ — עדיין חסרה');
+    eq(a?.contract?.balance, -4539, '23i המאזן נשמר, עם הסימן של קליקטאק');
+    eq(a?.contract?.continuing, true, '23j "ממשיך משנה קודמת" מהחוזה');
+    eq(a?.contract?.tuition_amount, 3102, '23k וסכום שכר הלימוד');
+    eq(a?.contract?.present, true, '23l ונוכח/ה בקובץ החוזים');
+    eq(data?.summary?.missing_parents, 1, '23m המונה סופר רק את מי שבאמת אין לו הורה');
+
+    // The whole point: a family the contracts export named can be promoted.
+    const promote = await request({
+      method: 'POST', token, path: `/api/external-enrollments/${a.id}/promote`, body: { monthly_fee: 1500 },
+    });
+    ok(promote.status === 201, '23n ואפשר לקלוט אותה למערכת', `${promote.status} ${promote.text?.slice(0, 200)}`);
+
+    const rec = await reconcileNow();
+    const rowA = rec?.rows?.find(r => r.id_number === FRESH.idNumber);
+    ok(rowA?.issues?.some(i => i.code === 'balance_due' && /4,539/.test(i.detail)),
+      '23o ההצלבה מעירה על יתרת החוב', JSON.stringify(rowA?.issues));
+    eq(rowA?.clicktac?.balance, -4539, '23p והמאזן על השורה');
+    ok(rowA?.issues?.every(i => i.color), '23q לכל חריגה יש צבע משלה');
+
+    // An older, 26-column file still parses — and says nothing about the family.
+    await wipeAll();
+    const legacy = await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_old.xlsx',
+      buffer: sheetBuffer(LEGACY_CONTRACTS_HEADER, [legacyContractRow(KIDS[0])], 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    ok(legacy.status === 200, '23r קובץ חוזים ישן (26 עמודות) עדיין נקלט', `${legacy.status} ${legacy.text?.slice(0, 200)}`);
+    const old = (await listRows()).enrollments[0];
+    eq(old?.contract?.balance, null, '23s בלי עמודת מאזן — אין מאזן, לא אפס');
+    eq(old?.contract?.continuing, null, '23t ובלי עמודת ממשיך — לא נאמר דבר');
+    eq(old?.missing_parents, true, '23u וההורים חסרים, כמו תמיד');
+  }
+
+  head('בדיקה 24 — הקובץ האחרון קובע: שם ותאריך לידה שתוקנו בקליקטאק נקלטים');
+  {
+    await wipeAll();
+    await importRegistrations();
+    const corrected = contractRow({ ...KIDS[0], first: 'אורה', birth: [2025, 1, 21] });
+    const res = await uploadContracts([corrected, contractRow(KIDS[1]), contractRow(KIDS[2])]);
+    ok(res.status === 200, '24a קובץ החוזים המתוקן נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
+    const row = (await listRows()).enrollments.find(e => e.child.id_number === KIDS[0].idNumber);
+    eq(row?.child?.full_name, 'אורה אבוחצירא', '24b השם עודכן מהקובץ המאוחר');
+    eq(row?.child?.birth_date?.slice(0, 10), '2025-01-21', '24c וגם תאריך הלידה');
+    ok(row?.changes?.some(c => c.field === 'שם' && c.to === 'אורה אבוחצירא'), '24d השינוי נרשם בהיסטוריה');
+    ok(row?.changes?.some(c => c.field === 'תאריך לידה'), '24e וגם תאריך הלידה');
+    eq(row?.parent1?.phone, '050000001', '24f והטלפון מייצוא הנרשמים לא נגע — הקובץ הזה שתק עליו');
+    // Silence is still silence: a blank cell does not erase.
+    eq(row?.child?.nickname, 'אורי', '24g הכינוי שרד');
+  }
+
+  head('בדיקה 25 — קובץ חוזים מסמן מי ירד ממנו, ומי שירד מכל הרשימות עובר לארכיון');
+  {
+    await wipeAll();
+    await uploadContracts(KIDS.map(k => contractRow(k)));
+    const second = await uploadContracts([contractRow(KIDS[0]), contractRow(KIDS[1])], 'contracts_export_2027.xlsx');
+    eq(second.body?.missing, 1, '25a אחד ירד מקובץ החוזים');
+    eq(second.body?.missing_names, ['שירה לוי'], '25b ושמו מדווח');
+    const gone = (await listRows()).enrollments.find(e => e.child.id_number === KIDS[2].idNumber);
+    eq(gone?.contract?.present, false, '25c השורה מסומנת כנעדרת מקובץ החוזים');
+    ok(gone?.changes?.some(c => c.field === 'נוכחות בקובץ החוזים'), '25d עם רישום בהיסטוריה');
+
+    let rec = await reconcileNow();
+    ok(!rec?.rows?.some(r => r.id_number === KIDS[2].idNumber), '25e בהצלבה — אינה בטבלה');
+    ok(rec?.archived?.some(r => r.id_number === KIDS[2].idNumber && r.verdict === 'gone'),
+      '25f אלא בארכיון, כמי שהוסר/ה מכל הרשימות');
+    eq(rec?.summary?.archived, 1, '25g והמונה');
+
+    // Back in the registrations export: no longer gone — one list still names her.
+    await importRegistrations();
+    rec = await reconcileNow();
+    const back = rec?.rows?.find(r => r.id_number === KIDS[2].idNumber);
+    ok(!!back, '25h חזרה לטבלה כשייצוא הנרשמים כולל אותה');
+    ok(back?.issues?.some(i => i.code === 'contract_removed'), '25i עם חריגה "ירד/ה מייצוא החוזים"');
+    eq(back?.clicktac?.live, true, '25j ונחשבת רשומה');
+
+    // And the contracts file listing her again clears it.
+    await uploadContracts(KIDS.map(k => contractRow(k)), 'contracts_export_2028.xlsx');
+    const restored = (await listRows()).enrollments.find(e => e.child.id_number === KIDS[2].idNumber);
+    eq(restored?.contract?.present, true, '25k קובץ חוזים שכולל אותה שוב — חזרה');
+    ok(restored?.changes?.some(c => c.field === 'נוכחות בקובץ החוזים' && c.to === 'חזר/ה'), '25l ונרשם');
+  }
+
+  head('בדיקה 26 — ביטול העלאה: רק האחרונה, ובדיוק');
+  {
+    await wipeAll();
+    const first = await uploadContracts(KIDS.map(k => contractRow(k)), 'contracts_A.xlsx');
+    const idA = first.body?.import_id;
+    const secondRes = await uploadContracts(
+      [contractRow({ ...KIDS[0], tier: 9 }), contractRow(KIDS[1])], 'contracts_B.xlsx',
+    );
+    const idB = secondRes.body?.import_id;
+    eq(secondRes.body?.updated, 1, '26a הקובץ השני עדכן דרגה אחת');
+    eq(secondRes.body?.missing, 1, '26b וסימן אחד כנעדר');
+
+    const imports = await listImports();
+    ok(imports.every(i => !('snapshots' in i)), '26c הצילומים אינם יוצאים לרשימת ההעלאות');
+    ok(imports.find(i => i.id === idB)?.exact_undo, '26d וההעלאה יודעת שאפשר לבטל אותה במדויק');
+    const rec0 = await reconcileNow();
+    ok(!JSON.stringify(rec0.last_import).includes('snapshots'), '26e וגם לא לכרטיס "קובץ אחרון"');
+
+    const notLatest = await request({ method: 'DELETE', token, path: `/api/external-enrollments/imports/${idA}` });
+    eq(notLatest.status, 409, '26f ההעלאה הראשונה אינה ניתנת לביטול כל עוד יש מאוחרת ממנה');
+    eq(notLatest.body?.code, 'NOT_LATEST', '26g עם קוד');
+
+    const undoB = await request({ method: 'DELETE', token, path: `/api/external-enrollments/imports/${idB}` });
+    ok(undoB.status === 200, '26h ההעלאה השנייה מבוטלת', `${undoB.status} ${undoB.text?.slice(0, 200)}`);
+    eq(undoB.body?.restored, 2, '26i שתי שורות הוחזרו — זו שעודכנה וזו שסומנה כנעדרת');
+    const afterB = await listRows();
+    eq(afterB.enrollments.find(e => e.child.id_number === KIDS[0].idNumber)?.contract?.tier, '0', '26j הדרגה חזרה ל-0');
+    eq(afterB.enrollments.find(e => e.child.id_number === KIDS[2].idNumber)?.contract?.present, true, '26k והנעדרת חזרה');
+    eq((await listImports()).length, 1, '26l ההעלאה נמחקה מההיסטוריה');
+
+    const undoA = await request({ method: 'DELETE', token, path: `/api/external-enrollments/imports/${idA}` });
+    ok(undoA.status === 200, '26m ועכשיו גם הראשונה', `${undoA.status} ${undoA.text?.slice(0, 200)}`);
+    eq(undoA.body?.deleted, 3, '26n שלוש השורות שהיא יצרה נמחקו');
+    eq((await listRows()).enrollments.length, 0, '26o הטבלה ריקה');
+
+    // A batch from before ids were recorded: the created rows are still found
+    // by the upload's own minute and file.
+    const legacy = await uploadContracts(KIDS.map(k => contractRow(k)), 'contracts_legacy.xlsx');
+    await EnrollmentImport.updateOne({ _id: legacy.body.import_id }, { $unset: { created_ids: 1, snapshots: 1 } });
+    const undoLegacy = await request({ method: 'DELETE', token, path: `/api/external-enrollments/imports/${legacy.body.import_id}` });
+    eq(undoLegacy.body?.deleted, 3, '26p העלאה ישנה בלי מזהים — השורות שנוצרו נמצאות לפי הדקה והקובץ');
+    eq((await listRows()).enrollments.length, 0, '26q ונמחקות');
+
+    // A created row that was promoted is not pulled from under its registration.
+    const prom = await uploadContracts([contractRow({
+      id: '337401', first: 'יוגב', last: 'שטיינבוך', idNumber: '248888892', birth: [2025, 3, 3], cls: 'פעוטות א', tier: 3,
+      parentFirst: 'הורה', parentPhone: '0501112233',
+    })], 'contracts_P.xlsx');
+    const rowP = (await listRows()).enrollments[0];
+    const promoted = await request({ method: 'POST', token, path: `/api/external-enrollments/${rowP.id}/promote`, body: { monthly_fee: 1500 } });
+    ok(promoted.status === 201, '26q2 השורה נקלטה כרישום', `${promoted.status} ${promoted.text?.slice(0, 200)}`);
+    const refused = await request({ method: 'DELETE', token, path: `/api/external-enrollments/imports/${prom.body.import_id}` });
+    eq(refused.status, 409, '26r שורה שכבר נקלטה כרישום — הביטול מסרב');
+    eq(refused.body?.code, 'ALREADY_IMPORTED', '26s עם קוד');
+
+    // The ministry's list, same rule.
+    await wipeAll();
+    const t1 = await tmtRow(KIDS[0]);
+    const t2 = await tmtRow(KIDS[1]);
+    const tmtBatch = await EnrollmentImport.create({
+      source: 'tmt', branch_id: branch._id, academic_year: '2026-2027', file_name: 'child-list.xls',
+      rows: 2, parsed: 2, created: 2, created_ids: [t1._id, t2._id],
+    });
+    const undoTmt = await request({ method: 'DELETE', token, path: `/api/tmt/imports/${tmtBatch._id}` });
+    ok(undoTmt.status === 200, '26t ביטול העלאת תמ"ת', `${undoTmt.status} ${undoTmt.text?.slice(0, 200)}`);
+    eq(await TmtApproval.countDocuments({}), 0, '26u ושתי שורות התמ"ת נמחקו');
+  }
+
+  head('בדיקה 27 — ההצלבה: ת"ז שונה בין הקבצים, אותו ילד; וטלפון תמ"ת רק כשיש למה להשוות');
+  {
+    await wipeAll();
+    await importRegistrations();
+    // The ministry has נועם under a different number — a typo on one side.
+    await tmtRow({ ...KIDS[1], idNumber: '242222299' });
+    let rec = await reconcileNow();
+    const noams = rec.rows.filter(r => /נועם כהן/.test(r.child_name));
+    eq(noams.length, 1, '27a נועם מופיע פעם אחת, לא כשתי שורות אדומות');
+    eq(noams[0]?.matched_by, 'name_birth', '27b הוצלב לפי שם ותאריך לידה');
+    eq(noams[0]?.id_number, '242222299', '27c והשורה נושאת את הת"ז של התמ"ת');
+    ok(noams[0]?.issues?.some(i => i.code === 'id_mismatch' && i.severity === 'critical'),
+      '27d עם חריגה אדומה "ת"ז שונה בין הקבצים"', JSON.stringify(noams[0]?.issues));
+    eq(noams[0]?.verdict, 'approved', '27e והמסקנה — מאושר/ת, כי שני הצדדים קיימים');
+    eq(rec.summary?.missing_approval, 3, '27f שלושת האחרים ללא אישור — לא ארבעה');
+    // The ministry's phone is not a parent's: a grey remark, no more.
+    const remark = noams[0]?.issues?.find(i => i.code === 'tmt_contact_unknown');
+    eq(remark?.severity, 'note', '27g טלפון תמ"ת שונה — הערה, לא חריגה');
+
+    // No parent phones at all (contracts-only, old file): nothing to compare, no remark.
+    await wipeAll();
+    await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_old.xlsx',
+      buffer: sheetBuffer(LEGACY_CONTRACTS_HEADER, [legacyContractRow(KIDS[0])], 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    await tmtRow(KIDS[0]);
+    rec = await reconcileNow();
+    const only = rec.rows.find(r => r.id_number === KIDS[0].idNumber);
+    ok(!only?.issues?.some(i => i.code === 'tmt_contact_unknown'),
+      '27h בלי טלפוני הורים בקליקטאק — אין "טלפון תמ"ת אינו של אף הורה"', JSON.stringify(only?.issues));
+    eq(only?.clicktac?.missing_parents, true, '27i אלא "חסר פרטי הורים", שזה מה שנכון');
+
+    // Age-group mismatch is the urgent one.
+    await wipeAll();
+    await uploadContracts([contractRow({ ...KIDS[0], ageGroup: 'בוגר' })]);
+    await tmtRow(KIDS[0]);
+    rec = await reconcileNow();
+    const urgent = rec.rows.find(r => r.id_number === KIDS[0].idNumber);
+    ok(urgent?.urgent === true && urgent?.issues?.some(i => i.code === 'age_group_mismatch' && i.urgent),
+      '27j שכבת גיל שונה מסומנת כדחופה', JSON.stringify(urgent?.issues));
+    eq(rec.summary?.urgent, 1, '27k והמונה');
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

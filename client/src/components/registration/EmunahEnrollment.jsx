@@ -314,9 +314,17 @@ export default function EmunahEnrollment() {
                 {upload.result.export_label ? ` — ${upload.result.export_label}` : ''}
               </AlertTitle>
               חדשים: {upload.result.created} · עודכנו: {upload.result.updated} ·
-              {' '}ללא שינוי: {upload.result.unchanged}
-              {upload.result.export_type === 'contracts'
-                ? '' : ` · ירדו מהקובץ: ${upload.result.missing ?? 0}`}
+              {' '}ללא שינוי: {upload.result.unchanged} · ירדו מהקובץ: {upload.result.missing ?? 0}
+              {/* A whole-organisation contracts file: the rows of the other
+                  מעונות were set aside, not filed here. Said in full so the
+                  office can see the file was not "for" this branch. */}
+              {upload.result.other_institution > 0 && (
+                <Box sx={{ mt: 1 }}>
+                  <b>לא נקלטו — שייכים למעון אחר ({upload.result.other_institution}):</b>{' '}
+                  {(upload.result.other_institution_names || []).slice(0, 30).join(', ')}
+                  {upload.result.other_institution > 30 ? ' …' : ''}
+                </Box>
+              )}
               {upload.result.export_type === 'contracts' && upload.result.missing_parents > 0 && (
                 <Box sx={{ mt: 1 }}>
                   <b>{upload.result.missing_parents}</b> ילדים בסניף עדיין ללא פרטי הורים —

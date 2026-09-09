@@ -32,6 +32,8 @@ router.post('/placement/confirm', allow('system_admin', 'accountant', 'branch_ma
 // Undoing a whole upload. Deliberately admin/accountant only: it removes the
 // ministry's answer for a whole gan and a whole year in one call.
 router.delete('/data', allow('system_admin', 'accountant'), ctrl.deleteData);
+// Undoing ONE ministry upload — the latest one — exactly.
+router.delete('/imports/:id', allow('system_admin', 'accountant'), ctrl.undoImport);
 router.delete('/approvals/:id', allow('system_admin', 'accountant'), ctrl.removeApproval);
 
 module.exports = router;

@@ -13,6 +13,8 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 import HistoryIcon from '@mui/icons-material/History';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import UndoIcon from '@mui/icons-material/Undo';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
@@ -39,9 +41,33 @@ const VERDICT_STYLE = {
   cancelled: { color: 'warning', short: 'ביטל/ה רישום' },
   withdrawn: { color: 'error', short: 'הוסר/ה מרשימת תמ״ת' },
   not_approved: { color: 'error', short: 'תמ"ת לא אישר' },
+  gone: { color: 'default', short: 'הוסר/ה מכל הרשימות' },
 };
 
-const SEVERITY_COLOR = { critical: 'error', warning: 'warning', info: 'info', ok: 'default' };
+/**
+ * חריגה = צבע. ONE COLOUR PER KIND OF FINDING, served by the server with the
+ * finding itself (see ISSUES in enrollment-reconcile.service) — the chip below
+ * only paints it. The severity used to pick the colour, and three different
+ * remarks in one blue on one row read as one remark. `urgent` is the one the
+ * owner wants shouted, and it is filled where every other chip is outlined.
+ */
+function IssueChip({ issue, sx }) {
+  const color = issue.color || '#757575';
+  const filled = !!issue.urgent;
+  return (
+    <Tooltip title={issue.detail || ''}>
+      <Chip size="small" variant={filled ? 'filled' : 'outlined'}
+        label={filled ? `${issue.label} — דחוף` : issue.label}
+        sx={{
+          ...TIGHT_CHIP,
+          ...(filled
+            ? { bgcolor: color, color: '#fff', fontWeight: 700 }
+            : { borderColor: color, color, fontWeight: issue.severity === 'note' ? 400 : 600 }),
+          ...sx,
+        }} />
+    </Tooltip>
+  );
+}
 
 /**
  * אמצעי התשלום — צבע לכל שיטה.
@@ -181,14 +207,13 @@ const SOURCE_LABEL = { registrations: 'נרשמים', contracts: 'חוזים' };
 
 /** The counts behind one upload, on one line. */
 function ImportLine({ imp }) {
+  const other = imp.details?.other_institution?.length || 0;
   return (
     <Typography variant="caption" color="text.secondary" display="block">
       {imp.file_name} · {imp.parsed} שורות · חדשים {imp.created} · עודכנו {imp.updated} ·
-      {' '}ללא שינוי {imp.unchanged}
-      {/* The contracts export never reports anyone as gone — its silence about
-          a child is not evidence, since the two files list different
-          populations at different moments. */}
-      {imp.export_type === 'contracts' ? '' : ` · הוסרו ${imp.missing}`}
+      {' '}ללא שינוי {imp.unchanged} · הוסרו {imp.missing}
+      {/* Rows of another מעון the file carried and this branch did not take. */}
+      {other ? ` · מעון אחר ${other}` : ''}
       {imp.imported_by_name ? ` · ${imp.imported_by_name}` : ''}
     </Typography>
   );
@@ -243,11 +268,21 @@ export default function TmtReconcile({
    * onto a standing order. Merging them would bury the urgent half.
    */
   const [chequeOnly, setChequeOnly] = useState(false);
+  /**
+   * "Show me the children who left every list."
+   *
+   * Not a filter over the table — a different table. A child gone from the
+   * ministry's list AND from both ClickTac exports is not a finding anybody
+   * acts on, so the server keeps those rows apart (`archived`) and the screen
+   * shows one set or the other, never both mixed.
+   */
+  const [showArchived, setShowArchived] = useState(false);
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
   const [detail, setDetail] = useState(null);
   const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null, error: null });
   const [historyDlg, setHistoryDlg] = useState({ open: false, loading: false, imports: [] });
+  const [undoDlg, setUndoDlg] = useState({ open: false, imp: null, saving: false, result: null, error: null });
   const [contactsDlg, setContactsDlg] = useState({ open: false, loading: false, rows: [] });
   const [saving, setSaving] = useState({});
 
@@ -282,8 +317,12 @@ export default function TmtReconcile({
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const rows = data?.rows || [];
+  const rows = useMemo(
+    () => (showArchived ? (data?.archived || []) : (data?.rows || [])),
+    [data, showArchived],
+  );
   const summary = data?.summary || {};
+  const issueDict = data?.dictionaries?.issues || {};
 
   const visible = useMemo(() => rows.filter(r => {
     if (verdictFilter && r.verdict !== verdictFilter) return false;
@@ -342,6 +381,42 @@ export default function TmtReconcile({
     } catch {
       setHistoryDlg({ open: false, loading: false, imports: [] });
       toast.error('שגיאה בטעינת ההיסטוריה');
+    }
+  };
+
+  /**
+   * Which uploads can be undone: the LATEST of each kind (ministry list,
+   * ClickTac registrations, ClickTac contracts). An older one cannot — a
+   * later file has moved the rows on, and putting the older snapshot back
+   * would erase that file's work. The server enforces the same rule; this is
+   * only so the button does not appear where it would be refused.
+   */
+  const undoableIds = useMemo(() => {
+    const seen = new Set();
+    const ids = new Set();
+    for (const imp of historyDlg.imports) {
+      const kind = imp.source === 'tmt' ? 'tmt' : `clicktac:${imp.export_type || 'registrations'}`;
+      if (seen.has(kind)) continue;
+      seen.add(kind);
+      ids.add(imp.id);
+    }
+    return ids;
+  }, [historyDlg.imports]);
+
+  const handleUndo = async () => {
+    const imp = undoDlg.imp;
+    if (!imp) return;
+    setUndoDlg(d => ({ ...d, saving: true, error: null }));
+    try {
+      const base = imp.source === 'tmt' ? '/tmt/imports' : '/external-enrollments/imports';
+      const res = await api.delete(`${base}/${imp.id}`);
+      setUndoDlg(d => ({ ...d, saving: false, result: res.data }));
+      toast.success(`ההעלאה "${imp.file_name}" בוטלה`);
+      fetchData();
+      openHistory();
+    } catch (err) {
+      const data = err.response?.data;
+      setUndoDlg(d => ({ ...d, saving: false, error: data?.error || 'שגיאה בביטול ההעלאה', names: data?.names || [] }));
     }
   };
 
@@ -509,7 +584,33 @@ export default function TmtReconcile({
             <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
               hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
+            {/* שכבת גיל שונה בין שני הקבצים — התעריף שגוי באחד הצדדים. The
+                one card that is red whenever it is not zero, and the one the
+                back office is mailed about until it is. */}
+            <StatCard label="שכבת גיל שונה — דחוף" value={summary.urgent || 0}
+              color={summary.urgent ? 'error' : 'info'}
+              active={issueFilter === 'age_group_mismatch'} hint='לתקן בתמ"ת או בקליקטאק'
+              onClick={() => setIssueFilter(issueFilter === 'age_group_mismatch' ? '' : 'age_group_mismatch')} />
+            {/* Gone from every list. A different table, not a filter — see
+                showArchived. */}
+            <StatCard label="ארכיון" value={summary.archived || 0} color="secondary"
+              active={showArchived} hint="הוסרו מכל הרשימות · 30 יום"
+              onClick={() => setShowArchived(v => !v)} />
           </Stack>
+
+          {/* The key to the חריגות column — only the kinds that actually
+              appear, in the server's own colours, so it can be read down
+              without hovering over anything. */}
+          {!!Object.keys(summary.issues || {}).length && (
+            <Stack direction="row" spacing={0.75} sx={{ mb: 1, overflowX: 'auto', pb: 0.5 }}
+              flexWrap="nowrap" alignItems="center">
+              <Typography variant="caption" color="text.secondary" sx={NOWRAP}>חריגות:</Typography>
+              {Object.entries(summary.issues || {}).map(([code, count]) => (
+                <IssueChip key={code} sx={{ height: 18, fontSize: '0.65rem', cursor: 'pointer' }}
+                  issue={{ ...(issueDict[code] || {}), code, label: `${issueDict[code]?.label || code} (${count})`, detail: '' }} />
+              ))}
+            </Stack>
+          )}
 
           {/* The key to the colours in the אמצעי תשלום column. Written out
               once here rather than left to be learned from tooltips: the whole
@@ -538,11 +639,17 @@ export default function TmtReconcile({
             <ToggleButtonGroup size="small" exclusive value={issueFilter}
               onChange={(e, v) => setIssueFilter(v || '')}>
               {Object.entries(summary.issues || {}).map(([code, count]) => (
-                <ToggleButton key={code} value={code}>
-                  {data.dictionaries?.issues?.[code]?.label || code} ({count})
+                <ToggleButton key={code} value={code}
+                  sx={{ borderBottom: 3, borderBottomColor: issueDict[code]?.color || 'transparent' }}>
+                  {issueDict[code]?.label || code} ({count})
                 </ToggleButton>
               ))}
             </ToggleButtonGroup>
+            {showArchived && (
+              <Chip size="small" color="secondary" icon={<Inventory2OutlinedIcon />}
+                label={`ארכיון — הוסרו מכל הרשימות (${summary.archived || 0})`}
+                onDelete={() => setShowArchived(false)} />
+            )}
             {!!summary.missing_parents && (
               <Chip size="small" color="error"
                 variant={missingParentsOnly ? 'filled' : 'outlined'}
@@ -605,7 +712,17 @@ export default function TmtReconcile({
                 ))}
                 {!!lastCtReg?.details?.missing?.length && (
                   <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
-                    ירדו מהרשימה: {lastCtReg.details.missing.join(', ')}
+                    ירדו מקובץ הנרשמים: {lastCtReg.details.missing.join(', ')}
+                  </Alert>
+                )}
+                {!!lastCtContracts?.details?.missing?.length && (
+                  <Alert severity="warning" sx={{ mt: 1, py: 0 }}>
+                    ירדו מקובץ החוזים: {lastCtContracts.details.missing.join(', ')}
+                  </Alert>
+                )}
+                {!!lastCtContracts?.details?.other_institution?.length && (
+                  <Alert severity="info" sx={{ mt: 1, py: 0 }}>
+                    לא נקלטו — מעון אחר ({lastCtContracts.details.other_institution.length})
                   </Alert>
                 )}
               </Card>
@@ -711,12 +828,7 @@ export default function TmtReconcile({
                         worse than they are. It has its own column now. */}
                     <TableCell>
                       <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                        {r.issues.map(i => (
-                          <Tooltip key={i.code} title={i.detail || ''}>
-                            <Chip size="small" variant="outlined" label={i.label}
-                              color={SEVERITY_COLOR[i.severity] || 'default'} sx={TIGHT_CHIP} />
-                          </Tooltip>
-                        ))}
+                        {r.issues.map(i => <IssueChip key={i.code} issue={i} />)}
                         {!r.issues.length && (
                           <Typography variant="caption" color="text.disabled">—</Typography>
                         )}
@@ -731,14 +843,18 @@ export default function TmtReconcile({
                       {r.clicktac
                         ? (
                           <Stack spacing={0.5} alignItems="flex-start">
-                            <Typography variant="body2" sx={NOWRAP}>{r.clicktac.status}</Typography>
+                            <Typography variant="body2" sx={NOWRAP}
+                              color={r.clicktac.live === false ? 'error' : 'text.primary'}>
+                              {r.clicktac.status}
+                              {r.clicktac.live === false ? ' (הוסר/ה)' : ''}
+                            </Typography>
                             {/* The row exists because a contract was signed and
                                 nothing else — no parent, no phone, no payment
                                 method. It cannot be promoted, and saying so
                                 here is cheaper than finding out at the import
                                 button. */}
                             {r.clicktac.missing_parents && (
-                              <Tooltip title="הילד/ה מופיע/ה רק בייצוא החוזים של קליקטאק. יש לקלוט גם את ייצוא הנרשמים כדי לקבל הורים, טלפון ואמצעי תשלום.">
+                              <Tooltip title="אין טלפון הורה באף קובץ של קליקטאק. יש לקלוט את ייצוא הנרשמים, או ייצוא חוזים עדכני שכולל את ההורים.">
                                 <Chip size="small" color="error" label="חסר פרטי הורים" sx={TIGHT_CHIP} />
                               </Tooltip>
                             )}
@@ -746,11 +862,21 @@ export default function TmtReconcile({
                                 בכרטיס למעלה. שתי השורות נראות זהות בטבלה, וזה
                                 מה שמסביר למה לאחת יש דרגה ולשנייה טלפון. */}
                             <Stack direction="row" spacing={0.5}>
-                              {(r.clicktac.sources || []).map(src => (
-                                <Chip key={src} size="small" variant="outlined"
-                                  sx={{ height: 18, fontSize: '0.65rem' }}
-                                  label={SOURCE_LABEL[src] || src} />
-                              ))}
+                              {(r.clicktac.sources || []).map(src => {
+                                // Struck through when the LATEST upload of that
+                                // export no longer lists the child.
+                                const gone = src === 'registrations'
+                                  ? r.clicktac.is_present === false
+                                  : r.clicktac.contract_present === false;
+                                return (
+                                  <Tooltip key={src} title={gone ? 'לא בקובץ האחרון מסוג זה' : ''}>
+                                    <Chip size="small" variant="outlined"
+                                      color={gone ? 'error' : 'default'}
+                                      sx={{ height: 18, fontSize: '0.65rem', textDecoration: gone ? 'line-through' : 'none' }}
+                                      label={SOURCE_LABEL[src] || src} />
+                                  </Tooltip>
+                                );
+                              })}
                             </Stack>
                           </Stack>
                         )
@@ -834,7 +960,9 @@ export default function TmtReconcile({
                 ))}
                 {!visible.length && (
                   <TableRow><TableCell colSpan={12} align="center" sx={{ py: 3 }}>
-                    <Typography color="text.secondary">אין רשומות להצגה</Typography>
+                    <Typography color="text.secondary">
+                      {showArchived ? 'הארכיון ריק — אף ילד/ה לא הוסר/ה מכל הרשימות' : 'אין רשומות להצגה'}
+                    </Typography>
                   </TableCell></TableRow>
                 )}
               </TableBody>
@@ -909,11 +1037,17 @@ export default function TmtReconcile({
                 <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>חריגות</Typography>
                   {detail.issues.map(i => (
-                    <Typography key={i.code} variant="body2">
-                      • {i.label}{i.detail ? ` — ${i.detail}` : ''}
-                    </Typography>
+                    <Stack key={i.code} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <IssueChip issue={{ ...i, detail: '' }} />
+                      <Typography variant="body2">{i.detail || ''}</Typography>
+                    </Stack>
                   ))}
                 </Card>
+              )}
+              {detail.gone_since && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  הוסר/ה מכל הרשימות ב־{fmtDate(detail.gone_since)}. יימחק/תימחק מהארכיון 30 יום אחרי כן.
+                </Alert>
               )}
 
               <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
@@ -978,6 +1112,42 @@ export default function TmtReconcile({
                         {detail.clicktac.parent2_name} · {detail.clicktac.parent2_phone}
                       </Typography>
                       <Typography variant="body2">{detail.clicktac.address}</Typography>
+                      {detail.clicktac.contract_present === false && (
+                        <Alert severity="error" sx={{ mt: 1, py: 0 }}>
+                          ירד/ה מקובץ החוזים בתאריך {fmtDate(detail.clicktac.contract_missing_since)}
+                        </Alert>
+                      )}
+                      {detail.clicktac.is_present === false && (
+                        <Alert severity="error" sx={{ mt: 1, py: 0 }}>
+                          ירד/ה מקובץ הנרשמים בתאריך {fmtDate(detail.clicktac.missing_since)}
+                        </Alert>
+                      )}
+
+                      {/* ---- מאזן בקליקטאק ----
+                          The child's account as the contracts export carries
+                          it. Negative is what the family owes; shown in red,
+                          and only when the file had the column at all. */}
+                      {detail.clicktac.balance != null && (
+                        <>
+                          <Divider sx={{ my: 1 }} />
+                          <Typography variant="body2"
+                            color={detail.clicktac.balance < 0 ? 'error.main' : 'text.primary'}
+                            fontWeight={detail.clicktac.balance < 0 ? 700 : 400}>
+                            מאזן בקליקטאק: {detail.clicktac.balance < 0
+                              ? `חוב ${fmtMoney(-detail.clicktac.balance)}`
+                              : (detail.clicktac.balance > 0 ? `זכות ${fmtMoney(detail.clicktac.balance)}` : 'מאוזן')}
+                            {detail.clicktac.family_balance != null && detail.clicktac.family_balance !== detail.clicktac.balance
+                              ? ` · משפחתי ${fmtMoney(detail.clicktac.family_balance)}` : ''}
+                          </Typography>
+                          {detail.clicktac.tuition_amount != null && (
+                            <Typography variant="body2">
+                              שכ"ל בחוזה: {fmtMoney(detail.clicktac.tuition_amount)}
+                              {detail.clicktac.continuing_contract != null
+                                ? ` · ${detail.clicktac.continuing_contract ? 'ממשיך/ה משנה קודמת' : 'רישום חדש'} (לפי החוזה)` : ''}
+                            </Typography>
+                          )}
+                        </>
+                      )}
 
                       {/* ---- תנאי תשלום ----
                           Everything the office needs before it picks up the
@@ -1016,6 +1186,16 @@ export default function TmtReconcile({
                 <Card variant="outlined" sx={{ p: 1.5, mt: 2 }}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>שינויים בין העלאות תמ"ת</Typography>
                   {detail.tmt.changes.map((c, i) => (
+                    <Typography key={i} variant="body2">
+                      {fmtDateTime(c.at)} — {c.field}: {c.from} ← {c.to}
+                    </Typography>
+                  ))}
+                </Card>
+              )}
+              {!!detail.clicktac?.changes?.length && (
+                <Card variant="outlined" sx={{ p: 1.5, mt: 2 }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>שינויים בין העלאות קליקטאק</Typography>
+                  {detail.clicktac.changes.map((c, i) => (
                     <Typography key={i} variant="body2">
                       {fmtDateTime(c.at)} — {c.field}: {c.from} ← {c.to}
                     </Typography>
@@ -1099,24 +1279,42 @@ export default function TmtReconcile({
                 <TableRow>
                   <TableCell>מקור</TableCell><TableCell>תאריך</TableCell><TableCell>קובץ</TableCell>
                   <TableCell>שורות</TableCell><TableCell>חדשים</TableCell><TableCell>עודכנו</TableCell>
-                  <TableCell>ירדו</TableCell><TableCell>מי העלה</TableCell>
+                  <TableCell>ירדו</TableCell><TableCell>מעון אחר</TableCell><TableCell>מי העלה</TableCell>
+                  {canImport && <TableCell />}
                 </TableRow>
               </TableHead>
               <TableBody>
                 {historyDlg.imports.map(i => (
                   <TableRow key={i.id}>
-                    <TableCell>{i.source === 'tmt' ? 'תמ"ת' : 'קליקטאק'}</TableCell>
-                    <TableCell>{fmtDateTime(i.created_at)}</TableCell>
+                    <TableCell sx={NOWRAP}>
+                      {i.source === 'tmt' ? 'תמ"ת' : `קליקטאק — ${SOURCE_LABEL[i.export_type || 'registrations']}`}
+                    </TableCell>
+                    <TableCell sx={NOWRAP}>{fmtDateTime(i.created_at)}</TableCell>
                     <TableCell>{i.file_name}</TableCell>
                     <TableCell>{i.parsed}</TableCell>
                     <TableCell>{i.created}</TableCell>
                     <TableCell>{i.updated}</TableCell>
                     <TableCell>{i.missing}</TableCell>
+                    <TableCell>{i.details?.other_institution?.length || ''}</TableCell>
                     <TableCell>{i.imported_by_name}</TableCell>
+                    {/* Only the latest upload of each kind can be undone — see
+                        undoableIds. */}
+                    {canImport && (
+                      <TableCell>
+                        {undoableIds.has(i.id) && (
+                          <Tooltip title="ביטול ההעלאה — מחיקת מה שנוצר והחזרת מה שהשתנה">
+                            <IconButton size="small" color="error"
+                              onClick={() => setUndoDlg({ open: true, imp: i, saving: false, result: null, error: null })}>
+                              <UndoIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
                 {!historyDlg.imports.length && (
-                  <TableRow><TableCell colSpan={8} align="center">אין העלאות</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={10} align="center">אין העלאות</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -1124,6 +1322,54 @@ export default function TmtReconcile({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setHistoryDlg({ open: false, loading: false, imports: [] })}>סגירה</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ---- ביטול העלאה ---- */}
+      <Dialog open={undoDlg.open} onClose={() => setUndoDlg({ open: false, imp: null, saving: false, result: null, error: null })} maxWidth="sm" fullWidth>
+        <DialogTitle>ביטול העלאה</DialogTitle>
+        <DialogContent>
+          {undoDlg.imp && !undoDlg.result && (
+            <>
+              <Alert severity="warning" sx={{ mb: 2 }}>
+                <AlertTitle>{undoDlg.imp.file_name}</AlertTitle>
+                הועלה ב־{fmtDateTime(undoDlg.imp.created_at)}
+                {undoDlg.imp.imported_by_name ? ` על ידי ${undoDlg.imp.imported_by_name}` : ''}.
+                <Box sx={{ mt: 1 }}>
+                  הביטול ימחק את <b>{undoDlg.imp.created}</b> הרשומות שהקובץ יצר,
+                  יחזיר את <b>{undoDlg.imp.updated}</b> הרשומות שהוא שינה למצבן הקודם,
+                  ויחזיר לרשימה את <b>{undoDlg.imp.missing}</b> הרשומות שהוא סימן כמי שירדו.
+                </Box>
+              </Alert>
+              {!undoDlg.imp.exact_undo && (undoDlg.imp.updated > 0 || undoDlg.imp.missing > 0) && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  העלאה זו נעשתה לפני שהמערכת שמרה עותק של השורות ששונו. הביטול ימחק רק את מה שנוצר;
+                  שורות שעודכנו יישארו כפי שהן.
+                </Alert>
+              )}
+              {undoDlg.error && (
+                <Alert severity="error">
+                  {undoDlg.error}
+                  {!!undoDlg.names?.length && <Box sx={{ mt: 0.5 }}>{undoDlg.names.join(', ')}</Box>}
+                </Alert>
+              )}
+            </>
+          )}
+          {undoDlg.result && (
+            <Alert severity="success">
+              <AlertTitle>ההעלאה בוטלה</AlertTitle>
+              נמחקו {undoDlg.result.deleted} רשומות · הוחזרו {undoDlg.result.restored} רשומות למצבן הקודם
+              {!!undoDlg.result.names?.length && <Box sx={{ mt: 0.5 }}>{undoDlg.result.names.join(', ')}</Box>}
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUndoDlg({ open: false, imp: null, saving: false, result: null, error: null })}>סגירה</Button>
+          {!undoDlg.result && (
+            <Button variant="contained" color="error" onClick={handleUndo} disabled={undoDlg.saving}>
+              {undoDlg.saving ? 'מבטל…' : 'ביטול ההעלאה'}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

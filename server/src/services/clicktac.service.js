@@ -138,7 +138,89 @@ const CONTRACT_COLUMNS = {
   created_at: 'תאריך יצירה',
   updated_by: 'מעדכן',
   updated_at: 'תאריך עדכון',
+
+  /**
+   * THE SEPTEMBER 2026 SHAPE. Some time between the export the parser above
+   * was written against (26 columns) and the one uploaded on 09.09.2026 (72
+   * columns), the vendor widened this file to carry the family as well: both
+   * parents, address, the per-child balance, "ממשיך משנה קודמת" and the actual
+   * tuition amount. Every column below is OPTIONAL — a file without them still
+   * parses exactly as before — and `missingContractColumns` does not require
+   * any of them, so an older export is not refused.
+   *
+   * What this changes downstream: a row that has only ever been in the
+   * contracts export is no longer parentless by construction. See `hasParents`
+   * in the controller.
+   */
+  p1_first: 'שם פרטי הורה ראשון',
+  p1_last: 'שם משפחה הורה ראשון',
+  p1_phone: 'טלפון הורה ראשון',
+  p1_email: 'אימייל הורה ראשון',
+  p1_id: 'ת.ז. הורה ראשון',
+  p2_first: 'שם פרטי הורה שני',
+  p2_last: 'שם משפחה הורה שני',
+  p2_phone: 'טלפון הורה שני',
+  p2_email: 'אימייל הורה שני',
+  p2_id: 'ת.ז. הורה שני',
+  home_phone: 'טלפון בבית',
+  address: 'כתובת 1',
+  city: 'עיר',
+  // מאזן — the child's own account. NEGATIVE IS A DEBT: "-4539" on a child
+  // whose fee is 3102 is the registration fee and a first month not yet paid.
+  // `יתרה להתאמה` is the same number without its sign and is not stored.
+  // `מאזן כללי` is the family's — two siblings show the same figure.
+  balance: 'מאזן',
+  family_balance: 'מאזן כללי',
+  deposit: 'פיקדון',
+  continuing: 'ממשיך משנה קודמת',
+  // The sum, as opposed to `שכר לימוד` which is the funding type.
+  tuition_amount: 'סכום שכר לימוד',
+  extended_funding: 'מימון ממשלתי מורחב',
+  card_last4: 'ארבע ספרות אחרונות',
+  terminal_type: 'סוג מסוף סליקה',
+  charge_day: 'יום גביה',
 };
+
+/**
+ * Does this file's `מעון` belong to the branch the upload was aimed at?
+ *
+ * WHY THIS EXISTS. The contracts export the vendor now publishes is for the
+ * WHOLE ORGANISATION — 155 rows across three institutions in one sheet — and
+ * on 09.09.2026 it was uploaded against הרצליה as if it were הרצליה's. The
+ * cross-branch guard caught the 72 children who were already filed elsewhere;
+ * the 18 who were not yet in the system anywhere were created under הרצליה
+ * with תל אביב's classes. So the column is read after all — not to CHOOSE the
+ * branch (it still cannot separate the two כפר סבא gans, see the note on
+ * CONTRACT_COLUMNS) but to REFUSE a row that plainly belongs to another city.
+ *
+ * The match is by the leading words: the vendor writes "הרצליה", "כפר סבא",
+ * "תל אביב יפו - אייזיק חריף"; the branches are "הרצליה הרצוג", "כפר סבא -
+ * משה דיין", "כפר סבא - קפלן", "תל אביב". One side starting with the other's
+ * first word(s) is the test, so both כפר סבא branches accept "כפר סבא" and
+ * nothing else does.
+ *
+ * A blank `מעון` is accepted: an older export has no such column at all, and
+ * silence is not evidence of another branch.
+ */
+function institutionMatchesBranch(institution, branchName) {
+  const inst = str(institution);
+  if (!inst) return true;
+  const norm = (s) => str(s).replace(/[-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+  const a = norm(inst);
+  const b = norm(branchName);
+  if (!a || !b) return true;
+  // The city is the first word — or the first two, for a two-word city. Take
+  // the shorter of the two names' leading words and demand the other begins
+  // with them.
+  const words = (s) => s.split(' ').filter(Boolean);
+  const wa = words(a);
+  const wb = words(b);
+  const startsWith = (long, short) => short.every((w, i) => long[i] === w);
+  // Two words when the first is a common two-word city prefix (כפר, תל, בית,
+  // ראש…), otherwise one. Both names are compared at the same depth.
+  const depth = /^(כפר|תל|בית|ראש|רמת|קרית|גבעת|בני|באר|פתח|נס|הוד)$/.test(wa[0]) ? 2 : 1;
+  return startsWith(wa, wb.slice(0, depth)) || startsWith(wb, wa.slice(0, depth));
+}
 
 /**
  * Age group boundaries, in months at 1 September.
@@ -478,10 +560,45 @@ function parseContractsRow(row, { branchId = null, sourceFile = '' } = {}) {
   const firstName = str(c('child_first'));
   const lastName = str(c('child_last'));
 
+  // The family half, present only in the wider export. A party is written
+  // only when the file names somebody — an empty parent object would read as
+  // "parents arrived, all blank" to every consumer that tests for presence.
+  const address = [str(c('address')), str(c('city'))].filter(Boolean).join(', ');
+  const party = (n) => {
+    const first = str(c(`p${n}_first`));
+    const last = str(c(`p${n}_last`));
+    const phone = str(c(`p${n}_phone`));
+    if (!first && !last && !phone) return null;
+    return {
+      first_name: first,
+      last_name: last,
+      id_number: str(c(`p${n}_id`)).replace(/\D/g, ''),
+      phone,
+      email: str(c(`p${n}_email`)),
+      address,
+    };
+  };
+  const parent1 = party(1);
+  const parent2 = party(2);
+  const money = (v) => {
+    const s = str(v).replace(/[^\d.-]/g, '');
+    if (s === '' || s === '-' || s === '.') return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+  // Present in the header at all? Decides whether nulls below mean "the file
+  // did not say" or "the file said zero".
+  const carriesFamily = CONTRACT_COLUMNS.p1_phone in row;
+
   return {
     branch_id: branchId,
     academic_year: year,
     source_file: sourceFile,
+    // What this export carries beyond the contract — read by the importer to
+    // decide whether to touch the family fields at all.
+    carries_family: carriesFamily,
+    ...(parent1 ? { parent1 } : {}),
+    ...(parent2 ? { parent2 } : {}),
 
     child: {
       first_name: firstName,
@@ -516,6 +633,17 @@ function parseContractsRow(row, { branchId = null, sourceFile = '' } = {}) {
       updated_by: str(c('updated_by')),
       updated_at: parseDate(c('updated_at')),
       source_file: sourceFile,
+      // The wider export's own facts. Null when the column is not in the
+      // file — see CONTRACT_COLUMNS — and only then.
+      balance: money(c('balance')),
+      family_balance: money(c('family_balance')),
+      deposit: money(c('deposit')),
+      tuition_amount: money(c('tuition_amount')),
+      continuing: carriesFamily ? bool(c('continuing')) : null,
+      extended_funding: carriesFamily ? bool(c('extended_funding')) : null,
+      card_last4: last4(c('card_last4')),
+      terminal_type: str(c('terminal_type')),
+      home_phone: str(c('home_phone')),
     },
 
     computed: computedFor(birth, year, sourceGroup),
@@ -537,6 +665,11 @@ function hashContract(parsed) {
     academic_year: parsed.academic_year,
     computed: parsed.computed,
     contract,
+    // The family, when this export carries it: a phone corrected in ClickTac
+    // has to read as a change here, or the re-upload is a no-op and the old
+    // number stays.
+    parent1: parsed.parent1 || null,
+    parent2: parsed.parent2 || null,
   });
 }
 
@@ -672,4 +805,5 @@ module.exports = {
   looksLikeContractsExport, detectExportType, identifyHeader, validateHeader,
   parseContractsRow, parseContractsSheet, hashContract, parseIdNumber, idKey,
   ageInMonths, ageGroupFor, computedFor, parseDate, hashPayload,
+  institutionMatchesBranch,
 };

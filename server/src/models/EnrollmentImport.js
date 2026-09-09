@@ -56,7 +56,33 @@ const enrollmentImportSchema = new mongoose.Schema({
     created: [{ type: String }],
     updated: [{ name: String, changes: [String], _id: false }],
     missing: [{ type: String }],
+    // Rows this file did not write because their מעון belongs to another
+    // branch — contracts export only. Named so the office sees what a
+    // whole-organisation file did NOT do to this gan.
+    other_institution: [{ type: String }],
   },
+
+  /**
+   * WHAT IT WOULD TAKE TO UNDO THIS UPLOAD.
+   *
+   * On 09.09.2026 a contracts export for the whole organisation was uploaded
+   * against הרצליה and created eighteen children of תל אביב under it. The
+   * counts above could say that had happened; nothing could say WHICH rows,
+   * and nothing could put back the rows the same file had changed. So a batch
+   * now records the ids it created and a copy of every row it altered as it
+   * was before — enough to reverse the upload exactly, and only the LATEST
+   * upload of its kind, because a later file has since moved the rows on.
+   *
+   * `snapshots` holds the touched rows minus `raw` (the sheet row itself is
+   * re-derivable from the next upload and would triple the size). Capped at
+   * 300 — a branch has under a hundred children.
+   */
+  created_ids: [{ type: mongoose.Schema.Types.ObjectId }],
+  snapshots: [{
+    id: { type: mongoose.Schema.Types.ObjectId },
+    before: { type: mongoose.Schema.Types.Mixed },
+    _id: false,
+  }],
 
   imported_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });

@@ -49,6 +49,12 @@ function contractRow({
   id, first, last, idNumber, idType = 'ת.ז.', birth, cls, tier,
   nickname = '', medicalNotes = '', ageGroup = 'פעוט', status = 'התקבל',
   year = YEAR, institution = 'הרצליה',
+  // The wider export (09.2026) — the family, the balance, the flags. All
+  // blank by default, which is the 26-column file this builder used to make.
+  parentFirst = '', parentLast = '', parentPhone = '', parentEmail = '', parentId = '',
+  parent2First = '', parent2Last = '', parent2Phone = '',
+  address = '', city = '', balance = '', familyBalance = '', continuing = '',
+  tuitionAmount = '', cardLast4 = '', terminalType = '',
 }) {
   const by = {
     [CONTRACT_COLUMNS.contract_id]: id,
@@ -78,7 +84,47 @@ function contractRow({
     [CONTRACT_COLUMNS.updated_by]: 'אלון',
     [CONTRACT_COLUMNS.updated_at]: excelSerial(2026, 5, 3),
   };
+  // Written only when asked for — see registrationRow.
+  const optional = {
+    [CONTRACT_COLUMNS.p1_first]: parentFirst,
+    [CONTRACT_COLUMNS.p1_last]: parentLast,
+    [CONTRACT_COLUMNS.p1_phone]: parentPhone,
+    [CONTRACT_COLUMNS.p1_email]: parentEmail,
+    [CONTRACT_COLUMNS.p1_id]: parentId,
+    [CONTRACT_COLUMNS.p2_first]: parent2First,
+    [CONTRACT_COLUMNS.p2_last]: parent2Last,
+    [CONTRACT_COLUMNS.p2_phone]: parent2Phone,
+    [CONTRACT_COLUMNS.address]: address,
+    [CONTRACT_COLUMNS.city]: city,
+    [CONTRACT_COLUMNS.balance]: balance,
+    [CONTRACT_COLUMNS.family_balance]: familyBalance,
+    [CONTRACT_COLUMNS.continuing]: continuing,
+    [CONTRACT_COLUMNS.tuition_amount]: tuitionAmount,
+    [CONTRACT_COLUMNS.card_last4]: cardLast4,
+    [CONTRACT_COLUMNS.terminal_type]: terminalType,
+  };
+  for (const [k, v] of Object.entries(optional)) if (v !== '' && v != null) by[k] = v;
   return CONTRACTS_HEADER.map(h => by[h] ?? '');
+}
+
+/**
+ * The 26-column header of the export as it was before September 2026 —
+ * for proving that an older file still parses, and that its silence about
+ * the family is read as silence.
+ */
+const LEGACY_CONTRACT_KEYS = [
+  'contract_id', 'child_first', 'child_last', 'nickname', 'birth_date', 'birth_date_hebrew',
+  'id_type', 'id_number', 'health_fund', 'medical_notes', 'registered_at', 'status',
+  'age_group', 'admin_notes', 'institution', 'year', 'class_name', 'tuition_type', 'tier',
+  'start_date', 'end_date', 'tags', 'created_by', 'created_at', 'updated_by', 'updated_at',
+];
+const LEGACY_CONTRACTS_HEADER = LEGACY_CONTRACT_KEYS.map(k => CONTRACT_COLUMNS[k]);
+
+/** A contracts row cut down to the legacy header. */
+function legacyContractRow(opts) {
+  const full = contractRow(opts);
+  const byHeader = Object.fromEntries(CONTRACTS_HEADER.map((h, i) => [h, full[i]]));
+  return LEGACY_CONTRACTS_HEADER.map(h => byHeader[h] ?? '');
 }
 
 /**
@@ -144,4 +190,5 @@ function registrationRow({
 module.exports = {
   YEAR, excelSerial, sheetBuffer,
   CONTRACTS_HEADER, REGISTRATIONS_HEADER, contractRow, registrationRow,
+  LEGACY_CONTRACTS_HEADER, legacyContractRow,
 };

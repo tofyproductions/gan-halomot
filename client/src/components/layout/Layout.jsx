@@ -11,7 +11,9 @@ import { MyDecisionsPopup } from '../payroll/MyDecisions';
 
 // Routes that benefit from extra horizontal space — payroll/attendance tables
 // are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
-const WIDE_ROUTES = ['/payroll', '/attendance', '/employees'];
+// …and the תמ"ת↔ClickTac comparison: twelve columns that were scrolling
+// sideways inside a 1200px box on every office PC.
+const WIDE_ROUTES = ['/payroll', '/attendance', '/employees', '/external-enrollment'];
 
 /**
  * Branch → subtle background tint. The tint is very light so text remains

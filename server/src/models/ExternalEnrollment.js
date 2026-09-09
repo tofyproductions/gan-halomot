@@ -95,6 +95,39 @@ const contractSchema = new mongoose.Schema({
   // record's own timestamps, which move whenever either export touches it.
   imported_at: { type: Date, default: null },
   source_file: { type: String, default: '' },
+
+  /**
+   * The wider export (September 2026 onward) — see CONTRACT_COLUMNS in the
+   * service. All null when the file that wrote this half did not carry them.
+   *
+   * `balance` is the child's account in ClickTac, NEGATIVE WHEN THE FAMILY
+   * OWES. `family_balance` is the household's, shared by siblings. Neither is
+   * a rate and neither is billed from here; they are shown so the office sees
+   * a debt before it promotes a child, and so last year's file can say who
+   * still owes.
+   */
+  balance: { type: Number, default: null },
+  family_balance: { type: Number, default: null },
+  deposit: { type: Number, default: null },
+  tuition_amount: { type: Number, default: null },
+  // ממשיך משנה קודמת — the contracts file's own flag, kept apart from
+  // enrollment.continuing (the registrations file's) so the two can disagree
+  // out loud.
+  continuing: { type: Boolean, default: null },
+  extended_funding: { type: Boolean, default: null },
+  card_last4: { type: String, default: '' },
+  terminal_type: { type: String, default: '' },
+  home_phone: { type: String, default: '' },
+
+  /**
+   * Whether the LATEST contracts upload for this branch and year still listed
+   * the child. The mirror of `presence` for this file: the two exports are
+   * uploaded independently, so a child can be current in one and gone from
+   * the other, and one flag cannot say which. `null` on rows written before
+   * this existed, which reads as present.
+   */
+  present: { type: Boolean, default: true },
+  missing_since: { type: Date, default: null },
 }, { _id: false });
 
 const externalEnrollmentSchema = new mongoose.Schema({

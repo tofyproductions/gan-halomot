@@ -3,6 +3,7 @@ const {
   TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child,
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
+const { undoBatch, snapshotCollector } = require('../services/enrollment-undo.service');
 const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
@@ -145,6 +146,8 @@ async function importFile(req, res, next) {
 
     const details = { created: [], updated: [], missing: [] };
     let created = 0; let updated = 0; let unchanged = 0;
+    const createdIds = [];
+    const snapshots = snapshotCollector();
 
     for (const doc of parsed) {
       const id = doc.child.id_number;
@@ -153,10 +156,11 @@ async function importFile(req, res, next) {
 
       const existing = existingById.get(id);
       if (!existing) {
-        await TmtApproval.create({
+        const fresh = await TmtApproval.create({
           ...doc,
           presence: { is_present: true, first_seen_at: now, last_seen_at: now, missing_since: null },
         });
+        createdIds.push(fresh._id);
         created += 1;
         details.created.push(doc.child.full_name);
         continue;
@@ -170,6 +174,7 @@ async function importFile(req, res, next) {
         continue;
       }
 
+      snapshots.take(existing);
       const changes = diffFields(existing.toObject(), doc);
       // A child who was gone from the previous file and is back in this one:
       // the return is the change, even when no field moved.
@@ -206,6 +211,7 @@ async function importFile(req, res, next) {
     for (const [id, doc] of existingById) {
       if (seen.has(id)) continue;
       if (doc.presence?.is_present === false) continue;
+      snapshots.take(doc);
       doc.presence.is_present = false;
       doc.presence.missing_since = now;
       doc.changes.push({ at: now, field: 'נוכחות ברשימת תמ"ת', from: 'מאושר/ת', to: 'הוסר/ה מהרשימה' });
@@ -230,6 +236,8 @@ async function importFile(req, res, next) {
         updated: details.updated.slice(0, 100),
         missing: details.missing.slice(0, 100),
       },
+      created_ids: createdIds,
+      snapshots: snapshots.list,
       imported_by: req.user?.id || null,
     });
 
@@ -365,9 +373,14 @@ async function reconcileBranch(req, res, next) {
     if (error) return res.status(status).json({ error, code });
 
     const [lastTmt, lastCt, lastClickTac] = await Promise.all([
+      // NEVER the snapshots: they are whole rows as they were, bank account
+      // included. They exist for the undo and for nothing else. See
+      // EnrollmentImport.snapshots.
       EnrollmentImport.findOne({ source: 'tmt', branch_id: branchId, academic_year: academicYear })
+        .select('-snapshots -created_ids')
         .sort({ created_at: -1 }).populate('imported_by', 'full_name username').lean(),
       EnrollmentImport.findOne({ source: 'clicktac', branch_id: branchId, academic_year: academicYear })
+        .select('-snapshots -created_ids')
         .sort({ created_at: -1 }).populate('imported_by', 'full_name username').lean(),
       // ClickTac publishes TWO exports and they are uploaded independently, so
       // "the last ClickTac file" is two dates. `clicktac` above stays the most
@@ -408,18 +421,29 @@ async function listImports(req, res, next) {
     if (req.query.source) filter.source = req.query.source;
 
     const imports = await EnrollmentImport.find(filter)
+      // The snapshots stay on the server — see reconcileBranch. Only whether
+      // there ARE any travels, so the undo dialog can say what it will do.
+      .select('-snapshots')
       .populate('branch_id', 'name')
       .populate('imported_by', 'full_name username')
       .sort({ created_at: -1 })
       .limit(50)
       .lean();
+    const exact = await EnrollmentImport.aggregate([
+      { $match: { _id: { $in: imports.map(i => i._id) } } },
+      { $project: { n: { $size: { $ifNull: ['$snapshots', []] } } } },
+    ]);
+    const snapshotCount = new Map(exact.map(e => [String(e._id), e.n]));
 
     res.json({
-      imports: imports.map(i => ({
+      imports: imports.map(({ created_ids, ...i }) => ({
         ...i,
         id: i._id,
         branch_name: i.branch_id?.name || '',
         imported_by_name: i.imported_by?.full_name || i.imported_by?.username || '',
+        // Recorded ids and snapshots = the undo puts back exactly what this
+        // file changed. Without them only the created rows can be removed.
+        exact_undo: !!(created_ids?.length || snapshotCount.get(String(i._id))),
       })),
     });
   } catch (error) {
@@ -695,9 +719,18 @@ async function exportReconcile(req, res, next) {
       // Informational only — see the note in enrollment-reconcile.service on
       // why a second signer still waiting no longer raises a finding.
       pt_second_signer: r.clicktac?.payment_terms?.second_signer || '',
+      // The wider contracts export's own facts — blank when it did not carry
+      // them. Balance is signed as ClickTac signs it: negative owes.
+      ct_balance: r.clicktac?.balance ?? '',
+      ct_family_balance: r.clicktac?.family_balance ?? '',
+      ct_tuition_amount: r.clicktac?.tuition_amount ?? '',
+      ct_continuing_contract: r.clicktac?.continuing_contract == null ? '' : (r.clicktac.continuing_contract ? 'כן' : 'לא'),
       tmt_decision: r.tmt?.decision || '',
       tmt_absorbed_at: dateCell(r.tmt?.absorbed_at),
       tmt_present: r.tmt ? (r.tmt.is_present ? 'כן' : `הוסר/ה ${dateCell(r.tmt.missing_since)}`) : 'לא ברשימה',
+      ct_present: r.clicktac
+        ? (r.clicktac.live ? 'כן' : `הוסר/ה ${dateCell(r.clicktac.contract_missing_since || r.clicktac.missing_since)}`)
+        : 'לא נרשם',
       ct_status: r.clicktac?.status || 'לא נרשם',
       ct_signed: r.clicktac?.second_signer || '',
       parent1: r.clicktac?.parent1_name || '',
@@ -717,7 +750,9 @@ async function exportReconcile(req, res, next) {
       ['placed_group', 'שובץ ידנית ל'], ['verdict', 'מסקנה'], ['action', 'פעולה נדרשת'],
       ['issues', 'חריגות'], ['tmt_decision', 'החלטת תמ"ת'], ['tmt_absorbed_at', 'תאריך כניסה בתמ"ת'],
       ['tmt_present', 'ברשימת תמ"ת'],
-      ['ct_status', 'סטטוס קליקטאק'], ['ct_signed', 'חתימה'],
+      ['ct_status', 'סטטוס קליקטאק'], ['ct_present', 'בקובץ קליקטאק'], ['ct_signed', 'חתימה'],
+      ['ct_balance', 'מאזן בקליקטאק'], ['ct_family_balance', 'מאזן משפחתי'],
+      ['ct_tuition_amount', 'שכ"ל בחוזה'], ['ct_continuing_contract', 'ממשיך (חוזה)'],
       ['payment_method', 'אמצעי תשלום'], ['payment_method_raw', 'אמצעי תשלום — כפי שנרשם'],
       ['class_name', 'כיתה'], ['tier', 'דרגה'], ['fee_by_tier', 'שכ"ל לפי דרגה'],
       ['payment_alert', 'התרעת תשלום'], ['source', 'מקור'], ['missing_parents', 'חסר פרטי הורים'],
@@ -747,12 +782,17 @@ async function exportReconcile(req, res, next) {
       .filter(r => r.issues.some(i => i.code === 'needs_absorption_date'))
       .map(asRow);
 
+    // Children gone from every list — their own tab, since they are not on
+    // the screen's table either.
+    const archived = (result.archived || []).map(asRow);
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, sheetFrom(anomalies, COLS_FULL), 'חריגות');
     XLSX.utils.book_append_sheet(wb, sheetFrom(approved, COLS_FULL), 'מאושרים');
     XLSX.utils.book_append_sheet(wb, sheetFrom(needsDate, COLS_FULL), 'להזין תאריך כניסה');
     XLSX.utils.book_append_sheet(wb, sheetFrom(approved, COLS_CONTACT), 'דף קשר');
     XLSX.utils.book_append_sheet(wb, sheetFrom(all, COLS_FULL), 'הכל');
+    XLSX.utils.book_append_sheet(wb, sheetFrom(archived, COLS_FULL), 'ארכיון');
 
     const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     const safeBranch = String(result.branch_name).replace(/[^\p{L}\p{N}\- ]/gu, '');
@@ -1114,8 +1154,28 @@ async function removeApproval(req, res, next) {
   }
 }
 
+/** DELETE /api/tmt/imports/:id — undo one ministry upload, the latest one. */
+async function undoImport(req, res, next) {
+  try {
+    const batch = await EnrollmentImport.findById(req.params.id);
+    if (!batch || batch.source !== 'tmt') return res.status(404).json({ error: 'העלאה לא נמצאה' });
+    if (!await canAccessBranch(req, batch.branch_id)) return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+
+    const result = await undoBatch({
+      Model: TmtApproval,
+      batch,
+      sameKind: { source: 'tmt' },
+      legacyExtra: { source_file: batch.file_name },
+    });
+    if (result.error) return res.status(result.status).json(result);
+    res.json({ ok: true, file_name: batch.file_name, ...result });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
   exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
-  isTmtSupervised,
+  isTmtSupervised, undoImport,
 };

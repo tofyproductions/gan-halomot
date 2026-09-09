@@ -73,67 +73,137 @@ const VERDICTS = {
     severity: 'ok',
     rank: 6,
   },
+  /**
+   * Gone from EVERY list — the ministry's and both of ClickTac's exports.
+   *
+   * Not a finding: there is nobody left to argue with. The child left, or was
+   * never really here (a row of another מעון filed against this branch by
+   * mistake). Such rows leave the table and sit under "ארכיון" for thirty
+   * days, and are then removed. Ranked last so a caller that does not filter
+   * still sees them at the bottom.
+   */
+  gone: {
+    label: 'הוסר/ה מכל הרשימות',
+    action: 'לא מופיע/ה עוד באף קובץ — נמחק/ת מהארכיון אחרי 30 יום',
+    severity: 'archived',
+    rank: 7,
+  },
 };
 
-/** A finding on a child who exists on both sides but whose data disagrees. */
+/**
+ * A finding on a child who exists on both sides but whose data disagrees.
+ *
+ * `color` is the chip's own colour on the screen, ONE PER CODE. The severity
+ * used to decide the colour, which put "ילד רווחה", "שם חלקי" and "טלפון" in
+ * the same blue and made a row of three chips unreadable at a glance. The
+ * severity still decides the sort and the counters; the colour is the code's.
+ */
 const ISSUES = {
+  id_mismatch: {
+    label: 'ת"ז שונה בין הקבצים',
+    severity: 'critical',
+    color: '#b71c1c',
+  },
   branch_mismatch: {
     label: 'אושר/ה בתמ"ת בסניף אחר',
     severity: 'critical',
+    color: '#6a1b9a',
   },
   birth_date_mismatch: {
     label: 'תאריך לידה שונה',
     severity: 'warning',
+    color: '#ef6c00',
   },
   name_mismatch: {
     label: 'שם שונה',
     severity: 'warning',
+    color: '#f9a825',
   },
   name_partial: {
     label: 'שם חלקי (שם אמצעי או משפחה חסר בצד אחד)',
     severity: 'info',
+    color: '#9e9d24',
   },
+  /**
+   * The one the owner wants shouted: a child the ministry funds as פעוט and
+   * ClickTac has as תינוק is a child whose fee is wrong on one side, and it
+   * is reported to the back office until somebody fixes it.
+   */
   age_group_mismatch: {
     label: 'שכבת גיל שונה',
-    severity: 'warning',
+    severity: 'critical',
+    color: '#d81b60',
+    urgent: true,
   },
   age_group_computed_mismatch: {
     label: 'שכבת הגיל אינה תואמת את תאריך הלידה',
     severity: 'info',
+    color: '#ad1457',
   },
   continuing_mismatch: {
     label: 'ילד ממשיך — סימון שונה',
     severity: 'info',
+    color: '#0277bd',
   },
   welfare_mismatch: {
     label: 'ילד רווחה — סימון שונה',
     severity: 'info',
+    color: '#00838f',
   },
+  /**
+   * `note` — the fourth, quietest severity: not a problem, a remark. The
+   * ministry's contact phone is whatever the parent typed into the state's
+   * form; the numbers this gan calls are ClickTac's, which the office can
+   * edit. So a mismatch is worth a grey chip and nothing more.
+   */
   tmt_contact_unknown: {
-    label: 'טלפון תמ"ת אינו של אף אחד מההורים',
-    severity: 'info',
+    label: 'טלפון תמ"ת שונה מטלפוני ההורים',
+    severity: 'note',
+    color: '#78909c',
   },
   place_freed: {
     label: 'מקום התפנה — יש אישור תמ"ת והרישום בוטל',
     severity: 'warning',
+    color: '#2e7d32',
   },
   needs_absorption_date: {
     label: 'להזין תאריך כניסה לגן בפורטל התמ"ת',
     severity: 'warning',
+    color: '#5d4037',
   },
   absorption_date_inconsistent: {
     label: 'החלטת התמ"ת אינה תואמת את תאריך הכניסה',
     severity: 'info',
+    color: '#8d6e63',
   },
   tmt_removed: {
     label: 'ירד/ה מרשימת התמ"ת בקובץ מאוחר יותר',
     severity: 'critical',
+    color: '#c62828',
   },
   clicktac_removed: {
-    label: 'ירד/ה מקובץ הקליקטאק',
+    label: 'ירד/ה מייצוא הנרשמים של קליקטאק',
     severity: 'critical',
+    color: '#e53935',
+  },
+  contract_removed: {
+    label: 'ירד/ה מייצוא החוזים של קליקטאק',
+    severity: 'critical',
+    color: '#ff7043',
+  },
+  /**
+   * Money owed in ClickTac — the child's own account, from the contracts
+   * export. A remark rather than a finding: collection is not this screen's
+   * job, but a family that owes should be seen before it is promoted.
+   */
+  balance_due: {
+    label: 'יתרת חוב בקליקטאק',
+    severity: 'note',
+    color: '#4e342e',
   },
 };
+
+const SEVERITY_RANK = { critical: 0, warning: 1, info: 2, note: 3 };
 
 const dayKey = (d) => (d ? new Date(d).toISOString().slice(0, 10) : '');
 
@@ -209,6 +279,41 @@ function parentPhones(ct) {
 }
 
 /**
+ * Is the child still in ClickTac, as far as the LATEST uploads say?
+ *
+ * Two exports, two flags. `presence.is_present` is the registrations file's
+ * ("was the child in the last registrations upload") and `contract.present`
+ * is the contracts file's. A child current in EITHER is still registered:
+ * the two files list different populations at different moments in the
+ * summer, and one of them going quiet is a finding, not a departure. Gone
+ * from both is gone.
+ *
+ * A row that has only ever been in one export is judged by that export alone.
+ */
+function clicktacLive(ct) {
+  if (!ct) return false;
+  const sources = ct.sources?.length ? ct.sources : ['registrations'];
+  const regLive = sources.includes('registrations') && ct.presence?.is_present !== false;
+  const contractLive = sources.includes('contracts') && ct.contract && ct.contract.present !== false;
+  return regLive || contractLive;
+}
+
+/** Whether the row's contracts half says the child owes money. */
+function balanceDue(ct) {
+  const b = ct?.contract?.balance;
+  return typeof b === 'number' && b < 0 ? -b : 0;
+}
+
+/** ClickTac's own "ממשיך" — the registrations file's flag, else the contract's. */
+function clicktacContinuing(ct) {
+  if (!ct) return null;
+  const sources = ct.sources?.length ? ct.sources : ['registrations'];
+  if (sources.includes('registrations')) return !!ct.enrollment?.continuing;
+  if (ct.contract && ct.contract.continuing != null) return !!ct.contract.continuing;
+  return null;
+}
+
+/**
  * תנאי התשלום — what the office reads before it phones a family, and nothing
  * a bank account could be emptied with.
  *
@@ -274,9 +379,17 @@ function paymentTermsFor(ct) {
  * Only called when the child is on both sides — a child missing from one list
  * has one finding (the absence) and comparing fields would bury it.
  */
-function issuesFor(tmt, ct, { branchId }) {
+function issuesFor(tmt, ct, { branchId, matchedBy = 'id' } = {}) {
   const found = [];
   const add = (code, detail) => found.push({ code, detail, ...ISSUES[code] });
+
+  // Joined by name and birth date because the two files carry two different
+  // ת"ז — one of them is a typo, and it is the ministry's copy that will be
+  // checked against the population registry. Reported first: it is the one
+  // finding on this row that a re-upload cannot fix by itself.
+  if (tmt && ct && matchedBy === 'name_birth') {
+    add('id_mismatch', `תמ"ת ${tmt.child?.id_number || '—'} · קליקטאק ${ct.child?.id_number || '—'}`);
+  }
 
   if (tmt && String(tmt.branch_id?._id || tmt.branch_id) !== String(branchId)) {
     add('branch_mismatch', `אישור התמ"ת רשום על סניף ${tmt.branch_name || 'אחר'}`);
@@ -284,8 +397,17 @@ function issuesFor(tmt, ct, { branchId }) {
   if (tmt && tmt.presence?.is_present === false) {
     add('tmt_removed', `הופיע/ה ברשימה עד ${fmtDate(tmt.presence.missing_since)}, ואינו/ה בקובץ האחרון`);
   }
-  if (ct && ct.presence?.is_present === false) {
-    add('clicktac_removed', `הופיע/ה בקובץ עד ${fmtDate(ct.presence.missing_since)}, ואינו/ה בקובץ האחרון`);
+  // Each ClickTac export reports its own absence — and only for a row that
+  // has been in it. Both together are not two findings on a child who left;
+  // that child is `gone` and is not on the table at all (see reconcile()).
+  if (ct) {
+    const sources = ct.sources?.length ? ct.sources : ['registrations'];
+    if (sources.includes('registrations') && ct.presence?.is_present === false) {
+      add('clicktac_removed', `הופיע/ה בקובץ הנרשמים עד ${fmtDate(ct.presence.missing_since)}, ואינו/ה בקובץ האחרון`);
+    }
+    if (sources.includes('contracts') && ct.contract && ct.contract.present === false) {
+      add('contract_removed', `הופיע/ה בקובץ החוזים עד ${fmtDate(ct.contract.missing_since)}, ואינו/ה בקובץ האחרון`);
+    }
   }
 
   if (tmt && ct) {
@@ -316,20 +438,29 @@ function issuesFor(tmt, ct, { branchId }) {
       add('age_group_computed_mismatch', `לפי תאריך הלידה ${computed} · קליקטאק ${cg}`);
     }
 
-    if (tmt.ministry?.continuing != null && ct.enrollment?.continuing != null
-      && tmt.ministry.continuing !== !!ct.enrollment.continuing) {
-      add('continuing_mismatch', `תמ"ת ${yesNo(tmt.ministry.continuing)} · קליקטאק ${yesNo(!!ct.enrollment.continuing)}`);
+    const ctContinuing = clicktacContinuing(ct);
+    if (tmt.ministry?.continuing != null && ctContinuing != null
+      && tmt.ministry.continuing !== ctContinuing) {
+      add('continuing_mismatch', `תמ"ת ${yesNo(tmt.ministry.continuing)} · קליקטאק ${yesNo(ctContinuing)}`);
     }
 
     if (tmt.ministry?.welfare != null && tmt.ministry.welfare !== !!ct.child?.welfare_referred) {
       add('welfare_mismatch', `תמ"ת ${yesNo(tmt.ministry.welfare)} · קליקטאק ${yesNo(!!ct.child?.welfare_referred)}`);
     }
 
+    // Only when there ARE parent phones to compare against. A row whose
+    // family has not been uploaded yet has no phones, and "the ministry's
+    // number belongs to nobody" would then be true of every child — which is
+    // exactly what happened for the contracts-only rows of 09.2026.
     const phone = normalizePhone(tmt.contact?.phone);
-    if (phone && !parentPhones(ct).includes(phone)) {
+    const known = parentPhones(ct);
+    if (phone && known.length && !known.includes(phone)) {
       add('tmt_contact_unknown', `${tmt.contact.name || 'איש קשר תמ"ת'} · ${tmt.contact.phone}`);
     }
   }
+
+  const due = balanceDue(ct);
+  if (due) add('balance_due', `₪${due.toLocaleString('he-IL')}`);
 
   /**
    * התקבל vs נקלט במעון.
@@ -378,10 +509,16 @@ function verdictFor(tmt, ct, { branchId } = {}) {
   // A name the ministry dropped from a later file is not an approval any more,
   // whatever the decision on the row still says.
   const approvalLive = ownApproval && tmt.presence?.is_present !== false;
-  // Same on our side: a row that vanished from a later export is not a
+  // Same on our side: a row that vanished from BOTH later exports is not a
   // registration. It is NOT the same as ביטל רישום — a cancelled family is
-  // still in the file, with a status.
-  const registrationLive = !!ct && ct.presence?.is_present !== false;
+  // still in the file, with a status. See clicktacLive.
+  const registrationLive = clicktacLive(ct);
+
+  // Nobody lists the child any more — the ministry dropped them (or never
+  // had them) AND ClickTac dropped them (or never had them). One list still
+  // naming the child keeps the row on the table, as the finding it is.
+  const tmtLists = !!tmt && tmt.presence?.is_present !== false;
+  if (!tmtLists && !registrationLive) return 'gone';
 
   if (ownApproval && !approvalLive) return 'withdrawn';
   if (ct?.enrollment?.status === CANCELLED) return 'cancelled';
@@ -419,14 +556,66 @@ function reconcile({
     if (id) ctById.set(id, c);
   }
 
-  const ids = new Set([...tmtById.keys(), ...ctById.keys()]);
-  const rows = [];
+  /**
+   * THE SECOND PASS — name and birth date, over whoever the ת"ז did not join.
+   *
+   * אלי רדומסקי, 09.2026: 241037043 in the ministry's list, 041291725 in
+   * ClickTac, born 12.04.2024 in both. One of the two numbers is a typo. The
+   * ת"ז-only join produced two red rows — "approved, not registered" and
+   * "registered, not approved" — and `apply` then dropped the ClickTac row
+   * from the intake queue on the strength of the second. So the leftovers of
+   * the first pass are joined by the child's name and birthday, and the pair
+   * is reported ONCE with an id_mismatch finding that says which number is
+   * which.
+   *
+   * Name+birth is the same rule the importer uses to merge the two ClickTac
+   * exports (findMergeTarget), and for the same reason it is a fallback and
+   * not the rule: two children can share both. Here the ids are known to
+   * differ by construction, so the guard is the exact name, not the partial
+   * one — a middle name dropped on one side is common, but a different ת"ז
+   * AND a looser name is too much doubt to merge on.
+   */
+  const pairs = [];
+  const joined = new Set();
+  for (const id of tmtById.keys()) {
+    if (ctById.has(id)) { pairs.push({ id, tmt: tmtById.get(id), ct: ctById.get(id), by: 'id' }); joined.add(id); }
+  }
+  const nameKey = (child) => `${normalizeChildName(child?.full_name || '')}|${dayKey(child?.birth_date)}`;
+  const looseCt = new Map();
+  for (const [id, c] of ctById) {
+    if (joined.has(id)) continue;
+    const key = nameKey(c.child);
+    if (!c.child?.full_name || !c.child?.birth_date) continue;
+    // Two ClickTac rows with the same name and birthday are twins or a
+    // duplicate — either way not a safe target. Mark the key ambiguous.
+    looseCt.set(key, looseCt.has(key) ? null : { id, ct: c });
+  }
+  for (const [id, t] of tmtById) {
+    if (joined.has(id)) continue;
+    const hit = t.child?.full_name && t.child?.birth_date ? looseCt.get(nameKey(t.child)) : null;
+    if (hit && !joined.has(hit.id)) {
+      // The row is keyed by the ministry's ת"ז: it is the state's number and
+      // the one the export sheets are checked against.
+      pairs.push({ id, tmt: t, ct: hit.ct, by: 'name_birth' });
+      joined.add(id);
+      joined.add(hit.id);
+    } else {
+      pairs.push({ id, tmt: t, ct: null, by: 'id' });
+      joined.add(id);
+    }
+  }
+  for (const [id, c] of ctById) {
+    if (joined.has(id)) continue;
+    pairs.push({ id, tmt: null, ct: c, by: 'id' });
+    joined.add(id);
+  }
 
-  for (const id of ids) {
-    const tmt = tmtById.get(id) || null;
-    const ct = ctById.get(id) || null;
+  const rows = [];
+  const archived = [];
+
+  for (const { id, tmt, ct, by } of pairs) {
     const verdict = verdictFor(tmt, ct, { branchId });
-    const issues = issuesFor(tmt, ct, { branchId });
+    const issues = issuesFor(tmt, ct, { branchId, matchedBy: by });
 
     // A cancelled registration whose ministry approval still stands is the one
     // case where the anomaly is an opportunity: the state has allocated a place
@@ -435,12 +624,25 @@ function reconcile({
       issues.unshift({ code: 'place_freed', detail: `אישור תמ"ת מ־${fmtDate(tmt.ministry.absorbed_at) !== '—' ? fmtDate(tmt.ministry.absorbed_at) : tmt.ministry.decision}`, ...ISSUES.place_freed });
     }
 
+    issues.sort((a, b) => (SEVERITY_RANK[a.severity] ?? 9) - (SEVERITY_RANK[b.severity] ?? 9));
     const worst = issues.some(i => i.severity === 'critical') ? 'critical'
       : issues.some(i => i.severity === 'warning') ? 'warning'
-        : issues.length ? 'info' : 'ok';
+        : issues.some(i => i.severity === 'info') ? 'info'
+          : issues.length ? 'note' : 'ok';
 
-    rows.push({
+    // When the child left every list, the ONLY thing worth knowing is when.
+    // The latest "gone" date of the lists they were on.
+    const goneSince = verdict === 'gone'
+      ? [tmt?.presence?.missing_since, ct?.presence?.missing_since, ct?.contract?.missing_since]
+        .filter(Boolean).map(d => new Date(d).getTime()).reduce((a, b) => Math.max(a, b), 0) || null
+      : null;
+
+    (verdict === 'gone' ? archived : rows).push({
       id_number: id,
+      matched_by: by,
+      // For the archive filter and the 30-day purge.
+      gone_since: goneSince ? new Date(goneSince) : null,
+      urgent: issues.some(i => i.urgent),
       child_name: ct?.child?.full_name || tmt?.child?.full_name || '',
       birth_date: ct?.child?.birth_date || tmt?.child?.birth_date || null,
       age_group: canonicalAgeGroup(ct?.child?.age_group || tmt?.child?.age_group || ''),
@@ -505,6 +707,18 @@ function reconcile({
         address: ct.parent1?.address || ct.parent2?.address || '',
         is_present: ct.presence?.is_present !== false,
         missing_since: ct.presence?.missing_since || null,
+        // The contracts file's own presence — see clicktacLive.
+        contract_present: !ct.contract || ct.contract.present !== false,
+        contract_missing_since: ct.contract?.missing_since || null,
+        live: clicktacLive(ct),
+        /**
+         * The child's account in ClickTac, from the wider contracts export.
+         * Negative is a debt. Null when the file did not carry it.
+         */
+        balance: ct.contract?.balance ?? null,
+        family_balance: ct.contract?.family_balance ?? null,
+        tuition_amount: ct.contract?.tuition_amount ?? null,
+        continuing_contract: ct.contract?.continuing ?? null,
 
         /**
          * WHICH ClickTac export this child has actually been in, and what the
@@ -519,11 +733,11 @@ function reconcile({
          * the same reading the importer applies.
          */
         sources: ct.sources?.length ? ct.sources : ['registrations'],
-        // The test is `sources` alone — the same one `hasParents` applies, and
-        // for the same reason: the registrations export does carry rows with
-        // blank parent columns, and those rows are promotable. See the note on
-        // hasParents in externalEnrollment.controller.
-        missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations'),
+        // The same test `hasParents` applies in externalEnrollment.controller:
+        // been in the registrations export, OR a parent phone arrived with the
+        // (wider, September 2026) contracts export.
+        missing_parents: !(ct.sources?.length ? ct.sources : ['registrations']).includes('registrations')
+          && !String(ct.parent1?.phone || ct.parent2?.phone || '').trim(),
         /**
          * איך המשפחה משלמת — ומה צריך טיפול.
          *
@@ -602,6 +816,7 @@ function reconcile({
   // Anomalies first, then by name — the screen is a work queue, not a register.
   rows.sort((a, b) => a.rank - b.rank
     || a.child_name.localeCompare(b.child_name, 'he'));
+  archived.sort((a, b) => (b.gone_since?.getTime() || 0) - (a.gone_since?.getTime() || 0));
 
   const by = (fn) => rows.filter(fn).length;
   const issueCounts = {};
@@ -614,8 +829,13 @@ function reconcile({
     branch_id: branchId,
     branch_name: branchName,
     rows,
+    // Children gone from every list — off the table, kept for thirty days.
+    archived,
     summary: {
       total: rows.length,
+      archived: archived.length,
+      urgent: by(r => r.urgent),
+      balance_due: by(r => r.issues.some(i => i.code === 'balance_due')),
       approved: by(r => r.verdict === 'approved'),
       missing_registration: by(r => r.verdict === 'missing_registration'),
       missing_approval: by(r => r.verdict === 'missing_approval'),
@@ -657,5 +877,6 @@ function reconcile({
 
 module.exports = {
   reconcile, compareNames, issuesFor, verdictFor, ageAtYearStart, paymentTermsFor,
+  clicktacLive, clicktacContinuing,
   VERDICTS, ISSUES, CANCELLED,
 };

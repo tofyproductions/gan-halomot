@@ -28,6 +28,9 @@ router.post('/promote-bulk', allow('system_admin', 'accountant'), ctrl.promoteBu
 // Undoing a whole upload — a file put against the wrong branch. Refuses to
 // touch rows that already became registrations.
 router.delete('/data', allow('system_admin', 'accountant'), ctrl.deleteData);
+// Undoing ONE upload — the latest of its kind — exactly. See
+// enrollment-undo.service for what "exactly" covers.
+router.delete('/imports/:id', allow('system_admin', 'accountant'), ctrl.undoImport);
 
 router.get('/', ctrl.list);
 router.get('/:id', ctrl.getOne);
