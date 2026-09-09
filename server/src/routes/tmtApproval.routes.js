@@ -29,6 +29,14 @@ router.get('/imports', ctrl.listImports);
 router.get('/placement', ctrl.placement);
 router.post('/placement/confirm', allow('system_admin', 'accountant', 'branch_manager'), ctrl.confirmPlacement);
 
+// What a person decides about one child — a note, a closed finding, a
+// corrected phone, "in the gan without the ministry". The same people who
+// place children may decide; the back office holds the write grant.
+const decide = allow('system_admin', 'accountant', 'branch_manager');
+router.put('/decisions/:idNumber', decide, ctrl.putDecision);
+router.post('/decisions/:idNumber/resolve', decide, ctrl.resolveIssue);
+router.delete('/decisions/:idNumber/resolve/:code', decide, ctrl.reopenIssue);
+
 // Undoing a whole upload. Deliberately admin/accountant only: it removes the
 // ministry's answer for a whole gan and a whole year in one call.
 router.delete('/data', allow('system_admin', 'accountant'), ctrl.deleteData);

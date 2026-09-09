@@ -1394,7 +1394,7 @@ async function main() {
       'כיתה', 'דרגה', 'שכ"ל לפי דרגה', 'התרעת תשלום', 'מקור', 'חסר פרטי הורים',
       'שכ"ל — אמצעי', 'כרטיס (4 ספרות)', 'דמי רישום — אמצעי', 'סכום בקובץ', 'מספר קבלה',
       'הו"ק', 'ממשיך', 'חותם שני', 'הורה 1', 'טלפון 1', 'הורה 2', 'טלפון 2',
-      'איש קשר תמ"ת', 'טלפון תמ"ת', 'מייל', 'כתובת', 'במערכת',
+      'איש קשר תמ"ת', 'טלפון תמ"ת', 'מייל', 'כתובת', 'במערכת', 'הערה', 'תיקון הורים',
     ];
     const asRows = XLSX.utils.sheet_to_json(wb.Sheets['הכל'], { header: 1, defval: '' });
     const headerRow = asRows[0] || [];
@@ -1518,8 +1518,7 @@ async function main() {
 
     const rec = await reconcileNow();
     const rowA = rec?.rows?.find(r => r.id_number === FRESH.idNumber);
-    ok(rowA?.issues?.some(i => i.code === 'balance_due' && /4,539/.test(i.detail)),
-      '23o ההצלבה מעירה על יתרת החוב', JSON.stringify(rowA?.issues));
+    eq(rec?.summary?.balance_due, 1, '23o ההצלבה סופרת את יתרת החוב');
     eq(rowA?.clicktac?.balance, -4539, '23p והמאזן על השורה');
     ok(rowA?.issues?.every(i => i.color), '23q לכל חריגה יש צבע משלה');
 
@@ -1696,6 +1695,136 @@ async function main() {
     ok(urgent?.urgent === true && urgent?.issues?.some(i => i.code === 'age_group_mismatch' && i.urgent),
       '27j שכבת גיל שונה מסומנת כדחופה', JSON.stringify(urgent?.issues));
     eq(rec.summary?.urgent, 1, '27k והמונה');
+  }
+
+  head('בדיקה 28 — החלטות: הערה, "בגן ללא תמ"ת", סגירת חריגה, תיקון הורים — ושרידות מול קובץ חדש');
+  {
+    const { ReconcileDecision } = require('../src/models');
+    await wipeAll();
+    await ReconcileDecision.deleteMany({});
+    await importRegistrations();
+    const kid = KIDS[1]; // נועם כהן, 242222225
+    const decide = (path, body) => request({ method: 'POST', token, path, body });
+    const put = (idn, body) => request({ method: 'PUT', token, path: `/api/tmt/decisions/${idn}`, body: { branch_id: branchId, academic_year: YEAR, ...body } });
+
+    // (a) a note, and it survives a re-upload
+    let r = await put(kid.idNumber, { note: 'ילד אריתראי — לא יכול להיות בתמ"ת, כן בגן' });
+    ok(r.status === 200, '28a הערה נשמרה', `${r.status} ${r.text?.slice(0, 200)}`);
+    await importRegistrations();
+    let rec = await reconcileNow();
+    let row = rec.rows.find(x => x.id_number === kid.idNumber);
+    eq(row?.decision?.note, 'ילד אריתראי — לא יכול להיות בתמ"ת, כן בגן', '28b וההערה שרדה העלאה חוזרת');
+    eq(row?.has_note, true, '28c והשורה יודעת שיש לה הערה');
+    eq(rec.summary?.with_notes, 1, '28d והמונה');
+
+    // (b) "in the gan without the ministry"
+    eq(row?.verdict, 'missing_approval', '28e לפני הסימון — "אין אישור תמ"ת"');
+    r = await put(kid.idNumber, { verdict_override: { kind: 'private', reason: 'משלמים מלא' } });
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === kid.idNumber);
+    eq(row?.verdict, 'private', '28f אחרי הסימון — "בגן ללא תמ"ת"');
+    eq(row?.decision?.verdict_override?.reason, 'משלמים מלא', '28g עם הסיבה');
+    eq(rec.summary?.missing_approval, 3, '28h ואינו/ה נספר/ת עוד כחסר/ת אישור');
+    eq(rec.summary?.private, 1, '28i אלא במונה שלו');
+    // …and apply no longer drops the child from the intake queue
+    await tmtRow(KIDS[0]);
+    const applied = await request({ method: 'POST', token, path: '/api/tmt/apply', body: { branch_id: branchId, academic_year: YEAR, confirm_drop_all: true } });
+    ok(applied.status === 200, '28j החלת המסקנות רצה', `${applied.status} ${applied.text?.slice(0, 200)}`);
+    ok(!(applied.body?.details?.dropped || []).some(d => d.id_number === kid.idNumber),
+      '28k ונועם לא נפסל מהתור', JSON.stringify(applied.body?.details?.dropped));
+    const ctRow = await ExternalEnrollment.findOne({ 'child.id_number': kid.idNumber }).lean();
+    ok(ctRow?.review?.status !== 'ignored', '28l — סטטוס הבדיקה שלו לא "לא רלוונטי"', ctRow?.review?.status);
+    await put(kid.idNumber, { verdict_override: null });
+    rec = await reconcileNow();
+    eq(rec.rows.find(x => x.id_number === kid.idNumber)?.verdict, 'missing_approval', '28m ביטול הסימון מחזיר את המסקנה');
+
+    // (c) closing a name finding, choosing the ministry's spelling
+    await wipeAll();
+    await ReconcileDecision.deleteMany({});
+    await importRegistrations();
+    await tmtRow({ ...KIDS[0], first: 'אור יוסף' });   // ministry: "אור יוסף אבוחצירא"; ClickTac: "אור אבוחצירא"
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === KIDS[0].idNumber);
+    ok(row?.issues?.some(i => i.code === 'name_partial'), '28n לפני — חריגת שם חלקי', JSON.stringify(row?.issues?.map(i => i.code)));
+    ok(row?.issues?.every(i => i.snapshot != null), '28o ולכל חריגה פתוחה יש צילום של הערכים');
+    r = await decide(`/api/tmt/decisions/${KIDS[0].idNumber}/resolve`, { branch_id: branchId, academic_year: YEAR, code: 'name_partial', choice: 'tmt' });
+    ok(r.status === 200, '28p החריגה נסגרה', `${r.status} ${r.text?.slice(0, 200)}`);
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === KIDS[0].idNumber);
+    ok(!row?.issues?.some(i => i.code === 'name_partial'), '28q החריגה ירדה מהטבלה');
+    eq(row?.resolved_issues?.length, 1, '28r ונמצאת ברשימת הסגורות');
+    eq(row?.child_name, 'אור יוסף אבוחצירא', '28s והשם על השורה הוא של התמ"ת');
+    eq(row?.name_source, 'tmt', '28t עם ציון המקור');
+    // a later file changes the name → the finding comes back, marked
+    await uploadContracts([contractRow({ ...KIDS[0], first: 'אורה' })]);
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === KIDS[0].idNumber);
+    const back = row?.issues?.find(i => i.code === 'name_mismatch' || i.code === 'name_partial');
+    ok(!!back, '28u קובץ חדש ששינה את השם — החריגה חוזרת', JSON.stringify(row?.issues?.map(i => i.code)));
+    ok(back?.changed_since_resolved === true && /השתנה מאז/.test(back?.detail || ''), '28v מסומנת "השתנה מאז שנסגר"');
+    eq(rec.summary?.reopened, 1, '28w והמונה סופר אותה');
+    // reopen by hand
+    r = await request({ method: 'DELETE', token, path: `/api/tmt/decisions/${KIDS[0].idNumber}/resolve/name_partial?branch=${branchId}&year=${encodeURIComponent(YEAR)}` });
+    ok(r.status === 200, '28x פתיחה מחדש ידנית', `${r.status}`);
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === KIDS[0].idNumber);
+    eq(row?.resolved_issues?.length, 0, '28y אין עוד סגורות');
+
+    // (d) the office corrects a phone; the ministry's phone check reads it; promotion uses it.
+    // שירה לוי — a child no earlier test promoted (a Registration outlives wipe()).
+    const sh = KIDS[2];
+    await tmtRow(sh);
+    r = await put(sh.idNumber, { parent_overrides: { parent1: { name: 'הורה3 מתוקן לוי', phone: '0509999999' } } });
+    ok(r.status === 200, '28z תיקון הורה נשמר', `${r.status} ${r.text?.slice(0, 200)}`);
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === sh.idNumber);
+    eq(row?.clicktac?.parent1_phone, '0509999999', '28aa הטלפון המוצג הוא המתוקן');
+    eq(row?.clicktac?.parent1_name, 'הורה3 מתוקן לוי', '28ab וגם השם');
+    eq(row?.clicktac?.parent1_override?.pending, true, '28ac ומסומן "לתקן בקליקטאק" — הקובץ עדיין אומר אחרת');
+    ok(!row?.issues?.some(i => i.code === 'tmt_contact_unknown'), '28ad טלפון התמ"ת (0509999999) תואם עכשיו את ההורה המתוקן — אין הערה');
+    eq(rec.summary?.parent_fixes_pending, 1, '28ae והמונה');
+    const promoted = await request({ method: 'POST', token, path: `/api/external-enrollments/${row.clicktac.id}/promote`, body: { monthly_fee: 1500 } });
+    ok(promoted.status === 201, '28af הקליטה לרישום מצליחה', `${promoted.status} ${promoted.text?.slice(0, 200)}`);
+    eq(promoted.body?.registration?.parent_phone, '0509999999', '28ag והרישום נוצר עם הטלפון המתוקן');
+    eq(promoted.body?.registration?.parent_name, 'הורה3 מתוקן לוי', '28ah ועם השם המתוקן');
+    // the file catches up → no longer pending
+    await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'Registrations Export 2.xlsx',
+      buffer: sheetBuffer(REGISTRATIONS_HEADER, [registrationRow({ ...sh, parentFirst: 'הורה3 מתוקן', parentPhone: '0509999999' })], 'Sheet1'),
+      fields: { branch_id: branchId, academic_year: YEAR },
+    });
+    rec = await reconcileNow();
+    row = rec.rows.find(x => x.id_number === sh.idNumber);
+    eq(row?.clicktac?.parent1_override?.pending, false, '28ai הקובץ עודכן — התיקון כבר לא ממתין');
+    await ReconcileDecision.deleteMany({});
+  }
+
+  head('בדיקה 29 — ארכיון: 30 יום ואז מחיקה, ואף פעם לא של ילד שהוחלט עליו');
+  {
+    const { ReconcileDecision } = require('../src/models');
+    const archiveJob = require('../src/services/reconcileArchiveJob');
+    await wipeAll();
+    await uploadContracts(KIDS.map(k => contractRow(k)));
+    await uploadContracts([contractRow(KIDS[0])], 'contracts_later.xlsx');   // two gone from contracts
+    const old = new Date(Date.now() - 40 * 24 * 3600 * 1000);
+    await ExternalEnrollment.updateMany({ 'contract.present': false }, { $set: { 'contract.missing_since': old } });
+    // one of the two has a note — protected
+    await ReconcileDecision.create({ branch_id: branch._id, academic_year: '2026-2027', id_number: KIDS[2].idNumber, note: 'לבדוק' });
+    // a ministry row dropped 40 days ago, nobody registered
+    const t = await tmtRow({ first: 'ישן', last: 'מאוד', idNumber: '250000001', birth: [2025, 1, 1] });
+    await TmtApproval.updateOne({ _id: t._id }, { $set: { 'presence.is_present': false, 'presence.missing_since': old } });
+    // and one dropped yesterday — too soon
+    const t2 = await tmtRow({ first: 'ישן', last: 'קצת', idNumber: '250000002', birth: [2025, 1, 1] });
+    await TmtApproval.updateOne({ _id: t2._id }, { $set: { 'presence.is_present': false, 'presence.missing_since': new Date(Date.now() - 86400000) } });
+
+    const res = await archiveJob.tick();
+    eq(res.clicktac, 1, '29a נמחקה שורת קליקטאק אחת — זו בלי ההערה');
+    eq(res.tmt, 1, '29b ושורת תמ"ת אחת — זו מלפני 40 יום');
+    eq((await listRows()).enrollments.length, 2, '29c נשארו 2 שורות קליקטאק');
+    ok(!!(await ExternalEnrollment.findOne({ 'child.id_number': KIDS[2].idNumber })), '29d הילד/ה עם ההערה נשאר/ה');
+    ok(!(await TmtApproval.findOne({ _id: t._id })), '29e שורת התמ"ת הישנה נמחקה');
+    ok(!!(await TmtApproval.findOne({ _id: t2._id })), '29f ושורת התמ"ת מאתמול — לא');
+    await ReconcileDecision.deleteMany({});
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);

@@ -74,6 +74,7 @@ const EmployeeDocument = require('./EmployeeDocument');
 const Form101Sync = require('./Form101Sync');
 const Form101Inbox = require('./Form101Inbox');
 const Setting = require('./Setting');
+const ReconcileDecision = require('./ReconcileDecision');
 const ClassProvider = require('./ClassProvider');
 const ClassProgram = require('./ClassProgram');
 const ClassSession = require('./ClassSession');
@@ -163,6 +164,7 @@ const real = {
   Form101Sync,
   Form101Inbox,
   Setting,
+  ReconcileDecision,
   ClassProvider,
   ClassProgram,
   ClassSession,

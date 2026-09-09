@@ -15,6 +15,9 @@ import HistoryIcon from '@mui/icons-material/History';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import UndoIcon from '@mui/icons-material/Undo';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
+import CheckIcon from '@mui/icons-material/Check';
+import ReplayIcon from '@mui/icons-material/Replay';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
@@ -41,8 +44,35 @@ const VERDICT_STYLE = {
   cancelled: { color: 'warning', short: 'ביטל/ה רישום' },
   withdrawn: { color: 'error', short: 'הוסר/ה מרשימת תמ״ת' },
   not_approved: { color: 'error', short: 'תמ"ת לא אישר' },
+  private: { color: 'secondary', short: 'בגן ללא תמ"ת' },
   gone: { color: 'default', short: 'הוסר/ה מכל הרשימות' },
 };
+
+/**
+ * מאזן — the child's account in ClickTac, one cell.
+ *
+ * Signed as the vendor signs it: below zero the family owes, above zero the
+ * gan does. Red and bold only for a debt; a credit is green; zero is grey and
+ * says so, because "—" would read as "the file had no column", which is the
+ * other case and is drawn as "—".
+ */
+function BalanceCell({ balance, family }) {
+  if (balance == null) return <Typography variant="caption" color="text.disabled">—</Typography>;
+  const owes = balance < 0;
+  const credit = balance > 0;
+  const text = owes ? `חוב ${fmtMoney(-balance)}` : credit ? `זכות ${fmtMoney(balance)}` : '0 ₪';
+  const tip = family != null && family !== balance
+    ? `מאזן משפחתי (כולל אחים): ${family < 0 ? `חוב ${fmtMoney(-family)}` : fmtMoney(family)}` : '';
+  return (
+    <Tooltip title={tip}>
+      <Typography variant="body2" sx={NOWRAP}
+        color={owes ? 'error.main' : credit ? 'success.main' : 'text.secondary'}
+        fontWeight={owes ? 700 : 400}>
+        {text}
+      </Typography>
+    </Tooltip>
+  );
+}
 
 /**
  * חריגה = צבע. ONE COLOUR PER KIND OF FINDING, served by the server with the
@@ -54,20 +84,42 @@ const VERDICT_STYLE = {
 function IssueChip({ issue, sx }) {
   const color = issue.color || '#757575';
   const filled = !!issue.urgent;
+  // A finding a person closed and a later file reopened: dashed, with the
+  // date it was closed in the tooltip (the server puts it in the detail).
+  const reopened = !!issue.changed_since_resolved;
   return (
     <Tooltip title={issue.detail || ''}>
       <Chip size="small" variant={filled ? 'filled' : 'outlined'}
+        icon={reopened ? <ReplayIcon sx={{ fontSize: 14, color: `${color} !important` }} /> : undefined}
         label={filled ? `${issue.label} — דחוף` : issue.label}
         sx={{
           ...TIGHT_CHIP,
           ...(filled
             ? { bgcolor: color, color: '#fff', fontWeight: 700 }
             : { borderColor: color, color, fontWeight: issue.severity === 'note' ? 400 : 600 }),
+          ...(reopened ? { borderStyle: 'dashed', borderWidth: 2 } : {}),
           ...sx,
         }} />
     </Tooltip>
   );
 }
+
+/**
+ * What a person can say about one finding, in one row of buttons.
+ *
+ * Names get the real choice — whose spelling is right — because the choice
+ * is what the child is then called everywhere. Everything else is "I looked,
+ * it is fine": the finding is hidden until a later file moves the values.
+ */
+const RESOLVE_OPTIONS = {
+  name_mismatch: [['tmt', 'השם לפי תמ"ת'], ['clicktac', 'השם לפי קליקטאק'], ['ok', 'שני השמות בסדר']],
+  name_partial: [['tmt', 'השם לפי תמ"ת'], ['clicktac', 'השם לפי קליקטאק'], ['ok', 'שני השמות בסדר']],
+  tmt_contact_unknown: [['ok', 'הטלפונים בקליקטאק נכונים']],
+  id_mismatch: [['ok', 'בדקתי — אותו ילד/ה']],
+  birth_date_mismatch: [['ok', 'בדקתי — תקין']],
+  age_group_mismatch: [['ok', 'טופל — השכבה תוקנה']],
+};
+const DEFAULT_RESOLVE = [['ok', 'בדקתי — תקין']];
 
 /**
  * אמצעי התשלום — צבע לכל שיטה.
@@ -277,9 +329,20 @@ export default function TmtReconcile({
    * shows one set or the other, never both mixed.
    */
   const [showArchived, setShowArchived] = useState(false);
+  /** "Show me the families who owe money in ClickTac." A fact, not a finding. */
+  const [balanceDueOnly, setBalanceDueOnly] = useState(false);
 
   const [uploadDlg, setUploadDlg] = useState({ open: false, file: null, saving: false, result: null });
-  const [detail, setDetail] = useState(null);
+  /**
+   * The open card is the ROW ID, not the row: every decision saved from the
+   * card reloads the comparison, and the card has to show the reloaded row
+   * rather than the one it was opened with.
+   */
+  const [detailId, setDetailId] = useState(null);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [parentsDraft, setParentsDraft] = useState(null);   // { parent1: {name, phone}, parent2 } while editing
+  const [privateReason, setPrivateReason] = useState('');
+  const [deciding, setDeciding] = useState(false);
   const [applyDlg, setApplyDlg] = useState({ open: false, saving: false, result: null, error: null });
   const [historyDlg, setHistoryDlg] = useState({ open: false, loading: false, imports: [] });
   const [undoDlg, setUndoDlg] = useState({ open: false, imp: null, saving: false, result: null, error: null });
@@ -323,11 +386,22 @@ export default function TmtReconcile({
   );
   const summary = data?.summary || {};
   const issueDict = data?.dictionaries?.issues || {};
+  const detail = useMemo(() => {
+    if (!detailId || !data) return null;
+    return [...(data.rows || []), ...(data.archived || [])].find(r => r.id_number === detailId) || null;
+  }, [data, detailId]);
+  const openDetail = (r) => {
+    setDetailId(r.id_number);
+    setNoteDraft(r.decision?.note || '');
+    setParentsDraft(null);
+    setPrivateReason(r.decision?.verdict_override?.reason || '');
+  };
 
   const visible = useMemo(() => rows.filter(r => {
     if (verdictFilter && r.verdict !== verdictFilter) return false;
     if (issueFilter && !r.issues.some(i => i.code === issueFilter)) return false;
     if (missingParentsOnly && !r.clicktac?.missing_parents) return false;
+    if (balanceDueOnly && !(typeof r.clicktac?.balance === 'number' && r.clicktac.balance < 0)) return false;
     // Errors only — the card counts errors only, and a filter that shows more
     // rows than the number on the card it sits under is a bug the office
     // reports as "the screen is lying".
@@ -336,7 +410,48 @@ export default function TmtReconcile({
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return r.child_name.toLowerCase().includes(q) || String(r.id_number).includes(q);
-  }), [rows, verdictFilter, issueFilter, missingParentsOnly, paymentAlertOnly, chequeOnly, search]);
+  }), [rows, verdictFilter, issueFilter, missingParentsOnly, balanceDueOnly, paymentAlertOnly, chequeOnly, search]);
+
+  /* ---- החלטות — what the card lets a person say about a child ---- */
+  const decisionCall = async (fn, okMessage) => {
+    setDeciding(true);
+    try {
+      await fn();
+      if (okMessage) toast.success(okMessage);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירת ההחלטה');
+    } finally {
+      setDeciding(false);
+    }
+  };
+  const scope = { branch_id: branchId, academic_year: year };
+  const saveNote = (row) => decisionCall(
+    () => api.put(`/tmt/decisions/${row.id_number}`, { ...scope, note: noteDraft }),
+    'ההערה נשמרה',
+  );
+  const setPrivate = (row, on) => decisionCall(
+    () => api.put(`/tmt/decisions/${row.id_number}`, {
+      ...scope, verdict_override: on ? { kind: 'private', reason: privateReason } : null,
+    }),
+    on ? `${row.child_name} — מסומן/ת כילד/ה בגן ללא תמ"ת` : 'הסימון בוטל',
+  );
+  const saveParents = (row) => decisionCall(
+    () => api.put(`/tmt/decisions/${row.id_number}`, { ...scope, parent_overrides: parentsDraft }),
+    'פרטי ההורים עודכנו — זכרו לתקן גם בקליקטאק',
+  ).then(() => setParentsDraft(null));
+  const clearParents = (row) => decisionCall(
+    () => api.put(`/tmt/decisions/${row.id_number}`, { ...scope, parent_overrides: null }),
+    'התיקון בוטל — חוזרים לפרטים מהקובץ',
+  );
+  const resolve = (row, code, choice) => decisionCall(
+    () => api.post(`/tmt/decisions/${row.id_number}/resolve`, { ...scope, code, choice }),
+    'החריגה נסגרה',
+  );
+  const reopen = (row, code) => decisionCall(
+    () => api.delete(`/tmt/decisions/${row.id_number}/resolve/${code}`, { params: { branch: branchId, year } }),
+    'החריגה נפתחה מחדש',
+  );
 
   const handleUpload = async () => {
     if (!uploadDlg.file) return toast.error('יש לבחור קובץ');
@@ -584,6 +699,21 @@ export default function TmtReconcile({
             <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
               hint="החלטה שלך על הכיתה" />
             <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
+            {/* מאזן שלילי בקליקטאק — a fact about the family's account, from
+                the contracts export. Red when there is anyone to chase. */}
+            <StatCard label="יתרות חוב בקליקטאק" value={summary.balance_due || 0}
+              color={summary.balance_due ? 'error' : 'info'} active={balanceDueOnly}
+              hint="לפי עמודת מאזן בקובץ החוזים"
+              onClick={() => setBalanceDueOnly(v => !v)} />
+            {!!summary.private && (
+              <StatCard label='בגן ללא תמ"ת' value={summary.private} color="secondary"
+                active={verdictFilter === 'private'} hint="החלטה שלך — לא במסגרת המשרד"
+                onClick={() => setVerdictFilter(verdictFilter === 'private' ? '' : 'private')} />
+            )}
+            {!!summary.reopened && (
+              <StatCard label="נפתחו מחדש" value={summary.reopened} color="warning"
+                hint="חריגות שנסגרו וקובץ חדש שינה" />
+            )}
             {/* שכבת גיל שונה בין שני הקבצים — התעריף שגוי באחד הצדדים. The
                 one card that is red whenever it is not zero, and the one the
                 back office is mailed about until it is. */}
@@ -761,6 +891,10 @@ export default function TmtReconcile({
                       cannot be read at all. */}
                   <TableCell>תשלום</TableCell>
                   <TableCell>כיתה / דרגה</TableCell>
+                  {/* The child's account in ClickTac, for every row — a family
+                      that owes is seen before it is promoted, and a family
+                      in credit is seen too. See BalanceCell. */}
+                  <TableCell>מאזן</TableCell>
                   {/* The eye/detail button — pinned to the inline-end edge
                       (physically the left in this RTL table) so it survives
                       the sideways scroll the table above is built for. Below
@@ -773,7 +907,21 @@ export default function TmtReconcile({
               <TableBody>
                 {visible.map(r => (
                   <TableRow key={r.id_number} hover>
-                    <TableCell sx={NOWRAP}>{r.child_name}</TableCell>
+                    <TableCell sx={NOWRAP}>
+                      {r.child_name}
+                      {r.has_note && (
+                        <Tooltip title={r.decision?.note || ''}>
+                          <StickyNote2OutlinedIcon fontSize="inherit" color="warning"
+                            sx={{ mr: 0.5, verticalAlign: 'middle', cursor: 'pointer' }}
+                            onClick={() => openDetail(r)} />
+                        </Tooltip>
+                      )}
+                      {r.name_source && (
+                        <Tooltip title={`השם נבחר לפי ${r.name_source === 'tmt' ? 'תמ"ת' : r.name_source === 'clicktac' ? 'קליקטאק' : 'הזנה ידנית'}`}>
+                          <CheckIcon fontSize="inherit" color="success" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
+                        </Tooltip>
+                      )}
+                    </TableCell>
                     <TableCell sx={NOWRAP}>{r.id_number}</TableCell>
                     {/* The source of the birth date used to be a second line
                         under every date in the table — sixty repetitions of
@@ -953,13 +1101,16 @@ export default function TmtReconcile({
                         </Tooltip>
                       ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                     </TableCell>
+                    <TableCell>
+                      <BalanceCell balance={r.clicktac?.balance} family={r.clicktac?.family_balance} />
+                    </TableCell>
                     <TableCell sx={{ position: 'sticky', insetInlineEnd: 0, bgcolor: 'background.paper', zIndex: 1 }}>
-                      <IconButton size="small" onClick={() => setDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
+                      <IconButton size="small" onClick={() => openDetail(r)}><VisibilityIcon fontSize="small" /></IconButton>
                     </TableCell>
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={12} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={13} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">
                       {showArchived ? 'הארכיון ריק — אף ילד/ה לא הוסר/ה מכל הרשימות' : 'אין רשומות להצגה'}
                     </Typography>
@@ -1020,7 +1171,7 @@ export default function TmtReconcile({
       </Dialog>
 
       {/* ---- כרטיס ילד: שני הצדדים זה מול זה ---- */}
-      <Dialog open={!!detail} onClose={() => setDetail(null)} maxWidth="md" fullWidth>
+      <Dialog open={!!detail} onClose={() => setDetailId(null)} maxWidth="md" fullWidth>
         {detail && (
           <>
             <DialogTitle>
@@ -1029,17 +1180,94 @@ export default function TmtReconcile({
                 color={VERDICT_STYLE[detail.verdict]?.color || 'default'} />
             </DialogTitle>
             <DialogContent>
-              <Alert severity={detail.verdict === 'approved' ? 'success' : 'warning'} sx={{ mb: 2 }}>
+              <Alert severity={['approved', 'private'].includes(detail.verdict) ? 'success' : 'warning'} sx={{ mb: 2 }}>
                 {detail.verdict_action}
+                {detail.decision?.verdict_override && (
+                  <Box sx={{ mt: 0.5 }}>
+                    <b>סומן/ה כילד/ה בגן ללא תמ"ת</b>
+                    {detail.decision.verdict_override.reason ? ` — ${detail.decision.verdict_override.reason}` : ''}
+                    {detail.decision.verdict_override.by_name ? ` (${detail.decision.verdict_override.by_name}, ${fmtDate(detail.decision.verdict_override.at)})` : ''}
+                  </Box>
+                )}
               </Alert>
+
+              {/* ---- הערה ----
+                  Free text that survives every upload — see ReconcileDecision. */}
+              <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
+                <Typography variant="subtitle2" fontWeight={700} gutterBottom>הערה</Typography>
+                <Stack direction="row" spacing={1} alignItems="flex-start">
+                  <TextField fullWidth multiline minRows={1} maxRows={4} size="small"
+                    placeholder='למשל: ילד אריתראי — לא יכול להיות בתמ"ת, כן בגן'
+                    value={noteDraft} onChange={e => setNoteDraft(e.target.value)} disabled={!canPlace} />
+                  <Button variant="contained" size="small" disabled={!canPlace || deciding || noteDraft === (detail.decision?.note || '')}
+                    onClick={() => saveNote(detail)}>שמירה</Button>
+                </Stack>
+                {/* ---- בגן ללא תמ"ת ----
+                    Offered only where it means something: a child ClickTac
+                    has and the ministry does not approve. */}
+                {['missing_approval', 'not_approved', 'private'].includes(detail.verdict) && canPlace && (
+                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
+                    {detail.verdict === 'private' ? (
+                      <Button size="small" color="secondary" variant="outlined" disabled={deciding}
+                        onClick={() => setPrivate(detail, false)}>
+                        ביטול הסימון "בגן ללא תמ"ת"
+                      </Button>
+                    ) : (
+                      <>
+                        <TextField size="small" placeholder="סיבה (לא חובה)" value={privateReason}
+                          onChange={e => setPrivateReason(e.target.value)} sx={{ minWidth: 220 }} />
+                        <Button size="small" color="secondary" variant="contained" disabled={deciding}
+                          onClick={() => setPrivate(detail, true)}>
+                          סימון: בגן ללא תמ"ת
+                        </Button>
+                        <Typography variant="caption" color="text.secondary">
+                          הילד/ה לא במסגרת המשרד — לא ייחשב/תיחשב "ללא אישור" ולא יורד/תרד מתור הקליטה
+                        </Typography>
+                      </>
+                    )}
+                  </Stack>
+                )}
+              </Card>
 
               {!!detail.issues.length && (
                 <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
                   <Typography variant="subtitle2" fontWeight={700} gutterBottom>חריגות</Typography>
                   {detail.issues.map(i => (
-                    <Stack key={i.code} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                    <Stack key={i.code} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.75 }} flexWrap="wrap" useFlexGap>
                       <IssueChip issue={{ ...i, detail: '' }} />
-                      <Typography variant="body2">{i.detail || ''}</Typography>
+                      <Typography variant="body2" sx={{ flex: 1, minWidth: 160 }}>{i.detail || ''}</Typography>
+                      {/* One answer per finding — see RESOLVE_OPTIONS. */}
+                      {canPlace && (RESOLVE_OPTIONS[i.code] || DEFAULT_RESOLVE).map(([choice, label]) => (
+                        <Button key={choice} size="small" variant="outlined" disabled={deciding}
+                          startIcon={<CheckIcon />} onClick={() => resolve(detail, i.code, choice)}>
+                          {label}
+                        </Button>
+                      ))}
+                    </Stack>
+                  ))}
+                </Card>
+              )}
+              {/* ---- נסגרו ----
+                  Findings a person closed. Listed so the decision can be
+                  seen, and undone. */}
+              {!!detail.resolved_issues?.length && (
+                <Card variant="outlined" sx={{ p: 1.5, mb: 2, bgcolor: 'action.hover' }}>
+                  <Typography variant="subtitle2" fontWeight={700} gutterBottom>חריגות שנסגרו</Typography>
+                  {detail.resolved_issues.map(i => (
+                    <Stack key={i.code} direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }} flexWrap="wrap" useFlexGap>
+                      <Typography variant="body2" color="text.secondary" sx={{ textDecoration: 'line-through' }}>
+                        {i.label}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {i.resolution?.choice === 'tmt' ? 'לפי תמ"ת' : i.resolution?.choice === 'clicktac' ? 'לפי קליקטאק'
+                          : i.resolution?.choice === 'custom' ? `ידני: ${i.resolution.value}` : 'תקין'}
+                        {i.resolution?.by_name ? ` · ${i.resolution.by_name}` : ''}
+                        {i.resolution?.at ? ` · ${fmtDate(i.resolution.at)}` : ''}
+                      </Typography>
+                      {canPlace && (
+                        <Button size="small" disabled={deciding} startIcon={<ReplayIcon />}
+                          onClick={() => reopen(detail, i.code)}>פתיחה מחדש</Button>
+                      )}
                     </Stack>
                   ))}
                 </Card>
@@ -1105,12 +1333,55 @@ export default function TmtReconcile({
                       <Typography variant="body2">חותם שני: {detail.clicktac.second_signer || '—'}</Typography>
                       <Typography variant="body2">תאריך הרשמה: {fmtDate(detail.clicktac.registered_at)}</Typography>
                       <Divider sx={{ my: 1 }} />
-                      <Typography variant="body2">
-                        {detail.clicktac.parent1_name} · {detail.clicktac.parent1_phone}
-                      </Typography>
-                      <Typography variant="body2">
-                        {detail.clicktac.parent2_name} · {detail.clicktac.parent2_phone}
-                      </Typography>
+                      {/* ---- ההורים ----
+                          Editable in place. A correction lives in
+                          ReconcileDecision, beats the file everywhere, and
+                          carries a reminder until ClickTac catches up. */}
+                      {parentsDraft ? (
+                        <Stack spacing={1}>
+                          {['parent1', 'parent2'].map((k, idx) => (
+                            <Stack key={k} direction="row" spacing={1}>
+                              <TextField size="small" label={`הורה ${idx + 1} — שם`} value={parentsDraft[k]?.name || ''}
+                                onChange={e => setParentsDraft(d => ({ ...d, [k]: { ...d[k], name: e.target.value } }))} />
+                              <TextField size="small" label="טלפון" value={parentsDraft[k]?.phone || ''}
+                                onChange={e => setParentsDraft(d => ({ ...d, [k]: { ...d[k], phone: e.target.value } }))} />
+                            </Stack>
+                          ))}
+                          <Stack direction="row" spacing={1}>
+                            <Button size="small" variant="contained" disabled={deciding} onClick={() => saveParents(detail)}>שמירה</Button>
+                            <Button size="small" disabled={deciding} onClick={() => setParentsDraft(null)}>ביטול</Button>
+                          </Stack>
+                        </Stack>
+                      ) : (
+                        <>
+                          {[['parent1', detail.clicktac.parent1_name, detail.clicktac.parent1_phone, detail.clicktac.parent1_override],
+                            ['parent2', detail.clicktac.parent2_name, detail.clicktac.parent2_phone, detail.clicktac.parent2_override]]
+                            .map(([k, name, phone, ov]) => (
+                              <Typography key={k} variant="body2">
+                                {name || '—'} · {phone || '—'}
+                                {ov?.pending && (
+                                  <Tooltip title={`בקובץ: ${ov.file_name || '—'} · ${ov.file_phone || '—'}`}>
+                                    <Chip size="small" color="warning" label="תוקן כאן — לתקן בקליקטאק" sx={{ ...TIGHT_CHIP, mr: 1 }} />
+                                  </Tooltip>
+                                )}
+                                {ov && !ov.pending && (
+                                  <Chip size="small" color="success" variant="outlined" label="הקובץ עודכן" sx={{ ...TIGHT_CHIP, mr: 1 }} />
+                                )}
+                              </Typography>
+                            ))}
+                          {canPlace && (
+                            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                              <Button size="small" onClick={() => setParentsDraft({
+                                parent1: { name: detail.clicktac.parent1_name, phone: detail.clicktac.parent1_phone },
+                                parent2: { name: detail.clicktac.parent2_name, phone: detail.clicktac.parent2_phone },
+                              })}>עריכת פרטי ההורים</Button>
+                              {detail.decision?.parent_overrides && (
+                                <Button size="small" color="warning" disabled={deciding} onClick={() => clearParents(detail)}>ביטול התיקון</Button>
+                              )}
+                            </Stack>
+                          )}
+                        </>
+                      )}
                       <Typography variant="body2">{detail.clicktac.address}</Typography>
                       {detail.clicktac.contract_present === false && (
                         <Alert severity="error" sx={{ mt: 1, py: 0 }}>
@@ -1203,7 +1474,7 @@ export default function TmtReconcile({
                 </Card>
               )}
             </DialogContent>
-            <DialogActions><Button onClick={() => setDetail(null)}>סגירה</Button></DialogActions>
+            <DialogActions><Button onClick={() => setDetailId(null)}>סגירה</Button></DialogActions>
           </>
         )}
       </Dialog>

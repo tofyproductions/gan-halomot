@@ -2,8 +2,11 @@ const XLSX = require('xlsx');
 const shabbat = require('../services/shabbatParents');
 const {
   ExternalEnrollment, Registration, Child, Collection, Branch, BranchPricing, Classroom,
-  EnrollmentImport,
+  EnrollmentImport, ReconcileDecision, TmtApproval,
 } = require('../models');
+const { partyWithOverride } = require('../services/enrollment-reconcile.service');
+// The ministry-shaped ת"ז (9 digits) — the key ReconcileDecision rows carry.
+const { normalizeId: tmtId } = require('../services/tmt.service');
 const {
   parseSheet, parseContractsSheet, identifyHeader, AGE_GROUPS, idKey, institutionMatchesBranch,
 } = require('../services/clicktac.service');
@@ -1568,18 +1571,42 @@ async function promoteOne(doc, opts) {
     feeSource = 'manual';
   }
 
-  const parentName = `${doc.parent1?.first_name || ''} ${doc.parent1?.last_name || ''}`.trim();
+  /**
+   * WHAT THE OFFICE CORRECTED BY HAND WINS OVER THE FILE.
+   *
+   * A phone the office knows to be wrong in ClickTac, a name the ministry
+   * spells right — decided on the comparison screen (ReconcileDecision) and
+   * promoted here, so the Registration is created with the number the gan
+   * actually calls rather than the one that made somebody open the card.
+   */
+  const decision = await ReconcileDecision.findOne({
+    branch_id: doc.branch_id, academic_year: doc.academic_year, id_number: tmtId(doc.child?.id_number),
+  }).lean();
+  const p1 = partyWithOverride(doc.parent1, decision?.parent_overrides?.parent1);
+  const p2 = partyWithOverride(doc.parent2, decision?.parent_overrides?.parent2);
+  const nameChoice = decision?.resolutions?.find(r => (r.code === 'name_mismatch' || r.code === 'name_partial') && r.choice !== 'ok');
+  let childName = doc.child.full_name;
+  if (nameChoice?.choice === 'custom' && nameChoice.value) childName = nameChoice.value;
+  if (nameChoice?.choice === 'tmt') {
+    const tmt = await TmtApproval.findOne({ academic_year: doc.academic_year, 'child.id_number': tmtId(doc.child?.id_number) })
+      .select('child.full_name').lean();
+    if (tmt?.child?.full_name) childName = tmt.child.full_name;
+  }
+  const parentName = p1.name;
+  const parentPhone = p1.phone || null;
+  const parent2Name = p2.name;
+  const parent2Phone = p2.phone || null;
   const [y1, y2] = doc.academic_year.split('-').map(Number);
 
   const registration = await Registration.create({
     unique_id: generateUniqueId('REG'),
     branch_id: doc.branch_id,
-    child_name: doc.child.full_name,
+    child_name: childName,
     child_birth_date: doc.child.birth_date,
     classroom_id: classroom_id || null,
     parent_name: parentName,
     parent_id_number: doc.parent1?.id_number || null,
-    parent_phone: doc.parent1?.phone || null,
+    parent_phone: parentPhone,
     parent_email: doc.parent1?.email || null,
     monthly_fee,
     fee_source: feeSource,
@@ -1627,10 +1654,9 @@ async function promoteOne(doc, opts) {
   // Both parents, from the start. ClickTac asks for two registrants and 73 of
   // 77 rows have both — this is the one import where the second parent is not
   // something to infer later.
-  const parent2Name = `${doc.parent2?.first_name || ''} ${doc.parent2?.last_name || ''}`.trim();
   await Child.create({
     registration_id: registration._id,
-    child_name: doc.child.full_name,
+    child_name: childName,
     child_id_number: doc.child.id_number || null,
     birth_date: doc.child.birth_date,
     // ClickTac already asked. Kept on the child rather than only inside the
@@ -1641,11 +1667,11 @@ async function promoteOne(doc, opts) {
     classroom_id: classroom_id || null,
     parent_name: parentName,
     parent_id_number: doc.parent1?.id_number || null,
-    phone: doc.parent1?.phone || null,
+    phone: parentPhone,
     email: doc.parent1?.email || null,
     parent2_name: parent2Name || null,
     parent2_id_number: doc.parent2?.id_number || null,
-    parent2_phone: doc.parent2?.phone || null,
+    parent2_phone: parent2Phone,
     parent2_email: doc.parent2?.email || null,
     address: doc.parent1?.address || doc.parent2?.address || null,
     allergies: doc.child.has_allergy ? doc.child.allergy_detail : null,

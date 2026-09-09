@@ -1,10 +1,10 @@
 const XLSX = require('xlsx');
 const {
-  TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child,
+  TmtApproval, ExternalEnrollment, EnrollmentImport, Branch, Classroom, Child, ReconcileDecision,
 } = require('../models');
 const { parseSheet, missingColumns, COLUMNS, normalizeId } = require('../services/tmt.service');
 const { undoBatch, snapshotCollector } = require('../services/enrollment-undo.service');
-const { reconcile, VERDICTS, ISSUES } = require('../services/enrollment-reconcile.service');
+const { reconcile, VERDICTS, ISSUES, familyOf } = require('../services/enrollment-reconcile.service');
 const { AGE_GROUPS } = require('../services/clicktac.service');
 const {
   promoteOne, effectiveAgeGroup, hasParents, NO_PARENTS_MESSAGE, lastClickTacImports,
@@ -320,7 +320,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     };
   }
 
-  const [tmtAll, ctDocs, pricing] = await Promise.all([
+  const [tmtAll, ctDocs, pricing, decisionDocs] = await Promise.all([
     TmtApproval.find({ academic_year: academicYear })
       .select('-raw')
       .populate('branch_id', 'name')
@@ -337,7 +337,10 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     // prices. Read here rather than inside reconcile() because that function
     // is pure and has no database — and read once for the whole screen.
     branchPricingFor(branchId, academicYear),
+    // What people decided — notes, closed findings, overrides. See the model.
+    ReconcileDecision.find({ branch_id: branchId, academic_year: academicYear }).lean(),
   ]);
+  const decisions = new Map(decisionDocs.map(d => [d.id_number, d]));
 
   const ctIds = new Set(ctDocs.map(d => normalizeId(d.child?.id_number)).filter(Boolean));
   const tmtDocs = tmtAll
@@ -354,6 +357,7 @@ async function buildReconciliation({ branchId, academicYear, req }) {
     academicYear,
     branchName: branch.name,
     pricing,
+    decisions,
   });
   // The size of each side, which the verdicts alone cannot tell you: a branch
   // with no תמ"ת file and a branch whose every child was refused produce the
@@ -559,7 +563,9 @@ async function apply(req, res, next) {
     // approves them.
     const restored = [];
     for (const row of result.rows) {
-      if (row.verdict !== 'approved' || !row.clicktac) continue;
+      // 'private' is the office saying "in the gan without the ministry" —
+      // cleared by a person rather than by the files, and cleared all the same.
+      if (!['approved', 'private'].includes(row.verdict) || !row.clicktac) continue;
       if (row.clicktac.review_status !== 'ignored') continue;
       await ExternalEnrollment.updateOne({ _id: row.clicktac.id }, {
         $set: {
@@ -742,6 +748,9 @@ async function exportReconcile(req, res, next) {
       email: r.clicktac?.parent1_email || r.tmt?.contact_email || '',
       address: r.clicktac?.address || '',
       review: r.clicktac?.review_status === 'imported' ? 'נקלט במערכת' : '',
+      // What the office wrote and decided — see ReconcileDecision.
+      note: r.decision?.note || '',
+      parent_fix: r.decision?.parent_overrides?.pending ? 'לתקן בקליקטאק' : '',
     });
 
     const COLS_FULL = [
@@ -764,6 +773,7 @@ async function exportReconcile(req, res, next) {
       ['parent2', 'הורה 2'], ['parent2_phone', 'טלפון 2'],
       ['tmt_contact', 'איש קשר תמ"ת'], ['tmt_phone', 'טלפון תמ"ת'],
       ['email', 'מייל'], ['address', 'כתובת'], ['review', 'במערכת'],
+      ['note', 'הערה'], ['parent_fix', 'תיקון הורים'],
     ];
     const COLS_CONTACT = [
       ['child_name', 'שם הילד/ה'], ['id_number', 'ת"ז'], ['age_group', 'שכבת גיל'],
@@ -1154,6 +1164,158 @@ async function removeApproval(req, res, next) {
   }
 }
 
+/* ------------------------------------------------------------------ *
+ * החלטות — what a person says about one child, kept across uploads.
+ * See models/ReconcileDecision.
+ * ------------------------------------------------------------------ */
+
+/** The (branch, year, ת"ז) key of a decision, from the request. */
+async function decisionScope(req) {
+  const branchId = req.body?.branch_id || req.query?.branch;
+  if (!branchId) return { error: 'יש לציין סניף', status: 400 };
+  if (!await canAccessBranch(req, branchId)) return { error: 'אין לך הרשאה לסניף זה', status: 403 };
+  const academicYear = normalizeYear(req.body?.academic_year || req.query?.year || enrollmentYear());
+  const idNumber = normalizeId(req.params.idNumber);
+  if (!idNumber) return { error: 'ת"ז לא תקינה', status: 400 };
+  return { branchId, academicYear, idNumber };
+}
+
+const who = (req) => ({ by: req.user?.id || null, by_name: req.user?.full_name || req.user?.name || '' });
+
+/** The decision as the screen reads it — no user ids. */
+function decisionOut(doc) {
+  if (!doc) return null;
+  const d = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  return {
+    id_number: d.id_number,
+    note: d.note || '',
+    verdict_override: d.verdict_override?.kind ? {
+      kind: d.verdict_override.kind, reason: d.verdict_override.reason || '',
+      by_name: d.verdict_override.by_name || '', at: d.verdict_override.at || null,
+    } : null,
+    parent_overrides: (d.parent_overrides?.parent1 || d.parent_overrides?.parent2) ? {
+      parent1: d.parent_overrides.parent1 || null, parent2: d.parent_overrides.parent2 || null,
+      by_name: d.parent_overrides.by_name || '', at: d.parent_overrides.at || null,
+    } : null,
+    resolutions: (d.resolutions || []).map(r => ({
+      code: r.code, choice: r.choice, value: r.value, note: r.note, by_name: r.by_name, at: r.at,
+    })),
+  };
+}
+
+/**
+ * PUT /api/tmt/decisions/:idNumber  { branch_id, academic_year, note?, verdict_override?, parent_overrides? }
+ *
+ * Each key that is PRESENT is set; a key that is absent is left alone, so the
+ * note field and the parents form can each save on their own. `null` clears.
+ */
+async function putDecision(req, res, next) {
+  try {
+    const scope = await decisionScope(req);
+    if (scope.error) return res.status(scope.status).json({ error: scope.error });
+    const { branchId, academicYear, idNumber } = scope;
+    const has = (k) => Object.prototype.hasOwnProperty.call(req.body || {}, k);
+    const set = {};
+    if (has('note')) set.note = String(req.body.note || '').slice(0, 4000);
+    if (has('verdict_override')) {
+      const v = req.body.verdict_override;
+      set.verdict_override = v?.kind === 'private'
+        ? { kind: 'private', reason: String(v.reason || '').slice(0, 500), ...who(req), at: new Date() }
+        : { kind: null, reason: '', by: null, by_name: '', at: null };
+    }
+    if (has('parent_overrides')) {
+      const p = req.body.parent_overrides;
+      const party = (x) => (x && (x.name || x.phone)
+        ? { name: String(x.name || '').trim().slice(0, 120), phone: String(x.phone || '').trim().slice(0, 30) }
+        : null);
+      const parent1 = party(p?.parent1);
+      const parent2 = party(p?.parent2);
+      set.parent_overrides = (parent1 || parent2)
+        ? { parent1, parent2, ...who(req), at: new Date() }
+        : { parent1: null, parent2: null, by: null, by_name: '', at: null };
+    }
+    if (!Object.keys(set).length) return res.status(400).json({ error: 'אין מה לשמור' });
+
+    const doc = await ReconcileDecision.findOneAndUpdate(
+      { branch_id: branchId, academic_year: academicYear, id_number: idNumber },
+      { $set: set, $setOnInsert: { branch_id: branchId, academic_year: academicYear, id_number: idNumber } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+    res.json({ decision: decisionOut(doc) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/tmt/decisions/:idNumber/resolve
+ *   { branch_id, academic_year, code, choice?, value?, note? }
+ *
+ * Closes one finding. The snapshot of what the files say RIGHT NOW is taken
+ * from the comparison itself (every open issue carries one), so the answer
+ * is tied to exactly the values the person saw.
+ */
+async function resolveIssue(req, res, next) {
+  try {
+    const scope = await decisionScope(req);
+    if (scope.error) return res.status(scope.status).json({ error: scope.error });
+    const { branchId, academicYear, idNumber } = scope;
+    const code = String(req.body?.code || '');
+    if (!ISSUES[code]) return res.status(400).json({ error: 'סוג חריגה לא מוכר' });
+    const choice = ['ok', 'tmt', 'clicktac', 'custom'].includes(req.body?.choice) ? req.body.choice : 'ok';
+    const value = String(req.body?.value || '').trim().slice(0, 200);
+    if (choice === 'custom' && !value) return res.status(400).json({ error: 'יש להזין ערך' });
+
+    const { result, error, status } = await buildReconciliation({ branchId, academicYear, req });
+    if (error) return res.status(status).json({ error });
+    const row = [...result.rows, ...result.archived].find(r => r.id_number === idNumber
+      || (r.clicktac && normalizeId(r.clicktac.id_number_raw) === idNumber));
+    if (!row) return res.status(404).json({ error: 'הילד/ה אינו/ה בהצלבה' });
+    const issue = row.issues.find(i => i.code === code);
+    if (!issue) return res.status(409).json({ error: 'החריגה אינה פתוחה — אין מה לסגור', code: 'NOT_OPEN' });
+
+    const resolution = {
+      code, choice, value, snapshot: issue.snapshot ?? null,
+      note: String(req.body?.note || '').slice(0, 500), ...who(req), at: new Date(),
+    };
+    // One answer per question: the new one replaces the old — and "שם שונה"
+    // and "שם חלקי" are one question (see familyOf).
+    const sameQuestion = Object.keys(ISSUES).filter(c => familyOf(c) === familyOf(code));
+    await ReconcileDecision.updateOne(
+      { branch_id: branchId, academic_year: academicYear, id_number: row.id_number },
+      { $pull: { resolutions: { code: { $in: sameQuestion } } } },
+      { upsert: true },
+    );
+    const doc = await ReconcileDecision.findOneAndUpdate(
+      { branch_id: branchId, academic_year: academicYear, id_number: row.id_number },
+      { $push: { resolutions: resolution } },
+      { new: true },
+    );
+    res.json({ decision: decisionOut(doc) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** DELETE /api/tmt/decisions/:idNumber/resolve/:code?branch=&year= — reopen a finding. */
+async function reopenIssue(req, res, next) {
+  try {
+    const scope = await decisionScope(req);
+    if (scope.error) return res.status(scope.status).json({ error: scope.error });
+    const { branchId, academicYear, idNumber } = scope;
+    const code = String(req.params.code || '');
+    const sameQuestion = Object.keys(ISSUES).filter(c => familyOf(c) === familyOf(code));
+    const doc = await ReconcileDecision.findOneAndUpdate(
+      { branch_id: branchId, academic_year: academicYear, id_number: idNumber },
+      { $pull: { resolutions: { code: { $in: sameQuestion.length ? sameQuestion : [code] } } } },
+      { new: true },
+    );
+    res.json({ decision: decisionOut(doc) });
+  } catch (error) {
+    next(error);
+  }
+}
+
 /** DELETE /api/tmt/imports/:id — undo one ministry upload, the latest one. */
 async function undoImport(req, res, next) {
   try {
@@ -1177,5 +1339,5 @@ async function undoImport(req, res, next) {
 module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
   exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
-  isTmtSupervised, undoImport,
+  isTmtSupervised, undoImport, putDecision, resolveIssue, reopenIssue,
 };

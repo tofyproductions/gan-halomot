@@ -74,6 +74,23 @@ const VERDICTS = {
     rank: 6,
   },
   /**
+   * A person's override: in the gan WITHOUT the ministry.
+   *
+   * A child with no residency, a family paying in full — never going to be
+   * on the ministry's list, and registered in ClickTac all the same. Without
+   * this the row is "נרשם — אין אישור תמ"ת" forever and `apply` keeps dropping
+   * it from the intake queue. Set from the child's card, kept in
+   * ReconcileDecision, and it beats only the two verdicts that mean "the
+   * ministry has not approved" — a cancelled or vanished registration is still
+   * cancelled or vanished.
+   */
+  private: {
+    label: 'בגן ללא תמ"ת',
+    action: 'ילד/ה שלא במסגרת התמ"ת — נקלט/ת כרגיל, ללא סבסוד',
+    severity: 'ok',
+    rank: 6,
+  },
+  /**
    * Gone from EVERY list — the ministry's and both of ClickTac's exports.
    *
    * Not a finding: there is nobody left to argue with. The child left, or was
@@ -191,16 +208,6 @@ const ISSUES = {
     severity: 'critical',
     color: '#ff7043',
   },
-  /**
-   * Money owed in ClickTac — the child's own account, from the contracts
-   * export. A remark rather than a finding: collection is not this screen's
-   * job, but a family that owes should be seen before it is promoted.
-   */
-  balance_due: {
-    label: 'יתרת חוב בקליקטאק',
-    severity: 'note',
-    color: '#4e342e',
-  },
 };
 
 const SEVERITY_RANK = { critical: 0, warning: 1, info: 2, note: 3 };
@@ -273,9 +280,92 @@ function compareNames(a, b) {
 /** The child's ת"ז as ClickTac holds it, normalized to the ministry's shape. */
 const ctId = (doc) => normalizeId(doc?.child?.id_number);
 
-/** Both parents' phones, for checking the ministry's contact against them. */
-function parentPhones(ct) {
-  return [ct?.parent1?.phone, ct?.parent2?.phone].map(normalizePhone).filter(Boolean);
+/**
+ * Both parents' phones, for checking the ministry's contact against them —
+ * including a phone the office corrected by hand (ReconcileDecision), since
+ * "the number we actually call" is the one worth comparing to.
+ */
+function parentPhones(ct, decision = null) {
+  const o = decision?.parent_overrides || {};
+  return [ct?.parent1?.phone, ct?.parent2?.phone, o.parent1?.phone, o.parent2?.phone]
+    .map(normalizePhone).filter(Boolean);
+}
+
+/**
+ * What the files said about ONE finding, at this moment.
+ *
+ * Stored on the resolution when a person closes the finding, and compared
+ * on every read: the same snapshot means the answer still holds and the
+ * finding stays closed; a different one means a later upload moved the
+ * ground and the question is put back in front of a person — marked, not
+ * silently re-opened and not silently kept closed.
+ *
+ * Small on purpose — the two values that disagree, not the two records.
+ */
+function snapshotFor(issue, tmt, ct, { branchId } = {}) {
+  switch (issue.code) {
+    case 'name_mismatch':
+    case 'name_partial':
+      return { tmt: tmt?.child?.full_name || '', ct: ct?.child?.full_name || '' };
+    case 'birth_date_mismatch':
+      return { tmt: dayKey(tmt?.child?.birth_date), ct: dayKey(ct?.child?.birth_date) };
+    case 'id_mismatch':
+      return { tmt: tmt?.child?.id_number || '', ct: ct?.child?.id_number || '' };
+    case 'age_group_mismatch':
+      return { tmt: canonicalAgeGroup(tmt?.child?.age_group), ct: canonicalAgeGroup(ct?.child?.age_group) };
+    case 'age_group_computed_mismatch':
+      return { computed: ct?.computed?.age_group || '', ct: canonicalAgeGroup(ct?.child?.age_group) };
+    case 'continuing_mismatch':
+      return { tmt: tmt?.ministry?.continuing ?? null, ct: clicktacContinuing(ct) };
+    case 'welfare_mismatch':
+      return { tmt: tmt?.ministry?.welfare ?? null, ct: !!ct?.child?.welfare_referred };
+    case 'tmt_contact_unknown':
+      return { tmt: normalizePhone(tmt?.contact?.phone), parents: parentPhones(ct).sort() };
+    case 'branch_mismatch':
+      return { tmt_branch: String(tmt?.branch_id?._id || tmt?.branch_id || ''), branch: String(branchId || '') };
+    default:
+      // The absence findings and the ministry-portal to-dos: the detail text
+      // carries the date or the decision, and either moving is a change.
+      return { detail: issue.detail || '' };
+  }
+}
+
+const sameSnapshot = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/**
+ * Findings that are the same QUESTION under two codes.
+ *
+ * "שם שונה" and "שם חלקי" are one question — whose spelling is right — asked
+ * at two strengths, and a file that turns the one into the other has not
+ * asked a new question. An answer given to either covers both; whether it
+ * still holds is the snapshot's job.
+ */
+const RESOLUTION_FAMILY = { name_mismatch: 'name', name_partial: 'name' };
+const familyOf = (code) => RESOLUTION_FAMILY[code] || code;
+
+/** The two words of a name the office typed: first, and everything after. */
+function splitName(full) {
+  const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+  return { first_name: parts[0] || '', last_name: parts.slice(1).join(' ') };
+}
+
+/**
+ * The parent as the screen, the export and the promotion should show them:
+ * the office's correction where there is one, else the file. `pending` says
+ * the correction still differs from the latest file — the reminder to fix it
+ * in ClickTac. An override the file has since caught up with is simply done.
+ */
+function partyWithOverride(party, override) {
+  const fileName = `${party?.first_name || ''} ${party?.last_name || ''}`.trim();
+  const filePhone = String(party?.phone || '').trim();
+  if (!override || (!override.name && !override.phone)) {
+    return { name: fileName, phone: filePhone, overridden: false, pending: false };
+  }
+  const name = override.name || fileName;
+  const phone = override.phone || filePhone;
+  const pending = (override.name && override.name !== fileName)
+    || (override.phone && normalizePhone(override.phone) !== normalizePhone(filePhone));
+  return { name, phone, overridden: true, pending: !!pending, file_name: fileName, file_phone: filePhone };
 }
 
 /**
@@ -296,12 +386,6 @@ function clicktacLive(ct) {
   const regLive = sources.includes('registrations') && ct.presence?.is_present !== false;
   const contractLive = sources.includes('contracts') && ct.contract && ct.contract.present !== false;
   return regLive || contractLive;
-}
-
-/** Whether the row's contracts half says the child owes money. */
-function balanceDue(ct) {
-  const b = ct?.contract?.balance;
-  return typeof b === 'number' && b < 0 ? -b : 0;
 }
 
 /** ClickTac's own "ממשיך" — the registrations file's flag, else the contract's. */
@@ -379,7 +463,7 @@ function paymentTermsFor(ct) {
  * Only called when the child is on both sides — a child missing from one list
  * has one finding (the absence) and comparing fields would bury it.
  */
-function issuesFor(tmt, ct, { branchId, matchedBy = 'id' } = {}) {
+function issuesFor(tmt, ct, { branchId, matchedBy = 'id', decision = null } = {}) {
   const found = [];
   const add = (code, detail) => found.push({ code, detail, ...ISSUES[code] });
 
@@ -453,14 +537,12 @@ function issuesFor(tmt, ct, { branchId, matchedBy = 'id' } = {}) {
     // number belongs to nobody" would then be true of every child — which is
     // exactly what happened for the contracts-only rows of 09.2026.
     const phone = normalizePhone(tmt.contact?.phone);
-    const known = parentPhones(ct);
+    const known = parentPhones(ct, decision);
     if (phone && known.length && !known.includes(phone)) {
       add('tmt_contact_unknown', `${tmt.contact.name || 'איש קשר תמ"ת'} · ${tmt.contact.phone}`);
     }
   }
 
-  const due = balanceDue(ct);
-  if (due) add('balance_due', `₪${due.toLocaleString('he-IL')}`);
 
   /**
    * התקבל vs נקלט במעון.
@@ -503,7 +585,16 @@ function issuesFor(tmt, ct, { branchId, matchedBy = 'id' } = {}) {
  * verdict is the same as having no approval at all, and the branch_mismatch
  * issue is what says where the approval actually is.
  */
-function verdictFor(tmt, ct, { branchId } = {}) {
+function verdictFor(tmt, ct, { branchId, decision = null } = {}) {
+  const base = baseVerdictFor(tmt, ct, { branchId });
+  // The office's override beats exactly the two verdicts that mean "the
+  // ministry has not approved" — see VERDICTS.private.
+  if (decision?.verdict_override?.kind === 'private'
+    && (base === 'missing_approval' || base === 'not_approved')) return 'private';
+  return base;
+}
+
+function baseVerdictFor(tmt, ct, { branchId } = {}) {
   const ownApproval = !!tmt && (!branchId
     || String(tmt.branch_id?._id || tmt.branch_id) === String(branchId));
   // A name the ministry dropped from a later file is not an approval any more,
@@ -544,7 +635,19 @@ function reconcile({
   // a caller that has no matrix (or does not care) gets rows with a null
   // `fee_by_tier` rather than an exception.
   pricing = null,
+  /**
+   * What people decided about these children — ReconcileDecision rows for
+   * the branch and year, as a Map keyed by the ministry-shaped ת"ז. Optional
+   * like `pricing`: without it every finding is open and every verdict is
+   * the files' own.
+   */
+  decisions = null,
 }) {
+  const decisionFor = (...ids) => {
+    if (!decisions) return null;
+    for (const id of ids) if (id && decisions.get(id)) return decisions.get(id);
+    return null;
+  };
   const tmtById = new Map();
   for (const t of tmtDocs) {
     const id = normalizeId(t.child?.id_number);
@@ -614,8 +717,44 @@ function reconcile({
   const archived = [];
 
   for (const { id, tmt, ct, by } of pairs) {
-    const verdict = verdictFor(tmt, ct, { branchId });
-    const issues = issuesFor(tmt, ct, { branchId, matchedBy: by });
+    // A decision is keyed by the row's own id; a row joined by name+birth
+    // may have been decided under ClickTac's number before the join existed.
+    const decision = decisionFor(id, ct ? ctId(ct) : null);
+    const verdict = verdictFor(tmt, ct, { branchId, decision });
+    let issues = issuesFor(tmt, ct, { branchId, matchedBy: by, decision });
+    for (const i of issues) i.snapshot = snapshotFor(i, tmt, ct, { branchId });
+
+    /**
+     * FINDINGS A PERSON CLOSED. Hidden while the files still say what they
+     * said when the answer was given; back on the table — marked — the moment
+     * a later upload changes the underlying values. See snapshotFor.
+     */
+    const resolved = [];
+    if (decision?.resolutions?.length) {
+      const byCode = new Map(decision.resolutions.map(r => [familyOf(r.code), r]));
+      issues = issues.filter((i) => {
+        const r = byCode.get(familyOf(i.code));
+        if (!r) return true;
+        const brief = { choice: r.choice, value: r.value, note: r.note, by_name: r.by_name, at: r.at };
+        if (sameSnapshot(i.snapshot, r.snapshot)) {
+          resolved.push({ ...i, resolution: brief });
+          return false;
+        }
+        i.resolution = brief;
+        i.changed_since_resolved = true;
+        i.detail = `השתנה מאז שנסגר ב־${fmtDate(r.at)} · ${i.detail || ''}`.trim();
+        return true;
+      });
+    }
+
+    // The name a person chose, where the two files disagreed.
+    const nameChoice = decision?.resolutions?.find(r => (r.code === 'name_mismatch' || r.code === 'name_partial') && r.choice !== 'ok');
+    const chosenName = !nameChoice ? ''
+      : nameChoice.choice === 'tmt' ? (tmt?.child?.full_name || '')
+        : nameChoice.choice === 'clicktac' ? (ct?.child?.full_name || '')
+          : (nameChoice.value || '');
+    const parent1 = ct ? partyWithOverride(ct.parent1, decision?.parent_overrides?.parent1) : null;
+    const parent2 = ct ? partyWithOverride(ct.parent2, decision?.parent_overrides?.parent2) : null;
 
     // A cancelled registration whose ministry approval still stands is the one
     // case where the anomaly is an opportunity: the state has allocated a place
@@ -643,7 +782,30 @@ function reconcile({
       // For the archive filter and the 30-day purge.
       gone_since: goneSince ? new Date(goneSince) : null,
       urgent: issues.some(i => i.urgent),
-      child_name: ct?.child?.full_name || tmt?.child?.full_name || '',
+      child_name: chosenName || ct?.child?.full_name || tmt?.child?.full_name || '',
+      name_source: chosenName ? nameChoice.choice : '',
+      // Findings closed by a person — off the table, listed on the card.
+      resolved_issues: resolved,
+      /**
+       * What the office decided about this child, for the card. Never the
+       * whole document: the ids of who decided are not the screen's business,
+       * the names are.
+       */
+      decision: decision ? {
+        note: decision.note || '',
+        verdict_override: decision.verdict_override?.kind ? {
+          kind: decision.verdict_override.kind,
+          reason: decision.verdict_override.reason || '',
+          by_name: decision.verdict_override.by_name || '',
+          at: decision.verdict_override.at || null,
+        } : null,
+        parent_overrides: (parent1?.overridden || parent2?.overridden) ? {
+          by_name: decision.parent_overrides?.by_name || '',
+          at: decision.parent_overrides?.at || null,
+          pending: !!(parent1?.pending || parent2?.pending),
+        } : null,
+      } : null,
+      has_note: !!decision?.note,
       birth_date: ct?.child?.birth_date || tmt?.child?.birth_date || null,
       age_group: canonicalAgeGroup(ct?.child?.age_group || tmt?.child?.age_group || ''),
       computed_age_group: ct?.computed?.age_group || '',
@@ -688,6 +850,9 @@ function reconcile({
 
       clicktac: ct ? {
         id: ct._id,
+        // ClickTac's own number, as stored — the row is keyed by the
+        // ministry's when the two differ (see the second pass).
+        id_number_raw: ct.child?.id_number || '',
         full_name: ct.child?.full_name || '',
         birth_date: ct.child?.birth_date || null,
         age_group: ct.child?.age_group || '',
@@ -698,12 +863,15 @@ function reconcile({
         review_status: ct.review?.status || 'pending',
         classroom_id: ct.placement?.classroom_id || null,
         imported_registration_id: ct.review?.imported_registration_id || null,
-        parent1_name: `${ct.parent1?.first_name || ''} ${ct.parent1?.last_name || ''}`.trim(),
-        parent1_phone: ct.parent1?.phone || '',
+        // The office's correction where there is one — see partyWithOverride.
+        parent1_name: parent1.name,
+        parent1_phone: parent1.phone,
         parent1_email: ct.parent1?.email || '',
-        parent2_name: `${ct.parent2?.first_name || ''} ${ct.parent2?.last_name || ''}`.trim(),
-        parent2_phone: ct.parent2?.phone || '',
+        parent1_override: parent1.overridden ? parent1 : null,
+        parent2_name: parent2.name,
+        parent2_phone: parent2.phone,
         parent2_email: ct.parent2?.email || '',
+        parent2_override: parent2.overridden ? parent2 : null,
         address: ct.parent1?.address || ct.parent2?.address || '',
         is_present: ct.presence?.is_present !== false,
         missing_since: ct.presence?.missing_since || null,
@@ -835,7 +1003,13 @@ function reconcile({
       total: rows.length,
       archived: archived.length,
       urgent: by(r => r.urgent),
-      balance_due: by(r => r.issues.some(i => i.code === 'balance_due')),
+      balance_due: by(r => typeof r.clicktac?.balance === 'number' && r.clicktac.balance < 0),
+      private: by(r => r.verdict === 'private'),
+      with_notes: by(r => r.has_note),
+      resolved: rows.reduce((n, r) => n + (r.resolved_issues?.length || 0), 0),
+      // Findings a person closed and a later file reopened — the ones to look at first.
+      reopened: by(r => r.issues.some(i => i.changed_since_resolved)),
+      parent_fixes_pending: by(r => r.decision?.parent_overrides?.pending),
       approved: by(r => r.verdict === 'approved'),
       missing_registration: by(r => r.verdict === 'missing_registration'),
       missing_approval: by(r => r.verdict === 'missing_approval'),
@@ -877,6 +1051,6 @@ function reconcile({
 
 module.exports = {
   reconcile, compareNames, issuesFor, verdictFor, ageAtYearStart, paymentTermsFor,
-  clicktacLive, clicktacContinuing,
+  clicktacLive, clicktacContinuing, snapshotFor, partyWithOverride, splitName, familyOf,
   VERDICTS, ISSUES, CANCELLED,
 };

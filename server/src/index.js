@@ -367,6 +367,17 @@ connectDB().then(() => {
       setTimeout(runCompliance, 5 * 60 * 1000);
       setInterval(runCompliance, 60 * 60 * 1000);
     }
+
+    // ארכיון ההצלבה: children gone from every enrollment list for 30 days
+    // are removed. Daily; nothing a person decided about is ever touched.
+    const archiveJob = require('./services/reconcileArchiveJob');
+    const runArchive = () => archiveJob.tick()
+      .then(r => { if (r.clicktac || r.tmt) console.log(`[reconcile-archive] purged clicktac=${r.clicktac} tmt=${r.tmt}`); })
+      .catch(e => console.error('[reconcile-archive] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runArchive, 10 * 60 * 1000);
+      setInterval(runArchive, 24 * 60 * 60 * 1000);
+    }
   });
 });
 
