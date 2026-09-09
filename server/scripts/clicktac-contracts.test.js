@@ -1897,6 +1897,97 @@ async function main() {
     await ExternalEnrollment.deleteMany({ academic_year: '2025-2026' });
   }
 
+  head('בדיקה 31 — חייבים, כל הסניפים: שנה נוכחית ושעברה, טבלה אחת, הערה משותפת עם ההצלבה');
+  {
+    const { ReconcileDecision } = require('../src/models');
+    const PREV_YEAR = 'תשפ"ו';
+    const debtorsBranch2 = await Branch.create({ name: 'מעון בדיקה — חייבים' });
+
+    await wipeAll();
+    await ExternalEnrollment.deleteMany({ branch_id: debtorsBranch2._id });
+    await ReconcileDecision.deleteMany({});
+
+    // הרצליה, שנה נוכחית: KIDS[1] חייב, KIDS[0] מאוזן.
+    await uploadContracts([
+      contractRow({ ...KIDS[0], balance: 0 }),
+      contractRow({ ...KIDS[1], balance: -500 }),
+    ]);
+
+    // הרצליה, שנה שעברה: KIDS[1] ממשיך וחייב גם אז; KIDS[2] לא ממשיך יותר וחייבת.
+    await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_prev.xlsx',
+      buffer: sheetBuffer(CONTRACTS_HEADER, [
+        contractRow({ ...KIDS[1], year: PREV_YEAR, balance: -1865 }),
+        contractRow({ ...KIDS[2], year: PREV_YEAR, balance: -347 }),
+      ], 'Worksheet 1'),
+      fields: { branch_id: branchId, academic_year: PREV_YEAR },
+    });
+
+    // מעון שני, שנה נוכחית בלבד: ילד/ה חייב/ת — זו הנקודה של המסך: לא צריך
+    // לפתוח את הסניף הזה בנפרד כדי לראות אותה.
+    const other = { id: '337500', first: 'דנה', last: 'אביטן', idNumber: '249999991', birth: [2025, 5, 5], cls: 'פעוטות', tier: 2 };
+    await upload({
+      token, path: '/api/external-enrollments/import', fileName: 'contracts_export_other.xlsx',
+      buffer: sheetBuffer(CONTRACTS_HEADER, [contractRow({ ...other, balance: -900, institution: debtorsBranch2.name })], 'Worksheet 1'),
+      fields: { branch_id: String(debtorsBranch2._id), academic_year: YEAR },
+    });
+
+    const debtorsRes = await request({ token, path: '/api/tmt/debtors' });
+    ok(debtorsRes.status === 200, '31a המסך נטען', `${debtorsRes.status} ${debtorsRes.text?.slice(0, 200)}`);
+    const { rows, years, by_year: byYear, missing_uploads: missing, total_debt: totalDebt } = debtorsRes.body;
+
+    ok(!rows.some(r => r.id_number === KIDS[0].idNumber), '31b ילד מאוזן — לא ברשימת החייבים');
+    const noam = rows.find(r => r.id_number === KIDS[1].idNumber && r.is_current_year);
+    ok(!!noam, '31c נועם — חייב בשנה הנוכחית, בהרצליה');
+    eq(noam?.balance, -500, '31d עם הסכום הנכון');
+
+    const otherRow = rows.find(r => r.id_number === other.idNumber);
+    ok(!!otherRow && otherRow.branch_name === debtorsBranch2.name, '31e חייבת ממעון אחר — באותה טבלה, בלי לפתוח אותו בנפרד');
+
+    const noamPrev = rows.find(r => r.id_number === KIDS[1].idNumber && !r.is_current_year);
+    const shiraPrev = rows.find(r => r.id_number === KIDS[2].idNumber && !r.is_current_year);
+    ok(!!noamPrev && !!shiraPrev, '31f שני החייבים משנה שעברה נמצאים');
+    eq(noamPrev?.active_this_year, true, '31g נועם — עדיין רשום השנה');
+    eq(shiraPrev?.active_this_year, false, '31h שירה — כבר לא רשומה השנה');
+    ok(years.some(y => y.year === '2026-2027') && years.some(y => y.year === '2025-2026'),
+      '31i שתי השנים מדווחות', JSON.stringify(years));
+    eq(byYear['2026-2027']?.count, 2, '31j מונה השנה הנוכחית');
+    eq(byYear['2025-2026']?.count, 2, '31k ומונה השנה הקודמת');
+    eq(totalDebt, 500 + 900 + 1865 + 347, '31l סך החוב מסוכם נכון על פני שתי השנים והמעונות');
+    ok(missing.some(m => m.branch_name === debtorsBranch2.name && m.year === '2025-2026'),
+      '31m המעון השני מדווח כמי שלא העלה קובץ שנה שעברה', JSON.stringify(missing));
+
+    // הערה — אותה הערה בדיוק שהילד/ה רואה בכרטיס במסך ההצלבה.
+    const noteRes = await request({
+      method: 'PUT', token, path: `/api/tmt/decisions/${shiraPrev.id_number}`,
+      body: { branch_id: branchId, academic_year: '2025-2026', note: 'דיברתי עם ההורים — יעבירו עד סוף החודש' },
+    });
+    ok(noteRes.status === 200, '31n ההערה נשמרת דרך אותו נתיב שהכרטיס משתמש בו');
+    const afterNote = await request({ token, path: '/api/tmt/debtors' });
+    const shiraAfter = afterNote.body.rows.find(r => r.id_number === KIDS[2].idNumber && !r.is_current_year);
+    eq(shiraAfter?.note, 'דיברתי עם ההורים — יעבירו עד סוף החודש', '31o וחוזרת בטבלת החייבים');
+
+    // תיחום סניפים — מנהלת סניף רואה רק את הסניף שלה.
+    await User.create({
+      email: 'manager@debtors.local', full_name: 'רותי מנהלת', id_number: '900000099',
+      role: 'branch_manager', branch_id: branch._id, position: 'מנהלת סניף',
+      password_hash: await bcrypt.hash(PASSWORD, 10), password_set: true, is_active: true,
+    });
+    const mgrLogin = await request({
+      method: 'POST', path: '/api/auth/login-password',
+      body: { full_name: 'רותי מנהלת', id_number: '900000099', password: PASSWORD },
+    });
+    const mgrToken = mgrLogin.body?.token;
+    ok(!!mgrToken, '31q מנהלת הסניף מתחברת', mgrLogin.status);
+    const mgrDebtors = await request({ token: mgrToken, path: '/api/tmt/debtors' });
+    ok(mgrDebtors.body?.rows?.every(r => r.branch_id === String(branch._id)), '31r ורואה רק את החייבים של הסניף שלה');
+    ok(!mgrDebtors.body?.rows?.some(r => r.id_number === other.idNumber), '31s ולא את החייבת מהמעון האחר', JSON.stringify(mgrDebtors.body?.rows?.map(r => r.id_number)));
+
+    await Branch.deleteOne({ _id: debtorsBranch2._id });
+    await ExternalEnrollment.deleteMany({ branch_id: debtorsBranch2._id });
+    await ReconcileDecision.deleteMany({});
+  }
+
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
 }
 

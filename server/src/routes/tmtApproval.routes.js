@@ -25,6 +25,8 @@ router.get('/reconcile', ctrl.reconcileBranch);
 router.get('/approvals', ctrl.listApprovals);
 router.get('/contacts', ctrl.contacts);
 router.get('/imports', ctrl.listImports);
+// כל החייבים, כל הסניפים, שנה נוכחית ושעברה — see the note on ctrl.debtors.
+router.get('/debtors', ctrl.debtors);
 // The placement board, and the confirm that turns it into real registrations.
 router.get('/placement', ctrl.placement);
 router.post('/placement/confirm', allow('system_admin', 'accountant', 'branch_manager'), ctrl.confirmPlacement);

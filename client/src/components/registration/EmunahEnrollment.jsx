@@ -7,6 +7,8 @@ import {
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import GroupsIcon from '@mui/icons-material/Groups';
+import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import DebtorsDialog from './DebtorsDialog';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
@@ -109,6 +111,8 @@ export default function EmunahEnrollment() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [placeOpen, setPlaceOpen] = useState(false);
+  // עצמאי מהסניף שנבחר למעלה — זו כל הנקודה: לא לעבור סניף כדי לראות מי חייב.
+  const [debtorsOpen, setDebtorsOpen] = useState(false);
   const [upload, setUpload] = useState({ open: false, source: '', file: null, saving: false, result: null });
   const [wipe, setWipe] = useState({ open: false, source: '', saving: false, result: null, blocked: null });
 
@@ -236,6 +240,13 @@ export default function EmunahEnrollment() {
           </Button>
         )}
 
+        {/* לא תלוי בסניף הנבחר, ולא מושבת עבור קפלן — הטבלה חוצה סניפים
+            בכוונה, כדי שלא יהיה צורך לעבור בין המעונות בקליקטאק בשביל זה. */}
+        <Button variant="outlined" color="error" startIcon={<ReceiptLongIcon />}
+          onClick={() => setDebtorsOpen(true)}>
+          חייבים — כל הסניפים
+        </Button>
+
         {!isTmtBranch && (
           <Chip size="small" color="default" variant="outlined"
             label={`${branch?.name || 'הסניף'} אינו תחת משרד התמ"ת — הרישום בו ישיר`} />
@@ -270,6 +281,12 @@ export default function EmunahEnrollment() {
         branchName={branch?.name || ''}
         year={year}
         onDone={() => setReloadKey(k => k + 1)}
+      />
+
+      <DebtorsDialog
+        open={debtorsOpen}
+        onClose={() => setDebtorsOpen(false)}
+        canEdit={canPlace}
       />
 
       {/* ---------- upload ---------- */}

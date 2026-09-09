@@ -1350,6 +1350,117 @@ async function reopenIssue(req, res, next) {
 }
 
 /**
+ * GET /api/tmt/debtors?year=
+ *
+ * חייבים משנה שעברה — every family with a negative מאזן in ClickTac, across
+ * EVERY branch the caller may see, in one table. Before this, seeing them
+ * meant opening ClickTac itself and switching between its three separate
+ * מעונות one at a time; this reads the same balances this system already
+ * imported (see contract.balance in clicktac.service) and puts them side by
+ * side.
+ *
+ * BOTH YEARS, NOT ONLY "LAST YEAR" LITERALLY. A branch that has not yet
+ * uploaded last year's ClickTac file (see the "קובץ שנה קודמת" checkbox) has
+ * no debtor row for it at all — and on 09.09.2026 that was every branch. A
+ * family can also owe money on THIS year's running account before the year
+ * is even over. So both the current and the previous academic year are
+ * queried and every row is labelled with which one it came from; a family
+ * showing in both is two rows, one per year — the two balances are two
+ * separate ClickTac accounts on two separate uploads and are never summed
+ * into a number this system did not actually see.
+ *
+ * The note per row is the SAME ReconcileDecision.note the child's card on
+ * the reconcile screen uses — same collection, same (branch, year, ת"ז) key,
+ * saved through the same PUT /api/tmt/decisions/:idNumber. A call logged here
+ * is visible there too, and the other way round.
+ */
+async function debtors(req, res, next) {
+  try {
+    const scope = await resolveBranchScope(req);
+    const currentYear = normalizeYear(enrollmentYear());
+    const prevYear = previousYear(currentYear);
+    const years = req.query.year ? [normalizeYear(req.query.year)] : [currentYear, prevYear];
+
+    const branchFilter = scope ? { _id: { $in: scope } } : {};
+    const branches = await Branch.find(branchFilter).select('name').lean();
+    const branchName = new Map(branches.map(b => [String(b._id), b.name]));
+    const branchIds = branches.map(b => b._id);
+
+    const [allRows, decisionDocs] = await Promise.all([
+      ExternalEnrollment.find({
+        academic_year: { $in: years }, branch_id: { $in: branchIds },
+      }).select('branch_id academic_year child parent1 parent2 contract.balance contract.family_balance contract.class_name enrollment.status sources presence.is_present contract.present').lean(),
+      ReconcileDecision.find({ academic_year: { $in: years }, branch_id: { $in: branchIds } })
+        .select('branch_id academic_year id_number note').lean(),
+    ]);
+
+    const noteByKey = new Map(decisionDocs.map(d => [`${d.branch_id}|${d.academic_year}|${d.id_number}`, d.note || '']));
+    // Who is live THIS year, per branch — so a previous-year debtor can be
+    // marked "still with us" or "gone", the fact that decides whether a call
+    // is worth making at all.
+    const liveThisYear = new Set(
+      allRows
+        .filter(r => r.academic_year === currentYear && r.presence?.is_present !== false)
+        .map(r => `${r.branch_id}|${normalizeId(r.child?.id_number)}`),
+    );
+
+    const party = (p) => ({
+      name: `${p?.first_name || ''} ${p?.last_name || ''}`.trim(),
+      phone: p?.phone || '',
+    });
+
+    const rows = allRows
+      .filter(r => typeof r.contract?.balance === 'number' && r.contract.balance < 0)
+      .map((r) => {
+        const idNumber = normalizeId(r.child?.id_number);
+        const key = `${r.branch_id}|${r.academic_year}|${idNumber}`;
+        return {
+          branch_id: r.branch_id,
+          branch_name: branchName.get(String(r.branch_id)) || '',
+          academic_year: r.academic_year,
+          is_current_year: r.academic_year === currentYear,
+          id_number: idNumber,
+          child_name: r.child?.full_name || '',
+          class_name: r.contract?.class_name || '',
+          status: r.enrollment?.status || '',
+          balance: r.contract.balance,
+          family_balance: r.contract?.family_balance ?? null,
+          parent1: party(r.parent1),
+          parent2: party(r.parent2),
+          // Only meaningful for a PREVIOUS-year row — a current-year row is
+          // trivially "yes, this is the current row".
+          active_this_year: r.academic_year === currentYear ? null
+            : liveThisYear.has(`${r.branch_id}|${idNumber}`),
+          note: noteByKey.get(key) || '',
+        };
+      })
+      .sort((a, b) => a.balance - b.balance); // biggest debt first (most negative)
+
+    // Which branches were ASKED for but have no row at all for a given year —
+    // "not uploaded yet", not "nobody owes anything there".
+    const uploadedFor = new Map(); // year -> Set(branch_id)
+    for (const y of years) uploadedFor.set(y, new Set());
+    for (const r of allRows) uploadedFor.get(r.academic_year)?.add(String(r.branch_id));
+    const missingUploads = years.flatMap(y => branches
+      .filter(b => !uploadedFor.get(y)?.has(String(b._id)))
+      .map(b => ({ year: y, year_label: formatAcademicYear(y), branch_name: b.name })));
+
+    res.json({
+      years: years.map(y => ({ year: y, label: formatAcademicYear(y) })),
+      rows,
+      total_debt: rows.reduce((s, r) => s - r.balance, 0),
+      by_year: Object.fromEntries(years.map(y => [y, {
+        count: rows.filter(r => r.academic_year === y).length,
+        total: rows.filter(r => r.academic_year === y).reduce((s, r) => s - r.balance, 0),
+      }])),
+      missing_uploads: missingUploads,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * POST /api/tmt/alerts/test — send both alerts for real, right now, on
  * purpose. The one way to prove the email half actually arrives: the
  * provider credentials (GAS/Resend/SMTP) live only in this server's own
@@ -1395,7 +1506,7 @@ module.exports = {
   importFile, listApprovals, reconcileBranch, listImports, apply, contacts,
   exportReconcile, removeApproval, deleteData, placement, confirmPlacement,
   isTmtSupervised, undoImport, putDecision, resolveIssue, reopenIssue,
-  sendTestAlerts,
+  sendTestAlerts, debtors,
   // The comparison itself, so the daily urgent-findings digest reads exactly
   // what the screen reads rather than recomputing its own version of it.
   buildReconciliation,
