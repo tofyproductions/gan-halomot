@@ -134,7 +134,7 @@ async function publicSubmit(req, res, next) {
         title: 'ליד חדש בגן החלומות',
         body: `${lead.parent_name} — ${branchName}`,
         url: '/leads',
-      }));
+      }).catch(err => console.error('lead push create failed:', err.message)));
     }).catch(err => console.error('lead push notify failed:', err.message));
     sendSms({ to: lead.parent_phone, text: THANK_YOU_TEXT })
       .catch(err => console.error('lead thank-you SMS failed:', err.message));
