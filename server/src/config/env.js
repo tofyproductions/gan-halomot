@@ -71,6 +71,15 @@ const env = {
   // The Firebase project's service-account key, pasted as one line of JSON.
   // Without it every send is a silent no-op, same as a missing SMS key.
   FCM_SERVICE_ACCOUNT: process.env.FCM_SERVICE_ACCOUNT,
+
+  // Web Push (browser) — VAPID keypair identifies this server to the push
+  // services (Chrome/Firefox/etc.) without a third-party account. Generate
+  // once with `node -e "console.log(require('web-push').generateVAPIDKeys())"`
+  // and set both halves on Render; a missing pair means web push is a silent
+  // no-op, the same as a missing FCM_SERVICE_ACCOUNT.
+  VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+  VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@ganhahalomot.co.il',
 };
 
 module.exports = env;
