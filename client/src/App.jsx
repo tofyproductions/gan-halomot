@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Box } from '@mui/material';
 import AppShell from './components/layout/AppShell';
 import ScreenSkeleton from './components/ui/ScreenSkeleton';
+import NotFound from './components/layout/NotFound';
 import LoginPage from './components/layout/LoginPage';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import Dashboard from './components/dashboard/Dashboard';
@@ -278,6 +279,10 @@ function AppRoutes() {
         {/* The gan's own commercial screen: what they pay and why. Read-only,
             and system_admin only — this is the relationship with us, not
             something their branch managers need. */}
+        {/* Anything inside the shell that is not a screen. Inside, so the rail
+            is there and leaving is one click. */}
+        <Route path="*" element={<NotFound />} />
+
         <Route path="account" element={
           <ProtectedRoute roles={['system_admin']}>
             <MyAccount />
@@ -285,7 +290,7 @@ function AppRoutes() {
         } />
       </Route>
 
-      <Route path="*" element={<Navigate to="/" />} />
+
     </Routes>
     </Suspense>
   );

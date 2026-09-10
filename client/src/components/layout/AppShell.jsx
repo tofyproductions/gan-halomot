@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import ScreenSkeleton from '../ui/ScreenSkeleton';
+import Breadcrumb from './Breadcrumb';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MobileNav, { MOBILE_NAV_HEIGHT } from './MobileNav';
@@ -50,6 +51,11 @@ export default function AppShell() {
         {/* What accounting decided on the requests THIS person sent. Shown once
             on entry, then reachable from the bell — the screen keeps the rest. */}
         <MyDecisionsPopup />
+
+        {/* Where you are, and what the browser tab says — both from
+            config/screenMeta, both here rather than in each of 62 screens, so
+            renaming a screen in the rail renames it in the tab strip too. */}
+        <Breadcrumb />
 
         {/* Screens arrive one at a time now (see App.jsx), and the boundary is
             HERE rather than around the whole route tree so the rail, the branch
