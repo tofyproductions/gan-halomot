@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import {
   Box, Stack, Typography, TextField, MenuItem, Button, Dialog, DialogTitle,
   DialogContent, DialogActions, Alert, AlertTitle,
-  Chip, List, ListItem, ListItemText, Divider, Checkbox, FormControlLabel,
+  Chip, List, ListItem, ListItemText, Divider, Checkbox, FormControlLabel, Menu,
 } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
@@ -15,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { hasTabAccess } from '../../config/tabs';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 import TmtReconcile from './TmtReconcile';
+import PageHeader from '../ui/PageHeader';
 import ClassPlacement from './ClassPlacement';
 
 /**
@@ -111,6 +112,8 @@ export default function EmunahEnrollment() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [placeOpen, setPlaceOpen] = useState(false);
+
+  const [importAnchor, setImportAnchor] = useState(null);
   // עצמאי מהסניף שנבחר למעלה — זו כל הנקודה: לא לעבור סניף כדי לראות מי חייב.
   const [debtorsOpen, setDebtorsOpen] = useState(false);
   const [upload, setUpload] = useState({ open: false, source: '', file: null, saving: false, result: null });
@@ -201,71 +204,88 @@ export default function EmunahEnrollment() {
 
   return (
     <Box dir="rtl" sx={{ p: 2 }}>
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        <Typography variant="h5" sx={{ fontWeight: 800 }}>רישום חיצוני</Typography>
+      {/* One header, one filled button.
+          What was here: two rows carrying six buttons, two of them filled and
+          competing, two of them red and destructive sitting a few pixels from
+          the ones pressed every day, plus a branch dropdown and a year chip
+          wedged into the title line. Nothing said which action was the normal
+          one. The branch and the year were never actions — they are what you
+          are looking at, so they read as a line of context; the two uploads are
+          one thing done twice, so they are one control; and deleting a file is
+          now two deliberate clicks rather than one careless one. */}
+      <PageHeader
+        title="רישום חיצוני"
+        meta={[
+          { label: branch?.name || 'ללא סניף', strong: true },
+          { label: `שנת ${formatAcademicYear(year)}` },
+          !isTmtBranch && { label: 'רישום ישיר — הסניף אינו תחת משרד התמ"ת' },
+          !canImport && { label: 'צפייה בלבד' },
+        ]}
+        primary={canPlace && {
+          label: 'שיבוץ לכיתות',
+          icon: <GroupsIcon />,
+          onClick: () => setPlaceOpen(true),
+          disabled: !isTmtBranch,
+          hint: isTmtBranch ? '' : 'הסניף אינו תחת משרד התמ"ת',
+        }}
+        actions={[
+          canImport && {
+            label: 'קליטת קובץ',
+            icon: <UploadFileIcon />,
+            onClick: (e) => setImportAnchor(e.currentTarget),
+          },
+        ]}
+        menu={[
+          {
+            label: 'חייבים — כל הסניפים',
+            icon: <ReceiptLongIcon fontSize="small" />,
+            onClick: () => setDebtorsOpen(true),
+          },
+          canImport && {
+            label: 'מחיקת קובץ קליקטאק',
+            icon: <DeleteForeverIcon fontSize="small" />,
+            danger: true,
+            onClick: () => setWipe({ open: true, source: 'clicktac', saving: false, result: null, blocked: null }),
+          },
+          canImport && {
+            label: 'מחיקת קובץ תמ״ת',
+            icon: <DeleteForeverIcon fontSize="small" />,
+            danger: true,
+            disabled: !isTmtBranch,
+            onClick: () => setWipe({ open: true, source: 'tmt', saving: false, result: null, blocked: null }),
+          },
+        ]}
+      />
 
-        <TextField select size="small" label="סניף" value={branchId} sx={{ minWidth: 200 }}
-          onChange={e => { setBranchId(e.target.value); localStorage.setItem('selectedBranch', e.target.value); }}>
-          {branches.map(b => (
-            <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
-          ))}
-        </TextField>
-
-        <Chip color="primary" variant="outlined" label={`שנת ${formatAcademicYear(year)}`}
-          sx={{ fontWeight: 700 }} />
-
-        <Box sx={{ flex: 1 }} />
-
-        {canImport ? (
-          <>
-            <Button size="small" variant="contained" startIcon={<UploadFileIcon />}
-              onClick={() => openUpload('clicktac')}>
-              קליטת קובץ קליקטאק
-            </Button>
-            <Button size="small" variant="contained" color="secondary" startIcon={<UploadFileIcon />}
-              disabled={!isTmtBranch} onClick={() => openUpload('tmt')}>
-              קליטת קובץ תמ״ת
-            </Button>
-          </>
-        ) : (
-          <Chip color="default" variant="outlined" label="צפייה בלבד" />
-        )}
-      </Stack>
-
-      <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-        {canPlace && (
-          <Button variant="contained" color="success" startIcon={<GroupsIcon />}
-            disabled={!isTmtBranch} onClick={() => setPlaceOpen(true)}>
-            שיבוץ לכיתות
-          </Button>
-        )}
-
-        {/* לא תלוי בסניף הנבחר, ולא מושבת עבור קפלן — הטבלה חוצה סניפים
-            בכוונה, כדי שלא יהיה צורך לעבור בין המעונות בקליקטאק בשביל זה. */}
-        <Button variant="outlined" color="error" startIcon={<ReceiptLongIcon />}
-          onClick={() => setDebtorsOpen(true)}>
-          חייבים — כל הסניפים
-        </Button>
-
-        {!isTmtBranch && (
-          <Chip size="small" color="default" variant="outlined"
-            label={`${branch?.name || 'הסניף'} אינו תחת משרד התמ"ת — הרישום בו ישיר`} />
-        )}
-
-        <Box sx={{ flex: 1 }} />
-        {canImport && (
-          <>
-            <Button size="small" color="error" startIcon={<DeleteForeverIcon />}
-              onClick={() => setWipe({ open: true, source: 'clicktac', saving: false, result: null, blocked: null })}>
-              מחיקת קובץ קליקטאק
-            </Button>
-            <Button size="small" color="error" disabled={!isTmtBranch} startIcon={<DeleteForeverIcon />}
-              onClick={() => setWipe({ open: true, source: 'tmt', saving: false, result: null, blocked: null })}>
-              מחיקת קובץ תמ״ת
-            </Button>
-          </>
-        )}
-      </Stack>
+      {/* The two ClickTac exports and the ministry file, behind one control.
+          The server reads the header row and decides which export it was given,
+          so the only question this has to ask is which SYSTEM the file came
+          from — and asking that twice, as two filled buttons, was most of why
+          the old header had no obvious primary action. */}
+      <Menu
+        anchorEl={importAnchor}
+        open={!!importAnchor}
+        onClose={() => setImportAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+      >
+        <MenuItem onClick={() => { setImportAnchor(null); openUpload('clicktac'); }} sx={{ py: 1 }}>
+          <ListItemText primary="קובץ קליקטאק"
+            secondary="נרשמים או חוזים — המערכת מזהה לבד"
+            primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+            secondaryTypographyProps={{ fontSize: '0.75rem' }} />
+        </MenuItem>
+        <MenuItem
+          onClick={() => { setImportAnchor(null); openUpload('tmt'); }}
+          disabled={!isTmtBranch}
+          sx={{ py: 1 }}
+        >
+          <ListItemText primary="קובץ תמ״ת"
+            secondary={isTmtBranch ? 'רשימת האישורים מהפורטל' : 'הסניף אינו תחת משרד התמ"ת'}
+            primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+            secondaryTypographyProps={{ fontSize: '0.75rem' }} />
+        </MenuItem>
+      </Menu>
 
       {isTmtBranch ? <TmtReconcile {...shared} /> : (
         <Alert severity="info">

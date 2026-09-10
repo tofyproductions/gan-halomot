@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { Box, Typography, Select, MenuItem, Tooltip, IconButton, Avatar } from '@mui/material';
+import { useEffect, useMemo, useState } from 'react';
+import { Box, Typography, Select, MenuItem, Tooltip, IconButton, Avatar, Collapse } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useNavigate, useLocation } from 'react-router-dom';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -46,6 +47,34 @@ export default function Sidebar() {
   const badges = useBadges();
   const [accountOpen, setAccountOpen] = useState(false);
   const model = useMemo(() => buildNavModel(user), [user]);
+
+  /**
+   * Which sections are open.
+   *
+   * Thirty-eight rows in one column is a scroll, and a scroll is a list nobody
+   * reads to the end of — the four screens at the bottom may as well not exist.
+   * So a section opens when you are inside it and closes when you leave, and
+   * anything you open by hand stays open until you close it.
+   *
+   * The current section is derived rather than stored: arriving anywhere — a
+   * link, a badge, a fresh tab — opens the section that screen lives in,
+   * without every entry point having to remember to.
+   */
+  const groupOfCurrent = useMemo(
+    () => model.find((g) => g.items.some((i) => i.path === pathname))?.label,
+    [model, pathname]
+  );
+  const [openGroups, setOpenGroups] = useState(() => new Set());
+
+  useEffect(() => {
+    if (groupOfCurrent) setOpenGroups((prev) => new Set(prev).add(groupOfCurrent));
+  }, [groupOfCurrent]);
+
+  const toggleGroup = (label) => setOpenGroups((prev) => {
+    const next = new Set(prev);
+    if (next.has(label)) next.delete(label); else next.add(label);
+    return next;
+  });
 
   return (
     <Box
@@ -120,16 +149,42 @@ export default function Sidebar() {
       )}
 
       <Box sx={{ flex: 1 }}>
-        {model.map((group) => (
-          <Box key={group.label} sx={{ mb: 2 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, pb: 0.75 }}>
+        {model.map((group) => {
+          const open = openGroups.has(group.label);
+          const holdsCurrent = group.label === groupOfCurrent;
+          // What is waiting inside a section you cannot see into.
+          const groupBadge = group.items.reduce((n, i) => n + (badges[i.id] || 0), 0);
+          return (
+          <Box key={group.label} sx={{ mb: open ? 1.5 : 0.25 }}>
+            <Box
+              component="button"
+              type="button"
+              onClick={() => toggleGroup(group.label)}
+              aria-expanded={open}
+              sx={{
+                display: 'flex', alignItems: 'center', gap: 1,
+                width: '100%', px: 1, py: 0.75, mb: open ? 0.5 : 0,
+                border: 0, bgcolor: 'transparent', cursor: 'pointer',
+                fontFamily: 'inherit', textAlign: 'inherit', borderRadius: 1.5,
+                '&:hover': { bgcolor: 'sidebar.bgActive' },
+                '&:focus-visible': { outline: '2px solid', outlineColor: 'sidebar.marker', outlineOffset: -2 },
+              }}
+            >
+              <ExpandMoreIcon
+                sx={{
+                  fontSize: 16, flexShrink: 0,
+                  color: 'sidebar.groupLabel',
+                  transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+                  transition: 'transform 160ms',
+                }}
+              />
               <Typography
                 component="div"
                 sx={{
                   fontSize: '0.6875rem',
                   fontWeight: 700,
                   letterSpacing: '0.08em',
-                  color: 'sidebar.groupLabel',
+                  color: holdsCurrent ? 'sidebar.marker' : 'sidebar.groupLabel',
                   flexShrink: 0,
                 }}
               >
@@ -139,7 +194,29 @@ export default function Sidebar() {
                   into four sections without spending a heading's worth of height
                   on each. */}
               <Box sx={{ flex: 1, height: '1px', bgcolor: 'sidebar.rule' }} />
+              {/* Closed sections still have to be able to say that something is
+                  waiting inside them, or collapsing the rail hides the badge
+                  that was the reason to look. */}
+              {!open && groupBadge > 0 && (
+                <Box
+                  component="span"
+                  sx={{
+                    flexShrink: 0, bgcolor: 'sidebar.marker', color: 'sidebar.bg',
+                    borderRadius: 999, minWidth: 19, textAlign: 'center',
+                    px: 0.625, fontSize: '0.6875rem', fontWeight: 800, lineHeight: 1.55,
+                  }}
+                >
+                  {groupBadge}
+                </Box>
+              )}
+              {!open && (
+                <Typography sx={{ flexShrink: 0, fontSize: '0.6875rem', color: 'sidebar.groupLabel', opacity: 0.7 }}>
+                  {group.items.length}
+                </Typography>
+              )}
             </Box>
+
+            <Collapse in={open} timeout={160} unmountOnExit>
 
             {group.items.map((item) => {
               const Icon = iconFor(item.id);
@@ -220,8 +297,10 @@ export default function Sidebar() {
                 </Box>
               );
             })}
+            </Collapse>
           </Box>
-        ))}
+          );
+        })}
       </Box>
 
       <Box sx={{ height: '1px', bgcolor: 'sidebar.rule', mt: 'auto', mb: 1.25, mx: 0.5 }} />

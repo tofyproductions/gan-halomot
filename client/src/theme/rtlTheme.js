@@ -262,15 +262,86 @@ const theme = createTheme({
       },
     },
 
+    /**
+     * Chips stop shouting.
+     *
+     * MUI's filled colour chips are solid, saturated blocks, and this app puts
+     * one in nearly every cell of every table — a verdict, a payment method, a
+     * finding, a status. Twelve of them in a row is a row of traffic lights,
+     * and once a screen has twelve there is no way to tell which one is the
+     * problem. Every filled and outlined colour variant is remapped onto the
+     * soft pairs from tokens.js: the same meaning, the same contrast (each pair
+     * measured at AA by design-tokens.test.js), a tenth of the volume.
+     *
+     * Done here rather than screen by screen because it is the single change
+     * that reaches all 152 of them at once.
+     */
     MuiChip: {
       styleOverrides: {
         root: {
-          fontWeight: 500,
+          fontWeight: 600,
           fontSize: TYPE.caption.size,
           borderRadius: RADIUS.pill,
+          border: '1px solid transparent',
         },
         sizeSmall: { height: 22, fontSize: '0.6875rem' },
-        outlined: { borderColor: COLOR.divider },
+        filled: { backgroundColor: COLOR.background.sunken, color: COLOR.text.secondary },
+        outlined: { borderColor: COLOR.divider, color: COLOR.text.secondary },
+        filledPrimary: {
+          backgroundColor: COLOR.primary.soft,
+          color: COLOR.primary.softOn,
+          '& .MuiChip-deleteIcon': { color: COLOR.primary.softOn, opacity: 0.55 },
+          '&:hover': { backgroundColor: COLOR.primary.soft },
+        },
+        outlinedPrimary: {
+          color: COLOR.primary.softOn,
+          borderColor: COLOR.primary.soft,
+          backgroundColor: COLOR.primary.soft,
+        },
+        filledSuccess: {
+          backgroundColor: COLOR.success.soft,
+          color: COLOR.success.softOn,
+          '& .MuiChip-deleteIcon': { color: COLOR.success.softOn, opacity: 0.55 },
+          '&:hover': { backgroundColor: COLOR.success.soft },
+        },
+        outlinedSuccess: {
+          color: COLOR.success.softOn,
+          borderColor: COLOR.success.soft,
+          backgroundColor: COLOR.success.soft,
+        },
+        filledWarning: {
+          backgroundColor: COLOR.warning.soft,
+          color: COLOR.warning.softOn,
+          '& .MuiChip-deleteIcon': { color: COLOR.warning.softOn, opacity: 0.55 },
+          '&:hover': { backgroundColor: COLOR.warning.soft },
+        },
+        outlinedWarning: {
+          color: COLOR.warning.softOn,
+          borderColor: COLOR.warning.soft,
+          backgroundColor: COLOR.warning.soft,
+        },
+        filledError: {
+          backgroundColor: COLOR.error.soft,
+          color: COLOR.error.softOn,
+          '& .MuiChip-deleteIcon': { color: COLOR.error.softOn, opacity: 0.55 },
+          '&:hover': { backgroundColor: COLOR.error.soft },
+        },
+        outlinedError: {
+          color: COLOR.error.softOn,
+          borderColor: COLOR.error.soft,
+          backgroundColor: COLOR.error.soft,
+        },
+        filledInfo: {
+          backgroundColor: COLOR.info.soft,
+          color: COLOR.info.softOn,
+          '& .MuiChip-deleteIcon': { color: COLOR.info.softOn, opacity: 0.55 },
+          '&:hover': { backgroundColor: COLOR.info.soft },
+        },
+        outlinedInfo: {
+          color: COLOR.info.softOn,
+          borderColor: COLOR.info.soft,
+          backgroundColor: COLOR.info.soft,
+        },
       },
     },
 
