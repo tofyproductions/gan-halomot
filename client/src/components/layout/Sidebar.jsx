@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Typography, Select, MenuItem, Tooltip, IconButton, Avatar, Collapse } from '@mui/material';
+import { Box, Typography, Select, MenuItem, Tooltip, IconButton, Avatar, Collapse, InputBase } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
+import HistoryIcon from '@mui/icons-material/History';
 import { useNavigate, useLocation } from 'react-router-dom';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -25,6 +28,136 @@ function useBadges() {
   return useMemo(
     () => ({ proposed_changes: pendingProposals, leads: newLeads }),
     [pendingProposals, newLeads]
+  );
+}
+
+const RECENTS_KEY = 'nav_recents';
+const RECENTS_MAX = 3;
+
+/**
+ * The last three screens this person opened, on this device.
+ *
+ * Forty-one screens in six sections, and almost everybody lives in four of
+ * them — but those four are spread across three sections, so the daily route
+ * to each is open a section, find the row, and the section you had open closes.
+ * Recents is the shortcut the rail could not otherwise offer without guessing
+ * what somebody's job is.
+ *
+ * localStorage, deliberately: it is a per-device convenience worth nothing to
+ * anyone else, it must survive a reload, and it must never reach the server —
+ * which screens a named employee opens is not something this app should be
+ * storing centrally in order to save her a click.
+ */
+function useRecents(currentId, model) {
+  const [ids, setIds] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]');
+      return Array.isArray(raw) ? raw.filter((x) => typeof x === 'string') : [];
+    } catch {
+      // A private window, cleared site data, or storage blocked outright. An
+      // empty list is the correct answer, not a crash in the navigation.
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    if (!currentId) return;
+    setIds((prev) => {
+      const next = [currentId, ...prev.filter((x) => x !== currentId)].slice(0, RECENTS_MAX + 1);
+      try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* see above */ }
+      return next;
+    });
+  }, [currentId]);
+
+  // Resolved against the model, so a screen this person lost access to — or one
+  // that no longer exists — silently drops out instead of rendering a dead row.
+  // The screen you are on now is excluded: it is not somewhere to go back to.
+  return useMemo(() => {
+    const all = model.flatMap((g) => g.items);
+    return ids
+      .filter((id) => id !== currentId)
+      .map((id) => all.find((i) => i.id === id))
+      .filter(Boolean)
+      .slice(0, RECENTS_MAX);
+  }, [ids, model, currentId]);
+}
+
+/**
+ * One row in the rail.
+ *
+ * Pulled out of the section loop because there are now three places a screen
+ * can be listed — inside its section, in the search results, and in recents —
+ * and three copies of a row is three chances for the marker, the badge or the
+ * focus ring to drift apart. `hint` is the section name, shown only where the
+ * row has been taken out of its section and the name is the missing context.
+ */
+function NavRow({ item, active, count, onClick, hint }) {
+  const Icon = iconFor(item.id);
+  return (
+    <Box
+      component="button"
+      type="button"
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      sx={{
+        position: 'relative',
+        width: '100%',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.25,
+        px: 1,
+        py: 0.875,
+        border: 0,
+        cursor: 'pointer',
+        textAlign: 'inherit',
+        borderRadius: 1.5,
+        fontSize: '0.84375rem',
+        fontFamily: 'inherit',
+        color: active ? 'sidebar.fgActive' : 'sidebar.fg',
+        fontWeight: active ? 700 : 500,
+        bgcolor: active ? 'sidebar.markerSoft' : 'transparent',
+        transition: (t) => `background-color ${t.motion.fast}, color ${t.motion.fast}`,
+        // The marker is an inset bar rather than a full-height border: a 2px
+        // line running the whole row reads as a table rule, a short bar reads
+        // as a bookmark.
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          insetInlineStart: 0,
+          top: 8,
+          bottom: 8,
+          width: 3,
+          borderRadius: 999,
+          bgcolor: active ? 'sidebar.marker' : 'transparent',
+        },
+        '&:hover': { bgcolor: active ? 'sidebar.markerSoft' : 'sidebar.bgActive', color: 'sidebar.fgActive' },
+        '&:focus-visible': { outline: '2px solid', outlineColor: 'sidebar.marker', outlineOffset: -2 },
+      }}
+    >
+      <Icon sx={{ fontSize: 18, flexShrink: 0, color: active ? 'sidebar.marker' : 'inherit', opacity: active ? 1 : 0.6 }} />
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 0.75 }}>
+        <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {item.label}
+        </Box>
+        {hint && (
+          <Box component="span" sx={{ fontSize: '0.625rem', color: 'sidebar.groupLabel', flexShrink: 0 }}>
+            {hint}
+          </Box>
+        )}
+      </Box>
+      {count > 0 && (
+        <Box
+          component="span"
+          sx={{
+            flexShrink: 0, bgcolor: 'sidebar.marker', color: 'sidebar.bg',
+            borderRadius: 999, minWidth: 19, textAlign: 'center',
+            px: 0.625, fontSize: '0.6875rem', fontWeight: 800, lineHeight: 1.55,
+          }}
+        >
+          {count}
+        </Box>
+      )}
+    </Box>
   );
 }
 
@@ -79,10 +212,38 @@ export default function Sidebar() {
     [model, currentId]
   );
   const [openGroup, setOpenGroup] = useState(null);
+  const [query, setQuery] = useState('');
+  const recents = useRecents(currentId, model);
 
   useEffect(() => {
     if (groupOfCurrent) setOpenGroup(groupOfCurrent);
   }, [groupOfCurrent]);
+
+  /**
+   * Typing searches every screen at once, across every section.
+   *
+   * This is the answer to the one thing sections cost: a person who knows the
+   * screen's name still has to know which section somebody else filed it under.
+   * "גיוס" is under כוח אדם, "ארכיון" is under מערכת — obvious once you know,
+   * unfindable until then.
+   *
+   * Matches on the label and on the section name, so "שכר" finds both the
+   * payroll table and the monthly updates, and "מערכת" lists what is in that
+   * section without opening it.
+   */
+  const results = useMemo(() => {
+    const q = query.trim();
+    if (!q) return null;
+    const out = [];
+    for (const g of model) {
+      for (const i of g.items) {
+        if (i.label.includes(q) || g.label.includes(q)) out.push({ ...i, group: g.label });
+      }
+    }
+    return out;
+  }, [query, model]);
+
+  const go = (path) => { setQuery(''); navigate(path); };
 
   // Clicking the open one closes it, so the rail can be reduced to four rows.
   const toggleGroup = (label) => setOpenGroup((prev) => (prev === label ? null : label));
@@ -159,7 +320,111 @@ export default function Sidebar() {
         </Select>
       )}
 
-      <Box sx={{ flex: 1 }}>
+      {/* Type to find a screen, anywhere.
+          Sections cost one thing: a person who knows the screen's name still
+          has to know which section somebody else filed it under. This is that
+          cost paid back. */}
+      <Box
+        sx={{
+          display: 'flex', alignItems: 'center', gap: 0.75,
+          mb: 1.5, px: 1, py: 0.5,
+          borderRadius: 1.5,
+          bgcolor: 'sidebar.bgDeep',
+          border: '1px solid',
+          borderColor: query ? 'sidebar.marker' : 'sidebar.rule',
+          transition: (t) => `border-color ${t.motion.fast}`,
+        }}
+      >
+        <SearchIcon sx={{ fontSize: 16, color: 'sidebar.groupLabel', flexShrink: 0 }} />
+        <InputBase
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setQuery('');
+            // The first result is the obvious one; Enter should take it rather
+            // than making somebody reach for the mouse after typing.
+            if (e.key === 'Enter' && results?.length) go(results[0].path);
+          }}
+          placeholder="חיפוש מסך"
+          inputProps={{ 'aria-label': 'חיפוש מסך' }}
+          /**
+           * NO `::placeholder` RULE HERE, and it is not an oversight.
+           *
+           * `sx={{ '& input::placeholder': {...} }}` crashes this app — a white
+           * screen, caught only by ScreenBoundary. client/node_modules holds
+           * TWO copies of stylis: 4.3.6 at the top level (pulled in by
+           * stylis-plugin-rtl) and 4.2.0 inside @emotion/cache. Stylis handles
+           * `::placeholder` by calling `lift()`, which reads `root.siblings` —
+           * a field one of those versions creates and the other does not — so
+           * it throws "Cannot read properties of undefined (reading 'push')"
+           * from inside emotion's insertion, with nothing pointing at the
+           * selector that caused it.
+           *
+           * MUI already renders the placeholder as currentColor at reduced
+           * opacity, so setting `color` here is enough. The real fix is one
+           * stylis in the tree, which is a dependency change and not this
+           * branch's business.
+           */
+          sx={{ flex: 1, color: 'sidebar.fgActive', fontSize: '0.8125rem' }}
+        />
+        {query && (
+          <IconButton size="small" onClick={() => setQuery('')} aria-label="ניקוי החיפוש"
+            sx={{ p: 0.25, color: 'sidebar.groupLabel' }}>
+            <CloseIcon sx={{ fontSize: 14 }} />
+          </IconButton>
+        )}
+      </Box>
+
+      {/* Results replace the sections rather than sitting above them: while you
+          are searching, the sections are not what you are looking at. */}
+      {results && (
+        <Box sx={{ flex: 1 }}>
+          {results.length === 0 ? (
+            <Typography sx={{ px: 1, py: 2, fontSize: '0.75rem', color: 'sidebar.groupLabel' }}>
+              אין מסך בשם הזה
+            </Typography>
+          ) : results.map((item) => (
+            <NavRow
+              key={item.id}
+              item={item}
+              active={item.id === currentId}
+              count={badges[item.id] || 0}
+              hint={item.group}
+              onClick={() => go(item.path)}
+            />
+          ))}
+        </Box>
+      )}
+
+      <Box sx={{ flex: 1, display: results ? 'none' : 'block' }}>
+        {/* Where you just were. Four screens is most people's whole job, and
+            they are spread across three sections — so the daily route to each
+            was: open a section, find the row, and the section you had open
+            closes behind you. */}
+        {recents.length > 0 && (
+          <Box sx={{ mb: 1.5 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, py: 0.75 }}>
+              <HistoryIcon sx={{ fontSize: 14, color: 'sidebar.groupLabel', flexShrink: 0 }} />
+              <Typography
+                component="div"
+                sx={{ fontSize: '0.6875rem', fontWeight: 700, letterSpacing: '0.08em', color: 'sidebar.groupLabel', flexShrink: 0 }}
+              >
+                אחרונים
+              </Typography>
+              <Box sx={{ flex: 1, height: '1px', bgcolor: 'sidebar.rule' }} />
+            </Box>
+            {recents.map((item) => (
+              <NavRow
+                key={item.id}
+                item={item}
+                active={false}
+                count={badges[item.id] || 0}
+                onClick={() => go(item.path)}
+              />
+            ))}
+          </Box>
+        )}
+
         {model.map((group) => {
           const open = openGroup === group.label;
           const holdsCurrent = group.label === groupOfCurrent;
@@ -229,85 +494,15 @@ export default function Sidebar() {
 
             <Collapse in={open} timeout={{ enter: 200, exit: 140 }} unmountOnExit>
 
-            {group.items.map((item) => {
-              const Icon = iconFor(item.id);
-              const active = item.id === currentId;
-              const count = badges[item.id] || 0;
-              return (
-                <Box
-                  key={item.id}
-                  component="button"
-                  type="button"
-                  onClick={() => navigate(item.path)}
-                  aria-current={active ? 'page' : undefined}
-                  sx={{
-                    position: 'relative',
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.25,
-                    px: 1,
-                    py: 0.875,
-                    border: 0,
-                    cursor: 'pointer',
-                    textAlign: 'inherit',
-                    borderRadius: 1.5,
-                    fontSize: '0.84375rem',
-                    fontFamily: 'inherit',
-                    color: active ? 'sidebar.fgActive' : 'sidebar.fg',
-                    fontWeight: active ? 700 : 500,
-                    bgcolor: active ? 'sidebar.markerSoft' : 'transparent',
-                    transition: (t) => `background-color ${t.motion.fast}, color ${t.motion.fast}`,
-                    // The marker is an inset bar rather than a full-height
-                    // border: a 2px line running the whole row reads as a table
-                    // rule, a short bar reads as a bookmark.
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      insetInlineStart: 0,
-                      top: 8,
-                      bottom: 8,
-                      width: 3,
-                      borderRadius: 999,
-                      bgcolor: active ? 'sidebar.marker' : 'transparent',
-                    },
-                    '&:hover': { bgcolor: active ? 'sidebar.markerSoft' : 'sidebar.bgActive', color: 'sidebar.fgActive' },
-                    '&:focus-visible': {
-                      outline: '2px solid',
-                      outlineColor: 'sidebar.marker',
-                      outlineOffset: -2,
-                    },
-                  }}
-                >
-                  <Icon sx={{ fontSize: 18, flexShrink: 0, color: active ? 'sidebar.marker' : 'inherit', opacity: active ? 1 : 0.6 }} />
-                  <Box
-                    component="span"
-                    sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {item.label}
-                  </Box>
-                  {count > 0 && (
-                    <Box
-                      component="span"
-                      sx={{
-                        flexShrink: 0,
-                        bgcolor: 'sidebar.marker',
-                        color: 'sidebar.bg',
-                        borderRadius: 999,
-                        minWidth: 19,
-                        textAlign: 'center',
-                        px: 0.625,
-                        fontSize: '0.6875rem',
-                        fontWeight: 800,
-                        lineHeight: 1.55,
-                      }}
-                    >
-                      {count}
-                    </Box>
-                  )}
-                </Box>
-              );
-            })}
+            {group.items.map((item) => (
+              <NavRow
+                key={item.id}
+                item={item}
+                active={item.id === currentId}
+                count={badges[item.id] || 0}
+                onClick={() => go(item.path)}
+              />
+            ))}
             </Collapse>
           </Box>
           );

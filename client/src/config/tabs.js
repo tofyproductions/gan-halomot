@@ -48,9 +48,6 @@ export const TAB_GROUPS = [
       // `path: null` keeps it out of the menu; Header.jsx filters on it.
       { id: 'clicktac_write', label: 'רישום חיצוני — קליטת קבצים ופעולות', path: null, defaultRoles: ['system_admin', 'accountant'], writeGrantFor: 'clicktac' },
       { id: 'collections',    label: 'גבייה',     path: '/collections',       defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
-      // שינויים שביקש "מנהל מערכת - לצפייה בלבד" ומחכים למשרד. The viewer
-      // sees his own list on the same screen.
-      { id: 'proposed_changes', label: 'שינויים לאישור', path: '/proposed-changes', defaultRoles: ['system_admin', 'accountant', 'admin_viewer'] },
       // אישור שהות ואישור קייטנה — the papers a family asks the office for,
       // filled from the system instead of typed from memory.
       { id: 'parent_letters', label: 'מסמכים להורים', path: '/parent-letters', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
@@ -59,16 +56,6 @@ export const TAB_GROUPS = [
       // documents above, so it sits beside them rather than under חופשות.
       { id: 'parent_supply_list', label: 'רשימת ציוד', path: '/parent-supply-list', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'pricing',        label: 'מחירון',    path: '/pricing',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
-      { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
-      // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
-      // אש — with the expiry dates the mail digest watches.
-      { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
-      // Both of these were real routes in App.jsx with no entry here, which
-      // meant no row in the rail and no link anywhere in the client — the
-      // screen where the 43 screens are handed out was reachable only by
-      // typing its address. Either they are screens or they are not.
-      { id: 'branches',    label: 'סניפים',  path: '/branches',          defaultRoles: ['system_admin', 'admin_viewer'] },
-      { id: 'permissions', label: 'הרשאות',  path: '/admin/permissions', defaultRoles: ['system_admin'] },
     ],
   },
   {
@@ -146,6 +133,33 @@ export const TAB_GROUPS = [
       { id: 'stock',        label: 'מעקב מלאי',  path: '/stock',        defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'cook'] },
       { id: 'suppliers',    label: 'ספקים',      path: '/suppliers',    defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
       { id: 'maintenance',  label: 'אחזקה',      path: '/maintenance',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
+    ],
+  },
+  {
+    /**
+     * The other five that were in ניהול.
+     *
+     * ניהול held fourteen items — the largest group by half again, and the
+     * reason the section, once opened, was still a scroll. The split is not
+     * alphabetical or thematic, it is by how often somebody opens the screen:
+     * everything above is the daily and weekly work of running the gans;
+     * everything here is configured once and revisited when something is
+     * wrong. Mixing the two meant "הרשאות" sat two rows from "גבייה".
+     */
+    label: 'מערכת והרשאות',
+    items: [
+      // שינויים שביקש "מנהל מערכת - לצפייה בלבד" ומחכים למשרד.
+      { id: 'proposed_changes', label: 'שינויים לאישור', path: '/proposed-changes', defaultRoles: ['system_admin', 'accountant', 'admin_viewer'] },
+      { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
+      // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
+      // אש — with the expiry dates the mail digest watches.
+      { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // Both of these were real routes in App.jsx with no entry here, which
+      // meant no row in the rail and no link anywhere in the client — the
+      // screen where the 43 screens are handed out was reachable only by
+      // typing its address. Either they are screens or they are not.
+      { id: 'branches',    label: 'סניפים',  path: '/branches',          defaultRoles: ['system_admin', 'admin_viewer'] },
+      { id: 'permissions', label: 'הרשאות',  path: '/admin/permissions', defaultRoles: ['system_admin'] },
     ],
   },
   {
