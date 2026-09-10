@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Box, Typography, Button, Stack, MenuItem, Dialog, DialogTitle, DialogContent,
-  DialogActions, Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
+  Box, Typography, Button, Stack, MenuItem,
+  Table, TableBody, TableCell, TableHead, TableRow, TableContainer,
   Paper, Chip, IconButton, Tooltip, TextField, Divider, InputAdornment, Alert,
-  ToggleButton, ToggleButtonGroup, Switch, FormControlLabel,
+  ToggleButton, ToggleButtonGroup, Switch, FormControlLabel, Drawer,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import CloseIcon from '@mui/icons-material/Close';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -26,6 +29,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor } from '../../utils/branchColors';
 import ConfirmDialog from '../shared/ConfirmDialog';
+import { useConfirm } from '../shared/ConfirmProvider';
 import { formatCurrency } from '../../utils/hebrewYear';
 import HoursReportDialog from './HoursReportDialog';
 import ClockMatchDialog from './ClockMatchDialog';
@@ -226,6 +230,7 @@ export default function EmployeeManager() {
   const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const askConfirm = useConfirm();
   /**
    * Why the list is empty, not just that it is.
    *
@@ -530,7 +535,8 @@ export default function EmployeeManager() {
   };
 
   const updateField = (key, value) => {
-    setDialog(prev => ({ ...prev, data: { ...prev.data, [key]: value } }));
+    // `dirty` is what lets the roster arrows ask before they throw away typing.
+    setDialog(prev => ({ ...prev, data: { ...prev.data, [key]: value }, dirty: true }));
   };
 
   // Inline editing: save on Enter/blur, cancel on Escape
@@ -603,6 +609,47 @@ export default function EmployeeManager() {
       (e.email || '').toLowerCase().includes(q)
     );
   }, [employees, search, onlyIncomplete]);
+
+  /**
+   * The employee above and below THIS one, in the order the table is showing.
+   *
+   * Filtered and searched order, not the raw fetch order — the point of the
+   * arrows is to walk the list in front of you, and a filtered list that jumps
+   * to somebody who is not on screen is worse than no arrows. An employee no
+   * longer in the filtered set (edited in a way that removed her from it) has
+   * no neighbours, and both arrows go quiet rather than jumping somewhere
+   * arbitrary.
+   */
+  const neighbours = useMemo(() => {
+    if (dialog.mode !== 'edit' || !dialog.original) return { prev: null, next: null };
+    const id = dialog.original._id || dialog.original.id;
+    const i = filteredEmployees.findIndex((e) => (e._id || e.id) === id);
+    if (i === -1) return { prev: null, next: null };
+    return {
+      prev: filteredEmployees[i - 1] || null,
+      next: filteredEmployees[i + 1] || null,
+    };
+  }, [dialog.mode, dialog.original, filteredEmployees]);
+
+  const stepEmployee = async (dir) => {
+    const target = dir < 0 ? neighbours.prev : neighbours.next;
+    if (!target) return;
+    /**
+     * Unsaved edits are the reason this asks.
+     *
+     * Reaching for the next employee is not "cancel", and the arrows sit two
+     * centimetres from the fields — silently discarding what somebody typed
+     * because they wanted to check the next row is the kind of loss no toast
+     * makes up for. Not `danger`, because nothing is deleted and the answer is
+     * usually yes; it simply must be asked.
+     */
+    if (dialog.dirty && !(await askConfirm({
+      title: 'מעבר לעובד/ת אחר/ת',
+      message: 'יש שינויים שלא נשמרו בכרטיס הזה. לעבור בלי לשמור אותם?',
+      confirm_label: 'עבור בלי לשמור',
+    }))) return;
+    openEdit(target);
+  };
 
   // How much of the roster is unusable as-is. Blocking gaps mean the month
   // cannot be paid for that person, so they get counted separately.
@@ -949,12 +996,76 @@ export default function EmployeeManager() {
         </Table>
       </TableContainer>
 
-      {/* Add/Edit Employee Dialog */}
-      <Dialog open={dialog.open} onClose={closeDialog} dir="rtl" maxWidth="md" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>
-          {dialog.mode === 'add' ? 'הוסף עובד' : `ערוך עובד — ${dialog.data.full_name}`}
-        </DialogTitle>
-        <DialogContent>
+      {/*
+        * The employee card is a PANE, not a dialog.
+        *
+        * It is four hundred lines of form — personal details, salary terms,
+        * travel, bank, pension, work days, pregnancy status — and as a centred
+        * modal it covered the table it came from. So the answer to "is this the
+        * right רותי?" or "does the one below her have the same rate?" was:
+        * close, look, reopen, and lose your place in the form. Reviewing a
+        * roster of forty meant forty of those round trips.
+        *
+        * Anchored to the side, the list stays visible and readable beside it,
+        * and ↑ / ↓ move to the next employee without closing anything — which
+        * is what "going through the roster" actually is.
+        *
+        * A Drawer rather than a Dialog also removes the modal's focus trap, so
+        * the table behind it stays keyboard-reachable. `keepMounted` is
+        * deliberately NOT set: this form holds unsaved edits and must not
+        * survive being closed.
+        */}
+      <Drawer
+        anchor="left"
+        open={dialog.open}
+        onClose={closeDialog}
+        dir="rtl"
+        PaperProps={{
+          sx: {
+            width: { xs: '100%', md: 'min(720px, 60vw)' },
+            display: 'flex',
+            flexDirection: 'column',
+          },
+        }}
+      >
+        <Box sx={{
+          px: 3, py: 2,
+          display: 'flex', alignItems: 'center', gap: 1,
+          borderBottom: '1px solid', borderColor: 'divider',
+          position: 'sticky', top: 0, zIndex: 1, bgcolor: 'background.paper',
+        }}>
+          <Typography component="h2" sx={{ fontWeight: 700, fontSize: '1.125rem', flex: 1, minWidth: 0 }}>
+            {dialog.mode === 'add' ? 'הוסף עובד' : `ערוך עובד — ${dialog.data.full_name}`}
+          </Typography>
+
+          {/* Through the roster without closing the card. Disabled rather than
+              hidden at the ends, so the controls do not move under the cursor
+              on the first and last employee. */}
+          {dialog.mode === 'edit' && (
+            <>
+              <Tooltip title="העובד/ת הקודמ/ת">
+                <span>
+                  <IconButton size="small" onClick={() => stepEmployee(-1)} disabled={!neighbours.prev || saving}>
+                    <KeyboardArrowUpIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="העובד/ת הבא/ה">
+                <span>
+                  <IconButton size="small" onClick={() => stepEmployee(1)} disabled={!neighbours.next || saving}>
+                    <KeyboardArrowDownIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </>
+          )}
+
+          <IconButton size="small" onClick={closeDialog} disabled={saving} aria-label="סגירה">
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        <Box sx={{ px: 3, py: 2, flex: 1, overflowY: 'auto' }}>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {dialog.mode === 'add' && dialog.contractFlow && (
               <Alert severity="info" icon={<DescriptionIcon fontSize="small" />}>
@@ -1403,14 +1514,22 @@ export default function EmployeeManager() {
               helperText="הלוואות, פטורים, תנאים מיוחדים — כרגע עריכה חופשית. מודלים מובנים יתווספו בהמשך."
             />
           </Stack>
-        </DialogContent>
-        <DialogActions>
+        </Box>
+
+        {/* Pinned, because the form is long enough that the save button was
+            below the fold on every screen smaller than the whole card. */}
+        <Box sx={{
+          px: 3, py: 2,
+          display: 'flex', justifyContent: 'flex-end', gap: 1,
+          borderTop: '1px solid', borderColor: 'divider',
+          bgcolor: 'background.paper',
+        }}>
           <Button onClick={closeDialog} disabled={saving}>ביטול</Button>
           <Button variant="contained" onClick={handleSave} disabled={saving}>
             {saving ? 'שומר…' : 'שמור'}
           </Button>
-        </DialogActions>
-      </Dialog>
+        </Box>
+      </Drawer>
 
       <ConfirmDialog open={confirm.open} onClose={() => setConfirm({ open: false, id: null })}
         onConfirm={handleDelete} title="הסרת עובד" message="להסיר את העובד מהמערכת? (ההחתמות ההיסטוריות נשמרות)"
