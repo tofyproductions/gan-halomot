@@ -20,6 +20,7 @@ import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import PageHeader from '../ui/PageHeader';
+import EmptyState from '../ui/EmptyState';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor } from '../../utils/branchColors';
@@ -223,6 +224,15 @@ export default function EmployeeManager() {
   // employee's own branch, which is why the branch is in each row.
   const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  /**
+   * Why the list is empty, not just that it is.
+   *
+   * "אין עובדים בסניף זה" was printed for a branch with no employees AND for a
+   * request that failed — same sentence, and only one of them is true. A branch
+   * manager reading it after a dropped request concludes her staff were deleted.
+   */
+  const [loadError, setLoadError] = useState(null);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
@@ -280,9 +290,12 @@ export default function EmployeeManager() {
     const params = { branch: selectedBranch };
     if (!showArchived) params.active = 'true';
     api.get('/payroll/employees', { params })
-      .then(res => setEmployees(res.data.employees || []))
+      .then(res => { setEmployees(res.data.employees || []); setLoadError(null); })
       .catch((err) => {
         console.error(err);
+        setLoadError(err?.response?.status === 413
+          ? 'הרשימה ארוכה מדי לטעינה — בחר סניף מסוים או סנן.'
+          : 'הרשימה לא נטענה. זו תקלה בטעינה, לא רשימה ריקה.');
         // 413 already produced a toast in the api client saying the list is too
         // long and how to narrow it. Adding "שגיאה בטעינת עובדים" on top of it
         // contradicts the advice — one message says do this, the other says the
@@ -381,7 +394,18 @@ export default function EmployeeManager() {
 
   const closeDialog = () => setDialog({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
 
+  /**
+   * A save button that is live during the save is a save button somebody
+   * presses twice.
+   *
+   * The employee card takes a moment on a gan's wifi, nothing on screen changes
+   * while it is in flight, and `add` POSTs — so a second press creates a second
+   * employee, and the branch's payroll now carries a duplicate nobody typed.
+   * The guard is `saving`, and it is released in `finally` so a failed save
+   * leaves a button you can press again.
+   */
   const handleSave = async () => {
+    if (saving) return;
     const { mode, data, original } = dialog;
     if (!data.full_name?.trim()) return toast.error('שם מלא חובה');
     if (!data.branch_id) return toast.error('סניף חובה');
@@ -455,6 +479,7 @@ export default function EmployeeManager() {
         reason: hb.reason || '',
       }));
 
+    setSaving(true);
     try {
       if (mode === 'add') {
         const res = await api.post('/payroll/employees', payload);
@@ -486,6 +511,8 @@ export default function EmployeeManager() {
       fetchEmployees();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -882,13 +909,38 @@ export default function EmployeeManager() {
                   for (const emp of list) out.push(renderEmp(emp));
                 }
                 if (out.length === 0) {
-                  out.push(<TableRow key="empty"><TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.disabled' }}>אין עובדים תואמים את החיפוש</TableCell></TableRow>);
+                  out.push(
+                    <TableRow key="empty"><TableCell colSpan={11} sx={{ border: 0 }}>
+                      {loadError ? (
+                        <EmptyState state="error" title="הרשימה לא נטענה" hint={loadError}
+                          action={fetchEmployees} actionLabel="נסה שוב" />
+                      ) : (
+                        <EmptyState state="filtered" title="אין עובדים תואמים את החיפוש"
+                          hint={`החיפוש "${search}" לא מצא אף עובד/ת באף אחד מהסניפים.`}
+                          action={() => setSearch('')} actionLabel="ניקוי החיפוש" />
+                      )}
+                    </TableCell></TableRow>
+                  );
                 }
                 return out;
               }
               // Single-branch view: simple flat list
               if (filteredEmployees.length === 0) {
-                return <TableRow><TableCell colSpan={11} align="center" sx={{ py: 4, color: 'text.disabled' }}>{search ? 'אין עובדים תואמים את החיפוש' : 'אין עובדים בסניף זה'}</TableCell></TableRow>;
+                return (
+                  <TableRow><TableCell colSpan={11} sx={{ border: 0 }}>
+                    {loadError ? (
+                      <EmptyState state="error" title="הרשימה לא נטענה" hint={loadError}
+                        action={fetchEmployees} actionLabel="נסה שוב" />
+                    ) : search ? (
+                      <EmptyState state="filtered" title="אין עובדים תואמים את החיפוש"
+                        hint={`החיפוש "${search}" לא מצא אף עובד/ת בסניף הזה.`}
+                        action={() => setSearch('')} actionLabel="ניקוי החיפוש" />
+                    ) : (
+                      <EmptyState state="empty" title="אין עדיין עובדים בסניף הזה"
+                        hint="כרטיס עובד מחזיק את תנאי השכר, פרטי הבנק וההחתמות. אפשר להוסיף את הראשון עכשיו." />
+                    )}
+                  </TableCell></TableRow>
+                );
               }
               return filteredEmployees.map(renderEmp);
             })()}
@@ -1352,8 +1404,10 @@ export default function EmployeeManager() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeDialog}>ביטול</Button>
-          <Button variant="contained" onClick={handleSave}>שמור</Button>
+          <Button onClick={closeDialog} disabled={saving}>ביטול</Button>
+          <Button variant="contained" onClick={handleSave} disabled={saving}>
+            {saving ? 'שומר…' : 'שמור'}
+          </Button>
         </DialogActions>
       </Dialog>
 

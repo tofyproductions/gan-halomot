@@ -106,7 +106,7 @@ export default function SupplyListManager() {
       <Paper sx={{ borderRadius: 2, mb: 2 }}>
         <Button fullWidth onClick={() => setShowHeaderFields(v => !v)}
           sx={{ justifyContent: 'space-between', px: 2, py: 1, color: 'text.secondary' }}
-          endIcon={<ExpandMoreIcon sx={{ transform: showHeaderFields ? 'rotate(180deg)' : 'none', transition: '0.2s' }} />}
+          endIcon={<ExpandMoreIcon sx={{ transform: showHeaderFields ? 'rotate(180deg)' : 'none', transition: (t) => t.motion.base }} />}
         >
           כותרות ותחתית הפוסטר
         </Button>

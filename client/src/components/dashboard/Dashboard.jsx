@@ -283,7 +283,7 @@ export default function Dashboard() {
                       cursor: k._id ? 'pointer' : 'default',
                       borderRight: `3px solid ${cc.border}`,
                       '&:hover': k._id ? { bgcolor: cc.border, transform: 'translateX(-2px)' } : {},
-                      transition: 'all 0.15s ease',
+                      transition: (t) => `all ${t.motion.fast}`,
                     }}
                   >
                     {k.child_name || '—'}

@@ -113,7 +113,7 @@ export default function GanttCalendar() {
                 bgcolor: STATUS_COLORS[status],
                 border: '2px solid transparent',
                 '&:hover': { borderColor: COLOR.primary.light, transform: 'scale(1.02)' },
-                transition: 'all 0.2s',
+                transition: (t) => `all ${t.motion.base}`,
               }}
               onClick={() => openEditor(month)}
             >

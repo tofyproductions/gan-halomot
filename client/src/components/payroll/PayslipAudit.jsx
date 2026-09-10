@@ -210,7 +210,7 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove, hid
       onDrop={takeDrop}
       sx={{
         p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: hideBranch ? '1fr auto' : '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center',
-        transition: 'all .15s',
+        transition: (t) => `all ${t.motion.fast}`,
         ...(dragOver ? { borderColor: 'primary.main', borderStyle: 'dashed', bgcolor: 'primary.soft', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' } : {}),
       }}
     >
@@ -569,7 +569,7 @@ function PerEmployeePairedView({
                     borderRight: 3,
                     borderColor: isEmployeeReviewed(editableR) ? 'success.main' : 'primary.main',
                     p: 0,
-                    transition: 'border-color 0.2s',
+                    transition: (t) => `border-color ${t.motion.base}`,
                   }}
                 >
                   <EmployeeBlock
@@ -791,7 +791,7 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
         borderColor: reviewed ? 'success.main' : 'divider',
         borderWidth: reviewed ? 2 : 1,
         opacity: isEmpty && !expanded ? 0.7 : 1,
-        transition: 'background-color 0.2s, border-color 0.2s',
+        transition: (t) => `background-color ${t.motion.base}, border-color ${t.motion.base}`,
       }}
     >
       <Stack
@@ -843,7 +843,7 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
               'transparent';
             const rowOpacity = status === 'rejected' ? 0.55 : 1;
             return (
-              <Box key={fIdx} sx={{ bgcolor: rowBg, borderRadius: 1, p: 0.5, opacity: rowOpacity, transition: 'opacity 0.15s' }}>
+              <Box key={fIdx} sx={{ bgcolor: rowBg, borderRadius: 1, p: 0.5, opacity: rowOpacity, transition: (t) => `opacity ${t.motion.fast}` }}>
                 <Stack direction="row" spacing={0.5} alignItems="flex-start">
                   <Select
                     size="small"

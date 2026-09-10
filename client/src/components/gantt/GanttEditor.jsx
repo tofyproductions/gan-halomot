@@ -89,7 +89,7 @@ function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
         ...props.sx,
         outline: isOver ? `2px solid ${COLOR.primary.light}` : 'none',
         opacity: isDragging ? 0.45 : 1,
-        transition: 'outline 0.15s, opacity 0.15s',
+        transition: (t) => `outline ${t.motion.fast}, opacity ${t.motion.fast}`,
       }}
     >
       {canDrag && (
@@ -104,7 +104,7 @@ function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
             // lands on the left — which is where the colour button already is.
             // The logical property says the corner and survives the rewrite.
             position: 'absolute', top: 2, insetInlineEnd: 2,
-            opacity: 0, transition: '0.2s',
+            opacity: 0, transition: (t) => t.motion.base,
             cursor: 'grab', lineHeight: 0, '&:active': { cursor: 'grabbing' },
           }}
         >
@@ -1105,7 +1105,7 @@ export default function GanttEditor() {
                                   toast to find out what the screen was now
                                   doing. Started from the first cell instead,
                                   it is one gesture and it says what it will do. */}
-                              <Box className="ca" sx={{ position: 'absolute', top: 0, insetInlineStart: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
+                              <Box className="ca" sx={{ position: 'absolute', top: 0, insetInlineStart: 0, opacity: 0, transition: (t) => t.motion.base, display: 'flex', gap: '1px' }}>
                                 <Tooltip title="צבע">
                                   <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
                                     <PaletteIcon sx={{ fontSize: 13, color: COLOR.text.disabled }} />

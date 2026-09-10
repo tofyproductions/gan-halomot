@@ -555,7 +555,7 @@ export default function ContentBankPanel({
                             {cell && (
                               <Stack className="act" direction="row" spacing={0.3} sx={{
                                 position: 'absolute', top: 0, insetInlineStart: 2,
-                                opacity: 0, transition: '0.2s',
+                                opacity: 0, transition: (t) => t.motion.base,
                               }}>
                                 <Box
                                   onClick={(e) => { e.stopPropagation(); setEditingCell({ rowKey: row.key, dayIdx: d }); }}

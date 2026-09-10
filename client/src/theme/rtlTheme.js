@@ -473,6 +473,31 @@ const theme = createTheme({
         },
       },
     },
+
+    /**
+     * The marigold reaches past the rail.
+     *
+     * It marked the open screen in the sidebar and appeared nowhere else, so
+     * the app had two unrelated accents — a warm gold on the dark rail, a clay
+     * orange on the white workspace — and no visual thread between "where I am"
+     * and "what I am looking at". The tab indicator is the same idea as the
+     * rail marker one level down: this row, of these rows. It gets the same
+     * colour, and 3px, so it reads as the same mark.
+     */
+    MuiTabs: {
+      styleOverrides: {
+        indicator: {
+          borderRadius: '3px 3px 0 0',
+          backgroundColor: COLOR.sidebar.marker,
+          // `&&` doubles the class, and it is not decoration: MUI emits its own
+          // `height: 2px` for the horizontal variant AFTER the override, at the
+          // same specificity, so a plain `height: 3` here is accepted by the
+          // theme and then silently lost in the cascade. The colour lands, the
+          // thickness does not, and nothing anywhere says so.
+          '&&': { height: 3 },
+        },
+      },
+    },
   },
 });
 

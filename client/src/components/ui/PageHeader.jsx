@@ -47,9 +47,22 @@ export default function PageHeader({
         }}
       >
         <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
+          {/* The same mark the rail puts beside the open screen, under the
+              title of the screen it opened. It is the one line of continuity
+              between the dark rail and the white workspace — without it the app
+              carries two unrelated accents and neither means anything. */}
           <Typography
             component="h1"
-            sx={{ fontSize: '1.5rem', fontWeight: 700, letterSpacing: '-0.015em', lineHeight: 1.2 }}
+            sx={{
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              letterSpacing: '-0.015em',
+              lineHeight: 1.2,
+              display: 'inline-block',
+              pb: 0.5,
+              borderBottom: '3px solid',
+              borderColor: 'sidebar.marker',
+            }}
           >
             {title}
           </Typography>

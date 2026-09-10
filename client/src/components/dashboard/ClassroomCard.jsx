@@ -11,7 +11,7 @@ export default function ClassroomCard({ name, kids }) {
   const color = CLASS_COLORS[name] || '#64748b';
 
   return (
-    <Card sx={{ borderTop: `5px solid ${color}`, transition: '0.2s', '&:hover': { transform: 'translateY(-3px)' } }}>
+    <Card sx={{ borderTop: `5px solid ${color}`, transition: (t) => t.motion.base, '&:hover': { transform: 'translateY(-3px)' } }}>
       <CardContent>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1.5, pb: 1, borderBottom: '2px solid #f1f5f9' }}>
           <Typography sx={{ fontWeight: 700, fontSize: '1.1rem' }}>{name}</Typography>
