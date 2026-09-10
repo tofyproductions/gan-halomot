@@ -11,6 +11,7 @@ const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, 
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
+const notificationService = require('../services/notification.service');
 const fixedSchedule = require('../services/fixedSchedule');
 const closureCompletion = require('../services/closureCompletion');
 const fingerprintSync = require('../services/fingerprintSync');
@@ -2232,6 +2233,26 @@ async function createManualPunches(req, res, next, opts = {}) {
         manager_approved_at: managerApprovedAt,
       });
       created.push(punch);
+    }
+
+    for (const punch of created) {
+      if (punch.approval_status === 'pending_manager') {
+        const ids = await notificationService.branchManagerIds(punchBranchId);
+        for (const recipient_id of ids) {
+          await notificationService.createEvent({
+            type: 'punch_pending_manager', ref_collection: 'Punch', ref_id: punch._id, recipient_id,
+            title: 'ממתין לאישורך', body: `${emp.full_name} — דיווח החתמה`, url: '/attendance',
+          });
+        }
+      } else if (punch.approval_status === 'pending_accountant') {
+        const ids = await notificationService.accountantIds();
+        for (const recipient_id of ids) {
+          await notificationService.createEvent({
+            type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: punch._id, recipient_id,
+            title: 'ממתין לאישור הנהלת חשבונות', body: `${emp.full_name} — דיווח החתמה`, url: '/attendance',
+          });
+        }
+      }
     }
 
     res.json({ ok: true, created: created.length, punches: created });
