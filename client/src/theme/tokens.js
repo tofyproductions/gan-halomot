@@ -137,6 +137,61 @@ export const COLOR = {
   },
 
   /**
+   * A gan's own colour.
+   *
+   * Semantic, like the punch grid: the payroll table, the attendance grid, the
+   * employee list and the branch switcher all identify a branch by the same
+   * colour, and somebody scanning a cross-branch report is reading the strips
+   * rather than the names.
+   *
+   * These were framework-default colours — the full-saturation Tailwind ramp —
+   * which is why the tables read as cold next to warm paper, and none of the
+   * text-on-strip pairs had ever been measured. `strip` carries `stripText`, so
+   * both are checked by design-tokens.test.js; `nameTint` and `rowTint` are
+   * washes that ordinary body text sits on, and are checked against it.
+   *
+   * Deliberately still twelve distinct hues. Harmonising a palette whose whole
+   * job is telling four things apart into one tasteful family would be the
+   * design decision that breaks the feature.
+   */
+  branch: {
+    red:      { strip: '#B23A2E', stripText: '#FFFFFF', nameTint: '#F6DCD8', rowTint: '#FDF3F1', accent: '#8E2C22' },
+    amber:    { strip: '#C58A12', stripText: '#2A1C00', nameTint: '#F8E7BE', rowTint: '#FEF7E6', accent: '#9A6B08' },
+    orange:   { strip: '#B4540A', stripText: '#FFFFFF', nameTint: '#F7DEC6', rowTint: '#FDF4EA', accent: '#98490A' },
+    pink:     { strip: '#AC3D6B', stripText: '#FFFFFF', nameTint: '#F4DAE5', rowTint: '#FDF2F6', accent: '#8A2F54' },
+    blue:     { strip: '#3A6EA5', stripText: '#FFFFFF', nameTint: '#D8E4F1', rowTint: '#F1F5FA', accent: '#2B5480' },
+    green:    { strip: '#3F7D53', stripText: '#FFFFFF', nameTint: '#D9EADE', rowTint: '#F1F8F3', accent: '#2E5C3D' },
+    violet:   { strip: '#5B4B9E', stripText: '#FFFFFF', nameTint: '#E0DBF0', rowTint: '#F4F2FB', accent: '#453979' },
+    cyan:     { strip: '#1F7480', stripText: '#FFFFFF', nameTint: '#D2E8EB', rowTint: '#EFF7F8', accent: '#175860' },
+    slate:    { strip: '#5C6470', stripText: '#FFFFFF', nameTint: '#DDE0E4', rowTint: '#F4F5F6', accent: '#454C55' },
+    rose:     { strip: '#A93E52', stripText: '#FFFFFF', nameTint: '#F3DBE0', rowTint: '#FCF2F4', accent: '#87313F' },
+    olive:    { strip: '#5F7326', stripText: '#FFFFFF', nameTint: '#E0E7C9', rowTint: '#F5F7EC', accent: '#48571C' },
+    bronze:   { strip: '#8A5A22', stripText: '#FFFFFF', nameTint: '#EDDCC6', rowTint: '#F9F3EA', accent: '#6B451A' },
+  },
+
+  /**
+   * The six highlight colours a gan can paint a Gantt cell with.
+   *
+   * THE VALUES ARE DATA, NOT STYLE, AND THEY DO NOT CHANGE. When somebody
+   * marks a week yellow the hex itself is written to the cell and stored, so
+   * a prettier yellow here would not restyle those cells — it would leave
+   * every one already painted holding a colour no longer in the picker, and
+   * the plan a gan built last August would come back in colours nobody chose.
+   *
+   * They live here for the same reason everything else does — one place, and
+   * the next colour anybody adds gets measured — but changing one is a data
+   * migration, not a design decision.
+   */
+  ganttCell: [
+    { label: 'צהוב', value: '#fef9c3' },
+    { label: 'ירוק', value: '#dcfce7' },
+    { label: 'כחול', value: '#dbeafe' },
+    { label: 'ורוד', value: '#fce7f3' },
+    { label: 'סגול', value: '#ede9fe' },
+    { label: 'כתום', value: '#ffedd5' },
+  ],
+
+  /**
    * Row tints. A row that needs attention is tinted; a row that is fine is
    * white. This is the whole of the colour budget for a table — the alternative,
    * which the app currently does, is a different coloured chip in every column

@@ -7,13 +7,30 @@
  * a stable color is derived from the branch's index in the alphabetical list.
  */
 
+/**
+ * Built from theme/tokens.js#COLOR.branch rather than written out here.
+ *
+ * The colours themselves moved into the token file so they could be measured:
+ * every strip/text pair and every wash is checked against AA by
+ * server/scripts/design-tokens.test.js, and the twelve are asserted distinct —
+ * telling four gans apart at a glance is this palette's entire job. What stays
+ * in this file is the part that is logic rather than colour: which gan gets
+ * which, and what an unnamed one falls back to.
+ */
+const shape = (b) => ({
+  header: b.nameTint, sub: b.rowTint, cell: b.rowTint,
+  accent: b.accent, border: b.nameTint, dot: b.strip,
+});
+
+import { COLOR } from '../theme/tokens';
+
 export const BRANCH_PALETTE = {
-  blue:   { header: '#dbeafe', sub: '#eff6ff', cell: '#f8fafc', accent: '#1e40af', border: '#93c5fd', dot: '#3b82f6' },
-  green:  { header: '#d1fae5', sub: '#ecfdf5', cell: '#f7fef9', accent: '#065f46', border: '#86efac', dot: '#10b981' },
-  purple: { header: '#ede9fe', sub: '#f5f3ff', cell: '#fbfaff', accent: '#5b21b6', border: '#c4b5fd', dot: '#8b5cf6' },
-  orange: { header: '#ffedd5', sub: '#fff7ed', cell: '#fffbf6', accent: '#9a3412', border: '#fdba74', dot: '#f97316' },
-  rose:   { header: '#ffe4e6', sub: '#fff1f2', cell: '#fffafa', accent: '#9f1239', border: '#fda4af', dot: '#f43f5e' },
-  teal:   { header: '#ccfbf1', sub: '#f0fdfa', cell: '#f6fefc', accent: '#115e59', border: '#5eead4', dot: '#14b8a6' },
+  blue: shape(COLOR.branch.blue),
+  green: shape(COLOR.branch.green),
+  purple: shape(COLOR.branch.violet),
+  orange: shape(COLOR.branch.orange),
+  rose: shape(COLOR.branch.rose),
+  teal: shape(COLOR.branch.cyan),
 };
 
 export const BRANCH_COLOR_NAMES = Object.keys(BRANCH_PALETTE);
@@ -47,10 +64,10 @@ export function branchColorName(branch, idx = 0) {
  *   accent     = thick separator / spine / border colour
  */
 export const GAN_MARKERS = [
-  { match: ['תל אביב', 'תל-אביב', 'ת"א'], strip: '#ef4444', stripText: '#ffffff', nameTint: '#fecaca', rowTint: '#fef2f2', accent: '#dc2626' }, // red
-  { match: ['הרצליה'],                      strip: '#facc15', stripText: '#3f2d00', nameTint: '#fef08a', rowTint: '#fefce8', accent: '#eab308' }, // yellow
-  { match: ['משה דיין'],                    strip: '#f97316', stripText: '#ffffff', nameTint: '#fed7aa', rowTint: '#fff7ed', accent: '#ea580c' }, // orange
-  { match: ['קפלן'],                         strip: '#ec4899', stripText: '#ffffff', nameTint: '#fbcfe8', rowTint: '#fdf2f8', accent: '#db2777' }, // pink
+  { match: ['תל אביב', 'תל-אביב', 'ת"א'], ...COLOR.branch.red },
+  { match: ['הרצליה'], ...COLOR.branch.amber },
+  { match: ['משה דיין'], ...COLOR.branch.orange },
+  { match: ['קפלן'], ...COLOR.branch.pink },
 ];
 
 /**
@@ -68,18 +85,9 @@ export const GAN_MARKERS = [
  * colours move on Tuesday has no colours at all.
  */
 const FALLBACK_MARKERS = [
-  { strip: '#3b82f6', stripText: '#ffffff', nameTint: '#bfdbfe', rowTint: '#eff6ff', accent: '#2563eb' }, // blue
-  { strip: '#10b981', stripText: '#ffffff', nameTint: '#a7f3d0', rowTint: '#ecfdf5', accent: '#059669' }, // green
-  { strip: '#8b5cf6', stripText: '#ffffff', nameTint: '#ddd6fe', rowTint: '#f5f3ff', accent: '#7c3aed' }, // purple
-  { strip: '#06b6d4', stripText: '#ffffff', nameTint: '#a5f3fc', rowTint: '#ecfeff', accent: '#0891b2' }, // cyan
-  { strip: '#f59e0b', stripText: '#3f2d00', nameTint: '#fde68a', rowTint: '#fffbeb', accent: '#d97706' }, // amber
-  { strip: '#64748b', stripText: '#ffffff', nameTint: '#cbd5e1', rowTint: '#f8fafc', accent: '#475569' }, // slate
-  { strip: '#e11d48', stripText: '#ffffff', nameTint: '#fecdd3', rowTint: '#fff1f2', accent: '#be123c' }, // rose
-  { strip: '#65a30d', stripText: '#ffffff', nameTint: '#d9f99d', rowTint: '#f7fee7', accent: '#4d7c0f' }, // lime
-  { strip: '#0ea5e9', stripText: '#ffffff', nameTint: '#bae6fd', rowTint: '#f0f9ff', accent: '#0284c7' }, // sky
-  { strip: '#d946ef', stripText: '#ffffff', nameTint: '#f5d0fe', rowTint: '#fdf4ff', accent: '#c026d3' }, // fuchsia
-  { strip: '#14b8a6', stripText: '#ffffff', nameTint: '#99f6e4', rowTint: '#f0fdfa', accent: '#0d9488' }, // teal
-  { strip: '#a16207', stripText: '#ffffff', nameTint: '#fde68a', rowTint: '#fefce8', accent: '#854d0e' }, // bronze
+  COLOR.branch.blue, COLOR.branch.green, COLOR.branch.violet, COLOR.branch.cyan,
+  COLOR.branch.amber, COLOR.branch.slate, COLOR.branch.rose, COLOR.branch.olive,
+  COLOR.branch.bronze, COLOR.branch.red, COLOR.branch.orange, COLOR.branch.pink,
 ];
 
 export function ganMarkerByName(branchName) {

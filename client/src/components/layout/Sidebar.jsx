@@ -49,32 +49,32 @@ export default function Sidebar() {
   const model = useMemo(() => buildNavModel(user), [user]);
 
   /**
-   * Which sections are open.
+   * Which section is open — exactly one, or none.
    *
    * Thirty-eight rows in one column is a scroll, and a scroll is a list nobody
-   * reads to the end of — the four screens at the bottom may as well not exist.
-   * So a section opens when you are inside it and closes when you leave, and
-   * anything you open by hand stays open until you close it.
+   * reads to the end of; the four screens at the bottom may as well not exist.
+   * Sections collapse to fix that, and then letting several stand open undoes
+   * the fix — two open sections are already 25 rows and the scroll is back.
    *
-   * The current section is derived rather than stored: arriving anywhere — a
-   * link, a badge, a fresh tab — opens the section that screen lives in,
-   * without every entry point having to remember to.
+   * So opening one closes the last. There is nothing to compare across sections
+   * here: you are going to one screen, and the section is how you find it.
+   *
+   * The current section is derived rather than stored, so arriving anywhere —
+   * a link, a badge, a fresh tab, the browser's back button — opens the section
+   * that screen lives in without every entry point having to remember to.
    */
   const groupOfCurrent = useMemo(
     () => model.find((g) => g.items.some((i) => i.path === pathname))?.label,
     [model, pathname]
   );
-  const [openGroups, setOpenGroups] = useState(() => new Set());
+  const [openGroup, setOpenGroup] = useState(null);
 
   useEffect(() => {
-    if (groupOfCurrent) setOpenGroups((prev) => new Set(prev).add(groupOfCurrent));
+    if (groupOfCurrent) setOpenGroup(groupOfCurrent);
   }, [groupOfCurrent]);
 
-  const toggleGroup = (label) => setOpenGroups((prev) => {
-    const next = new Set(prev);
-    if (next.has(label)) next.delete(label); else next.add(label);
-    return next;
-  });
+  // Clicking the open one closes it, so the rail can be reduced to four rows.
+  const toggleGroup = (label) => setOpenGroup((prev) => (prev === label ? null : label));
 
   return (
     <Box
@@ -150,7 +150,7 @@ export default function Sidebar() {
 
       <Box sx={{ flex: 1 }}>
         {model.map((group) => {
-          const open = openGroups.has(group.label);
+          const open = openGroup === group.label;
           const holdsCurrent = group.label === groupOfCurrent;
           // What is waiting inside a section you cannot see into.
           const groupBadge = group.items.reduce((n, i) => n + (badges[i.id] || 0), 0);

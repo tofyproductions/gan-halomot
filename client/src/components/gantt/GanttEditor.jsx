@@ -30,15 +30,14 @@ import ShabbatParentPicker from './ShabbatParentPicker';
 import { printGantt, renderGanttImage, shareGanttImage } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
+import { COLOR } from '../../theme/tokens';
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 const MONTH_NAMES = {1:'ינואר',2:'פברואר',3:'מרץ',4:'אפריל',5:'מאי',6:'יוני',7:'יולי',8:'אוגוסט',9:'ספטמבר',10:'אוקטובר',11:'נובמבר',12:'דצמבר'};
-const CELL_COLORS = [
-  { label: 'ללא', value: '' }, { label: 'צהוב', value: '#fef9c3' },
-  { label: 'ירוק', value: '#dcfce7' }, { label: 'כחול', value: '#dbeafe' },
-  { label: 'ורוד', value: '#fce7f3' }, { label: 'סגול', value: '#ede9fe' },
-  { label: 'כתום', value: '#ffedd5' },
-];
+// The six come from theme/tokens.js#COLOR.ganttCell. Their VALUES are stored
+// on the cells themselves, so they are data and cannot be restyled — see the
+// note there. "ללא" is not one of them; it is the absence of one.
+const CELL_COLORS = [{ label: 'ללא', value: '' }, ...COLOR.ganttCell];
 
 // Draggable activity chip
 function DraggableActivity({ activity }) {
@@ -109,7 +108,7 @@ function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
             cursor: 'grab', lineHeight: 0, '&:active': { cursor: 'grabbing' },
           }}
         >
-          <DragIndicatorIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
+          <DragIndicatorIcon sx={{ fontSize: 13, color: '#A79C8E' }} />
         </Box>
       )}
       {children}
@@ -232,7 +231,7 @@ export default function GanttEditor() {
     return classSessions.filter(s => s.date === ymd
       && (!classroomCategory || !s.program_id?.classroom_category || s.program_id.classroom_category === classroomCategory));
   };
-  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: '#f1f5f9' };
+  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: '#F3EEE6' };
 
   // Cell helpers
   const getCell = (wk, rk, di) => gantt?.weeks?.[wk]?.cells?.find(c => c.row_key === rk && c.day_index === di);
@@ -521,7 +520,7 @@ export default function GanttEditor() {
     const act = event.active.data.current?.activity;
     if (act) { setDraggingActivity(act); return; }
     const cell = event.active.data.current?.cell;
-    if (cell) setDraggingActivity({ name: cell.content, color: cell.color || '#e2e8f0' });
+    if (cell) setDraggingActivity({ name: cell.content, color: cell.color || '#EBE4D9' });
   };
 
   /**
@@ -745,11 +744,11 @@ export default function GanttEditor() {
             {/* Who may write this room's plan, on the plan. The manager set it
                 once and then wants to see it, not re-open a dialog to check. */}
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-              <Typography variant="caption" sx={{ color: '#64748b', fontWeight: 700 }}>
+              <Typography variant="caption" sx={{ color: '#6B6157', fontWeight: 700 }}>
                 מובילות:
               </Typography>
               {editorNames.length === 0 && (
-                <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                <Typography variant="caption" sx={{ color: '#A79C8E' }}>
                   לא הוגדרו — רק מנהלת יכולה לערוך
                 </Typography>
               )}
@@ -887,7 +886,7 @@ export default function GanttEditor() {
                         const shut = own ? isClosed(dd) : null;
                         return (
                           <TableCell key={di} sx={{
-                            bgcolor: !own ? '#64748b' : shut ? '#92400e' : hol ? '#b45309' : di === 5 ? '#5b21b6' : '#1e3a5f',
+                            bgcolor: !own ? '#6B6157' : shut ? '#92400e' : hol ? '#b45309' : di === 5 ? '#5b21b6' : '#1e3a5f',
                             color: 'white', fontWeight: 700, textAlign: 'center', p: 1,
                             opacity: own ? 1 : 0.55,
                           }}>
@@ -923,7 +922,7 @@ export default function GanttEditor() {
                               <Stack spacing={0.4}>
                                 {sessions.map(s => (
                                   <Box key={s._id} sx={{
-                                    bgcolor: SESSION_TINT[s.status] || '#f1f5f9', borderRadius: 1, px: 0.6, py: 0.2,
+                                    bgcolor: SESSION_TINT[s.status] || '#F3EEE6', borderRadius: 1, px: 0.6, py: 0.2,
                                     fontSize: '0.68rem', fontWeight: 700, color: '#334155',
                                     textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
                                   }}>
@@ -939,12 +938,12 @@ export default function GanttEditor() {
                     })()}
                     {rows.map((row, rowIdx) => (
                       <TableRow key={row.key}>
-                        <TableCell sx={{ bgcolor: '#f1f5f9', fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>
+                        <TableCell sx={{ bgcolor: '#F3EEE6', fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>
                           <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}>
                             <span>{row.label}</span>
                             {row.key.startsWith('c') && row.key.includes('_') && (
                               <IconButton size="small" onClick={() => removeRow(row.key)} sx={{ p: 0 }}>
-                                <DeleteIcon sx={{ fontSize: 14, color: '#94a3b8' }} />
+                                <DeleteIcon sx={{ fontSize: 14, color: '#A79C8E' }} />
                               </IconButton>
                             )}
                           </Stack>
@@ -1055,7 +1054,7 @@ export default function GanttEditor() {
                                         sx={{
                                           bgcolor: 'white', borderRadius: 1, py: 0.3,
                                           fontSize: '0.85rem', fontWeight: 700,
-                                          color: name ? '#1e293b' : '#94a3b8',
+                                          color: name ? '#1C1815' : '#A79C8E',
                                           borderColor: '#ddd6fe',
                                           '&:hover': { borderColor: '#8b5cf6', bgcolor: 'white' },
                                         }}
@@ -1084,7 +1083,7 @@ export default function GanttEditor() {
                               canDrag={!mergeMode && Boolean(String(cellContent).trim())}
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
-                                bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : own ? 'white' : '#f8fafc'),
+                                bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : own ? 'white' : '#FAF7F2'),
                                 border: picked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                                 p: 1, verticalAlign: 'top', cursor: mergeMode ? 'crosshair' : 'default',
                                 position: 'relative', '&:hover .ca': { opacity: 1 },
@@ -1105,7 +1104,7 @@ export default function GanttEditor() {
                               <Box className="ca" sx={{ position: 'absolute', top: 0, insetInlineStart: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
                                 <Tooltip title="צבע">
                                   <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
-                                    <PaletteIcon sx={{ fontSize: 13, color: '#94a3b8' }} />
+                                    <PaletteIcon sx={{ fontSize: 13, color: '#A79C8E' }} />
                                   </IconButton>
                                 </Tooltip>
                                 {canEdit && (
@@ -1115,7 +1114,7 @@ export default function GanttEditor() {
                                       if (!mergeMode) setMergeMode(true);
                                       handleMergeClick(weekIdx, row.key, si);
                                     }}>
-                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : '#94a3b8' }} />
+                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : '#A79C8E' }} />
                                     </IconButton>
                                   </Tooltip>
                                 )}
@@ -1123,7 +1122,7 @@ export default function GanttEditor() {
                               {(cs > 1 || rs > 1) && (
                                 <IconButton size="small" sx={{ position: 'absolute', bottom: 0, left: 0, p: '2px' }}
                                   onClick={() => updateCell(weekIdx, row.key, si, { col_span: 1, row_span: 1 })}>
-                                  <Typography sx={{ fontSize: '0.55rem', color: '#94a3b8' }}>✕</Typography>
+                                  <Typography sx={{ fontSize: '0.55rem', color: '#A79C8E' }}>✕</Typography>
                                 </IconButton>
                               )}
                             </GanttCell>
@@ -1139,14 +1138,14 @@ export default function GanttEditor() {
                         looking at. */}
                     {canEdit && (
                       <TableRow>
-                        <TableCell sx={{ bgcolor: '#f8fafc', p: 0.25, borderLeft: '2px solid #cbd5e1' }}>
+                        <TableCell sx={{ bgcolor: '#FAF7F2', p: 0.25, borderLeft: '2px solid #cbd5e1' }}>
                           <Button size="small" fullWidth startIcon={<AddIcon sx={{ fontSize: 15 }} />}
                             onClick={addRow}
-                            sx={{ fontSize: '0.72rem', color: '#64748b', py: 0.2, minHeight: 0 }}>
+                            sx={{ fontSize: '0.72rem', color: '#6B6157', py: 0.2, minHeight: 0 }}>
                             שורה
                           </Button>
                         </TableCell>
-                        <TableCell colSpan={DAY_NAMES.length} sx={{ bgcolor: '#f8fafc', p: 0.25 }} />
+                        <TableCell colSpan={DAY_NAMES.length} sx={{ bgcolor: '#FAF7F2', p: 0.25 }} />
                       </TableRow>
                     )}
                   </TableBody>

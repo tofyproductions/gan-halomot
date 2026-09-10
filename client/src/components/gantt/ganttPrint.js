@@ -33,7 +33,7 @@ const ROW_TINT = {
   story: { bg: '#fdfae6', label: '#fef9c3', ink: '#854d0e' },
   misc: { bg: '#f2effc', label: '#ede9fe', ink: '#5b21b6' },
 };
-const tintOf = (key) => ROW_TINT[key] || { bg: '#f8fafc', label: '#f1f5f9', ink: '#334155' };
+const tintOf = (key) => ROW_TINT[key] || { bg: '#FAF7F2', label: '#F3EEE6', ink: '#334155' };
 const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
@@ -315,7 +315,7 @@ export function buildGanttPrintHtml({
   body.img .head { margin-bottom: 14px; }
   ` : ''}
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  html { background: #e2e8f0; }
+  html { background: #EBE4D9; }
   /*
    * The body is exactly the printable width of the page, always.
    *
@@ -332,14 +332,14 @@ export function buildGanttPrintHtml({
          box-shadow: 0 0 0 1px #cbd5e1, 0 6px 24px rgba(15,23,42,.12); }
   @media print { html { background: #fff; } body { box-shadow: none; margin: 0; } }
   :root { --k: 1; --pad: 0mm; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
-  body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: #0f172a; }
+  body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: #1C1815; }
   /* A4 landscape less the 6mm @page margins, stated once and used by the
      fit script below so the two cannot drift apart. */
 
   .head { display: flex; align-items: center; justify-content: space-between;
           margin-bottom: 2mm; }
   .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: #1e3a5f; }
-  .head .s { font-size: calc(var(--head) * var(--k)); color: #64748b; font-weight: 700; }
+  .head .s { font-size: calc(var(--head) * var(--k)); color: #6B6157; font-weight: 700; }
 
   /* Cells sit in their own rounded tiles with white between them, the way the
      screen shows them. On paper it also stops five weeks of grid from reading
@@ -355,17 +355,17 @@ export function buildGanttPrintHtml({
   tr.banner .tp { font-size: calc(var(--head) * var(--k) * 1.25); font-weight: 800; }
   tr.banner .rg { font-size: calc(var(--small) * var(--k)); opacity: 0.75; margin-right: 4mm; }
 
-  th.d { background: #f1f5f9 !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
+  th.d { background: #F3EEE6 !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
          text-align: center; line-height: 1.15; }
   th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: #334155; }
-  th.d .dd { font-size: calc(var(--small) * var(--k)); color: #64748b; font-weight: 700; }
+  th.d .dd { font-size: calc(var(--small) * var(--k)); color: #6B6157; font-weight: 700; }
   th.d .hol { font-size: calc(var(--small) * var(--k)); color: #92400e; font-weight: 800; }
   th.d.shut { background: #fde68a !important; }
   th.d.short { background: #fef3c7 !important; }
   /* Only a PLAIN borrowed day fades — a borrowed day that is also a closure
      keeps its amber. The unqualified rule used to win the cascade and the
      end of סוכות printed as two ordinary white columns. */
-  th.d.borrowed:not(.shut):not(.short) { background: #f8fafc !important; }
+  th.d.borrowed:not(.shut):not(.short) { background: #FAF7F2 !important; }
   th.d.borrowed:not(.shut):not(.short) .dn,
   th.d.borrowed:not(.shut):not(.short) .dd { color: #a8b4c2; }
 
@@ -375,7 +375,7 @@ export function buildGanttPrintHtml({
 
   td.c { padding: calc(0.8mm + var(--pad)) 1mm; text-align: center; vertical-align: middle;
          font-size: calc(var(--cell) * var(--k)); line-height: 1.22; font-weight: 600;
-         color: #1e293b; overflow-wrap: anywhere; }
+         color: #1C1815; overflow-wrap: anywhere; }
   /* A day borrowed from the month next door is written in like any other, just
      quieter, so a parent reading the sheet knows which month they are in. */
   td.c.borrowed { opacity: 0.72; }

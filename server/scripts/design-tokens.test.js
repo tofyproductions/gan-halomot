@@ -95,6 +95,25 @@ async function main() {
   const bgs = Object.values(COLOR.punch).map((p) => p.bg.toLowerCase());
   ok(new Set(bgs).size === bgs.length, `כל ${bgs.length} מצבי ההחתמה בגוון נפרד`);
 
+  console.log('\nניגודיות צבעי הסניפים:');
+  for (const [name, b] of Object.entries(COLOR.branch)) {
+    const onStrip = contrast(b.stripText, b.strip);
+    const onName = contrast(COLOR.text.primary, b.nameTint);
+    const onRow = contrast(COLOR.text.primary, b.rowTint);
+    const worst = Math.min(onStrip, onName, onRow);
+    ok(worst >= AA, `branch.${name} — כותרת ${onStrip.toFixed(2)} · עמודת שם ${onName.toFixed(2)} · שורה ${onRow.toFixed(2)}`, `נדרש ${AA}`);
+  }
+  // Telling four gans apart at a glance is the entire job of this palette.
+  const strips = Object.values(COLOR.branch).map((b) => b.strip.toLowerCase());
+  ok(new Set(strips).size === strips.length, `כל ${strips.length} צבעי הסניפים נפרדים`);
+
+  console.log('\nצבעי תאי הגאנט (ערכים שמורים במסד — לא לשנות):');
+  ok(Array.isArray(COLOR.ganttCell) && COLOR.ganttCell.length === 6, 'שישה צבעים לבחירה');
+  for (const c of COLOR.ganttCell) {
+    const ratio = contrast(COLOR.text.primary, c.value);
+    ok(ratio >= AA, `ganttCell ${c.label} — טקסט ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+
   console.log('\nהצבע הישן לא חזר:');
   ok(COLOR.primary.main.toLowerCase() !== '#f59e0b',
     'primary.main אינו הכתום שנכשל בניגודיות');
