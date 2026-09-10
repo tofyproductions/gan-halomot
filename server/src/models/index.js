@@ -103,10 +103,12 @@ const ParentLetter = require('./ParentLetter');
 const RateChangeRequest = require('./RateChangeRequest');
 const PushSubscription = require('./PushSubscription');
 const DataDeletionRequest = require('./DataDeletionRequest');
+const NotificationEvent = require('./NotificationEvent');
 
 const real = {
   PushSubscription,
   DataDeletionRequest,
+  NotificationEvent,
   PayrollRollup,
   User,
   CustomRole,
