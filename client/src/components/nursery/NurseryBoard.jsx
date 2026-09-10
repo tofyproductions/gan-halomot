@@ -13,7 +13,14 @@ import { useAuth } from '../../hooks/useAuth';
 import ChildDayCard from './ChildDayCard';
 
 /**
- * לוח עדכונים — the תינוקייה's day.
+ * לוח עדכונים — the gan's day.
+ *
+ * Two boards behind one screen, chosen by the room. The infant rooms and the
+ * צעירים keep the full one: a card per child, every bottle and nap one tap
+ * away. The older rooms get a single line for the whole class — "what we did
+ * today" — because a teacher of twenty four-year-olds filling in twenty cards
+ * is a board that never gets filled in, and until now those rooms had no
+ * board and their parents had no day.
  *
  * Replaces a Google Sheet the staff drove through an Apps Script page. The
  * shape of the screen is kept because it earned its shape in the room: the
@@ -41,6 +48,11 @@ export default function NurseryBoard() {
   const [toast, setToast] = useState('');
   const [classroomId, setClassroomId] = useState('');
   const [date, setDate] = useState('');
+  // The older rooms' one line. Held as a draft and saved by hand: it is a
+  // sentence somebody is in the middle of typing, not a tap on a chip.
+  const [activity, setActivity] = useState('');
+  const [activitySaving, setActivitySaving] = useState(false);
+  const [activitySaved, setActivitySaved] = useState(false);
 
   const load = useCallback(async (opts = {}) => {
     setError('');
@@ -52,6 +64,8 @@ export default function NurseryBoard() {
       setData(res.data);
       setClassroomId(String(res.data.classroom?.id || ''));
       setDate(res.data.date);
+      setActivity(res.data.activity || '');
+      setActivitySaved(false);
     } catch (err) {
       setError(err.response?.data?.error || 'לא הצלחנו לטעון את הלוח');
     } finally {
@@ -82,6 +96,23 @@ export default function NurseryBoard() {
     }
   };
 
+  const saveActivity = async () => {
+    setActivitySaving(true);
+    try {
+      await api.put('/nursery/classroom-day', {
+        classroom_id: data.classroom.id,
+        date: data.date,
+        activity,
+      });
+      setActivitySaved(true);
+      setData(d => ({ ...d, activity }));
+    } catch (err) {
+      setToast(err.response?.data?.error || 'השמירה נכשלה');
+    } finally {
+      setActivitySaving(false);
+    }
+  };
+
   const toggleDish = async (mealKey, category, dish) => {
     const key = `${mealKey}.${category}`;
     const current = data.menu_selections[key] || [];
@@ -107,17 +138,17 @@ export default function NurseryBoard() {
   if (error && !data) return <Alert severity="error">{error}</Alert>;
 
   if (!data?.classrooms?.length) {
-    return (
-      <Alert severity="info">
-        לא נמצאו כיתות תינוקייה. הלוח היומי קיים לתינוקיות בלבד.
-      </Alert>
-    );
+    return <Alert severity="info">לא נמצאו כיתות פעילות.</Alert>;
   }
+
+  // Which board this room keeps. Decided on the server (nursery.boardKind) and
+  // read here, so the two never disagree about a room somebody re-categorised.
+  const light = data.classroom?.board === 'light';
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Typography variant="h5" fontWeight={700}>לוח תינוקייה</Typography>
+        <Typography variant="h5" fontWeight={700}>לוח יומי</Typography>
         {mayEditSettings && (
           <Button size="small" startIcon={<SettingsIcon />} onClick={() => navigate('/nursery/settings')}>
             הגדרות
@@ -191,7 +222,44 @@ export default function NurseryBoard() {
         </AccordionDetails>
       </Accordion>
 
-      {data.children.length === 0 && (
+      {/* The older rooms' whole board: one line, for the room. */}
+      {light && (
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 0.5 }}>
+              מה עשינו היום
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              נכתב פעם אחת לכל הכיתה, וההורים של כל ילדי הכיתה רואים את זה.
+            </Typography>
+            <TextField
+              fullWidth multiline minRows={3} size="small" sx={{ mt: 1.5 }}
+              placeholder="למשל: יצאנו לחצר, הכנו עוגיות ושמענו סיפור על הפיל"
+              value={activity}
+              disabled={!isToday}
+              onChange={(e) => { setActivity(e.target.value); setActivitySaved(false); }}
+            />
+            {isToday && (
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mt: 1.5 }}>
+                <Button
+                  variant="contained" size="small"
+                  disabled={activitySaving || activity === (data.activity || '')}
+                  onClick={saveActivity}
+                >
+                  {activitySaving ? 'שומר…' : 'שמירה'}
+                </Button>
+                {activitySaved && (
+                  <Typography variant="caption" color="success.main" fontWeight={700}>
+                    נשמר — ההורים רואים
+                  </Typography>
+                )}
+              </Stack>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {!light && data.children.length === 0 && (
         <Alert severity="info">אין ילדים פעילים בכיתה זו.</Alert>
       )}
 

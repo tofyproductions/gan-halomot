@@ -273,7 +273,11 @@ export default function ChildDetails({ childId }) {
   const tabs = useMemo(() => {
     if (!data) return [];
     const list = [{ key: 'home', label: 'בית', icon: <HomeRoundedIcon />, primary: true }];
-    if (data.is_nursery) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon />, primary: true });
+    // Every child now, not only the infants. What is INSIDE the section
+    // differs — the older rooms get what the class did, what the kitchen
+    // served and the day's photographs — but the day itself is the thing a
+    // parent opens the app for at every age.
+    if (data.day_board) list.push({ key: 'day', label: 'היום בגן', icon: <TodayIcon />, primary: true });
     // Photographs are the other thing a parent opens the app for, and burying
     // them behind the paperwork would be the same mistake the single scroll made.
     list.push({ key: 'photos', label: 'תמונות', icon: <PhotoLibraryIcon />, primary: true });
@@ -396,7 +400,7 @@ export default function ChildDetails({ childId }) {
         <ParentHome
           childId={childId}
           childName={data.child.name}
-          isNursery={data.is_nursery}
+          dayBoard={data.day_board}
           photos={myPhotos}
           payments={payments}
           announcements={news}

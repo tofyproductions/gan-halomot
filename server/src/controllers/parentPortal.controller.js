@@ -1,4 +1,7 @@
-const { ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, Photo, GiftSelection } = require('../models');
+const {
+  ParentAccount, Contract, Registration, Child, DailyLog, DailyMenu, ClassroomDay,
+  Photo, GiftSelection,
+} = require('../models');
 const vacationCalendar = require('../services/vacationCalendar');
 const parentVisibility = require('../services/parentVisibility');
 const nursery = require('../services/nursery.service');
@@ -136,6 +139,11 @@ async function childDetails(req, res) {
     // the infant rooms keep one; a three-year-old's parent has no bottle log
     // to read and should not be shown an empty one.
     is_nursery: nursery.isNurseryClassroom(child.classroom_id),
+    // Which KIND of day this child has. Every child has one now — 'full' is
+    // the bottle log and the morning-at-home form (תינוקייה, צעירים), 'light'
+    // is what the class did, what the kitchen served and the photographs.
+    // The screen reads this rather than re-deciding from the room's name.
+    day_board: nursery.boardKind(child.classroom_id),
   });
 }
 
@@ -157,9 +165,10 @@ async function childDay(req, res) {
   if (!own) return res.status(404).json({ error: 'לא נמצא' });
 
   const { child } = own;
-  if (!nursery.isNurseryClassroom(child.classroom_id)) {
-    return res.status(400).json({ error: 'הלוח היומי קיים לתינוקייה בלבד' });
-  }
+  // Every child has a day now. Which kind decides what is fetched below and
+  // what the screen draws: the infant rooms keep the bottle log, the older
+  // ones get the class's own line, the kitchen's menu and the photographs.
+  const kind = nursery.boardKind(child.classroom_id);
 
   const today = nursery.todayKey();
   const date = nursery.normalizeDateKey(req.query.date) || today;
@@ -172,10 +181,23 @@ async function childDay(req, res) {
   const menuVisible = branchId
     ? (await parentVisibility.visibilityFor(branchId, parentVisibility.weekKey(date))).menu
     : true;
-  const [log, menuDoc, menu] = await Promise.all([
-    DailyLog.findOne({ child_id: child._id, date }).lean(),
+  const classroomId = child.classroom_id?._id || child.classroom_id || null;
+
+  const [log, menuDoc, menu, classDay, classPhotos] = await Promise.all([
+    kind === 'full' ? DailyLog.findOne({ child_id: child._id, date }).lean() : null,
     branchId ? DailyMenu.findOne({ branch_id: branchId, date }).lean() : null,
     nursery.getMenu(),
+    kind === 'light' && classroomId
+      ? ClassroomDay.findOne({ classroom_id: classroomId, date }).lean()
+      : null,
+    // The room's photographs from that day — a class gallery, which is what
+    // the staff upload and what every family in the room may see. `source:
+    // 'staff'` is the whole of the rule: a photograph a PARENT uploaded is
+    // theirs alone and has no business on somebody else's screen.
+    kind === 'light' && classroomId && storage.isConfigured()
+      ? Photo.find({ classroom_id: classroomId, source: 'staff', date })
+        .sort({ created_at: -1 }).limit(30).lean()
+      : [],
   ]);
 
   // Only the dishes actually chosen. Handing over the whole menu and letting
@@ -213,11 +235,24 @@ async function childDay(req, res) {
       categories,
     }));
 
+  const photos = classPhotos.length
+    ? (await photoService.withUrls(classPhotos)).map(p => ({
+      id: p._id, date: p.date, caption: p.caption || '',
+      width: p.width, height: p.height, url: p.url, thumb_url: p.thumb_url,
+    }))
+    : [];
+
   return res.json({
     date,
     today,
     is_today: date === today,
+    board: kind,
     child: { id: child._id, name: child.child_name },
+    // The older rooms' whole day, in the class's own words. Empty string means
+    // nobody has written today yet — which the screen says differently from a
+    // room that has no such line at all.
+    activity: classDay?.activity || '',
+    photos,
     // Absent means nobody has recorded anything yet, which the screen must say
     // differently from "the child was marked away".
     log: log ? {
@@ -269,8 +304,11 @@ async function updateChildDay(req, res) {
   if (!own) return res.status(404).json({ error: 'לא נמצא' });
 
   const { child } = own;
-  if (!nursery.isNurseryClassroom(child.classroom_id)) {
-    return res.status(400).json({ error: 'הלוח היומי קיים לתינוקייה בלבד' });
+  // The morning-at-home form belongs to the rooms whose day is made of it.
+  // A four-year-old's parent is not asked how much of a bottle was drunk, and
+  // a request naming those fields for such a child writes nothing.
+  if (nursery.boardKind(child.classroom_id) !== 'full') {
+    return res.status(400).json({ error: 'הדיווח מהבית קיים לתינוקייה ולצעירים בלבד' });
   }
 
   const today = nursery.todayKey();

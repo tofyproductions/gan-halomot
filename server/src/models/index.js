@@ -93,6 +93,7 @@ const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
 const DailyLog = require('./DailyLog');
 const DailyMenu = require('./DailyMenu');
+const ClassroomDay = require('./ClassroomDay');
 const Photo = require('./Photo');
 const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
@@ -188,6 +189,7 @@ const real = {
   ParentPortalChange,
   DailyLog,
   DailyMenu,
+  ClassroomDay,
   Photo,
   GiftCampaign,
   GiftSelection,

@@ -20,6 +20,9 @@ const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_lea
 
 router.get('/board', allow, ctrl.board);
 router.patch('/log/:childId', allow, ctrl.updateLog);
+// The older rooms' whole day: one line for the class. Same permission as the
+// per-child log — whoever fills the board fills this.
+router.put('/classroom-day', allow, ctrl.setClassroomDay);
 router.put('/menu', allow, ctrl.setMenu);
 
 // The lists and the menu behind the board. Reading them is part of using the

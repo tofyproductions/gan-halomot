@@ -69,6 +69,48 @@ async function nurseryClassrooms(filter = {}) {
 }
 
 /**
+ * How much of a day this room keeps: 'full' or 'light'.
+ *
+ * 'full' is the board as it has always been — the bottle log, the naps, the
+ * nappies, and the four fields the family fills in from home before the child
+ * arrives. It belongs to the rooms whose day is actually made of those things:
+ * תינוקייה and צעירים.
+ *
+ * 'light' is everything else. A four-year-old's parent has no bottle to read
+ * and the staff of that room should not be handed a screen asking for one —
+ * but the parent still wants the day, and the day for them is three things:
+ * what the kitchen served, what the class did, and the photographs. So the
+ * older rooms get a board of one line for the whole class rather than no
+ * board at all, which is what they had until now.
+ *
+ * An unplaced or uncategorised room falls to 'light' deliberately. The light
+ * board asks nothing of anybody and shows what happens to exist; the full one
+ * would present a family with an empty bottle log for a child who does not
+ * drink from one.
+ */
+const FULL_BOARD_CATEGORIES = new Set(['תינוקייה', 'צעירים']);
+
+function boardKind(classroom) {
+  return FULL_BOARD_CATEGORIES.has(classroomCategory(classroom)) ? 'full' : 'light';
+}
+
+/**
+ * Every active room the daily board covers — which is now all of them.
+ *
+ * Same de-duplication as the infant list: a branch mid-rollover holds this
+ * year's room and last year's under the same name, and the board must offer
+ * one of them.
+ */
+async function boardClassrooms(filter = {}) {
+  const { dedupeNewest } = require('./classroomList');
+  const rooms = await Classroom.find({ is_active: true, ...filter })
+    .populate('branch_id', 'name')
+    .sort({ name: 1 })
+    .lean();
+  return dedupeNewest(rooms);
+}
+
+/**
  * The lists the board offers.
  *
  * These came from a "הגדרות" tab the staff edited themselves, and they must
@@ -168,6 +210,7 @@ function normalizeDateKey(raw) {
 
 module.exports = {
   isNurseryClassroom, nurseryClassrooms, classroomCategory,
+  boardKind, boardClassrooms,
   getOptions, getMenu, todayKey, normalizeDateKey,
   DEFAULT_OPTIONS, DEFAULT_MENU, OPTIONS_KEY, MENU_KEY,
   NURSERY_CATEGORY,

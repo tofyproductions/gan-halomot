@@ -131,6 +131,10 @@ function TodayCard({ day, childName, onOpen }) {
   const absent = log?.attendance === 'חסר';
   const stats = statsFrom(log);
   const recorded = stats.some(s => s.value) || absent;
+  // An older room has no bottle log to summarise. Its day is the line the
+  // class wrote, and that line IS the card — shown whole rather than squeezed
+  // into three tiles that would each hold a fragment of a sentence.
+  const light = day?.board === 'light';
 
   return (
     <DoorCard onClick={onOpen} label={`היום של ${childName}`}>
@@ -145,14 +149,20 @@ function TodayCard({ day, childName, onOpen }) {
           <Stack direction="row" alignItems="flex-start" sx={{ mb: 1.5 }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: '1.15rem', lineHeight: 1.25 }}>
-                {absent ? `${childName} לא היה/תה היום בגן` : `היום של ${childName}`}
+                {absent && !light ? `${childName} לא היה/תה היום בגן` : `היום של ${childName}`}
               </Typography>
               <Typography variant="caption" sx={{ opacity: 0.92 }}>{todayLine()}</Typography>
             </Box>
             <More text="הכל" color="inherit" />
           </Stack>
 
-          {absent ? (
+          {light ? (
+            <Typography variant="body2" sx={{ opacity: 0.9, whiteSpace: 'pre-wrap' }}>
+              {day?.activity
+                ? day.activity
+                : 'הצוות עוד לא כתב מה עשינו היום.'}
+            </Typography>
+          ) : absent ? (
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
               הצוות סימן היעדרות. יש לפנות לגן אם זו טעות.
             </Typography>
@@ -402,14 +412,14 @@ function QuickActions({ actions }) {
 }
 
 export default function ParentHome({
-  childId, childName, isNursery,
+  childId, childName, dayBoard,
   photos = [], payments = null, announcements = [], onOpen,
 }) {
   const [day, setDay] = useState(null);
-  const [loading, setLoading] = useState(isNursery);
+  const [loading, setLoading] = useState(Boolean(dayBoard));
 
   useEffect(() => {
-    if (!isNursery) { setDay(null); setLoading(false); return undefined; }
+    if (!dayBoard) { setDay(null); setLoading(false); return undefined; }
 
     let cancelled = false;
     setLoading(true);
@@ -426,7 +436,7 @@ export default function ParentHome({
     })();
 
     return () => { cancelled = true; };
-  }, [childId, isNursery]);
+  }, [childId, dayBoard]);
 
   if (loading) {
     return (
@@ -455,7 +465,7 @@ export default function ParentHome({
       />,
     );
   }
-  if (isNursery) {
+  if (dayBoard) {
     cards.push(
       <TodayCard key="day" day={day} childName={childName} onOpen={() => onOpen('day')} />,
     );
