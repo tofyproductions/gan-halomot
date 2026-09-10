@@ -241,11 +241,30 @@ async function childPayments(req, res) {
   const branch = reg.branch_id
     ? await Branch.findById(reg.branch_id).select('name tmt_supervised').lean()
     : null;
+  const academicYear = normalizeYear(child.academic_year || reg.academic_year || '');
+
   if (branch && isTmtSupervised(branch)) {
-    return res.json(await externalPayments(own, branch));
+    /**
+     * One exception, and it is evidence rather than a guess.
+     *
+     * A supervised branch can still hold a child the gan collects from
+     * itself — "בגן ללא תמ"ת", a family not funded by the ministry and paying
+     * in full. When the office has actually set a fee AND opened a collection
+     * row for them, there is a real ledger here, and it says more than a
+     * ClickTac balance that will never carry their name.
+     *
+     * Both conditions together. A fee typed in for some other reason, with no
+     * collection behind it, is not a ledger — and a table of receipts nobody
+     * issued would be worse than the balance.
+     */
+    const ownLedger = academicYear
+      && !feeStillUnknown(reg)
+      && (parseFloat(reg.monthly_fee) || 0) > 0
+      && Boolean(await Collection.exists({ registration_id: reg._id, academic_year: academicYear }));
+
+    if (!ownLedger) return res.json(await externalPayments(own, branch));
   }
 
-  const academicYear = normalizeYear(child.academic_year || reg.academic_year || '');
   if (!academicYear) {
     return res.json({ available: false, reason: 'no_year' });
   }
