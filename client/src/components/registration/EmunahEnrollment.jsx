@@ -12,6 +12,7 @@ import DebtorsDialog from './DebtorsDialog';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranch } from '../../hooks/useBranch';
 import { hasTabAccess } from '../../config/tabs';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 import TmtReconcile from './TmtReconcile';
@@ -107,7 +108,33 @@ export default function EmunahEnrollment() {
   const canPlace = CAN_PLACE.includes(user?.role) || canImport;
 
   const [branches, setBranches] = useState([]);
-  const [branchId, setBranchId] = useState(localStorage.getItem('selectedBranch') || '');
+  /**
+   * The branch comes from the rail, not from this screen.
+   *
+   * It used to be a dropdown in this screen's own header, writing the same
+   * localStorage key the rail uses — two controls for one fact, and whichever
+   * you touched last won. The header lost its copy, so this has to follow the
+   * rail: without the effect below, `useState(localStorage.getItem(...))` reads
+   * once at mount and a person switching gan in the rail keeps looking at the
+   * previous gan's cohort with no way on the page to correct it. On a screen
+   * whose whole job is filing children into the right gan, that is the worst
+   * possible thing to get quietly wrong.
+   *
+   * `all` is deliberately not adopted: the comparison is per-gan (a ministry
+   * file is downloaded per מעון), so the last real branch is kept instead.
+   */
+  const { selectedBranch } = useBranch();
+  const [branchId, setBranchId] = useState(
+    (selectedBranch && selectedBranch !== 'all' ? selectedBranch : null)
+      || localStorage.getItem('selectedBranch')
+      || ''
+  );
+
+  useEffect(() => {
+    if (selectedBranch && selectedBranch !== 'all' && selectedBranch !== branchId) {
+      setBranchId(selectedBranch);
+    }
+  }, [selectedBranch, branchId]);
   // Bumped after an upload or a delete: both views refetch, neither is remounted.
   const [reloadKey, setReloadKey] = useState(0);
 

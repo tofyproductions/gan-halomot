@@ -12,6 +12,17 @@ import { useAuth } from '../../hooks/useAuth';
 export const MOBILE_NAV_HEIGHT = 56;
 
 /**
+ * Whether the bottom bar will actually render, for anyone who needs to leave
+ * room for it. AppShell used to assume it always does and reserved the space
+ * unconditionally; a person with no visible tabs got 72px of empty page.
+ */
+export function useHasMobileNav() {
+  const { user } = useAuth();
+  const model = useMemo(() => buildNavModel(user), [user]);
+  return model.some((g) => g.items.length > 0);
+}
+
+/**
  * The four screens that are actually opened from a phone, standing in a room:
  * the infant board, what ran out, the punch clock, and the camera roll. The
  * office screens are all still here under "עוד" — they are simply not what

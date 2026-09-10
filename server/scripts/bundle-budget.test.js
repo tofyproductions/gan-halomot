@@ -18,6 +18,8 @@
  * it grows.
  *
  *   npm --prefix client run build && node scripts/bundle-budget.test.js
+ *
+ * Fails when there is no build to measure. --allow-missing opts out, loudly.
  */
 const fs = require('fs');
 const path = require('path');
@@ -38,11 +40,26 @@ function ok(cond, label, detail = '') {
 function main() {
   console.log('=== תקציב הטעינה הראשונה ===\n');
 
+  /**
+   * No build, no pass.
+   *
+   * This used to print a note and exit 0, which is the worst of both: a
+   * pipeline whose build step failed or was skipped runs this, sees green, and
+   * ships the very regression the file exists to catch — a heavy library back
+   * on the critical path, measured by nobody. Skipping has to be asked for out
+   * loud.
+   */
   const indexHtml = path.join(DIST, 'index.html');
   if (!fs.existsSync(indexHtml)) {
-    console.log('אין build. הרץ קודם:  npm --prefix client run build');
-    console.log('\n⏭️  מדלג.\n');
-    process.exit(0);
+    const skipping = process.argv.includes('--allow-missing');
+    console.log('אין build ב-client/dist. הרץ קודם:  npm --prefix client run build');
+    if (skipping) {
+      console.log('\n⏭️  --allow-missing — מדלג במפורש.\n');
+      process.exit(0);
+    }
+    console.log('\n❌ אין מה למדוד, ולכן אין מה לאשר.');
+    console.log('   (להרצה מכוונת בלי build:  node scripts/bundle-budget.test.js --allow-missing)\n');
+    process.exit(1);
   }
 
   const html = fs.readFileSync(indexHtml, 'utf8');

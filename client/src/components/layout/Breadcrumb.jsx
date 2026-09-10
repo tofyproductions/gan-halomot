@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { screenForPath, titleForPath } from '../../config/screenMeta';
 
 /**
@@ -12,12 +12,14 @@ import { screenForPath, titleForPath } from '../../config/screenMeta';
  * in the tab strip, where all 72 screens said "גן החלומות - ניהול חכם" and an
  * office with eleven tabs open found the right one by clicking through them.
  *
- * The section is a link because it is the fastest way back to the group you
- * were working in, and one line of 12px type is a cheap price for that.
+ * The section is NOT a link. It was one, and it navigated to the dashboard —
+ * because a section is a heading in the rail and has no page of its own — so
+ * the underline promised a destination the click did not deliver. A crumb that
+ * lies about where it goes is worse than a crumb that goes nowhere; this one
+ * just says where you are, which is the whole job.
  */
 export default function Breadcrumb() {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const screen = screenForPath(pathname);
 
   // The tab title lives here rather than in each of 62 screens, so a screen
@@ -29,12 +31,6 @@ export default function Breadcrumb() {
   // The dashboard is the root. Saying "ניהול / לוח בקרה" over the words
   // "לוח בקרה" is the crumb explaining itself.
   if (!screen.known || pathname === '/') return null;
-
-  const openGroup = () => {
-    // Nothing to navigate to — a section is a heading, not a screen — so this
-    // goes home, where the rail opens that section.
-    navigate('/');
-  };
 
   return (
     <Box
@@ -51,24 +47,7 @@ export default function Breadcrumb() {
     >
       {screen.group && (
         <>
-          <Box
-            component="button"
-            type="button"
-            onClick={openGroup}
-            sx={{
-              border: 0,
-              p: 0,
-              bgcolor: 'transparent',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              fontSize: 'inherit',
-              color: 'inherit',
-              '&:hover': { color: 'text.secondary', textDecoration: 'underline' },
-              '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
-            }}
-          >
-            {screen.group}
-          </Box>
+          <Box component="span">{screen.group}</Box>
           <Box component="span" aria-hidden>/</Box>
         </>
       )}

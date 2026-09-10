@@ -4,7 +4,7 @@ import ScreenSkeleton from '../ui/ScreenSkeleton';
 import Breadcrumb from './Breadcrumb';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
-import MobileNav, { MOBILE_NAV_HEIGHT } from './MobileNav';
+import MobileNav, { MOBILE_NAV_HEIGHT, useHasMobileNav } from './MobileNav';
 import { useAuth } from '../../hooks/useAuth';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
@@ -27,6 +27,8 @@ import { MyDecisionsPopup } from '../payroll/MyDecisions';
  * task gate and the decisions popup.
  */
 export default function AppShell() {
+  const hasMobileNav = useHasMobileNav();
+
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', bgcolor: 'background.default' }}>
       <Box sx={{ display: { xs: 'none', md: 'block' } }}>
@@ -41,8 +43,11 @@ export default function AppShell() {
           px: { xs: 2, md: 3 },
           py: { xs: 2, md: 2.5 },
           // Clear of the phone's bottom bar, which is fixed and would otherwise
-          // sit on top of the last row of whatever table is open.
-          pb: { xs: `calc(${MOBILE_NAV_HEIGHT}px + 16px)`, md: 2.5 },
+          // sit on top of the last row of whatever table is open — but only
+          // when there is a bar. MobileNav renders nothing for somebody with no
+          // visible tabs, and reserving the space anyway left 72px of blank
+          // page under the content.
+          pb: { xs: hasMobileNav ? `calc(${MOBILE_NAV_HEIGHT}px + 16px)` : 2, md: 2.5 },
         }}
       >
         {/* A branch manager's open "complete your missing punches" assignment —

@@ -11,6 +11,17 @@
 // transparent canvas flattened to JPEG can render blank/black) and wait for
 // fonts before rasterizing.
 async function mount(html) {
+  // FETCHED BEFORE ANYTHING IS ATTACHED TO THE PAGE.
+  //
+  // This renderer and its canvas engine are just under a megabyte and are
+  // needed by the person producing a contract PDF, not by everybody who opens
+  // the app — hence the dynamic import. But it has to happen first: if it
+  // rejects (offline, or a deploy replaced the hashed chunk mid-session) and
+  // the wrapper is already in the document, mount throws before the caller
+  // reaches its try/finally and the hidden 900px div is orphaned, once per
+  // attempt.
+  const { default: html2pdf } = await import('html2pdf.js');
+
   const wrapper = document.createElement('div');
   Object.assign(wrapper.style, {
     position: 'absolute',
@@ -25,11 +36,6 @@ async function mount(html) {
   content.innerHTML = html;
   wrapper.appendChild(content);
   document.body.appendChild(wrapper);
-
-  // Fetched here rather than at the top of the file: this renderer and its
-  // canvas engine are just under a megabyte, and they are needed by the person
-  // producing a contract PDF, not by everybody who opens the app.
-  const { default: html2pdf } = await import('html2pdf.js');
 
   const worker = html2pdf()
     .set({
