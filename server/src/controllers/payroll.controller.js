@@ -2846,6 +2846,7 @@ async function approvePunch(req, res, next) {
       p.approval_decided_at = new Date();
       p.approval_decided_note = req.body?.note || '';
       await p.save();
+      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
       return res.json({ ok: true, punch: p, applied_edit: true });
     }
 
@@ -2878,6 +2879,14 @@ async function approvePunch(req, res, next) {
       p.manager_approved_by = req.user.id;
       p.manager_approved_at = new Date();
       await p.save();
+      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+      const accIds = await notificationService.accountantIds();
+      for (const recipient_id of accIds) {
+        await notificationService.createEvent({
+          type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+          title: 'ממתין לאישור הנהלת חשבונות', body: 'תיקון החתמה חוצה-סניפים', url: '/attendance',
+        });
+      }
       return res.json({ ok: true, punch: p, pending: true });
     }
 
@@ -2915,6 +2924,16 @@ async function approvePunch(req, res, next) {
       return res.status(403).json({ error: 'אין הרשאה לאשר את ההחתמה בשלב זה' });
     }
     await p.save();
+    await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+    if (p.approval_status === 'pending_accountant' && (st === 'pending_manager' || st === 'pending')) {
+      const accIds = await notificationService.accountantIds();
+      for (const recipient_id of accIds) {
+        await notificationService.createEvent({
+          type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+          title: 'ממתין לאישור הנהלת חשבונות', body: 'דיווח החתמה', url: '/attendance',
+        });
+      }
+    }
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
 }
@@ -2960,6 +2979,7 @@ async function rejectPunch(req, res, next) {
       p.approval_decided_at = new Date();
       p.approval_decided_note = req.body?.note || '';
       await p.save();
+      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
       return res.json({ ok: true, punch: p, restored: true });
     }
     p.approval_status = 'rejected';
@@ -2967,6 +2987,7 @@ async function rejectPunch(req, res, next) {
     p.approval_decided_at = new Date();
     p.approval_decided_note = req.body?.note || '';
     await p.save();
+    await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
 }
