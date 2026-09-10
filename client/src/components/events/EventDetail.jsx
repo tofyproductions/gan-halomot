@@ -15,7 +15,6 @@ import AddBusinessIcon from '@mui/icons-material/AddBusiness';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import ListAltIcon from '@mui/icons-material/ListAlt';
 import { toast } from 'react-toastify';
-import html2pdf from 'html2pdf.js';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
 import EventEditor from './EventEditor';
@@ -87,7 +86,7 @@ export default function EventDetail({ open, groupId, branches = [], onClose, onC
     } catch (e) { toast.error(e.response?.data?.error || 'שגיאה'); }
   };
 
-  const exportPdf = (branch) => {
+  const exportPdf = async (branch) => {
     const el = document.createElement('div');
     el.setAttribute('dir', 'rtl');
     el.style.cssText = 'font-family: Arial, sans-serif; padding: 24px; color: #1a1a1a; width: 700px;';
@@ -114,6 +113,9 @@ export default function EventDetail({ open, groupId, branches = [], onClose, onC
       </table>
       <div style="margin-top:12px;color:#888;font-size:12px;">שוריינו ${branch.taken_items}/${branch.total_items} פריטים</div>`;
     try {
+      // Just under a megabyte, fetched when somebody exports rather than when
+      // anybody opens the app.
+      const { default: html2pdf } = await import('html2pdf.js');
       html2pdf().set({
         margin: 10,
         filename: `${ev.name.replace(/[^֐-׿\w -]/g, '')}-${branch.branch_name.replace(/[^֐-׿\w -]/g, '')}.pdf`,

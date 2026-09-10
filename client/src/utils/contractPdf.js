@@ -1,4 +1,3 @@
-import html2pdf from 'html2pdf.js';
 
 // Client-side contract → PDF rendering. The server has no HTML→PDF engine, so
 // the contract (a full HTML document with an embedded <style> block) is
@@ -11,7 +10,7 @@ import html2pdf from 'html2pdf.js';
 // to html2pdf has no positioning. We also force a white background (a
 // transparent canvas flattened to JPEG can render blank/black) and wait for
 // fonts before rasterizing.
-function mount(html) {
+async function mount(html) {
   const wrapper = document.createElement('div');
   Object.assign(wrapper.style, {
     position: 'absolute',
@@ -26,6 +25,11 @@ function mount(html) {
   content.innerHTML = html;
   wrapper.appendChild(content);
   document.body.appendChild(wrapper);
+
+  // Fetched here rather than at the top of the file: this renderer and its
+  // canvas engine are just under a megabyte, and they are needed by the person
+  // producing a contract PDF, not by everybody who opens the app.
+  const { default: html2pdf } = await import('html2pdf.js');
 
   const worker = html2pdf()
     .set({
@@ -120,7 +124,7 @@ async function settle(content) {
 
 // Render the contract HTML and trigger a PDF download.
 export async function renderHtmlToPdf(html, filename) {
-  const { wrapper, content, worker } = mount(html);
+  const { wrapper, content, worker } = await mount(html);
   try {
     await settle(content);
     await worker.set({ filename: filename || 'contract.pdf' }).save();
@@ -132,7 +136,7 @@ export async function renderHtmlToPdf(html, filename) {
 // Render the contract HTML to a PDF data-URI string (no download) — used to
 // upload the signed contract to the server.
 export async function renderHtmlToPdfDataUri(html) {
-  const { wrapper, content, worker } = mount(html);
+  const { wrapper, content, worker } = await mount(html);
   try {
     await settle(content);
     return await worker.outputPdf('datauristring');

@@ -10,7 +10,6 @@ import WarningIcon from '@mui/icons-material/Warning';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
-import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { COLOR } from '../../theme/tokens';

@@ -1,0 +1,6 @@
+{
+  "firstLoadGzipKB": 250,
+  "recorded": "2026-09-10",
+  "was": "1168 KB gzip / 3.99 MB raw, in one chunk, before routes and vendors were split",
+  "note": "What index.html pulls in before first paint: the entry chunk plus every modulepreload. Lazily-imported screens are deliberately not counted — that is the point. Only ever goes down. Enforced by server/scripts/bundle-budget.test.js, which must run after a build."
+}

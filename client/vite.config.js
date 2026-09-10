@@ -19,6 +19,43 @@ export default defineConfig({
   build: {
     sourcemap: false,
     minify: 'esbuild',
+
+    /**
+     * Which third-party code travels together.
+     *
+     * Screens are split by route (see App.jsx), which took the first download
+     * from 4MB to 2.3MB — but the remainder is almost all library code, and it
+     * was still one block. Two things follow from splitting it.
+     *
+     * The heavy, occasional ones stop riding along: the spreadsheet writer, the
+     * PDF renderer and the chart library together are most of a megabyte, and
+     * they are needed by the person exporting payroll to Excel, not by the
+     * assistant opening the infant board on a phone. They now arrive with the
+     * screen that asks for them.
+     *
+     * And the rest — React, MUI, the router — is the part that does NOT change
+     * when we ship a design fix. Kept in its own file it keeps its cache across
+     * deploys, so a staff member who has used the app before downloads the
+     * changed screens and nothing else.
+     */
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('xlsx')) return 'vendor-xlsx';
+          if (id.includes('html2pdf') || id.includes('html2canvas') || id.includes('jspdf')) return 'vendor-pdf';
+          if (id.includes('apexcharts')) return 'vendor-charts';
+          if (id.includes('@dnd-kit')) return 'vendor-dnd';
+          if (id.includes('signature')) return 'vendor-signature';
+          if (id.includes('@mui') || id.includes('@emotion')) return 'vendor-mui';
+          // React, the router and everything else unclaimed go in ONE bucket.
+          // Splitting react out from a catch-all made the two depend on each
+          // other — rollup warns "Circular chunk", and a circular chunk pair is
+          // an initialisation-order bug waiting for the wrong load order.
+          return 'vendor';
+        },
+      },
+    },
   },
   esbuild: {
     drop: ['console', 'debugger'],

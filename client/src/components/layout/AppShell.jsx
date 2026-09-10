@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { Box } from '@mui/material';
+import ScreenSkeleton from '../ui/ScreenSkeleton';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MobileNav, { MOBILE_NAV_HEIGHT } from './MobileNav';
@@ -49,7 +50,15 @@ export default function AppShell() {
         {/* What accounting decided on the requests THIS person sent. Shown once
             on entry, then reachable from the bell — the screen keeps the rest. */}
         <MyDecisionsPopup />
-        <Outlet />
+
+        {/* Screens arrive one at a time now (see App.jsx), and the boundary is
+            HERE rather than around the whole route tree so the rail, the branch
+            selector and the gates above stay on screen while one loads. A
+            person clicking שכר should see שכר appear inside the app, not the
+            app disappear and come back. */}
+        <Suspense fallback={<ScreenSkeleton />}>
+          <Outlet />
+        </Suspense>
       </Box>
 
       <MobileNav />

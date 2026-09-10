@@ -1,77 +1,101 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { Box } from '@mui/material';
 import AppShell from './components/layout/AppShell';
+import ScreenSkeleton from './components/ui/ScreenSkeleton';
 import LoginPage from './components/layout/LoginPage';
-import NurseryBoard from './components/nursery/NurseryBoard';
-import NurserySettings from './components/nursery/NurserySettings';
-import PhotosManager from './components/nursery/PhotosManager';
-import Announcements from './components/announcements/Announcements';
-import Absences from './components/absences/Absences';
-import Pickup from './components/pickup/Pickup';
-import GiftsManager from './components/nursery/GiftsManager';
-import ParentChanges from './components/admin/ParentChanges';
-import ParentLogin from './components/parent-portal/ParentLogin';
-import ParentPortal from './components/parent-portal/ParentPortal';
 import ProtectedRoute from './components/layout/ProtectedRoute';
 import Dashboard from './components/dashboard/Dashboard';
 import { useAuth } from './hooks/useAuth';
 import { hasTabAccess } from './config/tabs';
-import RegistrationWizard from './components/registration/RegistrationWizard';
-import ParentOnboarding from './components/registration/ParentOnboarding';
-import RegistrationTracker from './components/registration/RegistrationTracker';
-import EmunahEnrollment from './components/registration/EmunahEnrollment';
-import CollectionsTable from './components/collections/CollectionsTable';
-import ArchiveList from './components/archive/ArchiveList';
-import ContactListPDF from './components/contacts/ContactListPDF';
-import BranchManager from './components/branches/BranchManager';
-import OrderList from './components/orders/OrderList';
-import OrderForm from './components/orders/OrderForm';
-import OrderView from './components/orders/OrderView';
-import SupplierManager from './components/orders/SupplierManager';
-import EmployeeManager from './components/employees/EmployeeManager';
-import SalaryRequests from './components/employees/SalaryRequests';
-import AttendanceMonitor from './components/attendance/AttendanceMonitor';
-import SalaryTable from './components/payroll/SalaryTable';
-import PayslipAudit from './components/payroll/PayslipAudit';
-import PayrollPage from './components/payroll/PayrollPage';
-import HolidayManager from './components/holidays/HolidayManager';
-import SupplyListManager from './components/holidays/SupplyListManager';
-import GanttCalendar from './components/gantt/GanttCalendar';
-import SuppliesBoard from './components/supplies/SuppliesBoard';
-import ParentVisibilityPanel from './components/gantt/ParentVisibilityPanel';
-import GanttEditor from './components/gantt/GanttEditor';
-import ClassTrackingPage from './components/classes/ClassTrackingPage';
-import MaintenancePage from './components/maintenance/MaintenancePage';
-import EventsPage from './components/events/EventsPage';
-import EventSignup from './components/events/EventSignup';
-import LeadForm from './components/leads/LeadForm';
-import LeadsPage from './components/leads/LeadsPage';
-import RecruitmentPage from './components/recruitment/RecruitmentPage';
-import BranchCertificationsPage from './components/compliance/BranchCertificationsPage';
-import ParentLettersPage from './components/parent-letters/ParentLettersPage';
-import CoursesPage from './components/compliance/CoursesPage';
-import MySalaryPreview from './components/employee-portal/MySalaryPreview';
-import MyPayslips from './components/employee-portal/MyPayslips';
-import MyDocuments from './components/employee-portal/MyDocuments';
-import MyAttendance from './components/employee-portal/MyAttendance';
-import Updates from './components/employee-portal/Updates';
-import RequestsManager from './components/employees/RequestsManager';
-import EmployeeLetters from './components/employees/EmployeeLetters';
-import Form101Center from './components/employees/Form101Center';
-import PayrollUpdates from './components/payroll/PayrollUpdates';
-import BranchPayslips from './components/payroll/BranchPayslips';
-import ContractSigning from './components/employees/ContractSigning';
-import PayslipFixUpload from './components/public/PayslipFixUpload';
-import PermissionsManager from './components/admin/PermissionsManager';
-import ProposedChanges from './components/admin/ProposedChanges';
-import MyAccount from './components/account/MyAccount';
-import StockPage from './components/stock/StockPage';
-import PricingManager from './components/pricing/PricingManager';
 import { BranchProvider } from './hooks/useBranch';
 import { WorkMonthProvider } from './hooks/useWorkMonth';
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
 
+/**
+ * Every screen is its own download.
+ *
+ * The whole app used to arrive in one 4MB file: opening the dashboard also
+ * fetched the payroll table, the Gantt editor, the payslip auditor and the
+ * spreadsheet parser, for a person who might open three screens all week.
+ * Now a screen's code is fetched the first time somebody goes there, and
+ * cached after that.
+ *
+ * Static above, deliberately: the shell, the login page and the dashboard are
+ * on the critical path — FreshEntryGate sends every new tab to `/`, so lazily
+ * loading the screen it lands on would buy a spinner and nothing else.
+ */
+const Absences = lazy(() => import('./components/absences/Absences'));
+const Announcements = lazy(() => import('./components/announcements/Announcements'));
+const ArchiveList = lazy(() => import('./components/archive/ArchiveList'));
+const AttendanceMonitor = lazy(() => import('./components/attendance/AttendanceMonitor'));
+const BranchCertificationsPage = lazy(() => import('./components/compliance/BranchCertificationsPage'));
+const BranchManager = lazy(() => import('./components/branches/BranchManager'));
+const BranchPayslips = lazy(() => import('./components/payroll/BranchPayslips'));
+const ClassTrackingPage = lazy(() => import('./components/classes/ClassTrackingPage'));
+const CollectionsTable = lazy(() => import('./components/collections/CollectionsTable'));
+const ContactListPDF = lazy(() => import('./components/contacts/ContactListPDF'));
+const ContractSigning = lazy(() => import('./components/employees/ContractSigning'));
+const CoursesPage = lazy(() => import('./components/compliance/CoursesPage'));
+const EmployeeLetters = lazy(() => import('./components/employees/EmployeeLetters'));
+const EmployeeManager = lazy(() => import('./components/employees/EmployeeManager'));
+const EmunahEnrollment = lazy(() => import('./components/registration/EmunahEnrollment'));
+const EventSignup = lazy(() => import('./components/events/EventSignup'));
+const EventsPage = lazy(() => import('./components/events/EventsPage'));
+const Form101Center = lazy(() => import('./components/employees/Form101Center'));
+const GanttCalendar = lazy(() => import('./components/gantt/GanttCalendar'));
+const GanttEditor = lazy(() => import('./components/gantt/GanttEditor'));
+const GiftsManager = lazy(() => import('./components/nursery/GiftsManager'));
+const HolidayManager = lazy(() => import('./components/holidays/HolidayManager'));
+const LeadForm = lazy(() => import('./components/leads/LeadForm'));
+const LeadsPage = lazy(() => import('./components/leads/LeadsPage'));
+const MaintenancePage = lazy(() => import('./components/maintenance/MaintenancePage'));
+const MyAccount = lazy(() => import('./components/account/MyAccount'));
+const MyAttendance = lazy(() => import('./components/employee-portal/MyAttendance'));
+const MyDocuments = lazy(() => import('./components/employee-portal/MyDocuments'));
+const MyPayslips = lazy(() => import('./components/employee-portal/MyPayslips'));
+const MySalaryPreview = lazy(() => import('./components/employee-portal/MySalaryPreview'));
+const NurseryBoard = lazy(() => import('./components/nursery/NurseryBoard'));
+const NurserySettings = lazy(() => import('./components/nursery/NurserySettings'));
+const OrderForm = lazy(() => import('./components/orders/OrderForm'));
+const OrderList = lazy(() => import('./components/orders/OrderList'));
+const OrderView = lazy(() => import('./components/orders/OrderView'));
+const ParentChanges = lazy(() => import('./components/admin/ParentChanges'));
+const ParentLettersPage = lazy(() => import('./components/parent-letters/ParentLettersPage'));
+const ParentLogin = lazy(() => import('./components/parent-portal/ParentLogin'));
+const ParentOnboarding = lazy(() => import('./components/registration/ParentOnboarding'));
+const ParentPortal = lazy(() => import('./components/parent-portal/ParentPortal'));
+const ParentVisibilityPanel = lazy(() => import('./components/gantt/ParentVisibilityPanel'));
+const PayrollPage = lazy(() => import('./components/payroll/PayrollPage'));
+const PayrollUpdates = lazy(() => import('./components/payroll/PayrollUpdates'));
+const PayslipAudit = lazy(() => import('./components/payroll/PayslipAudit'));
+const PayslipFixUpload = lazy(() => import('./components/public/PayslipFixUpload'));
+const PermissionsManager = lazy(() => import('./components/admin/PermissionsManager'));
+const PhotosManager = lazy(() => import('./components/nursery/PhotosManager'));
+const Pickup = lazy(() => import('./components/pickup/Pickup'));
+const PricingManager = lazy(() => import('./components/pricing/PricingManager'));
+const ProposedChanges = lazy(() => import('./components/admin/ProposedChanges'));
+const RecruitmentPage = lazy(() => import('./components/recruitment/RecruitmentPage'));
+const RegistrationTracker = lazy(() => import('./components/registration/RegistrationTracker'));
+const RegistrationWizard = lazy(() => import('./components/registration/RegistrationWizard'));
+const RequestsManager = lazy(() => import('./components/employees/RequestsManager'));
+const SalaryRequests = lazy(() => import('./components/employees/SalaryRequests'));
+const SalaryTable = lazy(() => import('./components/payroll/SalaryTable'));
+const StockPage = lazy(() => import('./components/stock/StockPage'));
+const SupplierManager = lazy(() => import('./components/orders/SupplierManager'));
+const SuppliesBoard = lazy(() => import('./components/supplies/SuppliesBoard'));
+const SupplyListManager = lazy(() => import('./components/holidays/SupplyListManager'));
+const Updates = lazy(() => import('./components/employee-portal/Updates'));
+
+
 function AppRoutes() {
   return (
+    // Two boundaries, on purpose. This one catches the public and standalone
+    // routes — a parent on /event/:token, the login page — which render with
+    // no shell around them. Screens INSIDE the shell have their own boundary
+    // in AppShell, around the Outlet, so the rail stays put while one loads
+    // instead of the whole window blanking.
+    <Suspense fallback={<Box sx={{ p: 3 }}><ScreenSkeleton /></Box>}>
     <Routes>
       {/* Public routes — rendered STANDALONE, deliberately OUTSIDE the
           management providers (Branch/WorkMonth/Confirm). A parent on /event/:token
@@ -263,6 +287,7 @@ function AppRoutes() {
 
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
+    </Suspense>
   );
 }
 

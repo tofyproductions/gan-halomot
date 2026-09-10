@@ -1,14 +1,23 @@
+import { lazy, Suspense } from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip, Stack, Alert, AlertTitle } from '@mui/material';
+import { Box, Typography, Button, Card, CardContent, Tabs, Tab, Chip, Stack, Alert, AlertTitle, Skeleton } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
-import OccupancyChart from './OccupancyChart';
+
 import { useBranch } from '../../hooks/useBranch';
 import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
 import StockShortageTile from './StockShortageTile';
+
+/**
+ * The chart library is 564KB — larger than the rest of this screen put
+ * together — for one panel below the figures. Fetched when the dashboard
+ * renders rather than before it paints, so the numbers arrive first and the
+ * chart fills in behind them. That order is also the right one to read in.
+ */
+const OccupancyChart = lazy(() => import('./OccupancyChart'));
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -226,10 +235,12 @@ export default function Dashboard() {
               />
             </Tabs>
           </Box>
-          <OccupancyChart
-            forecast={activeForecast}
-            totalCapacity={totalCapacity}
-          />
+          <Suspense fallback={<Skeleton variant="rounded" height={300} />}>
+            <OccupancyChart
+              forecast={activeForecast}
+              totalCapacity={totalCapacity}
+            />
+          </Suspense>
         </CardContent>
       </Card>
 
