@@ -63,6 +63,26 @@ function main() {
     process.exit(1);
   }
 
+  /**
+   * A file that uses COLOR without importing it.
+   *
+   * This has now bitten twice, and it is nastier than it sounds: it is a
+   * runtime ReferenceError, not a syntax one, so `vite build` passes happily
+   * and the screen goes blank the first time somebody opens it. Both times the
+   * check that missed it counted USAGES rather than the import.
+   */
+  console.log('\nכל קובץ שמשתמש באסימונים גם מייבא אותם:');
+  const missingImport = files.filter((f) => {
+    const src = fs.readFileSync(f, 'utf8');
+    return /\bCOLOR\./.test(src) && !/import\s*\{[^}]*\bCOLOR\b[^}]*\}/.test(src);
+  });
+  if (missingImport.length) {
+    for (const f of missingImport) console.log(`  ❌ ${path.relative(CLIENT_SRC, f)}`);
+    console.log('\n❌ ReferenceError בזמן ריצה — הבנייה עוברת והמסך יוצא לבן.');
+    process.exit(1);
+  }
+  console.log('  ✅ אין קובץ כזה');
+
   const budget = JSON.parse(fs.readFileSync(BUDGET_FILE, 'utf8'));
 
   console.log(`נמצאו ${total} צבעים קשיחים ב-${perFile.length} קבצים.`);

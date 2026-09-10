@@ -170,6 +170,45 @@ export const COLOR = {
   },
 
   /**
+   * Where a pregnancy stands, in the payroll row.
+   *
+   * Four states that change what the month owes and what may lawfully be done
+   * about it — 40 monitoring hours, שמירת הריון, maternity leave, and the
+   * protected period under §9 — so they are read off the row rather than
+   * looked up, and they have to stay apart from one another. Written by hand
+   * as four unmeasured pairs before this.
+   */
+  maternity: {
+    expecting: { bg: '#F6DEE9', on: '#8A2F54' },
+    bedrest:   { bg: '#F7E3D2', on: '#8A4A12' },
+    leave:     { bg: '#E4DFF2', on: '#453979' },
+    protected: { bg: '#F8DDD9', on: '#8C1D18' },
+  },
+
+  /**
+   * What a payroll column is FOR.
+   *
+   * The monthly table is about forty columns wide and scrolls sideways, so by
+   * the time somebody reaches בונוס the header row is a long way from the
+   * figure under the cursor. The tints are how you keep your place: they say
+   * whether the column you are in is base pay, overtime, a top-up, a deduction,
+   * a once-a-year payment or a loan — six families rather than forty labels.
+   *
+   * `head` is the column heading, `cell` the body cells beneath it, one step
+   * fainter so a column reads as a column without the table reading as stripes.
+   * Both carry ordinary body text, and both are measured against it.
+   */
+  payrollColumn: {
+    base:      { head: '#E3EDF6', cell: '#F2F6FA' },
+    overtime:  { head: '#DCE8F5', cell: '#EFF4F9' },
+    topUp:     { head: '#F8EBC9', cell: '#FCF6E8' },
+    deduction: { head: '#F7E3D2', cell: '#FBF2EA' },
+    annual:    { head: '#DCECEC', cell: '#F0F7F7' },
+    bonus:     { head: '#DEEEE1', cell: '#F0F7F2' },
+    loan:      { head: '#F6E0DD', cell: '#FBF1EF' },
+  },
+
+  /**
    * The six highlight colours a gan can paint a Gantt cell with.
    *
    * THE VALUES ARE DATA, NOT STYLE, AND THEY DO NOT CHANGE. When somebody

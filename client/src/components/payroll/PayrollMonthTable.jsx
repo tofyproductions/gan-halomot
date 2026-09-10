@@ -32,7 +32,11 @@ import { useBranch } from '../../hooks/useBranch';
 import { useWorkMonth } from '../../hooks/useWorkMonth';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
-import { ganMarkerByName as ganMarker } from '../../utils/branchColors';
+import {
+  ganMarkerByName as ganMarker,
+  BRANCH_PALETTE as SHARED_BRANCH_PALETTE,
+  BRANCH_COLOR_NAMES,
+} from '../../utils/branchColors';
 import SalaryAdjustmentDialog from './SalaryAdjustmentDialog';
 import VacationDetailDialog from './VacationDetailDialog';
 import SickDetailDialog from './SickDetailDialog';
@@ -50,6 +54,7 @@ import HolidayPayDetailDialog from './HolidayPayDetailDialog';
 import LoansDialog from './LoansDialog';
 import CibusImportDialog from './CibusImportDialog';
 import EmployeeDetailDialog from './EmployeeDetailDialog';
+import { COLOR } from '../../theme/tokens';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Monthly payroll table — auto-calculated per-amuta hours from punches,
@@ -349,7 +354,7 @@ function NotesDialog({ open, row, onClose, onSave, onSavePermanent }) {
               {committed != null && <>📋 התחייבות שעות לחודש: <b>{committed}h</b>{'  •  '}</>}
               ⏱️ עבד בפועל: <b>{worked}h</b>
               {diff != null && (
-                <span style={{ color: diff < 0 ? '#b91c1c' : '#15803d' }}>
+                <span style={{ color: diff < 0 ? COLOR.error.main : COLOR.success.main }}>
                   {' '}({diff >= 0 ? '+' : ''}{diff}h)
                 </span>
               )}
@@ -578,7 +583,7 @@ function BonusCell({ row }) {
       </Box>
     }>
       <Box sx={{ cursor: 'help' }}>
-        <Typography variant="body2" sx={{ fontWeight: 700, color: eff ? '#15803d' : 'text.disabled' }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: eff ? COLOR.success.main : 'text.disabled' }}>
           {eff ? fmtCurrency(eff) : '₪0'}
         </Typography>
         <Typography variant="caption" sx={{ color: 'text.disabled' }}>
@@ -682,14 +687,14 @@ function AddColumnDialog({ open, month, onClose, onCreated }) {
 
 /* ─── Branch colour palette ─────────────────────────────────────────── */
 
-const BRANCH_PALETTE = [
-  { name: 'blue',   header: '#dbeafe', sub: '#F3EEE6', cell: '#FAF7F2', accent: '#1e40af', border: '#93c5fd' },
-  { name: 'green',  header: '#d1fae5', sub: '#ecfdf5', cell: '#f7fef9', accent: '#065f46', border: '#86efac' },
-  { name: 'purple', header: '#ede9fe', sub: '#f5f3ff', cell: '#fbfaff', accent: '#5b21b6', border: '#c4b5fd' },
-  { name: 'orange', header: '#ffedd5', sub: '#fff7ed', cell: '#fffbf6', accent: '#9a3412', border: '#fdba74' },
-  { name: 'rose',   header: '#ffe4e6', sub: '#fff1f2', cell: '#fffafa', accent: '#9f1239', border: '#fda4af' },
-  { name: 'teal',   header: '#ccfbf1', sub: '#f0fdfa', cell: '#f6fefc', accent: '#115e59', border: '#5eead4' },
-];
+/**
+ * A SECOND copy of the branch palette used to live here, six colours written
+ * out again beside the one in utils/branchColors — and the two had already
+ * drifted, which is what a duplicated palette does. This file now uses the
+ * shared one, which reads its colours from theme/tokens.js where they are
+ * measured.
+ */
+const BRANCH_PALETTE = BRANCH_COLOR_NAMES.map(name => ({ name, ...SHARED_BRANCH_PALETTE[name] }));
 function branchColor(idx) { return BRANCH_PALETTE[idx % BRANCH_PALETTE.length]; }
 
 /* Per-gan marker colours live in utils/branchColors (single source of truth).
@@ -807,7 +812,7 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
     if (matches.length === 0) { toast.info(`לא נמצא עובד תואם ל"${query}"`); return; }
     const target = matches[searchIdxRef.current % matches.length];
     searchIdxRef.current += 1;
-    target.style.outline = '4px solid #f59e0b';
+    target.style.outline = `4px solid ${COLOR.primary.light}`;
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (matches.length > 1) {
       toast.info(`${matches.length} התאמות — לחיצה נוספת תעבור לבאה`, { autoClose: 2500 });
@@ -1577,7 +1582,7 @@ export default function PayrollMonthTable() {
     else exportPDF(rows);
   };
   const exportColor = (branchName) => ganMarker(branchName)
-    || { strip: '#1e3a8a', stripText: '#ffffff', rowTint: '#F3EEE6', accent: '#1e3a8a' };
+    || { strip: COLOR.info.dark, stripText: '#ffffff', rowTint: COLOR.background.sunken, accent: COLOR.info.dark };
 
   // Build one coloured branch table (header + body + totals) from a row subset.
   // Drops the branch column (the whole file is a single branch).
@@ -1617,7 +1622,7 @@ export default function PayrollMonthTable() {
     for (const i of cols) if (numericCol[i] && !NO_TOTAL.has(header[i])) totals[i] = rows.reduce((s, r) => s + (parseNum(r[i]) || 0), 0);
     const fmt = (c, i) => { const n = numericCol[i] ? parseNum(c) : null; return n != null ? n.toLocaleString('he-IL') : esc(c); };
     const align = (i) => numericCol[i] ? 'left' : (i <= 2 ? 'right' : 'center');
-    const bd = excel ? '#ccc' : '#cbd5e1';
+    const bd = excel ? '#ccc' : COLOR.dividerStrong;
     const ws = excel ? 'nowrap' : 'normal';
     // Fixed, identical column widths for every branch page → uniform tables.
     const colWeight = (label) => {
@@ -1642,20 +1647,20 @@ export default function PayrollMonthTable() {
         || customColumns.some(c => c.label === label)) return 'נתונים נוספים';
       return 'שכר ותשלומים';
     };
-    const groupColor = { 'עובד': '#475569', 'שעות עבודה': '#0369a1', 'שכר ותשלומים': '#15803d', 'נתונים נוספים': '#7c3aed' };
+    const groupColor = { 'עובד': COLOR.text.secondary, 'שעות עבודה': COLOR.info.dark, 'שכר ותשלומים': COLOR.success.softOn, 'נתונים נוספים': COLOR.maternity.leave.on };
     let gh = '<tr>';
     for (let k = 0; k < cols.length;) {
       const g = groupOf(header[cols[k]]);
       let span = 1;
       while (k + span < cols.length && groupOf(header[cols[k + span]]) === g) span++;
-      gh += `<th colspan="${span}" style="background:${groupColor[g] || '#334155'};color:#fff;border:1px solid #fff;padding:3px 4px;font-weight:bold;text-align:center;white-space:nowrap;font-size:${excel ? '11px' : '8pt'}">${esc(g)}</th>`;
+      gh += `<th colspan="${span}" style="background:${groupColor[g] || COLOR.text.primary};color:#fff;border:1px solid #fff;padding:3px 4px;font-weight:bold;text-align:center;white-space:nowrap;font-size:${excel ? '11px' : '8pt'}">${esc(g)}</th>`;
       k += span;
     }
     gh += '</tr>';
     const body = rows.map((r, ri) => {
       const inactive = branchRows[ri]?.is_active === false;
-      const rowBg = inactive ? 'background:#e5e7eb' : (ri % 2 ? `background:${color.rowTint}` : '');
-      const rowExtra = inactive ? 'color:#6b7280;font-style:italic' : '';
+      const rowBg = inactive ? 'background:#EBE4D9' : (ri % 2 ? `background:${color.rowTint}` : '');
+      const rowExtra = inactive ? 'color:#A79C8E;font-style:italic' : '';
       return `<tr style="${rowBg};${rowExtra}">${cols.map(i => {
         const numStyle = excel ? "mso-number-format:'\\@'" : '';
         return `<td style="border:1px solid ${bd};padding:3px 4px;text-align:${align(i)};white-space:${ws};word-break:break-word;${numStyle}">${fmt(r[i], i)}</td>`;
@@ -1663,7 +1668,7 @@ export default function PayrollMonthTable() {
     }).join('');
     const totalsRow = `<tr>${cols.map((i, idx) => {
       const v = idx === 0 ? 'סה״כ' : (totals[i] != null ? Math.round(totals[i]).toLocaleString('he-IL') : '');
-      return `<td style="border:1px solid ${color.accent};padding:4px 4px;background:#fde68a;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${v}</td>`;
+      return `<td style="border:1px solid ${color.accent};padding:4px 4px;background:#F8EBC9;font-weight:bold;text-align:${align(i)};white-space:${ws};word-break:break-word">${v}</td>`;
     }).join('')}</tr>`;
     return { colgroup, gh, th, body, totalsRow, count: rows.length };
   };
@@ -1770,11 +1775,11 @@ export default function PayrollMonthTable() {
     }).join('');
     const html = `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8"><title>שכר ${esc(month)}</title>
       <style>
-        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:8px;color:#0f172a}
+        body{font-family:Arial,'Heebo',sans-serif;direction:rtl;padding:8px;color:#1C1815}
         .hdr{display:flex;justify-content:space-between;align-items:flex-end;margin:0 0 8px;border-bottom:3px solid;padding-bottom:6px}
         .hdr h1{font-size:17px;margin:0;display:flex;align-items:center;gap:7px;font-weight:800}
         .hdr .dot{width:15px;height:15px;border-radius:50%;display:inline-block}
-        .hdr .meta{font-size:10px;color:#475569}
+        .hdr .meta{font-size:10px;color:#6B6157}
         table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:8pt}
         td,th{padding:3px 4px;overflow:hidden;vertical-align:middle}
         thead{display:table-header-group}
@@ -1904,9 +1909,9 @@ export default function PayrollMonthTable() {
           </Typography>
           <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
           <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
-          <Button startIcon={<AutorenewIcon />} size="small" onClick={() => setCibusSyncOpen(true)} variant="outlined" sx={{ color: '#0f766e', borderColor: '#5eead4' }}>סיבוס אוטומטי</Button>
+          <Button startIcon={<AutorenewIcon />} size="small" onClick={() => setCibusSyncOpen(true)} variant="outlined" sx={{ color: COLOR.payrollColumn.annual.head, borderColor: '#5eead4' }}>סיבוס אוטומטי</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
-          <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: '#7c3aed', borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
+          <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: COLOR.maternity.leave.on, borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
           <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
           <Tooltip title="עובדים שמקבלים שעות קבועות ללא החתמה בשעון">
@@ -1973,7 +1978,7 @@ export default function PayrollMonthTable() {
       </Paper>
 
       {isAugustMonth && (
-        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: '#ecfeff', border: '1px solid #67e8f9', color: '#1C1815' }}>
+        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: COLOR.payrollColumn.annual.head, border: '1px solid #67e8f9', color: COLOR.text.primary }}>
           <b>אוגוסט — חודש תשלום דמי ההבראה השנתי.</b>{' '}
           זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה: ימים לפי מדרגות הוותק שבצו ההרחבה × תעריף יום × היקף משרה.
           מי שטרם השלימ/ה שנה — אינה זכאית השנה ותקבל תשלום מלא באוגוסט הבא.
@@ -2045,23 +2050,23 @@ export default function PayrollMonthTable() {
               </TableCell>
             </TableRow>
             <TableRow>
-              <SubHeaderGroup color={{ sub: '#F3EEE6', accent: '#1e40af', border: '#93c5fd' }} />
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>
+              <SubHeaderGroup color={{ sub: COLOR.background.sunken, accent: COLOR.info.dark, border: COLOR.info.soft }} />
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.base.head }}>
                 <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
                 </Tooltip>
               </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dbeafe' }}>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
                 <Tooltip arrow title="תשלום בגין שעות נוספות ב-125% (שעתיים הראשונות מעל 8 ש׳ ביום). תקן: שעות 125% × ערך שעה × 1.25.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 125% ⓘ</span>
                 </Tooltip>
               </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dbeafe' }}>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
                 <Tooltip arrow title="תשלום בגין שעות נוספות ב-150% (מעל 10 ש׳ ביום). תקן: שעות 150% × ערך שעה × 1.5.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 150% ⓘ</span>
                 </Tooltip>
               </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fef9c3' }}>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.topUp.head }}>
                 <Tooltip arrow title="עובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים אוטומטית עד השכר המוסכם המלא: max(0, שכר מוסכם − שכר בסיס − שע״נ). שכר בסיס + השלמה = השכר המוסכם בדיוק (השע״נ כלול, לא נוסף מעליו). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
                 </Tooltip>
@@ -2069,7 +2074,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#fff7ed' }}>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.deduction.head }}>
                 <Tooltip arrow title="עובד תקן בלבד. ימים שבהם הגיע/ה אך עבד/ה מעל שעה פחות משעות ההתחייבות. שעה ראשונה חסרה = גרייס (לא מנוכה). מעל שעה — כל השעות החסרות מנוכות יחסית, לאחר אישור הנה״ח לכל יום.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>היעדרות (שעות) ⓘ</span>
                 </Tooltip>
@@ -2079,7 +2084,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>קיזוז מקדמה</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>GIFT CARD</TableCell>
               {showRecreation && (
-                <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#ecfeff' }}>
+                <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.annual.head }}>
                   <Tooltip arrow title="דמי הבראה שנתיים — משולמים באוגוסט. זכאות: השלמת שנת עבודה מלאה; ימים לפי מדרגות ותק בצו ההרחבה × תעריף יום × היקף משרה. ההצעה מחושבת אוטומטית — לחיצה עליה מזינה את הסכום">
                     <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>הבראה 🌴</span>
                   </Tooltip>
@@ -2088,7 +2093,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.50' }}>הלוואות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#dcfce7' }}>בונוס</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -2185,7 +2190,7 @@ export default function PayrollMonthTable() {
                   // distinguishable while keeping the branch colour (not too dark).
                   const nameBg = marker?.nameTint
                     ? (ri % 2 === 1 ? lightenHex(marker.nameTint, 0.45) : lightenHex(marker.nameTint, 0.7))
-                    : (ri % 2 === 1 ? '#f3f4f6' : '#ffffff');
+                    : (ri % 2 === 1 ? COLOR.background.sunken : COLOR.background.paper);
                   elements.push(
                     <TableRow
                       key={r.employee_id}
@@ -2193,7 +2198,7 @@ export default function PayrollMonthTable() {
                       sx={{
                         ...(marker ? { backgroundColor: marker.rowTint } : {}),
                         ...(r.is_active === false ? { opacity: 0.6 } : {}),
-                        ...(highlightEmp === r.employee_id ? { outline: '3px solid #f59e0b', outlineOffset: '-3px' } : {}),
+                        ...(highlightEmp === r.employee_id ? { outline: `3px solid ${COLOR.primary.light}`, outlineOffset: '-3px' } : {}),
                       }}>
                       <TableCell sx={{
                         fontWeight: 700, position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0
@@ -2341,23 +2346,23 @@ export default function PayrollMonthTable() {
                           hourly_rate: r.breakdown.rates?.hourly_rate || 0,
                           global_salary: r.breakdown.rates?.global_salary || 0,
                         };
-                        return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: '#93c5fd' }} />;
+                        return <BranchGroupCells bk={totalBk} salaryType={r.salary_type} color={{ cell: 'rgba(99,102,241,0.04)', border: COLOR.info.soft }} />;
                       })()}
 
                       {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה */}
-                      <TableCell align="center" sx={{ bgcolor: '#F3EEE6' }}>
+                      <TableCell align="center" sx={{ bgcolor: COLOR.background.sunken }}>
                         <TekenBasePartCell row={r}
                           branchPay={(() => { const l = perBranchBreakdown(r); return breakdownIsInformative(r, l) ? l : null; })()}
                           onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
                         />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#eef6ff' }}>
+                      <TableCell align="center" sx={{ bgcolor: COLOR.payrollColumn.base.cell }}>
                         <PayAmountCell value={paySplit(r)?.ot125} />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#eef6ff' }}>
+                      <TableCell align="center" sx={{ bgcolor: COLOR.payrollColumn.base.cell }}>
                         <PayAmountCell value={paySplit(r)?.ot150} />
                       </TableCell>
-                      <TableCell align="center" sx={{ bgcolor: '#fefce8' }}>
+                      <TableCell align="center" sx={{ bgcolor: COLOR.payrollColumn.topUp.cell }}>
                         <TekenCompletionCell row={r} disabled={locked}
                           onToggle={(v) => patchManual(r.employee_id, { include_salary_completion: v })}
                         />
@@ -2437,7 +2442,7 @@ export default function PayrollMonthTable() {
                             <Tooltip title="פתח/י את חלונית ההבראה — כל הנתונים, עריכה ואישור מחדש">
                               <Chip size="small" variant="outlined" label="🌴 פרטים"
                                 onClick={(e) => { e.stopPropagation(); setRecDlg({ open: true, row: r }); }}
-                                sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#a5f3fc' }} />
+                                sx={{ height: 16, fontSize: '0.55rem', mt: 0.3, cursor: 'pointer', color: COLOR.payrollColumn.annual.head, borderColor: '#a5f3fc' }} />
                             </Tooltip>
                           )}
                           {r.recreation_auto && (!r.manual.recreation || r.manual.recreation.kind === 'empty') && (() => {
@@ -2454,7 +2459,7 @@ export default function PayrollMonthTable() {
                                 <Tooltip title={`הערכת מערכת (לא לאישור): ותק ${ra.full_years} שנים → ${ra.days} ימי הבראה × ₪${ra.day_rate} × ${Math.round(ra.fte * 100)}% משרה ≈ ₪${ra.amount.toLocaleString('he-IL')}. הסכום הסופי נקבע ע"י רו״ח. לחץ/י לרישום`}>
                                   <Chip size="small" variant="outlined" label="🌴 זכאית להבראה"
                                     onClick={openDlg}
-                                    sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: '#0e7490', borderColor: '#67e8f9' }} />
+                                    sx={{ height: 17, fontSize: '0.6rem', fontWeight: 700, mt: 0.3, cursor: 'pointer', color: COLOR.payrollColumn.annual.head, borderColor: '#67e8f9' }} />
                                 </Tooltip>
                               );
                             }
@@ -2480,7 +2485,7 @@ export default function PayrollMonthTable() {
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.50' }} onClick={() => setLoansDlg({ open: true, row: r })}>
                         <LoansSummaryCell row={r} />
                       </TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: '#f0fdf4' }} onClick={() => !locked && setBonusDlg({ open: true, row: r })}>
+                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: COLOR.payrollColumn.bonus.cell }} onClick={() => !locked && setBonusDlg({ open: true, row: r })}>
                         <BonusCell row={r} />
                         {/* Only relevant the one month a branch actually closes for the
                             summer — showing it year-round just invites toggling it on
@@ -2552,11 +2557,11 @@ export default function PayrollMonthTable() {
                             onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
                             sx={{
                               height: 22, borderRadius: 1.5, fontSize: '0.64rem', fontWeight: 600,
-                              color: r.docs_total > 0 ? '#1e40af' : 'primary.main',
-                              bgcolor: r.docs_total > 0 ? '#dbeafe' : '#eef2ff',
-                              border: `1px solid ${r.docs_total > 0 ? '#93c5fd' : '#c7d2fe'}`,
+                              color: r.docs_total > 0 ? COLOR.info.softOn : COLOR.primary.softOn,
+                              bgcolor: r.docs_total > 0 ? COLOR.info.soft : COLOR.primary.soft,
+                              border: '1px solid transparent',
                               '& .MuiChip-icon': { color: 'primary.main', ml: '6px', mr: '-2px' },
-                              '&:hover': { bgcolor: '#e0e7ff' },
+                              '&:hover': { bgcolor: COLOR.info.soft },
                             }}
                           />
                         </Box>
@@ -2568,25 +2573,25 @@ export default function PayrollMonthTable() {
                                 label="🤰 בהריון · מעקב 40ש׳"
                                 onClick={(e) => { e.stopPropagation(); setPregnancyDlg({ open: true, row: r }); }}
                                 sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
-                                  color: '#9d174d', bgcolor: '#fce7f3', border: '1px solid #fbcfe8',
-                                  '&:hover': { bgcolor: '#fbcfe8' } }}
+                                  color: COLOR.maternity.expecting.on, bgcolor: COLOR.maternity.expecting.bg,
+                                  border: '1px solid transparent' }}
                               />
                             )}
                             {r.pregnancy.on_pregnancy_bedrest && (
                               <Chip size="small" label="🛏️ שמירת הריון"
                                 sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
-                                  color: '#9a3412', bgcolor: '#ffedd5', border: '1px solid #fed7aa' }} />
+                                  color: COLOR.maternity.bedrest.on, bgcolor: COLOR.maternity.bedrest.bg, border: '1px solid transparent' }} />
                             )}
                             {r.pregnancy.on_maternity_leave && (
                               <Chip size="small" label="🍼 חופשת לידה"
                                 sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
-                                  color: '#5b21b6', bgcolor: '#ede9fe', border: '1px solid #ddd6fe' }} />
+                                  color: COLOR.maternity.leave.on, bgcolor: COLOR.maternity.leave.bg, border: '1px solid transparent' }} />
                             )}
                             {r.pregnancy.protected && (
                               <Tooltip title="תקופה מוגנת (§9 חוק עבודת נשים): אסור לפגוע בשכר/היקף חד-צדדית בלי היתר מהממונה במשרד העבודה">
                                 <Chip size="small" label="🛡️ תקופה מוגנת"
                                   sx={{ height: 22, borderRadius: 1.5, fontSize: '0.62rem', fontWeight: 700,
-                                    color: '#991b1b', bgcolor: '#fee2e2', border: '1px solid #fecaca' }} />
+                                    color: COLOR.maternity.protected.on, bgcolor: COLOR.maternity.protected.bg, border: '1px solid transparent' }} />
                               </Tooltip>
                             )}
                           </Box>
@@ -2597,11 +2602,11 @@ export default function PayrollMonthTable() {
                             <Box
                               onClick={(e) => { e.stopPropagation(); setPunchDlg({ open: true, row: r }); }}
                               sx={{ mb: 0.4, p: '4px 6px', borderRadius: 1, cursor: 'pointer',
-                                bgcolor: pending ? '#fef2f2' : '#f0fdf4',
-                                border: `1px solid ${pending ? '#fecaca' : '#bbf7d0'}`,
+                                bgcolor: pending ? COLOR.error.soft : COLOR.success.soft,
+                                border: '1px solid transparent',
                                 '&:hover': { filter: 'brightness(0.97)' } }}
                             >
-                              <Box sx={{ color: pending ? '#b91c1c' : '#15803d', fontWeight: 800, fontSize: '0.64rem' }}>
+                              <Box sx={{ color: pending ? COLOR.error.softOn : COLOR.success.softOn, fontWeight: 800, fontSize: '0.64rem' }}>
                                 {pending ? `\u26A0\uFE0F ${pending} ימים עם יותר מ-2 החתמות — לאישור` : '\u2714\uFE0F החתמות אושרו'}
                               </Box>
                             </Box>
@@ -2611,21 +2616,21 @@ export default function PayrollMonthTable() {
                           <Box
                             onClick={(e) => { e.stopPropagation(); setDocsDlg({ open: true, row: r }); }}
                             sx={{ mb: 0.4, p: '4px 6px', borderRadius: 1, cursor: 'pointer',
-                              bgcolor: '#fffbeb', border: '1px solid #fde68a',
+                              bgcolor: '#fffbeb', border: '1px solid #F8EBC9',
                               '&:hover': { bgcolor: '#fef3c7' } }}
                           >
                             {r.pending_docs.map(d => (
-                              <Box key={d.id} sx={{ color: '#92400e', fontWeight: 700, fontSize: '0.64rem' }}>
+                              <Box key={d.id} sx={{ color: '#6B3F00', fontWeight: 700, fontSize: '0.64rem' }}>
                                 📎 {d.source === 'request' ? d.name : `קובץ "${d.name}"`} ממתין בקבצים
                               </Box>
                             ))}
                           </Box>
                         )}
                         {r.commitment?.committed_hours != null && (
-                          <Box sx={{ color: '#1d4ed8', fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
+                          <Box sx={{ color: COLOR.info.dark, fontWeight: 600, fontSize: '0.62rem', opacity: 0.85 }}>📋 התחייבות: {r.commitment.committed_hours}h</Box>
                         )}
                         {r.permanent_note && (
-                          <Box sx={{ color: '#7c3aed', fontWeight: 700, mt: 0.3 }}>📌 {r.permanent_note}</Box>
+                          <Box sx={{ color: COLOR.maternity.leave.on, fontWeight: 700, mt: 0.3 }}>📌 {r.permanent_note}</Box>
                         )}
                         {r.manual.notes && <Box sx={{ color: 'text.primary', fontWeight: 600, mt: 0.3 }}>{r.manual.notes}</Box>}
                         {!r.commitment?.committed_hours && !r.permanent_note && !r.manual.notes && (
@@ -2639,7 +2644,7 @@ export default function PayrollMonthTable() {
                   if (r.is_active === false) {
                     elements.push(
                       <TableRow key={`inact-${r.employee_id}`}>
-                        <TableCell colSpan={totalCols} sx={{ bgcolor: '#fff1f2', color: '#b91c1c', fontSize: '0.72rem', fontWeight: 700, py: 0.4, borderBottom: '2px solid #fecaca' }}>
+                        <TableCell colSpan={totalCols} sx={{ bgcolor: '#fff1f2', color: COLOR.error.dark, fontSize: '0.72rem', fontWeight: 700, py: 0.4, borderBottom: '2px solid #fecaca' }}>
                           ⛔ עובד לא פעיל{r.inactive_reason ? ` — ${r.inactive_reason}` : ' (לא נרשמה סיבה)'}
                           {r.inactive_effective_month && ` · מוצגת עד ${r.inactive_effective_month}, לאחר מכן בארכיון בלבד`}
                         </TableCell>
@@ -3106,12 +3111,12 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
               { lbl: 'שע״נ 150%', h: o.ot150, perHour: r2(o.rate * 1.5) },
             ].filter(l => l.h > 0);
             return (
-              <Box key={i} sx={{ mb: 0.4, p: 0.3, bgcolor: i % 2 ? '#FAF7F2' : '#F3EEE6', borderRadius: 0.5 }}>
+              <Box key={i} sx={{ mb: 0.4, p: 0.3, bgcolor: i % 2 ? COLOR.background.default : COLOR.background.sunken, borderRadius: 0.5 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
                   <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
                     {o.name}
                   </Typography>
-                  <Typography component="span" variant="caption" sx={{ fontSize: '0.62rem', fontWeight: 800, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
+                  <Typography component="span" variant="caption" sx={{ fontSize: '0.62rem', fontWeight: 800, color: COLOR.info.dark, whiteSpace: 'nowrap' }}>
                     ₪{o.amount.toLocaleString('he-IL')}
                   </Typography>
                 </Box>
@@ -3128,9 +3133,9 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
               </Box>
             );
           })}
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, borderTop: '1px solid #cbd5e1', mt: 0.2, pt: 0.2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, borderTop: '1px solid #DDD3C4', mt: 0.2, pt: 0.2 }}>
             <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', fontWeight: 700, color: 'text.secondary' }}>סה״כ בסיס</Typography>
-            <Typography component="span" variant="caption" sx={{ fontSize: '0.64rem', fontWeight: 800, color: '#1C1815' }}>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.64rem', fontWeight: 800, color: COLOR.text.primary }}>
               ₪{branchPay.reduce((s, o) => s + o.amount, 0).toLocaleString('he-IL')}
             </Typography>
           </Box>
@@ -3563,10 +3568,10 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                 // approved extra hours minus the shortfall hours that will be deducted.
                 const netHours = Math.round((extraApprovedHours - effectiveHours) * 10) / 10;
                 const netPay = extraPay - deduction;
-                const c = netHours > 0 ? '#15803d' : netHours < 0 ? '#b91c1c' : '#64748b';
+                const c = netHours > 0 ? COLOR.success.softOn : netHours < 0 ? COLOR.error.dark : COLOR.text.secondary;
                 return (
                   <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderWidth: 2,
-                    borderColor: netHours > 0 ? 'success.light' : netHours < 0 ? 'error.light' : 'divider', bgcolor: '#FAF7F2' }}>
+                    borderColor: netHours > 0 ? 'success.light' : netHours < 0 ? 'error.light' : 'divider', bgcolor: COLOR.background.default }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.8 }}>סיכום נטו (לפי המאושר)</Typography>
                     <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Box sx={{ textAlign: 'center' }}>
@@ -3580,7 +3585,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                       </Box>
                       <Typography sx={{ fontSize: 22, color: 'text.disabled' }}>=</Typography>
                       <Box sx={{ textAlign: 'center', px: 2.5, py: 0.6, borderRadius: 2, minWidth: 120,
-                        bgcolor: netHours > 0 ? '#dcfce7' : netHours < 0 ? '#fee2e2' : '#F3EEE6' }}>
+                        bgcolor: netHours > 0 ? '#dcfce7' : netHours < 0 ? '#fee2e2' : COLOR.background.sunken }}>
                         <Typography variant="caption" sx={{ fontWeight: 700 }}>נטו</Typography>
                         <Typography sx={{ fontWeight: 900, fontSize: 30, lineHeight: 1.05, color: c }}>
                           {netHours > 0 ? '+' : ''}{netHours} <span style={{ fontSize: 16 }}>ש׳</span>
@@ -3599,7 +3604,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                     <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
                       <span>תוספת שעות (מעבר/יום חופשי): <b>{pa.extra_hours} ש׳</b></span>
                       <span>אושרו לתשלום: <b>{extraApprovedHours} ש׳</b></span>
-                      <span>תשלום תוספת: <b style={{ color: '#15803d' }}>+₪{extraPay.toLocaleString('he-IL')}</b></span>
+                      <span>תשלום תוספת: <b style={{ color: COLOR.success.softOn }}>+₪{extraPay.toLocaleString('he-IL')}</b></span>
                     </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                       ברירת מחדל: לא משולם. סמן/י "מאושר" כדי <b>לשלם</b> את שעות התוספת (עם סיבה אופציונלית).
@@ -3619,7 +3624,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                     </TableHead>
                     <TableBody>
                       {extras.map(c => (
-                        <TableRow key={c.date} sx={extraAppr[c.date] ? { bgcolor: '#ecfdf5' } : undefined}>
+                        <TableRow key={c.date} sx={extraAppr[c.date] ? { bgcolor: COLOR.success.soft } : undefined}>
                           <TableCell sx={{ whiteSpace: 'nowrap' }}>{fmtDate(c.date)}</TableCell>
                           <TableCell align="center"><Chip size="small" variant="outlined" color={c.kind === 'offday' ? 'info' : 'success'} label={kindLabel(c.kind)} sx={{ height: 18, fontSize: '0.6rem' }} /></TableCell>
                           <TableCell align="center">{c.kind === 'offday' ? '—' : `${c.committed_h} ש׳`}</TableCell>
@@ -3650,7 +3655,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                       <span>עבד/ה בפועל: <b>{pa.worked_hours} ש׳</b></span>
                       <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
                       <span>שעות לקיזוז (לא מאושרות): <b>{deductHours}</b></span>
-                      <span>ניכוי בפועל: <b style={{ color: '#b91c1c' }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
+                      <span>ניכוי בפועל: <b style={{ color: COLOR.error.dark }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
                     </Stack>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                       ברירת מחדל: כל יום חוסר מקוזז. סמן/י "מאושר" כדי <b>לא</b> לקזז יום (עם סיבה אופציונלית).
@@ -3681,12 +3686,12 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                         const examApproved = (!!exam && exam.status === 'approved') || !!examRegistered[c.date];
                         const examPending = !!exam && !examApproved;
                         return (
-                          <TableRow key={c.date} sx={excused[c.date] ? { bgcolor: examApproved ? '#fdf2f8' : '#ecfdf5' } : undefined}>
+                          <TableRow key={c.date} sx={excused[c.date] ? { bgcolor: examApproved ? '#fdf2f8' : COLOR.success.soft } : undefined}>
                             <TableCell sx={{ whiteSpace: 'nowrap' }}>
                               {fmtDate(c.date)}
                               {examApproved && (
                                 <Tooltip title="בדיקת היריון מאושרת — השעות משולמות לפי חוק ונספרות במעקב 40 השעות">
-                                  <Chip size="small" label="🤰 בדיקה מאושרת" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700, mr: 0.5, bgcolor: '#fce7f3', color: '#9d174d' }} />
+                                  <Chip size="small" label="🤰 בדיקה מאושרת" sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700, mr: 0.5, bgcolor: '#fce7f3', color: '#8A2F54' }} />
                                 </Tooltip>
                               )}
                               {examPending && (
@@ -3713,7 +3718,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                                 {isPregnant && !exam && !examRegistered[c.date] && canAccounting && !disabled && (
                                   <Button size="small" variant="outlined" disabled={!!examBusy[c.date]}
                                     onClick={() => registerAsExam(c)}
-                                    sx={{ whiteSpace: 'nowrap', fontSize: '0.65rem', color: '#9d174d', borderColor: '#f9a8d4' }}>
+                                    sx={{ whiteSpace: 'nowrap', fontSize: '0.65rem', color: '#8A2F54', borderColor: '#f9a8d4' }}>
                                     {examBusy[c.date] ? '…' : '🤰 רשום כבדיקה'}
                                   </Button>
                                 )}

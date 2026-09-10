@@ -114,6 +114,26 @@ async function main() {
     ok(ratio >= AA, `ganttCell ${c.label} — טקסט ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
   }
 
+  console.log('\nניגודיות גווני עמודות השכר:');
+  for (const [kind, c] of Object.entries(COLOR.payrollColumn)) {
+    const onHead = contrast(COLOR.text.primary, c.head);
+    const onCell = contrast(COLOR.text.primary, c.cell);
+    ok(Math.min(onHead, onCell) >= AA, `payrollColumn.${kind} — כותרת ${onHead.toFixed(2)} · תא ${onCell.toFixed(2)}`, `נדרש ${AA}`);
+  }
+  // Six families, and the body tint has to stay lighter than its own heading
+  // or the column reads upside down.
+  for (const [kind, c] of Object.entries(COLOR.payrollColumn)) {
+    ok(luminance(c.cell) > luminance(c.head), `payrollColumn.${kind} — התא בהיר מהכותרת`);
+  }
+
+  console.log('\nניגודיות מצבי הריון:');
+  for (const [state, c] of Object.entries(COLOR.maternity)) {
+    const ratio = contrast(c.on, c.bg);
+    ok(ratio >= AA, `maternity.${state} — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  const mBgs = Object.values(COLOR.maternity).map((c) => c.bg.toLowerCase());
+  ok(new Set(mBgs).size === mBgs.length, `כל ${mBgs.length} מצבי ההריון בגוון נפרד`);
+
   console.log('\nהצבע הישן לא חזר:');
   ok(COLOR.primary.main.toLowerCase() !== '#f59e0b',
     'primary.main אינו הכתום שנכשל בניגודיות');
