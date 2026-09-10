@@ -396,24 +396,22 @@ export default function Sidebar() {
           placeholder="חיפוש מסך"
           inputProps={{ 'aria-label': 'חיפוש מסך' }}
           /**
-           * NO `::placeholder` RULE HERE, and it is not an oversight.
+           * This rule is the reason `stylis` is pinned to 4.2.0 in
+           * client/package.json.
            *
-           * `sx={{ '& input::placeholder': {...} }}` crashes this app — a white
-           * screen, caught only by ScreenBoundary. client/node_modules holds
-           * TWO copies of stylis: 4.3.6 at the top level (pulled in by
-           * stylis-plugin-rtl) and 4.2.0 inside @emotion/cache. Stylis handles
-           * `::placeholder` by calling `lift()`, which reads `root.siblings` —
-           * a field one of those versions creates and the other does not — so
-           * it throws "Cannot read properties of undefined (reading 'push')"
-           * from inside emotion's insertion, with nothing pointing at the
-           * selector that caused it.
-           *
-           * MUI already renders the placeholder as currentColor at reduced
-           * opacity, so setting `color` here is enough. The real fix is one
-           * stylis in the tree, which is a dependency change and not this
-           * branch's business.
+           * It used to crash the whole app to a white screen. client/package.json
+           * asked for `stylis: ^4.3.4` while @emotion/cache pins exactly 4.2.0,
+           * so npm hoisted 4.3.6 and nested emotion's — and rtlTheme.js imports
+           * `prefixer` from 'stylis', which then handed 4.3.6's prefixer to a
+           * cache running 4.2.0's compile. 4.3.6 handles `::placeholder` via
+           * `lift()`, which reads `root.siblings`, a field 4.2.0's nodes do not
+           * have: "Cannot read properties of undefined (reading 'push')", thrown
+           * from inside emotion's insertion, naming nothing.
            */
-          sx={{ flex: 1, color: 'sidebar.fgActive', fontSize: '0.8125rem' }}
+          sx={{
+            flex: 1, color: 'sidebar.fgActive', fontSize: '0.8125rem',
+            '& input::placeholder': { color: 'sidebar.groupLabel', opacity: 1 },
+          }}
         />
         {query && (
           <IconButton size="small" onClick={() => setQuery('')} aria-label="ניקוי החיפוש"

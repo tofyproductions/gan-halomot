@@ -79,7 +79,8 @@
     "test:bundle": "node scripts/bundle-budget.test.js",
     "test:screen-meta": "node scripts/screen-meta.test.js",
     "test:rtl-noflip": "node scripts/rtl-noflip.test.js",
-    "test:confirm-safety": "node scripts/confirm-safety.test.js"
+    "test:confirm-safety": "node scripts/confirm-safety.test.js",
+    "test:one-stylis": "node scripts/one-stylis.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
