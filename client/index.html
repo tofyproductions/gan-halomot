@@ -5,7 +5,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&family=Assistant:wght@300;400;600;700;800&family=Varela+Round&display=swap" rel="stylesheet" />
+  <!--
+    Assistant only, and weight 500 included.
+    Rubik belongs to the parent portal, which loads its own; Varela Round was
+    dropped from the type scale but stayed in this tag and on the login screen,
+    so the first thing anyone saw contradicted the decision. Weight 500 was in
+    use in the rail and the figures and had never been fetched, so the browser
+    was synthesising it.
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 
   <!--
     Added so "התקן את האפליקציה" is a true sentence. Adding this to a home
@@ -21,7 +29,9 @@
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <meta name="theme-color" content="#f59e0b" />
+  <!-- The clay the app actually uses. #f59e0b is the orange that failed contrast
+       at 2.2:1 and design-tokens.test.js forbids by name. -->
+  <meta name="theme-color" content="#B4540A" />
   <meta name="mobile-web-app-capable" content="yes" />
   <!-- iOS reads its own vendor-prefixed pair; without them Safari opens the
        home-screen icon in a browser tab with an address bar. -->

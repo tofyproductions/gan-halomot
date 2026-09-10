@@ -13,6 +13,7 @@ import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { BusyButton } from '../shared/UploadControls';
+import { COLOR } from '../../theme/tokens';
 
 const ROLE_LABEL = { in: 'כניסה', out: 'יציאה', ignore: 'התעלם' };
 const ROLE_COLOR = { in: 'success', out: 'error', ignore: 'standard' };
@@ -477,7 +478,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                           </Box>
                         )}
                         {b.missing_count > 0 && (
-                          <Box component="span" sx={{ bgcolor: '#f59e0b', color: '#fff', borderRadius: 5, px: 0.7, fontSize: '0.62rem', fontWeight: 800 }}>
+                          <Box component="span" sx={{ bgcolor: COLOR.primary.main, color: '#fff', borderRadius: 5, px: 0.7, fontSize: '0.62rem', fontWeight: 800 }}>
                             {b.missing_count}
                           </Box>
                         )}

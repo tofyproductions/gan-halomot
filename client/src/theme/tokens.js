@@ -54,8 +54,22 @@ export const COLOR = {
 
   text: {
     primary: '#1C1815',
-    secondary: '#6B6157',
+    /**
+     * Darkened from #6B6157 (5.22:1) to 7.04:1 — AAA for body text. Most of
+     * the people reading this all day are over 55, on office monitors of
+     * varying honesty, and secondary text here is not decoration: it is the
+     * branch name, the column head, the hint under a figure.
+     */
+    secondary: '#57504A',
+    /**
+     * FOR NON-TEXT ONLY — an empty cell's em dash, a disabled control's
+     * outline. It measures 2.70:1 and always did; the mistake was using it for
+     * breadcrumbs and hints, which are read. `textMuted` below is what those
+     * want.
+     */
     disabled: '#A79C8E',
+    /** Quiet, and still legible: 4.83:1 on paper. */
+    muted: '#7A7067',
   },
 
   divider: '#EBE4D9',
@@ -431,6 +445,28 @@ export const TYPE = {
  * transition they have to wait for is a transition that is too long.
  */
 export const MOTION = {
-  duration: 180,
-  easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+  /**
+   * Four durations, not one.
+   *
+   * A single 180ms for everything is not a motion language, it is a default —
+   * too slow for a hover, too fast for twelve rows opening, and it read as
+   * mechanical because it was. These are the four things this app actually
+   * animates.
+   */
+  duration: {
+    instant: 90,   // background, colour, border — feedback you should not notice
+    fast: 140,     // hover, focus, a control changing state
+    base: 200,     // a section opening, a dialog, a panel
+    slow: 300,     // a list arriving, a row closing after it is resolved
+  },
+  /**
+   * Two curves. A symmetric ease in both directions is the other half of why
+   * an interface feels like a machine: things that arrive should decelerate
+   * into place, and things that leave should not linger.
+   */
+  easing: {
+    standard: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    enter: 'cubic-bezier(0.2, 0, 0, 1)',
+    exit: 'cubic-bezier(0.4, 0, 1, 1)',
+  },
 };

@@ -36,6 +36,10 @@ const TAB_DEFAULT_ROLES = {
   pricing: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   archive: ['system_admin', 'admin_viewer', 'branch_manager'],
   branch_certifications: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
+  // Real routes that had no tab entry at all, so they were unreachable from
+  // the rail — adopted in client/src/config/tabs.js, mirrored here.
+  branches:    ['system_admin', 'admin_viewer'],
+  permissions: ['system_admin'],
 
   // כוח אדם
   employees: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],

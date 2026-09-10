@@ -7,6 +7,7 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import AddIcon from '@mui/icons-material/Add';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
+import { COLOR } from '../../theme/tokens';
 
 function todayPlusDays(d) {
   const date = new Date(Date.now() + d * 24 * 60 * 60 * 1000);
@@ -81,7 +82,7 @@ export default function ReceiveOrderDialog({ open, onClose, order, onReceived })
                 key={i}
                 sx={{
                   p: 1.5, borderRadius: 2,
-                  border: shortage ? '2px solid #f59e0b' : over ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                  border: shortage ? `2px solid ${COLOR.primary.light}` : over ? `2px solid ${COLOR.info.main}` : `1px solid ${COLOR.divider}`,
                   bgcolor: shortage ? '#fffbeb' : over ? '#eef2ff' : '#fff',
                 }}
               >

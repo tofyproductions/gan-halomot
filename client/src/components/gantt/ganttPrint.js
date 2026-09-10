@@ -411,7 +411,7 @@ export function buildGanttPrintHtml({
 
   .bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
          z-index: 9999; }
-  .toolbar { background: #f59e0b; color: #111;
+  .toolbar { background: ${COLOR.primary.light}; color: #111;
              padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;
              border: none; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
   .toolbar.alt { background: #25D366; color: #fff; }

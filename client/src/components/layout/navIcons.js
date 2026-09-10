@@ -53,6 +53,8 @@ import AccountBalanceWalletIcon from '@mui/icons-material/AccountBalanceWallet';
 import FolderIcon from '@mui/icons-material/Folder';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import StorefrontIcon from '@mui/icons-material/Storefront';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 
 export const ICON_BY_TAB = {
@@ -69,6 +71,8 @@ export const ICON_BY_TAB = {
   pricing: PriceChangeIcon,
   archive: ArchiveIcon,
   branch_certifications: VerifiedIcon,
+  branches: StorefrontIcon,
+  permissions: AdminPanelSettingsIcon,
 
   // כוח אדם
   employees: PeopleIcon,

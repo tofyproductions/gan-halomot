@@ -75,7 +75,8 @@
     "test:nav-model": "node scripts/nav-model.test.js",
     "test:design-hex": "node scripts/design-hex-budget.test.js",
     "test:bundle": "node scripts/bundle-budget.test.js",
-    "test:screen-meta": "node scripts/screen-meta.test.js"
+    "test:screen-meta": "node scripts/screen-meta.test.js",
+    "test:rtl-noflip": "node scripts/rtl-noflip.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

@@ -63,6 +63,12 @@ export const TAB_GROUPS = [
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
       // אש — with the expiry dates the mail digest watches.
       { id: 'branch_certifications', label: 'אישורי מעון', path: '/branch-certifications', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // Both of these were real routes in App.jsx with no entry here, which
+      // meant no row in the rail and no link anywhere in the client — the
+      // screen where the 43 screens are handed out was reachable only by
+      // typing its address. Either they are screens or they are not.
+      { id: 'branches',    label: 'סניפים',  path: '/branches',          defaultRoles: ['system_admin', 'admin_viewer'] },
+      { id: 'permissions', label: 'הרשאות',  path: '/admin/permissions', defaultRoles: ['system_admin'] },
     ],
   },
   {

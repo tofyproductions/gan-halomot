@@ -15,6 +15,7 @@ import InventoryIcon from '@mui/icons-material/Inventory2';
 import { useDraggable } from '@dnd-kit/core';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { COLOR } from '../../theme/tokens';
 
 export const BANK_ROWS = [
   { key: 'meeting', label: 'מפגש', color: '#dbeafe' },
@@ -359,7 +360,7 @@ export default function ContentBankPanel({
                 color={theme === t.theme ? 'primary' : 'default'}
                 variant={theme === t.theme ? 'filled' : 'outlined'}
                 onClick={() => setTheme(t.theme)}
-                sx={{ fontWeight: 700, borderColor: '#f59e0b' }}
+                sx={{ fontWeight: 700, borderColor: COLOR.primary.light }}
               />
             ))}
           </Box>
@@ -417,7 +418,7 @@ export default function ContentBankPanel({
 
           {!loading && groups.filter(g => g.items.length).map(g => (
             <Accordion key={g.category} defaultExpanded disableGutters elevation={0}
-              sx={{ '&:before': { display: 'none' }, border: '1px solid #e2e8f0', borderRadius: 2, mb: 1 }}>
+              sx={{ '&:before': { display: 'none' }, border: `1px solid ${COLOR.divider}`, borderRadius: 2, mb: 1 }}>
               <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ bgcolor: ROW_COLOR[g.category], borderRadius: 2, minHeight: 40 }}>
                 <Typography sx={{ fontWeight: 800, fontSize: '0.9rem' }}>
                   {g.label} <span style={{ opacity: 0.6, fontWeight: 500 }}>({g.items.length})</span>
@@ -504,7 +505,7 @@ export default function ContentBankPanel({
                           return (
                             <Box key={d} sx={{
                               minHeight: 52, borderRadius: 1.5, p: 0.4,
-                              bgcolor: row.color, border: '2px solid #f59e0b',
+                              bgcolor: row.color, border: `2px solid ${COLOR.primary.light}`,
                               display: 'flex', alignItems: 'center',
                             }}>
                               <TextField
@@ -541,12 +542,12 @@ export default function ContentBankPanel({
                               position: 'relative', minHeight: 52, borderRadius: 1.5, p: 0.8,
                               cursor: 'pointer', userSelect: 'none',
                               bgcolor: cell ? row.color : '#f8fafc',
-                              border: isPicked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                              border: isPicked ? `2px solid ${COLOR.primary.light}` : `1px solid ${COLOR.divider}`,
                               fontSize: '0.78rem', fontWeight: 600, lineHeight: 1.35,
                               color: cell ? '#1e293b' : '#cbd5e1',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
                               textAlign: 'center',
-                              '&:hover': { borderColor: '#f59e0b' },
+                              '&:hover': { borderColor: COLOR.primary.light },
                               '&:hover .act': { opacity: 1 },
                             }}
                           >
@@ -583,7 +584,7 @@ export default function ContentBankPanel({
               )}
 
               {previewMaterials.length > 0 && (
-                <Box sx={{ bgcolor: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 2, p: 1.5 }}>
+                <Box sx={{ bgcolor: '#f8fafc', border: `1px solid ${COLOR.divider}`, borderRadius: 2, p: 1.5 }}>
                   <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
                     <InventoryIcon sx={{ fontSize: 16, color: '#475569' }} />
                     <Typography sx={{ fontWeight: 800, fontSize: '0.85rem' }}>ציוד לשבוע</Typography>

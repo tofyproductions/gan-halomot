@@ -8,6 +8,7 @@ import {
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import FavoriteIcon from '@mui/icons-material/Favorite';
+import { COLOR } from '../../theme/tokens';
 
 // Public — no JWT.
 const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
@@ -67,8 +68,8 @@ export default function LeadForm() {
   return (
     <Box dir="rtl" sx={{ minHeight: '100vh', bgcolor: '#fdf6ec', display: 'flex', alignItems: 'center', justifyContent: 'center', px: 2, py: 4 }}>
       <Paper elevation={3} sx={{ maxWidth: 480, width: '100%', borderRadius: 4, overflow: 'hidden' }}>
-        <Box sx={{ background: 'linear-gradient(135deg,#fbbf24,#f59e0b)', color: '#fff', p: 3, textAlign: 'center' }}>
-          <Typography variant="h4" sx={{ fontWeight: 900, fontFamily: 'Varela Round' }}>גן החלומות</Typography>
+        <Box sx={{ background: COLOR.primary.main, color: '#fff', p: 3, textAlign: 'center' }}>
+          <Typography variant="h4" sx={{ fontWeight: 800 }}>גן החלומות</Typography>
           <Typography sx={{ opacity: 0.95, mt: 0.5 }}>שמחים שאתם מתעניינים! 🎈</Typography>
         </Box>
 

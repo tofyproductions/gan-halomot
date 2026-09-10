@@ -56,7 +56,12 @@ async function main() {
   ok(typeof SPACING_UNIT === 'number' && SPACING_UNIT === 8, 'SPACING_UNIT = 8');
   ok(RADIUS && RADIUS.control === 6 && RADIUS.surface === 8 && RADIUS.pill === 999, 'סולם פינות: 6 / 8 / 999');
   ok(TYPE && TYPE.fontFamily && !/Varela/i.test(TYPE.fontFamily), 'משפחת גופנים אחת, בלי Varela Round');
-  ok(MOTION && MOTION.duration >= 150 && MOTION.duration <= 250, 'משך תנועה 150–250ms');
+  ok(MOTION && typeof MOTION.duration === 'object'
+    && [90, 140, 200, 300].every((v) => Object.values(MOTION.duration).includes(v)),
+    'סולם תנועה: 90 / 140 / 200 / 300');
+  ok(MOTION.easing && MOTION.easing.enter && MOTION.easing.exit
+    && MOTION.easing.enter !== MOTION.easing.exit,
+    'שתי עקומות נפרדות לכניסה וליציאה');
 
   console.log('\nניגודיות טקסט (מינימום AA = 4.5):');
   const AA = 4.5;
@@ -70,6 +75,9 @@ async function main() {
     ['text.primary על background.default', COLOR.text.primary, COLOR.background.default],
     ['text.secondary על background.paper', COLOR.text.secondary, COLOR.background.paper],
     ['text.secondary על background.default', COLOR.text.secondary, COLOR.background.default],
+    ['text.secondary על background.sunken', COLOR.text.secondary, COLOR.background.sunken],
+    ['text.muted על background.paper', COLOR.text.muted, COLOR.background.paper],
+    ['text.muted על background.default', COLOR.text.muted, COLOR.background.default],
     ['sidebar.fg על sidebar.bg', COLOR.sidebar.fg, COLOR.sidebar.bg],
     ['sidebar.fgActive על sidebar.bgActive', COLOR.sidebar.fgActive, COLOR.sidebar.bgActive],
     ['sidebar.groupLabel על sidebar.bg', COLOR.sidebar.groupLabel, COLOR.sidebar.bg],
@@ -77,6 +85,16 @@ async function main() {
   for (const [label, fg, bg] of pairs) {
     const ratio = contrast(fg, bg);
     ok(ratio >= AA, `${label} — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+
+  console.log('\nגוף הטקסט ב-AAA (הקהל בן 55+):');
+  const AAA = 7;
+  for (const [label, fg, bg] of [
+    ['text.primary על נייר', COLOR.text.primary, COLOR.background.paper],
+    ['text.secondary על נייר', COLOR.text.secondary, COLOR.background.paper],
+  ]) {
+    const r = contrast(fg, bg);
+    ok(r >= AAA, `${label} — ${r.toFixed(2)}:1`, `נדרש ${AAA}`);
   }
 
   console.log('\nניגודיות תגיות רכות:');

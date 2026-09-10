@@ -10,6 +10,7 @@ import CancelIcon from '@mui/icons-material/Cancel';
 import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { COLOR } from '../../theme/tokens';
 
 /**
  * What accounting decided on the requests this person sent.
@@ -50,7 +51,7 @@ function DecisionCard({ item, highlight }) {
   return (
     <Card variant="outlined" sx={{
       p: 1.5, mb: 1.25, borderRadius: 2,
-      borderColor: highlight ? '#f59e0b' : 'divider',
+      borderColor: highlight ? COLOR.primary.light : 'divider',
       borderWidth: highlight ? 2 : 1,
       bgcolor: highlight ? '#fffdf7' : 'background.paper',
     }}>

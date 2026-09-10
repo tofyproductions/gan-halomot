@@ -32,22 +32,29 @@ const TONE_FILL = {
 };
 
 /** A figure plus its label, in one of three sizes. */
-function Figure({ value, label, hint, size = 'base', tone, muted }) {
-  const colour = muted ? 'text.primary' : `${TONE_FILL[tone] || 'primary'}.main`;
+function Figure({ value, label, hint, size = 'base', tone, muted, active }) {
+  const role = TONE_FILL[tone] || 'primary';
+  /**
+   * On a soft background the figure has to use the soft foreground.
+   * `success.main` on `success.soft` measures 4.20:1 — under AA — and it was
+   * only drawn in the active state, which is exactly when somebody is looking
+   * at it.
+   */
+  const colour = muted ? 'text.primary' : active ? `${role}.softOn` : `${role}.main`;
   return (
     <>
       <Typography
         component="div"
         className="num"
-        sx={{
-          ...(size === 'hero' ? { fontSize: '2.5rem', lineHeight: 1.05, letterSpacing: '-0.03em' }
-            : size === 'small' ? { fontSize: '1.25rem', lineHeight: 1.15, letterSpacing: '-0.01em' }
-            : { fontSize: '1.75rem', lineHeight: 1.1, letterSpacing: '-0.02em' }),
-          fontWeight: 600,
+        sx={(t) => ({
+          // theme.figure, not three sets of numbers retyped here. The scale was
+          // defined in the theme and consumed by nothing.
+          ...(t.figure[size === 'hero' ? 'hero' : size === 'small' ? 'small' : 'base']),
           color: colour,
-          direction: 'ltr',
+          // No `direction` here: `.num` owns that, and setting it inline in a
+          // stylesheet the RTL plugin rewrites is how it got inverted before.
           textAlign: 'inherit',
-        }}
+        })}
       >
         {value}
       </Typography>
@@ -55,7 +62,7 @@ function Figure({ value, label, hint, size = 'base', tone, muted }) {
         {label}
       </Typography>
       {hint && (
-        <Typography sx={{ fontSize: '0.6875rem', color: 'text.disabled', lineHeight: 1.35, mt: 0.125 }}>
+        <Typography sx={{ fontSize: '0.6875rem', color: 'text.muted', lineHeight: 1.35, mt: 0.125 }}>
           {hint}
         </Typography>
       )}
@@ -71,17 +78,40 @@ const pressable = (onClick, active, tone, muted) => ({
   border: '1px solid',
   borderColor: active ? `${TONE_FILL[tone] || 'primary'}.main` : 'divider',
   bgcolor: active ? (muted ? 'background.sunken' : `${TONE_FILL[tone] || 'primary'}.soft`) : 'background.paper',
-  transition: 'border-color 140ms, background-color 140ms, transform 140ms',
+  transition: (t) => `border-color ${t.motion.fast}, background-color ${t.motion.fast}, transform ${t.motion.fast}`,
   '&:hover': onClick ? {
     borderColor: active ? `${TONE_FILL[tone] || 'primary'}.main` : 'dividerStrong',
     transform: 'translateY(-1px)',
   } : {},
   '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 2 },
+  // A lift with no press is half a gesture.
+  '&:active': onClick ? { transform: 'scale(0.985)', transitionDuration: '60ms' } : {},
 });
 
+/**
+ * A count, however it was formatted. `a.value > 0` is false for the string
+ * "1,204" and for "₪3,900" — so a formatted problem count dropped into the
+ * quiet row and the panel announced "הכל נקי" above it.
+ */
+const countOf = (v) => {
+  if (typeof v === 'number') return v;
+  const n = Number(String(v ?? '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+};
+
 export default function StatBoard({ hero, attention = [], facts = [] }) {
-  const live = attention.filter((a) => a && a.value > 0);
-  const quiet = attention.filter((a) => a && !(a.value > 0));
+  const withCounts = attention.filter(Boolean).map((a) => ({ ...a, _n: countOf(a.value) }));
+  /**
+   * At most five loud figures. TmtReconcile passes eleven, eight of them with
+   * no `tone` and therefore red by default — which turned a wall of fourteen
+   * identical tiles into a wall of eleven red ones. The rest stay reachable as
+   * filters in the quiet row; they simply stop competing.
+   */
+  const live = withCounts
+    .filter((a) => a._n > 0)
+    .sort((a, b) => (a.tone === 'warning') - (b.tone === 'warning') || b._n - a._n)
+    .slice(0, 5);
+  const quiet = withCounts.filter((a) => !live.includes(a));
 
   return (
     <Box sx={{ mb: 2.5 }}>
@@ -110,7 +140,7 @@ export default function StatBoard({ hero, attention = [], facts = [] }) {
               justifyContent: 'center',
             }}
           >
-            <Figure {...hero} size="hero" tone={hero.tone || 'success'} />
+            <Figure {...hero} size="hero" tone={hero.tone || 'success'} active={hero.active} />
           </Box>
         )}
 
@@ -129,7 +159,7 @@ export default function StatBoard({ hero, attention = [], facts = [] }) {
             <Typography
               sx={{
                 fontSize: '0.6875rem', fontWeight: 700, letterSpacing: '0.06em',
-                color: live.length ? 'error.main' : 'text.disabled', flexShrink: 0,
+                color: live.length ? 'error.main' : 'text.muted', flexShrink: 0,
               }}
             >
               דורש טיפול
@@ -153,7 +183,7 @@ export default function StatBoard({ hero, attention = [], facts = [] }) {
                   aria-pressed={a.onClick ? !!a.active : undefined}
                   sx={{ ...pressable(a.onClick, a.active, a.tone || 'error'), borderRadius: 1.5, p: 1.25 }}
                 >
-                  <Figure {...a} size="base" tone={a.tone || 'error'} />
+                  <Figure {...a} size="base" tone={a.tone || 'error'} active={a.active} />
                 </Box>
               ))}
             </Box>
@@ -182,7 +212,7 @@ export default function StatBoard({ hero, attention = [], facts = [] }) {
                       color: 'text.secondary',
                     }}
                   >
-                    <Box component="span" className="num" sx={{ fontWeight: 700, color: 'text.disabled' }}>
+                    <Box component="span" className="num" sx={{ fontWeight: 700, color: 'text.muted' }}>
                       {a.value}
                     </Box>
                     {a.label}

@@ -1,10 +1,11 @@
 {
-  "firstLoadGzipKB": 252,
+  "firstLoadGzipKB": 254,
   "recorded": "2026-09-10",
   "was": "1168 KB gzip / 3.99 MB raw, in one chunk, before routes and vendors were split",
   "note": "What index.html pulls in before first paint: the entry chunk plus every modulepreload. Lazily-imported screens are deliberately not counted — that is the point. Enforced by server/scripts/bundle-budget.test.js, which must run after a build.",
   "history": [
     "250 — routes and vendors split",
-    "252 — +2 KB for the breadcrumb, the 404 page and the screen-name map. Raised deliberately: the three heavy-library checks still pass, so this is new behaviour rather than a library creeping back onto the critical path. A budget raised without a reason written here is not a budget."
+    "252 — +2 KB for the breadcrumb, the 404 page and the screen-name map. Raised deliberately: the three heavy-library checks still pass, so this is new behaviour rather than a library creeping back onto the critical path. A budget raised without a reason written here is not a budget.",
+    "254 — +2 KB for the error boundary around the lazy screens. A failed chunk on a gan's wifi was a white page that a reload could not fix, because React caches the rejected promise."
   ]
 }

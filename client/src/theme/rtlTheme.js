@@ -16,7 +16,8 @@ const t = (v) => ({
   ...(v.letterSpacing ? { letterSpacing: v.letterSpacing } : {}),
 });
 
-const transition = `${MOTION.duration}ms ${MOTION.easing}`;
+const t2 = (ms, curve = MOTION.easing.standard) => `${ms}ms ${curve}`;
+const transition = t2(MOTION.duration.fast);
 
 /**
  * Depth is a hairline, not a shadow.
@@ -84,6 +85,24 @@ const theme = createTheme({
     row: COLOR.row,
   },
 
+  /**
+   * The motion scale, reachable from any component as theme.motion.
+   *
+   * There were eighteen hand-written transition strings across the components —
+   * 160ms here, 140ms there, `all 0.2s` in the Gantt — and the token that was
+   * supposed to govern them was consumed in exactly one place. A scale nobody
+   * can reach is a scale nobody uses.
+   */
+  motion: {
+    instant: t2(MOTION.duration.instant),
+    fast: t2(MOTION.duration.fast),
+    base: t2(MOTION.duration.base, MOTION.easing.enter),
+    slow: t2(MOTION.duration.slow, MOTION.easing.enter),
+    exit: t2(MOTION.duration.fast, MOTION.easing.exit),
+    duration: MOTION.duration,
+    easing: MOTION.easing,
+  },
+
   // Type, not colour, so these stay off the palette.
   figure: { hero: t(TYPE.figureHero), base: t(TYPE.figure), small: t(TYPE.figureSmall) },
   overline: { ...t(TYPE.overline), textTransform: 'none' },
@@ -119,11 +138,35 @@ const theme = createTheme({
          * is one of those three, so isolation is a default here rather than
          * something each of 152 screens has to remember.
          */
+        /**
+         * `/* @noflip *\/` IS LOad-BEARING. stylis-plugin-rtl rewrites this
+         * whole stylesheet, and it does not know that these two declarations
+         * are the point rather than an accident: it turned `direction: ltr`
+         * into `rtl` and `text-align: right` into `left`, so the class written
+         * to stop Israeli IDs and shekel figures reordering was doing the
+         * opposite. Verified by running the plugin over the rule.
+         *
+         * server/scripts/design-tokens.test.js now runs the plugin too and
+         * fails if the output stops being ltr.
+         */
         '.num': {
           fontVariantNumeric: 'tabular-nums',
           unicodeBidi: 'isolate',
-          direction: 'ltr',
-          textAlign: 'right',
+          '/*!@noflip*/direction': 'ltr',
+          '/*!@noflip*/textAlign': 'right',
+        },
+
+        /**
+         * Somewhere to be, for a keyboard.
+         *
+         * MUI's ButtonBase sets `outline: 0` on everything it renders and this
+         * theme never put one back, so every button, icon button, tab, chip and
+         * select in the app was invisible to a keyboard. Only two components in
+         * the whole client defined a focus style of their own.
+         */
+        '.Mui-focusVisible, :focus-visible': {
+          outline: `2px solid ${COLOR.primary.main}`,
+          outlineOffset: 2,
         },
 
         '@media (prefers-reduced-motion: reduce)': {
@@ -257,6 +300,17 @@ const theme = createTheme({
             padding: '9px 12px',
             fontSize: TYPE.body2.size,
             borderBottom: `1px solid ${COLOR.divider}`,
+            // A row was jumping to its hover colour with no transition while a
+            // tile beside it faded in 140ms.
+            transition: `background-color ${t2(MOTION.duration.instant)}`,
+          },
+          /**
+           * Dense actually means dense. The rule above outranked MUI's own
+           * `.MuiTableCell-sizeSmall`, so `size="small"` did nothing and a
+           * 40-employee grid showed fifteen of them.
+           */
+          '& .MuiTableCell-root.MuiTableCell-sizeSmall': {
+            padding: '5px 8px',
           },
         },
       },
@@ -345,9 +399,37 @@ const theme = createTheme({
       },
     },
 
+    /**
+     * Alerts get what chips got.
+     *
+     * The Alert is this app's main feedback surface — four of them stack up in
+     * one upload dialog — and it was the one component left on MUI's cold blue
+     * and green, sitting on warm paper. Same soft pairs, same measured
+     * contrast.
+     */
     MuiAlert: {
       styleOverrides: {
         root: { borderRadius: RADIUS.control, fontSize: TYPE.body2.size },
+        standardSuccess: {
+          backgroundColor: COLOR.success.soft,
+          color: COLOR.success.softOn,
+          '& .MuiAlert-icon': { color: COLOR.success.main },
+        },
+        standardWarning: {
+          backgroundColor: COLOR.warning.soft,
+          color: COLOR.warning.softOn,
+          '& .MuiAlert-icon': { color: COLOR.warning.main },
+        },
+        standardError: {
+          backgroundColor: COLOR.error.soft,
+          color: COLOR.error.softOn,
+          '& .MuiAlert-icon': { color: COLOR.error.main },
+        },
+        standardInfo: {
+          backgroundColor: COLOR.info.soft,
+          color: COLOR.info.softOn,
+          '& .MuiAlert-icon': { color: COLOR.info.main },
+        },
       },
     },
 

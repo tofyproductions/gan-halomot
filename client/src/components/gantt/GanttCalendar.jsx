@@ -8,6 +8,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear, getHebrewYearFromStart } from '../../hooks/useAcademicYear';
+import { COLOR } from '../../theme/tokens';
 
 const MONTH_NAMES = {
   9: 'ספטמבר', 10: 'אוקטובר', 11: 'נובמבר', 12: 'דצמבר',
@@ -111,7 +112,7 @@ export default function GanttCalendar() {
                 cursor: 'pointer',
                 bgcolor: STATUS_COLORS[status],
                 border: '2px solid transparent',
-                '&:hover': { borderColor: '#f59e0b', transform: 'scale(1.02)' },
+                '&:hover': { borderColor: COLOR.primary.light, transform: 'scale(1.02)' },
                 transition: 'all 0.2s',
               }}
               onClick={() => openEditor(month)}

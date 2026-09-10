@@ -184,7 +184,7 @@ export default function LoginPage() {
       <Card sx={{ maxWidth: 420, width: '100%' }}>
         <CardContent sx={{ p: 4 }}>
           <Box sx={{ textAlign: 'center', mb: 4 }}>
-            <Typography variant="h4" sx={{ fontWeight: 900, fontFamily: 'Varela Round', mb: 1 }}>
+            <Typography variant="h4" sx={{ fontWeight: 800, mb: 1 }}>
               גן החלומות
             </Typography>
             <Typography variant="body2" color="text.secondary">

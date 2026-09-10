@@ -95,7 +95,7 @@ export default function OrderView() {
       <style>
         @media print { @page { size: A4; margin: 14mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
         body { font-family: Assistant, Arial, sans-serif; color:#1e293b; padding:20px; max-width:800px; margin:0 auto; }
-        .head { border-bottom:3px solid #f59e0b; padding-bottom:12px; margin-bottom:20px; }
+        .head { border-bottom:3px solid #B4540A; padding-bottom:12px; margin-bottom:20px; }
         .head h1 { margin:0; color:#d97706; font-size:26px; }
         .meta { width:100%; border-collapse:collapse; margin-bottom:16px; }
         .meta td { vertical-align:top; padding:12px; border-radius:8px; width:50%; }
@@ -109,7 +109,7 @@ export default function OrderView() {
         table.items tfoot td { background:#fef3c7; font-weight:800; font-size:16px; }
         .notes { padding:12px; background:#dbeafe; border-radius:8px; margin-bottom:16px; }
         .footer { margin-top:32px; padding-top:16px; border-top:1px solid #e2e8f0; color:#94a3b8; font-size:12px; text-align:center; }
-        .print-btn { position:fixed; bottom:20px; left:20px; z-index:9999; padding:12px 24px; background:#f59e0b; color:#fff; border:none; border-radius:30px; font-weight:700; font-size:16px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
+        .print-btn { position:fixed; bottom:20px; left:20px; z-index:9999; padding:12px 24px; background:#B4540b; color:#fff; border:none; border-radius:30px; font-weight:700; font-size:16px; cursor:pointer; box-shadow:0 4px 12px rgba(0,0,0,0.2); }
         @media print { .print-btn { display:none; } }
       </style></head>
       <body>

@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Box } from '@mui/material';
 import AppShell from './components/layout/AppShell';
 import ScreenSkeleton from './components/ui/ScreenSkeleton';
+import ScreenBoundary from './components/ui/ScreenBoundary';
 import NotFound from './components/layout/NotFound';
 import LoginPage from './components/layout/LoginPage';
 import ProtectedRoute from './components/layout/ProtectedRoute';
@@ -96,6 +97,7 @@ function AppRoutes() {
     // no shell around them. Screens INSIDE the shell have their own boundary
     // in AppShell, around the Outlet, so the rail stays put while one loads
     // instead of the whole window blanking.
+    <ScreenBoundary>
     <Suspense fallback={<Box sx={{ p: 3 }}><ScreenSkeleton /></Box>}>
     <Routes>
       {/* Public routes — rendered STANDALONE, deliberately OUTSIDE the
@@ -293,6 +295,7 @@ function AppRoutes() {
 
     </Routes>
     </Suspense>
+    </ScreenBoundary>
   );
 }
 

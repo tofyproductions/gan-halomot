@@ -30,9 +30,10 @@ import { formatAcademicYear, getAcademicYears } from '../../hooks/useAcademicYea
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { getAcademicYearRange } from '../../utils/hebrewYear';
 import { printContractHtml } from '../../utils/contractPdf';
+import { COLOR } from '../../theme/tokens';
 
 const STATUS_CONFIG = {
-  link_generated: { label: 'בתהליך', color: '#fef3c7', textColor: '#92400e', border: '#f59e0b' },
+  link_generated: { label: 'בתהליך', color: '#fef3c7', textColor: '#92400e', border: COLOR.primary.light },
   contract_signed: { label: 'חוזה נחתם', color: '#dbeafe', textColor: '#1e40af', border: '#3b82f6' },
   docs_uploaded: { label: 'מסמכים הועלו', color: '#e0e7ff', textColor: '#3730a3', border: '#6366f1' },
   completed: { label: 'הושלם', color: '#dcfce7', textColor: '#166534', border: '#22c55e' },

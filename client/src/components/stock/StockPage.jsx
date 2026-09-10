@@ -22,11 +22,12 @@ import StockCountDialog from './StockCountDialog';
 import StockCategoryManager from './StockCategoryManager';
 import ShortageOrderDialog from './ShortageOrderDialog';
 import ShoppingBasketIcon from '@mui/icons-material/ShoppingBasket';
+import { COLOR } from '../../theme/tokens';
 
 function colorForStatus(item) {
   const { qty = 0, min_qty = 0, warn_qty = 0 } = item;
   if (qty < min_qty) return { border: '#dc2626', bg: '#fef2f2', label: 'אדום', tint: '#dc2626' };
-  if (warn_qty > 0 && qty < warn_qty) return { border: '#f59e0b', bg: '#fffbeb', label: 'כתום', tint: '#f59e0b' };
+  if (warn_qty > 0 && qty < warn_qty) return { border: COLOR.primary.light, bg: '#fffbeb', label: 'כתום', tint: COLOR.primary.light };
   return { border: '#10b981', bg: '#f0fdf4', label: 'ירוק', tint: '#10b981' };
 }
 
@@ -104,7 +105,7 @@ function StockItemCard({ item, onAdjust, onCount, onEdit, onDelete, onHistory })
         )}
         {stale && (
           <Tooltip title={`לא נספר ${days} ימים`}>
-            <WarningAmberIcon fontSize="small" sx={{ color: '#f59e0b' }} />
+            <WarningAmberIcon fontSize="small" sx={{ color: COLOR.primary.light }} />
           </Tooltip>
         )}
         {days !== null && (

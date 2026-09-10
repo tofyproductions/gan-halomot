@@ -115,6 +115,39 @@ function main() {
   }
   console.log('  ✅ אין');
 
+  /**
+   * The orange that failed, by name, anywhere in the client.
+   *
+   * design-tokens.test.js asserts `primary.main !== '#f59e0b'`, which only
+   * guards the token — and the colour walked straight back in through a
+   * component, hand-typed on five dashboard cards and on index.html's
+   * theme-color. A rule that only protects the place you took it out of is not
+   * a rule.
+   */
+  console.log('\nהכתום שנכשל בניגודיות לא חזר בשום צורה:');
+  const BANNED = ['#f59e0b', '#F59E0B'];
+  const offenders = [];
+  for (const f of [...files, path.join(__dirname, '..', '..', 'client', 'index.html')]) {
+    if (!fs.existsSync(f)) continue;
+    const src = fs.readFileSync(f, 'utf8');
+    // tokens.js keeps it deliberately as primary.light / sidebar.marker — fills
+    // that never carry text.
+    if (f.endsWith(path.join('theme', 'tokens.js'))) continue;
+    // Comments may name the colour — this whole rule exists because of it, and
+    // the explanation of why it is banned should not itself be a violation.
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+    if (BANNED.some((b) => code.includes(b))) offenders.push(path.relative(CLIENT_SRC, f));
+  }
+  if (offenders.length) {
+    for (const o of offenders) console.log(`  ❌ ${o}`);
+    console.log('\n❌ 2.2:1 מאחורי טקסט לבן. השתמשו ב-primary.main, או ב-primary.light למילוי בלי טקסט.');
+    process.exit(1);
+  }
+  console.log('  ✅ אין');
+
   const budget = JSON.parse(fs.readFileSync(BUDGET_FILE, 'utf8'));
 
   console.log(`נמצאו ${total} צבעים קשיחים ב-${perFile.length} קבצים.`);

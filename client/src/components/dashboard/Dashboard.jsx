@@ -10,6 +10,7 @@ import { useBranch } from '../../hooks/useBranch';
 import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
 import StockShortageTile from './StockShortageTile';
+import StatBoard from '../ui/StatBoard';
 
 /**
  * The chart library is 564KB — larger than the rest of this screen put
@@ -99,7 +100,7 @@ export default function Dashboard() {
   if (loading) {
     return (
       <Box sx={{ textAlign: 'center', py: 10 }}>
-        <Typography variant="h6" sx={{ color: '#f59e0b' }}>טוען נתונים...</Typography>
+        <Typography variant="h6" sx={{ color: 'text.secondary' }}>טוען נתונים...</Typography>
       </Box>
     );
   }
@@ -163,7 +164,7 @@ export default function Dashboard() {
           <Button
             variant="outlined" size="small" startIcon={<SyncIcon />}
             onClick={handleSync} disabled={syncing || checking}
-            sx={{ borderColor: '#10b981', color: '#10b981' }}
+            sx={{ borderColor: 'success.main', color: 'success.main' }}
           >
             {syncing ? 'מסנכרן...' : 'סנכרון'}
           </Button>
@@ -171,51 +172,51 @@ export default function Dashboard() {
         </Stack>
       </Box>
 
-      {/* KPI Cards */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2, mb: 4 }}>
-        <Card>
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">סה״כ ילדים פעילים</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#f59e0b' }}>{totalKids}</Typography>
-            <Typography variant="caption" color="text.secondary">{academicYear}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">חוזים חתומים</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#10b981' }}>{signedCount}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">ממתינים לחתימה</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#f97316' }}>{pendingCount}</Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">תפוסה מאושרת</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#3b82f6' }}>
-              {bindingCapacity || '—'}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              {licensedCapacity != null
-                ? `רישיון ${licensedCapacity} · כיתות ${totalCapacity}`
-                : 'לפי סכום מקומות בכיתות'}
-            </Typography>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent sx={{ textAlign: 'center' }}>
-            <Typography variant="body2" color="text.secondary">מקומות פנויים</Typography>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: freePlaces === 0 ? '#ef4444' : '#10b981' }}>
-              {freePlaces == null ? '—' : freePlaces}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              {bindingCapacity > 0 ? `${totalKids} מתוך ${bindingCapacity} משובצים` : 'לא הוזנה תפוסה'}
-            </Typography>
-          </CardContent>
-        </Card>
+      {/* The one screen whose whole job is "at a glance" was the only one NOT
+          using StatBoard — five identical centred cards, each with a hand-typed
+          hex, including #f59e0b: the orange that fails contrast at 2.2:1 and
+          that design-tokens.test.js forbids by name. It had been deleted from
+          the tokens and walked back in through a component. */}
+      <StatBoard
+        hero={{
+          id: 'kids',
+          label: 'ילדים פעילים',
+          value: totalKids,
+          hint: academicYear,
+          tone: 'primary',
+        }}
+        attention={[
+          {
+            id: 'pending',
+            label: 'ממתינים לחתימה',
+            value: pendingCount,
+            hint: 'חוזה נשלח ולא נחתם',
+            tone: 'warning',
+          },
+          {
+            id: 'free',
+            label: 'מקומות פנויים',
+            value: freePlaces == null ? 0 : freePlaces,
+            hint: bindingCapacity > 0
+              ? `${totalKids} מתוך ${bindingCapacity} משובצים`
+              : 'לא הוזנה תפוסה',
+            // A gan with no free places is a fact to act on, not an alarm — it
+            // goes quiet at zero like everything else in this panel, which is
+            // wrong here, so it is inverted: the SHORTAGE is what matters.
+            tone: freePlaces === 0 ? 'error' : 'info',
+          },
+        ]}
+        facts={[
+          { id: 'signed', label: 'חוזים חתומים', value: signedCount },
+          {
+            id: 'capacity',
+            label: licensedCapacity != null ? `תפוסה מאושרת (רישיון ${licensedCapacity})` : 'תפוסה מאושרת',
+            value: bindingCapacity || '—',
+          },
+        ]}
+      />
+
+      <Box sx={{ mb: 4 }}>
         <StockShortageTile />
       </Box>
 

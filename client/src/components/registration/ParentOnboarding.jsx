@@ -178,7 +178,7 @@ export default function ParentOnboarding() {
     <Box dir="rtl" sx={{ maxWidth: 700, mx: 'auto', py: 4, px: 2 }}>
       {/* Header */}
       <Box sx={{ textAlign: 'center', mb: 4 }}>
-        <Typography variant="h4" sx={{ fontWeight: 800, fontFamily: 'Varela Round' }}>
+        <Typography variant="h4" sx={{ fontWeight: 800 }}>
           גן החלומות
         </Typography>
       </Box>

@@ -87,7 +87,7 @@ function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
       {...props}
       sx={{
         ...props.sx,
-        outline: isOver ? '2px solid #f59e0b' : 'none',
+        outline: isOver ? `2px solid ${COLOR.primary.light}` : 'none',
         opacity: isDragging ? 0.45 : 1,
         transition: 'outline 0.15s, opacity 0.15s',
       }}
@@ -852,7 +852,7 @@ export default function GanttEditor() {
           return (
             <Card key={weekIdx} sx={{ mb: 3, boxShadow: '0 2px 12px rgba(0,0,0,0.06)', borderRadius: 3, overflow: 'hidden' }}>
               <Box sx={{ bgcolor: COLOR.gantt.header, color: COLOR.gantt.headerOn, px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
-                <Chip label={`שבוע ${week.week_number}`} size="small" sx={{ bgcolor: '#f59e0b', color: 'white', fontWeight: 700 }} />
+                <Chip label={`שבוע ${week.week_number}`} size="small" sx={{ bgcolor: COLOR.primary.main, color: 'white', fontWeight: 700 }} />
                 {/* The range the week actually DRAWS, not the stored one. The
                     stored end_date is the Saturday, which is never a column,
                     so printing it beside a row of dates that stops on Friday
@@ -1034,11 +1034,11 @@ export default function GanttEditor() {
 
                           // Friday specials
                           if (isFri && row.key === 'meeting') {
-                            return <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, textAlign: 'center', p: 1, fontWeight: 800, fontSize: '1rem', color: COLOR.gantt.span.on, border: '1px solid #e2e8f0' }}>קבלת שבת</TableCell>;
+                            return <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, textAlign: 'center', p: 1, fontWeight: 800, fontSize: '1rem', color: COLOR.gantt.span.on, border: `1px solid ${COLOR.divider}` }}>קבלת שבת</TableCell>;
                           }
                           if (isFri && row.key === 'activity') {
                             return (
-                              <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, p: 1.5, border: '1px solid #e2e8f0' }}>
+                              <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, p: 1.5, border: `1px solid ${COLOR.divider}` }}>
                                 {/* Chosen from the room's children rather than
                                     typed, so the turn can be counted and the
                                     round kept without anybody remembering it. */}
@@ -1088,7 +1088,7 @@ export default function GanttEditor() {
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
                                 bgcolor: cc || (hol ? COLOR.gantt.cell.holiday : isFri ? COLOR.gantt.cell.friday : own ? COLOR.background.paper : COLOR.gantt.cell.other),
-                                border: picked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
+                                border: picked ? `2px solid ${COLOR.primary.light}` : `1px solid ${COLOR.divider}`,
                                 p: 1, verticalAlign: 'top', cursor: mergeMode ? 'crosshair' : 'default',
                                 position: 'relative', '&:hover .ca': { opacity: 1 },
                               }}
@@ -1118,7 +1118,7 @@ export default function GanttEditor() {
                                       if (!mergeMode) setMergeMode(true);
                                       handleMergeClick(weekIdx, row.key, si);
                                     }}>
-                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : COLOR.text.disabled }} />
+                                      <MergeIcon sx={{ fontSize: 13, color: picked ? COLOR.primary.light : COLOR.text.disabled }} />
                                     </IconButton>
                                   </Tooltip>
                                 )}

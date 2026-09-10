@@ -1,10 +1,11 @@
 import { Suspense, useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import ScreenSkeleton from '../ui/ScreenSkeleton';
+import ScreenBoundary from '../ui/ScreenBoundary';
 import Breadcrumb from './Breadcrumb';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
-import MobileNav, { MOBILE_NAV_HEIGHT, useHasMobileNav } from './MobileNav';
+import MobileNav, { MOBILE_NAV_SPACE, useHasMobileNav } from './MobileNav';
 import { useAuth } from '../../hooks/useAuth';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
@@ -28,6 +29,7 @@ import { MyDecisionsPopup } from '../payroll/MyDecisions';
  */
 export default function AppShell() {
   const hasMobileNav = useHasMobileNav();
+  const { pathname } = useLocation();
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', bgcolor: 'background.default' }}>
@@ -47,7 +49,7 @@ export default function AppShell() {
           // when there is a bar. MobileNav renders nothing for somebody with no
           // visible tabs, and reserving the space anyway left 72px of blank
           // page under the content.
-          pb: { xs: hasMobileNav ? `calc(${MOBILE_NAV_HEIGHT}px + 16px)` : 2, md: 2.5 },
+          pb: { xs: hasMobileNav ? `calc(${MOBILE_NAV_SPACE} + 16px)` : 2, md: 2.5 },
         }}
       >
         {/* A branch manager's open "complete your missing punches" assignment —
@@ -67,9 +69,15 @@ export default function AppShell() {
             selector and the gates above stay on screen while one loads. A
             person clicking שכר should see שכר appear inside the app, not the
             app disappear and come back. */}
-        <Suspense fallback={<ScreenSkeleton />}>
-          <Outlet />
-        </Suspense>
+        {/* The boundary sits OUTSIDE the Suspense: a screen whose code never
+            arrives rejects the lazy import, and without something to catch it
+            the whole tree unmounts to a white page. It is keyed on the route so
+            one broken screen does not shadow every screen after it. */}
+        <ScreenBoundary routeKey={pathname}>
+          <Suspense fallback={<ScreenSkeleton />}>
+            <Outlet />
+          </Suspense>
+        </ScreenBoundary>
       </Box>
 
       <MobileNav />

@@ -7,11 +7,12 @@ import UndoIcon from '@mui/icons-material/Undo';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { COLOR } from '../../theme/tokens';
 
 const REASON_LABELS = {
   count: { label: 'ספירה', color: '#0ea5e9' },
   delivery: { label: 'קבלת הזמנה', color: '#10b981' },
-  consumption: { label: 'צריכה', color: '#f59e0b' },
+  consumption: { label: 'צריכה', color: COLOR.primary.light },
   correction: { label: 'תיקון', color: '#6366f1' },
   spoilage: { label: 'פסולת', color: '#dc2626' },
   undo: { label: 'ביטול', color: '#94a3b8' },

@@ -4,6 +4,7 @@ import Inventory2Icon from '@mui/icons-material/Inventory2';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { COLOR } from '../../theme/tokens';
 
 export default function StockShortageTile() {
   const [data, setData] = useState(null);
@@ -58,10 +59,10 @@ export default function StockShortageTile() {
   }
 
   return (
-    <Card sx={{ borderRight: `4px solid ${totals.red > 0 ? '#dc2626' : '#f59e0b'}` }}>
+    <Card sx={{ borderRight: `4px solid ${totals.red > 0 ? '#dc2626' : COLOR.primary.light}` }}>
       <CardContent>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-          <Inventory2Icon sx={{ color: totals.red > 0 ? '#dc2626' : '#f59e0b' }} />
+          <Inventory2Icon sx={{ color: totals.red > 0 ? '#dc2626' : COLOR.primary.light }} />
           <Typography variant="body2" sx={{ fontWeight: 800 }}>מצב מלאי</Typography>
           <Box sx={{ flex: 1 }} />
           {totals.red > 0 && <Chip size="small" label={`${totals.red} אדום`} sx={{ bgcolor: '#fee2e2', color: '#991b1b', fontWeight: 700 }} />}
@@ -82,7 +83,7 @@ export default function StockShortageTile() {
             >
               <Typography variant="body2" sx={{ fontWeight: 700, flex: 1 }}>{b.branch_name}</Typography>
               {b.red > 0 && <Chip size="small" label={b.red} sx={{ bgcolor: '#dc2626', color: '#fff', fontWeight: 700, height: 20 }} />}
-              {b.warn > 0 && <Chip size="small" label={b.warn} sx={{ bgcolor: '#f59e0b', color: '#fff', fontWeight: 700, height: 20 }} />}
+              {b.warn > 0 && <Chip size="small" label={b.warn} sx={{ bgcolor: COLOR.primary.main, color: COLOR.primary.contrastText, fontWeight: 700, height: 20 }} />}
               {b.red === 0 && b.warn === 0 && (
                 <Typography variant="caption" sx={{ color: '#065f46', fontWeight: 700 }}>תקין</Typography>
               )}

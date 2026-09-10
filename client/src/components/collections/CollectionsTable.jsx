@@ -26,6 +26,14 @@ import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
 import { COLOR } from '../../theme/tokens';
 
+/** What each tint in the grid means. Printed as well as shown. */
+const CELL_LEGEND = {
+  paid: 'שולם במלואו',
+  partial: 'שולם חלקית',
+  unpaid: 'לא שולם',
+  before: 'לפני תחילת הרישום',
+};
+
 const MONTH_LABELS = [
   'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳', 'ינו׳', 'פבר׳',
   'מרץ', 'אפר׳', 'מאי', 'יוני', 'יולי', 'אוג׳',
@@ -419,12 +427,61 @@ export default function CollectionsTable() {
     return summary;
   }, [allRows, columns]);
 
-  const handlePrint = () => window.print();
+  /**
+   * Printing a grid whose entire meaning is the colour of a cell.
+   *
+   * `window.print()` alone gave a white sheet: browsers strip background fills
+   * from print by default, so paid / part-paid / unpaid / before-start came out
+   * identical — and there was no legend either, so nothing on the page said
+   * what the colours had meant. Somebody chasing a debt from that printout is
+   * reading nothing. AttendanceMonitor already does both of these; this screen
+   * did neither.
+   */
+  const handlePrint = () => {
+    const style = document.createElement('style');
+    style.id = 'collections-print';
+    style.textContent = `
+      @media print {
+        @page { size: A4 landscape; margin: 8mm; }
+        /* Without this the fills are dropped and the grid means nothing. */
+        *, *::before, *::after {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        nav, .MuiDrawer-root, .no-print { display: none !important; }
+        table { font-size: 8pt; }
+      }
+    `;
+    document.head.appendChild(style);
+    window.print();
+    // Removed on the next tick so the dialog has already read it.
+    setTimeout(() => style.remove(), 0);
+  };
 
   if (loading) return <LoadingSpinner />;
 
   return (
     <Box dir="rtl">
+      {/* The key to the colours, built from COLOR.collections.cell itself so it
+          cannot describe a shade the grid stopped using — the same trick the
+          punch grid's legend uses. It prints, deliberately: on paper it is the
+          only thing that says what the tints mean. */}
+      <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap
+        sx={{ mb: 1.5, alignItems: 'center' }}>
+        {Object.entries(CELL_LEGEND).map(([k, label]) => (
+          <Stack key={k} direction="row" spacing={0.5} alignItems="center">
+            <Box sx={{
+              width: 16, height: 14, borderRadius: 0.75,
+              bgcolor: COLOR.collections.cell[k].bg,
+              border: '1px solid', borderColor: 'divider',
+            }} />
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              {label}
+            </Typography>
+          </Stack>
+        ))}
+      </Stack>
+
       {/* Header */}
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב גבייה</Typography>
@@ -1095,7 +1152,7 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                         width: 6,
                         height: 6,
                         borderRadius: '50%',
-                        bgcolor: '#f59e0b',
+                        bgcolor: COLOR.primary.main,
                       }}
                     />
                   )}

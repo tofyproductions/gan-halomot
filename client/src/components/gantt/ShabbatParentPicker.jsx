@@ -5,6 +5,7 @@ import {
 } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { COLOR } from '../../theme/tokens';
 
 /**
  * Who is אבא של שבת, or אמא של שבת, this week.
@@ -67,10 +68,10 @@ export default function ShabbatParentPicker({
       sx={{
         display: 'flex', alignItems: 'center', gap: 1, px: 1.2, py: 0.8,
         borderRadius: 2, cursor: 'pointer', border: '1px solid',
-        borderColor: child.name === currentName ? '#f59e0b' : '#e2e8f0',
+        borderColor: child.name === currentName ? COLOR.primary.light : '#e2e8f0',
         bgcolor: child.name === currentName ? '#fffbeb' : dim ? '#f8fafc' : '#fff',
         opacity: dim ? 0.65 : 1,
-        '&:hover': { borderColor: '#f59e0b' },
+        '&:hover': { borderColor: COLOR.primary.light },
       }}
     >
       <Typography sx={{ fontWeight: 700, fontSize: '0.9rem', flex: 1 }}>{child.name}</Typography>

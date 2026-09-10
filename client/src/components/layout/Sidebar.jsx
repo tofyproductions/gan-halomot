@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import LogoutIcon from '@mui/icons-material/Logout';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { buildNavModel } from '../../config/nav';
+import { screenForPath } from '../../config/screenMeta';
 import { iconFor } from './navIcons';
 import AccountMenu from './AccountMenu';
 import { useAuth } from '../../hooks/useAuth';
@@ -63,9 +64,19 @@ export default function Sidebar() {
    * a link, a badge, a fresh tab, the browser's back button — opens the section
    * that screen lives in without every entry point having to remember to.
    */
+  /**
+   * Which screen you are on, including when you are one level inside it.
+   *
+   * Exact path matching meant /orders/new, /gantt/edit, /nursery/settings and
+   * /edit-registration/:id opened no section and lit no row — the rail claimed
+   * you were nowhere while the breadcrumb said "הזמנות / הזמנה חדשה".
+   * screenForPath already resolves sub-screens to their parent; it just was
+   * not being asked.
+   */
+  const currentId = useMemo(() => screenForPath(pathname).id, [pathname]);
   const groupOfCurrent = useMemo(
-    () => model.find((g) => g.items.some((i) => i.path === pathname))?.label,
-    [model, pathname]
+    () => model.find((g) => g.items.some((i) => i.id === currentId))?.label,
+    [model, currentId]
   );
   const [openGroup, setOpenGroup] = useState(null);
 
@@ -175,7 +186,7 @@ export default function Sidebar() {
                   fontSize: 16, flexShrink: 0,
                   color: 'sidebar.groupLabel',
                   transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-                  transition: 'transform 160ms',
+                  transition: (t) => `transform ${t.motion.fast}`,
                 }}
               />
               <Typography
@@ -216,11 +227,11 @@ export default function Sidebar() {
               )}
             </Box>
 
-            <Collapse in={open} timeout={160} unmountOnExit>
+            <Collapse in={open} timeout={{ enter: 200, exit: 140 }} unmountOnExit>
 
             {group.items.map((item) => {
               const Icon = iconFor(item.id);
-              const active = pathname === item.path;
+              const active = item.id === currentId;
               const count = badges[item.id] || 0;
               return (
                 <Box
@@ -246,7 +257,7 @@ export default function Sidebar() {
                     color: active ? 'sidebar.fgActive' : 'sidebar.fg',
                     fontWeight: active ? 700 : 500,
                     bgcolor: active ? 'sidebar.markerSoft' : 'transparent',
-                    transition: 'background-color 140ms, color 140ms',
+                    transition: (t) => `background-color ${t.motion.fast}, color ${t.motion.fast}`,
                     // The marker is an inset bar rather than a full-height
                     // border: a 2px line running the whole row reads as a table
                     // rule, a short bar reads as a bookmark.
