@@ -2235,23 +2235,25 @@ async function createManualPunches(req, res, next, opts = {}) {
       created.push(punch);
     }
 
+    // Notifications only after every punch above is already created —
+    // fire-and-forget from here on, so a push failure can never turn an
+    // already-successful manual entry into a 500 for the caller (see
+    // leads.controller.js's publicSubmit for the same pattern).
     for (const punch of created) {
       if (punch.approval_status === 'pending_manager') {
-        const ids = await notificationService.branchManagerIds(punchBranchId);
-        for (const recipient_id of ids) {
-          await notificationService.createEvent({
+        notificationService.branchManagerIds(punchBranchId).then((ids) => {
+          ids.forEach((recipient_id) => notificationService.createEvent({
             type: 'punch_pending_manager', ref_collection: 'Punch', ref_id: punch._id, recipient_id,
             title: 'ממתין לאישורך', body: `${emp.full_name} — דיווח החתמה`, url: '/attendance',
-          });
-        }
+          }).catch(err => console.error('manual punch manager push create failed:', err.message)));
+        }).catch(err => console.error('manual punch branchManagerIds lookup failed:', err.message));
       } else if (punch.approval_status === 'pending_accountant') {
-        const ids = await notificationService.accountantIds();
-        for (const recipient_id of ids) {
-          await notificationService.createEvent({
+        notificationService.accountantIds().then((ids) => {
+          ids.forEach((recipient_id) => notificationService.createEvent({
             type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: punch._id, recipient_id,
             title: 'ממתין לאישור הנהלת חשבונות', body: `${emp.full_name} — דיווח החתמה`, url: '/attendance',
-          });
-        }
+          }).catch(err => console.error('manual punch accountant push create failed:', err.message)));
+        }).catch(err => console.error('manual punch accountantIds lookup failed:', err.message));
       }
     }
 
@@ -2846,7 +2848,10 @@ async function approvePunch(req, res, next) {
       p.approval_decided_at = new Date();
       p.approval_decided_note = req.body?.note || '';
       await p.save();
-      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+      // Fire-and-forget: the approval already succeeded, so a resolve
+      // failure here must not turn it into a 500 for the caller.
+      notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
+        .catch(err => console.error('approvePunch resolve events failed:', err.message));
       return res.json({ ok: true, punch: p, applied_edit: true });
     }
 
@@ -2879,14 +2884,16 @@ async function approvePunch(req, res, next) {
       p.manager_approved_by = req.user.id;
       p.manager_approved_at = new Date();
       await p.save();
-      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
-      const accIds = await notificationService.accountantIds();
-      for (const recipient_id of accIds) {
-        await notificationService.createEvent({
+      // Fire-and-forget: the manager's approval already succeeded, so a
+      // notification-layer failure here must not turn it into a 500.
+      notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
+        .catch(err => console.error('approvePunch resolve events failed:', err.message));
+      notificationService.accountantIds().then((accIds) => {
+        accIds.forEach((recipient_id) => notificationService.createEvent({
           type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
           title: 'ממתין לאישור הנהלת חשבונות', body: 'תיקון החתמה חוצה-סניפים', url: '/attendance',
-        });
-      }
+        }).catch(err => console.error('approvePunch accountant push create failed:', err.message)));
+      }).catch(err => console.error('approvePunch accountantIds lookup failed:', err.message));
       return res.json({ ok: true, punch: p, pending: true });
     }
 
@@ -2924,15 +2931,17 @@ async function approvePunch(req, res, next) {
       return res.status(403).json({ error: 'אין הרשאה לאשר את ההחתמה בשלב זה' });
     }
     await p.save();
-    await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+    // Fire-and-forget: the approval already succeeded, so a
+    // notification-layer failure here must not turn it into a 500.
+    notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
+      .catch(err => console.error('approvePunch resolve events failed:', err.message));
     if (p.approval_status === 'pending_accountant' && (st === 'pending_manager' || st === 'pending')) {
-      const accIds = await notificationService.accountantIds();
-      for (const recipient_id of accIds) {
-        await notificationService.createEvent({
+      notificationService.accountantIds().then((accIds) => {
+        accIds.forEach((recipient_id) => notificationService.createEvent({
           type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
           title: 'ממתין לאישור הנהלת חשבונות', body: 'דיווח החתמה', url: '/attendance',
-        });
-      }
+        }).catch(err => console.error('approvePunch accountant push create failed:', err.message)));
+      }).catch(err => console.error('approvePunch accountantIds lookup failed:', err.message));
     }
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
@@ -2979,7 +2988,10 @@ async function rejectPunch(req, res, next) {
       p.approval_decided_at = new Date();
       p.approval_decided_note = req.body?.note || '';
       await p.save();
-      await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+      // Fire-and-forget: the punch is already restored, so a resolve
+      // failure here must not turn it into a 500 for the caller.
+      notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
+        .catch(err => console.error('rejectPunch resolve events failed:', err.message));
       return res.json({ ok: true, punch: p, restored: true });
     }
     p.approval_status = 'rejected';
@@ -2987,7 +2999,10 @@ async function rejectPunch(req, res, next) {
     p.approval_decided_at = new Date();
     p.approval_decided_note = req.body?.note || '';
     await p.save();
-    await notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id });
+    // Fire-and-forget: the rejection already succeeded, so a resolve
+    // failure here must not turn it into a 500 for the caller.
+    notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
+      .catch(err => console.error('rejectPunch resolve events failed:', err.message));
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
 }
@@ -3070,16 +3085,12 @@ async function editPunch(req, res, next) {
         : null;
       const isHomeManager = !emp || isHomeManagerFor(scope, emp.branch_id);
 
+      // hostBranchName is filled in below, in the cross-branch case only —
+      // it is read again after the save, once we are ready to notify.
+      let hostBranchName = '';
       if (isHomeManager) {
         p.manager_approved_by = req.user?.id || null;
         p.manager_approved_at = new Date();
-        const accIds = await notificationService.accountantIds();
-        for (const recipient_id of accIds) {
-          await notificationService.createEvent({
-            type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
-            title: 'ממתין לאישור הנהלת חשבונות', body: `תיקון החתמה — ${emp?.full_name || ''}`, url: '/attendance',
-          });
-        }
       } else {
         // NOT touching approval_status: it stays whatever it already was
         // (auto/approved), so these hours keep counting for the whole wait —
@@ -3091,12 +3102,13 @@ async function editPunch(req, res, next) {
           Branch.findById(p.branch_id).select('name').lean(),
           Branch.findById(emp.branch_id).select('name').lean(),
         ]);
+        hostBranchName = hostBranch?.name || '';
         const log = await CrossBranchPunchEdit.create({
           punch_id: p._id,
           employee_id: p.employee_id,
           employee_name: emp.full_name || '',
           host_branch_id: p.branch_id,
-          host_branch_name: hostBranch?.name || '',
+          host_branch_name: hostBranchName,
           home_branch_id: emp.branch_id,
           home_branch_name: homeBranch?.name || '',
           requested_by: req.user?.id || null,
@@ -3109,13 +3121,6 @@ async function editPunch(req, res, next) {
           month: israelDateKey(requestedAt).slice(0, 7),
         });
         p.pending_edit.log_id = log._id;
-        const homeManagerIds = await notificationService.branchManagerIds(emp.branch_id);
-        for (const recipient_id of homeManagerIds) {
-          await notificationService.createEvent({
-            type: 'punch_pending_manager', ref_collection: 'Punch', ref_id: p._id, recipient_id,
-            title: 'תיקון החתמה ממתין לאישורך', body: `${emp.full_name} — סניף ${hostBranch?.name || ''}`, url: '/attendance',
-          });
-        }
       }
       // The label and the note are not money — pairing is chronological and
       // pay never reads them — so they apply now rather than waiting with
@@ -3123,6 +3128,26 @@ async function editPunch(req, res, next) {
       if (req.body.state != null) p.state = Number(req.body.state);
       if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
       await p.save();
+
+      // Notifications are created only AFTER the punch itself is safely
+      // staged and saved, and fire-and-forget from here on: a push failure
+      // must never turn an already-successful edit into a 500 for the
+      // caller (see leads.controller.js's publicSubmit for the same pattern).
+      if (isHomeManager) {
+        notificationService.accountantIds().then((accIds) => {
+          accIds.forEach((recipient_id) => notificationService.createEvent({
+            type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+            title: 'ממתין לאישור הנהלת חשבונות', body: `תיקון החתמה — ${emp?.full_name || ''}`, url: '/attendance',
+          }).catch(err => console.error('editPunch accountant push create failed:', err.message)));
+        }).catch(err => console.error('editPunch accountantIds lookup failed:', err.message));
+      } else {
+        notificationService.branchManagerIds(emp.branch_id).then((homeManagerIds) => {
+          homeManagerIds.forEach((recipient_id) => notificationService.createEvent({
+            type: 'punch_pending_manager', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+            title: 'תיקון החתמה ממתין לאישורך', body: `${emp.full_name} — סניף ${hostBranchName}`, url: '/attendance',
+          }).catch(err => console.error('editPunch home-manager push create failed:', err.message)));
+        }).catch(err => console.error('editPunch branchManagerIds lookup failed:', err.message));
+      }
       return res.json({ ok: true, punch: p, pending: true, cross_branch: !isHomeManager });
     }
 

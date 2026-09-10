@@ -142,6 +142,10 @@ async function main() {
 
     const approve = await request({ method: 'PATCH', token: tokenAccountant, path: `/api/payroll/punches/${punchId}/approve` });
     ok(approve.status === 200, '1d הנה"ח מאשרת');
+    // resolveEvents is fire-and-forget (see payroll.controller.js#approvePunch) —
+    // it runs after the response is sent, not before it, so this closes
+    // eventually rather than synchronously with the approve response.
+    await waitFor(async () => (await NotificationEvent.countDocuments({ ref_id: punchId, status: 'pending' })) === 0);
     eq(await NotificationEvent.countDocuments({ ref_id: punchId, status: 'pending' }), 0, '1e האירוע נסגר');
     const finalPunch = await Punch.findById(punchId).lean();
     eq(finalPunch.approval_status, 'approved', '1f ואושרה סופית');
@@ -160,6 +164,10 @@ async function main() {
 
     const approve = await request({ method: 'PATCH', token: tokenAccountant, path: `/api/payroll/punches/${p._id}/approve` });
     ok(approve.status === 200, '2c הנה"ח מאשרת');
+    // resolveEvents is fire-and-forget (see payroll.controller.js#approvePunch) —
+    // it runs after the response is sent, not before it, so this closes
+    // eventually rather than synchronously with the approve response.
+    await waitFor(async () => (await NotificationEvent.countDocuments({ ref_id: p._id, status: 'pending' })) === 0);
     eq(await NotificationEvent.countDocuments({ ref_id: p._id, status: 'pending' }), 0, '2d האירוע נסגר');
     const restored = await Punch.findById(p._id).lean();
     eq(restored.approval_status, 'auto', '2e ואושר עם שחזור ה-approval_status המקורי (prev_status)');
