@@ -1,4 +1,5 @@
-const { PushSubscription } = require('../models');
+const { PushSubscription, WebPushSubscription } = require('../models');
+const env = require('../config/env');
 
 /**
  * Register (or re-register) this device's FCM token.
@@ -42,3 +43,34 @@ async function unregister(req, res) {
 exports.registerStaff = (req, res) => register('user_id', req.user.id, req, res);
 exports.registerParent = (req, res) => register('parent_id', req.parent.pid, req, res);
 exports.unregister = unregister;
+
+/** POST /api/push/register-web — upsert this browser's Web Push subscription. */
+async function registerWeb(req, res) {
+  const { endpoint, keys } = req.body || {};
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    return res.status(400).json({ error: 'endpoint ו-keys נדרשים' });
+  }
+  await WebPushSubscription.findOneAndUpdate(
+    { endpoint },
+    { endpoint, keys: { p256dh: keys.p256dh, auth: keys.auth }, user_id: req.user.id },
+    { upsert: true }
+  );
+  res.json({ ok: true });
+}
+
+/** POST /api/push/unregister-web */
+async function unregisterWeb(req, res) {
+  const { endpoint } = req.body || {};
+  if (!endpoint) return res.status(400).json({ error: 'endpoint נדרש' });
+  await WebPushSubscription.deleteOne({ endpoint });
+  res.json({ ok: true });
+}
+
+/** GET /api/push/vapid-public-key */
+function vapidPublicKey(req, res) {
+  res.json({ publicKey: env.VAPID_PUBLIC_KEY || null });
+}
+
+exports.registerWeb = registerWeb;
+exports.unregisterWeb = unregisterWeb;
+exports.vapidPublicKey = vapidPublicKey;
