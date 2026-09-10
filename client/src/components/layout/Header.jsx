@@ -486,6 +486,16 @@ export default function Header() {
               <ListItemText primary="הגדר כניסה ביומטרית" />
             </ListItemButton>
           </ListItem>
+          {pushSupported && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => { setDrawerOpen(false); handleTogglePush(); }} sx={{ minHeight: 48 }}>
+                <ListItemIcon sx={{ minWidth: 40, color: pushSubscribed ? '#16a34a' : '#94a3b8' }}>
+                  {pushSubscribed ? <NotificationsActiveIcon /> : <NotificationsOffIcon />}
+                </ListItemIcon>
+                <ListItemText primary={pushSubscribed ? 'כבה התראות דפדפן' : 'הפעילי התראות בדפדפן'} />
+              </ListItemButton>
+            </ListItem>
+          )}
           <ListItem disablePadding>
             <ListItemButton onClick={() => { setDrawerOpen(false); logout(); }} sx={{ minHeight: 48 }}>
               <ListItemIcon sx={{ minWidth: 40 }}><LogoutIcon /></ListItemIcon>
