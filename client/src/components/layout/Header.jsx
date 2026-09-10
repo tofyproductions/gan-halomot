@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
   AppBar, Toolbar, Typography, Button, Box, Stack, MenuItem, Menu, Select, IconButton, Tooltip,
   Chip, Divider, Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
@@ -42,6 +42,9 @@ import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
 import DeleteAccountRequest from '../shared/DeleteAccountRequest';
+import { isWebPushSupported, getWebPushSubscriptionState, subscribeWebPush, unsubscribeWebPush } from '../../utils/webPush';
+import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import { TAB_GROUPS, hasTabAccess } from '../../config/tabs';
 import { ganMarkerByName } from '../../utils/branchColors';
 
@@ -86,6 +89,14 @@ export default function Header() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [navMenu, setNavMenu] = useState(null); // { anchorEl, group } — open category dropdown
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  useEffect(() => {
+    isWebPushSupported().then(async (supported) => {
+      setPushSupported(supported);
+      if (supported) setPushSubscribed((await getWebPushSubscriptionState()) === 'subscribed');
+    });
+  }, []);
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
   const pendingProposals = usePendingProposals();
@@ -112,6 +123,22 @@ export default function Header() {
       toast.error(err.response?.data?.error || 'שגיאה בהגדרת ביומטרי');
     }
   }, [user]);
+
+  const handleTogglePush = useCallback(async () => {
+    try {
+      if (pushSubscribed) {
+        await unsubscribeWebPush(api);
+        setPushSubscribed(false);
+        toast.success('התראות דפדפן כובו');
+      } else {
+        await subscribeWebPush(api);
+        setPushSubscribed(true);
+        toast.success('התראות דפדפן הופעלו!');
+      }
+    } catch (err) {
+      toast.error(err.message || 'שגיאה בהגדרת התראות');
+    }
+  }, [pushSubscribed]);
 
   return (
     <AppBar position="sticky" sx={{
@@ -295,6 +322,13 @@ export default function Header() {
                   <FingerprintIcon sx={{ fontSize: '1rem' }} />
                 </IconButton>
               </Tooltip>
+              {pushSupported && (
+                <Tooltip title={pushSubscribed ? 'כבה התראות דפדפן' : 'הפעילי התראות בדפדפן'}>
+                  <IconButton size="small" onClick={handleTogglePush} sx={{ color: pushSubscribed ? '#16a34a' : '#94a3b8' }}>
+                    {pushSubscribed ? <NotificationsActiveIcon sx={{ fontSize: '1rem' }} /> : <NotificationsOffIcon sx={{ fontSize: '1rem' }} />}
+                  </IconButton>
+                </Tooltip>
+              )}
               <Tooltip title="התנתק">
                 <IconButton size="small" onClick={logout} sx={{ color: 'text.secondary' }}>
                   <LogoutIcon sx={{ fontSize: '1rem' }} />
