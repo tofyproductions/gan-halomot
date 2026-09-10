@@ -78,6 +78,10 @@ async function update(req, res, next) {
 async function remove(req, res, next) {
   try {
     await Lead.deleteOne({ _id: req.params.id });
+    // Fire-and-forget: a deleted lead's pending push notifications must not
+    // keep pushing forever to a link that now goes nowhere.
+    notificationService.resolveEvents({ ref_collection: 'Lead', ref_id: req.params.id })
+      .catch(err => console.error('lead delete push resolve failed:', err.message));
     res.json({ ok: true });
   } catch (err) { next(err); }
 }

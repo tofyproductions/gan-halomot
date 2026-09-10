@@ -8,7 +8,6 @@
  * controller never calls them directly, so a caller can never be blocked
  * waiting on an actual push provider round-trip.
  */
-const mongoose = require('mongoose');
 const webpush = require('web-push');
 const env = require('../config/env');
 const { NotificationEvent, PushSubscription, WebPushSubscription, User } = require('../models');
@@ -82,10 +81,13 @@ async function deliver(event) {
 
 /**
  * Raise an event. Idempotent: a recipient who already has a pending row for
- * the same (type, ref_id) gets that row back untouched, not a duplicate —
- * so two Punch rows (in+out) staged in one request don't double-notify, and
- * a retry never piles up rows. The actual send happens in the background;
- * this resolves as soon as the row exists.
+ * the same (type, ref_id) gets that row back untouched, not a duplicate — so
+ * a second identical trigger for the SAME ref_id (e.g. a retried request)
+ * never piles up rows. This does NOT dedup across different ref_ids: two
+ * Punch rows staged in one request (an in-punch and an out-punch) are two
+ * different ref_ids, so they raise two separate events and a manager gets
+ * two separate pushes for one reported day. The actual send happens in the
+ * background; this resolves as soon as the row exists.
  */
 async function createEvent({ type, ref_collection, ref_id, recipient_id, title, body, url }) {
   const existing = await NotificationEvent.findOne({ type, ref_id, recipient_id, status: 'pending' });
@@ -107,8 +109,20 @@ async function resolveEvents({ ref_collection, ref_id }) {
   );
 }
 
+const THIRTY_DAYS_MS = 30 * 24 * HOUR_MS;
+
 /** Called by the resend job only — (re)delivers everything due right now. */
 async function resendDue() {
+  // Safety net: nothing should be able to push forever. Whatever the reason
+  // a row never got resolved (a caller that forgot, a dead link, a bug), a
+  // pending event older than 30 days is auto-resolved rather than resent —
+  // the same 30-day ceiling this codebase already uses elsewhere (e.g. the
+  // archive purge).
+  await NotificationEvent.updateMany(
+    { status: 'pending', created_at: { $lt: new Date(Date.now() - THIRTY_DAYS_MS) } },
+    { $set: { status: 'resolved', resolved_at: new Date() } }
+  );
+
   const due = await NotificationEvent.find({
     status: 'pending', next_send_at: { $lte: new Date() },
   }).lean();
