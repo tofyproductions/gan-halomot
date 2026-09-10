@@ -9,7 +9,6 @@ import DeleteForeverIcon from '@mui/icons-material/DeleteForever';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
-import YearSelector from '../shared/YearSelector';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { formatDateHebrew } from '../../utils/hebrewYear';
@@ -20,7 +19,7 @@ const STATUS_MAP = {
 };
 
 export default function ArchiveList() {
-  const { selectedYear, setSelectedYear } = useAcademicYear();
+  const { selectedYear } = useAcademicYear();
   const [tab, setTab] = useState(0);
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +63,7 @@ export default function ArchiveList() {
     <Box dir="rtl">
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>ארכיון רישומים</Typography>
-        <YearSelector value={selectedYear} onChange={setSelectedYear} />
+        {/* The year picker moved to the rail — one for the whole app. */}
       </Stack>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3 }}>

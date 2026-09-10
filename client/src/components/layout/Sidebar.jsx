@@ -13,6 +13,7 @@ import { iconFor } from './navIcons';
 import AccountMenu from './AccountMenu';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
+import { useAcademicYear, formatAcademicYear } from '../../hooks/useAcademicYear';
 import { usePendingProposals } from '../../hooks/usePendingProposals';
 import { useNewLeadsCount } from '../../hooks/useNewLeadsCount';
 
@@ -178,6 +179,7 @@ export default function Sidebar() {
   const { pathname } = useLocation();
   const { user, logout, canSeeAllBranches } = useAuth();
   const { branches, selectedBranch, changeBranch } = useBranch();
+  const { years, selectedYear, setSelectedYear, isCurrentYear } = useAcademicYear();
   const badges = useBadges();
   const [accountOpen, setAccountOpen] = useState(false);
   const model = useMemo(() => buildNavModel(user), [user]);
@@ -296,29 +298,75 @@ export default function Sidebar() {
         </Box>
       </Box>
 
-      {canSeeAllBranches && branches.length > 1 && (
+      {/* Which gan and which year — the two things every number below is
+          implicitly about, in the one place that is above all of them.
+          The year used to be a dropdown on six separate screens, each holding
+          its own, so walking from גבייה to ארכיון quietly changed the year and
+          neither screen mentioned it. */}
+      <Box sx={{ mb: 2 }}>
+        {canSeeAllBranches && branches.length > 1 && (
+          <Select
+            value={selectedBranch || ''}
+            onChange={(e) => changeBranch(e.target.value)}
+            size="small"
+            aria-label="בחירת סניף"
+            fullWidth
+            sx={{
+              bgcolor: 'sidebar.bgActive',
+              color: 'sidebar.fgActive',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              borderRadius: 1.5,
+              '& fieldset': { border: 'none' },
+              '& .MuiSelect-select': { py: 1 },
+              '& .MuiSvgIcon-root': { color: 'sidebar.fg' },
+            }}
+          >
+            {branches.map((b) => (
+              <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
+            ))}
+          </Select>
+        )}
+
         <Select
-          value={selectedBranch || ''}
-          onChange={(e) => changeBranch(e.target.value)}
+          value={selectedYear}
+          onChange={(e) => setSelectedYear(e.target.value)}
           size="small"
-          aria-label="בחירת סניף"
+          aria-label="שנת לימודים"
+          fullWidth
+          renderValue={(v) => formatAcademicYear(v)}
           sx={{
-            mb: 2,
+            mt: canSeeAllBranches && branches.length > 1 ? 0.75 : 0,
             bgcolor: 'sidebar.bgActive',
-            color: 'sidebar.fgActive',
-            fontSize: '0.8125rem',
+            fontSize: '0.75rem',
             fontWeight: 600,
             borderRadius: 1.5,
+            /**
+             * A year that is NOT the current one is marked, permanently and in
+             * the rail. This is the whole safety argument for making the year
+             * global: one picker is only safer than six if leaving it set is
+             * impossible to miss, and a manager who moved to last year in the
+             * morning must not spend the afternoon reading last year's numbers
+             * as today's.
+             */
+            color: isCurrentYear ? 'sidebar.fg' : 'sidebar.marker',
             '& fieldset': { border: 'none' },
-            '& .MuiSelect-select': { py: 1 },
-            '& .MuiSvgIcon-root': { color: 'sidebar.fg' },
+            '& .MuiSelect-select': { py: 0.75 },
+            '& .MuiSvgIcon-root': { color: isCurrentYear ? 'sidebar.fg' : 'sidebar.marker' },
           }}
         >
-          {branches.map((b) => (
-            <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
+          {[years.previous, years.current, years.next].map((y) => (
+            <MenuItem key={y.range} value={y.range} sx={{ fontSize: '0.8125rem' }}>
+              {y.label}
+              {y.range === years.current.range && (
+                <Box component="span" sx={{ ml: 1, fontSize: '0.6875rem', color: 'text.disabled' }}>
+                  נוכחית
+                </Box>
+              )}
+            </MenuItem>
           ))}
         </Select>
-      )}
+      </Box>
 
       {/* Type to find a screen, anywhere.
           Sections cost one thing: a person who knows the screen's name still

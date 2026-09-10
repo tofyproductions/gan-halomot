@@ -20,7 +20,6 @@ import { toast } from 'react-toastify';
 import { useBranch } from '../../hooks/useBranch';
 import api from '../../api/client';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
-import YearSelector from '../shared/YearSelector';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 import { getClassroomColor } from '../../utils/classroomColors';
@@ -57,7 +56,7 @@ const cellsOf = (row) => [...(row.months || []), ...(row.camp ? [row.camp] : [])
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' }) : '');
 
 export default function CollectionsTable() {
-  const { selectedYear, setSelectedYear } = useAcademicYear();
+  const { selectedYear } = useAcademicYear();
   const { selectedBranch } = useBranch();
   const [rawData, setRawData] = useState({});
   const [loading, setLoading] = useState(true);
@@ -509,7 +508,7 @@ export default function CollectionsTable() {
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב גבייה</Typography>
         <Stack direction="row" spacing={2} alignItems="center">
-          <YearSelector value={selectedYear} onChange={setSelectedYear} />
+          {/* The year picker moved to the rail — one for the whole app. */}
           <Button variant="outlined" color="secondary" startIcon={<DiscountIcon />}
             onClick={() => { setDiscountDialog({ open: true }); fetchDiscounts(); }} size="small"
           >

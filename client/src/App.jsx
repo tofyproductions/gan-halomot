@@ -12,6 +12,7 @@ import { useAuth } from './hooks/useAuth';
 import { hasTabAccess } from './config/tabs';
 import { BranchProvider } from './hooks/useBranch';
 import { WorkMonthProvider } from './hooks/useWorkMonth';
+import { AcademicYearProvider } from './hooks/useAcademicYear';
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
 
 /**
@@ -125,11 +126,16 @@ function AppRoutes() {
       <Route path="/" element={
         <ConfirmProvider>
           <BranchProvider>
-            <WorkMonthProvider>
-              <ProtectedRoute>
-                <AppShell />
-              </ProtectedRoute>
-            </WorkMonthProvider>
+            {/* Which gan, which year. The two facts every number on every
+                screen is implicitly about, and the two that were each being
+                re-decided per screen. */}
+            <AcademicYearProvider>
+              <WorkMonthProvider>
+                <ProtectedRoute>
+                  <AppShell />
+                </ProtectedRoute>
+              </WorkMonthProvider>
+            </AcademicYearProvider>
           </BranchProvider>
         </ConfirmProvider>
       }>

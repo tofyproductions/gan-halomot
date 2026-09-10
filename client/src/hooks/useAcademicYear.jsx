@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import api from '../api/client';
+import { createContext, useContext, useState, useCallback, useMemo } from 'react';
 
 /**
  * The Hebrew year in letters, computed rather than looked up — the same rule
@@ -101,9 +100,75 @@ export function getAcademicYears() {
   };
 }
 
-export function useAcademicYear() {
-  const years = getAcademicYears();
-  const [selectedYear, setSelectedYear] = useState(years.current.range);
+/**
+ * The school year is a property of the APP, not of each screen.
+ *
+ * `useAcademicYear` was a plain hook holding its own `useState`, which means
+ * every screen that called it got its own private year and its own selector to
+ * change it. Six screens did — גבייה, ארכיון, גאנט, חופשות, סניפים, מחירון —
+ * so moving from גבייה to ארכיון silently moved you back to the default year,
+ * and nothing on either screen said the two disagreed. A gan can be looking at
+ * תשפ״ז collections and תשפ״ו archive at the same moment and be told nothing.
+ *
+ * It is a context now, mounted beside BranchProvider in App.jsx, because it is
+ * the same kind of fact: WHICH GAN and WHICH YEAR are the two things every
+ * number on every screen is implicitly about. Both live in the rail, above
+ * everything they qualify.
+ *
+ * Persistence copies the branch: localStorage, so it survives a reload and the
+ * next morning. `?year=` on the URL wins over it on arrival, so a link can
+ * carry a year — which is the whole point of the address-bar work — without
+ * that link permanently changing what the recipient sees afterwards.
+ *
+ * NOT for the intake screens. רישום חיצוני and רישום לאמונה work on the year
+ * families are being enrolled INTO — `getEnrollmentYear()`, which is a rule,
+ * not a preference, and moves on 1 February on its own. Putting those under a
+ * picker would let somebody file a child into last year by leaving a dropdown
+ * where it was.
+ */
+const AcademicYearContext = createContext(null);
 
-  return { years, selectedYear, setSelectedYear };
+const YEAR_KEY = 'selectedAcademicYear';
+
+export function AcademicYearProvider({ children }) {
+  const years = getAcademicYears();
+  const valid = [years.previous.range, years.current.range, years.next.range];
+
+  const [selectedYear, setSelected] = useState(() => {
+    // A year in the address bar is somebody handing you a link. It wins on
+    // arrival, and only on arrival.
+    try {
+      const fromUrl = new URLSearchParams(window.location.search).get('year');
+      if (fromUrl && valid.includes(fromUrl)) return fromUrl;
+      const stored = localStorage.getItem(YEAR_KEY);
+      // A stored year ages out: last August's choice is not a year this app
+      // still offers, and silently showing a year that is not in the picker is
+      // worse than starting from the current one.
+      if (stored && valid.includes(stored)) return stored;
+    } catch {
+      // Private window, cleared site data, storage blocked. The current year is
+      // the right answer, not a crash before the app renders.
+    }
+    return years.current.range;
+  });
+
+  const setSelectedYear = useCallback((range) => {
+    setSelected(range);
+    try { localStorage.setItem(YEAR_KEY, range); } catch { /* see above */ }
+  }, []);
+
+  const value = useMemo(
+    () => ({ years, selectedYear, setSelectedYear, isCurrentYear: selectedYear === years.current.range }),
+    // `years` is recomputed from the clock on every render and is only ever
+    // read for its three ranges, which change once a year.
+    [selectedYear, setSelectedYear, years.current.range] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  return <AcademicYearContext.Provider value={value}>{children}</AcademicYearContext.Provider>;
+}
+
+export function useAcademicYear() {
+  const ctx = useContext(AcademicYearContext);
+  if (!ctx) throw new Error('useAcademicYear must be used within AcademicYearProvider');
+  return ctx;
 }

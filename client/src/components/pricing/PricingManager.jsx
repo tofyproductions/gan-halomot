@@ -3,7 +3,7 @@ import {
   Box, Paper, Typography, Stack, Table, TableHead, TableRow, TableCell, TableBody,
   TextField, ToggleButton, ToggleButtonGroup, IconButton, Button, Divider,
   Alert, InputAdornment, MenuItem, Select, CircularProgress, Tooltip,
-  Dialog, DialogContent, DialogActions,
+  Dialog, DialogContent, DialogActions, Chip,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
@@ -15,6 +15,7 @@ import CalculateIcon from '@mui/icons-material/Calculate';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
+import { useAcademicYear } from '../../hooks/useAcademicYear';
 
 // Academic years (Sept–Aug). A new תמ"ת tuition table + services basket arrives
 // at the end of August each year, so pricing is stored per year.
@@ -29,6 +30,21 @@ const ACADEMIC_YEARS = [
 
 function yearLabel(y) {
   return `${y.value} (${y.start}/${String(y.start + 1).slice(2)})`;
+}
+
+/**
+ * The rail's year ("2026-2027") as the key this screen stores ('תשפ״ז').
+ *
+ * Pricing is the one screen that does NOT hand its picker to the rail, and the
+ * reason is its range: the ministry tuition tables go back to תשפ״ד and this
+ * screen is where somebody looks one up, while the rail deliberately offers
+ * only last year, this year and next. So it keeps its own list — and starts on
+ * whatever the rail says, and says so when the two differ, which is the part
+ * that was missing.
+ */
+function railYearToKey(range) {
+  const start = Number(String(range || '').split('-')[0]);
+  return ACADEMIC_YEARS.find((y) => y.start === start)?.value || null;
 }
 
 // The academic year we're currently in (flips in September).
@@ -130,8 +146,10 @@ const shekel = { startAdornment: <InputAdornment position="start">₪</InputAdor
 
 export default function PricingManager() {
   const { branches } = useBranch();
+  const { selectedYear } = useAcademicYear();
+  const railKey = railYearToKey(selectedYear);
   const [branchId, setBranchId] = useState('');
-  const [year, setYear] = useState(currentAcademicYear());
+  const [year, setYear] = useState(() => railKey || currentAcademicYear());
   const [copyYear, setCopyYear] = useState('');
   const [copyBranch, setCopyBranch] = useState('');
   const [pricing, setPricing] = useState(emptyPricing(currentAcademicYear()));
@@ -431,6 +449,18 @@ export default function PricingManager() {
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2, flexWrap: 'wrap', gap: 1 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>מחירי המעונות</Typography>
         <Stack direction="row" spacing={1} alignItems="center">
+          {/* Showing a year the rail is not on is a thing worth saying out
+              loud — it is exactly how somebody edits next year's prices while
+              believing they are editing this year's. */}
+          {railKey && year !== railKey && (
+            <Chip
+              size="small"
+              color="warning"
+              variant="outlined"
+              label={`שאר המערכת מציגה ${railKey}`}
+              onClick={() => setYear(railKey)}
+            />
+          )}
           <Select size="small" value={year} onChange={e => setYear(e.target.value)} sx={{ minWidth: 150 }}>
             {ACADEMIC_YEARS.map(y => (
               <MenuItem key={y.value} value={y.value}>{yearLabel(y)}</MenuItem>

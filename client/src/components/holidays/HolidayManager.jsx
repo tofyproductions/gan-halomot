@@ -14,7 +14,7 @@ import ImageIcon from '@mui/icons-material/Image';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
-import { useAcademicYear } from '../../hooks/useAcademicYear';
+import { useAcademicYear, formatAcademicYear } from '../../hooks/useAcademicYear';
 
 const PRESET_HOLIDAYS = [
   'ראש השנה', 'יום כיפור', 'סוכות', 'חנוכה', 'פורים',
@@ -24,7 +24,7 @@ const PRESET_HOLIDAYS = [
 
 export default function HolidayManager() {
   const { selectedBranch, branches } = useBranch();
-  const { years, selectedYear, setSelectedYear } = useAcademicYear();
+  const { years, selectedYear } = useAcademicYear();
   const [holidays, setHolidays] = useState([]);
   // Employer closures — the staff day, the parties. Stored apart because
   // they cost something different, shown here because the question this
@@ -170,17 +170,12 @@ export default function HolidayManager() {
   return (
     <Box dir="rtl" sx={{ maxWidth: 900, mx: 'auto' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
-        <Stack direction="row" spacing={1.5} alignItems="center">
+        <Stack direction="row" spacing={1.5} alignItems="baseline">
           <Typography variant="h5" sx={{ fontWeight: 800 }}>חופשות וחגים</Typography>
-          <TextField
-            select size="small" value={academicYear}
-            onChange={(e) => setSelectedYear(e.target.value)}
-            sx={{ minWidth: 190 }}
-          >
-            {[years.previous, years.current, years.next].map(y => (
-              <MenuItem key={y.range} value={y.range}>{y.label}</MenuItem>
-            ))}
-          </TextField>
+          {/* The year picker moved to the rail — one for the whole app. */}
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+            {formatAcademicYear(academicYear)}
+          </Typography>
         </Stack>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<ImageIcon />}

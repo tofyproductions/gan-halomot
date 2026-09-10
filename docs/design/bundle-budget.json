@@ -1,5 +1,5 @@
 {
-  "firstLoadGzipKB": 258,
+  "firstLoadGzipKB": 259,
   "recorded": "2026-09-10",
   "was": "1168 KB gzip / 3.99 MB raw, in one chunk, before routes and vendors were split",
   "note": "What index.html pulls in before first paint: the entry chunk plus every modulepreload. Lazily-imported screens are deliberately not counted — that is the point. Enforced by server/scripts/bundle-budget.test.js, which must run after a build.",
@@ -18,6 +18,12 @@
       "from": 255,
       "to": 258,
       "why": "Merge of origin/main: UpdateBanner (mounted in main.jsx, must be eager) and NotificationsPanel (the first thing on the dashboard, so not a lazy candidate). No library — the three heavy vendors are still lazy, asserted below."
+    },
+    {
+      "date": "2026-09-10",
+      "from": 258,
+      "to": 259,
+      "why": "AcademicYearProvider + the year picker in the rail. The rail is on the critical path by definition; six per-screen pickers came off the lazy chunks in exchange."
     }
   ]
 }
