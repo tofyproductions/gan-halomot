@@ -22,12 +22,21 @@
 export const PENDING_STATUSES = ['pending', 'pending_manager', 'pending_accountant'];
 
 /**
- * A correction parked on a punch that already counts. It waits for the
- * accountant while the punch keeps its own status, so the status alone cannot
- * tell you the row is still open.
+ * A correction parked on a punch that already counts. It normally waits for
+ * the accountant while the punch keeps its own status, so the status alone
+ * cannot tell you the row is still open — EXCEPT the one case a HOST
+ * manager's correction on a GUEST employee produces (`cross_branch: true`):
+ * that one is deliberately given a real status, `pending_manager`, because it
+ * has to wait for a SPECIFIC manager (the employee's own) before Accounting
+ * ever sees it. `isCrossBranchAwaitingManager` is that one case, checked
+ * before the generic rule below assumes every pending_edit means "stage 2".
  */
 export function hasPendingEdit(p) {
   return Boolean(p && p.pending_edit && p.pending_edit.timestamp);
+}
+
+export function isCrossBranchAwaitingManager(p) {
+  return Boolean(hasPendingEdit(p) && p.pending_edit.cross_branch && !p.pending_edit.manager_approved);
 }
 
 export function isPending(p) {
@@ -42,6 +51,7 @@ export function isPending(p) {
  */
 export function stageOf(p) {
   if (!p) return null;
+  if (isCrossBranchAwaitingManager(p)) return 'manager';
   if (hasPendingEdit(p)) return 'accountant';
   if (p.approval_status === 'pending_accountant') return 'accountant';
   if (p.approval_status === 'pending_manager' || p.approval_status === 'pending') return 'manager';
@@ -52,6 +62,16 @@ export const STAGE_LABEL = {
   manager: 'ממתין לאישור מנהל/ת הסניף',
   accountant: 'ממתין לאישור הנהלת החשבונות',
 };
+
+/** The manager-stage label, specialized for the one case where it means a
+ * SPECIFIC manager rather than "whoever runs this branch". */
+export function stageLabelFor(p) {
+  const stage = stageOf(p);
+  if (stage === 'manager' && isCrossBranchAwaitingManager(p)) {
+    return 'ממתין לאישור מנהל/ת הבית של העובד/ת';
+  }
+  return STAGE_LABEL[stage] || '';
+}
 
 export const STAGE_ORDER = ['manager', 'accountant'];
 

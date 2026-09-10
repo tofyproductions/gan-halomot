@@ -23,6 +23,8 @@ import { formatManualBy } from './punchApproval';
 import DayPunchesDialog from './DayPunchesDialog';
 import PunchIssuesDialog from '../payroll/PunchIssuesDialog';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
+import CrossBranchEdits from './CrossBranchEdits';
 import { useAuth } from '../../hooks/useAuth';
 
 /**
@@ -69,6 +71,11 @@ export default function AttendanceMonitor() {
   // the branches this user manages.
   const [issuesOpen, setIssuesOpen] = useState(false);
   const [issuesCount, setIssuesCount] = useState(0);
+  // "עובדים שלי בסניפים אחרים" — the count feeds the badge from
+  // CrossBranchEdits' own load (it fetches regardless of whether the dialog
+  // is open, same as issuesCount does above for "בעיות בהחתמה").
+  const [crossBranchOpen, setCrossBranchOpen] = useState(false);
+  const [crossBranchCount, setCrossBranchCount] = useState(0);
   const [dayDialog, setDayDialog] = useState({ open: false, employee: null, date: null, branchId: null, isUnlinked: false, israeliId: null });
   const [exporting, setExporting] = useState(false);
   // The scrolling box. A month-wide grid is scrolled in both directions, and
@@ -617,6 +624,17 @@ export default function AttendanceMonitor() {
               בעיות בהחתמה
             </Button>
           </Badge>
+          <Badge color="warning" badgeContent={crossBranchCount} max={99}>
+            <Button
+              size="small"
+              variant={crossBranchCount ? 'contained' : 'outlined'}
+              color="secondary"
+              startIcon={<PeopleAltIcon />}
+              onClick={() => setCrossBranchOpen(true)}
+            >
+              עובדים שלי בסניפים אחרים
+            </Button>
+          </Badge>
           <Button
             size="small"
             variant="contained"
@@ -779,6 +797,17 @@ export default function AttendanceMonitor() {
         canFix={canFixIssues}
         canRemind={isAccountant || isAdmin}
         onClose={() => setIssuesOpen(false)}
+        onChanged={() => { fetchAttendance({ quiet: true }); fetchIssuesCount(); }}
+      />
+
+      {/* Mounted whether or not the dialog is open — like PunchIssuesDialog's
+          count above, the badge has to update on its own, not only while the
+          dialog happens to be on screen. */}
+      <CrossBranchEdits
+        open={crossBranchOpen}
+        month={month}
+        onCountChange={setCrossBranchCount}
+        onClose={() => setCrossBranchOpen(false)}
         onChanged={() => { fetchAttendance({ quiet: true }); fetchIssuesCount(); }}
       />
 

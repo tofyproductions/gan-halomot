@@ -41,7 +41,20 @@ function israelHHmm(iso) {
   });
 }
 
+/** A correction requested here for a GUEST employee — not one this dialog's
+ * viewer necessarily manages. See the note on `canActPunch` below for why its
+ * approve/reject icons never appear for this case. */
+function isCrossBranchPending(p) {
+  return !!p.pending_edit?.cross_branch && !p.pending_edit?.manager_approved;
+}
+
 function statusChip(p) {
+  if (isCrossBranchPending(p)) {
+    return <Chip size="small" color="secondary" label="תיקון ממתין לאישור מנהל/ת הבית" />;
+  }
+  if (p.pending_edit?.cross_branch && p.pending_edit?.manager_approved) {
+    return <Chip size="small" color="info" label="תיקון אושר — ממתין להנה״ח" />;
+  }
   switch (p.approval_status) {
     case 'pending':
     case 'pending_manager':    return <Chip size="small" color="warning" label="ממתין לאישור מנהל" />;
@@ -55,8 +68,19 @@ function statusChip(p) {
 export default function DayPunchesDialog({ open, onClose, employee, date, branchId, isUnlinked, israeliId, onChanged }) {
   const confirm = useConfirm();
   const { isAdmin, isManager, isAccountant } = useAuth();
-  // Who may act on a punch at its current stage (accountant is final).
-  const canActPunch = (st) => {
+  /**
+   * Who may act on a punch at its current stage (accountant is final).
+   *
+   * A cross-branch correction NEVER shows its approve/reject icons here,
+   * whoever is looking — the manager who could legitimately click them is
+   * the employee's home manager, not necessarily this branch's, and this
+   * generic dialog has no way to tell the two apart. "עובדים שלי בסניפים
+   * אחרים" is where that decision belongs; this dialog still shows the
+   * request (see statusChip) so a host manager can see her own is pending.
+   */
+  const canActPunch = (p) => {
+    if (isCrossBranchPending(p)) return false;
+    const st = p.approval_status;
     if (st === 'pending_manager' || st === 'pending') return isManager || isAdmin;
     if (st === 'pending_accountant') return isAccountant || isAdmin;
     return false;
@@ -111,9 +135,11 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
         setEditing(prev => { const x = { ...prev }; delete x[p._id]; return x; });
         load(); markDirty();
         // A parked time-change is not an update — say what actually happened.
-        toast.success(res.data?.pending
-          ? 'שינוי השעה נשלח לאישור הנהלת החשבונות — השעה תתעדכן אחרי האישור'
-          : 'עודכן');
+        toast.success(res.data?.cross_branch
+          ? 'התיקון נשלח לאישור מנהל/ת הבית של העובד/ת, ולאחר מכן להנהלת החשבונות — השעה תתעדכן אחרי האישור'
+          : res.data?.pending
+            ? 'שינוי השעה נשלח לאישור הנהלת החשבונות — השעה תתעדכן אחרי האישור'
+            : 'עודכן');
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
@@ -226,7 +252,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
                         }
                       />
                       <Stack direction="row" spacing={0.3}>
-                        {canActPunch(p.approval_status) && (
+                        {canActPunch(p) && (
                           <>
                             <Tooltip title="אשר"><IconButton size="small" color="success" onClick={() => approve(p)}><CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
                             <Tooltip title="דחה"><IconButton size="small" color="error" onClick={() => reject(p)}><CancelIcon fontSize="small" /></IconButton></Tooltip>

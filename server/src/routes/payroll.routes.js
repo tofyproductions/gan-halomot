@@ -82,6 +82,9 @@ router.post('/commitments/link',               requireRole('system_admin', 'bran
 // Manual-punch approval workflow
 router.post('/punch-requests',                 c.createPunchRequest);
 router.get('/punches/pending',                 requireRole('system_admin', 'branch_manager', 'accountant'), c.listPendingPunches);
+// "עובדים שלי בסניפים אחרים" — corrections other branches' managers asked
+// for on this caller's own employees, this month, pending or already decided.
+router.get('/cross-branch-edits',              requireRole('system_admin', 'branch_manager', 'accountant'), c.listCrossBranchEdits);
 router.get('/punches/day',                     requireRole('system_admin', 'branch_manager', 'accountant'), c.listPunchesForDay);
 router.patch('/punches/:id/approve',           requireRole('system_admin', 'branch_manager', 'accountant'), c.approvePunch);
 router.patch('/punches/:id/reject',            requireRole('system_admin', 'branch_manager', 'accountant'), c.rejectPunch);

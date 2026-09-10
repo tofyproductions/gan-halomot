@@ -104,6 +104,25 @@ const punchSchema = new mongoose.Schema({
     requested_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     requested_at: { type: Date, default: null },
     note: { type: String, default: '' },
+    /**
+     * The requester was NOT one of this employee's own branch managers — a
+     * host manager correcting a guest's day, not the home manager fixing her
+     * own employee. The one existing rule for a plain pending_edit is "wait
+     * for Accounting"; this one waits for the employee's HOME manager FIRST.
+     *
+     * `approval_status` is deliberately left untouched here too, for the
+     * same reason the comment above gives: the day keeps counting the hours
+     * it counted this morning for the ENTIRE wait, home-manager stage and
+     * accountant stage both — not only the accountant half. `manager_approved`
+     * is what tracks the extra stage instead, entirely inside pending_edit,
+     * where it cannot leak into payroll's approval_status check. See
+     * server/src/controllers/payroll.controller.js#editPunch/approvePunch.
+     */
+    cross_branch: { type: Boolean, default: false },
+    manager_approved: { type: Boolean, default: false },
+    // The CrossBranchPunchEdit log row this correction is mirrored onto, so
+    // approvePunch/rejectPunch can update it without a second lookup.
+    log_id: { type: mongoose.Schema.Types.ObjectId, ref: 'CrossBranchPunchEdit', default: null },
   },
 
   // Raw device state code (0=checkin, 1=checkout, 4/5=overtime in/out, etc.)

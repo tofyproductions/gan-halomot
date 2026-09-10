@@ -83,6 +83,7 @@ const EmployeeChangeRequest = require('./EmployeeChangeRequest');
 const GanEvent = require('./GanEvent');
 const Lead = require('./Lead');
 const PunchResolution = require('./PunchResolution');
+const CrossBranchPunchEdit = require('./CrossBranchPunchEdit');
 const PunchEntryTask = require('./PunchEntryTask');
 const ExternalEnrollment = require('./ExternalEnrollment');
 const TmtApproval = require('./TmtApproval');
@@ -173,6 +174,7 @@ const real = {
   GanEvent,
   Lead,
   PunchResolution,
+  CrossBranchPunchEdit,
   PunchEntryTask,
   ExternalEnrollment,
   TmtApproval,

@@ -7,7 +7,7 @@
  * Employee.user_id, but for now they live in parallel.
  */
 const mongoose = require('mongoose');
-const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth, EmployeeDocument } = require('../models');
+const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth, EmployeeDocument, CrossBranchPunchEdit } = require('../models');
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
@@ -2319,6 +2319,55 @@ async function punchOutOfScope(req, punch) {
 }
 
 /**
+ * Does THIS caller manage the employee's own (home) branch?
+ *
+ * Not the same question as `punchOutOfScope`'s employee-side check, which
+ * asks "does she work here at all" (home branch OR a declared multi-branch
+ * assignment). This asks the narrower thing: is the caller specifically one
+ * of the managers of her HOME branch — the person a cross-branch correction
+ * has to answer to. `null` scope (system_admin/accountant) always qualifies.
+ */
+function isHomeManagerFor(scope, employeeHomeBranchId) {
+  if (scope === null) return true;
+  return scope.includes(String(employeeHomeBranchId));
+}
+
+/**
+ * Gate for approvePunch/rejectPunch when the punch is sitting at
+ * "awaiting the employee's home manager" — see editPunch's cross-branch
+ * staging below.
+ *
+ * Returns `null` when this rule does not apply (an ordinary punch, or a
+ * cross-branch correction that already cleared the manager stage) — the
+ * caller falls through to the normal `punchOutOfScope` gate. Returns
+ * `{ ok, error }` when it does: `ok:true` OVERRIDES `punchOutOfScope` (the
+ * home manager does not manage the branch where the punch physically
+ * happened, and must still be let through); `ok:false` REFUSES even a
+ * caller `punchOutOfScope` would have allowed (the host manager who asked
+ * for the fix, or any other branch's manager, may not sign off on it).
+ */
+async function crossBranchEditGate(req, punch) {
+  const isAwaitingHomeManager = punch.pending_edit?.timestamp
+    && punch.pending_edit?.cross_branch
+    && !punch.pending_edit?.manager_approved;
+  if (!isAwaitingHomeManager) return null;
+
+  const role = req.user?.role;
+  if (role === 'system_admin' || role === 'accountant') return { ok: true };
+
+  const emp = punch.employee_id
+    ? await Employee.findById(punch.employee_id).select('branch_id').lean()
+    : null;
+  if (!emp) return { ok: false, error: 'העובד/ת של ההחתמה הזו לא נמצא/ת' };
+
+  const scope = await resolveBranchScope(req);
+  if (!isHomeManagerFor(scope, emp.branch_id)) {
+    return { ok: false, error: 'התיקון הזה ממתין לאישור מנהל/ת הבית של העובד/ת' };
+  }
+  return { ok: true };
+}
+
+/**
  * DELETE /api/payroll/punches/:id
  * Allows admins to delete any punch (manual or clock) — useful for fixing
  * accidental double-punches or removing test punches.
@@ -2676,9 +2725,20 @@ async function listPendingPunches(req, res, next) {
       .sort({ timestamp: -1 }).lean();
 
     // Stage 1 (branch manager): employee-reported punches in managed branches.
+    //
+    // A cross-branch correction (see editPunch) is DELIBERATELY excluded here
+    // even though its punch.branch_id sits in the HOST manager's `allowed`
+    // set — she is the one who asked for it, and this list is "things I can
+    // act on", not "things I started". It belongs to the employee's HOME
+    // manager instead, scoped by home_branch_id rather than branch_id, which
+    // is exactly what GET /api/payroll/cross-branch-edits ("עובדים שלי
+    // בסניפים אחרים") answers.
     let pending_manager = [];
     if (isManager) {
-      const f = { approval_status: { $in: ['pending_manager', 'pending'] } };
+      const f = {
+        approval_status: { $in: ['pending_manager', 'pending'] },
+        'pending_edit.cross_branch': { $ne: true },
+      };
       if (role !== 'system_admin') {
         if (allowed.length === 0) return res.json({ pending_manager: [], pending_accountant: [] });
         f.branch_id = { $in: allowed };
@@ -2717,9 +2777,19 @@ async function approvePunch(req, res, next) {
     // Same scope rule as createManualPunches above: a punch belongs to a
     // branch AND to an employee, and both must be in scope. Under the viewer's
     // manager fallback this 403 becomes a proposal.
+    //
+    // EXCEPT while it is parked awaiting the employee's HOME manager (a
+    // cross-branch correction — see editPunch): then it is judged by
+    // crossBranchEditGate instead, because the punch's own branch is the
+    // HOST branch and the home manager does not manage that branch at all.
     {
-      const denied = await punchOutOfScope(req, p);
-      if (denied) return res.status(403).json({ error: denied });
+      const cross = await crossBranchEditGate(req, p);
+      if (cross) {
+        if (!cross.ok) return res.status(403).json({ error: cross.error });
+      } else {
+        const denied = await punchOutOfScope(req, p);
+        if (denied) return res.status(403).json({ error: denied });
+      }
     }
     const role = req.user.role;
     const isFinal = role === 'system_admin' || role === 'accountant';
@@ -2730,6 +2800,23 @@ async function approvePunch(req, res, next) {
     // whatever it was before the request, and approving means applying the new
     // time and leaving it counting exactly as it was.
     if (p.pending_edit?.timestamp && isFinal) {
+      // A cross-branch correction may reach Accounting having skipped the
+      // manager stage entirely — an admin/accountant can always cut straight
+      // through, same as anywhere else in this app (see the note on
+      // isHomeManagerFor/crossBranchEditGate: "no home manager at all" falls
+      // to system_admin/accountant for free, because they are never
+      // scope-blocked in the first place).
+      if (p.pending_edit.log_id) {
+        await CrossBranchPunchEdit.findByIdAndUpdate(p.pending_edit.log_id, {
+          $set: {
+            status: 'approved',
+            final_decided_by: req.user.id,
+            final_decided_by_name: req.user.full_name || '',
+            final_decided_at: new Date(),
+            final_decided_note: req.body?.note || '',
+          },
+        });
+      }
       p.timestamp = p.pending_edit.timestamp;
       if (p.timestamp_source === 'fixed_schedule') p.schedule_edited = true;
       p.approval_status = p.pending_edit.prev_status || 'approved';
@@ -2739,6 +2826,38 @@ async function approvePunch(req, res, next) {
       p.approval_decided_note = req.body?.note || '';
       await p.save();
       return res.json({ ok: true, punch: p, applied_edit: true });
+    }
+
+    /**
+     * A cross-branch correction, still waiting on the employee's own (home)
+     * manager — the extra stage a host manager's edit creates (see
+     * editPunch). `crossBranchEditGate` above already refused anyone but
+     * that manager (or isFinal, already handled above) from reaching this
+     * point, so `isManager` here really does mean "the right person".
+     *
+     * Deliberately NOT touching `approval_status` — see the note on
+     * `pending_edit.manager_approved` in models/Punch.js: these hours must
+     * keep counting through this stage exactly as they did before anyone
+     * asked for a change, the same as an ordinary pending_edit already does
+     * for the accountant's stage.
+     */
+    if (p.pending_edit?.timestamp && p.pending_edit?.cross_branch && !p.pending_edit.manager_approved) {
+      if (!isManager) return res.status(403).json({ error: 'אין הרשאה לאשר את ההחתמה בשלב זה' });
+      if (p.pending_edit.log_id) {
+        await CrossBranchPunchEdit.findByIdAndUpdate(p.pending_edit.log_id, {
+          $set: {
+            status: 'pending_accountant',
+            manager_decided_by: req.user.id,
+            manager_decided_by_name: req.user.full_name || '',
+            manager_decided_at: new Date(),
+          },
+        });
+      }
+      p.pending_edit.manager_approved = true;
+      p.manager_approved_by = req.user.id;
+      p.manager_approved_at = new Date();
+      await p.save();
+      return res.json({ ok: true, punch: p, pending: true });
     }
 
     // Accounting/admin approving an employee self-report the branch manager
@@ -2758,7 +2877,10 @@ async function approvePunch(req, res, next) {
       p.manager_bypassed_by_name = req.user.full_name || '';
       p.manager_bypassed_at = new Date();
     } else if ((st === 'pending_manager' || st === 'pending') && isManager) {
-      // Stage 1 → forward to the accountant.
+      // Stage 1 → forward to the accountant. (A cross-branch pending_edit
+      // never has approval_status 'pending_manager' — that field is
+      // deliberately left alone for it, see the dedicated branch above — so
+      // this is only ever an ordinary employee-reported manual punch.)
       p.approval_status = 'pending_accountant';
       p.manager_approved_by = req.user.id;
       p.manager_approved_at = new Date();
@@ -2784,18 +2906,33 @@ async function rejectPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
-    // Same scope rule as createManualPunches above: a punch belongs to a
-    // branch AND to an employee, and both must be in scope. Under the viewer's
-    // manager fallback this 403 becomes a proposal.
+    // Same scope rule as createManualPunches above, with the same
+    // cross-branch exception as approvePunch — see the comment there.
     {
-      const denied = await punchOutOfScope(req, p);
-      if (denied) return res.status(403).json({ error: denied });
+      const cross = await crossBranchEditGate(req, p);
+      if (cross) {
+        if (!cross.ok) return res.status(403).json({ error: cross.error });
+      } else {
+        const denied = await punchOutOfScope(req, p);
+        if (denied) return res.status(403).json({ error: denied });
+      }
     }
     // Refusing a correction to a punch that was already counting means "keep
     // the original", not "throw the day away". Marking a real clock record
     // 'rejected' would remove hours the employee genuinely worked, which is
     // the opposite of what saying no to a change should do.
     if (p.pending_edit?.timestamp) {
+      if (p.pending_edit.log_id) {
+        await CrossBranchPunchEdit.findByIdAndUpdate(p.pending_edit.log_id, {
+          $set: {
+            status: 'rejected',
+            final_decided_by: req.user.id,
+            final_decided_by_name: req.user.full_name || '',
+            final_decided_at: new Date(),
+            final_decided_note: req.body?.note || '',
+          },
+        });
+      }
       p.approval_status = p.pending_edit.prev_status || p.approval_status;
       p.pending_edit = undefined;
       p.approval_decided_by = req.user.id;
@@ -2826,12 +2963,24 @@ async function editPunch(req, res, next) {
   try {
     const p = await Punch.findById(req.params.id);
     if (!p) return res.status(404).json({ error: 'punch not found' });
-    // Same scope rule as createManualPunches above: a punch belongs to a
-    // branch AND to an employee, and both must be in scope. Under the viewer's
-    // manager fallback this 403 becomes a proposal.
-    {
-      const denied = await punchOutOfScope(req, p);
-      if (denied) return res.status(403).json({ error: denied });
+    /**
+     * ONLY THE BRANCH HAS TO BE IN SCOPE HERE — not the employee.
+     *
+     * Every other action on a punch (delete, approve, reject, a brand-new
+     * manual entry) still needs both sides, via punchOutOfScope: a punch's
+     * branch alone does not prove the employee ever worked there. A
+     * CORRECTION is different — the punch itself IS the proof. It exists
+     * because a real clock, at a branch this caller manages, recorded this
+     * employee; whether she is formally declared there or is a one-off guest
+     * makes no difference to the fact that she was physically there. So a
+     * host manager may propose a fix for ANY employee's punch at her own
+     * branch — the reward for the relaxed rule is the staging below: a
+     * correction on somebody else's employee waits for that employee's own
+     * (home) manager before it goes anywhere near Accounting or the salary.
+     */
+    const scope = await resolveBranchScope(req);
+    if (scope !== null && !scope.includes(String(p.branch_id))) {
+      return res.status(403).json({ error: 'ההחתמה שייכת לסניף שאינו בניהולך' });
     }
 
     /**
@@ -2854,29 +3003,71 @@ async function editPunch(req, res, next) {
     if (wanted && Number.isNaN(wanted.getTime())) return res.status(400).json({ error: 'שעה לא תקינה' });
     const timeChanged = !!wanted && (!p.timestamp || wanted.getTime() !== p.timestamp.getTime());
     if (timeChanged && !editorIsFinal && COUNTS.includes(p.approval_status)) {
+      const requestedAt = new Date();
       p.pending_edit = {
         timestamp: wanted,
         prev_status: p.approval_status,
         requested_by: req.user?.id || null,
-        requested_at: new Date(),
+        requested_at: requestedAt,
         note: String(req.body.manual_note || ''),
+        cross_branch: false,
+        manager_approved: false,
+        log_id: null,
       };
-      // approval_status is deliberately NOT touched. Moving it to
-      // pending_accountant would stop the punch counting the moment the
-      // request was made — an employee's hours would drop while she waits for
-      // a decision that has not been taken, which is a worse outcome than the
-      // wrong time and is caused by asking. The day goes on counting what the
-      // clock recorded; the request is a separate thing sitting beside it, and
-      // the accountant's queue picks it up on pending_edit rather than status.
-      p.manager_approved_by = req.user?.id || null;
-      p.manager_approved_at = new Date();
+
+      // Home manager fixing her own employee — unchanged from before this
+      // feature: her own request already IS the manager's word on it, so
+      // stage 1 is satisfied on the spot and only Accounting is left.
+      // A HOST manager fixing a guest is the new case: she is not the
+      // manager whose word counts here, so the request waits — visibly, at
+      // approval_status 'pending_manager' — for whoever actually manages
+      // this employee. See crossBranchEditGate for how that manager then
+      // gets past the branch-scope check to act on it.
+      const emp = p.employee_id
+        ? await Employee.findById(p.employee_id).select('branch_id full_name').lean()
+        : null;
+      const isHomeManager = !emp || isHomeManagerFor(scope, emp.branch_id);
+
+      if (isHomeManager) {
+        p.manager_approved_by = req.user?.id || null;
+        p.manager_approved_at = new Date();
+      } else {
+        // NOT touching approval_status: it stays whatever it already was
+        // (auto/approved), so these hours keep counting for the whole wait —
+        // the manager stage below AND the accountant stage after it. Only
+        // `pending_edit.manager_approved` tracks whether the home manager
+        // has signed off yet; see crossBranchEditGate and approvePunch.
+        p.pending_edit.cross_branch = true;
+        const [hostBranch, homeBranch] = await Promise.all([
+          Branch.findById(p.branch_id).select('name').lean(),
+          Branch.findById(emp.branch_id).select('name').lean(),
+        ]);
+        const log = await CrossBranchPunchEdit.create({
+          punch_id: p._id,
+          employee_id: p.employee_id,
+          employee_name: emp.full_name || '',
+          host_branch_id: p.branch_id,
+          host_branch_name: hostBranch?.name || '',
+          home_branch_id: emp.branch_id,
+          home_branch_name: homeBranch?.name || '',
+          requested_by: req.user?.id || null,
+          requested_by_name: req.user?.full_name || '',
+          requested_at: requestedAt,
+          prev_timestamp: p.timestamp,
+          requested_timestamp: wanted,
+          note: p.pending_edit.note,
+          status: 'pending_manager',
+          month: israelDateKey(requestedAt).slice(0, 7),
+        });
+        p.pending_edit.log_id = log._id;
+      }
       // The label and the note are not money — pairing is chronological and
       // pay never reads them — so they apply now rather than waiting with
       // the timestamp.
       if (req.body.state != null) p.state = Number(req.body.state);
       if (req.body.manual_note != null) p.manual_note = String(req.body.manual_note);
       await p.save();
-      return res.json({ ok: true, punch: p, pending: true });
+      return res.json({ ok: true, punch: p, pending: true, cross_branch: !isHomeManager });
     }
 
     if (timeChanged) {
@@ -2906,6 +3097,34 @@ async function editPunch(req, res, next) {
     }
     await p.save();
     res.json({ ok: true, punch: p });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/cross-branch-edits?month=YYYY-MM
+ *
+ * "עובדים שלי בסניפים אחרים" — every correction another branch's manager
+ * has asked for on one of THIS caller's own employees, this month: what is
+ * still waiting on her, and what she (or Accounting) already decided.
+ * Grouped by employee on the client; this just returns the flat log,
+ * newest first.
+ *
+ * Scope is the employee's HOME branch (`home_branch_id`), not the branch the
+ * correction happened at — the whole point of this screen is that those are
+ * two different branches. system_admin/accountant see every branch's log.
+ */
+async function listCrossBranchEdits(req, res, next) {
+  try {
+    const scope = await resolveBranchScope(req);
+    const month = /^\d{4}-\d{2}$/.test(req.query.month || '') ? req.query.month
+      : israelDateKey(new Date()).slice(0, 7);
+    const filter = { month };
+    if (scope !== null) {
+      if (!scope.length) return res.json({ month, edits: [] });
+      filter.home_branch_id = { $in: scope };
+    }
+    const edits = await CrossBranchPunchEdit.find(filter).sort({ requested_at: -1 }).lean();
+    res.json({ month, edits });
   } catch (err) { next(err); }
 }
 
@@ -3521,6 +3740,7 @@ module.exports = {
   // all hang their refusal on this one predicate, so it is tested on its own.
   punchOutOfScope,
   listPendingPunches,
+  listCrossBranchEdits,
   listPunchesForDay,
   approvePunch,
   rejectPunch,
