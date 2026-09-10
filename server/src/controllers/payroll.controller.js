@@ -3052,6 +3052,13 @@ async function editPunch(req, res, next) {
       if (isHomeManager) {
         p.manager_approved_by = req.user?.id || null;
         p.manager_approved_at = new Date();
+        const accIds = await notificationService.accountantIds();
+        for (const recipient_id of accIds) {
+          await notificationService.createEvent({
+            type: 'punch_pending_accountant', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+            title: 'ממתין לאישור הנהלת חשבונות', body: `תיקון החתמה — ${emp?.full_name || ''}`, url: '/attendance',
+          });
+        }
       } else {
         // NOT touching approval_status: it stays whatever it already was
         // (auto/approved), so these hours keep counting for the whole wait —
@@ -3081,6 +3088,13 @@ async function editPunch(req, res, next) {
           month: israelDateKey(requestedAt).slice(0, 7),
         });
         p.pending_edit.log_id = log._id;
+        const homeManagerIds = await notificationService.branchManagerIds(emp.branch_id);
+        for (const recipient_id of homeManagerIds) {
+          await notificationService.createEvent({
+            type: 'punch_pending_manager', ref_collection: 'Punch', ref_id: p._id, recipient_id,
+            title: 'תיקון החתמה ממתין לאישורך', body: `${emp.full_name} — סניף ${hostBranch?.name || ''}`, url: '/attendance',
+          });
+        }
       }
       // The label and the note are not money — pairing is chronological and
       // pay never reads them — so they apply now rather than waiting with
