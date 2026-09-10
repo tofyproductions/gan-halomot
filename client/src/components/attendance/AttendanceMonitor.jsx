@@ -181,13 +181,13 @@ export default function AttendanceMonitor() {
     //  - unlinked  → warning.50 (existing)
     //  - guest     → soft purple — clearly NOT a home employee
     //  - has away  → no special bg, but a chip in the name cell
-    const rowBg = block.unlinked ? 'warning.50' : (block.is_guest ? '#f3e8ff' : undefined);
+    const rowBg = block.unlinked ? 'warning.50' : (block.is_guest ? COLOR.attendanceRow.guest.bg : undefined);
     return (
     <TableRow key={key} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
       <TableCell sx={{
         fontWeight: 600,
         position: 'sticky', left: 0, zIndex: 2, // RTL plugin flips to right:0 (freeze name on the right)
-        bgcolor: rowBg || '#ffffff',
+        bgcolor: rowBg || COLOR.background.paper,
         boxShadow: '-6px 0 6px -6px rgba(0,0,0,0.18)',
         borderLeft: '1px solid', borderColor: 'divider',
         minWidth: 200,
@@ -286,7 +286,7 @@ export default function AttendanceMonitor() {
               {day.sessions.map((s, i) => (
                 <div key={i}>{s.in_hhmm} → {s.out_hhmm} ({Math.round(s.minutes/60*100)/100}h)</div>
               ))}
-              {day.trailing_punch && <div style={{color:'#fbbf24'}}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
+              {day.trailing_punch && <div style={{ color: COLOR.attendanceRow.missingPunch.border }}>חסרה יציאה: {day.trailing_punch.hhmm}</div>}
               {day.needs_review && <div style={{color:'#fca5a5',fontWeight:800}}>⚠️ החתמה כפולה ({day.punch_count} החתמות) — ממתין להחלטת הנה״ח</div>}
               {day.has_pending && <div style={{color:'#c4b5fd'}}>עדכון ידני — ממתין לאישור הנה״ח</div>}
               {/* Who actually typed it. This line used to name the accountant on
@@ -330,7 +330,7 @@ export default function AttendanceMonitor() {
       }}>
         {block.month_total_hours}h
       </TableCell>
-      <TableCell align="center" sx={{ position: 'sticky', right: 60, zIndex: 2, bgcolor: rowBg || '#ffffff' }}>{/* RTL plugin flips to left:60 */}
+      <TableCell align="center" sx={{ position: 'sticky', right: 60, zIndex: 2, bgcolor: rowBg || COLOR.background.paper }}>{/* RTL plugin flips to left:60 */}
         {!block.unlinked && block.employee_id && (
           <IconButton size="small" onClick={() => setHoursDialog({
             open: true,
@@ -476,10 +476,10 @@ export default function AttendanceMonitor() {
           <div class="legend">
             <span><span class="swatch" style="background:#fff"></span>החתמת שעון</span>
             <span><span class="swatch" style="background:${COLOR.punch.manual.bg};border-color:${COLOR.punch.manual.on}"></span>✎ עדכון ידני</span>
-            <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
+            <span><span class="swatch" style="background:${COLOR.attendanceRow.missingPunch.bg};border:1px dashed ${COLOR.attendanceRow.missingPunch.border}"></span>חסרה החתמה</span>
             <span><span class="swatch" style="background:${COLOR.punch.pending.bg};border-color:${COLOR.punch.pending.on}"></span>ידני — ממתין לאישור</span>
-            <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
-            <span><span class="swatch" style="background:#fff7ed"></span>לא מזוהה</span>
+            <span><span class="swatch" style="background:${COLOR.attendanceRow.guest.bg};border-color:${COLOR.attendanceRow.guest.on}"></span>אורח/ת מסניף אחר</span>
+            <span><span class="swatch" style="background:${COLOR.attendanceRow.unlinked.bg}"></span>לא מזוהה</span>
           </div>
         </div>`;
       // Open a new window with the report HTML and trigger the browser's
@@ -510,7 +510,7 @@ export default function AttendanceMonitor() {
       thead th.name-col { text-align: right; width: 120px; }
       thead th.day-col { font-size: 6.5pt; }
       thead th.day-col .dow { font-size: 5pt; font-weight: 600; color: #64748b; }
-      thead th.total-col { background: #e5e7eb !important; width: 42px; }
+      thead th.total-col { background: ${COLOR.divider} !important; width: 42px; }
       tbody tr { page-break-inside: avoid; }
       td { padding: 0; vertical-align: middle; border: 1px solid #ccc; }
       td.name { text-align: right; font-weight: 700; padding: 3px 5px; background: #fff !important; font-size: 7pt; }
@@ -518,24 +518,24 @@ export default function AttendanceMonitor() {
       .day-cell { padding: 1px; line-height: 1.1; text-align: center; height: 26px; display: flex; flex-direction: column; justify-content: center; }
       .day-cell .h { font-weight: 800; font-size: 7pt; font-variant-numeric: tabular-nums; }
       .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; color: #444; }
-      .day-cell.ok { background: #ffffff !important; color: #111; }
-      .day-cell.warn { background: #fffbeb !important; color: #92400e; border: 0.5px dashed #d97706; border-radius: 2px; }
+      .day-cell.ok { background: ${COLOR.background.paper} !important; color: #111; }
+      .day-cell.warn { background: ${COLOR.attendanceRow.missingPunch.bg} !important; color: ${COLOR.attendanceRow.unlinked.on}; border: 0.5px dashed ${COLOR.attendanceRow.missingPunch.border}; border-radius: 2px; }
       .day-cell.pending { background: ${COLOR.punch.pending.bg} !important; color: ${COLOR.punch.pending.on}; border-radius: 2px; }
       .day-cell.manual { background: ${COLOR.punch.manual.bg} !important; color: ${COLOR.punch.manual.on}; border-radius: 2px; }
-      .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #6d28d9 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
-      .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
+      .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: ${COLOR.attendanceRow.guest.on} !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
+      .badge-away { display: inline-block; font-size: 5.5pt; color: ${COLOR.attendanceRow.unlinked.on}; background: ${COLOR.punch.incomplete.bg} !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
       .section-row td { padding: 4px 6px; text-align: right; font-size: 9pt; font-weight: 800; border-top: 2px solid #111; border-bottom: 1px solid #777; }
-      .section-banner td { background: #e5e7eb !important; }
-      .section-guests td { background: #ede9fe !important; color: #6d28d9; }
-      .section-unlinked td { background: #fef3c7 !important; color: #92400e; }
-      tr.guest td.name { background: #f3e8ff !important; }
-      tr.guest td.name::before { content: "אורח/ת · "; color: #6d28d9; font-weight: 700; font-size: 6pt; }
-      tr.unlinked td.name { background: #fff7ed !important; color: #92400e; }
+      .section-banner td { background: ${COLOR.divider} !important; }
+      .section-guests td { background: ${COLOR.attendanceRow.guest.section} !important; color: ${COLOR.attendanceRow.guest.on}; }
+      .section-unlinked td { background: ${COLOR.punch.incomplete.bg} !important; color: ${COLOR.attendanceRow.unlinked.on}; }
+      tr.guest td.name { background: ${COLOR.attendanceRow.guest.bg} !important; }
+      tr.guest td.name::before { content: "אורח/ת · "; color: ${COLOR.attendanceRow.guest.on}; font-weight: 700; font-size: 6pt; }
+      tr.unlinked td.name { background: ${COLOR.attendanceRow.unlinked.bg} !important; color: ${COLOR.attendanceRow.unlinked.on}; }
       .legend { display: flex; gap: 12px; font-size: 7pt; color: #555; margin-top: 6px; padding: 0 4px; }
       .legend .swatch { display: inline-block; width: 10px; height: 8px; vertical-align: middle; border: 1px solid #999; margin-left: 3px; }
       @media print { body { padding: 0; } .no-print { display: none !important; } }
-      .toolbar { position: fixed; top: 8px; left: 8px; background: #fbbf24; color: #111; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); border: none; font-size: 14px; z-index: 9999; }
+      .toolbar { position: fixed; top: 8px; left: 8px; background: ${COLOR.attendanceRow.missingPunch.border}; color: #111; padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.2); border: none; font-size: 14px; z-index: 9999; }
     </style>
   </head>
   <body>
@@ -711,7 +711,7 @@ export default function AttendanceMonitor() {
             {!loading && data && guestEmployees.length > 0 && (
               <>
                 <TableRow>
-                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#ede9fe', fontWeight: 700, py: 1, color: '#6d28d9' }}>
+                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: COLOR.attendanceRow.guest.section, fontWeight: 700, py: 1, color: COLOR.attendanceRow.guest.on }}>
                     🟣 אורחים מסניפים אחרים — החתימו פה אך משויכים לסניף אחר (השעות נספרות בשכר של סניף הבית שלהם)
                   </TableCell>
                 </TableRow>
@@ -767,7 +767,7 @@ export default function AttendanceMonitor() {
                   if (grpGuests.length > 0) {
                     out.push(
                       <TableRow key={`gst-hdr-${branchKey}`}>
-                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: '#ede9fe', fontWeight: 700, py: 0.5, fontSize: '0.8rem', color: '#6d28d9' }}>
+                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: COLOR.attendanceRow.guest.section, fontWeight: 700, py: 0.5, fontSize: '0.8rem', color: COLOR.attendanceRow.guest.on }}>
                           🟣 אורחים מסניפים אחרים ({grp.branch.name})
                         </TableCell>
                       </TableRow>

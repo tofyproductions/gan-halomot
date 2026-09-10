@@ -171,6 +171,21 @@ async function main() {
     ok(contrast(COLOR.text.primary, c) >= AA, `hours.leave.${k} — טקסט ${contrast(COLOR.text.primary, c).toFixed(2)}:1`);
   }
 
+  console.log('\nניגודיות שורות ההחתמות וגיליון הגבייה:');
+  for (const [k, c] of Object.entries(COLOR.attendanceRow)) {
+    ok(contrast(c.on, c.bg) >= AA, `attendanceRow.${k} — ${contrast(c.on, c.bg).toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  for (const [k, c] of Object.entries(COLOR.collections.cell)) {
+    ok(contrast(c.on, c.bg) >= AA, `collections.cell.${k} — ${contrast(c.on, c.bg).toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  // A year of these read across one row: two that look alike are a debt missed.
+  const cBgs = Object.values(COLOR.collections.cell).map((c) => c.bg.toLowerCase());
+  ok(new Set(cBgs).size === cBgs.length, `כל ${cBgs.length} מצבי התשלום בגוון נפרד`);
+  for (const [k, c] of Object.entries(COLOR.collections.summary)) {
+    ok(contrast(COLOR.text.primary, c) >= AA, `collections.summary.${k} — טקסט ${contrast(COLOR.text.primary, c).toFixed(2)}:1`);
+  }
+  ok(contrast(COLOR.collections.camp.on, COLOR.collections.camp.bg) >= AA, 'collections.camp');
+
   console.log('\nהצבע הישן לא חזר:');
   ok(COLOR.primary.main.toLowerCase() !== '#f59e0b',
     'primary.main אינו הכתום שנכשל בניגודיות');

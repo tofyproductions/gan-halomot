@@ -209,6 +209,53 @@ export const COLOR = {
   },
 
   /**
+   * Where a row in the punch grid came from.
+   *
+   * Cell state (COLOR.punch) answers "how did these hours get here"; this
+   * answers "whose row is this at all" — an employee borrowed from another
+   * branch for a week, or a card the system could not match to anybody. Both
+   * change what the manager is allowed to do with the row, so they are marked
+   * on the row rather than explained in a footnote, and both appear in the
+   * printed sheet's legend.
+   */
+  attendanceRow: {
+    guest:        { bg: '#F1EDF8', section: '#E4DFF2', on: '#453979' },
+    unlinked:     { bg: '#FDF3E2', on: '#8A4A12' },
+    missingPunch: { bg: '#FDF6E7', border: '#D9A21B', on: '#6B3F00' },
+  },
+
+  /**
+   * The collections sheet: who has paid, and who has not.
+   *
+   * `cell.*` is one family — a month either is paid, is partly paid, is unpaid,
+   * or falls before the child started. Somebody chasing a debt reads a year of
+   * these across a row and never opens one, which is the whole point of the
+   * grid, so the four have to be told apart instantly and none may be mistaken
+   * for another.
+   *
+   * `summary.*` are the three total rows at the foot, `camp` marks the קייטנה
+   * columns, and `registration` the דמי רישום column.
+   */
+  collections: {
+    cell: {
+      paid:    { bg: '#E4F0E7', on: '#255239' },
+      partial: { bg: '#FDF3E2', on: '#6B3F00' },
+      unpaid:  { bg: '#FBEDEA', on: '#8C1D18' },
+      // Muted, not unreadable. The original was #94a3b8 on #f1f5f9 — 2.33:1,
+      // and the cell still prints the amount, so a month before the child
+      // started was a figure nobody could actually read.
+      before:  { bg: '#F3EEE6', on: '#6B6157' },
+    },
+    summary: {
+      expected: '#EDF2F9',
+      paid:     '#E9F3EC',
+      debt:     '#FBF6E4',
+    },
+    camp:         { bg: '#F1EDF8', on: '#453979' },
+    registration: '#FBF6E4',
+  },
+
+  /**
    * The hours report, which is a document somebody signs.
    *
    * `row.*` are the five states a day can be in on the daily sheet, and the

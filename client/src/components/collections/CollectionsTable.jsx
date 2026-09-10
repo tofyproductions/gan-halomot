@@ -24,6 +24,7 @@ import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
+import { COLOR } from '../../theme/tokens';
 
 const MONTH_LABELS = [
   'ספט׳', 'אוק׳', 'נוב׳', 'דצמ׳', 'ינו׳', 'פבר׳',
@@ -392,10 +393,10 @@ export default function CollectionsTable() {
 
   // Cell color
   const getCellSx = (paid, expected, isBeforeStart) => {
-    if (isBeforeStart) return { bgcolor: '#f1f5f9', color: '#94a3b8' };
-    if (paid >= expected && expected > 0) return { bgcolor: '#d1fae5', color: '#065f46' };
-    if (paid > 0 && paid < expected) return { bgcolor: '#fef3c7', color: '#92400e' };
-    if (paid === 0 && expected > 0) return { bgcolor: '#fee2e2', color: '#991b1b' };
+    if (isBeforeStart) return { bgcolor: COLOR.collections.cell.before.bg, color: COLOR.collections.cell.before.on };
+    if (paid >= expected && expected > 0) return { bgcolor: COLOR.collections.cell.paid.bg, color: COLOR.collections.cell.paid.on };
+    if (paid > 0 && paid < expected) return { bgcolor: COLOR.collections.cell.partial.bg, color: COLOR.collections.cell.partial.on };
+    if (paid === 0 && expected > 0) return { bgcolor: COLOR.collections.cell.unpaid.bg, color: COLOR.collections.cell.unpaid.on };
     return {};
   };
 
@@ -435,7 +436,7 @@ export default function CollectionsTable() {
             הנחות
           </Button>
           <Button variant="outlined" startIcon={<BeachAccessIcon />} onClick={openCampDialog} size="small"
-            sx={{ color: '#5b21b6', borderColor: '#c4b5fd' }}
+            sx={{ color: COLOR.collections.camp.on, borderColor: COLOR.collections.camp.bg }}
           >
             קייטנה
           </Button>
@@ -475,7 +476,7 @@ export default function CollectionsTable() {
               variant="determinate"
               value={kpi.pct}
               sx={{
-                mt: 1, height: 8, borderRadius: 4, bgcolor: '#e2e8f0',
+                mt: 1, height: 8, borderRadius: 4, bgcolor: COLOR.divider,
                 '& .MuiLinearProgress-bar': {
                   bgcolor: kpi.pct >= 80 ? 'success.main' : kpi.pct >= 50 ? 'warning.main' : 'error.main',
                   borderRadius: 4,
@@ -514,13 +515,13 @@ export default function CollectionsTable() {
               <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper', minWidth: 140 }}>
                 שם הילד/ה
               </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, minWidth: 75, bgcolor: '#fef9c3' }}>דמי רישום</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, minWidth: 75, bgcolor: COLOR.collections.registration }}>דמי רישום</TableCell>
               {columnLabels.map((label, i) => {
                 const isCamp = columns[i] === CAMP_MONTH;
                 return (
                   <TableCell
                     key={label + i} align="center"
-                    sx={{ fontWeight: 700, minWidth: 90, ...(isCamp ? { bgcolor: '#f5f3ff', color: '#5b21b6' } : {}) }}
+                    sx={{ fontWeight: 700, minWidth: 90, ...(isCamp ? { bgcolor: COLOR.collections.camp.bg, color: COLOR.collections.camp.on } : {}) }}
                   >
                     {label}
                     {isCamp && campInfo?.start_date && campInfo?.end_date && (
@@ -550,8 +551,8 @@ export default function CollectionsTable() {
             ))}
 
             {/* Monthly Summary */}
-            <TableRow sx={{ bgcolor: '#f0fdf4' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#f0fdf4', zIndex: 2, fontSize: '0.8rem' }}>
+            <TableRow sx={{ bgcolor: COLOR.collections.summary.paid }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: COLOR.collections.summary.paid, zIndex: 2, fontSize: '0.8rem' }}>
                 נגבה בפועל
               </TableCell>
               <TableCell />
@@ -562,8 +563,8 @@ export default function CollectionsTable() {
               ))}
               <TableCell />
             </TableRow>
-            <TableRow sx={{ bgcolor: '#eff6ff' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#eff6ff', zIndex: 2, fontSize: '0.8rem' }}>
+            <TableRow sx={{ bgcolor: COLOR.collections.summary.expected }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: COLOR.collections.summary.expected, zIndex: 2, fontSize: '0.8rem' }}>
                 צפוי
               </TableCell>
               <TableCell />
@@ -574,8 +575,8 @@ export default function CollectionsTable() {
               ))}
               <TableCell />
             </TableRow>
-            <TableRow sx={{ bgcolor: '#fefce8' }}>
-              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: '#fefce8', zIndex: 2, fontSize: '0.85rem' }}>
+            <TableRow sx={{ bgcolor: COLOR.collections.summary.debt }}>
+              <TableCell sx={{ fontWeight: 800, position: 'sticky', left: 0, bgcolor: COLOR.collections.summary.debt, zIndex: 2, fontSize: '0.85rem' }}>
                 אחוז גבייה
               </TableCell>
               <TableCell />
@@ -584,7 +585,7 @@ export default function CollectionsTable() {
                 return (
                   <TableCell key={i} align="center" sx={{
                     fontWeight: 800, fontSize: '0.85rem',
-                    color: pct >= 100 ? '#16a34a' : pct >= 80 ? '#ca8a04' : pct > 0 ? '#dc2626' : '#94a3b8',
+                    color: pct >= 100 ? '#16a34a' : pct >= 80 ? '#ca8a04' : pct > 0 ? '#dc2626' : COLOR.text.disabled,
                   }}>
                     {monthlySummary[m].expected > 0 ? `${pct}%` : ''}
                   </TableCell>
@@ -796,7 +797,7 @@ export default function CollectionsTable() {
         </DialogTitle>
         <DialogContent>
           {dialog.monthNum === CAMP_MONTH && (
-            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: '#f5f3ff' }}>
+            <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: COLOR.collections.camp.bg }}>
               <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>האם הילד/ה בקייטנה?</Typography>
               <ToggleButtonGroup
                 size="small" exclusive
@@ -1019,7 +1020,8 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
               {row.child_name}
             </TableCell>
             <TableCell align="center" sx={{
-              bgcolor: row.registration_fee_receipt ? '#d1fae5' : (row.registration_fee > 0 ? '#fee2e2' : '#f8fafc'),
+              bgcolor: row.registration_fee_receipt ? COLOR.collections.cell.paid.bg
+                : (row.registration_fee > 0 ? COLOR.collections.cell.unpaid.bg : COLOR.background.default),
               fontWeight: 600, fontSize: '0.8rem',
               cursor: row.registration_fee > 0 ? 'pointer' : 'default',
               '&:hover': row.registration_fee > 0 ? { filter: 'brightness(0.95)' } : undefined,
@@ -1079,7 +1081,7 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                     <Tooltip title="לא סומן אם הילד/ה בקייטנה" arrow>
                       <Box component="span" sx={{
                         position: 'absolute', top: 2, right: 4,
-                        width: 6, height: 6, borderRadius: '50%', bgcolor: '#8b5cf6',
+                        width: 6, height: 6, borderRadius: '50%', bgcolor: COLOR.collections.camp.on,
                       }} />
                     </Tooltip>
                   )}
@@ -1108,7 +1110,7 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                           width: 6,
                           height: 6,
                           borderRadius: '50%',
-                          bgcolor: '#8b5cf6',
+                          bgcolor: COLOR.collections.camp.on,
                         }}
                       />
                     </Tooltip>
@@ -1135,8 +1137,8 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
       })}
 
       {/* Subtotals row */}
-      <TableRow sx={{ bgcolor: '#f8fafc' }}>
-        <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', position: 'sticky', left: 0, bgcolor: '#f8fafc', zIndex: 1 }}>
+      <TableRow sx={{ bgcolor: COLOR.background.default }}>
+        <TableCell sx={{ fontWeight: 700, fontSize: '0.8rem', position: 'sticky', left: 0, bgcolor: COLOR.background.default, zIndex: 1 }}>
           סה״כ {classroom}
         </TableCell>
         <TableCell />
