@@ -209,6 +209,83 @@ export const COLOR = {
   },
 
   /**
+   * The hours report, which is a document somebody signs.
+   *
+   * `row.*` are the five states a day can be in on the daily sheet, and the
+   * report prints its own legend of them — so, like the punch grid, they must
+   * stay distinguishable and they must survive being printed in black and
+   * white by somebody's office laser. Each carries the ink used for the
+   * figures in that row.
+   *
+   * `leave.*` are the five kinds of absence, tinting the same sheet.
+   */
+  hours: {
+    row: {
+      deducted:  { bg: '#FBEDEA', on: '#8C1D18' },
+      approved:  { bg: '#EDF2F9', on: '#2B5480' },
+      paid:      { bg: '#E9F3EC', on: '#255239' },
+      pending:   { bg: '#F1EDF8', on: '#453979' },
+      incomplete:{ bg: '#FDF3E2', on: '#6B3F00' },
+    },
+    leave: {
+      absence:  '#FBEDEA',
+      sick:     '#FDF3E2',
+      vacation: '#EDF2F9',
+      miluim:   '#F1EDF8',
+      holiday:  '#F3EEE6',
+    },
+  },
+
+  /**
+   * The Gantt board.
+   *
+   * `day.*` is a family: a column heading says at a glance whether that day
+   * belongs to this gan, is closed, is a holiday, or is the short Friday —
+   * which is the whole reason a planner scans the header row before reading a
+   * single cell. `cell.*` are the body washes underneath them, and `note`,
+   * `span` and `fixedRow` are the three kinds of block that sit in the grid.
+   *
+   * `defaultActivity` is the odd one out and is DATA, like ganttCell above: it
+   * is written onto an activity when one is created and stored, so changing it
+   * would not restyle a single existing activity — it would only make new ones
+   * disagree with old ones.
+   */
+  gantt: {
+    header: '#2A241D',
+    headerOn: '#FFFFFF',
+    day: {
+      own:     { bg: '#2A241D', on: '#FFFFFF' },
+      other:   { bg: '#6B6157', on: '#FFFFFF' },
+      closed:  { bg: '#8A4A12', on: '#FFFFFF' },
+      holiday: { bg: '#9A5B00', on: '#FFFFFF' },
+      friday:  { bg: '#5B4B9E', on: '#FFFFFF' },
+    },
+    cell: {
+      holiday: '#FDF3E2',
+      friday:  '#F1EEF9',
+      other:   '#FAF7F2',
+    },
+    note:     { bg: '#FDF3E2', border: '#F3E2C0', on: '#6B3F00' },
+    span:     { bg: '#EDEAF7', border: '#DCD6EF', on: '#453979' },
+    fixedRow: { bg: '#FBEFF4', border: '#F2DDE7' },
+    defaultActivity: '#dbeafe',
+
+    /**
+     * The five kinds of row on the printed plan — פגישה, פעילות, יצירה,
+     * סיפור, שונות. On a sheet pinned to a wall and read across a room the
+     * tint is what separates one band from the next, so the five have to stay
+     * apart from each other, and `ink` has to hold up printed.
+     */
+    row: {
+      meeting:  { bg: '#EEF3FA', label: '#DCE8F5', ink: '#2B5480' },
+      activity: { bg: '#EDF5EF', label: '#DBEBE0', ink: '#255239' },
+      creation: { bg: '#FBEFF4', label: '#F4DAE5', ink: '#8A2F54' },
+      story:    { bg: '#FBF6E4', label: '#F5EAC4', ink: '#6B4A00' },
+      misc:     { bg: '#F2EFFA', label: '#E4DFF2', ink: '#453979' },
+    },
+  },
+
+  /**
    * The six highlight colours a gan can paint a Gantt cell with.
    *
    * THE VALUES ARE DATA, NOT STYLE, AND THEY DO NOT CHANGE. When somebody

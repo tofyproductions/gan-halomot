@@ -134,6 +134,43 @@ async function main() {
   const mBgs = Object.values(COLOR.maternity).map((c) => c.bg.toLowerCase());
   ok(new Set(mBgs).size === mBgs.length, `כל ${mBgs.length} מצבי ההריון בגוון נפרד`);
 
+  console.log('\nניגודיות לוח הגאנט:');
+  for (const [state, c] of Object.entries(COLOR.gantt.day)) {
+    const ratio = contrast(c.on, c.bg);
+    ok(ratio >= AA, `gantt.day.${state} — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  const dayBgs = Object.values(COLOR.gantt.day).map((c) => c.bg.toLowerCase());
+  ok(new Set(dayBgs).size === dayBgs.length, `כל ${dayBgs.length} מצבי היום בגוון נפרד`);
+  for (const [k, c] of Object.entries(COLOR.gantt.cell)) {
+    const ratio = contrast(COLOR.text.primary, c);
+    ok(ratio >= AA, `gantt.cell.${k} — טקסט ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  for (const k of ['note', 'span']) {
+    const ratio = contrast(COLOR.gantt[k].on, COLOR.gantt[k].bg);
+    ok(ratio >= AA, `gantt.${k} — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+
+  for (const [kind, c] of Object.entries(COLOR.gantt.row)) {
+    const onBg = contrast(c.ink, c.bg);
+    const onLabel = contrast(c.ink, c.label);
+    ok(Math.min(onBg, onLabel) >= AA, `gantt.row.${kind} — רקע ${onBg.toFixed(2)} · תווית ${onLabel.toFixed(2)}`, `נדרש ${AA}`);
+  }
+  const rowBgs = Object.values(COLOR.gantt.row).map((c) => c.bg.toLowerCase());
+  ok(new Set(rowBgs).size === rowBgs.length, `כל ${rowBgs.length} סוגי השורה בגוון נפרד`);
+
+  console.log('\nניגודיות דוח השעות:');
+  for (const [state, c] of Object.entries(COLOR.hours.row)) {
+    const ratio = contrast(c.on, c.bg);
+    ok(ratio >= AA, `hours.row.${state} — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
+  }
+  const hBgs = Object.values(COLOR.hours.row).map((c) => c.bg.toLowerCase());
+  ok(new Set(hBgs).size === hBgs.length, `כל ${hBgs.length} מצבי השורה בגוון נפרד`);
+  const lBgs = Object.values(COLOR.hours.leave).map((c) => c.toLowerCase());
+  ok(new Set(lBgs).size === lBgs.length, `כל ${lBgs.length} סוגי ההיעדרות בגוון נפרד`);
+  for (const [k, c] of Object.entries(COLOR.hours.leave)) {
+    ok(contrast(COLOR.text.primary, c) >= AA, `hours.leave.${k} — טקסט ${contrast(COLOR.text.primary, c).toFixed(2)}:1`);
+  }
+
   console.log('\nהצבע הישן לא חזר:');
   ok(COLOR.primary.main.toLowerCase() !== '#f59e0b',
     'primary.main אינו הכתום שנכשל בניגודיות');

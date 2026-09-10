@@ -55,7 +55,7 @@ function DraggableActivity({ activity }) {
       size="small"
       sx={{
         cursor: 'grab', fontWeight: 600, mb: 0.5,
-        bgcolor: activity.color || '#dbeafe',
+        bgcolor: activity.color || COLOR.gantt.defaultActivity,
         opacity: isDragging ? 0.4 : 1,
         '&:active': { cursor: 'grabbing' },
       }}
@@ -108,7 +108,7 @@ function GanttCell({ id, dragId, dragPayload, canDrag, children, ...props }) {
             cursor: 'grab', lineHeight: 0, '&:active': { cursor: 'grabbing' },
           }}
         >
-          <DragIndicatorIcon sx={{ fontSize: 13, color: '#A79C8E' }} />
+          <DragIndicatorIcon sx={{ fontSize: 13, color: COLOR.text.disabled }} />
         </Box>
       )}
       {children}
@@ -144,7 +144,7 @@ export default function GanttEditor() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [editorNames, setEditorNames] = useState([]);
   const [parentPick, setParentPick] = useState(null);
-  const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
+  const [activityDialog, setActivityDialog] = useState({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' });
   const [draggingActivity, setDraggingActivity] = useState(null);
   // Merge selection — a set of 'wk|rowKey|di' keys, built by clicking cells.
   const [mergeMode, setMergeMode] = useState(false);
@@ -231,7 +231,7 @@ export default function GanttEditor() {
     return classSessions.filter(s => s.date === ymd
       && (!classroomCategory || !s.program_id?.classroom_category || s.program_id.classroom_category === classroomCategory));
   };
-  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: '#F3EEE6' };
+  const SESSION_TINT = { occurred: '#dcfce7', no_show: '#fee2e2', postponed: '#ffedd5', scheduled: COLOR.background.sunken };
 
   // Cell helpers
   const getCell = (wk, rk, di) => gantt?.weeks?.[wk]?.cells?.find(c => c.row_key === rk && c.day_index === di);
@@ -499,7 +499,7 @@ export default function GanttEditor() {
     const activity = active.data.current?.activity;
     if (activity) {
       updateCell(target.wk, target.rk, target.di, {
-        content: activity.name, color: activity.color || '#dbeafe',
+        content: activity.name, color: activity.color || COLOR.gantt.defaultActivity,
       });
       return;
     }
@@ -700,7 +700,7 @@ export default function GanttEditor() {
     try {
       await api.post('/activities', { branch_id: selectedBranch, name, color, fixed_day: fixed_day !== '' ? parseInt(fixed_day) : null });
       toast.success('חוג נוסף');
-      setActivityDialog({ open: false, name: '', color: '#dbeafe', fixed_day: '' });
+      setActivityDialog({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' });
       api.get('/activities').then(res => setActivities(res.data.activities || []));
     } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
   };
@@ -744,11 +744,11 @@ export default function GanttEditor() {
             {/* Who may write this room's plan, on the plan. The manager set it
                 once and then wants to see it, not re-open a dialog to check. */}
             <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
-              <Typography variant="caption" sx={{ color: '#6B6157', fontWeight: 700 }}>
+              <Typography variant="caption" sx={{ color: COLOR.text.secondary, fontWeight: 700 }}>
                 מובילות:
               </Typography>
               {editorNames.length === 0 && (
-                <Typography variant="caption" sx={{ color: '#A79C8E' }}>
+                <Typography variant="caption" sx={{ color: COLOR.text.disabled }}>
                   לא הוגדרו — רק מנהלת יכולה לערוך
                 </Typography>
               )}
@@ -802,7 +802,7 @@ export default function GanttEditor() {
             bgcolor: '#fffbeb', border: '1px solid #fbbf24',
           }}>
             <MergeIcon sx={{ color: '#b45309' }} />
-            <Typography variant="body2" sx={{ fontWeight: 700, color: '#92400e' }}>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: COLOR.warning.softOn }}>
               {mergeSel.length
                 ? `נבחרו ${mergeSel.length} תאים`
                 : 'סמני תאים לאיחוד — לחיצה על תא מסמנת אותו, לחיצה שנייה מבטלת'}
@@ -851,7 +851,7 @@ export default function GanttEditor() {
 
           return (
             <Card key={weekIdx} sx={{ mb: 3, boxShadow: '0 2px 12px rgba(0,0,0,0.06)', borderRadius: 3, overflow: 'hidden' }}>
-              <Box sx={{ bgcolor: '#1e3a5f', color: 'white', px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box sx={{ bgcolor: COLOR.gantt.header, color: COLOR.gantt.headerOn, px: 2, py: 1.5, display: 'flex', alignItems: 'center', gap: 2 }}>
                 <Chip label={`שבוע ${week.week_number}`} size="small" sx={{ bgcolor: '#f59e0b', color: 'white', fontWeight: 700 }} />
                 {/* The range the week actually DRAWS, not the stored one. The
                     stored end_date is the Saturday, which is never a column,
@@ -878,7 +878,7 @@ export default function GanttEditor() {
                 <Table size="small" sx={{ tableLayout: 'fixed' }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={{ bgcolor: '#1e3a5f', color: 'white', fontWeight: 700, textAlign: 'center', width: 90, p: 1 }}></TableCell>
+                      <TableCell sx={{ bgcolor: COLOR.gantt.header, color: COLOR.gantt.headerOn, fontWeight: 700, textAlign: 'center', width: 90, p: 1 }}></TableCell>
                       {DAY_NAMES.map((day, di) => {
                         const dd = dateOfColumn(di);
                         const own = inMonth(dd);
@@ -886,14 +886,18 @@ export default function GanttEditor() {
                         const shut = own ? isClosed(dd) : null;
                         return (
                           <TableCell key={di} sx={{
-                            bgcolor: !own ? '#6B6157' : shut ? '#92400e' : hol ? '#b45309' : di === 5 ? '#5b21b6' : '#1e3a5f',
+                            bgcolor: !own ? COLOR.gantt.day.other.bg
+                              : shut ? COLOR.gantt.day.closed.bg
+                              : hol ? COLOR.gantt.day.holiday.bg
+                              : di === 5 ? COLOR.gantt.day.friday.bg
+                              : COLOR.gantt.day.own.bg,
                             color: 'white', fontWeight: 700, textAlign: 'center', p: 1,
                             opacity: own ? 1 : 0.55,
                           }}>
                             <Box sx={{ fontWeight: 800 }}>{day}</Box>
                             <Box sx={{ fontSize: '0.8rem', opacity: 0.8 }}>{dd.toLocaleDateString('he-IL', { day:'numeric', month:'numeric' })}</Box>
                             {hol && (
-                              <Box sx={{ fontSize: '0.7rem', color: '#fde68a' }}>
+                              <Box sx={{ fontSize: '0.7rem', color: COLOR.gantt.note.border }}>
                                 {hol.emoji ? `${hol.emoji} ` : ''}{hol.name}
                                 {/* Open and finishing early is not a closure, and the
                                     difference decides whether a plan gets written. */}
@@ -916,13 +920,13 @@ export default function GanttEditor() {
                       if (!dayCells.some(c => c.sessions.length)) return null;
                       return (
                         <TableRow>
-                          <TableCell sx={{ bgcolor: '#fdf2f8', fontWeight: 800, fontSize: '0.82rem', textAlign: 'center', borderLeft: '2px solid #fbcfe8', color: '#9d174d', p: 1 }}>חוגים</TableCell>
+                          <TableCell sx={{ bgcolor: COLOR.gantt.fixedRow.bg, fontWeight: 800, fontSize: '0.82rem', textAlign: 'center', borderLeft: '2px solid #fbcfe8', color: '#9d174d', p: 1 }}>חוגים</TableCell>
                           {dayCells.map(({ di, sessions }) => (
-                            <TableCell key={di} sx={{ bgcolor: '#fdf2f8', border: '1px solid #fce7f3', p: 0.5, verticalAlign: 'top' }}>
+                            <TableCell key={di} sx={{ bgcolor: COLOR.gantt.fixedRow.bg, border: `1px solid ${COLOR.gantt.fixedRow.border}`, p: 0.5, verticalAlign: 'top' }}>
                               <Stack spacing={0.4}>
                                 {sessions.map(s => (
                                   <Box key={s._id} sx={{
-                                    bgcolor: SESSION_TINT[s.status] || '#F3EEE6', borderRadius: 1, px: 0.6, py: 0.2,
+                                    bgcolor: SESSION_TINT[s.status] || COLOR.background.sunken, borderRadius: 1, px: 0.6, py: 0.2,
                                     fontSize: '0.68rem', fontWeight: 700, color: '#334155',
                                     textDecoration: s.status === 'postponed' ? 'line-through' : 'none',
                                   }}>
@@ -938,12 +942,12 @@ export default function GanttEditor() {
                     })()}
                     {rows.map((row, rowIdx) => (
                       <TableRow key={row.key}>
-                        <TableCell sx={{ bgcolor: '#F3EEE6', fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>
+                        <TableCell sx={{ bgcolor: COLOR.background.sunken, fontWeight: 800, fontSize: '0.9rem', textAlign: 'center', borderLeft: '2px solid #cbd5e1', p: 1 }}>
                           <Stack direction="row" justifyContent="center" alignItems="center" spacing={0.5}>
                             <span>{row.label}</span>
                             {row.key.startsWith('c') && row.key.includes('_') && (
                               <IconButton size="small" onClick={() => removeRow(row.key)} sx={{ p: 0 }}>
-                                <DeleteIcon sx={{ fontSize: 14, color: '#A79C8E' }} />
+                                <DeleteIcon sx={{ fontSize: 14, color: COLOR.text.disabled }} />
                               </IconButton>
                             )}
                           </Stack>
@@ -1001,9 +1005,9 @@ export default function GanttEditor() {
                               if (rowIdx > 0) return null;
                               return (
                                 <TableCell key={di} rowSpan={rows.length} sx={{
-                                  bgcolor: '#fef3c7', border: '1px solid #fde68a',
+                                  bgcolor: COLOR.gantt.note.bg, border: `1px solid ${COLOR.gantt.note.border}`,
                                   textAlign: 'center', verticalAlign: 'middle', p: 1,
-                                  color: '#92400e',
+                                  color: COLOR.warning.softOn,
                                 }}>
                                   <Box sx={{ fontSize: '1rem', fontWeight: 800, lineHeight: 1.3 }}>
                                     {shut.emoji ? `${shut.emoji} ` : ''}{shut.name}
@@ -1015,9 +1019,9 @@ export default function GanttEditor() {
 
                             return (
                               <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{
-                                bgcolor: '#fef3c7', border: '1px solid #fde68a',
+                                bgcolor: COLOR.gantt.note.bg, border: `1px solid ${COLOR.gantt.note.border}`,
                                 textAlign: 'center', verticalAlign: 'middle', p: 1,
-                                color: '#92400e',
+                                color: COLOR.warning.softOn,
                               }}>
                                 {String(cellContentAt(weekIdx, row.key, si) || '').trim()
                                   ? <Box sx={{ fontSize: '0.85rem', fontWeight: 600 }}>{cellContentAt(weekIdx, row.key, si)}</Box>
@@ -1030,11 +1034,11 @@ export default function GanttEditor() {
 
                           // Friday specials
                           if (isFri && row.key === 'meeting') {
-                            return <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: '#ede9fe', textAlign: 'center', p: 1, fontWeight: 800, fontSize: '1rem', color: '#5b21b6', border: '1px solid #e2e8f0' }}>קבלת שבת</TableCell>;
+                            return <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, textAlign: 'center', p: 1, fontWeight: 800, fontSize: '1rem', color: COLOR.gantt.span.on, border: '1px solid #e2e8f0' }}>קבלת שבת</TableCell>;
                           }
                           if (isFri && row.key === 'activity') {
                             return (
-                              <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: '#ede9fe', p: 1.5, border: '1px solid #e2e8f0' }}>
+                              <TableCell key={di} colSpan={cs} rowSpan={rs} sx={{ bgcolor: COLOR.gantt.span.bg, p: 1.5, border: '1px solid #e2e8f0' }}>
                                 {/* Chosen from the room's children rather than
                                     typed, so the turn can be counted and the
                                     round kept without anybody remembering it. */}
@@ -1044,7 +1048,7 @@ export default function GanttEditor() {
                                     { role: 'mother', label: 'אמא של שבת', name: week.friday_parent_mother, hint: 'בחר/י ילדה' },
                                   ].map(({ role, label, name, hint }) => (
                                     <Box key={role}>
-                                      <Typography sx={{ fontSize: '0.75rem', color: '#5b21b6', fontWeight: 700 }}>{label}:</Typography>
+                                      <Typography sx={{ fontSize: '0.75rem', color: COLOR.gantt.span.on, fontWeight: 700 }}>{label}:</Typography>
                                       <Button
                                         fullWidth size="small" variant="outlined" disabled={!canEdit}
                                         onClick={() => setParentPick({
@@ -1054,7 +1058,7 @@ export default function GanttEditor() {
                                         sx={{
                                           bgcolor: 'white', borderRadius: 1, py: 0.3,
                                           fontSize: '0.85rem', fontWeight: 700,
-                                          color: name ? '#1C1815' : '#A79C8E',
+                                          color: name ? '#1C1815' : COLOR.text.disabled,
                                           borderColor: '#ddd6fe',
                                           '&:hover': { borderColor: '#8b5cf6', bgcolor: 'white' },
                                         }}
@@ -1083,7 +1087,7 @@ export default function GanttEditor() {
                               canDrag={!mergeMode && Boolean(String(cellContent).trim())}
                               onClick={() => mergeMode && handleMergeClick(weekIdx, row.key, si)}
                               sx={{
-                                bgcolor: cc || (hol ? '#fef3c7' : isFri ? '#f5f3ff' : own ? 'white' : '#FAF7F2'),
+                                bgcolor: cc || (hol ? COLOR.gantt.cell.holiday : isFri ? COLOR.gantt.cell.friday : own ? COLOR.background.paper : COLOR.gantt.cell.other),
                                 border: picked ? '2px solid #f59e0b' : '1px solid #e2e8f0',
                                 p: 1, verticalAlign: 'top', cursor: mergeMode ? 'crosshair' : 'default',
                                 position: 'relative', '&:hover .ca': { opacity: 1 },
@@ -1104,7 +1108,7 @@ export default function GanttEditor() {
                               <Box className="ca" sx={{ position: 'absolute', top: 0, insetInlineStart: 0, opacity: 0, transition: '0.2s', display: 'flex', gap: '1px' }}>
                                 <Tooltip title="צבע">
                                   <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); setColorMenu({ anchor: e.currentTarget, weekIdx, rowKey: row.key, dayIdx: si }); }}>
-                                    <PaletteIcon sx={{ fontSize: 13, color: '#A79C8E' }} />
+                                    <PaletteIcon sx={{ fontSize: 13, color: COLOR.text.disabled }} />
                                   </IconButton>
                                 </Tooltip>
                                 {canEdit && (
@@ -1114,7 +1118,7 @@ export default function GanttEditor() {
                                       if (!mergeMode) setMergeMode(true);
                                       handleMergeClick(weekIdx, row.key, si);
                                     }}>
-                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : '#A79C8E' }} />
+                                      <MergeIcon sx={{ fontSize: 13, color: picked ? '#f59e0b' : COLOR.text.disabled }} />
                                     </IconButton>
                                   </Tooltip>
                                 )}
@@ -1122,7 +1126,7 @@ export default function GanttEditor() {
                               {(cs > 1 || rs > 1) && (
                                 <IconButton size="small" sx={{ position: 'absolute', bottom: 0, left: 0, p: '2px' }}
                                   onClick={() => updateCell(weekIdx, row.key, si, { col_span: 1, row_span: 1 })}>
-                                  <Typography sx={{ fontSize: '0.55rem', color: '#A79C8E' }}>✕</Typography>
+                                  <Typography sx={{ fontSize: '0.55rem', color: COLOR.text.disabled }}>✕</Typography>
                                 </IconButton>
                               )}
                             </GanttCell>
@@ -1138,14 +1142,14 @@ export default function GanttEditor() {
                         looking at. */}
                     {canEdit && (
                       <TableRow>
-                        <TableCell sx={{ bgcolor: '#FAF7F2', p: 0.25, borderLeft: '2px solid #cbd5e1' }}>
+                        <TableCell sx={{ bgcolor: COLOR.background.default, p: 0.25, borderLeft: '2px solid #cbd5e1' }}>
                           <Button size="small" fullWidth startIcon={<AddIcon sx={{ fontSize: 15 }} />}
                             onClick={addRow}
-                            sx={{ fontSize: '0.72rem', color: '#6B6157', py: 0.2, minHeight: 0 }}>
+                            sx={{ fontSize: '0.72rem', color: COLOR.text.secondary, py: 0.2, minHeight: 0 }}>
                             שורה
                           </Button>
                         </TableCell>
-                        <TableCell colSpan={DAY_NAMES.length} sx={{ bgcolor: '#FAF7F2', p: 0.25 }} />
+                        <TableCell colSpan={DAY_NAMES.length} sx={{ bgcolor: COLOR.background.default, p: 0.25 }} />
                       </TableRow>
                     )}
                   </TableBody>
@@ -1209,7 +1213,7 @@ export default function GanttEditor() {
           <Box sx={{ width: 280, p: 2 }} dir="rtl">
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
               <Typography variant="h6" sx={{ fontWeight: 800 }}>בנק חוגים</Typography>
-              <IconButton size="small" onClick={() => setActivityDialog({ open: true, name: '', color: '#dbeafe', fixed_day: '' })}>
+              <IconButton size="small" onClick={() => setActivityDialog({ open: true, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' })}>
                 <AddIcon />
               </IconButton>
             </Stack>
@@ -1237,7 +1241,7 @@ export default function GanttEditor() {
         </Drawer>
 
         {/* Add Activity Dialog */}
-        <Dialog open={activityDialog.open} onClose={() => setActivityDialog({ open: false, name: '', color: '#dbeafe', fixed_day: '' })} dir="rtl" maxWidth="xs" fullWidth>
+        <Dialog open={activityDialog.open} onClose={() => setActivityDialog({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' })} dir="rtl" maxWidth="xs" fullWidth>
           <DialogTitle sx={{ fontWeight: 700 }}>הוסף חוג</DialogTitle>
           <DialogContent>
             <Stack spacing={2} sx={{ mt: 1 }}>
@@ -1259,7 +1263,7 @@ export default function GanttEditor() {
             </Stack>
           </DialogContent>
           <DialogActions>
-            <Button onClick={() => setActivityDialog({ open: false, name: '', color: '#dbeafe', fixed_day: '' })}>ביטול</Button>
+            <Button onClick={() => setActivityDialog({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' })}>ביטול</Button>
             <Button variant="contained" onClick={addActivity}>הוסף</Button>
           </DialogActions>
         </Dialog>

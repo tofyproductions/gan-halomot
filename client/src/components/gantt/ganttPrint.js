@@ -16,6 +16,8 @@
  * this month rather than fixed — six weeks of six rows gets smaller type than
  * four weeks of four, because the alternative is a second page.
  */
+import { COLOR } from '../../theme/tokens';
+
 
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
 
@@ -27,13 +29,14 @@ const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמיש
  * band is findable at that distance where a row label is not.
  */
 const ROW_TINT = {
-  meeting: { bg: '#eaf2fd', label: '#dbeafe', ink: '#1e40af' },
-  activity: { bg: '#eafaf0', label: '#dcfce7', ink: '#166534' },
-  creation: { bg: '#fdeef5', label: '#fce7f3', ink: '#9d174d' },
-  story: { bg: '#fdfae6', label: '#fef9c3', ink: '#854d0e' },
-  misc: { bg: '#f2effc', label: '#ede9fe', ink: '#5b21b6' },
+  meeting: COLOR.gantt.row.meeting,
+  activity: COLOR.gantt.row.activity,
+  creation: COLOR.gantt.row.creation,
+  story: COLOR.gantt.row.story,
+  misc: COLOR.gantt.row.misc,
 };
-const tintOf = (key) => ROW_TINT[key] || { bg: '#FAF7F2', label: '#F3EEE6', ink: '#334155' };
+const tintOf = (key) => ROW_TINT[key]
+  || { bg: COLOR.background.default, label: COLOR.background.sunken, ink: COLOR.text.primary };
 const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
   'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
@@ -315,7 +318,7 @@ export function buildGanttPrintHtml({
   body.img .head { margin-bottom: 14px; }
   ` : ''}
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-  html { background: #EBE4D9; }
+  html { background: ${COLOR.divider}; }
   /*
    * The body is exactly the printable width of the page, always.
    *
@@ -329,17 +332,17 @@ export function buildGanttPrintHtml({
    * actually be printed.
    */
   body { width: 285mm; margin: 0 auto; background: #fff; padding: 0;
-         box-shadow: 0 0 0 1px #cbd5e1, 0 6px 24px rgba(15,23,42,.12); }
+         box-shadow: 0 0 0 1px ${COLOR.dividerStrong}, 0 6px 24px rgba(15,23,42,.12); }
   @media print { html { background: #fff; } body { box-shadow: none; margin: 0; } }
   :root { --k: 1; --pad: 0mm; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
-  body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: #1C1815; }
+  body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: ${COLOR.text.primary}; }
   /* A4 landscape less the 6mm @page margins, stated once and used by the
      fit script below so the two cannot drift apart. */
 
   .head { display: flex; align-items: center; justify-content: space-between;
           margin-bottom: 2mm; }
-  .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: #1e3a5f; }
-  .head .s { font-size: calc(var(--head) * var(--k)); color: #6B6157; font-weight: 700; }
+  .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: ${COLOR.gantt.header}; }
+  .head .s { font-size: calc(var(--head) * var(--k)); color: ${COLOR.text.secondary}; font-weight: 700; }
 
   /* Cells sit in their own rounded tiles with white between them, the way the
      screen shows them. On paper it also stops five weeks of grid from reading
@@ -348,26 +351,26 @@ export function buildGanttPrintHtml({
              table-layout: fixed; margin-bottom: 1.4mm; page-break-inside: avoid; }
   table.wk th, table.wk td { border: none; border-radius: 1.6mm; }
 
-  tr.banner th { background: #1e3a5f !important; color: #fff; padding: 0.9mm 2mm; }
+  tr.banner th { background: ${COLOR.gantt.header} !important; color: #fff; padding: 0.9mm 2mm; }
   tr.banner .wn { font-size: calc(var(--head) * var(--k)); font-weight: 800;
                   width: 20mm; text-align: center; }
   tr.banner .topic { text-align: center; }
   tr.banner .tp { font-size: calc(var(--head) * var(--k) * 1.25); font-weight: 800; }
   tr.banner .rg { font-size: calc(var(--small) * var(--k)); opacity: 0.75; margin-right: 4mm; }
 
-  th.d { background: #F3EEE6 !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
+  th.d { background: ${COLOR.background.sunken} !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
          text-align: center; line-height: 1.15; }
-  th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: #334155; }
-  th.d .dd { font-size: calc(var(--small) * var(--k)); color: #6B6157; font-weight: 700; }
-  th.d .hol { font-size: calc(var(--small) * var(--k)); color: #92400e; font-weight: 800; }
-  th.d.shut { background: #fde68a !important; }
-  th.d.short { background: #fef3c7 !important; }
+  th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: ${COLOR.text.primary}; }
+  th.d .dd { font-size: calc(var(--small) * var(--k)); color: ${COLOR.text.secondary}; font-weight: 700; }
+  th.d .hol { font-size: calc(var(--small) * var(--k)); color: ${COLOR.warning.softOn}; font-weight: 800; }
+  th.d.shut { background: ${COLOR.gantt.day.closed.bg} !important; }
+  th.d.short { background: ${COLOR.gantt.cell.holiday} !important; }
   /* Only a PLAIN borrowed day fades — a borrowed day that is also a closure
      keeps its amber. The unqualified rule used to win the cascade and the
      end of סוכות printed as two ordinary white columns. */
-  th.d.borrowed:not(.shut):not(.short) { background: #FAF7F2 !important; }
+  th.d.borrowed:not(.shut):not(.short) { background: ${COLOR.background.default} !important; }
   th.d.borrowed:not(.shut):not(.short) .dn,
-  th.d.borrowed:not(.shut):not(.short) .dd { color: #a8b4c2; }
+  th.d.borrowed:not(.shut):not(.short) .dd { color: ${COLOR.text.disabled}; }
 
   th.rl { width: 20mm; text-align: center; font-weight: 800; line-height: 1.15;
           font-size: calc(var(--head) * var(--k)); padding: 0.5mm; }
@@ -375,20 +378,20 @@ export function buildGanttPrintHtml({
 
   td.c { padding: calc(0.8mm + var(--pad)) 1mm; text-align: center; vertical-align: middle;
          font-size: calc(var(--cell) * var(--k)); line-height: 1.22; font-weight: 600;
-         color: #1C1815; overflow-wrap: anywhere; }
+         color: ${COLOR.text.primary}; overflow-wrap: anywhere; }
   /* A day borrowed from the month next door is written in like any other, just
      quieter, so a parent reading the sheet knows which month they are in. */
   td.c.borrowed { opacity: 0.72; }
-  td.fri { background: #f5f3ff !important; }
-  td.strong { font-weight: 800; color: #5b21b6; text-align: center;
+  td.fri { background: ${COLOR.gantt.cell.friday} !important; }
+  td.strong { font-weight: 800; color: ${COLOR.gantt.span.on}; text-align: center;
               font-size: calc(var(--head) * var(--k) * 1.1); }
   td.fri .fp { font-size: calc(var(--small) * var(--k)); text-align: right;
-               color: #5b21b6; line-height: 1.35; font-weight: 700; }
+               color: ${COLOR.gantt.span.on}; line-height: 1.35; font-weight: 700; }
 
   /* A closed column that still has work in it: every cell amber, like the screen. */
-  td.c.shutc { background: #fde68a !important; color: #92400e; font-weight: 700; }
-  td.closed { background: #fef3c7 !important; text-align: center; vertical-align: middle; }
-  td.closed .cname { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: #92400e; }
+  td.c.shutc { background: ${COLOR.gantt.day.closed.bg} !important; color: ${COLOR.warning.softOn}; font-weight: 700; }
+  td.closed { background: ${COLOR.gantt.cell.holiday} !important; text-align: center; vertical-align: middle; }
+  td.closed .cname { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: ${COLOR.warning.softOn}; }
   td.closed .cnote { font-size: calc(var(--small) * var(--k)); color: #b45309; font-weight: 700; }
 
   /* The last lever before giving up: take the air out rather than the type.
@@ -412,7 +415,7 @@ export function buildGanttPrintHtml({
              padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;
              border: none; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
   .toolbar.alt { background: #25D366; color: #fff; }
-  .toolbar.ghost { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+  .toolbar.ghost { background: #fff; color: ${COLOR.text.primary}; border: 1px solid ${COLOR.dividerStrong}; }
   @media print { .bar { display: none !important; } }
 </style>
 </head>

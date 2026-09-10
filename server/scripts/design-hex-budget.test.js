@@ -83,6 +83,38 @@ function main() {
   }
   console.log('  ✅ אין קובץ כזה');
 
+  /**
+   * `${COLOR.x}` written inside a string that is not a template literal.
+   *
+   * The characters ship verbatim, CSS drops the declaration, and the element
+   * silently loses its colour — no error anywhere, and `vite build` is happy.
+   * It happens when colours are swapped inside a file that mixes JSX props
+   * (plain strings) with a printed stylesheet (a template literal), which is
+   * every screen carrying a print or Excel export. Nine got through in one
+   * pass, and the bundle was the only place they were visible.
+   *
+   * Matched narrowly: a quoted string whose ENTIRE content is one COLOR
+   * token. A regex cannot tell a quote inside a template literal from one
+   * outside it without parsing the language, and a check that cries wolf gets
+   * switched off — so this only catches the exact shape the mistake takes, and
+   * says nothing about anything else. `class="${trClass}"` inside a template
+   * is ordinary and must not trip it.
+   */
+  console.log('\nאין תחביר תבנית בתוך מחרוזת רגילה:');
+  const badInterp = [];
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    for (const m of src.matchAll(/(['"])\$\{\s*COLOR\.[\w.]+\s*\}\1/g)) {
+      badInterp.push(`${path.relative(CLIENT_SRC, f)}:${src.slice(0, m.index).split('\n').length}  ${m[0].slice(0, 60)}`);
+    }
+  }
+  if (badInterp.length) {
+    for (const b of badInterp.slice(0, 10)) console.log(`  ❌ ${b}`);
+    console.log('\n❌ הצבע לא יוצא — CSS מתעלם מההצהרה ואין שגיאה בשום מקום.');
+    process.exit(1);
+  }
+  console.log('  ✅ אין');
+
   const budget = JSON.parse(fs.readFileSync(BUDGET_FILE, 'utf8'));
 
   console.log(`נמצאו ${total} צבעים קשיחים ב-${perFile.length} קבצים.`);

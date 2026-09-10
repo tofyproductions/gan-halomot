@@ -9,12 +9,13 @@ import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import WarningIcon from '@mui/icons-material/Warning';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { COLOR } from '../../theme/tokens';
 
 const HEBREW_DAY_NAMES = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
 
 // Absence / leave day styling (a committed day with no punch).
 const LEAVE_COLOR = { absence: 'error', sick: 'warning', vacation: 'info', miluim: 'secondary', holiday: 'default' };
-const LEAVE_BG = { absence: '#fef2f2', sick: '#fffbeb', vacation: '#eff6ff', miluim: '#f5f3ff', holiday: '#f8fafc' };
+const LEAVE_BG = COLOR.hours.leave;
 function dayOfWeekHebrew(yyyyMmDd) {
   if (!yyyyMmDd) return '';
   const [y, m, d] = yyyyMmDd.split('-').map(Number);
@@ -192,34 +193,34 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { font-family: Arial, "Segoe UI", "Helvetica Neue", sans-serif; color: #111; margin: 0; padding: 0; background: #fff; }
-  .doc-head { border: 1px solid #64748b; padding: 8px 12px; margin-bottom: 8px;
+  .doc-head { border: 1px solid ${COLOR.text.secondary}; padding: 8px 12px; margin-bottom: 8px;
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; font-size: 10pt; }
   .doc-head .row { display: flex; gap: 6px; }
-  .doc-head .row .lbl { font-weight: 600; color: #374151; }
+  .doc-head .row .lbl { font-weight: 600; color: ${COLOR.text.primary}; }
   .doc-head .title-row { grid-column: 1/3; display: flex; justify-content: space-between; align-items: baseline;
-    border-bottom: 1px solid #e2e5e9; padding-bottom: 4px; margin-bottom: 2px; }
+    border-bottom: 1px solid ${COLOR.divider}; padding-bottom: 4px; margin-bottom: 2px; }
   .doc-head .title-row .title { font-size: 13pt; font-weight: 700; color: #1f2937; }
   table.daily { width: 100%; border-collapse: collapse; font-size: 9pt; }
-  table.daily thead th { background: #f6f7f9 !important; border: 1px solid #c4cad3; padding: 4px 6px; font-weight: 700; font-size: 8.5pt; text-align: center; color: #374151; }
-  table.daily tbody td { border: 1px solid #e2e5e9; padding: 3px 6px; text-align: center; }
-  table.daily tbody td.date { text-align: right; font-weight: 500; white-space: nowrap; color: #374151; }
+  table.daily thead th { background: ${COLOR.background.sunken} !important; border: 1px solid #c4cad3; padding: 4px 6px; font-weight: 700; font-size: 8.5pt; text-align: center; color: ${COLOR.text.primary}; }
+  table.daily tbody td { border: 1px solid ${COLOR.divider}; padding: 3px 6px; text-align: center; }
+  table.daily tbody td.date { text-align: right; font-weight: 500; white-space: nowrap; color: ${COLOR.text.primary}; }
   table.daily tbody td.branch { white-space: nowrap; }
   table.daily tbody td.num { font-variant-numeric: tabular-nums; }
   table.daily tbody td.note { font-size: 8pt; color: #555; text-align: right; }
-  table.daily tbody tr.incomplete td { background: #fffbeb !important; }
-  table.daily tbody tr.incomplete td.note { color: #92400e; font-weight: 700; }
+  table.daily tbody tr.incomplete td { background: ${COLOR.hours.row.incomplete.bg} !important; }
+  table.daily tbody tr.incomplete td.note { color: ${COLOR.hours.row.incomplete.on}; font-weight: 700; }
   /* Row tints by status */
-  table.daily tbody tr.r-ded td   { background: #fef2f2 !important; }  /* חוסר מקוזז */
-  table.daily tbody tr.r-extra td { background: #f0fdf4 !important; }  /* תוספת ששולמה */
-  table.daily tbody tr.r-exc td   { background: #eff6ff !important; }  /* חוסר מאושר / הושלם */
-  table.daily tbody tr.r-pend td  { background: #faf5ff !important; }  /* תוספת ממתינה */
-  table.daily td.ot { color: #92400e; font-weight: 600; }
-  table.daily td.ot2 { color: #b91c1c; font-weight: 600; }
-  table.daily td.miss-ded { color: #b91c1c; font-weight: 700; }     /* חוסר מקוזז */
-  table.daily td.miss-exc { color: #92400e; font-weight: 600; }     /* חוסר מאושר */
-  table.daily td.miss-mu  { color: #1d4ed8; font-weight: 600; }     /* חוסר שהושלם */
-  table.daily td.extra-ok   { color: #15803d; font-weight: 700; }   /* תוספת ששולמה */
-  table.daily td.extra-pend { color: #7e22ce; font-weight: 600; }   /* תוספת ממתינה */
+  table.daily tbody tr.r-ded td   { background: ${COLOR.hours.row.deducted.bg} !important; }  /* חוסר מקוזז */
+  table.daily tbody tr.r-extra td { background: ${COLOR.hours.row.paid.bg} !important; }  /* תוספת ששולמה */
+  table.daily tbody tr.r-exc td   { background: ${COLOR.hours.row.approved.bg} !important; }  /* חוסר מאושר / הושלם */
+  table.daily tbody tr.r-pend td  { background: ${COLOR.hours.row.pending.bg} !important; }  /* תוספת ממתינה */
+  table.daily td.ot { color: ${COLOR.hours.row.incomplete.on}; font-weight: 600; }
+  table.daily td.ot2 { color: ${COLOR.hours.row.deducted.on}; font-weight: 600; }
+  table.daily td.miss-ded { color: ${COLOR.hours.row.deducted.on}; font-weight: 700; }     /* חוסר מקוזז */
+  table.daily td.miss-exc { color: ${COLOR.hours.row.incomplete.on}; font-weight: 600; }     /* חוסר מאושר */
+  table.daily td.miss-mu  { color: ${COLOR.hours.row.approved.on}; font-weight: 600; }     /* חוסר שהושלם */
+  table.daily td.extra-ok   { color: ${COLOR.hours.row.paid.on}; font-weight: 700; }   /* תוספת ששולמה */
+  table.daily td.extra-pend { color: ${COLOR.hours.row.pending.on}; font-weight: 600; }   /* תוספת ממתינה */
   table.daily td.mute { color: #d1d5db; }
   .legend { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 8pt; }
   .legend .item { display: flex; align-items: center; gap: 4px; }
@@ -228,12 +229,12 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   table.daily tfoot td { border: 1px solid #94a3b8; padding: 4px 6px; background: #f1f3f5 !important; font-weight: 700; text-align: center; }
   table.daily tfoot td.label { text-align: right; }
   .summary-grid { display: grid; grid-template-columns: ${hasCommit ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr'}; gap: 8px; margin-top: 12px; }
-  .summary-grid .box { border: 1px solid #64748b; padding: 0; font-size: 9pt; }
-  .summary-grid .box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: #f6f7f9 !important; border-bottom: 1px solid #64748b; }
+  .summary-grid .box { border: 1px solid ${COLOR.text.secondary}; padding: 0; font-size: 9pt; }
+  .summary-grid .box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: ${COLOR.background.sunken} !important; border-bottom: 1px solid ${COLOR.text.secondary}; }
   .summary-grid .box .row { display: flex; justify-content: space-between; padding: 2px 10px; }
   .summary-grid .box .row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
-  .notes-box { border: 1px solid #64748b; margin-top: 8px; font-size: 9pt; }
-  .notes-box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: #f6f7f9 !important; border-bottom: 1px solid #64748b; }
+  .notes-box { border: 1px solid ${COLOR.text.secondary}; margin-top: 8px; font-size: 9pt; }
+  .notes-box .box-title { font-weight: 700; padding: 4px 10px; text-align: center; background: ${COLOR.background.sunken} !important; border-bottom: 1px solid ${COLOR.text.secondary}; }
   .notes-box .line { height: 26px; border-bottom: 1px solid #e5e7eb; }
   .notes-box .line:last-child { border-bottom: none; }
   .signatures { margin-top: 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 32px; font-size: 9pt; }
@@ -285,11 +286,11 @@ export default function HoursReportDialog({ open, employee, onClose }) {
   </tfoot>
 </table>
 ${hasCommit ? `<div class="legend">
-  <div class="item"><span class="sw" style="background:#fef2f2"></span> חוסר שמקזז שכר</div>
-  <div class="item"><span class="sw" style="background:#eff6ff"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
-  <div class="item"><span class="sw" style="background:#f0fdf4"></span> תוספת שאושרה ושולמה</div>
-  <div class="item"><span class="sw" style="background:#faf5ff"></span> תוספת הממתינה לאישור (לא שולמה)</div>
-  <div class="item"><span class="sw" style="background:#fffbeb"></span> החתמה חסרה</div>
+  <div class="item"><span class="sw" style="background:${COLOR.hours.row.deducted.bg}"></span> חוסר שמקזז שכר</div>
+  <div class="item"><span class="sw" style="background:${COLOR.hours.row.approved.bg}"></span> חוסר מאושר / הושלם בימים אחרים (ללא קיזוז)</div>
+  <div class="item"><span class="sw" style="background:${COLOR.hours.row.paid.bg}"></span> תוספת שאושרה ושולמה</div>
+  <div class="item"><span class="sw" style="background:${COLOR.hours.row.pending.bg}"></span> תוספת הממתינה לאישור (לא שולמה)</div>
+  <div class="item"><span class="sw" style="background:${COLOR.hours.row.incomplete.bg}"></span> החתמה חסרה</div>
 </div>` : ''}
 <div class="summary-grid">
   <div class="box">
@@ -305,9 +306,9 @@ ${hasCommit ? `<div class="legend">
     <div class="row"><span>שעות התחייבות</span><span class="v">${fmt(pa.committed_hours || 0)}</span></div>
     <div class="row"><span>שעות בפועל</span><span class="v">${fmt(pa.worked_hours || 0)}</span></div>
     <div class="row"><span>חוסר (ברוטו)</span><span class="v">${fmt(totals.shortfall)}</span></div>
-    <div class="row"><span>שעות שקוזזו בפועל</span><span class="v" style="color:#b91c1c">${fmt(pa.deduct_hours || 0)}</span></div>
-    <div class="row"><span>סכום קיזוז</span><span class="v" style="color:#b91c1c">${pa.deduction > 0 ? '−₪' + Math.round(pa.deduction).toLocaleString('he-IL') : '₪0'}</span></div>
-    ${pa.made_up ? '<div class="row"><span style="color:#1d4ed8;font-size:8pt">↺ החוסר הושלם בימים אחרים — ללא קיזוז</span><span></span></div>' : ''}
+    <div class="row"><span>שעות שקוזזו בפועל</span><span class="v" style="color:${COLOR.hours.row.deducted.on}">${fmt(pa.deduct_hours || 0)}</span></div>
+    <div class="row"><span>סכום קיזוז</span><span class="v" style="color:${COLOR.hours.row.deducted.on}">${pa.deduction > 0 ? '−₪' + Math.round(pa.deduction).toLocaleString('he-IL') : '₪0'}</span></div>
+    ${pa.made_up ? `<div class="row"><span style="color:${COLOR.hours.row.approved.on};font-size:8pt">↺ החוסר הושלם בימים אחרים — ללא קיזוז</span><span></span></div>` : ''}
   </div>` : `<div class="box">
     <div class="box-title">סטטיסטיקה</div>
     <div class="row"><span>ממוצע שעות יומי</span><span class="v">${fmt(avgHours)}</span></div>
@@ -332,8 +333,8 @@ ${hasCommit ? `<div class="legend">
   ${hasCommit ? `<div class="box">
     <div class="box-title">תוספת שכר (מעבר להתחייבות)</div>
     <div class="row"><span>שעות מעבר להתחייבות</span><span class="v">${fmt(pa.extra_hours || 0)}</span></div>
-    <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:#15803d">${fmt(pa.extra_approved_hours || 0)}</span></div>
-    <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:#15803d">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
+    <div class="row"><span>שעות שאושרו לתשלום</span><span class="v" style="color:${COLOR.hours.row.paid.on}">${fmt(pa.extra_approved_hours || 0)}</span></div>
+    <div class="row"><span>תוספת ששולמה</span><span class="v" style="color:${COLOR.hours.row.paid.on}">${pa.extra_pay > 0 ? '+₪' + Math.round(pa.extra_pay).toLocaleString('he-IL') : '₪0'}</span></div>
   </div>` : ''}
 </div>
 <div class="notes-box">
@@ -425,7 +426,7 @@ ${hasCommit ? `<div class="legend">
                     const hardAbsence = d.leave_type === 'absence' && !d.absence_approved;
                     const approvedAbs = d.leave_type === 'absence' && d.absence_approved;
                     const color = approvedAbs ? 'warning' : (LEAVE_COLOR[d.leave_type] || 'error');
-                    const bg = approvedAbs ? '#fffbeb' : (LEAVE_BG[d.leave_type] || '#fef2f2');
+                    const bg = approvedAbs ? COLOR.hours.row.incomplete.bg : (LEAVE_BG[d.leave_type] || COLOR.hours.row.deducted.bg);
                     return (
                       <TableRow key={d.date} hover sx={{ bgcolor: bg }}>
                         <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
@@ -440,15 +441,15 @@ ${hasCommit ? `<div class="legend">
                   }
                   const sh = Number(d.shortfall_hours) || 0;
                   const ex = Number(d.extra_hours) || 0;
-                  const rowBg = (sh > 0 && d.shortfall_status === 'deducted') ? '#fef2f2'
-                    : (ex > 0 && d.extra_approved) ? '#f0fdf4'
-                    : sh > 0 ? '#eff6ff'
-                    : ex > 0 ? '#faf5ff'
-                    : d.cross_branch_names?.length > 0 ? '#faf5ff' : undefined;
+                  const rowBg = (sh > 0 && d.shortfall_status === 'deducted') ? COLOR.hours.row.deducted.bg
+                    : (ex > 0 && d.extra_approved) ? COLOR.hours.row.paid.bg
+                    : sh > 0 ? COLOR.hours.row.approved.bg
+                    : ex > 0 ? COLOR.hours.row.pending.bg
+                    : d.cross_branch_names?.length > 0 ? COLOR.hours.row.pending.bg : undefined;
                   return (
                   <TableRow key={d.date} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
                     <TableCell sx={{ fontWeight: 600 }}>{formatDate(d.date)}</TableCell>
-                    <TableCell sx={{ fontWeight: 600, color: d.cross_branch_names?.length > 0 ? '#7e22ce' : 'text.primary' }}>
+                    <TableCell sx={{ fontWeight: 600, color: d.cross_branch_names?.length > 0 ? COLOR.hours.row.pending.on : 'text.primary' }}>
                       {d.branch_label || '—'}
                     </TableCell>
                     <TableCell align="center" dir="ltr">{d.first_in || '—'}</TableCell>
