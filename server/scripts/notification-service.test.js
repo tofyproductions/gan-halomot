@@ -57,8 +57,8 @@ function ok(cond, label, detail = '') {
 const eq = (a, b, label) => ok(JSON.stringify(a) === JSON.stringify(b), label, `קיבלנו ${JSON.stringify(a)}, ציפינו ${JSON.stringify(b)}`);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 async function waitFor(pred, tries = 30) {
-  for (let i = 0; i < tries; i++) { if (pred()) return true; await sleep(50); }
-  return pred();
+  for (let i = 0; i < tries; i++) { if (await pred()) return true; await sleep(50); }
+  return await pred();
 }
 
 async function main() {
