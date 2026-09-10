@@ -72,7 +72,8 @@
     "test:payment-check": "node scripts/payment-check.test.js",
     "test:reconcile-alerts": "node scripts/reconcile-alerts.test.js",
     "test:design-tokens": "node scripts/design-tokens.test.js",
-    "test:nav-model": "node scripts/nav-model.test.js"
+    "test:nav-model": "node scripts/nav-model.test.js",
+    "test:design-hex": "node scripts/design-hex-budget.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
