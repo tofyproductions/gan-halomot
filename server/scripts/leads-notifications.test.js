@@ -49,6 +49,27 @@ require.cache[emailPath] = {
   },
 };
 
+// notification.service.js's internal deliver() talks to fcm.service/web-push
+// directly — stub those too (same trick) so a NotificationEvent's background
+// send never hits anything real, even though this test never registers a
+// PushSubscription/WebPushSubscription for tania.
+const fcmPath = require.resolve('../src/services/fcm.service');
+require.cache[fcmPath] = {
+  id: fcmPath, filename: fcmPath, loaded: true, children: [], paths: [],
+  exports: {
+    sendPush: async ({ token }) => ({ ok: true, unregistered: false, token }),
+    isConfigured: () => true,
+  },
+};
+const webPushPath = require.resolve('web-push');
+require.cache[webPushPath] = {
+  id: webPushPath, filename: webPushPath, loaded: true, children: [], paths: [],
+  exports: {
+    setVapidDetails: () => {},
+    sendNotification: async () => ({ statusCode: 201 }),
+  },
+};
+
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
@@ -146,7 +167,7 @@ async function main() {
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(host)) throw new Error(`מסד הנתונים אינו מקומי (${host}) — עוצרים`);
   console.log(`\nשרת עלה על :${PORT}, מסד נתונים בזיכרון (${host})`);
 
-  const { User, Branch } = require('../src/models');
+  const { User, Branch, NotificationEvent } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const herzliya = await Branch.create({ name: 'הרצליה הרצוג' });
@@ -225,6 +246,32 @@ async function main() {
     ok(!!row, '5b הפנייה מופיעה ברשימה');
     eq(row?.source, 'facebook_ad_1', '5c ומחזירה את שדה המקור');
     eq(row?.message, 'הודעה לבדיקה', '5d ואת ההודעה החופשית');
+  }
+
+  head('בדיקה 6 — אירוע Push: פנייה חדשה פותחת אירוע new_lead למנהלת הסניף, ושינוי סטטוס מ-new סוגר אותו');
+  {
+    const list = await request({ token: tokenTania, path: '/api/leads' });
+    const row = (list.body?.leads || []).find(l => l.parent_phone === '0501234567');
+    ok(!!row, '6a מוצאים ברשימה את הפנייה מבדיקה 1');
+
+    let event = null;
+    for (let i = 0; i < 30 && !event; i++) {
+      event = await NotificationEvent.findOne({ type: 'new_lead', ref_collection: 'Lead', ref_id: row.id, recipient_id: tania._id });
+      if (!event) await sleep(50);
+    }
+    ok(!!event, '6b נוצר אירוע new_lead עבור טניה', JSON.stringify(event));
+    eq(event?.status, 'pending', '6c האירוע ממתין (pending) כל עוד הפנייה לא טופלה');
+
+    const upd = await request({ method: 'PUT', token: tokenTania, path: `/api/leads/${row.id}`, body: { status: 'contacted' } });
+    eq(upd.status, 200, '6d עדכון הסטטוס הצליח');
+
+    let resolved = null;
+    for (let i = 0; i < 30; i++) {
+      resolved = await NotificationEvent.findById(event._id);
+      if (resolved?.status === 'resolved') break;
+      await sleep(50);
+    }
+    eq(resolved?.status, 'resolved', '6e האירוע נסגר (resolved) לאחר שהסטטוס יצא מ-new', JSON.stringify(resolved));
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
