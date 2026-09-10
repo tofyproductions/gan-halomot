@@ -1,5 +1,5 @@
 {
-  "total": 1130,
+  "total": 1097,
   "recorded": "2026-09-10",
   "note": "Hand-written colour literals in client/src — 6-digit hex, 3-digit hex, and rgb()/rgba() calls, across .js, .jsx and .css. Excludes theme/tokens.js and the parent portal, both of which are allowed their own colours. Only ever goes down. Enforced by server/scripts/design-hex-budget.test.js.",
   "why_not_799": "The design spec quotes 799, counted with a narrower probe (6-digit hex only, in components/**/*.jsx). This number is the full one and is the figure to move."

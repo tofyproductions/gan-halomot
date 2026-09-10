@@ -32,7 +32,18 @@ const transition = `${MOTION.duration}ms ${MOTION.easing}`;
  * ground reads dirty.
  */
 const FLOAT_SHADOW =
-  '0 4px 6px -2px rgba(28,25,23,0.05), 0 12px 28px -8px rgba(28,25,23,0.16)';
+  '0 4px 6px -2px rgba(60,42,20,0.06), 0 14px 32px -10px rgba(60,42,20,0.20)';
+
+/**
+ * A card at rest.
+ *
+ * Almost nothing — a warm hairline and the faintest lift. The point is that a
+ * white card on warm paper should read as a sheet lying on a desk, which needs
+ * about this much and no more. The theme this replaces gave every card a
+ * two-layer neutral-black shadow, and eight of them on a screen read as eight
+ * floating objects rather than one page.
+ */
+const CARD_SHADOW = '0 1px 2px rgba(60,42,20,0.04), 0 6px 16px -10px rgba(60,42,20,0.14)';
 
 const theme = createTheme({
   direction: 'rtl',
@@ -52,25 +63,30 @@ const theme = createTheme({
     background: COLOR.background,
     text: COLOR.text,
     divider: COLOR.divider,
+    // A second, heavier rule. Under a table head and around a hovered control,
+    // where the hairline that separates rows is too faint to read as an edge.
+    dividerStrong: COLOR.dividerStrong,
     action: {
       hover: COLOR.row.hover,
       selected: COLOR.row.selected,
     },
+
+    /**
+     * INSIDE palette, deliberately.
+     *
+     * `sx={{ color: 'sidebar.fg' }}` resolves against theme.palette and
+     * nowhere else. Declared one level up — which is where these first went —
+     * the lookup silently misses, the raw string 'sidebar.fg' is handed to CSS
+     * as a colour, and the rail renders with black text and an invisible
+     * marker. It fails quietly, which is the worst way for a colour to fail.
+     */
+    sidebar: COLOR.sidebar,
+    row: COLOR.row,
   },
 
-  // Reachable from any component as theme.sidebar / theme.row / theme.soft.
-  // Not inside `palette` because none of these is a semantic MUI role: the
-  // rail is a place, not a meaning, and a soft tag is a pairing rather than a
-  // colour.
-  sidebar: COLOR.sidebar,
-  row: COLOR.row,
-  soft: {
-    primary: { bg: COLOR.primary.soft, fg: COLOR.primary.softOn },
-    success: { bg: COLOR.success.soft, fg: COLOR.success.softOn },
-    warning: { bg: COLOR.warning.soft, fg: COLOR.warning.softOn },
-    error: { bg: COLOR.error.soft, fg: COLOR.error.softOn },
-    info: { bg: COLOR.info.soft, fg: COLOR.info.softOn },
-  },
+  // Type, not colour, so these stay off the palette.
+  figure: { hero: t(TYPE.figureHero), base: t(TYPE.figure), small: t(TYPE.figureSmall) },
+  overline: { ...t(TYPE.overline), textTransform: 'none' },
 
   typography: {
     fontFamily: TYPE.fontFamily,
@@ -175,7 +191,7 @@ const theme = createTheme({
         root: {
           borderRadius: RADIUS.surface,
           border: `1px solid ${COLOR.divider}`,
-          boxShadow: 'none',
+          boxShadow: CARD_SHADOW,
         },
       },
     },
@@ -203,6 +219,7 @@ const theme = createTheme({
           borderRadius: RADIUS.surface,
           border: `1px solid ${COLOR.divider}`,
           backgroundColor: COLOR.background.paper,
+          boxShadow: CARD_SHADOW,
         },
       },
     },
@@ -211,11 +228,12 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           '& .MuiTableCell-head': {
-            backgroundColor: COLOR.background.default,
+            backgroundColor: COLOR.background.sunken,
             color: COLOR.text.secondary,
             fontWeight: TYPE.columnHead.weight,
             fontSize: TYPE.columnHead.size,
-            borderBottom: `1px solid ${COLOR.divider}`,
+            letterSpacing: '0.02em',
+            borderBottom: `1px solid ${COLOR.dividerStrong}`,
             whiteSpace: 'nowrap',
             padding: '9px 12px',
             // The tables here run to hundreds of rows and nobody remembers

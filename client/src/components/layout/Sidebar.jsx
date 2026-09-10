@@ -11,7 +11,7 @@ import { useBranch } from '../../hooks/useBranch';
 import { usePendingProposals } from '../../hooks/usePendingProposals';
 import { useNewLeadsCount } from '../../hooks/useNewLeadsCount';
 
-export const SIDEBAR_WIDTH = 224;
+export const SIDEBAR_WIDTH = 244;
 
 /**
  * Badges hang off tab ids rather than off screens, so a screen never has to
@@ -57,20 +57,42 @@ export default function Sidebar() {
         height: '100dvh',
         position: 'sticky',
         top: 0,
-        bgcolor: 'sidebar.bg',
         color: 'sidebar.fg',
         display: 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
-        px: 1.25,
-        py: 1.75,
+        px: 1.5,
+        py: 2,
+        // A very slight fall from top to bottom. Flat ink over 900px of height
+        // reads as a painted block; this reads as a surface.
+        background: (t) => `linear-gradient(180deg, ${t.palette.sidebar.bg} 0%, ${t.palette.sidebar.bgDeep} 100%)`,
+        // Hide the scrollbar's own chrome — a light system scrollbar down the
+        // side of an ink rail is the loudest thing on the screen.
+        scrollbarWidth: 'thin',
+        scrollbarColor: (t) => `${t.palette.sidebar.bgActive} transparent`,
+        '&::-webkit-scrollbar': { width: 6 },
+        '&::-webkit-scrollbar-thumb': { backgroundColor: 'sidebar.bgActive', borderRadius: 999 },
       }}
     >
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 0.75, mb: 1.5 }}>
-        <Box sx={{ width: 26, height: 26, borderRadius: 1.25, bgcolor: 'sidebar.marker', flexShrink: 0 }} />
-        <Typography sx={{ color: 'sidebar.fgActive', fontWeight: 700, fontSize: '0.9375rem' }}>
-          גן החלומות
-        </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, px: 0.5, mb: 2 }}>
+        <Box
+          sx={{
+            width: 30, height: 30, borderRadius: 1.5, flexShrink: 0,
+            bgcolor: 'sidebar.marker',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'sidebar.bg', fontWeight: 800, fontSize: '0.875rem',
+          }}
+        >
+          ג
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ color: 'sidebar.fgActive', fontWeight: 700, fontSize: '0.9375rem', lineHeight: 1.2 }}>
+            גן החלומות
+          </Typography>
+          <Typography sx={{ color: 'sidebar.groupLabel', fontSize: '0.6875rem', lineHeight: 1.3 }}>
+            ניהול חכם
+          </Typography>
+        </Box>
       </Box>
 
       {canSeeAllBranches && branches.length > 1 && (
@@ -80,11 +102,14 @@ export default function Sidebar() {
           size="small"
           aria-label="בחירת סניף"
           sx={{
-            mb: 1.5,
+            mb: 2,
             bgcolor: 'sidebar.bgActive',
             color: 'sidebar.fgActive',
             fontSize: '0.8125rem',
+            fontWeight: 600,
+            borderRadius: 1.5,
             '& fieldset': { border: 'none' },
+            '& .MuiSelect-select': { py: 1 },
             '& .MuiSvgIcon-root': { color: 'sidebar.fg' },
           }}
         >
@@ -96,20 +121,25 @@ export default function Sidebar() {
 
       <Box sx={{ flex: 1 }}>
         {model.map((group) => (
-          <Box key={group.label} sx={{ mb: 1.25 }}>
-            <Typography
-              component="div"
-              sx={{
-                px: 1,
-                pt: 0.75,
-                pb: 0.25,
-                fontSize: '0.625rem',
-                letterSpacing: '0.06em',
-                color: 'sidebar.groupLabel',
-              }}
-            >
-              {group.label}
-            </Typography>
+          <Box key={group.label} sx={{ mb: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1, pb: 0.75 }}>
+              <Typography
+                component="div"
+                sx={{
+                  fontSize: '0.6875rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.08em',
+                  color: 'sidebar.groupLabel',
+                  flexShrink: 0,
+                }}
+              >
+                {group.label}
+              </Typography>
+              {/* A rule that runs out to the edge. It is what turns four lists
+                  into four sections without spending a heading's worth of height
+                  on each. */}
+              <Box sx={{ flex: 1, height: '1px', bgcolor: 'sidebar.rule' }} />
+            </Box>
 
             {group.items.map((item) => {
               const Icon = iconFor(item.id);
@@ -123,24 +153,37 @@ export default function Sidebar() {
                   onClick={() => navigate(item.path)}
                   aria-current={active ? 'page' : undefined}
                   sx={{
+                    position: 'relative',
                     width: '100%',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 1,
+                    gap: 1.25,
                     px: 1,
-                    py: 0.75,
+                    py: 0.875,
                     border: 0,
                     cursor: 'pointer',
                     textAlign: 'inherit',
-                    borderRadius: 1,
-                    fontSize: '0.8125rem',
+                    borderRadius: 1.5,
+                    fontSize: '0.84375rem',
                     fontFamily: 'inherit',
                     color: active ? 'sidebar.fgActive' : 'sidebar.fg',
-                    fontWeight: active ? 600 : 400,
-                    bgcolor: active ? 'sidebar.bgActive' : 'transparent',
-                    borderRight: '2px solid',
-                    borderRightColor: active ? 'sidebar.marker' : 'transparent',
-                    '&:hover': { bgcolor: 'sidebar.bgActive' },
+                    fontWeight: active ? 700 : 500,
+                    bgcolor: active ? 'sidebar.markerSoft' : 'transparent',
+                    transition: 'background-color 140ms, color 140ms',
+                    // The marker is an inset bar rather than a full-height
+                    // border: a 2px line running the whole row reads as a table
+                    // rule, a short bar reads as a bookmark.
+                    '&::before': {
+                      content: '""',
+                      position: 'absolute',
+                      insetInlineStart: 0,
+                      top: 8,
+                      bottom: 8,
+                      width: 3,
+                      borderRadius: 999,
+                      bgcolor: active ? 'sidebar.marker' : 'transparent',
+                    },
+                    '&:hover': { bgcolor: active ? 'sidebar.markerSoft' : 'sidebar.bgActive', color: 'sidebar.fgActive' },
                     '&:focus-visible': {
                       outline: '2px solid',
                       outlineColor: 'sidebar.marker',
@@ -148,7 +191,7 @@ export default function Sidebar() {
                     },
                   }}
                 >
-                  <Icon sx={{ fontSize: 17, opacity: active ? 1 : 0.75, flexShrink: 0 }} />
+                  <Icon sx={{ fontSize: 18, flexShrink: 0, color: active ? 'sidebar.marker' : 'inherit', opacity: active ? 1 : 0.6 }} />
                   <Box
                     component="span"
                     sx={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
@@ -163,10 +206,12 @@ export default function Sidebar() {
                         bgcolor: 'sidebar.marker',
                         color: 'sidebar.bg',
                         borderRadius: 999,
-                        px: 0.75,
-                        fontSize: '0.625rem',
-                        fontWeight: 700,
-                        lineHeight: 1.6,
+                        minWidth: 19,
+                        textAlign: 'center',
+                        px: 0.625,
+                        fontSize: '0.6875rem',
+                        fontWeight: 800,
+                        lineHeight: 1.55,
                       }}
                     >
                       {count}
@@ -179,14 +224,17 @@ export default function Sidebar() {
         ))}
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.75, pt: 1, mt: 'auto' }}>
+      <Box sx={{ height: '1px', bgcolor: 'sidebar.rule', mt: 'auto', mb: 1.25, mx: 0.5 }} />
+
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 0.5, pb: 0.5 }}>
         <Avatar
           sx={{
-            width: 26,
-            height: 26,
-            fontSize: '0.75rem',
+            width: 30,
+            height: 30,
+            fontSize: '0.8125rem',
+            fontWeight: 700,
             bgcolor: 'sidebar.bgActive',
-            color: 'sidebar.fgActive',
+            color: 'sidebar.marker',
           }}
         >
           {(user?.full_name || '?').trim().charAt(0)}
@@ -195,7 +243,9 @@ export default function Sidebar() {
           component="span"
           sx={{
             flex: 1,
-            fontSize: '0.75rem',
+            fontSize: '0.78125rem',
+            fontWeight: 600,
+            color: 'sidebar.fgActive',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',

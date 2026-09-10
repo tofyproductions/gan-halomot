@@ -21,6 +21,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import ReplayIcon from '@mui/icons-material/Replay';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import StatBoard from '../ui/StatBoard';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
 
 /**
@@ -235,24 +236,6 @@ function paymentTermLines(terms) {
   lines.push(`${terms.continuing ? 'ילד/ה ממשיך/ה' : 'רישום חדש'}`
     + (terms.second_signer ? ` · חותם שני: ${terms.second_signer}` : ''));
   return lines;
-}
-
-/** A count that is only worth showing when it is not zero. */
-function StatCard({ label, value, color, onClick, active, hint }) {
-  return (
-    <Card
-      onClick={onClick}
-      sx={{
-        p: 1.5, minWidth: 132, cursor: onClick ? 'pointer' : 'default',
-        border: 2, borderColor: active ? `${color}.main` : 'transparent',
-        bgcolor: active ? `${color}.50` : 'background.paper',
-      }}
-    >
-      <Typography variant="h5" color={`${color}.main`} fontWeight={700}>{value}</Typography>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      {hint && <Typography variant="caption" display="block" color="text.disabled">{hint}</Typography>}
-    </Card>
-  );
 }
 
 /** שני הייצואים של קליקטאק, בשם שהמשרד קורא להם. */
@@ -685,86 +668,135 @@ export default function TmtReconcile({
 
       {data && !loading && (
         <>
-          <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
-            <StatCard label="מאושרים לשנה הבאה" value={summary.approved || 0} color="success"
-              active={verdictFilter === 'approved'} hint={`${summary.clean || 0} ללא חריגות`}
-              onClick={() => setVerdictFilter(verdictFilter === 'approved' ? '' : 'approved')} />
-            <StatCard label='אושר בתמ"ת — לא נרשם' value={summary.missing_registration || 0} color="error"
-              active={verdictFilter === 'missing_registration'} hint="להתקשר להורים"
-              onClick={() => setVerdictFilter(verdictFilter === 'missing_registration' ? '' : 'missing_registration')} />
-            <StatCard label='נרשם — אין אישור תמ"ת' value={summary.missing_approval || 0} color="error"
-              active={verdictFilter === 'missing_approval'} hint="לא ניתן לקלוט"
-              onClick={() => setVerdictFilter(verdictFilter === 'missing_approval' ? '' : 'missing_approval')} />
-            <StatCard label="ביטלו רישום" value={summary.cancelled || 0} color="warning"
-              active={verdictFilter === 'cancelled'} hint={`${summary.places_freed || 0} מקומות התפנו`}
-              onClick={() => setVerdictFilter(verdictFilter === 'cancelled' ? '' : 'cancelled')} />
-            <StatCard label='ללא אישור בתמ"ת' value={summary.not_approved || 0} color="error"
-              active={verdictFilter === 'not_approved'}
-              onClick={() => setVerdictFilter(verdictFilter === 'not_approved' ? '' : 'not_approved')} />
-            <StatCard label='הוסרו מרשימת התמ"ת' value={summary.withdrawn || 0} color="error"
-              active={verdictFilter === 'withdrawn'} hint="האישור בוטל"
-              onClick={() => setVerdictFilter(verdictFilter === 'withdrawn' ? '' : 'withdrawn')} />
-            <StatCard label='להזין תאריך כניסה בתמ"ת' value={summary.needs_absorption_date || 0} color="warning"
-              active={issueFilter === 'needs_absorption_date'} hint={`${summary.absorbed || 0} כבר עם תאריך`}
-              onClick={() => setIssueFilter(issueFilter === 'needs_absorption_date' ? '' : 'needs_absorption_date')} />
-            {/* Registered in ClickTac's CONTRACTS export and nowhere else.
-                Not "call these families" — there is nobody to call yet, since
-                the contracts export has no parent in it. The fix is the other
-                upload, and the hint says so. */}
-            <StatCard label="חסר פרטי הורים" value={summary.missing_parents || 0} color="error"
-              active={missingParentsOnly} hint="להעלות גם את ייצוא הנרשמים"
-              onClick={() => setMissingParentsOnly(v => !v)} />
-            {/* מזומן אינו מתקבל, ומשפחה בלי אמצעי תשלום צריכה טלפון — שתי
-                עובדות שהיו בקובץ מהיום הראשון ואף אחד לא ראה אותן. Red only
-                when there is something to do: a branch where every family is
-                on a credit card should not have a red card sitting there.
-
-                The cheques ride in the hint rather than in the number: they
-                are accepted, and the number on this card is the list of calls
-                that have to be made. */}
-            <StatCard label="אמצעי תשלום" value={summary.payment_alerts || 0}
-              color={summary.payment_alerts ? 'error' : 'info'}
-              active={paymentAlertOnly}
-              hint={`לטיפול ${summary.payment_alerts || 0} · צ'קים ${summary.payment_warnings || 0}`}
-              onClick={() => setPaymentAlertOnly(v => !v)} />
-            <StatCard label="שובצו ידנית" value={summary.placed_by_hand || 0} color="info"
-              hint="החלטה שלך על הכיתה" />
-            <StatCard label="נקלטו כבר למערכת" value={summary.already_imported || 0} color="info" />
-            {/* מאזן שלילי בקליקטאק — a fact about the family's account, from
-                the contracts export. Red when there is anyone to chase. */}
-            <StatCard label="יתרות חוב בקליקטאק" value={summary.balance_due || 0}
-              color={summary.balance_due ? 'error' : 'info'} active={balanceDueOnly}
-              hint="לפי עמודת מאזן בקובץ החוזים"
-              onClick={() => setBalanceDueOnly(v => !v)} />
-            {summary.prev_year_loaded && (
-              <StatCard label="חוב משנה שעברה" value={summary.prev_year_debtors || 0}
-                color={summary.prev_year_debtors ? 'error' : 'info'}
-                active={issueFilter === 'prev_year_debt'}
-                hint={`${summary.prev_year_returning || 0} היו בקובץ ${data.previous_year_label || ''}`}
-                onClick={() => setIssueFilter(issueFilter === 'prev_year_debt' ? '' : 'prev_year_debt')} />
-            )}
-            {!!summary.private && (
-              <StatCard label='בגן ללא תמ"ת' value={summary.private} color="secondary"
-                active={verdictFilter === 'private'} hint="החלטה שלך — לא במסגרת המשרד"
-                onClick={() => setVerdictFilter(verdictFilter === 'private' ? '' : 'private')} />
-            )}
-            {!!summary.reopened && (
-              <StatCard label="נפתחו מחדש" value={summary.reopened} color="warning"
-                hint="חריגות שנסגרו וקובץ חדש שינה" />
-            )}
-            {/* שכבת גיל שונה בין שני הקבצים — התעריף שגוי באחד הצדדים. The
-                one card that is red whenever it is not zero, and the one the
-                back office is mailed about until it is. */}
-            <StatCard label="שכבת גיל שונה — דחוף" value={summary.urgent || 0}
-              color={summary.urgent ? 'error' : 'info'}
-              active={issueFilter === 'age_group_mismatch'} hint='לתקן בתמ"ת או בקליקטאק'
-              onClick={() => setIssueFilter(issueFilter === 'age_group_mismatch' ? '' : 'age_group_mismatch')} />
-            {/* Gone from every list. A different table, not a filter — see
-                showArchived. */}
-            <StatCard label="ארכיון" value={summary.archived || 0} color="secondary"
-              active={showArchived} hint="הוסרו מכל הרשימות · 30 יום"
-              onClick={() => setShowArchived(v => !v)} />
-          </Stack>
+          {/* The numbers, arranged by what somebody is meant to do with them.
+              These were fourteen identical cards in one flat row: the count of
+              children safely approved, the count nobody has phoned yet and the
+              count already filed, all the same size, weight and grey. Every one
+              of them was already a filter over the table below — they simply
+              did not look like controls, and nothing on the row claimed to
+              matter more than anything else. See components/ui/StatBoard. */}
+          <StatBoard
+            hero={{
+              id: 'approved',
+              label: 'מאושרים לשנה הבאה',
+              value: summary.approved || 0,
+              hint: `${summary.clean || 0} ללא חריגות`,
+              tone: 'success',
+              active: verdictFilter === 'approved',
+              onClick: () => setVerdictFilter(verdictFilter === 'approved' ? '' : 'approved'),
+            }}
+            attention={[
+              {
+                id: 'missing_registration',
+                label: 'אושר בתמ"ת — לא נרשם',
+                value: summary.missing_registration || 0,
+                hint: 'להתקשר להורים',
+                active: verdictFilter === 'missing_registration',
+                onClick: () => setVerdictFilter(verdictFilter === 'missing_registration' ? '' : 'missing_registration'),
+              },
+              {
+                id: 'missing_approval',
+                label: 'נרשם — אין אישור תמ"ת',
+                value: summary.missing_approval || 0,
+                hint: 'לא ניתן לקלוט',
+                active: verdictFilter === 'missing_approval',
+                onClick: () => setVerdictFilter(verdictFilter === 'missing_approval' ? '' : 'missing_approval'),
+              },
+              {
+                id: 'not_approved',
+                label: 'ללא אישור בתמ"ת',
+                value: summary.not_approved || 0,
+                active: verdictFilter === 'not_approved',
+                onClick: () => setVerdictFilter(verdictFilter === 'not_approved' ? '' : 'not_approved'),
+              },
+              {
+                id: 'withdrawn',
+                label: 'הוסרו מרשימת התמ"ת',
+                value: summary.withdrawn || 0,
+                hint: 'האישור בוטל',
+                active: verdictFilter === 'withdrawn',
+                onClick: () => setVerdictFilter(verdictFilter === 'withdrawn' ? '' : 'withdrawn'),
+              },
+              {
+                // Registered in ClickTac's CONTRACTS export and nowhere else.
+                // Not "call these families" — there is nobody to call yet, since
+                // the contracts export carries no parent. The fix is the other
+                // upload, and the hint says so.
+                id: 'missing_parents',
+                label: 'חסר פרטי הורים',
+                value: summary.missing_parents || 0,
+                hint: 'להעלות גם את ייצוא הנרשמים',
+                active: missingParentsOnly,
+                onClick: () => setMissingParentsOnly(v => !v),
+              },
+              {
+                // מזומן אינו מתקבל, ומשפחה בלי אמצעי תשלום צריכה טלפון — two
+                // facts that were in the file from day one and nobody saw. The
+                // cheques ride in the hint rather than in the number: they are
+                // accepted, and this number is the list of calls to make.
+                id: 'payment_alerts',
+                label: 'אמצעי תשלום',
+                value: summary.payment_alerts || 0,
+                hint: `צ'קים ${summary.payment_warnings || 0}`,
+                active: paymentAlertOnly,
+                onClick: () => setPaymentAlertOnly(v => !v),
+              },
+              {
+                // מאזן שלילי בקליקטאק — a fact about the family's account, from
+                // the contracts export.
+                id: 'balance_due',
+                label: 'יתרות חוב בקליקטאק',
+                value: summary.balance_due || 0,
+                hint: 'לפי עמודת מאזן בקובץ החוזים',
+                active: balanceDueOnly,
+                onClick: () => setBalanceDueOnly(v => !v),
+              },
+              summary.prev_year_loaded && {
+                id: 'prev_year_debt',
+                label: 'חוב משנה שעברה',
+                value: summary.prev_year_debtors || 0,
+                hint: `${summary.prev_year_returning || 0} היו בקובץ ${data.previous_year_label || ''}`,
+                active: issueFilter === 'prev_year_debt',
+                onClick: () => setIssueFilter(issueFilter === 'prev_year_debt' ? '' : 'prev_year_debt'),
+              },
+              {
+                id: 'needs_absorption_date',
+                label: 'להזין תאריך כניסה בתמ"ת',
+                value: summary.needs_absorption_date || 0,
+                hint: `${summary.absorbed || 0} כבר עם תאריך`,
+                tone: 'warning',
+                active: issueFilter === 'needs_absorption_date',
+                onClick: () => setIssueFilter(issueFilter === 'needs_absorption_date' ? '' : 'needs_absorption_date'),
+              },
+              {
+                id: 'cancelled',
+                label: 'ביטלו רישום',
+                value: summary.cancelled || 0,
+                hint: `${summary.places_freed || 0} מקומות התפנו`,
+                tone: 'warning',
+                active: verdictFilter === 'cancelled',
+                onClick: () => setVerdictFilter(verdictFilter === 'cancelled' ? '' : 'cancelled'),
+              },
+              !!summary.reopened && {
+                id: 'reopened',
+                label: 'נפתחו מחדש',
+                value: summary.reopened,
+                hint: 'חריגות שנסגרו וקובץ חדש שינה',
+                tone: 'warning',
+              },
+            ].filter(Boolean)}
+            facts={[
+              { id: 'placed_by_hand', label: 'שובצו ידנית', value: summary.placed_by_hand || 0 },
+              { id: 'already_imported', label: 'נקלטו כבר למערכת', value: summary.already_imported || 0 },
+              !!summary.private && {
+                id: 'private',
+                label: 'בגן ללא תמ"ת',
+                value: summary.private,
+                active: verdictFilter === 'private',
+                onClick: () => setVerdictFilter(verdictFilter === 'private' ? '' : 'private'),
+              },
+            ].filter(Boolean)}
+          />
 
           {/* The key to the חריגות column — only the kinds that actually
               appear, in the server's own colours, so it can be read down

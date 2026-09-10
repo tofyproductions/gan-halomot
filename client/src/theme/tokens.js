@@ -24,31 +24,42 @@
  * used for its own greys, pointed the other way.
  */
 const SIDEBAR = {
-  bg: '#1C1917',
-  fg: '#D6D3D1',
+  // Warm ink, not black and not blue-grey. Deep enough that the marigold
+  // marker reads as light rather than as another dark thing.
+  bg: '#1F1B16',
+  bgDeep: '#181410',
+  fg: '#C9C0B4',
   fgActive: '#FFFFFF',
-  bgActive: '#292524',
-  // Brand amber, on dark, carrying no text of its own — the one place the
-  // original #f59e0b survives at full strength.
-  marker: '#F59E0B',
-  groupLabel: '#A8A29E',
+  bgActive: '#332C23',
+  // Marigold. Brighter than the button clay on purpose: on ink it is the one
+  // thing that should catch the eye, and it carries no text of its own.
+  marker: '#E9A13B',
+  markerSoft: 'rgba(233,161,59,0.13)',
+  groupLabel: '#8C8375',
+  rule: '#2E2721',
 };
 
 export const COLOR = {
   sidebar: SIDEBAR,
 
   background: {
-    default: '#F4F4F2',
+    // Warm paper. The cold grey it replaces is what made every screen read as
+    // a default admin template — a neutral grey beside warm ink looks like an
+    // absence of a decision.
+    default: '#FAF7F2',
     paper: '#FFFFFF',
+    // The band a page header or a table toolbar sits on.
+    sunken: '#F3EEE6',
   },
 
   text: {
-    primary: '#1B1917',
-    secondary: '#6B6560',
-    disabled: '#A8A29E',
+    primary: '#1C1815',
+    secondary: '#6B6157',
+    disabled: '#A79C8E',
   },
 
-  divider: '#E7E5E4',
+  divider: '#EBE4D9',
+  dividerStrong: '#DDD3C4',
 
   /**
    * Clay, not amber.
@@ -137,6 +148,26 @@ export const RADIUS = {
  */
 export const TYPE = {
   fontFamily: '"Assistant", system-ui, -apple-system, sans-serif',
+
+  /**
+   * The figures.
+   *
+   * Not in the MUI variant scale, because these are not headings — they are
+   * the thing the page is about. A count of children waiting for a signature
+   * set at 20px in the same weight as its own label is why a screen of
+   * fourteen numbers reads as a wall of grey: nothing on it claims to matter
+   * more than anything else.
+   *
+   * Tight tracking, because tabular figures at this size sit too loose by
+   * default and read as a licence plate.
+   */
+  figureHero: { size: '2.5rem', weight: 600, lineHeight: 1.05, letterSpacing: '-0.03em' },
+  figure: { size: '1.75rem', weight: 600, lineHeight: 1.1, letterSpacing: '-0.02em' },
+  figureSmall: { size: '1.25rem', weight: 600, lineHeight: 1.15, letterSpacing: '-0.01em' },
+
+  /** The small line above a figure or a section. Tracked, never shouted. */
+  overline: { size: '0.6875rem', weight: 600, lineHeight: 1.35, letterSpacing: '0.04em' },
+
   h1: { size: '1.75rem', weight: 700, lineHeight: 1.25, letterSpacing: '-0.01em' },
   h2: { size: '1.5rem', weight: 700, lineHeight: 1.28, letterSpacing: '-0.01em' },
   h3: { size: '1.3125rem', weight: 700, lineHeight: 1.3 },
