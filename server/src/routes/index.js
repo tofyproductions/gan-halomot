@@ -26,6 +26,11 @@ router.use('/auth', require('./auth.routes'));
 router.use('/public', require('./public.routes'));
 router.use('/utils', require('./utils.routes'));
 
+// Which version of the mobile apps is live in the stores, and where to get it.
+// Anonymous on purpose: the app asks this BEFORE anybody signs in, and a
+// version number is not a secret. Written only by a system_admin, under /admin.
+router.get('/app-version', require('../controllers/appVersion.controller').publicVersions);
+
 // Pi agent routes — authenticated with per-branch X-Agent-Secret header,
 // NOT with the normal JWT flow used by the web client.
 router.use('/agent', require('./agent.routes'));

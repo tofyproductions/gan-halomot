@@ -15,6 +15,7 @@ import BookmarkAddIcon from '@mui/icons-material/BookmarkAdd';
 import { TAB_GROUPS, ALL_TABS, isDefaultAllowed, roleHasTab, customRoleHasTab } from '../../config/tabs';
 import api from '../../api/client';
 import { toast } from 'react-toastify';
+import StoreVersionPanel from './StoreVersionPanel';
 
 const ROLE_LABELS = {
   system_admin: 'מנהל מערכת',
@@ -481,6 +482,11 @@ export default function PermissionsManager() {
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 } }}>
+      {/* Not permissions, but the only other thing on this screen's side of
+          the line: a setting only a system_admin may touch, with no screen of
+          its own to live on. */}
+      <StoreVersionPanel />
+
       {/* Shown once. All three details, because logging in needs the full name
           AND the id number AND the password — handing over the password alone
           ends the call with the person still locked out. */}
