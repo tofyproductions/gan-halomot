@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Box } from '@mui/material';
-import AppShell from './components/layout/AppShell';
+const AppShell = lazy(() => import('./components/layout/AppShell'));
 import ScreenSkeleton from './components/ui/ScreenSkeleton';
 import ScreenBoundary from './components/ui/ScreenBoundary';
 import NotFound from './components/layout/NotFound';
@@ -13,6 +13,22 @@ import { hasTabAccess } from './config/tabs';
 import { BranchProvider } from './hooks/useBranch';
 import { WorkMonthProvider } from './hooks/useWorkMonth';
 import { AcademicYearProvider } from './hooks/useAcademicYear';
+import { useUiVersion } from './hooks/useUiVersion';
+import UiVersionOffer from './components/layout/UiVersionOffer';
+/**
+ * Neither shell is eager.
+ *
+ * Two complete interfaces ship now, and every person uses exactly one of them
+ * — so loading both before first paint charges everybody for the one they will
+ * never see. AppShell was static because it used to be the only shell; now the
+ * choice is data (`User.ui_version`), which is not known until the user is,
+ * which is precisely when a lazy import can resolve.
+ *
+ * The Suspense fallback is `null` rather than a spinner: this resolves in the
+ * same tick as the auth check that gates it, and a flash of skeleton behind a
+ * screen that was about to render anyway is worse than a beat of nothing.
+ */
+const ClassicLayout = lazy(() => import('./components/layout/classic/ClassicLayout'));
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
 import { UndoProvider } from './components/shared/UndoProvider';
 
@@ -92,6 +108,34 @@ const SupplyListManager = lazy(() => import('./components/holidays/SupplyListMan
 const Updates = lazy(() => import('./components/employee-portal/Updates'));
 
 
+/**
+ * The shell this person sees.
+ *
+ * Both are shipped: ClassicLayout is the top-bar interface the gans have been
+ * running on, AppShell is the redesigned rail. `User.ui_version` decides, and
+ * it changes only when the person changes it. A deploy moves nobody.
+ *
+ * They are chosen HERE rather than inside AppShell because they are different
+ * page structures, not two skins — one has a header and a 1200px column, the
+ * other a rail and a full-width workspace — and each carries its own gates
+ * (fresh-entry, set-password, class popups, punch-entry tasks). Swapping at
+ * the element keeps each one whole.
+ *
+ * The offer dialog rides along with both, so a person still on the classic
+ * interface is asked the question in the interface she is actually looking at.
+ */
+function Shell() {
+  const { isNew } = useUiVersion();
+  return (
+    <>
+      <UiVersionOffer />
+      <Suspense fallback={null}>
+        {isNew ? <AppShell /> : <ClassicLayout />}
+      </Suspense>
+    </>
+  );
+}
+
 function AppRoutes() {
   return (
     // Two boundaries, on purpose. This one catches the public and standalone
@@ -137,7 +181,7 @@ function AppRoutes() {
             <AcademicYearProvider>
               <WorkMonthProvider>
                 <ProtectedRoute>
-                  <AppShell />
+                  <Shell />
                 </ProtectedRoute>
               </WorkMonthProvider>
             </AcademicYearProvider>

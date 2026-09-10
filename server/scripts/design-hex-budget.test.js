@@ -28,6 +28,26 @@ const EXEMPT = [
   path.join('theme', 'tokens.js'),
   path.join('theme', 'parentTheme.js'),
   path.join('components', 'parent-portal') + path.sep,
+  /**
+   * The classic interface, kept verbatim.
+   *
+   * These are a preserved copy of what the gans were already running, shipped
+   * beside the redesign so that nobody is moved by a deploy and anybody can go
+   * back (User.ui_version). They are FROZEN on purpose: rewriting their
+   * colours to satisfy this budget would change the one thing the classic
+   * option exists to keep identical, and "the old design, but with different
+   * colours" is not the old design.
+   *
+   * That includes #f59e0b — the orange that measures 2.2:1 behind white text
+   * and that the banned-colour guard below rejects by name. It is banned from
+   * the NEW design, which is what that guard is for; it is what the classic
+   * one has always looked like.
+   *
+   * Nothing new belongs in here. If a screen is being worked on, it is being
+   * worked on in the new design.
+   */
+  path.join('components', 'layout', 'classic') + path.sep,
+  path.join('theme', 'classicTheme.js'),
 ];
 
 const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\s*\(/g;

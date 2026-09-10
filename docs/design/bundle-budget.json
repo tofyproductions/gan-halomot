@@ -1,5 +1,5 @@
 {
-  "firstLoadGzipKB": 259,
+  "firstLoadGzipKB": 249,
   "recorded": "2026-09-10",
   "was": "1168 KB gzip / 3.99 MB raw, in one chunk, before routes and vendors were split",
   "note": "What index.html pulls in before first paint: the entry chunk plus every modulepreload. Lazily-imported screens are deliberately not counted — that is the point. Enforced by server/scripts/bundle-budget.test.js, which must run after a build.",
@@ -24,6 +24,12 @@
       "from": 258,
       "to": 259,
       "why": "AcademicYearProvider + the year picker in the rail. The rail is on the critical path by definition; six per-screen pickers came off the lazy chunks in exchange."
+    },
+    {
+      "date": "2026-09-10",
+      "from": 259,
+      "to": 249,
+      "why": "Two complete interfaces now ship (classic + new), and BOTH shells became lazy — a person uses exactly one, so neither belongs in the first download. Net 259 -> 249 despite the addition."
     }
   ]
 }

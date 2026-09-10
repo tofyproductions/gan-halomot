@@ -20,6 +20,36 @@ const userSchema = new mongoose.Schema({
    * a screen that can be closed is not a requirement.
    */
   must_change_password: { type: Boolean, default: false },
+  /**
+   * Which version of the interface this person sees.
+   *
+   *   null       never asked. The next time they open the app they are asked
+   *              once, and whatever they answer is written here.
+   *   'classic'  the interface they have been using. Also what "no thanks"
+   *              writes, so the question is not asked again.
+   *   'new'      the redesigned rail, colours and typography.
+   *
+   * Deliberately per USER and not per browser: the question has to be asked
+   * once, not once per device, and somebody who said no on the office PC must
+   * not be asked again on her phone. A localStorage flag would do the opposite
+   * of what was asked for.
+   *
+   * NOBODY is switched by deploying this. The default stays 'classic' for
+   * every existing account, and only the person's own answer moves it.
+   */
+  ui_version: {
+    type: String,
+    enum: ['classic', 'new'],
+    default: null,
+  },
+  /**
+   * Whether the switch offer has been PUT to this person yet.
+   *
+   * Separate from `ui_version` on purpose: "asked and said no" and "never
+   * asked" both leave the interface classic, and only one of them should stay
+   * quiet. Without this the app would re-ask every single login.
+   */
+  ui_version_asked: { type: Boolean, default: false },
   full_name: { type: String, default: '' },
   role: {
     type: String,

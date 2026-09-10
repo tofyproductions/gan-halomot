@@ -23,6 +23,9 @@ router.post('/logout', authController.logout);
 // GET /api/auth/me (requires auth)
 router.get('/me', authMiddleware, authController.me);
 
+// PATCH /api/auth/ui-version (requires auth) — the caller's own display choice
+router.patch('/ui-version', authMiddleware, authController.setUiVersion);
+
 // WebAuthn registration (requires auth — user must be logged in)
 router.post('/webauthn/register/options', authMiddleware, authController.webauthnRegisterOptions);
 router.post('/webauthn/register/verify', authMiddleware, authController.webauthnRegisterVerify);

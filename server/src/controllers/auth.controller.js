@@ -625,9 +625,51 @@ async function webauthnAuthVerify(req, res, next) {
   }
 }
 
+/**
+ * The person's own answer about which interface they see.
+ *
+ * Two things can be set, and they are separate on purpose:
+ *
+ *   version  'classic' | 'new'  — what to show them from now on.
+ *   asked    true                — the offer has been PUT to them.
+ *
+ * "Asked and said no" and "never asked" both leave the interface classic, and
+ * only one of them should stay quiet, so a decline sends `{ version:
+ * 'classic', asked: true }` and the question is never repeated.
+ *
+ * It writes only to the caller's OWN record — `req.user.id`, never an id from
+ * the body — so this cannot be used to change what somebody else sees.
+ */
+async function setUiVersion(req, res, next) {
+  try {
+    const { version, asked } = req.body || {};
+    const update = {};
+
+    if (version !== undefined) {
+      if (version !== 'classic' && version !== 'new') {
+        return res.status(400).json({ error: 'version must be classic or new' });
+      }
+      update.ui_version = version;
+    }
+    if (asked !== undefined) update.ui_version_asked = !!asked;
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ error: 'nothing to update' });
+    }
+
+    const user = await User.findByIdAndUpdate(req.user.id, update, { new: true })
+      .select('ui_version ui_version_asked');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({ ui_version: user.ui_version, ui_version_asked: user.ui_version_asked });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
   effectiveRoleTabs,
-  login, loginWithPassword, setPassword, logout, me,
+  login, loginWithPassword, setPassword, logout, me, setUiVersion,
   forgotPassword, resetWithCode,
   webauthnRegisterOptions, webauthnRegisterVerify,
   webauthnAuthOptions, webauthnAuthVerify,

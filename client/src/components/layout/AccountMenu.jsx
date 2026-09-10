@@ -3,6 +3,7 @@ import { Dialog, DialogTitle, DialogContent, Button, Stack, Divider, Typography 
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
+import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
 import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
@@ -10,6 +11,7 @@ import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
 import { useAuth } from '../../hooks/useAuth';
+import { useUiVersion } from '../../hooks/useUiVersion';
 import DeleteAccountRequest from '../shared/DeleteAccountRequest';
 import {
   isWebPushSupported, getWebPushSubscriptionState, subscribeWebPush, unsubscribeWebPush,
@@ -37,6 +39,7 @@ import { resetAllRememberedConfirms } from '../shared/ConfirmProvider';
  */
 export default function AccountMenu({ open, onClose }) {
   const { user, isAdmin } = useAuth();
+  const { isNew, switchTo } = useUiVersion();
   const navigate = useNavigate();
   const [pushSupported, setPushSupported] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
@@ -102,6 +105,21 @@ export default function AccountMenu({ open, onClose }) {
             sx={{ justifyContent: 'flex-start' }}
           >
             הפעלת כניסה בטביעת אצבע
+          </Button>
+
+          {/* The way back, and the way forward — the same door in both
+              directions, which is what the offer dialog promised when it said
+              "אפשר לחזור לעיצוב הישן בכל רגע". A promise like that has to be
+              kept somewhere findable, and this is where everything else that
+              belongs to the person rather than to a screen already lives. */}
+          <Button
+            startIcon={<ViewQuiltIcon />}
+            onClick={() => switchTo(isNew ? 'classic' : 'new')}
+            fullWidth
+            variant="outlined"
+            sx={{ justifyContent: 'flex-start' }}
+          >
+            {isNew ? 'חזרה לעיצוב הישן' : 'מעבר לעיצוב החדש'}
           </Button>
 
           {/* A browser that cannot do push should not be offered a switch for
