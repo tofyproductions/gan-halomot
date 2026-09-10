@@ -115,7 +115,7 @@ async function main() {
   const host = String(mongoose.connection.host || '');
   if (!/^(127\.0\.0\.1|localhost|::1)$/.test(host)) throw new Error(`מסד הנתונים אינו מקומי (${host}) — עוצרים`);
 
-  const { User, Branch, Employee, PushSubscription, NotificationEvent } = require('../src/models');
+  const { User, Branch, Employee, Punch, PushSubscription, NotificationEvent } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const branch = await Branch.create({ name: 'הרצליה' });
@@ -133,6 +133,8 @@ async function main() {
     const res = await request({ method: 'POST', token: tokenManager, path: '/api/payroll/manual-punches', body: { employee_id: String(emp._id), date: '2026-09-10', in_time: '08:00', note: '' } });
     ok(res.status === 200, '1a הדיווח נקלט', `${res.status} ${res.text?.slice(0, 200)}`);
     const punchId = res.body.punches[0]._id;
+    const created = await Punch.findById(punchId).lean();
+    eq(created.approval_status, 'pending_accountant', '1a2 ההחתמה נחתה על pending_accountant');
     await waitFor(async () => (await NotificationEvent.countDocuments({ ref_id: punchId, type: 'punch_pending_accountant', recipient_id: accountant._id })) === 1);
     eq(await NotificationEvent.countDocuments({ ref_id: punchId, type: 'punch_pending_accountant', recipient_id: accountant._id, status: 'pending' }), 1, '1b נוצר אירוע פוש להנה"ח');
     await waitFor(() => sent.fcm.some(s => s.token === 'ACC_TOKEN'));
@@ -141,21 +143,26 @@ async function main() {
     const approve = await request({ method: 'PATCH', token: tokenAccountant, path: `/api/payroll/punches/${punchId}/approve` });
     ok(approve.status === 200, '1d הנה"ח מאשרת');
     eq(await NotificationEvent.countDocuments({ ref_id: punchId, status: 'pending' }), 0, '1e האירוע נסגר');
+    const finalPunch = await Punch.findById(punchId).lean();
+    eq(finalPunch.approval_status, 'approved', '1f ואושרה סופית');
   }
 
   head('בדיקה 2 — מנהלת מתקנת שעה שכבר נספרת לעובדת שלה (pending_edit רגיל) → פוש להנה"ח מיד');
   {
-    const { Punch } = require('../src/models');
     const p = await Punch.create({ branch_id: branch._id, employee_id: emp._id, israeli_id: emp.israeli_id, device_user_sn: 9001, timestamp: new Date('2026-09-10T08:00:00Z'), approval_status: 'auto' });
     sent.fcm.length = 0;
     const res = await request({ method: 'PATCH', token: tokenManager, path: `/api/payroll/punches/${p._id}`, body: { timestamp: new Date('2026-09-10T08:30:00Z').toISOString() } });
     ok(res.status === 200, '2a התיקון נקלט');
+    const staged = await Punch.findById(p._id).lean();
+    eq(staged.approval_status, 'auto', '2a2 הסטטוס נשאר auto בזמן ההמתנה');
     await waitFor(async () => (await NotificationEvent.countDocuments({ ref_id: p._id, type: 'punch_pending_accountant', recipient_id: accountant._id })) === 1);
     eq(await NotificationEvent.countDocuments({ ref_id: p._id, status: 'pending' }), 1, '2b אירוע אחד בלבד, להנה"ח');
 
     const approve = await request({ method: 'PATCH', token: tokenAccountant, path: `/api/payroll/punches/${p._id}/approve` });
     ok(approve.status === 200, '2c הנה"ח מאשרת');
     eq(await NotificationEvent.countDocuments({ ref_id: p._id, status: 'pending' }), 0, '2d האירוע נסגר');
+    const restored = await Punch.findById(p._id).lean();
+    eq(restored.approval_status, 'auto', '2e ואושר עם שחזור ה-approval_status המקורי (prev_status)');
   }
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} בדיקות עברו`);
