@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useUrlState } from '../../hooks/useUrlState';
 import {
   Box, Typography, Stack, TextField, Paper, Table, TableBody, TableCell,
   TableHead, TableRow, TableContainer, Chip, Alert, Button, Tooltip, IconButton,
@@ -81,7 +82,16 @@ export default function AttendanceMonitor() {
   const { isAdmin, isAccountant, isManager } = useAuth();
   // Managers fix their own staff's days; accounting reviews and approves.
   const canFixIssues = isAdmin || isAccountant || isManager;
-  const [month, setMonth] = useState(currentYearMonth());
+  /**
+   * The month and the search are in the address bar.
+   *
+   * This is the screen most often discussed between two people — a manager and
+   * the accountant looking at the same forty employees — and "August, and search
+   * for דנה" was something one of them had to say out loud. The current month is
+   * the fallback, so a bare /attendance still opens on today and leaves no
+   * parameter behind. See hooks/useUrlState.
+   */
+  const [month, setMonth] = useUrlState('month', currentYearMonth());
   const [data, setData] = useState(null);            // single-branch payload
   const [perBranch, setPerBranch] = useState(null);  // [{ branch, data, error }] in all-branches mode
   const [loading, setLoading] = useState(false);
@@ -103,7 +113,7 @@ export default function AttendanceMonitor() {
   // the horizontal position is the one that hurts to lose — day 28 is a long
   // way right of day 1.
   const gridRef = useRef(null);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useUrlState('q');
 
   /**
    * @param {object} opts

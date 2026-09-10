@@ -11,7 +11,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import GavelIcon from '@mui/icons-material/Gavel';
 import DescriptionIcon from '@mui/icons-material/Description';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import EmploymentContractDialog, { CONTRACT_STATUS } from './EmploymentContractDialog';
 import LinkIcon from '@mui/icons-material/Link';
 import SearchIcon from '@mui/icons-material/Search';
@@ -21,6 +21,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import PageHeader from '../ui/PageHeader';
 import EmptyState from '../ui/EmptyState';
+import { useUrlState, useUrlFlag } from '../../hooks/useUrlState';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor } from '../../utils/branchColors';
@@ -267,37 +268,10 @@ export default function EmployeeManager() {
   const [pendingChanges, setPendingChanges] = useState(0);
   // Inline editing: { empId, field, value }
   const [inlineEdit, setInlineEdit] = useState(null);
-  /**
-   * What you are looking at lives in the address bar, not in this component.
-   *
-   * Three things used to be held here and lost on every reload: the search
-   * text, the incomplete-only filter and whether archived staff are shown. The
-   * cost of that is not just a reload — it is that "the eleven employees
-   * missing a bank account" was a thing you could see and not a thing you could
-   * send. Somebody wanting a colleague to look at the same list had to describe
-   * it in words.
-   *
-   * `replace: true` keeps a filter out of the browser's history: typing seven
-   * characters in the search box should not be seven presses of the back button
-   * before you leave the screen.
-   */
-  const [params, setParams] = useSearchParams();
-  const search = params.get('q') || '';
-  const onlyIncomplete = params.get('incomplete') === '1';
-  const showArchived = params.get('archived') === '1';
-
-  const setParam = (key, value) => setParams((prev) => {
-    const next = new URLSearchParams(prev);
-    // An empty filter is an absent parameter. `?q=&incomplete=0` is a URL that
-    // says nothing while looking like it says something.
-    if (value === '' || value === false || value == null) next.delete(key);
-    else next.set(key, value === true ? '1' : value);
-    return next;
-  }, { replace: true });
-
-  const setSearch = (v) => setParam('q', v);
-  const setOnlyIncomplete = (v) => setParam('incomplete', !!v);
-  const setShowArchived = (v) => setParam('archived', !!v);
+  // What you are looking at lives in the address bar. See hooks/useUrlState.
+  const [search, setSearch] = useUrlState('q');
+  const [onlyIncomplete, setOnlyIncomplete] = useUrlFlag('incomplete');
+  const [showArchived, setShowArchived] = useUrlFlag('archived');
   // Whoever else sits at this desk shouldn't be able to read salaries off the
   // screen over someone's shoulder. Hidden by default, remembered per browser
   // (localStorage, not per-session) — the point is that it stays off until

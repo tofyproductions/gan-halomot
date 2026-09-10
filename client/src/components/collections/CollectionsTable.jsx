@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useUrlState } from '../../hooks/useUrlState';
 import {
   Box, Card, CardContent, Typography, TextField, Button, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -60,7 +61,9 @@ export default function CollectionsTable() {
   const { selectedBranch } = useBranch();
   const [rawData, setRawData] = useState({});
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  // The name being chased, in the address bar — a collections question is
+  // almost always about one family. See hooks/useUrlState.
+  const [search, setSearch] = useUrlState('q');
 
   // Receipt dialog state
   const [dialog, setDialog] = useState({
