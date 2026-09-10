@@ -91,6 +91,10 @@ router.get('/children/:childId/vacations', portal.childVacations);
 router.get('/children/:childId/payments', payments.childPayments);
 router.get('/children/:childId/contracts', portal.childContracts);
 router.get('/children/:childId/contracts/:contractId/file', portal.contractFile);
+// Documents the office attached to this child and deliberately shared — the
+// signed repayment agreement, in practice. Listed alongside the contracts by
+// the handler above; this serves the bytes.
+router.get('/children/:childId/documents/:docId/file', portal.sharedDocumentFile);
 
 // Changing the phone is its own two-step flow, because the code has to go to
 // the new number — see parentPortal.controller.

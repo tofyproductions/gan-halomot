@@ -19,9 +19,11 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import CheckIcon from '@mui/icons-material/Check';
 import ReplayIcon from '@mui/icons-material/Replay';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { formatAcademicYear, getEnrollmentYear } from '../../hooks/useAcademicYear';
+import DebtDocumentsDialog from './DebtDocumentsDialog';
 
 /**
  * הצלבת תמ"ת מול קליקטאק.
@@ -446,6 +448,9 @@ export default function TmtReconcile({
     }
   };
   const scope = { branch_id: branchId, academic_year: year };
+  // The child whose attached papers are open — the same dialog the חייבים
+  // table uses, on the same record.
+  const [docsRow, setDocsRow] = useState(null);
   const saveNote = (row) => decisionCall(
     () => api.put(`/tmt/decisions/${row.id_number}`, { ...scope, note: noteDraft }),
     'ההערה נשמרה',
@@ -1336,10 +1341,26 @@ export default function TmtReconcile({
                 )}
               </Alert>
 
-              {/* ---- הערה ----
-                  Free text that survives every upload — see ReconcileDecision. */}
+              {/* ---- הערה ומסמכים ----
+                  Free text that survives every upload — see ReconcileDecision.
+                  The papers hang off the same record, so an agreement attached
+                  from the חייבים table is here too, and the other way round. */}
               <Card variant="outlined" sx={{ p: 1.5, mb: 2 }}>
-                <Typography variant="subtitle2" fontWeight={700} gutterBottom>הערה</Typography>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                  <Typography variant="subtitle2" fontWeight={700}>הערה</Typography>
+                  <Button
+                    size="small" startIcon={<AttachFileIcon fontSize="small" />}
+                    onClick={() => setDocsRow({
+                      id_number: detail.id_number,
+                      child_name: detail.child_name,
+                      branch_id: branchId,
+                      branch_name: branches.find(b => String(b.id || b._id) === String(branchId))?.name || '',
+                      academic_year: year,
+                    })}
+                  >
+                    מסמכים
+                  </Button>
+                </Stack>
                 <Stack direction="row" spacing={1} alignItems="flex-start">
                   <TextField fullWidth multiline minRows={1} maxRows={4} size="small"
                     placeholder='למשל: ילד אריתראי — לא יכול להיות בתמ"ת, כן בגן'
@@ -1855,6 +1876,14 @@ export default function TmtReconcile({
           <Button onClick={() => setContactsDlg({ open: false, loading: false, rows: [] })}>סגירה</Button>
         </DialogActions>
       </Dialog>
+
+      {/* The same papers the חייבים table shows, on the same record. */}
+      <DebtDocumentsDialog
+        open={Boolean(docsRow)}
+        row={docsRow}
+        canEdit={canImport}
+        onClose={() => setDocsRow(null)}
+      />
     </Box>
   );
 }

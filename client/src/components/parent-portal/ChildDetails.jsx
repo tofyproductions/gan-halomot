@@ -175,6 +175,10 @@ function Hero({ name, classroom, year, photo }) {
 export default function ChildDetails({ childId }) {
   const [data, setData] = useState(null);
   const [contracts, setContracts] = useState(null);
+  // Papers the gan attached to this child and deliberately shared — in
+  // practice a signed repayment agreement. Never everything on the record:
+  // the office turns each file on one at a time.
+  const [documents, setDocuments] = useState([]);
   const [heroPhoto, setHeroPhoto] = useState('');
   const [myPhotos, setMyPhotos] = useState([]);
   const [error, setError] = useState('');
@@ -214,6 +218,7 @@ export default function ChildDetails({ childId }) {
     setError('');
     setData(null);
     setContracts(null);
+    setDocuments([]);
     setHeroPhoto('');
     setMyPhotos([]);
     setTab('');
@@ -241,6 +246,7 @@ export default function ChildDetails({ childId }) {
         if (cancelled) return;
         setData(d.data);
         setContracts(c.data.contracts || []);
+        setDocuments(c.data.documents || []);
         setPayments(pay?.data?.available ? pay.data : null);
         setNews(ann?.data?.announcements || []);
         // Only photographs of THIS child. A classroom picture has other
@@ -313,6 +319,26 @@ export default function ChildDetails({ childId }) {
   const barValue = primaryTabs.some(t => t.key === active) ? active : 'more';
 
   const goTo = (key) => { setTab(key); setMoreOpen(false); };
+
+  /**
+   * A shared document, opened through a link the server signs on the spot.
+   *
+   * Not a stored URL: the permission it stands for is this parent's, checked a
+   * moment ago, and a link kept beside the record would outlive the reason it
+   * was issued — including the office deciding to stop sharing the file.
+   */
+  const openDocument = async (d) => {
+    setError('');
+    setBusy(d.id);
+    try {
+      const res = await parentApi.get(`/children/${childId}/documents/${d.id}/file`);
+      window.open(res.data.url, '_blank', 'noopener');
+    } catch (err) {
+      setError(parentApiError(err, 'לא הצלחנו לפתוח את המסמך'));
+    } finally {
+      setBusy('');
+    }
+  };
 
   const openContract = async (c) => {
     setError('');
@@ -502,6 +528,46 @@ export default function ChildDetails({ childId }) {
       )}
 
       {active === 'docs' && (
+        <Stack spacing={2}>
+        {/* Anything the office attached to this child and chose to share.
+            Above the contracts, because a family who has one of these is a
+            family who is looking for it — a contract is read once a year. */}
+        {documents.length > 0 && (
+          <Card>
+            <CardContent>
+              <Typography variant="h5" sx={{ mb: 1.5 }}>מסמכים מהגן</Typography>
+              <Stack spacing={1}>
+                {documents.map((d) => (
+                  <Box
+                    key={d.id}
+                    sx={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 1, flexWrap: 'wrap', p: 1.5, borderRadius: '14px',
+                      border: 1, borderColor: 'divider', bgcolor: 'background.default',
+                    }}
+                  >
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={700}>{d.file_name}</Typography>
+                      {d.uploaded_at && (
+                        <Typography variant="caption" color="text.secondary">
+                          {formatDate(d.uploaded_at)}
+                        </Typography>
+                      )}
+                    </Box>
+                    <Button
+                      size="small" variant="outlined" startIcon={<DescriptionIcon />}
+                      disabled={busy === d.id}
+                      onClick={() => openDocument(d)}
+                    >
+                      {busy === d.id ? 'פותח…' : 'פתיחה'}
+                    </Button>
+                  </Box>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardContent>
             <Typography variant="h5" sx={{ mb: 1.5 }}>חוזים</Typography>
@@ -546,6 +612,7 @@ export default function ChildDetails({ childId }) {
             </Stack>
           </CardContent>
         </Card>
+        </Stack>
       )}
 
     </Stack>

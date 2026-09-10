@@ -6,8 +6,10 @@ import {
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import SaveIcon from '@mui/icons-material/Save';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import DebtDocumentsDialog from './DebtDocumentsDialog';
 
 /**
  * חייבים משנה שעברה — כל סניף, טבלה אחת.
@@ -19,7 +21,11 @@ import api from '../../api/client';
  * אחד.
  *
  * ההערה בכל שורה היא אותה הערה שבכרטיס הילד במסך ההצלבה (ReconcileDecision,
- * אותו מפתח סניף+שנה+ת"ז) — מה שנכתב כאן נראה גם שם, וההפך.
+ * אותו מפתח סניף+שנה+ת"ז) — מה שנכתב כאן נראה גם שם, וההפך. אותו דבר לגבי
+ * המסמכים: הסכם החזר חוב חתום שמצורף כאן מופיע גם בכרטיס הילד שם.
+ *
+ * `canEdit` הוא הרשאת ההערות; `canFile` היא הרשאת הקבצים, והיא צרה יותר —
+ * לצרף מסמך משפטי לחוב של משפחה זו לא אותה פעולה כמו לרשום שהתקשרנו אליה.
  */
 
 const fmtMoney = (n) => `${Number(n || 0).toLocaleString('he-IL')} ₪`;
@@ -55,12 +61,15 @@ function NoteCell({ row, canEdit, onSave }) {
   );
 }
 
-export default function DebtorsDialog({ open, onClose, canEdit = false }) {
+export default function DebtorsDialog({ open, onClose, canEdit = false, canFile = false }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [data, setData] = useState(null);
   const [search, setSearch] = useState('');
   const [yearFilter, setYearFilter] = useState('all'); // 'all' | a specific academic_year string
+  // The row whose papers are open. A signed repayment agreement lives on the
+  // same (branch, year, ת"ז) record as the note beside it.
+  const [docsRow, setDocsRow] = useState(null);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -142,6 +151,7 @@ export default function DebtorsDialog({ open, onClose, canEdit = false }) {
                   <TableCell>הורה 1</TableCell>
                   <TableCell>הורה 2</TableCell>
                   <TableCell>רשום/ת השנה</TableCell>
+                  <TableCell>מסמכים</TableCell>
                   <TableCell>הערה</TableCell>
                 </TableRow>
               </TableHead>
@@ -179,13 +189,23 @@ export default function DebtorsDialog({ open, onClose, canEdit = false }) {
                           label={r.active_this_year ? 'כן' : 'לא'} />
                       )}
                     </TableCell>
+                    <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                      <Button
+                        size="small"
+                        startIcon={<AttachFileIcon fontSize="small" />}
+                        variant={r.documents_count ? 'outlined' : 'text'}
+                        onClick={() => setDocsRow(r)}
+                      >
+                        {r.documents_count || 'הוספה'}
+                      </Button>
+                    </TableCell>
                     <TableCell>
                       <NoteCell row={r} canEdit={canEdit} onSave={saveNote} />
                     </TableCell>
                   </TableRow>
                 ))}
                 {!visible.length && (
-                  <TableRow><TableCell colSpan={10} align="center" sx={{ py: 3 }}>
+                  <TableRow><TableCell colSpan={11} align="center" sx={{ py: 3 }}>
                     <Typography color="text.secondary">אין חייבים להצגה</Typography>
                   </TableCell></TableRow>
                 )}
@@ -197,6 +217,13 @@ export default function DebtorsDialog({ open, onClose, canEdit = false }) {
       <DialogActions>
         <Button onClick={onClose}>סגירה</Button>
       </DialogActions>
+
+      <DebtDocumentsDialog
+        open={Boolean(docsRow)}
+        row={docsRow}
+        canEdit={canFile}
+        onClose={() => { setDocsRow(null); fetchData(); }}
+      />
     </Dialog>
   );
 }

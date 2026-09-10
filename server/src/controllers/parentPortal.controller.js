@@ -418,7 +418,89 @@ async function childContracts(req, res) {
   }
 
   out.sort((a, b) => String(b.academic_year || '').localeCompare(String(a.academic_year || '')));
-  return res.json({ contracts: out });
+
+  return res.json({ contracts: out, documents: await sharedDocuments(own) });
+}
+
+/**
+ * Documents the office attached to this child's account AND deliberately
+ * shared — in practice, the repayment agreement a family signed.
+ *
+ * They live on the reconciliation record (ReconcileDecision), keyed by ת"ז, so
+ * they are found by the child's own number rather than by anything in this
+ * request. `visible_to_parent` is off by default and turned on one file at a
+ * time by the office: everything else attached there is internal, and a
+ * document that reaches a family's screen because it went onto the wrong row
+ * cannot be recalled. A soft-deleted file is never listed — its week of grace
+ * exists for the administrators, not for the family.
+ */
+async function sharedDocuments(own) {
+  const { ReconcileDecision } = require('../models');
+  const { normalizeId } = require('../services/tmt.service');
+
+  // Every year of this child, because a number can be recorded on one row and
+  // missing from another.
+  const ids = [...new Set((own.group?.years || [])
+    .map(y => normalizeId(y.child_id_number || ''))
+    .filter(Boolean))];
+  if (!ids.length) return [];
+
+  const decisions = await ReconcileDecision.find({ id_number: { $in: ids } })
+    .select('academic_year documents').lean();
+
+  const out = [];
+  for (const d of decisions) {
+    for (const doc of d.documents || []) {
+      if (!doc.visible_to_parent || doc.deleted_at) continue;
+      out.push({
+        id: String(doc._id),
+        file_name: doc.file_name || 'מסמך',
+        content_type: doc.content_type || '',
+        academic_year: d.academic_year,
+        uploaded_at: doc.uploaded_at || null,
+      });
+    }
+  }
+  out.sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0));
+  return out;
+}
+
+/**
+ * The bytes of one shared document.
+ *
+ * Every check is redone here rather than trusted from the listing: the id in
+ * the URL proves nothing, so the document must belong to a record carrying
+ * THIS child's ת"ז, must still be shared, and must not be deleted. A link
+ * copied out of the portal after the office un-shared a file stops working.
+ *
+ * A signed link as JSON rather than a redirect: a redirect would send this
+ * app's Authorization header on to the storage host, which refuses a request
+ * carrying two sets of credentials.
+ */
+async function sharedDocumentFile(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+  if (!storage.isConfigured()) return res.status(503).json({ error: 'האחסון אינו זמין' });
+
+  const { ReconcileDecision } = require('../models');
+  const { normalizeId } = require('../services/tmt.service');
+
+  const ids = [...new Set((own.group?.years || [])
+    .map(y => normalizeId(y.child_id_number || ''))
+    .filter(Boolean))];
+  if (!ids.length) return res.status(404).json({ error: 'לא נמצא' });
+
+  const decision = await ReconcileDecision.findOne({
+    id_number: { $in: ids },
+    'documents._id': req.params.docId,
+  }).select('documents').lean();
+
+  const doc = (decision?.documents || []).find(d => String(d._id) === String(req.params.docId));
+  if (!doc || doc.deleted_at || !doc.visible_to_parent) {
+    return res.status(404).json({ error: 'לא נמצא' });
+  }
+
+  return res.json({ url: await storage.signedReadUrl(doc.key), file_name: doc.file_name || '' });
 }
 
 /**
@@ -1076,6 +1158,7 @@ async function childGantt(req, res) {
 }
 
 module.exports = {
+  sharedDocumentFile,
   // Exported for controllers/parentPayments, which must apply the same
   // ownership test: the child id in the URL is only ever a lookup, and the
   // parent's children are resolved fresh from the enrolment data on every
