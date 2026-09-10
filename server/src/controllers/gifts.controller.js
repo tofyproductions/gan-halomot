@@ -42,11 +42,15 @@ async function listCampaigns(_req, res) {
 
 function readCampaignBody(body, current = {}) {
   const name = String(body?.name ?? current.name ?? '').trim().slice(0, 80);
+  // The word the families read. Short on purpose — it is dropped into
+  // "בחירת התמונה למתנת ___" and a sentence is not a holiday.
+  const occasion = String(body?.occasion ?? current.occasion ?? '').trim().slice(0, 40);
   const opens = nursery.normalizeDateKey(body?.opens_on ?? current.opens_on);
   const closes = nursery.normalizeDateKey(body?.closes_on ?? current.closes_on);
   const errors = [];
 
   if (!name) errors.push('חסר שם למבצע');
+  if (!occasion) errors.push('חסר שם החג/האירוע — זה מה שההורים רואים');
   if (!opens || !closes) errors.push('תאריכים לא תקינים');
   else if (opens > closes) errors.push('תאריך הפתיחה מאוחר מתאריך הסגירה');
 
@@ -62,15 +66,15 @@ function readCampaignBody(body, current = {}) {
   const picks = Number(body?.picks_required ?? current.picks_required ?? 2);
   if (!Number.isInteger(picks) || picks < 1 || picks > 5) errors.push('מספר התמונות לבחירה אינו תקין');
 
-  return { name, opens, closes, products, picks, errors };
+  return { name, occasion, opens, closes, products, picks, errors };
 }
 
 async function createCampaign(req, res) {
-  const { name, opens, closes, products, picks, errors } = readCampaignBody(req.body);
+  const { name, occasion, opens, closes, products, picks, errors } = readCampaignBody(req.body);
   if (errors.length) return res.status(400).json({ error: errors.join('. ') });
 
   const campaign = await GiftCampaign.create({
-    name, opens_on: opens, closes_on: closes, products, picks_required: picks,
+    name, occasion, opens_on: opens, closes_on: closes, products, picks_required: picks,
     created_by: req.user.id, created_by_name: req.user.full_name || '',
   });
   return res.json({ ok: true, campaign });
@@ -80,11 +84,11 @@ async function updateCampaign(req, res) {
   const current = await GiftCampaign.findById(req.params.id);
   if (!current) return res.status(404).json({ error: 'לא נמצא' });
 
-  const { name, opens, closes, products, picks, errors } = readCampaignBody(req.body, current.toObject());
+  const { name, occasion, opens, closes, products, picks, errors } = readCampaignBody(req.body, current.toObject());
   if (errors.length) return res.status(400).json({ error: errors.join('. ') });
 
   Object.assign(current, {
-    name, opens_on: opens, closes_on: closes, products, picks_required: picks,
+    name, occasion, opens_on: opens, closes_on: closes, products, picks_required: picks,
   });
   if (typeof req.body?.is_open === 'boolean') current.is_open = req.body.is_open;
   await current.save();

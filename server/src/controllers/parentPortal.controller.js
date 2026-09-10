@@ -857,6 +857,10 @@ async function childGift(req, res) {
     campaign: {
       id: campaign._id,
       name: campaign.name,
+      // What the family reads. Blank on the rounds that predate the field, and
+      // the screen falls back to the name there — which is what those families
+      // were already shown.
+      occasion: campaign.occasion || '',
       closes_on: campaign.closes_on,
       picks_required: campaign.picks_required,
       open,

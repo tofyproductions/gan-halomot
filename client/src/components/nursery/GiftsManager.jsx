@@ -8,6 +8,7 @@ import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import DownloadIcon from '@mui/icons-material/Download';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import api, { apiError, openApiFile } from '../../api/client';
+import GiftCallout from '../parent-portal/GiftCallout';
 import { useAuth } from '../../hooks/useAuth';
 
 /**
@@ -83,6 +84,7 @@ export default function GiftsManager() {
     try {
       const body = {
         name: editing.name,
+        occasion: editing.occasion,
         opens_on: editing.opens_on,
         closes_on: editing.closes_on,
         picks_required: Number(editing.picks_required) || 2,
@@ -157,7 +159,7 @@ export default function GiftsManager() {
         </Stack>
         {mayManage && (
           <Button variant="contained" size="small" onClick={() => setEditing({
-            name: '', opens_on: progress?.campaign?.opens_on || '', closes_on: '',
+            name: '', occasion: '', opens_on: progress?.campaign?.opens_on || '', closes_on: '',
             picks_required: 2, products: {}, is_open: true,
           })}>
             מבצע חדש
@@ -307,9 +309,14 @@ export default function GiftsManager() {
         <DialogContent>
           {editing && (
             <Stack spacing={2} sx={{ pt: 1 }}>
-              <TextField label="שם המבצע" value={editing.name} fullWidth
-                placeholder="מתנות ראש השנה"
+              <TextField label="שם המבצע (פנימי)" value={editing.name} fullWidth
+                placeholder="מתנות ראש השנה 2026"
+                helperText="לשימוש הצוות בלבד — ההורים לא רואים את זה"
                 onChange={(e) => setEditing(v => ({ ...v, name: e.target.value }))} />
+              <TextField label="שם החג / האירוע" value={editing.occasion || ''} fullWidth
+                placeholder="חנוכה"
+                helperText="מילה אחת. ההורים יראו: „בחירת התמונה למתנת חנוכה”"
+                onChange={(e) => setEditing(v => ({ ...v, occasion: e.target.value }))} />
               <Stack direction="row" spacing={2}>
                 <TextField label="פתיחה" type="date" fullWidth InputLabelProps={{ shrink: true }}
                   value={editing.opens_on || ''}
@@ -334,6 +341,29 @@ export default function GiftsManager() {
                     ...v, products: { ...(v.products || {}), [level]: e.target.value },
                   }))} />
               ))}
+
+              <Divider />
+              <Typography variant="subtitle2" fontWeight={700}>
+                כך זה ייראה להורים
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                הכרטיס האמיתי מהפורטל, עם שם לדוגמה. משתנה תוך כדי הקלדה.
+              </Typography>
+              {/* The parent's own component, not a copy of it. A preview built
+                  separately drifts from the screen it claims to preview the
+                  first time either side is edited. */}
+              <Box sx={{ pointerEvents: 'none' }}>
+                <GiftCallout
+                  preview
+                  occasion={editing.occasion}
+                  name={editing.name}
+                  product={editing.products?.[LEVELS[0]] || Object.values(editing.products || {})[0] || ''}
+                  deadline={fmt(editing.closes_on) || '—'}
+                  needed={Number(editing.picks_required) || 2}
+                  childName="דנה"
+                  open
+                />
+              </Box>
             </Stack>
           )}
         </DialogContent>
