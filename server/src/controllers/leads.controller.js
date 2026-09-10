@@ -1,5 +1,8 @@
 const { Lead, Branch, User } = require('../models');
 const { dispatchEmail } = require('../services/email.service');
+const { sendSms } = require('../services/sms.service');
+
+const THANK_YOU_TEXT = 'תודה על פנייתכם, נחזור אליכם בהקדם. גן החלומות';
 
 const STATUSES = ['new', 'contacted', 'tour_scheduled', 'converted', 'closed'];
 
@@ -115,8 +118,20 @@ async function publicSubmit(req, res, next) {
       status: 'new',
     });
 
-    // Notify the branch manager (best-effort — never fail the parent's submit).
+    // Notify the branch manager, and thank the parent (all best-effort —
+    // never fail the parent's submit over a notification channel; SMS and
+    // email are independent so one failing never blocks the other).
     notifyNewLead(lead, branch).catch(err => console.error('lead notify failed:', err.message));
+    sendSms({ to: lead.parent_phone, text: THANK_YOU_TEXT })
+      .catch(err => console.error('lead thank-you SMS failed:', err.message));
+    if (lead.parent_email) {
+      dispatchEmail({
+        to: lead.parent_email,
+        subject: 'גן החלומות — תודה על פנייתכם',
+        html: `<div dir="rtl" style="font-family:Arial"><p>${THANK_YOU_TEXT}</p></div>`,
+        text: THANK_YOU_TEXT,
+      }).catch(err => console.error('lead thank-you email failed:', err.message));
+    }
 
     res.status(201).json({ ok: true });
   } catch (err) { next(err); }

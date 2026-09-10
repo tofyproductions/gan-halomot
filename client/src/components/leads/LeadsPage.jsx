@@ -143,7 +143,8 @@ export default function LeadsPage() {
               <TableHead>
                 <TableRow>
                   <TableCell>תאריך</TableCell><TableCell>הורה</TableCell><TableCell>טלפון</TableCell>
-                  <TableCell>ילד/ה</TableCell><TableCell>סניף</TableCell><TableCell>סטטוס</TableCell>
+                  <TableCell>ילד/ה</TableCell><TableCell>סניף</TableCell><TableCell>הודעה</TableCell>
+                  <TableCell>מקור</TableCell><TableCell>סטטוס</TableCell>
                   <TableCell align="center">פעולות</TableCell>
                 </TableRow>
               </TableHead>
@@ -155,6 +156,16 @@ export default function LeadsPage() {
                     <TableCell dir="ltr">{l.parent_phone}</TableCell>
                     <TableCell>{l.child_name || '—'}{l.child_birth_date ? ` (${l.child_birth_date})` : ''}</TableCell>
                     <TableCell>{l.branch_name || '—'}</TableCell>
+                    <TableCell sx={{ maxWidth: 180 }}>
+                      {l.message
+                        ? (
+                          <Tooltip title={l.message}>
+                            <Typography variant="body2" noWrap sx={{ maxWidth: 180, cursor: 'default' }}>{l.message}</Typography>
+                          </Tooltip>
+                        )
+                        : '—'}
+                    </TableCell>
+                    <TableCell>{l.source || '—'}</TableCell>
                     <TableCell>
                       <TextField select size="small" variant="standard" value={l.status}
                         onChange={e => quickStatus(l, e.target.value)} sx={{ minWidth: 110 }}>

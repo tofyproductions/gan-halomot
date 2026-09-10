@@ -37,6 +37,7 @@ import RuleFolderIcon from '@mui/icons-material/RuleFolder';
 import { useBranch } from '../../hooks/useBranch';
 import { useAuth } from '../../hooks/useAuth';
 import { usePendingProposals } from '../../hooks/usePendingProposals';
+import { useNewLeadsCount } from '../../hooks/useNewLeadsCount';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../api/client';
@@ -88,6 +89,7 @@ export default function Header() {
   const { branches, selectedBranch, changeBranch } = useBranch();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
   const pendingProposals = usePendingProposals();
+  const newLeadsCount = useNewLeadsCount();
   // Selected gan marker colour — drives the branch switcher's own colour so
   // the switcher always shows the current gan's colour (synced with payroll).
   const selectedBranchObj = branches.find(b => (b._id || b.id) === selectedBranch);
@@ -250,7 +252,9 @@ export default function Header() {
                         <Icon sx={{ fontSize: '1.15rem', color: isActive ? 'primary.main' : 'text.secondary' }} />
                         {item.id === 'proposed_changes' && pendingProposals > 0
                           ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
-                          : item.label}
+                          : item.id === 'leads' && newLeadsCount > 0
+                            ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                            : item.label}
                       </MenuItem>
                     );
                   })}
@@ -401,7 +405,9 @@ export default function Header() {
                         <ListItemText
                           primary={item.id === 'proposed_changes' && pendingProposals > 0
                             ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
-                            : item.label}
+                            : item.id === 'leads' && newLeadsCount > 0
+                              ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                              : item.label}
                           primaryTypographyProps={{ fontWeight: isActive ? 800 : 600, fontSize: '0.95rem' }}
                         />
                       </ListItemButton>
