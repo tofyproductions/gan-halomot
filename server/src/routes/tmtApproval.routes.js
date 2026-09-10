@@ -39,6 +39,28 @@ router.put('/decisions/:idNumber', decide, ctrl.putDecision);
 router.post('/decisions/:idNumber/resolve', decide, ctrl.resolveIssue);
 router.delete('/decisions/:idNumber/resolve/:code', decide, ctrl.reopenIssue);
 
+/**
+ * The papers behind a debt — in practice a signed repayment agreement.
+ *
+ * Attached to the same (branch, year, ת"ז) record as the note, and gated the
+ * same way ClickTac uploads are: reading the חייבים table is a wider circle
+ * than attaching a legal document to somebody's debt. Listing and opening
+ * follow the same rule — the files are a family's private paperwork, not part
+ * of the screen everybody who can see the table may read.
+ *
+ * 25MB: these arrive as phone photographs of a signed page, which the 10MB
+ * cap for a spreadsheet upload above would routinely refuse.
+ */
+const docs = require('../controllers/debtDocuments.controller');
+const docUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const mayFile = allow('system_admin', 'accountant');
+
+router.get('/decisions/:idNumber/documents', mayFile, docs.listDocuments);
+router.post('/decisions/:idNumber/documents', mayFile, docUpload.single('file'), docs.uploadDocument);
+router.get('/decisions/:idNumber/documents/:docId/file', mayFile, docs.openDocument);
+router.patch('/decisions/:idNumber/documents/:docId', mayFile, docs.updateDocument);
+router.delete('/decisions/:idNumber/documents/:docId', mayFile, docs.deleteDocument);
+
 // A real, on-demand send of both alerts — the only way to prove the email
 // half actually arrives, since its credentials exist only on this server.
 // admin/accountant only, narrower than `decide` above: this sends a real SMS

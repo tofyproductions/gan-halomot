@@ -29,6 +29,23 @@ services:
         sync: false
       - key: CIBUS_MAIL_PASS
         sync: false
+      # Browser Web Push (VAPID keypair). Generate with:
+      #   node -e "console.log(require('web-push').generateVAPIDKeys())"
+      # Set both in the Render dashboard — without them /api/push/vapid-key
+      # returns null and browsers can never subscribe.
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      # Contact address web push services may use to reach the sender.
+      # Any "mailto:" address works — set in the Render dashboard.
+      - key: VAPID_SUBJECT
+        sync: false
+      # Firebase service-account JSON (single-line) for native app push via FCM.
+      # Without it fcm.service.js disables itself rather than throwing. Set in
+      # the Render dashboard — a service-account key must never live in the repo.
+      - key: FCM_SERVICE_ACCOUNT
+        sync: false
     healthCheckPath: /api/health
 
   # ---------------------------------------------------------------------------

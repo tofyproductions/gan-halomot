@@ -1,4 +1,4 @@
-const { Child, Classroom, DailyLog, DailyMenu, Setting } = require('../models');
+const { Child, Classroom, DailyLog, DailyMenu, ClassroomDay, Setting } = require('../models');
 const nursery = require('../services/nursery.service');
 
 /**
@@ -19,9 +19,16 @@ const nursery = require('../services/nursery.service');
  * rather than the day.
  */
 
-/** The classrooms this user may see, respecting branch scope. */
+/**
+ * The classrooms this user may see, respecting branch scope.
+ *
+ * ALL the active rooms now, not only the infant ones. The older rooms keep a
+ * lighter day — one line for the whole class rather than a bottle log per
+ * child — and which kind a room gets is `nursery.boardKind`, decided in one
+ * place and sent to the screen rather than guessed there.
+ */
 async function visibleClassrooms(user) {
-  const rooms = await nursery.nurseryClassrooms();
+  const rooms = await nursery.boardClassrooms();
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   const managed = (user.managed_branch_ids || []).map(String);
@@ -49,22 +56,28 @@ async function board(req, res) {
   const room = rooms.find(r => String(r._id) === requested) || rooms[0];
   const date = nursery.normalizeDateKey(req.query.date) || nursery.todayKey();
 
-  const children = await Child.find({ classroom_id: room._id, is_active: true })
-    .select('child_name birth_date phone parent_name classroom_id')
-    .sort({ birth_date: -1, child_name: 1 })
-    .lean();
+  const kind = nursery.boardKind(room);
 
-  const logs = await DailyLog.find({
-    date,
-    child_id: { $in: children.map(c => c._id) },
-  }).lean();
+  // A light room has no per-child day to fetch. Reading the roster anyway
+  // would be twenty documents nothing on the screen displays.
+  const children = kind === 'full'
+    ? await Child.find({ classroom_id: room._id, is_active: true })
+      .select('child_name birth_date phone parent_name classroom_id')
+      .sort({ birth_date: -1, child_name: 1 })
+      .lean()
+    : [];
+
+  const logs = children.length
+    ? await DailyLog.find({ date, child_id: { $in: children.map(c => c._id) } }).lean()
+    : [];
   const byChild = new Map(logs.map(l => [String(l.child_id), l]));
 
   const branchId = room.branch_id?._id || room.branch_id;
-  const [options, menu, menuDoc] = await Promise.all([
+  const [options, menu, menuDoc, classDay] = await Promise.all([
     nursery.getOptions(),
     nursery.getMenu(),
     DailyMenu.findOne({ branch_id: branchId, date }).lean(),
+    ClassroomDay.findOne({ classroom_id: room._id, date }).lean(),
   ]);
 
   return res.json({
@@ -75,11 +88,22 @@ async function board(req, res) {
       name: r.name,
       branch: r.branch_id?.name || '',
       academic_year: r.academic_year,
+      board: nursery.boardKind(r),
     })),
-    classroom: { id: room._id, name: room.name, branch: room.branch_id?.name || '', branch_id: branchId },
+    classroom: {
+      id: room._id,
+      name: room.name,
+      branch: room.branch_id?.name || '',
+      branch_id: branchId,
+      board: kind,
+    },
     options,
     menu,
     menu_selections: menuDoc?.selections || {},
+    // The whole of a light room's own day. Sent for every room so the screen
+    // never has to ask twice; the full rooms simply have nothing in it.
+    activity: classDay?.activity || '',
+    activity_updated_by: classDay?.updated_by_name || '',
     children: children.map(c => ({
       id: c._id,
       name: c.child_name,
@@ -87,6 +111,44 @@ async function board(req, res) {
       log: byChild.get(String(c._id)) || null,
     })),
   });
+}
+
+/**
+ * What the class did today, for one room.
+ *
+ * Replaces the line rather than patching it: it is one sentence written by one
+ * person, and there is nothing in it for two writers to interleave.
+ *
+ * The room is re-checked against what this user may see on every call. A board
+ * left open in a tab overnight must not write into a room its owner has since
+ * lost — the same rule the per-child log already follows.
+ */
+async function setClassroomDay(req, res) {
+  const date = nursery.normalizeDateKey(req.body?.date) || nursery.todayKey();
+  const roomId = req.body?.classroom_id;
+  if (!roomId) return res.status(400).json({ error: 'חסרה כיתה' });
+
+  const rooms = await visibleClassrooms(req.user);
+  const room = rooms.find(r => String(r._id) === String(roomId));
+  if (!room) return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
+
+  const activity = String(req.body?.activity ?? '').trim().slice(0, 2000);
+
+  const doc = await ClassroomDay.findOneAndUpdate(
+    { classroom_id: room._id, date },
+    {
+      $set: {
+        activity,
+        branch_id: room.branch_id?._id || room.branch_id || null,
+        updated_by: req.user.id,
+        updated_by_name: req.user.full_name || '',
+      },
+      $setOnInsert: { classroom_id: room._id, date },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  ).lean();
+
+  return res.json({ ok: true, activity: doc.activity || '', updated_by: doc.updated_by_name || '' });
 }
 
 /**
@@ -141,8 +203,8 @@ async function updateLog(req, res) {
     .populate('classroom_id', 'name category branch_id')
     .lean();
   if (!child) return res.status(404).json({ error: 'לא נמצא' });
-  if (!nursery.isNurseryClassroom(child.classroom_id)) {
-    return res.status(400).json({ error: 'הלוח היומי קיים לתינוקייה בלבד' });
+  if (nursery.boardKind(child.classroom_id) !== 'full') {
+    return res.status(400).json({ error: 'הדיווח האישי קיים לתינוקייה ולצעירים בלבד' });
   }
 
   const rooms = await visibleClassrooms(req.user);
@@ -363,4 +425,6 @@ async function saveMenu(req, res) {
   return res.json({ ok: true, menu: next });
 }
 
-module.exports = { board, updateLog, setMenu, settings, saveOptions, saveMenu };
+module.exports = {
+  board, updateLog, setClassroomDay, setMenu, settings, saveOptions, saveMenu,
+};

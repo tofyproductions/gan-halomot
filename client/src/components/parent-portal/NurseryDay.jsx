@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Card, CardContent, Typography, Stack, Box, TextField, Button, Alert,
-  Chip, Divider, CircularProgress,
+  Chip, Divider, CircularProgress, Dialog,
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
+import PhotoLibraryIcon from '@mui/icons-material/PhotoLibrary';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import EmojiFoodBeverageIcon from '@mui/icons-material/EmojiFoodBeverage';
@@ -15,7 +16,18 @@ import SendIcon from '@mui/icons-material/Send';
 import parentApi, { parentApiError } from '../../api/parentClient';
 
 /**
- * The day in the תינוקייה, for the parent.
+ * The day at the gan, for the parent — in two shapes.
+ *
+ * 'full' is the תינוקייה and the צעירים: the morning the family sent from
+ * home, and everything the room recorded back — bottles, naps, nappies. That
+ * is what those days are made of and what those parents open this for.
+ *
+ * 'light' is every older room. A four-year-old's parent has no bottle log to
+ * read, and asking their teacher to keep one per child would mean it is never
+ * kept. So their day is what the class did, what the kitchen served, and the
+ * photographs from that day — written once for the whole room. Before this
+ * existed those families had no day at all; the section simply was not offered
+ * to them.
  *
  * One screen where the old system had two. It had a "live" page and a "daily
  * report" page holding the same values and differing only in when you opened
@@ -90,6 +102,8 @@ export default function NurseryDay({ childId }) {
   // Null until the first load decides. A family who already sent this morning
   // sees the summary; everybody else sees the form, open and ready.
   const [editing, setEditing] = useState(null);
+  // The photograph opened full-size, if any.
+  const [zoom, setZoom] = useState(null);
 
   const [wake, setWake] = useState('');
   const [mealTime, setMealTime] = useState('');
@@ -142,10 +156,12 @@ export default function NurseryDay({ childId }) {
   if (error && !data) return <Alert severity="error">{error}</Alert>;
   if (!data) return null;
 
+  const light = data.board === 'light';
   const log = data.log;
   const meals = log?.meals || {};
   const sleep = log?.sleep || {};
   const absent = log?.attendance === 'חסר';
+  const photos = data.photos || [];
 
   const mealLine = (key, label) => {
     const m = meals[key] || {};
@@ -159,6 +175,8 @@ export default function NurseryDay({ childId }) {
     <Stack spacing={2}>
       {error && <Alert severity="error">{error}</Alert>}
 
+      {/* Only where the day is made of it. */}
+      {!light && (
       <Card>
         <CardContent>
           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -235,17 +253,31 @@ export default function NurseryDay({ childId }) {
         </CardContent>
       </Card>
 
+      )}
+
       <Card>
         <CardContent>
-          <Typography variant="h5" sx={{ mb: 1.5 }}>היום בגן</Typography>
+          <Typography variant="h5" sx={{ mb: 1.5 }}>
+            {light ? 'מה עשינו היום' : 'היום בגן'}
+          </Typography>
 
-          {!log && (
+          {/* The older rooms' whole day, in the class's own words. Written
+              once for the room rather than once per child — a teacher of
+              twenty four-year-olds would never fill in twenty of these, and a
+              board nobody fills in is worse than no board. */}
+          {light && (data.activity ? (
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{data.activity}</Typography>
+          ) : (
+            <Alert severity="info">הצוות עוד לא כתב מה עשינו היום.</Alert>
+          ))}
+
+          {!light && !log && (
             <Alert severity="info">הצוות עוד לא עדכן היום.</Alert>
           )}
 
-          {absent && <Alert severity="warning" sx={{ mb: 2 }}>סומן כלא הגיע היום.</Alert>}
+          {!light && absent && <Alert severity="warning" sx={{ mb: 2 }}>סומן כלא הגיע היום.</Alert>}
 
-          {log && !absent && (
+          {!light && log && !absent && (
             <Stack spacing={1}>
               {mealLine('breakfast', 'בוקר')}
               <Row label="שנת בוקר" value={napLabel(sleep.morning)} empty="לא נרשמה" />
@@ -279,6 +311,45 @@ export default function NurseryDay({ childId }) {
           )}
         </CardContent>
       </Card>
+
+      {/* The day's photographs of the room. A class gallery, which is what the
+          staff upload and what every family in the room may see — a parent's
+          own upload is theirs alone and never appears here. */}
+      {light && photos.length > 0 && (
+        <Card>
+          <CardContent>
+            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+              <PhotoLibraryIcon fontSize="small" color="primary" />
+              <Typography variant="h5">תמונות מהיום</Typography>
+            </Stack>
+            <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: 'repeat(3, 1fr)' }}>
+              {photos.map(p => (
+                <Box
+                  key={p.id}
+                  onClick={() => setZoom(p)}
+                  sx={{
+                    aspectRatio: '1', borderRadius: '14px', overflow: 'hidden',
+                    cursor: 'pointer', border: 1, borderColor: 'divider',
+                  }}
+                >
+                  <Box component="img" src={p.thumb_url} alt={p.caption || ''} loading="lazy"
+                    sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                </Box>
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tapped open at full size. The grid is thumbnails — 400px wide, which
+          is a grid and not a photograph. */}
+      <Dialog open={Boolean(zoom)} onClose={() => setZoom(null)} maxWidth="md">
+        <Box
+          component="img" src={zoom?.url} alt={zoom?.caption || ''}
+          onClick={() => setZoom(null)}
+          sx={{ display: 'block', maxWidth: '100%', maxHeight: '85dvh', cursor: 'zoom-out' }}
+        />
+      </Dialog>
 
       {data.menu.length > 0 && (
         <Card>

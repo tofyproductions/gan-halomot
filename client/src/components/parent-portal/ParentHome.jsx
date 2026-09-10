@@ -131,6 +131,10 @@ function TodayCard({ day, childName, onOpen }) {
   const absent = log?.attendance === 'חסר';
   const stats = statsFrom(log);
   const recorded = stats.some(s => s.value) || absent;
+  // An older room has no bottle log to summarise. Its day is the line the
+  // class wrote, and that line IS the card — shown whole rather than squeezed
+  // into three tiles that would each hold a fragment of a sentence.
+  const light = day?.board === 'light';
 
   return (
     <DoorCard onClick={onOpen} label={`היום של ${childName}`}>
@@ -145,14 +149,20 @@ function TodayCard({ day, childName, onOpen }) {
           <Stack direction="row" alignItems="flex-start" sx={{ mb: 1.5 }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontFamily: DISPLAY, fontWeight: 800, fontSize: '1.15rem', lineHeight: 1.25 }}>
-                {absent ? `${childName} לא היה/תה היום בגן` : `היום של ${childName}`}
+                {absent && !light ? `${childName} לא היה/תה היום בגן` : `היום של ${childName}`}
               </Typography>
               <Typography variant="caption" sx={{ opacity: 0.92 }}>{todayLine()}</Typography>
             </Box>
             <More text="הכל" color="inherit" />
           </Stack>
 
-          {absent ? (
+          {light ? (
+            <Typography variant="body2" sx={{ opacity: 0.9, whiteSpace: 'pre-wrap' }}>
+              {day?.activity
+                ? day.activity
+                : 'הצוות עוד לא כתב מה עשינו היום.'}
+            </Typography>
+          ) : absent ? (
             <Typography variant="body2" sx={{ opacity: 0.9 }}>
               הצוות סימן היעדרות. יש לפנות לגן אם זו טעות.
             </Typography>
@@ -313,6 +323,40 @@ function PhotosCard({ photos, onOpen }) {
  * restraint.
  */
 function PaymentsCard({ payments, onOpen }) {
+  // At a ministry branch there is no ledger here at all — one balance from the
+  // last ClickTac export, and nothing to sum, prorate or mark paid. Its own
+  // card, because everything below assumes months.
+  if (payments.mode === 'external') {
+    const owed = payments.total_debt || 0;
+    return (
+      <DoorCard onClick={onOpen} label="תשלומים">
+        <Card>
+          <CardContent>
+            <Stack direction="row" alignItems="center">
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {owed > 0 ? 'יתרה לתשלום' : 'תשלומים'}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: DISPLAY, fontWeight: 800,
+                    fontSize: owed > 0 ? '1.5rem' : '1.15rem',
+                    lineHeight: 1.2, letterSpacing: '-0.02em',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: owed > 0 ? 'text.primary' : 'success.main',
+                  }}
+                >
+                  {owed > 0 ? money(owed) : 'אין יתרה פתוחה'}
+                </Typography>
+              </Box>
+              <More text="לפירוט" />
+            </Stack>
+          </CardContent>
+        </Card>
+      </DoorCard>
+    );
+  }
+
   const { summary, months, current_month: current } = payments;
   const settled = summary.remaining === 0;
   const currentMonth = months.find(m => m.month === current);
@@ -402,14 +446,14 @@ function QuickActions({ actions }) {
 }
 
 export default function ParentHome({
-  childId, childName, isNursery,
+  childId, childName, dayBoard,
   photos = [], payments = null, announcements = [], onOpen,
 }) {
   const [day, setDay] = useState(null);
-  const [loading, setLoading] = useState(isNursery);
+  const [loading, setLoading] = useState(Boolean(dayBoard));
 
   useEffect(() => {
-    if (!isNursery) { setDay(null); setLoading(false); return undefined; }
+    if (!dayBoard) { setDay(null); setLoading(false); return undefined; }
 
     let cancelled = false;
     setLoading(true);
@@ -426,7 +470,7 @@ export default function ParentHome({
     })();
 
     return () => { cancelled = true; };
-  }, [childId, isNursery]);
+  }, [childId, dayBoard]);
 
   if (loading) {
     return (
@@ -455,7 +499,7 @@ export default function ParentHome({
       />,
     );
   }
-  if (isNursery) {
+  if (dayBoard) {
     cards.push(
       <TodayCard key="day" day={day} childName={childName} onOpen={() => onOpen('day')} />,
     );

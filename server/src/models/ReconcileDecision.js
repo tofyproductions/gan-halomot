@@ -43,6 +43,55 @@ const partyOverrideSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
 }, { _id: false });
 
+/**
+ * A file the office attached to this child — in practice, a signed debt
+ * repayment agreement.
+ *
+ * It sits here rather than in its own collection because it answers the same
+ * question the note does — "what do we know about this family's account" —
+ * and is keyed by the same (branch, year, ת"ז) that survives every upload.
+ * The archive purge already refuses to delete a row anybody has decided
+ * something about, so an agreement cannot be swept away by a file import.
+ *
+ * The BYTES are in object storage; this is the permission and the paperwork.
+ * A signed agreement is a legal document and routinely a phone photograph of
+ * several megabytes, which is exactly what a MongoDB document cannot hold.
+ *
+ * TWO FLAGS DO THE WORK.
+ *
+ * `visible_to_parent` is off by default and always will be. The office
+ * attaches internal things here too — a bookkeeper's screenshot, a note from
+ * a lawyer — and a file that reaches a family's screen because somebody
+ * uploaded it to the wrong row cannot be recalled. Sharing is a deliberate
+ * second act.
+ *
+ * `deleted_at` is a soft delete with a week's grace, and the grace is the
+ * point: deleting a signed agreement is destroying evidence of an obligation,
+ * usually by accident. The row is hidden immediately, every system_admin gets
+ * the file itself by email the moment it happens, and the object survives
+ * seven more days so somebody who reads that email on Sunday can still get it
+ * back.
+ */
+const debtDocumentSchema = new mongoose.Schema({
+  key: { type: String, required: true },          // object storage key
+  file_name: { type: String, default: '' },       // as the office named it
+  content_type: { type: String, default: '' },
+  bytes: { type: Number, default: 0 },
+
+  /** Shown in the family's own מסמכים tab. Off unless somebody turns it on. */
+  visible_to_parent: { type: Boolean, default: false },
+
+  uploaded_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  uploaded_by_name: { type: String, default: '' },
+  uploaded_at: { type: Date, default: Date.now },
+
+  // Soft delete. `purge_after` is when the bytes actually go.
+  deleted_at: { type: Date, default: null },
+  deleted_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  deleted_by_name: { type: String, default: '' },
+  purge_after: { type: Date, default: null },
+});
+
 const reconcileDecisionSchema = new mongoose.Schema({
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
   academic_year: { type: String, required: true, index: true },
@@ -72,6 +121,9 @@ const reconcileDecisionSchema = new mongoose.Schema({
 
   /** Findings a person closed, one per code (a second answer replaces the first). */
   resolutions: { type: [resolutionSchema], default: [] },
+
+  /** Signed agreements and anything else the office attached to this child. */
+  documents: { type: [debtDocumentSchema], default: [] },
 
   /**
    * The family as the office knows it, where ClickTac is wrong. Shown, exported

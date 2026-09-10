@@ -379,6 +379,18 @@ connectDB().then(() => {
       setInterval(runArchive, 24 * 60 * 60 * 1000);
     }
 
+    // מסמכי חוב שנמחקו: the week's grace after somebody deletes a signed
+    // agreement. Daily — the copy is already in every admin's inbox, this is
+    // only the bytes finally going.
+    const debtDocPurge = require('./services/debtDocPurgeJob');
+    const runDebtDocPurge = () => debtDocPurge.tick()
+      .then(r => { if (r?.purged) console.log(`[debt-docs] purged ${r.purged} deleted documents`); })
+      .catch(e => console.error('[debt-docs] purge tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runDebtDocPurge, 12 * 60 * 1000);
+      setInterval(runDebtDocPurge, 24 * 60 * 60 * 1000);
+    }
+
     // שכבת גיל שונה: mail the office + עינת every morning there is an open
     // one, hourly and self-limiting like the compliance digest.
     const reconcileDigest = require('./services/reconcileDigestJob');
@@ -398,6 +410,17 @@ connectDB().then(() => {
     if (!platformMode) {
       setTimeout(runReconcileReminder, 7 * 60 * 1000);
       setInterval(runReconcileReminder, 60 * 60 * 1000);
+    }
+
+    // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
+    // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
+    // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.
+    const notificationService = require('./services/notification.service');
+    const runNotificationResend = () => notificationService.resendDue()
+      .then(n => { if (n) console.log(`[notifications] resent ${n} pending`); })
+      .catch(e => console.error('[notifications] resend failed:', e.message));
+    if (!platformMode) {
+      setInterval(runNotificationResend, 5 * 60 * 1000);
     }
   });
 });

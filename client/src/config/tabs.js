@@ -92,7 +92,7 @@ export const TAB_GROUPS = [
       // The infant rooms' daily board. Open to the people actually in the
       // room — a teacher needs it more than anyone, and a board filled in by
       // management is a board filled in by somebody who was not there.
-      { id: 'nursery',    label: 'לוח תינוקייה', path: '/nursery',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      { id: 'nursery',    label: 'לוח יומי',      path: '/nursery',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
       // Same gate as the board: the person who notices the wipes ran out is in
       // the room, not the office.
       { id: 'supplies',   label: 'מה חסר',      path: '/supplies', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },

@@ -71,6 +71,8 @@
     "test:clicktac-contracts": "node scripts/clicktac-contracts.test.js",
     "test:payment-check": "node scripts/payment-check.test.js",
     "test:reconcile-alerts": "node scripts/reconcile-alerts.test.js",
+    "test:day-board": "node scripts/day-board-kind.test.js",
+    "test:debt-docs": "node scripts/debt-documents.test.js",
     "test:design-tokens": "node scripts/design-tokens.test.js",
     "test:nav-model": "node scripts/nav-model.test.js",
     "test:design-hex": "node scripts/design-hex-budget.test.js",
@@ -104,6 +106,7 @@
     "puppeteer-core": "^23.0.0",
     "sharp": "^0.35.3",
     "uuid": "^10.0.0",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },

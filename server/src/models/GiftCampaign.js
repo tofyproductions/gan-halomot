@@ -17,6 +17,21 @@ const mongoose = require('mongoose');
 const giftCampaignSchema = new mongoose.Schema({
   name: { type: String, required: true },        // "מתנות ראש השנה 2026"
 
+  /**
+   * The occasion, as a family says it: "חנוכה", "סוכות", "סוף שנה".
+   *
+   * Separate from `name` because the two have different readers. `name` is the
+   * office's handle for the round — it may carry a year, a supplier, whatever
+   * the staff need to tell two rounds apart — and it was being printed
+   * verbatim on the parent's screen, so a round called "מבצע חנוכה" told
+   * families the gan was running a promotion. The parent's screen now reads
+   * "בחירת התמונה למתנת חנוכה", and this is the word that goes in it.
+   *
+   * Empty on the rounds that ran before this field existed; their screens keep
+   * showing `name`, which is what those families already saw.
+   */
+  occasion: { type: String, default: '' },       // "חנוכה"
+
   // The window, YYYY-MM-DD local. A day at the gan is a calendar day, and an
   // instant would let a timezone close the window an evening early.
   opens_on: { type: String, required: true },

@@ -22,6 +22,12 @@ router.post('/custom-roles/from-user/:userId', ctrl.createCustomRoleFromUser);
 router.patch('/custom-roles/:id', ctrl.updateCustomRole);
 router.delete('/custom-roles/:id', ctrl.deleteCustomRole);
 
+// Which build is live in the App Store and in Google Play. Typed in by hand
+// once a store approves one — see the controller for why it cannot be derived.
+const appVersion = require('../controllers/appVersion.controller');
+router.get('/app-version', appVersion.getVersions);
+router.put('/app-version', appVersion.setVersions);
+
 // SMTP diagnostics
 router.get('/email-diagnostic', ctrl.emailDiagnostic);
 router.post('/email-test', ctrl.emailTest);

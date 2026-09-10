@@ -1391,10 +1391,17 @@ async function debtors(req, res, next) {
         academic_year: { $in: years }, branch_id: { $in: branchIds },
       }).select('branch_id academic_year child parent1 parent2 contract.balance contract.family_balance contract.class_name enrollment.status sources presence.is_present contract.present').lean(),
       ReconcileDecision.find({ academic_year: { $in: years }, branch_id: { $in: branchIds } })
-        .select('branch_id academic_year id_number note').lean(),
+        .select('branch_id academic_year id_number note documents').lean(),
     ]);
 
     const noteByKey = new Map(decisionDocs.map(d => [`${d.branch_id}|${d.academic_year}|${d.id_number}`, d.note || '']));
+    // How many papers are attached to this family — a signed repayment
+    // agreement, usually. Only the count: the table shows a button, and the
+    // files themselves are behind it.
+    const docsByKey = new Map(decisionDocs.map(d => [
+      `${d.branch_id}|${d.academic_year}|${d.id_number}`,
+      (d.documents || []).filter(x => !x.deleted_at).length,
+    ]));
     // Who is live THIS year, per branch — so a previous-year debtor can be
     // marked "still with us" or "gone", the fact that decides whether a call
     // is worth making at all.
@@ -1432,6 +1439,7 @@ async function debtors(req, res, next) {
           active_this_year: r.academic_year === currentYear ? null
             : liveThisYear.has(`${r.branch_id}|${idNumber}`),
           note: noteByKey.get(key) || '',
+          documents_count: docsByKey.get(key) || 0,
         };
       })
       .sort((a, b) => a.balance - b.balance); // biggest debt first (most negative)

@@ -1,6 +1,7 @@
 const { Lead, Branch, User } = require('../models');
 const { dispatchEmail } = require('../services/email.service');
 const { sendSms } = require('../services/sms.service');
+const notificationService = require('../services/notification.service');
 
 const THANK_YOU_TEXT = 'תודה על פנייתכם, נחזור אליכם בהקדם. גן החלומות';
 
@@ -62,6 +63,10 @@ async function update(req, res, next) {
       setObj.status = req.body.status;
       setObj.handled_by = req.user?.id || null;
     }
+    if (req.body.status !== undefined && req.body.status !== 'new') {
+      notificationService.resolveEvents({ ref_collection: 'Lead', ref_id: req.params.id })
+        .catch(err => console.error('lead push resolve failed:', err.message));
+    }
     const lead = await Lead.findByIdAndUpdate(req.params.id, setObj, { new: true })
       .populate('branch_id', 'name').lean();
     if (!lead) return res.status(404).json({ error: 'פנייה לא נמצאה' });
@@ -73,6 +78,10 @@ async function update(req, res, next) {
 async function remove(req, res, next) {
   try {
     await Lead.deleteOne({ _id: req.params.id });
+    // Fire-and-forget: a deleted lead's pending push notifications must not
+    // keep pushing forever to a link that now goes nowhere.
+    notificationService.resolveEvents({ ref_collection: 'Lead', ref_id: req.params.id })
+      .catch(err => console.error('lead delete push resolve failed:', err.message));
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
@@ -122,6 +131,15 @@ async function publicSubmit(req, res, next) {
     // never fail the parent's submit over a notification channel; SMS and
     // email are independent so one failing never blocks the other).
     notifyNewLead(lead, branch).catch(err => console.error('lead notify failed:', err.message));
+    notificationService.branchManagerIds(lead.branch_id).then((ids) => {
+      const branchName = branch?.name || 'לא נבחר סניף';
+      ids.forEach((recipient_id) => notificationService.createEvent({
+        type: 'new_lead', ref_collection: 'Lead', ref_id: lead._id, recipient_id,
+        title: 'ליד חדש בגן החלומות',
+        body: `${lead.parent_name} — ${branchName}`,
+        url: '/leads',
+      }).catch(err => console.error('lead push create failed:', err.message)));
+    }).catch(err => console.error('lead push notify failed:', err.message));
     sendSms({ to: lead.parent_phone, text: THANK_YOU_TEXT })
       .catch(err => console.error('lead thank-you SMS failed:', err.message));
     if (lead.parent_email) {

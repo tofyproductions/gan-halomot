@@ -93,6 +93,7 @@ const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
 const DailyLog = require('./DailyLog');
 const DailyMenu = require('./DailyMenu');
+const ClassroomDay = require('./ClassroomDay');
 const Photo = require('./Photo');
 const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
@@ -103,10 +104,14 @@ const ParentLetter = require('./ParentLetter');
 const RateChangeRequest = require('./RateChangeRequest');
 const PushSubscription = require('./PushSubscription');
 const DataDeletionRequest = require('./DataDeletionRequest');
+const NotificationEvent = require('./NotificationEvent');
+const WebPushSubscription = require('./WebPushSubscription');
 
 const real = {
   PushSubscription,
   DataDeletionRequest,
+  NotificationEvent,
+  WebPushSubscription,
   PayrollRollup,
   User,
   CustomRole,
@@ -184,6 +189,7 @@ const real = {
   ParentPortalChange,
   DailyLog,
   DailyMenu,
+  ClassroomDay,
   Photo,
   GiftCampaign,
   GiftSelection,

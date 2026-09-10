@@ -11,6 +11,7 @@ import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
 import StockShortageTile from './StockShortageTile';
 import StatBoard from '../ui/StatBoard';
+import NotificationsPanel from './NotificationsPanel';
 
 /**
  * The chart library is 564KB — larger than the rest of this screen put
@@ -171,6 +172,17 @@ export default function Dashboard() {
           <Button variant="contained" onClick={() => navigate('/new-registration')}>+ רישום חדש</Button>
         </Stack>
       </Box>
+
+      {/* What is waiting for this person, before anything else on the page.
+          A dashboard's job is to say what needs doing, and until now the
+          notifications the system already wrote were only ever pushed to a
+          phone — never shown on a screen.
+
+          Kept ahead of the figures, which is where main put it: the numbers
+          below say how the gan is doing, and this says what somebody has to do
+          about it. The five KPI cards it used to sit above are gone — they are
+          what StatBoard replaced, hand-typed hexes and all. */}
+      <NotificationsPanel />
 
       {/* The one screen whose whole job is "at a glance" was the only one NOT
           using StatBoard — five identical centred cards, each with a hand-typed

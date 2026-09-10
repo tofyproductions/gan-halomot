@@ -334,6 +334,7 @@ export default function EmunahEnrollment() {
         open={debtorsOpen}
         onClose={() => setDebtorsOpen(false)}
         canEdit={canPlace}
+        canFile={canImport}
       />
 
       {/* ---------- upload ---------- */}

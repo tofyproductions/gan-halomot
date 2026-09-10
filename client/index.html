@@ -20,11 +20,18 @@
     screen previously produced an unnamed square with a screenshot in it, which
     is not something you ask an employee to do.
 
-    A manifest and icons only — deliberately NO service worker. A worker is what
-    makes an installed page keep serving last week's build after a deploy, and
-    the people on the receiving end here have no idea what a hard refresh is.
-    Everything below buys the icon, the name and the full-screen window; none of
-    it needs to cache a thing.
+    A manifest and icons — no caching service worker. A worker is what makes
+    an installed page keep serving last week's build after a deploy, and the
+    people on the receiving end here have no idea what a hard refresh is.
+    Everything below buys the icon, the name and the full-screen window; none
+    of it needs to cache a thing.
+
+    There IS one service worker now — public/sw.js — registered on demand
+    only when a user opts into push notifications via the notifications
+    toggle (never at boot). It exists solely to receive web push events and
+    show a notification; it must keep having NO fetch handler and NO caching,
+    the same constraint this comment always protected, or an installed page
+    starts serving a stale build again.
   -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" href="/favicon.png" />

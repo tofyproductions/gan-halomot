@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Card, CardContent, Typography, Stack, Box, Button, Alert, Chip,
+  Typography, Box, Button, Alert, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, LinearProgress,
 } from '@mui/material';
-import CardGiftcardIcon from '@mui/icons-material/CardGiftcard';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
+import GiftCallout from './GiftCallout';
 
 /**
  * Choosing the photograph that goes on this year's gift.
@@ -23,13 +22,6 @@ import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentCl
  * selected immediately, because adding one during this dialog is not an
  * ambiguous act.
  */
-
-/** "תמונה אחת" reads; "1 תמונות" does not. */
-function photoCount(n) {
-  if (n === 1) return 'תמונה אחת';
-  if (n === 2) return 'שתי תמונות';
-  return `${n} תמונות`;
-}
 
 export default function GiftPicker({ childId, childName }) {
   const [data, setData] = useState(null);
@@ -126,89 +118,26 @@ export default function GiftPicker({ childId, childName }) {
 
   return (
     <>
-      <Card
-        sx={{
-          // The whole surface changes, not a stripe down its edge. Loud while
-          // something is required of the family, quiet once it is done: a
-          // demand that stays loud after it has been met is a demand people
-          // learn to ignore.
-          bgcolor: campaign.open && !done ? 'warning.light' : 'background.paper',
-          borderColor: campaign.open && !done ? '#EFD3A6' : 'divider',
-        }}
-      >
-        <CardContent>
-          <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: 0.75 }}>
-            <Box
-              sx={{
-                width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-                display: 'grid', placeItems: 'center',
-                bgcolor: done ? 'success.light' : campaign.open ? 'primary.main' : 'action.hover',
-                color: done ? 'success.dark' : campaign.open ? '#fff' : 'text.secondary',
-              }}
-            >
-              {done ? <CheckCircleIcon /> : <CardGiftcardIcon />}
-            </Box>
-            <Typography variant="h5">{campaign.name}</Typography>
-          </Stack>
-
-          {campaign.product && (
-            <Typography variant="body2" color="text.secondary">
-              המתנה השנה: {campaign.product}
-            </Typography>
-          )}
-
-          {campaign.open && !done && (
-            <>
-              <Typography variant="body1" fontWeight={700} sx={{ mt: 1 }}>
-                צריך לבחור {photoCount(needed)} של {childName} עד {deadline}.
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                הצוות יבחר מתוכן את זו שמתאימה למתנה. אם לא תבחרו — הגן יבחר עבורכם.
-              </Typography>
-              {/* The one primary action on this card, and sized like it. */}
-              <Button
-                variant="contained" color="primary" size="large"
-                startIcon={<CardGiftcardIcon />}
-                sx={{ mt: 2, width: { xs: '100%', sm: 'auto' } }}
-                onClick={begin}
-              >
-                בחירת תמונות
-              </Button>
-            </>
-          )}
-
-          {campaign.open && done && (
-            <>
-              <Typography variant="body2" sx={{ mt: 1 }}>
-                הבחירה נשמרה. אפשר לשנות עד {deadline}.
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
-                {chosenPhotos.map(p => (
-                  <Box key={p.id} component="img" src={p.thumb_url} alt=""
-                    sx={{
-                      width: 76, height: 76, objectFit: 'cover', borderRadius: '14px',
-                      border: '2px solid', borderColor: 'success.main',
-                    }} />
-                ))}
-              </Stack>
-              <Button size="small" sx={{ mt: 1 }} onClick={begin}>שינוי הבחירה</Button>
-            </>
-          )}
-
-          {!campaign.open && (
-            <Alert severity="info" sx={{ mt: 1 }}>
-              מועד הבחירה הסתיים{finalised ? '. הגן בחר תמונה למתנה.' : '.'}
-            </Alert>
-          )}
-        </CardContent>
-      </Card>
+      <GiftCallout
+        occasion={campaign.occasion}
+        name={campaign.name}
+        product={campaign.product}
+        deadline={deadline}
+        needed={needed}
+        childName={childName}
+        open={campaign.open}
+        done={done}
+        finalised={finalised}
+        chosenPhotos={chosenPhotos}
+        onChoose={begin}
+      />
 
       <Dialog open={open} onClose={saving || uploading ? undefined : () => setOpen(false)}
         fullWidth maxWidth="sm">
         <DialogTitle>
-          בחירת תמונות למתנה
+          בחירת התמונה למתנה
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            נבחרו {draft.length} מתוך {needed}
+            סומנו {draft.length} מתוך {needed}
           </Typography>
         </DialogTitle>
         <DialogContent>

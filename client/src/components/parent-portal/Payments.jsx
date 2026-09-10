@@ -170,6 +170,118 @@ function MonthRow({ m, isLast }) {
   );
 }
 
+/**
+ * The same room, at a branch the gan does not collect for.
+ *
+ * At the ministry-supervised branches the family enrols and pays through
+ * קליקטאק and this system never sees a payment. There is no month-by-month
+ * ledger to show, and inventing one would be worse than showing nothing —
+ * which is what these families got until now.
+ *
+ * So: one figure per child, the מאזן from the last contracts file the office
+ * uploaded, with the date of that file beside it and a plain sentence saying
+ * it is not live. Every child of the family on the one screen, each with their
+ * own line: ClickTac keeps an account per child and a parent of three wants
+ * the three, apart rather than summed into a number no document shows.
+ *
+ * A child with no row says so. "Nobody has uploaded a file with this child in
+ * it" and "this child owes nothing" are different facts, and only one of them
+ * is safe to put on a screen.
+ */
+function ExternalPayments({ data }) {
+  const updated = data.updated_at ? formatDate(data.updated_at) : '';
+  const owed = data.total_debt || 0;
+
+  return (
+    <Stack spacing={2} sx={{ animation: 'riseIn .35s cubic-bezier(.22,1,.36,1) both' }}>
+      <Card>
+        <CardContent>
+          <Typography variant="caption" color="text.secondary">
+            {owed > 0 ? 'יתרה לתשלום' : 'מצב התשלומים'}
+          </Typography>
+          <Typography
+            sx={{
+              fontFamily: DISPLAY, fontWeight: 800,
+              fontSize: owed > 0 ? '2.25rem' : '1.5rem',
+              lineHeight: 1.15, letterSpacing: '-0.02em',
+              fontVariantNumeric: 'tabular-nums',
+              color: owed > 0 ? 'text.primary' : 'success.main',
+              mt: 0.25,
+            }}
+          >
+            {owed > 0 ? money(owed) : 'אין יתרה פתוחה'}
+          </Typography>
+          {updated && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+              נכון לעדכון האחרון שהתקבל: {updated}
+            </Typography>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Per child, and named. A parent of three opens this once and wants to
+          see which of the three the balance belongs to. */}
+      {data.children.map(c => (
+        <Card key={c.id}>
+          <CardContent>
+            <Typography variant="h5" sx={{ mb: 1 }}>{c.name}</Typography>
+
+            {!c.has_data && (
+              <Typography variant="body2" color="text.secondary">
+                אין נתון עדכני מהמערכת של המעון עבור {c.name}.
+              </Typography>
+            )}
+
+            {c.years.map(y => (
+              <Box
+                key={y.academic_year}
+                sx={{
+                  display: 'flex', alignItems: 'center', gap: 1.5, py: 1.25,
+                  borderBottom: 1, borderColor: 'divider',
+                  '&:last-of-type': { borderBottom: 0 },
+                }}
+              >
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={y.is_current_year ? 800 : 600}>
+                    {y.year_label}
+                  </Typography>
+                  {y.updated_at && (
+                    <Typography variant="caption" color="text.secondary">
+                      עודכן {formatDate(y.updated_at)}
+                    </Typography>
+                  )}
+                </Box>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    fontWeight: 700, fontVariantNumeric: 'tabular-nums',
+                    textAlign: 'left', flexShrink: 0,
+                    color: y.debt > 0 ? 'text.primary' : 'text.secondary',
+                  }}
+                >
+                  {y.debt > 0 ? money(y.debt) : y.credit > 0 ? `זכות ${money(y.credit)}` : '—'}
+                </Typography>
+                <Box sx={{ flexShrink: 0 }}>
+                  <StatusPill status={y.debt > 0 ? 'overdue' : 'paid'} />
+                </Box>
+              </Box>
+            ))}
+          </CardContent>
+        </Card>
+      ))}
+
+      {/* Said plainly, and not in small print. The figure above came out of a
+          file somebody exported on a particular day; a family who paid this
+          morning must not read it as the gan disputing that. */}
+      <Alert severity="info">
+        הרישום והתשלומים במעון מתנהלים במערכת חיצונית, והנתונים כאן מתעדכנים רק
+        כשמתקבל ממנה קובץ. ייתכן שתשלום שביצעתם לאחרונה עדיין לא מופיע כאן.
+        לבירור, לתיקון או לקבלה — יש לפנות למשרד.
+      </Alert>
+    </Stack>
+  );
+}
+
 export default function Payments({ childId }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -219,6 +331,8 @@ export default function Payments({ childId }) {
       </Alert>
     );
   }
+
+  if (data.mode === 'external') return <ExternalPayments data={data} />;
 
   const { summary, months, camp, registration_fee: regFee } = data;
   const progress = summary.expected > 0
