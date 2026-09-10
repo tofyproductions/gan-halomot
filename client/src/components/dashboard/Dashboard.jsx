@@ -9,6 +9,7 @@ import { useBranch } from '../../hooks/useBranch';
 import { getClassroomColor } from '../../utils/classroomColors';
 import ChildDetailDialog from '../shared/ChildDetailDialog';
 import StockShortageTile from './StockShortageTile';
+import NotificationsPanel from './NotificationsPanel';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -161,6 +162,12 @@ export default function Dashboard() {
           <Button variant="contained" onClick={() => navigate('/new-registration')}>+ רישום חדש</Button>
         </Stack>
       </Box>
+
+      {/* What is waiting for this person, before anything else on the page.
+          A dashboard's job is to say what needs doing, and until now the
+          notifications the system already wrote were only ever pushed to a
+          phone — never shown on a screen. */}
+      <NotificationsPanel />
 
       {/* KPI Cards */}
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 2, mb: 4 }}>

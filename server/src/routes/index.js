@@ -85,6 +85,9 @@ router.use('/branches', require('./branch.routes'));
 // The customer's own subscription — what they pay and why. Read-only.
 router.use('/account', require('./account.routes'));
 router.use('/push', require('./push.routes'));
+// The notifications waiting for the caller — the second place to look when a
+// push arrived while the phone was in a drawer. See the controller.
+router.use('/notifications', require('./notifications.routes'));
 router.use('/data-deletion', require('./dataDeletion.routes'));
 router.use('/dashboard', require('./dashboard.routes'));
 router.use('/children', require('./children.routes'));
