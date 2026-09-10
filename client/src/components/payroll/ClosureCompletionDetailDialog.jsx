@@ -130,13 +130,13 @@ export default function ClosureCompletionDetailDialog({ open, row, month, onClos
         ) : (
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Stack direction="row" spacing={2}>
-              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'secondary.50', borderRadius: 2, textAlign: 'center' }}>
+              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'secondary.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">מאושרים לתשלום</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>
                   {approvable.filter(d => approved.has(d.date)).length} / {approvable.length}
                 </Typography>
               </Box>
-              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.50', borderRadius: 2, textAlign: 'center' }}>
+              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">בונוס משוער</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800, color: 'success.dark' }}>{ils(approvedEstimate)}</Typography>
               </Box>
@@ -187,7 +187,7 @@ export default function ClosureCompletionDetailDialog({ open, row, month, onClos
                         sx={{
                           cursor: worked || editingBlocked ? 'default' : 'pointer',
                           opacity: worked ? 0.55 : 1,
-                          bgcolor: isOn ? 'success.50' : undefined,
+                          bgcolor: isOn ? 'success.soft' : undefined,
                         }}
                       >
                         <TableCell padding="checkbox">

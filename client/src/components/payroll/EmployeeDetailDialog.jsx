@@ -413,7 +413,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
                             <TableCell align="left" sx={{ fontWeight: 700, color: 'warning.dark' }}>{formatCurrency(tb.completion)}</TableCell>
                           </TableRow>
                         )}
-                        <TableRow sx={{ bgcolor: 'grey.50' }}>
+                        <TableRow sx={{ bgcolor: 'background.sunken' }}>
                           <TableCell sx={{ fontWeight: 700 }}>שכר מוסכם <Typography component="span" variant="caption" color="text.secondary">(יסוד + שע״נ + השלמה)</Typography></TableCell>
                           <TableCell align="left" sx={{ fontWeight: 800 }}>{formatCurrency(tb.regular_pay + tb.ot_pay + tb.completion)}</TableCell>
                         </TableRow>
@@ -455,7 +455,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
                       <TableCell align="left" sx={{ color: 'error.main' }}>-{formatCurrency(breakdown.deductions.absence)}</TableCell>
                     </TableRow>
                   )}
-                  <TableRow sx={{ bgcolor: 'primary.50' }}>
+                  <TableRow sx={{ bgcolor: 'primary.soft' }}>
                     <TableCell sx={{ fontWeight: 800 }}>סה״כ מוערך</TableCell>
                     <TableCell align="left" sx={{ fontWeight: 900, fontSize: '1.1rem' }}>{formatCurrency(breakdown.estimated_total)}</TableCell>
                   </TableRow>

@@ -399,13 +399,26 @@ export default function CollectionsTable() {
     }
   };
 
-  // Cell color
+  /**
+   * What a cell IS — one answer, used for both its tint and its glyph.
+   *
+   * It returned only an `sx` before, which meant the state existed nowhere the
+   * cell could show it any other way. On a printed sheet, and for the roughly
+   * one man in twelve who cannot separate the green from the red, the tint was
+   * the whole message and the message did not arrive.
+   */
+  const cellStateOf = (paid, expected, isBeforeStart) => {
+    if (isBeforeStart) return 'before';
+    if (paid >= expected && expected > 0) return 'paid';
+    if (paid > 0 && paid < expected) return 'partial';
+    if (paid === 0 && expected > 0) return 'unpaid';
+    return null;
+  };
+
   const getCellSx = (paid, expected, isBeforeStart) => {
-    if (isBeforeStart) return { bgcolor: COLOR.collections.cell.before.bg, color: COLOR.collections.cell.before.on };
-    if (paid >= expected && expected > 0) return { bgcolor: COLOR.collections.cell.paid.bg, color: COLOR.collections.cell.paid.on };
-    if (paid > 0 && paid < expected) return { bgcolor: COLOR.collections.cell.partial.bg, color: COLOR.collections.cell.partial.on };
-    if (paid === 0 && expected > 0) return { bgcolor: COLOR.collections.cell.unpaid.bg, color: COLOR.collections.cell.unpaid.on };
-    return {};
+    const st = cellStateOf(paid, expected, isBeforeStart);
+    if (!st) return {};
+    return { bgcolor: COLOR.collections.cell[st].bg, color: COLOR.collections.cell[st].on };
   };
 
   // Monthly totals (collected + expected + percentage)
@@ -470,11 +483,18 @@ export default function CollectionsTable() {
         sx={{ mb: 1.5, alignItems: 'center' }}>
         {Object.entries(CELL_LEGEND).map(([k, label]) => (
           <Stack key={k} direction="row" spacing={0.5} alignItems="center">
+            {/* The swatch carries the mark, so the key explains both halves of
+                what the cell is telling you — not just the colour. */}
             <Box sx={{
               width: 16, height: 14, borderRadius: 0.75,
               bgcolor: COLOR.collections.cell[k].bg,
+              color: COLOR.collections.cell[k].on,
               border: '1px solid', borderColor: 'divider',
-            }} />
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.6rem', fontWeight: 700, lineHeight: 1,
+            }}>
+              {COLOR.collections.cell[k].mark}
+            </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
               {label}
             </Typography>
@@ -603,6 +623,7 @@ export default function CollectionsTable() {
                 onRegFeeClick={handleRegFeeClick}
                 onExitMonth={handleExitMonth}
                 getCellSx={getCellSx}
+                cellStateOf={cellStateOf}
                 onChildClick={(childId) => setSelectedChild(childId)}
               />
             ))}
@@ -1040,7 +1061,7 @@ export default function CollectionsTable() {
 }
 
 /* Grouped rows for a classroom */
-function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExitMonth, getCellSx, onChildClick }) {
+function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExitMonth, getCellSx, cellStateOf, onChildClick }) {
   const subtotals = {};
   columns.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -1096,6 +1117,7 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
               const notes = m.notes || '';
               const isDupOverride = m.is_duplicate_override === true;
               const cellSx = getCellSx(paid, expected, isBeforeStart);
+              const cellMark = COLOR.collections.cell[cellStateOf(paid, expected, isBeforeStart)]?.mark;
               const hasContent = !!(receipt || notes);
               // A cell is a real billable month (and thus editable) whenever it
               // has a month record — expected_amount != null — EVEN when that
@@ -1121,6 +1143,21 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                     }
                   }}
                 >
+                  {/* The state, as a mark rather than only as a tint. Corner,
+                      small, low-contrast — enough to read when the colour is
+                      gone, quiet enough not to compete with the amount. */}
+                  {cellMark && (
+                    <Box
+                      component="span"
+                      aria-hidden
+                      sx={{
+                        position: 'absolute', top: 1, insetInlineStart: 3,
+                        fontSize: '0.6rem', lineHeight: 1, opacity: 0.65, fontWeight: 700,
+                      }}
+                    >
+                      {cellMark}
+                    </Box>
+                  )}
                   {monthNum === CAMP_MONTH && m.camp_enrolled === false ? (
                     <span style={{ fontSize: '0.72rem', fontWeight: 600, opacity: 0.7 }}>לא בקייטנה</span>
                   ) : hasContent ? (

@@ -211,7 +211,7 @@ function PayslipFileRow({ row, idx, branches, canRemove, onChange, onRemove, hid
       sx={{
         p: 1.25, display: 'grid', gridTemplateColumns: { xs: '1fr', sm: hideBranch ? '1fr auto' : '2fr 1.5fr auto' }, gap: 1.5, alignItems: 'center',
         transition: 'all .15s',
-        ...(dragOver ? { borderColor: 'primary.main', borderStyle: 'dashed', bgcolor: 'primary.50', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' } : {}),
+        ...(dragOver ? { borderColor: 'primary.main', borderStyle: 'dashed', bgcolor: 'primary.soft', boxShadow: '0 0 0 2px rgba(99,102,241,0.15)' } : {}),
       }}
     >
       {/* File picker (click or drag-and-drop a PDF onto the row) */}
@@ -787,7 +787,7 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
       variant="outlined"
       sx={{
         p: 1.25,
-        bgcolor: reviewed ? 'success.50' : r.__manual ? 'warning.50' : isEmpty ? 'grey.50' : 'background.paper',
+        bgcolor: reviewed ? 'success.soft' : r.__manual ? 'warning.soft' : isEmpty ? 'background.sunken' : 'background.paper',
         borderColor: reviewed ? 'success.main' : 'divider',
         borderWidth: reviewed ? 2 : 1,
         opacity: isEmpty && !expanded ? 0.7 : 1,
@@ -838,8 +838,8 @@ function EmployeeBlock({ r, rIdx, defaultExpanded, onUpdate, onRemove, onAdd, on
             // Visual treatment per status — rejected findings dim out, approved
             // get a green border, pending stay neutral.
             const rowBg =
-              status === 'approved' ? 'success.50' :
-              status === 'rejected' ? 'grey.100'   :
+              status === 'approved' ? 'success.soft' :
+              status === 'rejected' ? 'background.sunken'   :
               'transparent';
             const rowOpacity = status === 'rejected' ? 0.55 : 1;
             return (
@@ -1514,7 +1514,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
             )}
           </Box>
           {/* Right: expected (table) ↔ detected (payslip) diff for THIS employee */}
-          <Box sx={{ flex: '1 1 40%', overflowY: 'auto', p: 1.5, bgcolor: 'grey.50' }}>
+          <Box sx={{ flex: '1 1 40%', overflowY: 'auto', p: 1.5, bgcolor: 'background.sunken' }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                 השוואה: צפוי (טבלה) ↔ זוהה בתלוש
@@ -1613,7 +1613,7 @@ function ResultCard({ result, expanded, onToggle, savedAuditId, reviewed, onTogg
       </Dialog>
       <Collapse in={expanded}>
         <Divider />
-        <Box sx={{ p: 2, bgcolor: 'grey.50' }}>
+        <Box sx={{ p: 2, bgcolor: 'background.sunken' }}>
           <Stack spacing={1}>
             {result.findings.length === 0 ? (
               <Typography variant="body2" align="center" color="success.dark">✓ הכל תקין</Typography>
@@ -2022,7 +2022,7 @@ export function PayslipDistributionDialog({ open, audit, onClose }) {
           </>
         )}
         {log && (
-          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.sunken' }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
               <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
@@ -2328,7 +2328,7 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
                     <Divider />
                     <Box sx={{ p: 1 }}>
                       {r.items.map((it) => (
-                        <Paper key={it.key} variant="outlined" sx={{ p: 1, mb: 1, bgcolor: it.matched ? 'transparent' : 'grey.50' }}>
+                        <Paper key={it.key} variant="outlined" sx={{ p: 1, mb: 1, bgcolor: it.matched ? 'transparent' : 'background.sunken' }}>
                           <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5, flexWrap: 'wrap' }}>
                             <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{it.employee_name}</Typography>
                             {it.branch && <Typography variant="caption" color="text.secondary">{it.branch}</Typography>}
@@ -2383,7 +2383,7 @@ export function FixRoundDialog({ open, auditId, branches = [], onClose, onOpenRo
                               );
                             })}
                             {it.new_findings.map((f, fi) => (
-                              <Box key={`nf${fi}`} sx={{ p: 0.75, borderRadius: 1, bgcolor: 'error.50', border: '1px solid', borderColor: 'error.light' }}>
+                              <Box key={`nf${fi}`} sx={{ p: 0.75, borderRadius: 1, bgcolor: 'error.soft', border: '1px solid', borderColor: 'error.light' }}>
                                 <Typography variant="caption" sx={{ fontWeight: 800, color: 'error.dark' }}>⚠ ממצא חדש שלא היה בהערות: </Typography>
                                 <Typography variant="caption">{f.message}</Typography>
                               </Box>
@@ -2548,7 +2548,7 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
                       : <Chip size="small" color="error" label="אין קובץ" />}
                   </Stack>
                   <Collapse in={!!expanded[it.branch]}>
-                    <Table size="small" sx={{ bgcolor: 'grey.50' }}>
+                    <Table size="small" sx={{ bgcolor: 'background.sunken' }}>
                       <TableBody>
                         {emps.length === 0 && <TableRow><TableCell colSpan={4} align="center" sx={{ color: 'text.secondary', py: 1 }}>אין עובדים מותאמים בקובץ.</TableCell></TableRow>}
                         {emps.map((e, j) => (
@@ -2577,7 +2577,7 @@ export function ManagerDistributionDialog({ open, audit, onClose }) {
           </Stack>
         )}
         {log && (
-          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+          <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.sunken' }}>
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
               <Typography variant="caption" color="text.secondary">{log.at ? new Date(log.at).toLocaleString('he-IL') : ''}</Typography>
@@ -3701,7 +3701,7 @@ export default function PayslipAudit() {
                       sx={{
                         borderColor: hasApproved ? 'success.main' : 'divider',
                         borderRight: hasApproved ? 4 : 1,
-                        bgcolor: hasApproved ? 'success.50' : 'background.paper',
+                        bgcolor: hasApproved ? 'success.soft' : 'background.paper',
                       }}
                     >
                       <Box
@@ -3770,7 +3770,7 @@ export default function PayslipAudit() {
                               <TableRow
                                 key={h._id}
                                 hover
-                                sx={{ cursor: 'pointer', bgcolor: audit?.saved_audit_id === h._id ? 'primary.50' : 'inherit' }}
+                                sx={{ cursor: 'pointer', bgcolor: audit?.saved_audit_id === h._id ? 'primary.soft' : 'inherit' }}
                                 onClick={() => loadFromHistory(h._id)}
                               >
                                 <TableCell>
@@ -3862,7 +3862,7 @@ export default function PayslipAudit() {
 
               {/* Cibus report meta — when a Cibus file was uploaded */}
               {audit.cibus_report_meta && (
-                <Box sx={{ mt: 2, p: 1.25, bgcolor: 'info.50', borderRadius: 1.5, border: '1px solid', borderColor: 'info.light' }}>
+                <Box sx={{ mt: 2, p: 1.25, bgcolor: 'info.soft', borderRadius: 1.5, border: '1px solid', borderColor: 'info.light' }}>
                   <Typography variant="caption" sx={{ fontWeight: 700, display: 'block', mb: 0.5 }}>
                     🍽️ דוח סיבוס/Pluxee נטען
                   </Typography>
@@ -3964,7 +3964,7 @@ export default function PayslipAudit() {
                         const pct = total === 0 ? 0 : Math.round((done / total) * 100);
                         const allDone = total > 0 && done === total;
                         return (
-                          <TableRow key={i} sx={{ bgcolor: allDone ? 'success.50' : 'inherit' }}>
+                          <TableRow key={i} sx={{ bgcolor: allDone ? 'success.soft' : 'inherit' }}>
                             <TableCell sx={{ fontWeight: 600 }}>
                               {allDone && <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main', verticalAlign: 'middle', ml: 0.5 }} />}
                               {b.branch}
@@ -4209,7 +4209,7 @@ export default function PayslipAudit() {
                   </Box>
 
                   {approvedPayslips.length > 0 && (
-                    <Paper variant="outlined" sx={{ p: 1, bgcolor: 'success.50', borderColor: 'success.light' }}>
+                    <Paper variant="outlined" sx={{ p: 1, bgcolor: 'success.soft', borderColor: 'success.light' }}>
                       <Typography variant="caption" sx={{ fontWeight: 800, color: 'success.dark' }}>
                         ✓ {approvedPayslips.length} תלושים מאושרים שיצוינו במייל:
                       </Typography>
@@ -4441,11 +4441,11 @@ export default function PayslipAudit() {
               (order[a.status] - order[b.status]) || a.name.localeCompare(b.name, 'he')
             );
             const cellSx = (cell) => {
-              if (!cell) return { bgcolor: 'grey.100', color: 'text.disabled' };
+              if (!cell) return { bgcolor: 'background.sunken', color: 'text.disabled' };
               const total = cell.critical + cell.warning;
-              if (total === 0) return { bgcolor: 'success.50', color: 'success.dark', fontWeight: 700 };
-              if (cell.critical > 0) return { bgcolor: 'error.50', color: 'error.dark', fontWeight: 700 };
-              return { bgcolor: 'warning.50', color: 'warning.dark', fontWeight: 700 };
+              if (total === 0) return { bgcolor: 'success.soft', color: 'success.dark', fontWeight: 700 };
+              if (cell.critical > 0) return { bgcolor: 'error.soft', color: 'error.dark', fontWeight: 700 };
+              return { bgcolor: 'warning.soft', color: 'warning.dark', fontWeight: 700 };
             };
             const cellLabel = (cell) => {
               if (!cell) return '—';

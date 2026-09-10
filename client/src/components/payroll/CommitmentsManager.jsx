@@ -387,7 +387,7 @@ export default function CommitmentsManager() {
       <Paper sx={{ borderRadius: 3, overflow: 'auto' }}>
         <Table size="small">
           <TableHead>
-            <TableRow sx={{ bgcolor: 'grey.50' }}>
+            <TableRow sx={{ bgcolor: 'background.sunken' }}>
               <TableCell align="center" sx={{ fontWeight: 700, width: 44 }}>#</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>סניף</TableCell>
@@ -415,7 +415,7 @@ export default function CommitmentsManager() {
               let serial = 0;
               for (const [branchName, list] of branchGroups) {
                 rows.push(
-                  <TableRow key={`hdr-${branchName}`} sx={{ bgcolor: 'grey.200' }}>
+                  <TableRow key={`hdr-${branchName}`} sx={{ bgcolor: 'background.sunkenDeep' }}>
                     <TableCell colSpan={11} sx={{ fontWeight: 900, py: 0.75 }}>
                       🏠 {branchName} <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500, fontSize: '0.8rem' }}>• {list.length}</Box>
                     </TableCell>

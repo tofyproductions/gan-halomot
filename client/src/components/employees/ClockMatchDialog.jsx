@@ -315,7 +315,7 @@ export default function ClockMatchDialog({ open, branchId, branchName, onClose, 
               </Box>
             )}
 
-            <Box sx={{ p: 1.5, border: '1px dashed', borderColor: 'primary.light', borderRadius: 2, bgcolor: 'primary.50' }}>
+            <Box sx={{ p: 1.5, border: '1px dashed', borderColor: 'primary.light', borderRadius: 2, bgcolor: 'primary.soft' }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 0.5 }}>הוספת עובד/ת קיים/ת לשעון סניף זה</Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
                 עובד/ת שכבר קיים/ת במערכת (עם ת"ז) ועובד/ת גם כאן — בחר/י ולחץ/י "הוסף לשעון". נשלחת פקודה למכשיר לרשום את ת"ז + השם.

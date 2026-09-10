@@ -166,7 +166,7 @@ export default function PendingPunchApprovals({ onChanged }) {
 
   return (
     <>
-      <Paper variant="outlined" sx={{ borderRadius: 3, mb: 2, p: 2, borderColor: 'warning.main', bgcolor: 'warning.50' }}>
+      <Paper variant="outlined" sx={{ borderRadius: 3, mb: 2, p: 2, borderColor: 'warning.main', bgcolor: 'warning.soft' }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: expanded ? 1.5 : 0 }}>
           <PendingActionsIcon color="warning" />
           <Typography variant="subtitle1" sx={{ fontWeight: 800, flex: 1 }}>

@@ -134,7 +134,7 @@ export default function CrossBranchEdits({ open, onClose, month, onCountChange, 
                     const meta = STATUS_META[e.status] || { label: e.status, color: 'default' };
                     const canAct = e.status === 'pending_manager' && !busyId;
                     return (
-                      <Box key={e._id} sx={{ p: 1, borderRadius: 2, bgcolor: 'grey.50' }}>
+                      <Box key={e._id} sx={{ p: 1, borderRadius: 2, bgcolor: 'background.sunken' }}>
                         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
                           <Chip size="small" color="default" variant="outlined" label={e.host_branch_name} />
                           <Typography variant="body2">

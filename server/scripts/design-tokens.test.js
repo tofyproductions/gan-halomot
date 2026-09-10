@@ -45,6 +45,132 @@ function contrast(a, b) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/**
+ * Colour-blind simulation, Brettel/Viénot-style, on linear sRGB.
+ *
+ * `new Set(bgs).size === bgs.length` — which is what this file used to assert —
+ * only proves nobody typed the same hex twice. Two tints can differ by one
+ * digit and be the same colour to the eye, and a red and a green chosen to be
+ * as different as possible are the SAME colour to roughly one man in twelve.
+ * The states in this app are read by four branch managers and an accountant
+ * across a month-wide grid; "distinct" has to mean distinct to them too.
+ */
+function toLinear(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  return [0, 2, 4].map((i) => {
+    const c = parseInt(m[1].slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+}
+
+/** Linear sRGB → CIE XYZ (D65). */
+function toXyz([r, g, b]) {
+  return [
+    0.4124 * r + 0.3576 * g + 0.1805 * b,
+    0.2126 * r + 0.7152 * g + 0.0722 * b,
+    0.0193 * r + 0.1192 * g + 0.9505 * b,
+  ];
+}
+
+/** CIE XYZ → CIE Lab (D65 white point), so distances are perceptual. */
+function toLab(hex) {
+  const [x, y, z] = toXyz(toLinear(hex));
+  const [xn, yn, zn] = [0.95047, 1, 1.08883];
+  const f = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (841 / 108) * t + 4 / 29);
+  const [fx, fy, fz] = [f(x / xn), f(y / yn), f(z / zn)];
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+
+/** Plain CIE76 ΔE. Coarse, but honest and dependency-free. */
+function deltaE(a, b) {
+  const [l1, a1, b1] = toLab(a);
+  const [l2, a2, b2] = toLab(b);
+  return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
+}
+
+/**
+ * What the colour looks like to a protanope or a deuteranope. The matrices are
+ * the standard Viénot–Brettel–Mollon approximations, applied in linear sRGB.
+ */
+const CVD = {
+  protanopia:   [[0.152, 1.053, -0.205], [0.115, 0.786, 0.099], [-0.004, -0.048, 1.052]],
+  deuteranopia: [[0.367, 0.861, -0.228], [0.280, 0.673, 0.047], [-0.012, 0.043, 0.969]],
+};
+
+function simulate(hex, kind) {
+  const lin = toLinear(hex);
+  const out = CVD[kind].map((row) => row.reduce((acc, k, i) => acc + k * lin[i], 0));
+  const enc = out.map((c) => {
+    const v = Math.min(1, Math.max(0, c));
+    const srgb = v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055;
+    return Math.round(srgb * 255).toString(16).padStart(2, '0');
+  });
+  return `#${enc.join('')}`;
+}
+
+/**
+ * Every pair in a family has to stay apart — for normal vision AND for both
+ * common kinds of colour blindness.
+ *
+ * ΔE 10 is deliberately modest: these are pale tints behind text, seen next to
+ * each other in a grid, not swatches on a card. It is enough to catch "these
+ * two are the same beige", which is the failure that matters.
+ */
+function assertDistinct(label, entries, minDeltaE = 10) {
+  let worst = { d: Infinity, pair: '', mode: '' };
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [na, ca] = entries[i];
+      const [nb, cb] = entries[j];
+      for (const mode of ['normal', 'protanopia', 'deuteranopia']) {
+        const a = mode === 'normal' ? ca : simulate(ca, mode);
+        const b = mode === 'normal' ? cb : simulate(cb, mode);
+        const d = deltaE(a, b);
+        if (d < worst.d) worst = { d, pair: `${na} ↔ ${nb}`, mode };
+      }
+    }
+  }
+  ok(worst.d >= minDeltaE,
+    `${label} — הזוג הקרוב ביותר ${worst.pair} (${worst.mode}) ΔE ${worst.d.toFixed(1)}`,
+    `נדרש ΔE ${minDeltaE}`);
+}
+
+/**
+ * The rule for a family whose members also carry a glyph.
+ *
+ * Teal and pink are the same colour to a deuteranope and no amount of nudging
+ * fixes that while both stay teal and pink — which is the honest reason this
+ * app marks its exceptional states rather than only tinting them. So: colour
+ * has to do the whole job for normal vision, and under colour blindness a pair
+ * may lean on its glyphs — but only if it HAS two different ones. A state with
+ * no glyph gets no such allowance, in any mode.
+ */
+function assertDistinctOrMarked(label, entries, minDeltaE = 10) {
+  let worstNormal = { d: Infinity, pair: '' };
+  const unprotected = [];
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const [na, ca, ma] = entries[i];
+      const [nb, cb, mb] = entries[j];
+      const dn = deltaE(ca, cb);
+      if (dn < worstNormal.d) worstNormal = { d: dn, pair: `${na} ↔ ${nb}` };
+      const glyphed = !!ma && !!mb && ma !== mb;
+      for (const mode of ['protanopia', 'deuteranopia']) {
+        const d = deltaE(simulate(ca, mode), simulate(cb, mode));
+        if (d < minDeltaE && !glyphed) {
+          unprotected.push(`${na} ↔ ${nb} (${mode}) ΔE ${d.toFixed(1)}`);
+        }
+      }
+    }
+  }
+  ok(worstNormal.d >= minDeltaE,
+    `${label} — הזוג הקרוב ביותר ${worstNormal.pair} ΔE ${worstNormal.d.toFixed(1)}`,
+    `נדרש ΔE ${minDeltaE}`);
+  ok(unprotected.length === 0,
+    `${label} — אין זוג שנשען על צבע בלבד בעיוורון צבעים`,
+    unprotected.join(' · '));
+}
+
 async function main() {
   console.log('=== אסימוני עיצוב: ניגודיות ושלמות ===\n');
   const { COLOR, RADIUS, SPACING_UNIT, TYPE, MOTION } = await import(TOKENS);
@@ -108,10 +234,21 @@ async function main() {
     const ratio = contrast(pair.on, pair.bg);
     ok(ratio >= AA, `punch.${state} — ${ratio.toFixed(2)}:1  ${pair.label}`, `נדרש ${AA}`);
   }
-  // Six states a manager tells apart at a glance across a month of forty
+  // Seven states a manager tells apart at a glance across a month of forty
   // employees: two that look alike are two she reads wrong.
-  const bgs = Object.values(COLOR.punch).map((p) => p.bg.toLowerCase());
-  ok(new Set(bgs).size === bgs.length, `כל ${bgs.length} מצבי ההחתמה בגוון נפרד`);
+  assertDistinctOrMarked('מצבי ההחתמה נבדלים לעין',
+    Object.entries(COLOR.punch).map(([k, p]) => [k, p.bg, p.mark]));
+
+  /**
+   * And the tint is never the only carrier. Six of the seven states have a
+   * glyph; `clock` is the ordinary day and deliberately has none, because a
+   * mark on every cell marks nothing.
+   */
+  const marked = Object.entries(COLOR.punch).filter(([k]) => k !== 'clock');
+  ok(marked.every(([, p]) => p.mark), 'לכל מצב חריג יש סימן ולא רק גוון',
+    marked.filter(([, p]) => !p.mark).map(([k]) => k).join(', '));
+  const marks = marked.map(([, p]) => p.mark);
+  ok(new Set(marks).size === marks.length, 'כל סימן מופיע פעם אחת');
 
   console.log('\nניגודיות צבעי הסניפים:');
   for (const [name, b] of Object.entries(COLOR.branch)) {
@@ -197,8 +334,8 @@ async function main() {
     ok(contrast(c.on, c.bg) >= AA, `collections.cell.${k} — ${contrast(c.on, c.bg).toFixed(2)}:1`, `נדרש ${AA}`);
   }
   // A year of these read across one row: two that look alike are a debt missed.
-  const cBgs = Object.values(COLOR.collections.cell).map((c) => c.bg.toLowerCase());
-  ok(new Set(cBgs).size === cBgs.length, `כל ${cBgs.length} מצבי התשלום בגוון נפרד`);
+  assertDistinctOrMarked('מצבי התשלום נבדלים לעין',
+    Object.entries(COLOR.collections.cell).map(([k, c]) => [k, c.bg, c.mark]));
   for (const [k, c] of Object.entries(COLOR.collections.summary)) {
     ok(contrast(COLOR.text.primary, c) >= AA, `collections.summary.${k} — טקסט ${contrast(COLOR.text.primary, c).toFixed(2)}:1`);
   }

@@ -84,15 +84,15 @@ export default function CibusImportDialog({ open, month, onClose, onImported }) 
             <>
               <Divider />
               <Stack direction="row" spacing={2}>
-                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.50', borderRadius: 2, textAlign: 'center' }}>
+                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
                   <Typography variant="caption" color="text.secondary">הותאמו</Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800 }}>{result.matched_count}</Typography>
                 </Box>
-                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
+                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.soft', borderRadius: 2, textAlign: 'center' }}>
                   <Typography variant="caption" color="text.secondary">לא הותאמו</Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800 }}>{result.unmatched_count}</Typography>
                 </Box>
-                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.50', borderRadius: 2, textAlign: 'center' }}>
+                <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.soft', borderRadius: 2, textAlign: 'center' }}>
                   <Typography variant="caption" color="text.secondary">סכום כולל</Typography>
                   <Typography variant="h5" sx={{ fontWeight: 800 }}>{Math.round(result.total_amount)} ₪</Typography>
                 </Box>

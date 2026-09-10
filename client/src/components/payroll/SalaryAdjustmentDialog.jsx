@@ -100,7 +100,7 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
         {loading ? <Typography variant="caption" color="text.secondary">טוען…</Typography> : list.length === 0 ? (
           <Typography variant="caption" color="text.disabled">אין עדכוני שכר חודשי לחודש זה.</Typography>
         ) : (
-          <List dense sx={{ bgcolor: 'grey.50', borderRadius: 2, mb: 2 }}>
+          <List dense sx={{ bgcolor: 'background.sunken', borderRadius: 2, mb: 2 }}>
             {list.map(adj => (
               <ListItem key={adj.id} sx={{ pr: 1 }}>
                 <ListItemText

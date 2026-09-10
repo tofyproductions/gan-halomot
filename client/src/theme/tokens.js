@@ -50,6 +50,18 @@ export const COLOR = {
     paper: '#FFFFFF',
     // The band a page header or a table toolbar sits on.
     sunken: '#F3EEE6',
+    /**
+     * One step below sunken, for a band INSIDE a sunken one — a branch heading
+     * row across a table that already stripes its group headers.
+     *
+     * It exists because 58 places reached for MUI's default `grey.50` /
+     * `grey.100` / `grey.200`, which are cold neutrals (#FAFAFA, #F5F5F5,
+     * #EEEEEE) sitting on warm paper. A cold grey next to warm ink is the exact
+     * thing that made every screen read as a stock template, and greys are the
+     * one family the token file could not police, because MUI supplies them
+     * whether we want them or not.
+     */
+    sunkenDeep: '#E9E1D5',
   },
 
   text: {
@@ -141,13 +153,39 @@ export const COLOR = {
    * because "these hours came from a fixed schedule" and "somebody typed this
    * and it is not approved yet" are real distinctions with no semantic role.
    */
+  /**
+   * `mark` is not decoration.
+   *
+   * Seven states told apart by seven pale tints is a grid that roughly one man
+   * in twelve cannot read, and that nobody at all can read on a printout that
+   * came out of a black-and-white printer — which is how this report leaves the
+   * office. The tint stays, because it is faster for everyone else; the glyph
+   * is what makes the state survive losing the tint. `clock` has none on
+   * purpose: it is the normal day, and marking every normal day marks nothing.
+   */
   punch: {
-    clock:      { bg: '#E4F0E7', on: '#255239', label: 'החתמת שעון' },
-    manual:     { bg: '#E7EFF8', on: '#274D74', label: '✎ עדכון ידני' },
-    fixed:      { bg: '#DEEFEC', on: '#1C574F', label: '⏱ שעות קבועות' },
-    incomplete: { bg: '#FFF1DC', on: '#6B3F00', label: 'חסרה יציאה' },
-    pending:    { bg: '#ECE9F6', on: '#413A7D', label: 'ידני — ממתין לאישור' },
-    review:     { bg: '#FBE9E6', on: '#8C1D18', label: '⚠️ החתמה כפולה — להחלטת הנה״ח' },
+    /**
+     * The ordinary day has NO tint.
+     *
+     * It used to be pale green, which meant a month of forty employees was a
+     * wall of colour with the three cells that need somebody buried in it — and
+     * green measured ΔE 3.5 from the teal beside it, so it was not even its own
+     * colour. Paper is the strongest thing "nothing happened here" can be, and
+     * it is the one state that stays legible with no glyph.
+     */
+    clock:      { bg: '#FFFFFF', on: '#255239', mark: '',  label: 'החתמת שעון' },
+    manual:     { bg: '#D6E7FA', on: '#274D74', mark: '✎', label: '✎ עדכון ידני' },
+    fixed:      { bg: '#B3E0D6', on: '#1C574F', mark: '⏱', label: '⏱ שעות קבועות' },
+    incomplete: { bg: '#FCE9C0', on: '#6B3F00', mark: '⚠', label: '⚠ חסרה יציאה' },
+    pending:    { bg: '#DCD4F4', on: '#413A7D', mark: '⏳', label: '⏳ ידני — ממתין לאישור' },
+    review:     { bg: '#F8CFC8', on: '#8C1D18', mark: '‼', label: '‼ החתמה כפולה — להחלטת הנה״ח' },
+    /**
+     * The seventh state, which was a pair of raw hexes inside AttendanceMonitor
+     * — and therefore absent from the legend, which is generated from this
+     * object. A colour on the grid that the legend cannot name is a colour
+     * nobody can read.
+     */
+    closure:    { bg: '#F6CFE2', on: '#7A2748', mark: '📋', label: '📋 השלמת שכר — יום סגירה בתשלום' },
   },
 
   /**
@@ -251,14 +289,23 @@ export const COLOR = {
    * columns, and `registration` the דמי רישום column.
    */
   collections: {
+    /**
+     * Paid, part-paid, unpaid — and `mark`, for the same reason the punch grid
+     * has one: green and red are one colour to a deuteranope, and this sheet is
+     * printed and posted. The glyph rides in the corner of the cell, the amount
+     * stays the amount.
+     *
+     * `before` is a month the child had not started yet: nothing was due and
+     * nothing is owed. Its glyph is a dash, which is what the cell means.
+     */
     cell: {
-      paid:    { bg: '#E4F0E7', on: '#255239' },
-      partial: { bg: '#FDF3E2', on: '#6B3F00' },
-      unpaid:  { bg: '#FBEDEA', on: '#8C1D18' },
+      paid:    { bg: '#DCEEE1', on: '#255239', mark: '✓' },
+      partial: { bg: '#FCE9C0', on: '#6B3F00', mark: '◐' },
+      unpaid:  { bg: '#F8CFC8', on: '#8C1D18', mark: '✗' },
       // Muted, not unreadable. The original was #94a3b8 on #f1f5f9 — 2.33:1,
       // and the cell still prints the amount, so a month before the child
       // started was a figure nobody could actually read.
-      before:  { bg: '#F3EEE6', on: '#6B6157' },
+      before:  { bg: '#E3DCD1', on: '#5E554B', mark: '–' },
     },
     summary: {
       expected: '#EDF2F9',

@@ -200,7 +200,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
         {loading ? <Box sx={{ textAlign: 'center', py: 2 }}><CircularProgress size={28} /></Box> : punches.length === 0 ? (
           <Typography variant="caption" color="text.disabled">אין החתמות ליום זה.</Typography>
         ) : (
-          <List dense sx={{ bgcolor: 'grey.50', borderRadius: 2, mb: 2 }}>
+          <List dense sx={{ bgcolor: 'background.sunken', borderRadius: 2, mb: 2 }}>
             {punches.map(p => {
               const e = editing[p._id];
               return (

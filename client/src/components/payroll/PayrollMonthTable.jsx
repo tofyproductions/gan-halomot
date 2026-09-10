@@ -1826,7 +1826,7 @@ export default function PayrollMonthTable() {
   return (
     <Box dir="rtl">
       {stagingMode && (
-        <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.50', border: '1px solid', borderColor: 'info.light' }}>
+        <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.soft', border: '1px solid', borderColor: 'info.light' }}>
           <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.dark' }}>
             ✏️ מצב עריכה לבקשת אישור — כל שינוי שתבצע יישלח להנה״ח לאישור
           </Typography>
@@ -1895,7 +1895,7 @@ export default function PayrollMonthTable() {
                   return (
                     <MenuItem key={g.branch_id} value={g.branch_id} sx={{ py: 0.5 }}>
                       <Checkbox size="small" checked={ganFilter.includes(g.branch_id)} />
-                      <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: mk?.strip || 'grey.400', mr: 1, ml: 0.5, flexShrink: 0 }} />
+                      <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: mk?.strip || 'dividerStrong', mr: 1, ml: 0.5, flexShrink: 0 }} />
                       <Typography variant="body2">{g.branch_name} <Box component="span" sx={{ color: 'text.disabled', fontSize: '0.72rem' }}>• {g.rows.length}</Box></Typography>
                     </MenuItem>
                   );
@@ -1993,7 +1993,7 @@ export default function PayrollMonthTable() {
           tableLayout: 'fixed',
           minWidth: 1100,
           '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px', verticalAlign: 'middle' },
-          '& td.auto': { bgcolor: 'grey.50', color: 'text.secondary' },
+          '& td.auto': { bgcolor: 'background.sunken', color: 'text.secondary' },
           '& .ag-divider': { borderLeft: '2px solid', borderColor: 'divider' },
           '& tbody tr:nth-of-type(even) td': { bgcolor: 'rgba(0,0,0,0.015)' },
           '& tbody tr:nth-of-type(even) td.auto': { bgcolor: 'rgba(0,0,0,0.035)' },
@@ -2042,10 +2042,10 @@ export default function PayrollMonthTable() {
                 borderLeft: '2px solid', borderColor: 'divider',
               }} className="ag-divider">שם העובד</TableCell>
               <TableCell colSpan={6} align="center" sx={{
-                fontWeight: 800, bgcolor: 'primary.50', color: 'primary.dark',
+                fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.50' }} className="ag-divider">
+              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -2092,7 +2092,7 @@ export default function PayrollMonthTable() {
               )}
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.50' }}>הלוואות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
@@ -2152,7 +2152,7 @@ export default function PayrollMonthTable() {
                 const color = branchInfo ? branchColor(branchInfo.color_index || 0) : null;
                 // Vivid marker strip when the gan is recognised; otherwise fall
                 // back to the soft positional palette.
-                const stripBg = marker?.strip || color?.header || 'grey.200';
+                const stripBg = marker?.strip || color?.header || 'background.sunkenDeep';
                 const stripText = marker?.stripText || color?.accent || 'text.primary';
                 const stripBorder = marker?.accent || color?.border || 'divider';
                 const stripCell = {
@@ -2482,7 +2482,7 @@ export default function PayrollMonthTable() {
                       )}
                       <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.50' }} onClick={() => setLoansDlg({ open: true, row: r })}>
+                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.soft' }} onClick={() => setLoansDlg({ open: true, row: r })}>
                         <LoansSummaryCell row={r} />
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: COLOR.payrollColumn.bonus.cell }} onClick={() => !locked && setBonusDlg({ open: true, row: r })}>

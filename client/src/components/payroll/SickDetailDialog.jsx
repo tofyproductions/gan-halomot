@@ -300,15 +300,15 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
         <Stack spacing={2} sx={{ mt: 1 }}>
           {/* Summary: days, paid days, ₪ pay */}
           <Stack direction="row" spacing={1.5}>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ימי מחלה החודש</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{Number(manualDays) || 0}</Typography>
             </Box>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'info.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'info.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ימים בתשלום</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{preview.totalPaidDays}</Typography>
             </Box>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">דמי מחלה</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800, color: 'success.dark' }}>{ils(preview.totalAmount)}</Typography>
             </Box>
@@ -456,7 +456,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
                   const pv = previewById.get(String(r.id)) || {};
                   const full = !!r.pay_from_first_day || policy === 'full';
                   return (
-                    <TableRow key={r.id} sx={editingId === r.id ? { bgcolor: 'primary.50' } : undefined}>
+                    <TableRow key={r.id} sx={editingId === r.id ? { bgcolor: 'primary.soft' } : undefined}>
                       <TableCell>{r.from_date}</TableCell>
                       <TableCell>{r.to_date}</TableCell>
                       <TableCell align="center"><Chip label={r.days} size="small" color="error" /></TableCell>

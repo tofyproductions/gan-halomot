@@ -224,7 +224,7 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
                     <Button size="small" variant="text" onClick={() => setPreview({ title: it.branch, scope: 'branch', branch: it.branch })} sx={{ fontSize: 11 }}>תצוגת סניף</Button>
                   </Stack>
                   <Collapse in={!!expanded[it.branch]}>
-                    <Table size="small" sx={{ bgcolor: 'grey.50' }}>
+                    <Table size="small" sx={{ bgcolor: 'background.sunken' }}>
                       <TableBody>
                         {emps.map((e, j) => (
                           <TableRow key={j}>
@@ -273,7 +273,7 @@ export default function HoursDistributionDialog({ open, onClose, month }) {
           const counts = (lg.results || []).reduce((a, r) => { a[r.status] = (a[r.status] || 0) + 1; return a; }, {});
           const HE = { sent: 'נשלח', error: 'שגיאה', no_email: 'אין מייל', no_manager: 'אין מנהל', no_selection: 'אין בחירה', no_match: 'לא הותאם' };
           return (
-            <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'grey.50' }}>
+            <Box sx={{ mt: 2, p: 1.5, border: '1px solid', borderColor: 'divider', borderRadius: 1, bgcolor: 'background.sunken' }}>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>לוג שליחה אחרון</Typography>
                 <Typography variant="caption" color="text.secondary">{lg.at ? new Date(lg.at).toLocaleString('he-IL') : ''}</Typography>

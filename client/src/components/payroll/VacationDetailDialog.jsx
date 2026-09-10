@@ -71,7 +71,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Stack direction="row" spacing={2}>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">יתרה מתלוש</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{balance ?? '—'}</Typography>
               {balanceDate && (
@@ -80,11 +80,11 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                 </Typography>
               )}
             </Box>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ניצול חודשי</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{usedDays}</Typography>
             </Box>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">נשאר</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{remaining ?? '—'}</Typography>
             </Box>

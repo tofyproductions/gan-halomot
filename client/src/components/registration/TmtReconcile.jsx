@@ -4,6 +4,7 @@ import {
   Table, TableHead, TableBody, TableRow, TableCell, Dialog, DialogTitle, DialogContent,
   DialogActions, Alert, AlertTitle, CircularProgress, Tooltip, IconButton, Divider,
   ToggleButton, ToggleButtonGroup, List, ListItem, ListItemText, Popover,
+  TableContainer,
 } from '@mui/material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import SearchIcon from '@mui/icons-material/Search';
@@ -13,7 +14,6 @@ import ContactPhoneIcon from '@mui/icons-material/ContactPhone';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import PlaylistAddCheckIcon from '@mui/icons-material/PlaylistAddCheck';
 import HistoryIcon from '@mui/icons-material/History';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import UndoIcon from '@mui/icons-material/Undo';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
@@ -62,15 +62,22 @@ function BalanceCell({ balance, family }) {
   if (balance == null) return <Typography variant="caption" color="text.disabled">—</Typography>;
   const owes = balance < 0;
   const credit = balance > 0;
-  const text = owes ? `חוב ${fmtMoney(-balance)}` : credit ? `זכות ${fmtMoney(balance)}` : '0 ₪';
+  // The word and the figure are two things: "חוב 1,410 ₪" in one cell means a
+  // column of balances never aligns on its digits. The label carries the sense,
+  // the number carries the comparison.
+  const word = owes ? 'חוב' : credit ? 'זכות' : '';
+  const text = owes ? fmtMoney(-balance) : credit ? fmtMoney(balance) : '0 ₪';
   const tip = family != null && family !== balance
     ? `מאזן משפחתי (כולל אחים): ${family < 0 ? `חוב ${fmtMoney(-family)}` : fmtMoney(family)}` : '';
   return (
     <Tooltip title={tip}>
-      <Typography variant="body2" sx={NOWRAP}
+      <Typography variant="body2" component="span" sx={{ ...NOWRAP, display: 'inline-flex', alignItems: 'baseline', gap: 0.5 }}
         color={owes ? 'error.main' : credit ? 'success.main' : 'text.secondary'}
         fontWeight={owes ? 700 : 400}>
-        {text}
+        {word && (
+          <Box component="span" sx={{ fontSize: '0.6875rem', fontWeight: 500, opacity: 0.75 }}>{word}</Box>
+        )}
+        <Box component="span" className="num">{text}</Box>
       </Typography>
     </Tooltip>
   );
@@ -636,32 +643,20 @@ export default function TmtReconcile({
 
   return (
     <Box sx={{ p: 2 }}>
-      {!embedded && (
-        <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
-          <Typography variant="h5" fontWeight={700}>הצלבת תמ"ת מול קליקטאק</Typography>
-          <TextField
-            select size="small" label="סניף" value={branchId}
-            onChange={e => setBranchId(e.target.value)} sx={{ minWidth: 200 }}
-          >
-            {branches.map(b => (
-              <MenuItem key={b.id || b._id} value={b.id || b._id}>{b.name}</MenuItem>
-            ))}
-          </TextField>
-          <Chip variant="outlined" label={`שנת ${formatAcademicYear(year)}`} />
-          <Box sx={{ flex: 1 }} />
-          <Button startIcon={<UploadFileIcon />} variant="contained"
-            onClick={() => setUploadDlg({ open: true, file: null, saving: false, result: null })}>
-            העלאת קובץ תמ"ת
-          </Button>
-          <Tooltip title="רענון"><span>
-            <IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton>
-          </span></Tooltip>
-        </Stack>
-      )}
-
-      <Alert severity="info" sx={{ mb: 2 }}>
+      {/*
+        * This screen is ALWAYS embedded — EmunahEnrollment owns the page header,
+        * its title, its branch and year line and its one filled button, and
+        * renders this component underneath. There is no second header here, and
+        * a `!embedded` branch that drew one would be a header nobody ever sees.
+        *
+        * The standing note about how a child qualifies is a caption, not an
+        * Alert. It is true on every load and about nothing in particular, and an
+        * alert that is always on is not an alert — it is a sentence wearing a
+        * blue box, taking 56px off the top of the table every time.
+        */}
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
         ילד נקלט לשנה הבאה רק אם הוא מופיע גם ברשימת האישורים של משרד התמ"ת וגם ברישום בקליקטאק.
-      </Alert>
+      </Typography>
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {loading && <Box sx={{ textAlign: 'center', py: 4 }}><CircularProgress /></Box>}
@@ -880,8 +875,16 @@ export default function TmtReconcile({
             <Button size="small" startIcon={<HistoryIcon />} onClick={openHistory}>היסטוריית העלאות</Button>
             <Button size="small" startIcon={<ContactPhoneIcon />} onClick={openContacts}>דף קשר</Button>
             <Button size="small" startIcon={<DownloadIcon />} onClick={handleExport}>ייצוא לאקסל</Button>
+            {/* The action the whole screen exists to reach.
+                It was a small outlined button at the end of four others, which
+                put "apply everything you just reviewed" at the same weight as
+                "export to Excel". It cannot move to the page header — that
+                belongs to EmunahEnrollment, which knows nothing about this
+                dialog — and it should not: it acts on the table below it, and
+                this is the last thing you touch before that table changes. */}
             {canImport && (
-              <Button size="small" variant="outlined" color="warning" startIcon={<PlaylistAddCheckIcon />}
+              <Button variant="contained" color="warning" startIcon={<PlaylistAddCheckIcon />}
+                sx={{ ml: 0.5 }}
                 onClick={() => setApplyDlg({ open: true, saving: false, result: null, error: null })}>
                 החלת המסקנות
               </Button>
@@ -1033,10 +1036,16 @@ export default function TmtReconcile({
               to two, and a table whose every row is four lines tall cannot be
               scanned — which is the whole job of this screen. The table keeps
               its natural width and the container scrolls sideways. */}
-          <Card sx={{ overflowX: 'auto' }}>
-            <Table size="small" sx={{ minWidth: 1320 }}>
+          {/* The header stays. A table of 260 children scrolled sideways AND
+              downwards, and by row twenty the column names were gone — so the
+              seventh column was "some date" and the ninth was "some chip".
+              maxHeight is what makes `stickyHeader` do anything at all; without
+              a scrolling box there is nothing for the header to stick to. */}
+          <Card>
+            <TableContainer sx={{ maxHeight: 'calc(100vh - 260px)' }}>
+              <Table size="small" stickyHeader sx={{ minWidth: 1320 }}>
               <TableHead>
-                <TableRow sx={{ '& th': NOWRAP }}>
+                <TableRow sx={{ '& th': { ...NOWRAP, bgcolor: 'background.paper' } }}>
                   <TableCell>שם הילד/ה</TableCell>
                   <TableCell>ת״ז</TableCell>
                   <TableCell>תאריך לידה</TableCell>
@@ -1075,7 +1084,22 @@ export default function TmtReconcile({
               </TableHead>
               <TableBody>
                 {visible.map(r => (
-                  <TableRow key={r.id_number} hover>
+                  <TableRow
+                    key={r.id_number}
+                    hover
+                    /**
+                     * The row itself says whether it needs somebody.
+                     *
+                     * COLOR.row.attention was defined with a comment explaining
+                     * that this is how a table should work — "a row that needs
+                     * attention is tinted; a row that is fine is white" — and
+                     * then used nowhere, so finding the one problem row still
+                     * meant scanning coloured chips across thirteen columns.
+                     */
+                    sx={r.verdict && r.verdict !== 'approved' && r.verdict !== 'private'
+                      ? { bgcolor: 'row.attention' }
+                      : undefined}
+                  >
                     <TableCell sx={NOWRAP}>
                       {r.child_name}
                       {r.has_note && (
@@ -1091,14 +1115,14 @@ export default function TmtReconcile({
                         </Tooltip>
                       )}
                     </TableCell>
-                    <TableCell sx={NOWRAP}>{r.id_number}</TableCell>
+                    <TableCell sx={NOWRAP} className="num">{r.id_number}</TableCell>
                     {/* The source of the birth date used to be a second line
                         under every date in the table — sixty repetitions of
                         "לפי תמ"ת" to answer a question asked about two rows.
                         It is a tooltip now. */}
                     <TableCell sx={NOWRAP}>
                       <Tooltip title={r.age_source ? `תאריך הלידה לפי ${r.age_source}` : ''}>
-                        <span>{fmtDate(r.birth_date)}</span>
+                        <span className="num">{fmtDate(r.birth_date)}</span>
                       </Tooltip>
                     </TableCell>
                     {/* Compact on the line, complete on hover. See compactAge. */}
@@ -1294,7 +1318,8 @@ export default function TmtReconcile({
                   </TableCell></TableRow>
                 )}
               </TableBody>
-            </Table>
+              </Table>
+            </TableContainer>
           </Card>
         </>
       )}

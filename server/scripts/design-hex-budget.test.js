@@ -72,8 +72,18 @@ function main() {
    * check that missed it counted USAGES rather than the import.
    */
   console.log('\nכל קובץ שמשתמש באסימונים גם מייבא אותם:');
+  /**
+   * Comments do not execute, and a comment that explains WHY a token exists is
+   * exactly the comment worth writing — so `// COLOR.row.attention was defined
+   * and never used` must not be read as a use. Stripping them first keeps the
+   * check about code; without it the fix is to delete the explanation, which is
+   * the wrong thing to teach.
+   */
+  const stripComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
   const missingImport = files.filter((f) => {
-    const src = fs.readFileSync(f, 'utf8');
+    const src = stripComments(fs.readFileSync(f, 'utf8'));
     return /\bCOLOR\./.test(src) && !/import\s*\{[^}]*\bCOLOR\b[^}]*\}/.test(src);
   });
   if (missingImport.length) {

@@ -227,11 +227,11 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Stack direction="row" spacing={2}>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'error.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">הלוואות פעילות</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{activeCount}</Typography>
             </Box>
-            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
+            <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ניכוי החודש</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{Math.round(monthDeduction)} ₪</Typography>
             </Box>
@@ -316,7 +316,7 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                     );
                   const editRow = editIdx === idx && editDraft ? (
                     <TableRow key={`${l._id || idx}-edit`}>
-                      <TableCell colSpan={9} sx={{ bgcolor: 'grey.50' }}>
+                      <TableCell colSpan={9} sx={{ bgcolor: 'background.sunken' }}>
                         <Stack spacing={1}>
                           <Typography variant="caption" color="text.secondary">
                             עריכת הלוואה — שינוי כל פרמטר יבנה מחדש את לוח התשלומים לפי הערכים החדשים.

@@ -181,7 +181,7 @@ export default function SalaryTable() {
       <TableCell align="center" sx={{ color: r.deductions > 0 ? 'error.main' : 'text.disabled' }}>
         {r.deductions > 0 ? `-${formatCurrency(r.deductions)}` : '—'}
       </TableCell>
-      <TableCell align="center" sx={{ fontWeight: 800, bgcolor: 'primary.50' }}>
+      <TableCell align="center" sx={{ fontWeight: 800, bgcolor: 'primary.soft' }}>
         {formatCurrency(r.estimated_total)}
       </TableCell>
       <TableCell>
@@ -201,7 +201,7 @@ export default function SalaryTable() {
   );
 
   const renderTotalsRow = (t, label, key, accent = false) => (
-    <TableRow key={key} sx={{ bgcolor: accent ? 'primary.50' : 'grey.100', '& td': { fontWeight: 800, fontSize: '0.95rem' } }}>
+    <TableRow key={key} sx={{ bgcolor: accent ? 'primary.soft' : 'background.sunken', '& td': { fontWeight: 800, fontSize: '0.95rem' } }}>
       <TableCell>{label}</TableCell>
       <TableCell>{t.employees ? t.employees + ' עובדים' : ''}</TableCell>
       <TableCell align="center">{t.hours}h</TableCell>
@@ -212,7 +212,7 @@ export default function SalaryTable() {
       <TableCell align="center">{formatCurrency(t.base)}</TableCell>
       <TableCell align="center" sx={{ color: 'success.main' }}>+{formatCurrency(t.extras)}</TableCell>
       <TableCell align="center" sx={{ color: 'error.main' }}>-{formatCurrency(t.deductions)}</TableCell>
-      <TableCell align="center" sx={{ bgcolor: accent ? 'primary.100' : undefined }}>{formatCurrency(t.total)}</TableCell>
+      <TableCell align="center" sx={{ bgcolor: accent ? 'primary.soft' : undefined }}>{formatCurrency(t.total)}</TableCell>
       <TableCell />
     </TableRow>
   );
@@ -301,7 +301,7 @@ export default function SalaryTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>שכר בסיס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>תוספות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>ניכויים</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'primary.50' }}>סה״כ מוערך</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'primary.soft' }}>סה״כ מוערך</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>הערות</TableCell>
             </TableRow>
           </TableHead>
@@ -320,7 +320,7 @@ export default function SalaryTable() {
               const branchKey = grp.branch._id || grp.branch.id;
               const out = [];
               out.push(
-                <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'grey.200' }}>
+                <TableRow key={`hdr-${branchKey}`} sx={{ bgcolor: 'background.sunkenDeep' }}>
                   <TableCell colSpan={12} sx={{ fontWeight: 900, fontSize: '0.95rem', py: 1 }}>
                     🏠 {grp.branch.name}
                     {grp.error && <Chip size="small" color="error" label={'שגיאה: ' + grp.error} sx={{ ml: 1 }} />}

@@ -70,15 +70,15 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
 
           {isHourly && (
             <Stack direction="row" spacing={2}>
-              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.50', borderRadius: 2, textAlign: 'center' }}>
+              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">ימים זכאים</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>{auto.total_days}</Typography>
               </Box>
-              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.50', borderRadius: 2, textAlign: 'center' }}>
+              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">סכום אוטומטי</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>{auto.total_pay} ₪</Typography>
               </Box>
-              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.50', borderRadius: 2, textAlign: 'center' }}>
+              <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">סכום סופי בטבלה</Typography>
                 <Typography variant="h5" sx={{ fontWeight: 800 }}>{manual} ₪</Typography>
               </Box>

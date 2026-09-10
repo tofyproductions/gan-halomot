@@ -56,6 +56,26 @@ function formatHours(h) {
   return `${h}h`;
 }
 
+/**
+ * Which of the seven punch states a day is in — one function, because the
+ * screen and the printout each used to decide this for themselves and did not
+ * agree. On screen a day could be `closure` (pink, its own tint); on paper the
+ * same day came out as an ordinary punched day, and the office reads the
+ * printed sheet.
+ *
+ * Order matters and is the order of urgency: a day that needs a decision is
+ * that, whatever else is also true of it.
+ */
+function punchStateOf(day) {
+  if (day.needs_review) return 'review';
+  if (day.has_pending) return 'pending';
+  if (day.incomplete) return 'incomplete';
+  if (day.has_manual) return 'manual';
+  if (day.has_fixed_schedule) return 'fixed';
+  if (day.has_closure_completion) return 'closure';
+  return 'clock';
+}
+
 export default function AttendanceMonitor() {
   const { selectedBranch, selectedBranchName, isAllBranches, branches } = useBranch();
   const { isAdmin, isAccountant, isManager } = useAuth();
@@ -177,10 +197,12 @@ export default function AttendanceMonitor() {
 
   const renderEmployeeRow = (block, key) => {
     // Visual treatment per row state:
-    //  - unlinked  → warning.50 (existing)
+    //  - unlinked  → COLOR.attendanceRow.unlinked — the token that was written
+    //                for exactly this row and then never referenced, while the
+    //                row asked for `warning.50`, which is not a colour MUI has.
     //  - guest     → soft purple — clearly NOT a home employee
     //  - has away  → no special bg, but a chip in the name cell
-    const rowBg = block.unlinked ? 'warning.50' : (block.is_guest ? COLOR.attendanceRow.guest.bg : undefined);
+    const rowBg = block.unlinked ? COLOR.attendanceRow.unlinked.bg : (block.is_guest ? COLOR.attendanceRow.guest.bg : undefined);
     return (
     <TableRow key={key} hover sx={rowBg ? { bgcolor: rowBg } : undefined}>
       <TableCell sx={{
@@ -191,7 +213,7 @@ export default function AttendanceMonitor() {
         borderLeft: '1px solid', borderColor: 'divider',
         minWidth: 200,
         cursor: block.employee_id && !block.unlinked ? 'pointer' : 'default',
-        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: rowBg || '#f1f5f9' } : {},
+        '&:hover': block.employee_id && !block.unlinked ? { bgcolor: rowBg || COLOR.row.hover } : {},
       }}
       onClick={() => {
         if (block.employee_id && !block.unlinked) {
@@ -209,7 +231,7 @@ export default function AttendanceMonitor() {
               <Chip
                 label={`אורח/ת מסניף ${block.home_branch_name}`}
                 size="small"
-                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#a855f7', color: 'white', fontWeight: 700 }}
+                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: COLOR.attendanceRow.guest.on, color: COLOR.background.paper, fontWeight: 700 }}
               />
             )}
             {block.away_total_hours > 0 && (
@@ -253,7 +275,7 @@ export default function AttendanceMonitor() {
             <Box sx={{
               width: 52, height: 42, mx: 'auto', borderRadius: 1.5,
               border: '1px dashed', borderColor: 'transparent',
-              '&:hover': { borderColor: 'primary.light', bgcolor: 'primary.50' },
+              '&:hover': { borderColor: 'primary.light', bgcolor: 'primary.soft' },
             }} />
           </TableCell>
         );
@@ -266,18 +288,11 @@ export default function AttendanceMonitor() {
         //   Teal   = generated from the employee's fixed weekly hours (no clock)
         //   Pink   = "השלמת שכר אוגוסט" — a committed day inside a branch closure
         //   Green  = punched on the clock by the employee (complete)
-        let bgColor, textColor;
-        // The six punch states live in theme/tokens.js#COLOR.punch, measured for
-        // contrast and checked for being distinguishable from one another. The
-        // legend under the grid is generated from the same object, so it cannot
-        // describe a colour the grid stopped using.
-        if (day.needs_review) { bgColor = COLOR.punch.review.bg; textColor = COLOR.punch.review.on; }
-        else if (day.has_pending) { bgColor = COLOR.punch.pending.bg; textColor = COLOR.punch.pending.on; }
-        else if (day.incomplete) { bgColor = COLOR.punch.incomplete.bg; textColor = COLOR.punch.incomplete.on; }
-        else if (day.has_manual) { bgColor = COLOR.punch.manual.bg; textColor = COLOR.punch.manual.on; }
-        else if (day.has_fixed_schedule) { bgColor = COLOR.punch.fixed.bg; textColor = COLOR.punch.fixed.on; }
-        else if (day.has_closure_completion) { bgColor = '#fce7f3'; textColor = '#9d174d'; }
-        else { bgColor = COLOR.punch.clock.bg; textColor = COLOR.punch.clock.on; }
+        // The seven punch states live in theme/tokens.js#COLOR.punch, measured
+        // for contrast and checked for being distinguishable from one another.
+        // The legend under the grid is generated from the same object, so it
+        // cannot describe a colour the grid stopped using.
+        const { bg: bgColor, on: textColor, mark } = COLOR.punch[punchStateOf(day)];
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
           <Tooltip key={d} title={
@@ -307,11 +322,12 @@ export default function AttendanceMonitor() {
                 width: 54, mx: 'auto', py: 0.3, px: 0.3, borderRadius: 1.5,
                 bgcolor: bgColor, color: textColor,
                 textAlign: 'center', lineHeight: 1.2,
-                transition: 'transform 0.1s',
+                transition: (t) => `transform ${t.motion.instant}`,
                 '&:hover': { transform: 'scale(1.06)' },
               }}>
                 <Box sx={{ fontWeight: 800, fontSize: '0.75rem' }}>
-                  {!day.has_pending && day.has_manual && <span style={{ fontSize: '0.6rem' }}>✎ </span>}{day.total_hours}h
+                  {mark && <Box component="span" aria-hidden sx={{ fontSize: '0.6rem', mr: 0.25 }}>{mark}</Box>}
+                  <Box component="span" className="num">{day.total_hours}h</Box>
                 </Box>
                 <Box dir="ltr" sx={{ fontSize: '0.55rem', fontWeight: 600, opacity: 0.75, letterSpacing: '-0.02em' }}>
                   {timeRange}
@@ -321,9 +337,13 @@ export default function AttendanceMonitor() {
           </Tooltip>
         );
       })}
-      <TableCell align="center" sx={{
+      <TableCell align="center" className="num" sx={{
         fontWeight: 800, position: 'sticky', right: 0, zIndex: 2, // RTL plugin flips to left:0 (totals frozen on the left)
-        bgcolor: rowBg || '#e8eefc',                              // opaque — hides day cells scrolling underneath
+        // Opaque, so the day cells scroll underneath rather than through it.
+        // The cold #e8eefc it held was the one blue on a warm screen, and the
+        // month total is the figure most often read here — it gets the paper
+        // the rest of the totals column sits on, not a leftover accent.
+        bgcolor: rowBg || COLOR.background.sunken,
         boxShadow: '6px 0 6px -6px rgba(0,0,0,0.18)',
         borderRight: '1px solid', borderColor: 'divider',
       }}>
@@ -379,10 +399,13 @@ export default function AttendanceMonitor() {
         const cells = days.map(d => {
           const day = block.days[d];
           if (!day) return '<td></td>';
-          const cls = day.has_pending ? 'pending' : (day.incomplete ? 'warn' : (day.has_manual ? 'manual' : 'ok'));
+          // Same seven states as the screen, same glyphs — and the tint is an
+          // inline style rather than one of four CSS classes, so the printout
+          // stops being a lossy copy of what the manager approved on screen.
+          const st = COLOR.punch[punchStateOf(day)];
           const range = `${day.first_in || '?'}–${day.last_out || '?'}`;
-          const mark = (!day.has_pending && day.has_manual) ? '✎ ' : '';
-          return `<td><div class="day-cell ${cls}"><div class="h">${mark}${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
+          const mark = st.mark ? `${st.mark} ` : '';
+          return `<td><div class="day-cell" style="background:${st.bg};color:${st.on}"><div class="h">${mark}${day.total_hours}h</div><div class="r">${range}</div></div></td>`;
         }).join('');
         const guestBadge = kind === 'guest' && block.home_branch_name
           ? `<span class="badge-guest">אורח/ת מ-${block.home_branch_name}</span>` : '';
@@ -473,10 +496,10 @@ export default function AttendanceMonitor() {
             <tbody>${bodyRows}</tbody>
           </table>
           <div class="legend">
-            <span><span class="swatch" style="background:#fff"></span>החתמת שעון</span>
-            <span><span class="swatch" style="background:${COLOR.punch.manual.bg};border-color:${COLOR.punch.manual.on}"></span>✎ עדכון ידני</span>
+            ${Object.values(COLOR.punch).map(pr =>
+              `<span><span class="swatch" style="background:${pr.bg};border-color:${pr.on}"></span>${pr.label}</span>`
+            ).join('')}
             <span><span class="swatch" style="background:${COLOR.attendanceRow.missingPunch.bg};border:1px dashed ${COLOR.attendanceRow.missingPunch.border}"></span>חסרה החתמה</span>
-            <span><span class="swatch" style="background:${COLOR.punch.pending.bg};border-color:${COLOR.punch.pending.on}"></span>ידני — ממתין לאישור</span>
             <span><span class="swatch" style="background:${COLOR.attendanceRow.guest.bg};border-color:${COLOR.attendanceRow.guest.on}"></span>אורח/ת מסניף אחר</span>
             <span><span class="swatch" style="background:${COLOR.attendanceRow.unlinked.bg}"></span>לא מזוהה</span>
           </div>
@@ -517,10 +540,10 @@ export default function AttendanceMonitor() {
       .day-cell { padding: 1px; line-height: 1.1; text-align: center; height: 26px; display: flex; flex-direction: column; justify-content: center; }
       .day-cell .h { font-weight: 800; font-size: 7pt; font-variant-numeric: tabular-nums; }
       .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; color: #444; }
-      .day-cell.ok { background: ${COLOR.background.paper} !important; color: #111; }
-      .day-cell.warn { background: ${COLOR.attendanceRow.missingPunch.bg} !important; color: ${COLOR.attendanceRow.unlinked.on}; border: 0.5px dashed ${COLOR.attendanceRow.missingPunch.border}; border-radius: 2px; }
-      .day-cell.pending { background: ${COLOR.punch.pending.bg} !important; color: ${COLOR.punch.pending.on}; border-radius: 2px; }
-      .day-cell.manual { background: ${COLOR.punch.manual.bg} !important; color: ${COLOR.punch.manual.on}; border-radius: 2px; }
+      /* The four state classes are gone: the cell carries its own tint inline,
+         from the same COLOR.punch entry the screen used, so the printout can
+         show all seven states instead of collapsing them into four. */
+      .day-cell { border-radius: 2px; }
       .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: ${COLOR.attendanceRow.guest.on} !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .badge-away { display: inline-block; font-size: 5.5pt; color: ${COLOR.attendanceRow.unlinked.on}; background: ${COLOR.punch.incomplete.bg} !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
@@ -720,7 +743,7 @@ export default function AttendanceMonitor() {
             {!loading && data && data.unlinked && data.unlinked.length > 0 && (
               <>
                 <TableRow>
-                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: 'warning.100', fontWeight: 700, py: 1 }}>
+                  <TableCell colSpan={days.length + 3} sx={{ bgcolor: 'warning.main', color: 'warning.contrastText', fontWeight: 700, py: 1 }}>
                     החתמות לא מזוהות
                   </TableCell>
                 </TableRow>
@@ -776,7 +799,7 @@ export default function AttendanceMonitor() {
                   if (grpUnlinked.length > 0) {
                     out.push(
                       <TableRow key={`unl-hdr-${branchKey}`}>
-                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: 'warning.50', fontWeight: 700, py: 0.5, fontSize: '0.85rem' }}>
+                        <TableCell colSpan={days.length + 3} sx={{ bgcolor: 'warning.soft', fontWeight: 700, py: 0.5, fontSize: '0.85rem' }}>
                           החתמות לא מזוהות ({grp.branch.name})
                         </TableCell>
                       </TableRow>
