@@ -4,6 +4,7 @@ import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
@@ -13,6 +14,7 @@ import DeleteAccountRequest from '../shared/DeleteAccountRequest';
 import {
   isWebPushSupported, getWebPushSubscriptionState, subscribeWebPush, unsubscribeWebPush,
 } from '../../utils/webPush';
+import { resetAllRememberedConfirms } from '../shared/ConfirmProvider';
 
 /**
  * The two things the old Header kept in the foot of its drawer that were never
@@ -117,6 +119,25 @@ export default function AccountMenu({ open, onClose }) {
               {pushSubscribed ? 'כיבוי התראות בדפדפן' : 'הפעלת התראות בדפדפן'}
             </Button>
           )}
+
+          {/* The way back from "אל תשאל שוב".
+              That checkbox writes to localStorage and the function that clears
+              it has existed since the provider was written — reachable from
+              nowhere in the app. Somebody who silenced a confirm by accident
+              had no way to un-silence it short of clearing site data. */}
+          <Button
+            startIcon={<RestartAltIcon />}
+            onClick={() => {
+              const n = resetAllRememberedConfirms();
+              toast.success(n ? `${n} אישורים יוצגו שוב` : 'לא היו אישורים מושתקים');
+            }}
+            fullWidth
+            variant="outlined"
+            color="inherit"
+            sx={{ justifyContent: 'flex-start' }}
+          >
+            החזרת שאלות אישור שהושתקו
+          </Button>
 
           {/* Offering a door that answers with a permission error is worse
               than not offering it. */}

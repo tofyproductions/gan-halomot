@@ -32,6 +32,7 @@ import { useBranch } from '../../hooks/useBranch';
 import { useWorkMonth } from '../../hooks/useWorkMonth';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { useUndoable } from '../shared/UndoProvider';
 import {
   ganMarkerByName as ganMarker,
   BRANCH_PALETTE as SHARED_BRANCH_PALETTE,
@@ -948,6 +949,7 @@ export default function PayrollMonthTable() {
   const isReviewer = isAdmin || isAccountant;
   const stagingMode = !isReviewer;
   const confirm = useConfirm();
+  const { undoable } = useUndoable();
   // On mobile the toolbar/chip row above the table wraps onto many more lines
   // than on desktop, so a fixed "100vh - 240px" cap leaves the grid almost no
   // height — the table looked empty because its scroll area WAS empty, not
@@ -1323,49 +1325,66 @@ export default function PayrollMonthTable() {
   }, []);
 
   const removeColumn = async (colId) => {
-    if (!(await confirm({ title: 'הסרת עמודה', message: 'להסיר את העמודה? הנתונים שהוזנו לעובדים יישמרו בבסיס הנתונים.', danger: true, remember_key: 'remove-payroll-column' }))) return;
+    if (!(await confirm({ title: 'הסרת עמודה', message: 'להסיר את העמודה? הנתונים שהוזנו לעובדים יישמרו בבסיס הנתונים.', danger: true }))) return;
     api.delete(`/payroll-month/custom-columns/${colId}`)
       .then(() => fetchData())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
   };
 
-  const applyAutoHolidays = async () => {
-    if (!(await confirm({ title: 'החלת דמי חגים', message: 'להחיל דמי חגים אוטומטית לכל הזכאים? לא ידרסו ערכים שכבר הוזנו ידנית.', remember_key: 'apply-auto-holidays' }))) return;
+  /**
+   * The three bulk applies ask for no confirmation.
+   *
+   * They were the only three actions in the app that offered "אל תשאל שוב",
+   * which is the app telling on itself: nobody wanted the question, they wanted
+   * not to have made a mistake. None of the three overwrites anything a person
+   * typed — the server skips every value already set, and says how many it
+   * skipped — so the dialog was stopping the work to ask something whose answer
+   * was always yes. `undoable` reports the action and runs it a few seconds
+   * later with "בטל" in reach. See components/shared/UndoProvider.
+   */
+  const applyAutoHolidays = () => {
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
-    api.post(`/payroll-month/${month}/apply-auto-holidays`, null, { params })
-      .then(res => {
-        const { updated, skipped_already_set, skipped_not_eligible } = res.data;
-        toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • לא זכאים: ${skipped_not_eligible}`);
-        fetchData();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+    undoable({
+      label: 'מחיל דמי חגים לכל הזכאים',
+      run: () => api.post(`/payroll-month/${month}/apply-auto-holidays`, null, { params })
+        .then(res => {
+          const { updated, skipped_already_set, skipped_not_eligible } = res.data;
+          toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • לא זכאים: ${skipped_not_eligible}`);
+          fetchData();
+        })
+        .catch(err => toast.error(err.response?.data?.error || 'שגיאה')),
+    });
   };
 
-  const applyKindergartenVacation = async () => {
-    if (!(await confirm({ title: 'החלת ימי חופשה מלוח', message: 'להחיל ימי חופשה מלוח חופשות הגן לכל העובדים? לא ידרסו ערכים שכבר הוזנו ידנית.', remember_key: 'apply-kindergarten-vacation' }))) return;
+  const applyKindergartenVacation = () => {
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
-    api.post(`/payroll-month/${month}/apply-kindergarten-vacation`, null, { params })
-      .then(res => {
-        const { updated, skipped_already_set, no_kindergarten_holidays } = res.data;
-        toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • בלי חגי גן: ${no_kindergarten_holidays}`);
-        fetchData();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+    undoable({
+      label: 'מחיל ימי חופשה מלוח חופשות הגן',
+      run: () => api.post(`/payroll-month/${month}/apply-kindergarten-vacation`, null, { params })
+        .then(res => {
+          const { updated, skipped_already_set, no_kindergarten_holidays } = res.data;
+          toast.success(`עודכן: ${updated} • דילגתי על קיימים: ${skipped_already_set} • בלי חגי גן: ${no_kindergarten_holidays}`);
+          fetchData();
+        })
+        .catch(err => toast.error(err.response?.data?.error || 'שגיאה')),
+    });
   };
 
-  const applyVacationRequests = async () => {
-    if (!(await confirm({ title: 'סנכרון בקשות חופש', message: 'לסנכרן בקשות חופש מאושרות מהחודש הזה לטבלת השכר?', remember_key: 'sync-vacation-requests' }))) return;
+  const applyVacationRequests = () => {
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
-    api.post(`/payroll-month/${month}/apply-vacation-requests`, null, { params })
-      .then(res => {
-        const { updated, skipped_already_applied, requests_examined } = res.data;
-        toast.success(`סונכרנו ${updated} בקשות (${skipped_already_applied} כבר היו) מתוך ${requests_examined}`);
-        fetchData();
-      })
-      .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
+    undoable({
+      label: 'מסנכרן בקשות חופש מאושרות',
+      run: () => api.post(`/payroll-month/${month}/apply-vacation-requests`, null, { params })
+        .then(res => {
+          const { updated, skipped_already_applied, requests_examined } = res.data;
+          toast.success(`סונכרנו ${updated} בקשות (${skipped_already_applied} כבר היו) מתוך ${requests_examined}`);
+          fetchData();
+        })
+        .catch(err => toast.error(err.response?.data?.error || 'שגיאה')),
+    });
   };
 
   const [acctContactsOpen, setAcctContactsOpen] = useState(false);
@@ -1373,7 +1392,7 @@ export default function PayrollMonthTable() {
   const acctBranch = (selectedBranch && !isAllBranches) ? selectedBranch : null;
 
   const finalize = async () => {
-    if (!(await confirm({ title: 'נעילת חודש', message: 'לנעול את החודש? לא ניתן יהיה לערוך עד ביטול הנעילה.', danger: true, remember_key: 'finalize-month' }))) return;
+    if (!(await confirm({ title: 'נעילת חודש', message: 'לנעול את החודש? לא ניתן יהיה לערוך עד ביטול הנעילה.', danger: true }))) return;
     const params = {};
     if (viewMode === 'branch' && selectedBranch && !isAllBranches) params.branch = selectedBranch;
     api.post(`/payroll-month/${month}/finalize`, null, { params })

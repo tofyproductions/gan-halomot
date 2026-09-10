@@ -14,6 +14,7 @@ import { BranchProvider } from './hooks/useBranch';
 import { WorkMonthProvider } from './hooks/useWorkMonth';
 import { AcademicYearProvider } from './hooks/useAcademicYear';
 import { ConfirmProvider } from './components/shared/ConfirmProvider';
+import { UndoProvider } from './components/shared/UndoProvider';
 
 /**
  * Every screen is its own download.
@@ -125,6 +126,10 @@ function AppRoutes() {
       {/* Protected admin routes — the management providers wrap ONLY this shell. */}
       <Route path="/" element={
         <ConfirmProvider>
+          {/* Undo sits beside confirm because it is the other half of the same
+              question: confirm is for what cannot be taken back, undo is for
+              what can. See components/shared/UndoProvider. */}
+          <UndoProvider>
           <BranchProvider>
             {/* Which gan, which year. The two facts every number on every
                 screen is implicitly about, and the two that were each being
@@ -137,6 +142,7 @@ function AppRoutes() {
               </WorkMonthProvider>
             </AcademicYearProvider>
           </BranchProvider>
+          </UndoProvider>
         </ConfirmProvider>
       }>
         <Route index element={<HomeRoute />} />

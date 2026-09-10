@@ -189,7 +189,7 @@ export default function StockPage() {
   }
 
   async function handleDelete(item) {
-    if (!(await confirm({ title: 'מחיקת פריט מלאי', message: `למחוק את "${item.name}"?`, danger: true, remember_key: 'delete-stock-item' }))) return;
+    if (!(await confirm({ title: 'מחיקת פריט מלאי', message: `למחוק את "${item.name}"?`, danger: true }))) return;
     try {
       await api.delete(`/stock/items/${item._id}`);
       setItems(prev => prev.filter(i => i._id !== item._id));

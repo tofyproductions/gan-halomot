@@ -226,7 +226,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
 
   // --- Delete a single punch ---
   const deletePunch = async (punchId) => {
-    if (!(await confirm({ title: 'מחיקת החתמה', message: 'למחוק את ההחתמה? (לא ניתן לשחזר)', danger: true, remember_key: 'delete-punch' }))) return;
+    if (!(await confirm({ title: 'מחיקת החתמה', message: 'למחוק את ההחתמה? (לא ניתן לשחזר)', danger: true }))) return;
     try {
       await api.delete(`/payroll/punches/${punchId}`);
       toast.success('נמחק');

@@ -330,7 +330,7 @@ export default function CommitmentsManager() {
   useEffect(() => { load(); }, [load]);
 
   const remove = async (id) => {
-    if (!(await confirm({ title: 'הסרת התחייבות', message: 'להסיר התחייבות זו?', danger: true, remember_key: 'remove-commitment' }))) return;
+    if (!(await confirm({ title: 'הסרת התחייבות', message: 'להסיר התחייבות זו?', danger: true }))) return;
     api.delete(`/payroll/commitments/${id}`)
       .then(() => load())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

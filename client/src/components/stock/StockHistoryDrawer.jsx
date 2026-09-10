@@ -48,7 +48,7 @@ export default function StockHistoryDrawer({ open, onClose, item, onItemChange }
   }
 
   async function handleUndo(m) {
-    if (!(await confirm({ title: 'ביטול תנועה', message: `לבטל את התנועה ${m.delta > 0 ? '+' : ''}${m.delta}?`, danger: true, remember_key: 'undo-stock-movement' }))) return;
+    if (!(await confirm({ title: 'ביטול תנועה', message: `לבטל את התנועה ${m.delta > 0 ? '+' : ''}${m.delta}?`, danger: true }))) return;
     try {
       const res = await api.post(`/stock/movements/${m._id}/undo`);
       onItemChange?.(res.data.item);

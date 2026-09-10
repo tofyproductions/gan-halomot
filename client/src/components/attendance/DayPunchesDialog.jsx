@@ -146,7 +146,7 @@ export default function DayPunchesDialog({ open, onClose, employee, date, branch
   const cancelEdit = (id) => setEditing(prev => { const x = { ...prev }; delete x[id]; return x; });
 
   const del = async (p) => {
-    if (!(await confirm({ title: 'הסרת החתמה', message: 'להסיר את ההחתמה?', danger: true, remember_key: 'delete-punch' }))) return;
+    if (!(await confirm({ title: 'הסרת החתמה', message: 'להסיר את ההחתמה?', danger: true }))) return;
     api.delete(`/payroll/punches/${p._id}`)
       .then(() => { load(); markDirty(); toast.success('נמחק'); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

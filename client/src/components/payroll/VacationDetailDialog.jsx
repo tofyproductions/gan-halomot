@@ -139,7 +139,7 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                     <Button
                       variant="outlined" color="error" size="small"
                       onClick={async () => {
-                        if (!(await confirm({ title: 'איפוס ימי חופש', message: 'לאפס את ימי החופש בטבלת השכר לאפס?', danger: true, remember_key: 'reset-vacation-days' }))) return;
+                        if (!(await confirm({ title: 'איפוס ימי חופש', message: 'לאפס את ימי החופש בטבלת השכר לאפס?', danger: true }))) return;
                         setManualDays(0);
                         saveManualDays(0);
                       }}

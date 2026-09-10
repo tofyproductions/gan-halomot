@@ -73,7 +73,7 @@ export default function SalaryAdjustmentDialog({ open, onClose, row, month, onCh
   };
 
   const remove = async (id) => {
-    if (!(await confirm({ title: 'הסרת עדכון שכר', message: 'להסיר עדכון זה?', danger: true, remember_key: 'remove-salary-adj' }))) return;
+    if (!(await confirm({ title: 'הסרת עדכון שכר', message: 'להסיר עדכון זה?', danger: true }))) return;
     api.delete(`/payroll-month/adjustments/${id}`)
       .then(() => { load(); onChanged && onChanged(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));

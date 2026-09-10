@@ -26,6 +26,21 @@ import WarningAmberIcon from '@mui/icons-material/WarningAmber';
  *
  * If remember_key is provided AND the user previously checked
  * "don't ask again" for that key, the confirm resolves immediately to true.
+ *
+ * EXCEPT on a destructive action, where remember_key is ignored outright.
+ *
+ * Five call sites paired `danger: true` with a remember_key — including
+ * "מחיקת החתמה — לא ניתן לשחזר". One accidental click on that checkbox and
+ * every future punch deletion happened with no prompt at all, forever, on that
+ * browser: the last guard on an irreversible action, removed by a tick box, in
+ * a system where a deleted punch is somebody's pay. Worse, the only way back
+ * (resetAllRememberedConfirms) existed in this file and was reachable from
+ * nowhere in the app.
+ *
+ * A safety somebody can permanently switch off by accident is not a safety, so
+ * it is not offered. `danger: true` is now what decides whether the checkbox
+ * appears, and the pairing is a mistake the provider refuses rather than a
+ * convention every future author has to remember.
  */
 const ConfirmContext = createContext(null);
 const SKIP_PREFIX = 'confirm_skip:';
@@ -46,7 +61,15 @@ export function ConfirmProvider({ children }) {
   const resolveRef = useRef(null);
 
   const confirm = useCallback((opts = {}) => {
-    if (opts.remember_key && readSkip(opts.remember_key)) {
+    // Destructive actions never remember. See the note at the top of the file.
+    const canRemember = !!opts.remember_key && !opts.danger;
+    if (import.meta.env?.DEV && opts.remember_key && opts.danger) {
+      console.warn(
+        `[confirm] remember_key "${opts.remember_key}" ignored: a destructive ` +
+        'action must not be skippable. Drop remember_key, or drop danger.'
+      );
+    }
+    if (canRemember && readSkip(opts.remember_key)) {
       return Promise.resolve(true);
     }
     setDontAskAgain(false);
@@ -57,7 +80,7 @@ export function ConfirmProvider({ children }) {
   }, []);
 
   const close = (result) => {
-    if (result && state.opts?.remember_key && dontAskAgain) {
+    if (result && state.opts?.remember_key && !state.opts?.danger && dontAskAgain) {
       writeSkip(state.opts.remember_key);
     }
     setState({ open: false, opts: null });
@@ -86,7 +109,7 @@ export function ConfirmProvider({ children }) {
             <Typography variant="body1">
               {opts.message || 'האם להמשיך?'}
             </Typography>
-            {opts.remember_key && (
+            {opts.remember_key && !opts.danger && (
               <FormControlLabel
                 control={
                   <Checkbox

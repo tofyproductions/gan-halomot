@@ -104,7 +104,7 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
   };
 
   const removeLoan = async (idx) => {
-    if (!(await confirm({ title: 'מחיקת הלוואה', message: 'למחוק הלוואה זו?', danger: true, remember_key: 'delete-loan' }))) return;
+    if (!(await confirm({ title: 'מחיקת הלוואה', message: 'למחוק הלוואה זו?', danger: true }))) return;
     const next = loans.filter((_, i) => i !== idx);
     setLoans(next);
     persist(next);

@@ -3265,7 +3265,7 @@ export default function PayslipAudit() {
   }, [editableResults]);
 
   const deleteFromHistory = async (id) => {
-    if (!(await confirm({ title: 'מחיקת ביקורת', message: 'למחוק את הביקורת מההיסטוריה? פעולה זו אינה הפיכה.', danger: true, remember_key: 'delete-audit-history' }))) return;
+    if (!(await confirm({ title: 'מחיקת ביקורת', message: 'למחוק את הביקורת מההיסטוריה? פעולה זו אינה הפיכה.', danger: true }))) return;
     try {
       await api.delete(`/payroll/payslip-audit/history/${id}`);
       setHistory((prev) => prev.filter((h) => h._id !== id));
@@ -3351,7 +3351,7 @@ export default function PayslipAudit() {
   };
 
   const unapproveAudit = async (id) => {
-    if (!(await confirm({ title: 'ביטול אישור', message: 'לבטל את האישור? הביקורת תוחזר ל-״לא סופי״.', danger: true, remember_key: 'unapprove-audit' }))) return;
+    if (!(await confirm({ title: 'ביטול אישור', message: 'לבטל את האישור? הביקורת תוחזר ל-״לא סופי״.', danger: true }))) return;
     try {
       await api.patch(`/payroll/payslip-audit/history/${id}/unapprove`);
       toast.success('האישור בוטל');

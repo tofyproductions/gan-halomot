@@ -41,7 +41,7 @@ export default function StockCategoryManager({ open, onClose, categories, branch
   }
 
   async function handleDelete(c) {
-    if (!(await confirm({ title: 'מחיקת קטגוריה', message: `למחוק קטגוריה "${c.name}"?`, danger: true, remember_key: 'delete-stock-category' }))) return;
+    if (!(await confirm({ title: 'מחיקת קטגוריה', message: `למחוק קטגוריה "${c.name}"?`, danger: true }))) return;
     try {
       await api.delete(`/stock/categories/${c._id}`);
       onChanged?.();

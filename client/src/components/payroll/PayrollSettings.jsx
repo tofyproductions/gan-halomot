@@ -59,7 +59,7 @@ function PresetOptionsManager() {
   };
 
   const remove = async (id) => {
-    if (!(await confirm({ title: 'הסרת אפשרות', message: 'להסיר אפשרות זו?', danger: true, remember_key: 'remove-payroll-preset' }))) return;
+    if (!(await confirm({ title: 'הסרת אפשרות', message: 'להסיר אפשרות זו?', danger: true }))) return;
     api.delete(`/payroll-month/presets/${id}`)
       .then(() => load())
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה'));
