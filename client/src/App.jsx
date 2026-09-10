@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import Layout from './components/layout/Layout';
+import AppShell from './components/layout/AppShell';
 import LoginPage from './components/layout/LoginPage';
 import NurseryBoard from './components/nursery/NurseryBoard';
 import NurserySettings from './components/nursery/NurserySettings';
@@ -100,7 +100,7 @@ function AppRoutes() {
           <BranchProvider>
             <WorkMonthProvider>
               <ProtectedRoute>
-                <Layout />
+                <AppShell />
               </ProtectedRoute>
             </WorkMonthProvider>
           </BranchProvider>

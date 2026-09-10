@@ -13,6 +13,7 @@
  *
  *   node scripts/nav-model.test.js
  */
+const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 
@@ -93,6 +94,30 @@ async function main() {
     'כל פריט: id + label + path'
   );
   ok(buildNavModel(null).length === 0, 'ללא משתמש — תפריט ריק, לא קריסה');
+
+  /**
+   * navIcons.js imports MUI, so it cannot be imported here — it is read as
+   * text, the same way tabs-constant-sync.test.js reads the client's tab file.
+   *
+   * The map this replaced covered 28 of 43 screens, which was survivable in a
+   * dropdown of mostly-text entries. In a rail of forty rows a missing icon
+   * reads as a broken row, so the map has to stay complete as tabs are added.
+   */
+  console.log('\nלכל מסך יש אייקון:');
+  const iconsSrc = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'client', 'src', 'components', 'layout', 'navIcons.js'),
+    'utf8'
+  );
+  const mapBody = iconsSrc.slice(iconsSrc.indexOf('export const ICON_BY_TAB'));
+  const pathedIds = TAB_GROUPS.flatMap((g) => g.items).filter((i) => i.path).map((i) => i.id);
+  const missing = pathedIds.filter((id) => !new RegExp(`^\\s*${id}:`, 'm').test(mapBody));
+  ok(
+    missing.length === 0,
+    `כל ${pathedIds.length} המסכים ממופים ב-navIcons.js`,
+    missing.length ? `חסרים: ${missing.join(', ')}` : ''
+  );
+  ok(/function iconFor/.test(iconsSrc) && /\|\| CircleOutlinedIcon/.test(iconsSrc),
+    'iconFor נופל לאייקון ניטרלי ולא ל-undefined');
 
   console.log(`\n${failures === 0 ? '✅' : '❌'} ${checks - failures}/${checks} עברו\n`);
   process.exit(failures === 0 ? 0 : 1);
