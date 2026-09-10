@@ -104,11 +104,13 @@ const RateChangeRequest = require('./RateChangeRequest');
 const PushSubscription = require('./PushSubscription');
 const DataDeletionRequest = require('./DataDeletionRequest');
 const NotificationEvent = require('./NotificationEvent');
+const WebPushSubscription = require('./WebPushSubscription');
 
 const real = {
   PushSubscription,
   DataDeletionRequest,
   NotificationEvent,
+  WebPushSubscription,
   PayrollRollup,
   User,
   CustomRole,
