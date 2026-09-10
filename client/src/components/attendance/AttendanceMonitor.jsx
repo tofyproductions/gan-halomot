@@ -13,6 +13,8 @@ import ClearIcon from '@mui/icons-material/Clear';
 import html2pdf from 'html2pdf.js';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { COLOR } from '../../theme/tokens';
+import PageHeader from '../ui/PageHeader';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor, ganMarkerByName } from '../../utils/branchColors';
 import HoursReportDialog from '../employees/HoursReportDialog';
@@ -215,7 +217,7 @@ export default function AttendanceMonitor() {
               <Chip
                 label={`עבד/ה גם בסניף אחר: ${block.away_total_hours}h`}
                 size="small"
-                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: '#fef3c7', color: '#92400e', fontWeight: 700 }}
+                sx={{ ml: 0.5, height: 18, fontSize: '0.65rem', bgcolor: COLOR.punch.incomplete.bg, color: COLOR.punch.incomplete.on, fontWeight: 700 }}
               />
             )}
             {block.israeli_id && !block.unlinked && (
@@ -266,13 +268,17 @@ export default function AttendanceMonitor() {
         //   Pink   = "השלמת שכר אוגוסט" — a committed day inside a branch closure
         //   Green  = punched on the clock by the employee (complete)
         let bgColor, textColor;
-        if (day.needs_review) { bgColor = '#fee2e2'; textColor = '#b91c1c'; }
-        else if (day.has_pending) { bgColor = '#ede9fe'; textColor = '#5b21b6'; }
-        else if (day.incomplete) { bgColor = '#fef3c7'; textColor = '#92400e'; }
-        else if (day.has_manual) { bgColor = '#dbeafe'; textColor = '#1e40af'; }
-        else if (day.has_fixed_schedule) { bgColor = '#ccfbf1'; textColor = '#0f766e'; }
+        // The six punch states live in theme/tokens.js#COLOR.punch, measured for
+        // contrast and checked for being distinguishable from one another. The
+        // legend under the grid is generated from the same object, so it cannot
+        // describe a colour the grid stopped using.
+        if (day.needs_review) { bgColor = COLOR.punch.review.bg; textColor = COLOR.punch.review.on; }
+        else if (day.has_pending) { bgColor = COLOR.punch.pending.bg; textColor = COLOR.punch.pending.on; }
+        else if (day.incomplete) { bgColor = COLOR.punch.incomplete.bg; textColor = COLOR.punch.incomplete.on; }
+        else if (day.has_manual) { bgColor = COLOR.punch.manual.bg; textColor = COLOR.punch.manual.on; }
+        else if (day.has_fixed_schedule) { bgColor = COLOR.punch.fixed.bg; textColor = COLOR.punch.fixed.on; }
         else if (day.has_closure_completion) { bgColor = '#fce7f3'; textColor = '#9d174d'; }
-        else { bgColor = '#d1fae5'; textColor = '#065f46'; }
+        else { bgColor = COLOR.punch.clock.bg; textColor = COLOR.punch.clock.on; }
         const timeRange = `${day.first_in || '?'}–${day.last_out || '?'}`;
         return (
           <Tooltip key={d} title={
@@ -469,9 +475,9 @@ export default function AttendanceMonitor() {
           </table>
           <div class="legend">
             <span><span class="swatch" style="background:#fff"></span>החתמת שעון</span>
-            <span><span class="swatch" style="background:#dbeafe;border-color:#1e40af"></span>✎ עדכון ידני</span>
+            <span><span class="swatch" style="background:${COLOR.punch.manual.bg};border-color:${COLOR.punch.manual.on}"></span>✎ עדכון ידני</span>
             <span><span class="swatch" style="background:#fffbeb;border:1px dashed #d97706"></span>חסרה החתמה</span>
-            <span><span class="swatch" style="background:#ede9fe;border-color:#6d28d9"></span>ידני — ממתין לאישור</span>
+            <span><span class="swatch" style="background:${COLOR.punch.pending.bg};border-color:${COLOR.punch.pending.on}"></span>ידני — ממתין לאישור</span>
             <span><span class="swatch" style="background:#f3e8ff;border-color:#6d28d9"></span>אורח/ת מסניף אחר</span>
             <span><span class="swatch" style="background:#fff7ed"></span>לא מזוהה</span>
           </div>
@@ -514,8 +520,8 @@ export default function AttendanceMonitor() {
       .day-cell .r { font-size: 4.5pt; opacity: 0.85; direction: ltr; letter-spacing: -0.04em; color: #444; }
       .day-cell.ok { background: #ffffff !important; color: #111; }
       .day-cell.warn { background: #fffbeb !important; color: #92400e; border: 0.5px dashed #d97706; border-radius: 2px; }
-      .day-cell.pending { background: #ede9fe !important; color: #5b21b6; border-radius: 2px; }
-      .day-cell.manual { background: #dbeafe !important; color: #1e40af; border-radius: 2px; }
+      .day-cell.pending { background: ${COLOR.punch.pending.bg} !important; color: ${COLOR.punch.pending.on}; border-radius: 2px; }
+      .day-cell.manual { background: ${COLOR.punch.manual.bg} !important; color: ${COLOR.punch.manual.on}; border-radius: 2px; }
       .badge-guest { display: inline-block; font-size: 5.5pt; color: #fff; background: #6d28d9 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .badge-away { display: inline-block; font-size: 5.5pt; color: #92400e; background: #fef3c7 !important; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-right: 3px; }
       .iid { direction: ltr; font-size: 5.5pt; color: #666; font-family: monospace; margin-top: 1px; }
@@ -565,22 +571,64 @@ export default function AttendanceMonitor() {
       <PendingPunchApprovals
         onChanged={() => { fetchAttendance({ quiet: true }); fetchIssuesCount(); }}
       />
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>מעקב החתמות</Typography>
-          <Typography variant="caption" color="text.secondary">
-            {selectedBranchName}
-            {data && ` • ${data.totals.total_punches} החתמות בחודש • ${data.totals.matched_punches} משויכות`}
-            {allTotals && ` • ${allTotals.total_punches} החתמות סה״כ • ${allTotals.matched_punches} משויכות`}
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+      {/* One header. What was here: a title, a caption, a search box, a month
+          picker, a refresh icon and five buttons in a single row — three of
+          which turned themselves filled whenever their count was non-zero, so
+          on a bad month the row had three primary actions and no primary
+          action. The counts now ride in the labels, where they read as facts
+          rather than as competing alarms, and the row keeps exactly one filled
+          button. Search and the month move down to the table they filter. */}
+      <PageHeader
+        title="מעקב החתמות"
+        meta={[
+          { label: selectedBranchName, strong: true },
+          data && { label: `${data.totals.total_punches} החתמות בחודש` },
+          data && { label: `${data.totals.matched_punches} משויכות` },
+          allTotals && { label: `${allTotals.total_punches} סה״כ בכל הסניפים` },
+        ]}
+        primary={{
+          label: 'דוחות שעות',
+          icon: <DescriptionIcon />,
+          onClick: () => setReportsOpen(true),
+        }}
+        actions={[
+          {
+            label: issuesCount ? `בעיות בהחתמה (${issuesCount})` : 'בעיות בהחתמה',
+            icon: <ReportProblemIcon />,
+            color: issuesCount ? 'warning' : 'inherit',
+            onClick: () => setIssuesOpen(true),
+          },
+          {
+            label: crossBranchCount
+              ? `עובדים שלי בסניפים אחרים (${crossBranchCount})`
+              : 'עובדים שלי בסניפים אחרים',
+            icon: <PeopleAltIcon />,
+            onClick: () => setCrossBranchOpen(true),
+          },
+        ]}
+        menu={[
+          {
+            label: exporting ? 'מייצא…' : 'ייצא PDF',
+            icon: <PictureAsPdfIcon fontSize="small" />,
+            disabled: (!data && !perBranch) || loading || exporting,
+            onClick: exportPDF,
+          },
+          {
+            label: 'רענן',
+            icon: <RefreshIcon fontSize="small" />,
+            disabled: loading,
+            onClick: () => fetchAttendance(),
+          },
+        ]}
+      >
+        {/* The two controls that filter the grid, next to the grid. */}
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <TextField
             placeholder="חיפוש עובד / ת״ז"
             size="small"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            sx={{ width: 240 }}
+            sx={{ width: 260 }}
             InputProps={{
               startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
               endAdornment: search ? (
@@ -596,69 +644,23 @@ export default function AttendanceMonitor() {
             value={month}
             onChange={e => setMonth(e.target.value)}
             size="small"
-            sx={{ width: 180 }}
+            sx={{ width: 170 }}
             InputLabelProps={{ shrink: true }}
           />
-          <Tooltip title="רענן">
-            <IconButton onClick={() => fetchAttendance()} disabled={loading}>
-              <RefreshIcon />
-            </IconButton>
-          </Tooltip>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<PictureAsPdfIcon />}
-            onClick={exportPDF}
-            disabled={(!data && !perBranch) || loading || exporting}
-          >
-            {exporting ? 'מייצא…' : 'ייצא PDF'}
-          </Button>
-          <Badge color="error" badgeContent={issuesCount} max={99}>
-            <Button
-              size="small"
-              variant={issuesCount ? 'contained' : 'outlined'}
-              color="warning"
-              startIcon={<ReportProblemIcon />}
-              onClick={() => setIssuesOpen(true)}
-            >
-              בעיות בהחתמה
-            </Button>
-          </Badge>
-          <Badge color="warning" badgeContent={crossBranchCount} max={99}>
-            <Button
-              size="small"
-              variant={crossBranchCount ? 'contained' : 'outlined'}
-              color="secondary"
-              startIcon={<PeopleAltIcon />}
-              onClick={() => setCrossBranchOpen(true)}
-            >
-              עובדים שלי בסניפים אחרים
-            </Button>
-          </Badge>
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<DescriptionIcon />}
-            onClick={() => setReportsOpen(true)}
-          >
-            דוחות שעות
-          </Button>
         </Stack>
-      </Stack>
+      </PageHeader>
 
       {/* Colour legend so the source/state of each cell is clear. */}
       <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mb: 1.5, px: 0.5, alignItems: 'center' }}>
-        {[
-          { c: '#d1fae5', t: '#065f46', label: 'החתמת שעון' },
-          { c: '#dbeafe', t: '#1e40af', label: '✎ עדכון ידני' },
-          { c: '#ccfbf1', t: '#0f766e', label: '⏱ שעות קבועות' },
-          { c: '#fef3c7', t: '#92400e', label: 'חסרה יציאה' },
-          { c: '#ede9fe', t: '#5b21b6', label: 'ידני — ממתין לאישור' },
-          { c: '#fee2e2', t: '#b91c1c', label: '⚠️ החתמה כפולה — להחלטת הנה״ח' },
-        ].map(item => (
-          <Stack key={item.label} direction="row" spacing={0.5} alignItems="center">
-            <Box sx={{ width: 16, height: 14, borderRadius: 0.75, bgcolor: item.c, border: '1px solid', borderColor: 'rgba(0,0,0,0.15)' }} />
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>{item.label}</Typography>
+        {Object.entries(COLOR.punch).map(([state, pair]) => (
+          <Stack key={state} direction="row" spacing={0.5} alignItems="center">
+            <Box sx={{
+              width: 16, height: 14, borderRadius: 0.75,
+              bgcolor: pair.bg, border: '1px solid', borderColor: 'divider',
+            }} />
+            <Typography variant="caption" sx={{ color: 'text.secondary', fontSize: '0.7rem' }}>
+              {pair.label}
+            </Typography>
           </Stack>
         ))}
       </Stack>
@@ -684,18 +686,18 @@ export default function AttendanceMonitor() {
                 const dow = hebWeekday(d);
                 const isSat = dow === 'ש';
                 return (
-                  <TableCell key={d} align="center" sx={{ fontWeight: 700, fontSize: '0.7rem', minWidth: 40, lineHeight: 1.1, bgcolor: isSat ? '#f1f5f9' : undefined }}>
+                  <TableCell key={d} align="center" sx={{ fontWeight: 700, fontSize: '0.7rem', minWidth: 40, lineHeight: 1.1, bgcolor: isSat ? 'background.sunken' : undefined }}>
                     {d.slice(-2)}
-                    <Box component="span" sx={{ display: 'block', fontSize: '0.6rem', fontWeight: 600, color: isSat ? '#94a3b8' : 'text.secondary' }}>
+                    <Box component="span" sx={{ display: 'block', fontSize: '0.6rem', fontWeight: 600, color: isSat ? 'text.disabled' : 'text.secondary' }}>
                       {dow}
                     </Box>
                   </TableCell>
                 );
               })}
-              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: '#dbeafe', zIndex: 3 }}>{/* RTL flips to left:0 · opaque */}
+              <TableCell align="center" sx={{ fontWeight: 800, position: 'sticky', right: 0, bgcolor: 'background.sunken', zIndex: 3 }}>{/* RTL flips to left:0 · opaque */}
                 סה״כ
               </TableCell>
-              <TableCell sx={{ position: 'sticky', right: 60, bgcolor: '#ffffff', zIndex: 3 }}>{/* RTL flips to left:60 */}
+              <TableCell sx={{ position: 'sticky', right: 60, bgcolor: 'background.paper', zIndex: 3 }}>{/* RTL flips to left:60 */}
               </TableCell>
             </TableRow>
           </TableHead>

@@ -683,7 +683,7 @@ function AddColumnDialog({ open, month, onClose, onCreated }) {
 /* ─── Branch colour palette ─────────────────────────────────────────── */
 
 const BRANCH_PALETTE = [
-  { name: 'blue',   header: '#dbeafe', sub: '#eff6ff', cell: '#f8fafc', accent: '#1e40af', border: '#93c5fd' },
+  { name: 'blue',   header: '#dbeafe', sub: '#F3EEE6', cell: '#FAF7F2', accent: '#1e40af', border: '#93c5fd' },
   { name: 'green',  header: '#d1fae5', sub: '#ecfdf5', cell: '#f7fef9', accent: '#065f46', border: '#86efac' },
   { name: 'purple', header: '#ede9fe', sub: '#f5f3ff', cell: '#fbfaff', accent: '#5b21b6', border: '#c4b5fd' },
   { name: 'orange', header: '#ffedd5', sub: '#fff7ed', cell: '#fffbf6', accent: '#9a3412', border: '#fdba74' },
@@ -1577,7 +1577,7 @@ export default function PayrollMonthTable() {
     else exportPDF(rows);
   };
   const exportColor = (branchName) => ganMarker(branchName)
-    || { strip: '#1e3a8a', stripText: '#ffffff', rowTint: '#f1f5f9', accent: '#1e3a8a' };
+    || { strip: '#1e3a8a', stripText: '#ffffff', rowTint: '#F3EEE6', accent: '#1e3a8a' };
 
   // Build one coloured branch table (header + body + totals) from a row subset.
   // Drops the branch column (the whole file is a single branch).
@@ -1973,7 +1973,7 @@ export default function PayrollMonthTable() {
       </Paper>
 
       {isAugustMonth && (
-        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: '#ecfeff', border: '1px solid #67e8f9', color: '#0f172a' }}>
+        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: '#ecfeff', border: '1px solid #67e8f9', color: '#1C1815' }}>
           <b>אוגוסט — חודש תשלום דמי ההבראה השנתי.</b>{' '}
           זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה: ימים לפי מדרגות הוותק שבצו ההרחבה × תעריף יום × היקף משרה.
           מי שטרם השלימ/ה שנה — אינה זכאית השנה ותקבל תשלום מלא באוגוסט הבא.
@@ -2045,7 +2045,7 @@ export default function PayrollMonthTable() {
               </TableCell>
             </TableRow>
             <TableRow>
-              <SubHeaderGroup color={{ sub: '#eff6ff', accent: '#1e40af', border: '#93c5fd' }} />
+              <SubHeaderGroup color={{ sub: '#F3EEE6', accent: '#1e40af', border: '#93c5fd' }} />
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: '#e0f2fe' }}>
                 <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
@@ -2345,7 +2345,7 @@ export default function PayrollMonthTable() {
                       })()}
 
                       {/* שכר בסיס (רגיל) / שע"נ 125% / שע"נ 150% / השלמה */}
-                      <TableCell align="center" sx={{ bgcolor: '#f0f9ff' }}>
+                      <TableCell align="center" sx={{ bgcolor: '#F3EEE6' }}>
                         <TekenBasePartCell row={r}
                           branchPay={(() => { const l = perBranchBreakdown(r); return breakdownIsInformative(r, l) ? l : null; })()}
                           onOpenHours={() => setEmpDetail({ open: true, employeeId: r.employee_id, initialTab: 1 })}
@@ -3106,7 +3106,7 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
               { lbl: 'שע״נ 150%', h: o.ot150, perHour: r2(o.rate * 1.5) },
             ].filter(l => l.h > 0);
             return (
-              <Box key={i} sx={{ mb: 0.4, p: 0.3, bgcolor: i % 2 ? '#f8fafc' : '#eff6ff', borderRadius: 0.5 }}>
+              <Box key={i} sx={{ mb: 0.4, p: 0.3, bgcolor: i % 2 ? '#FAF7F2' : '#F3EEE6', borderRadius: 0.5 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5 }}>
                   <Typography component="span" variant="caption" sx={{ fontSize: '0.6rem', fontWeight: 800, color: 'text.primary', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
                     {o.name}
@@ -3130,7 +3130,7 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
           })}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, borderTop: '1px solid #cbd5e1', mt: 0.2, pt: 0.2 }}>
             <Typography component="span" variant="caption" sx={{ fontSize: '0.58rem', fontWeight: 700, color: 'text.secondary' }}>סה״כ בסיס</Typography>
-            <Typography component="span" variant="caption" sx={{ fontSize: '0.64rem', fontWeight: 800, color: '#0f172a' }}>
+            <Typography component="span" variant="caption" sx={{ fontSize: '0.64rem', fontWeight: 800, color: '#1C1815' }}>
               ₪{branchPay.reduce((s, o) => s + o.amount, 0).toLocaleString('he-IL')}
             </Typography>
           </Box>
@@ -3566,7 +3566,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                 const c = netHours > 0 ? '#15803d' : netHours < 0 ? '#b91c1c' : '#64748b';
                 return (
                   <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, borderWidth: 2,
-                    borderColor: netHours > 0 ? 'success.light' : netHours < 0 ? 'error.light' : 'divider', bgcolor: '#f8fafc' }}>
+                    borderColor: netHours > 0 ? 'success.light' : netHours < 0 ? 'error.light' : 'divider', bgcolor: '#FAF7F2' }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.8 }}>סיכום נטו (לפי המאושר)</Typography>
                     <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
                       <Box sx={{ textAlign: 'center' }}>
@@ -3580,7 +3580,7 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                       </Box>
                       <Typography sx={{ fontSize: 22, color: 'text.disabled' }}>=</Typography>
                       <Box sx={{ textAlign: 'center', px: 2.5, py: 0.6, borderRadius: 2, minWidth: 120,
-                        bgcolor: netHours > 0 ? '#dcfce7' : netHours < 0 ? '#fee2e2' : '#f1f5f9' }}>
+                        bgcolor: netHours > 0 ? '#dcfce7' : netHours < 0 ? '#fee2e2' : '#F3EEE6' }}>
                         <Typography variant="caption" sx={{ fontWeight: 700 }}>נטו</Typography>
                         <Typography sx={{ fontWeight: 900, fontSize: 30, lineHeight: 1.05, color: c }}>
                           {netHours > 0 ? '+' : ''}{netHours} <span style={{ fontSize: 16 }}>ש׳</span>

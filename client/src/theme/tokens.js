@@ -110,6 +110,33 @@ export const COLOR = {
   },
 
   /**
+   * The six states a day in the punch grid can be in.
+   *
+   * These are not decoration and they are not a theme choice — the colour IS
+   * the information. A manager reads a month of forty employees across the grid
+   * and never opens a single cell; what she is reading is which days came off
+   * the clock, which somebody typed in, and which are still waiting on her.
+   *
+   * They were written by hand in three places — the cell renderer, the legend
+   * beneath it, and the PDF stylesheet — which is how a legend ends up
+   * describing colours the grid stopped using. The legend now generates itself
+   * from this object, so the two cannot drift.
+   *
+   * Four of the six reuse the semantic soft pairs above, because they mean the
+   * same things (fine / needs attention / wrong). Teal and violet are added
+   * because "these hours came from a fixed schedule" and "somebody typed this
+   * and it is not approved yet" are real distinctions with no semantic role.
+   */
+  punch: {
+    clock:      { bg: '#E4F0E7', on: '#255239', label: 'החתמת שעון' },
+    manual:     { bg: '#E7EFF8', on: '#274D74', label: '✎ עדכון ידני' },
+    fixed:      { bg: '#DEEFEC', on: '#1C574F', label: '⏱ שעות קבועות' },
+    incomplete: { bg: '#FFF1DC', on: '#6B3F00', label: 'חסרה יציאה' },
+    pending:    { bg: '#ECE9F6', on: '#413A7D', label: 'ידני — ממתין לאישור' },
+    review:     { bg: '#FBE9E6', on: '#8C1D18', label: '⚠️ החתמה כפולה — להחלטת הנה״ח' },
+  },
+
+  /**
    * Row tints. A row that needs attention is tinted; a row that is fine is
    * white. This is the whole of the colour budget for a table — the alternative,
    * which the app currently does, is a different coloured chip in every column

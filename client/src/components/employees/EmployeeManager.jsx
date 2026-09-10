@@ -19,6 +19,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import PageHeader from '../ui/PageHeader';
 import { useAuth } from '../../hooks/useAuth';
 import { useBranch } from '../../hooks/useBranch';
 import { branchColor } from '../../utils/branchColors';
@@ -606,35 +607,65 @@ export default function EmployeeManager() {
   }, [branches]);
 
   return (
-    <Box dir="rtl" sx={{ maxWidth: 1200, mx: 'auto' }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>ניהול עובדים</Typography>
-          <Typography variant="caption" color="text.secondary">
-            {totalCount} עובדים
-            {missingIdCount > 0 && ` • ${missingIdCount} בלי ת״ז`}
-          </Typography>
-          {(gapStats.blocking > 0 || gapStats.warning > 0) && (
-            <Stack direction="row" spacing={0.75} sx={{ mt: 0.75 }} alignItems="center">
-              {gapStats.blocking > 0 && (
-                <Chip size="small" color="error" label={`${gapStats.blocking} חוסמים תשלום`} sx={{ fontWeight: 700 }} />
-              )}
-              {gapStats.warning > 0 && (
-                <Chip size="small" color="warning" variant="outlined" label={`${gapStats.warning} עם נתונים חסרים`} />
-              )}
-              <Button size="small" onClick={() => setOnlyIncomplete(v => !v)} sx={{ fontSize: 12 }}>
-                {onlyIncomplete ? 'הצג את כולם' : 'הצג רק חסרים'}
-              </Button>
-            </Stack>
-          )}
-        </Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+    <Box dir="rtl">
+      {/* One header. What was here: seven buttons in a row, two of them toggles
+          that turned themselves filled when switched on — so with the archive
+          showing and salaries visible the row carried three filled buttons and
+          no primary one. Toggles now say their state in words and stay quiet;
+          the things done once a month sit in the overflow; adding an employee,
+          which is why anyone opens this screen, is the one filled button. */}
+      <PageHeader
+        title="ניהול עובדים"
+        meta={[
+          { label: `${totalCount} עובדים`, strong: true },
+          missingIdCount > 0 && { label: `${missingIdCount} בלי ת״ז` },
+          hideSalary && { label: 'עמודות שכר מוסתרות' },
+          showArchived && { label: 'כולל ארכיון' },
+        ]}
+        primary={canManage && {
+          label: 'הוסף עובד',
+          icon: <AddIcon />,
+          onClick: () => openAdd(false),
+        }}
+        actions={[
+          canManage && {
+            label: pendingChanges
+              ? `${isAdmin || isAccountant ? 'שינויים לאישור' : 'שינויים שהגשתי'} (${pendingChanges})`
+              : (isAdmin || isAccountant ? 'שינויים לאישור' : 'שינויים שהגשתי'),
+            icon: <FactCheckIcon />,
+            color: pendingChanges ? 'warning' : 'inherit',
+            onClick: () => setChangeReqOpen(true),
+          },
+        ]}
+        menu={[
+          canManage && {
+            label: 'הנפק הסכם לעובד חדש',
+            icon: <DescriptionIcon fontSize="small" />,
+            onClick: () => openAdd(true),
+          },
+          canManage && {
+            label: 'שיוך לשעון',
+            icon: <LinkIcon fontSize="small" />,
+            onClick: () => setClockMatchOpen(true),
+          },
+          {
+            label: hideSalary ? 'הצג עמודות שכר' : 'הסתר עמודות שכר',
+            icon: hideSalary ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />,
+            onClick: toggleHideSalary,
+          },
+          {
+            label: showArchived ? 'הסתר ארכיון' : 'הצג גם ארכיון',
+            onClick: () => setShowArchived(v => !v),
+          },
+        ]}
+      >
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <TextField
             placeholder="חיפוש שם / ת״ז / תפקיד / טלפון"
             size="small"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            sx={{ width: 280 }}
+            sx={{ width: 300 }}
             InputProps={{
               startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
               endAdornment: search ? (
@@ -644,50 +675,31 @@ export default function EmployeeManager() {
               ) : null,
             }}
           />
-          <Tooltip title={hideSalary ? 'הצג עמודות סוג שכר ותעריף' : 'הסתר עמודות סוג שכר ותעריף (למי שיושב לידך)'}>
-            <Button
-              size="small"
-              variant={hideSalary ? 'outlined' : 'contained'}
-              color={hideSalary ? 'inherit' : 'warning'}
-              startIcon={hideSalary ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
-              onClick={toggleHideSalary}
-            >
-              {hideSalary ? 'שכר מוסתר' : 'שכר גלוי'}
-            </Button>
-          </Tooltip>
-          <Tooltip title={showArchived ? 'מציג עובדים פעילים + ארכיון' : 'מציג עובדים פעילים בלבד'}>
-            <Button
-              size="small"
-              variant={showArchived ? 'contained' : 'outlined'}
-              color={showArchived ? 'warning' : 'inherit'}
-              onClick={() => setShowArchived(v => !v)}
-            >
-              {showArchived ? 'כולל ארכיון' : 'הצג ארכיון'}
-            </Button>
-          </Tooltip>
-          {canManage && (
+
+          {/* Missing data, as a filter rather than as a notice. Somebody who
+              sees "4 חוסמים תשלום" wants those four rows, not the sentence. */}
+          {(gapStats.blocking > 0 || gapStats.warning > 0) && (
             <>
-              <Badge color="warning" badgeContent={pendingChanges} max={99}>
-                <Button
-                  variant="outlined" color="warning" startIcon={<FactCheckIcon />}
-                  onClick={() => setChangeReqOpen(true)}
-                >
-                  {isAdmin || isAccountant ? 'שינויים לאישור' : 'שינויים שהגשתי'}
-                </Button>
-              </Badge>
-              <Button variant="outlined" startIcon={<LinkIcon />} onClick={() => setClockMatchOpen(true)}>
-                שיוך לשעון
-              </Button>
-              <Button variant="outlined" startIcon={<DescriptionIcon />} onClick={() => openAdd(true)}>
-                הנפק הסכם לעובד חדש
-              </Button>
-              <Button variant="contained" startIcon={<AddIcon />} onClick={() => openAdd(false)}>
-                הוסף עובד
-              </Button>
+              {gapStats.blocking > 0 && (
+                <Chip size="small" color="error"
+                  label={`${gapStats.blocking} חוסמים תשלום`}
+                  variant={onlyIncomplete ? 'filled' : 'outlined'}
+                  onClick={() => setOnlyIncomplete(v => !v)} />
+              )}
+              {gapStats.warning > 0 && (
+                <Chip size="small" color="warning"
+                  label={`${gapStats.warning} עם נתונים חסרים`}
+                  variant={onlyIncomplete ? 'filled' : 'outlined'}
+                  onClick={() => setOnlyIncomplete(v => !v)} />
+              )}
+              {onlyIncomplete && (
+                <Chip size="small" label="הצג את כולם" variant="outlined"
+                  onClick={() => setOnlyIncomplete(false)} />
+              )}
             </>
           )}
         </Stack>
-      </Stack>
+      </PageHeader>
 
       {missingIdCount > 0 && (
         <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>

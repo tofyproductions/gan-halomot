@@ -85,6 +85,16 @@ async function main() {
     ok(ratio >= AA, `${role}.softOn על ${role}.soft — ${ratio.toFixed(2)}:1`, `נדרש ${AA}`);
   }
 
+  console.log('\nניגודיות מצבי ההחתמה (הצבע הוא המידע):');
+  for (const [state, pair] of Object.entries(COLOR.punch)) {
+    const ratio = contrast(pair.on, pair.bg);
+    ok(ratio >= AA, `punch.${state} — ${ratio.toFixed(2)}:1  ${pair.label}`, `נדרש ${AA}`);
+  }
+  // Six states a manager tells apart at a glance across a month of forty
+  // employees: two that look alike are two she reads wrong.
+  const bgs = Object.values(COLOR.punch).map((p) => p.bg.toLowerCase());
+  ok(new Set(bgs).size === bgs.length, `כל ${bgs.length} מצבי ההחתמה בגוון נפרד`);
+
   console.log('\nהצבע הישן לא חזר:');
   ok(COLOR.primary.main.toLowerCase() !== '#f59e0b',
     'primary.main אינו הכתום שנכשל בניגודיות');

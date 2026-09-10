@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Box, Tabs, Tab, Paper, Typography, Badge } from '@mui/material';
+import { Box, Tabs, Tab, Badge } from '@mui/material';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import RequestPageIcon from '@mui/icons-material/RequestPage';
@@ -19,6 +19,7 @@ import CommitmentsManager from './CommitmentsManager';
 import PayrollChangeRequests from './PayrollChangeRequests';
 import MyDecisions from './MyDecisions';
 import api from '../../api/client';
+import PageHeader from '../ui/PageHeader';
 import { useAuth } from '../../hooks/useAuth';
 
 /**
@@ -91,19 +92,24 @@ export default function PayrollPage() {
 
   return (
     <Box dir="rtl">
-      <Paper dir="rtl" sx={{ borderRadius: 3, mb: 2, overflow: 'hidden' }} elevation={0} variant="outlined">
-        <Box sx={{ px: 2, pt: 1.5, pb: 0 }}>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>שכר</Typography>
-        </Box>
+      {/* The title and the nine tabs used to sit in a bordered card floating on
+          the page, which gave the strip a box of its own to be scrolled inside
+          — and it is the navigation for this screen, not a panel on it. Now it
+          is the page header, and the tabs are the row under the rule. */}
+      <PageHeader
+        title="שכר"
+        meta={[
+          { label: `${visibleTabs.length} מסכים`, strong: false },
+          pendingCount > 0 && { label: `${pendingCount} בקשות שינוי ממתינות` },
+        ]}
+      >
         <Tabs
           value={visibleTabs.length ? active : false}
           onChange={handleChange}
           variant="scrollable"
           scrollButtons="auto"
           dir="rtl"
-          sx={{
-            borderBottom: 1, borderColor: 'divider',
-          }}
+          sx={{ minHeight: 44, '& .MuiTabs-indicator': { height: 2 } }}
         >
           {visibleTabs.map(t => (
             <Tab
@@ -158,7 +164,7 @@ export default function PayrollPage() {
             />
           ))}
         </Tabs>
-      </Paper>
+      </PageHeader>
 
       <ActiveComponent />
     </Box>
