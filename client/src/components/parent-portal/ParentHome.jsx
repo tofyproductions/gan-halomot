@@ -323,6 +323,40 @@ function PhotosCard({ photos, onOpen }) {
  * restraint.
  */
 function PaymentsCard({ payments, onOpen }) {
+  // At a ministry branch there is no ledger here at all — one balance from the
+  // last ClickTac export, and nothing to sum, prorate or mark paid. Its own
+  // card, because everything below assumes months.
+  if (payments.mode === 'external') {
+    const owed = payments.total_debt || 0;
+    return (
+      <DoorCard onClick={onOpen} label="תשלומים">
+        <Card>
+          <CardContent>
+            <Stack direction="row" alignItems="center">
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {owed > 0 ? 'יתרה לתשלום' : 'תשלומים'}
+                </Typography>
+                <Typography
+                  sx={{
+                    fontFamily: DISPLAY, fontWeight: 800,
+                    fontSize: owed > 0 ? '1.5rem' : '1.15rem',
+                    lineHeight: 1.2, letterSpacing: '-0.02em',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: owed > 0 ? 'text.primary' : 'success.main',
+                  }}
+                >
+                  {owed > 0 ? money(owed) : 'אין יתרה פתוחה'}
+                </Typography>
+              </Box>
+              <More text="לפירוט" />
+            </Stack>
+          </CardContent>
+        </Card>
+      </DoorCard>
+    );
+  }
+
   const { summary, months, current_month: current } = payments;
   const settled = summary.remaining === 0;
   const currentMonth = months.find(m => m.month === current);

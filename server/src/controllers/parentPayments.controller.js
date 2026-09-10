@@ -1,6 +1,6 @@
-const { Registration, Collection, Discount, SummerCamp } = require('../models');
+const { Registration, Collection, Discount, SummerCamp, Branch, ExternalEnrollment } = require('../models');
 const {
-  normalizeYear, formatAcademicYear, hebrewYearForStart,
+  normalizeYear, formatAcademicYear, hebrewYearForStart, enrollmentYear,
   HEBREW_MONTHS, CAMP_MONTH,
 } = require('../services/academic-year.service');
 const { buildRegistrationMonths } = require('../services/collection-view.service');
@@ -87,6 +87,134 @@ function feeStillUnknown(reg) {
 }
 
 /**
+ * The previous academic year. '2026-2027' → '2025-2026'.
+ *
+ * A debt does not end because a year did, and the ClickTac file that carries
+ * last year's balance is uploaded separately from this year's.
+ */
+function previousYear(academicYear) {
+  const [y1, y2] = String(academicYear).split('-').map(Number);
+  return `${y1 - 1}-${y2 - 1}`;
+}
+
+/**
+ * What the family owes at a branch WE DO NOT COLLECT FOR.
+ *
+ * The gan's money is split down the middle and always has been. קפלן registers
+ * its families directly with us and the office enters every receipt here, so
+ * those parents get the month-by-month table above — expected, paid, receipt
+ * number, the lot. Every other branch is under משרד התמ"ת: the family enrols
+ * through קליקטאק, pays through קליקטאק, and this system never sees a single
+ * payment. Until now that meant those parents were shown nothing at all — the
+ * section was not even offered to them — while their neighbours at קפלן had a
+ * full ledger.
+ *
+ * What we DO hold for them is one number: the מאזן from the last contracts
+ * export somebody uploaded, the same figure the office reads in the חייבים
+ * table. So that is what this returns, and it is scrupulous about what it is:
+ *
+ *  - The date of the file it came from is shown beside it, always. A balance
+ *    with no date is a claim about right now, and this one is a claim about
+ *    whenever the last export was taken.
+ *  - It says out loud that the figure is not live. A family who paid this
+ *    morning must not read a month-old debt as the gan disputing it.
+ *  - Every child of the family is on the one screen, each with their own line.
+ *    ClickTac keeps an account per child; a parent of three wants the three,
+ *    and wants them apart rather than summed into a number no document shows.
+ *  - A child with no row is said to have no row. Not zero — a branch that has
+ *    not uploaded a file this year owes nobody an invented balance.
+ *
+ * Nothing here is billed, chased or paid. It is the office's own figure, shown
+ * to the family it is about.
+ */
+async function externalPayments(own, branch) {
+  const { normalizeId } = require('../services/tmt.service');
+
+  const currentYear = normalizeYear(enrollmentYear());
+  const years = [currentYear, previousYear(currentYear)];
+
+  // Every child of this parent, not only the one whose screen this is.
+  const kids = (own.parent.groups || [])
+    .map(g => g.current)
+    .filter(Boolean);
+
+  const idOf = (c) => normalizeId(c.child_id_number || '');
+  const ids = [...new Set(kids.map(idOf).filter(Boolean))];
+
+  // Matched on ת"ז rather than on this child's branch: siblings are not always
+  // in the same gan, and a family with one child at משה דיין and another at
+  // רעננה would otherwise be told the second has no account. Both spellings are
+  // asked for — the file writes the number as it finds it, and normalizeId pads
+  // to nine.
+  const idVariants = [...new Set(ids.flatMap(id => [id, id.replace(/^0+/, '')]))];
+
+  const rows = idVariants.length
+    ? await ExternalEnrollment.find({
+      academic_year: { $in: years },
+      'child.id_number': { $in: idVariants },
+    }).select('academic_year child.id_number contract.balance contract.family_balance contract.imported_at').lean()
+    : [];
+
+  // Newest file wins where a child appears twice — a family that moved branch
+  // mid-year has a row on each side, and the older one is not their balance.
+  const byChildYear = new Map();
+  for (const r of rows) {
+    const key = `${normalizeId(r.child?.id_number)}|${r.academic_year}`;
+    const kept = byChildYear.get(key);
+    const at = (x) => new Date(x?.contract?.imported_at || 0).getTime();
+    if (!kept || at(r) >= at(kept)) byChildYear.set(key, r);
+  }
+
+  // The newest file any of these rows came from — the one date the whole
+  // screen is "correct as of".
+  let updatedAt = null;
+  for (const r of rows) {
+    const at = r.contract?.imported_at ? new Date(r.contract.imported_at) : null;
+    if (at && !Number.isNaN(at.getTime()) && (!updatedAt || at > updatedAt)) updatedAt = at;
+  }
+
+  const children = kids.map((c) => {
+    const id = idOf(c);
+    const lines = years
+      .map((year) => {
+        const row = id ? byChildYear.get(`${id}|${year}`) : null;
+        const balance = row?.contract?.balance;
+        if (typeof balance !== 'number') return null;
+        return {
+          academic_year: year,
+          year_label: formatAcademicYear(year),
+          is_current_year: year === currentYear,
+          // ClickTac stores a debt as a NEGATIVE balance. Flipped once, here,
+          // so no screen has to remember the sign — and a credit stays a
+          // credit rather than being shown as a debt of minus something.
+          debt: balance < 0 ? Math.round(-balance) : 0,
+          credit: balance > 0 ? Math.round(balance) : 0,
+          updated_at: row.contract?.imported_at || null,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      id: c._id,
+      name: c.child_name,
+      // No row at all is its own answer, and it is not "no debt".
+      has_data: lines.length > 0,
+      years: lines,
+      debt: lines.reduce((s, l) => s + l.debt, 0),
+    };
+  });
+
+  return {
+    available: true,
+    mode: 'external',
+    branch_name: branch.name || '',
+    updated_at: updatedAt,
+    children,
+    total_debt: children.reduce((s, c) => s + c.debt, 0),
+  };
+}
+
+/**
  * GET /api/parent/children/:childId/payments
  */
 async function childPayments(req, res) {
@@ -101,6 +229,21 @@ async function childPayments(req, res) {
   const regId = child.registration_id?._id || child.registration_id;
   const reg = regId ? await Registration.findById(regId).lean() : null;
   if (!reg) return res.status(404).json({ error: 'לא נמצא' });
+
+  // Which half of the gan this family is in. Under the ministry, the money is
+  // ClickTac's and all we hold is the balance from its last export; at קפלן
+  // the office keeps the ledger here and the month-by-month table below is the
+  // real thing. Decided by the BRANCH rather than by whether a fee happens to
+  // be filled in — a supervised branch with a fee typed into it is still a
+  // branch we do not collect for, and showing it a table of receipts we never
+  // issued would invent a ledger.
+  const { isTmtSupervised } = require('./tmtApproval.controller');
+  const branch = reg.branch_id
+    ? await Branch.findById(reg.branch_id).select('name tmt_supervised').lean()
+    : null;
+  if (branch && isTmtSupervised(branch)) {
+    return res.json(await externalPayments(own, branch));
+  }
 
   const academicYear = normalizeYear(child.academic_year || reg.academic_year || '');
   if (!academicYear) {
