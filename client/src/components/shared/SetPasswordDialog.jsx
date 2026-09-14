@@ -100,7 +100,11 @@ export default function SetPasswordDialog({ open, onClose, allowSkip = false, fo
         <>
           <DialogContent>
             <Stack spacing={2} sx={{ mt: 1, alignItems: 'center', textAlign: 'center' }}>
-              <FingerprintIcon sx={{ fontSize: 56, color: '#7c3aed' }} />
+              {/* The token, not a literal: this dialog renders under BOTH shells
+                  and a hex here would be the redesign's purple sitting on the
+                  classic theme. `primary.main` is whichever accent the person
+                  is actually looking at. */}
+              <FingerprintIcon sx={{ fontSize: 56, color: 'primary.main' }} />
               <Typography variant="body2" color="text.secondary">
                 אפשר להוסיף כניסה עם טביעת אצבע או זיהוי פנים במכשיר הזה —
                 בפעם הבאה נכנסים בנגיעה אחת, בלי להקליד סיסמה.
