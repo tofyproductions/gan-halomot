@@ -50,6 +50,7 @@
     "demo:clone": "node scripts/ganflow-demo-clone.js",
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js",
+    "demo:ui": "node scripts/ganflow-demo-ui-version.js",
     "test:sales": "node scripts/sales-pages.test.js",
     "test:rtl-badge": "node scripts/rtl-badge-position.test.js",
     "test:viewer-role": "node scripts/viewer-role-exists.test.js",

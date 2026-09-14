@@ -528,11 +528,34 @@ function walk(collection, node, path = '', rootId = '') {
   if (WRITE) {
     const bcrypt = require('bcryptjs');
     const hash = await bcrypt.hash('Demo2026!', 10);
+    /**
+     * The demo opens on the REDESIGN, and is never asked about it.
+     *
+     * `User.ui_version` defaults to null, and null renders the classic shell
+     * plus a one-time "want to try the new interface?" offer. That default is
+     * right for a gan with four branches already running their day on the old
+     * screens — nobody gets moved by a deploy. It is wrong for the demo, which
+     * is not somebody's workplace but the first thing a prospect ever sees:
+     * cloned from production, it inherits the same null and opens on the old
+     * interface with a dialog on top asking the prospect to choose between two
+     * designs they have not been shown. So both fields are set here rather
+     * than in the model, where changing the default would move the four real
+     * gans too.
+     *
+     * `ui_version_asked: true` is the half that matters as much as the other —
+     * without it the offer still appears, now on top of the new interface.
+     */
     const r = await db.collection('users').updateMany({}, {
-      $set: { password_hash: hash, password_set: true },
+      $set: {
+        password_hash: hash,
+        password_set: true,
+        ui_version: 'new',
+        ui_version_asked: true,
+      },
       $unset: { webauthn_credentials: '' },
     });
     console.log(`\n  \u{1F511} ${r.modifiedCount} משתמשים אופסו לסיסמה: Demo2026!`);
+    console.log(`  \u{1F3A8} ${r.modifiedCount} משתמשים נפתחים בעיצוב החדש, בלי שאלה`);
 
     // A login worth saying out loud. Every other account in the demo is an
     // invented name with a nine-digit number nobody can hold in their head,
@@ -552,6 +575,9 @@ function walk(collection, node, path = '', rootId = '') {
       password_set: true,
       password_hash: await bcrypt.hash(DEMO_LOGIN.password, 10),
       branch_id: anyBranch ? anyBranch._id : null,
+      // Inserted after the updateMany above, so it carries these itself.
+      ui_version: 'new',
+      ui_version_asked: true,
       created_at: new Date(),
       updated_at: new Date(),
     });
