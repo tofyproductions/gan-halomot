@@ -304,7 +304,7 @@ export default function Sidebar() {
           its own, so walking from גבייה to ארכיון quietly changed the year and
           neither screen mentioned it. */}
       <Box sx={{ mb: 2 }}>
-        {canSeeAllBranches && branches.length > 1 && (
+        {branches.length > 1 && (
           <Select
             value={selectedBranch || ''}
             onChange={(e) => changeBranch(e.target.value)}
@@ -325,6 +325,23 @@ export default function Sidebar() {
             {branches.map((b) => (
               <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
             ))}
+            {/**
+             * The cross-branch view. It is not one more gan in the list, so it
+             * sits below a rule and carries the accent — and it has to be here
+             * at all: 'all' is a real, persisted value of selectedBranch, and
+             * the classic bar offers it. Without this item, somebody who was
+             * looking at כל הסניפים and accepted the new interface came back to
+             * a selector rendering a value it did not contain — blank, with no
+             * way to leave it.
+             */}
+            {canSeeAllBranches && branches.length > 1 && [
+              <MenuItem key="__all-divider" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset', py: 0.3 }}>
+                ──────────
+              </MenuItem>,
+              <MenuItem key="__all" value="all" sx={{ fontWeight: 800, color: 'primary.main' }}>
+                כל הסניפים
+              </MenuItem>,
+            ]}
           </Select>
         )}
 
@@ -336,7 +353,7 @@ export default function Sidebar() {
           fullWidth
           renderValue={(v) => formatAcademicYear(v)}
           sx={{
-            mt: canSeeAllBranches && branches.length > 1 ? 0.75 : 0,
+            mt: branches.length > 1 ? 0.75 : 0,
             bgcolor: 'sidebar.bgActive',
             fontSize: '0.75rem',
             fontWeight: 600,

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Box, Drawer, Typography, Divider, Avatar } from '@mui/material';
+import { Box, Drawer, Typography, Divider, Avatar, Select, MenuItem } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import MoreHorizIcon from '@mui/icons-material/MoreHoriz';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -8,6 +8,7 @@ import { buildNavModel } from '../../config/nav';
 import { iconFor } from './navIcons';
 import AccountMenu from './AccountMenu';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranch } from '../../hooks/useBranch';
 
 export const MOBILE_NAV_HEIGHT = 56;
 
@@ -61,7 +62,8 @@ const PHONE_FIRST_FALLBACK = ['nursery', 'supplies', 'attendance', 'photos'];
 export default function MobileNav() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, canSeeAllBranches } = useAuth();
+  const { branches, selectedBranch, changeBranch } = useBranch();
   const [moreOpen, setMoreOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const model = useMemo(() => buildNavModel(user), [user]);
@@ -200,6 +202,38 @@ export default function MobileNav() {
               <LogoutIcon sx={{ fontSize: 20 }} />
             </Box>
           </Box>
+
+          {/**
+           * Which gan — on the phone.
+           *
+           * The rail holds this on a desktop and the rail does not exist here,
+           * so without it a manager of more than one gan could not change gans
+           * from a phone at all: she was pinned to whatever was last chosen at
+           * a desk, with the screens quietly answering for the wrong one. The
+           * old drawer carried the same selector for the same reason.
+           */}
+          {branches.length > 1 && (
+            <Select
+              value={selectedBranch || ''}
+              onChange={(e) => { changeBranch(e.target.value); setMoreOpen(false); }}
+              size="small"
+              aria-label="בחירת סניף"
+              fullWidth
+              sx={{ mb: 1.5, fontSize: '0.875rem', fontWeight: 600, borderRadius: 1.5 }}
+            >
+              {branches.map((b) => (
+                <MenuItem key={b._id || b.id} value={b._id || b.id}>{b.name}</MenuItem>
+              ))}
+              {canSeeAllBranches && branches.length > 1 && [
+                <MenuItem key="__all-divider" disabled sx={{ opacity: 0.4, fontSize: '0.7rem', minHeight: 'unset', py: 0.3 }}>
+                  ──────────
+                </MenuItem>,
+                <MenuItem key="__all" value="all" sx={{ fontWeight: 800, color: 'primary.main' }}>
+                  כל הסניפים
+                </MenuItem>,
+              ]}
+            </Select>
+          )}
 
           <Divider sx={{ mb: 1.5 }} />
 

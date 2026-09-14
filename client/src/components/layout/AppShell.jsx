@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Fragment, Suspense, useEffect, useState } from 'react';
 import { Box } from '@mui/material';
 import ScreenSkeleton from '../ui/ScreenSkeleton';
 import ScreenBoundary from '../ui/ScreenBoundary';
@@ -7,6 +7,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import MobileNav, { MOBILE_NAV_SPACE, useHasMobileNav } from './MobileNav';
 import { useAuth } from '../../hooks/useAuth';
+import { useBranch } from '../../hooks/useBranch';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
 import PunchEntryTaskGate from '../attendance/PunchEntryTaskGate';
@@ -30,6 +31,7 @@ import { MyDecisionsPopup } from '../payroll/MyDecisions';
 export default function AppShell() {
   const hasMobileNav = useHasMobileNav();
   const { pathname } = useLocation();
+  const { selectedBranch } = useBranch();
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100dvh', bgcolor: 'background.default' }}>
@@ -73,9 +75,27 @@ export default function AppShell() {
             arrives rejects the lazy import, and without something to catch it
             the whole tree unmounts to a white page. It is keyed on the route so
             one broken screen does not shadow every screen after it. */}
-        <ScreenBoundary routeKey={pathname}>
+        {/* The key carries the branch as well as the route, and that is not a
+            detail — it is what makes switching gans mean anything.
+
+            Which gan a request is about is not passed down as a prop. The api
+            client reads `selectedBranch` out of localStorage and appends it to
+            every GET (api/client.js), so a screen depends on the branch without
+            ever mentioning it, and no screen's effects re-run when it changes.
+            The old top bar hid this by calling window.location.reload() on the
+            selector; the rail replaced the bar and dropped the reload, so the
+            selector said כפר סבא while the table underneath still listed תל
+            אביב — silently wrong, on the screens where being sure which gan you
+            are looking at matters most.
+
+            Remounting the screen instead of reloading the page: the effects
+            re-run and refetch under the new branch, while the rail, the year
+            and the gates above stay put and nothing is downloaded twice. */}
+        <ScreenBoundary routeKey={`${pathname}|${selectedBranch}`}>
           <Suspense fallback={<ScreenSkeleton />}>
-            <Outlet />
+            <Fragment key={selectedBranch}>
+              <Outlet />
+            </Fragment>
           </Suspense>
         </ScreenBoundary>
       </Box>
