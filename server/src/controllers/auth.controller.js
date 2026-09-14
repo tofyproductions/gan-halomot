@@ -110,6 +110,27 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     // at another — and the resolver would then hand it that other gan's
     // children. Absent on a single-customer server, where it means nothing.
     tenant: req && req.tenant ? req.tenant.slug : undefined,
+    /**
+     * Which interface this person has chosen, carried so the FIRST frame after
+     * login is the right one.
+     *
+     * `applyAuth` in useAuth.jsx sets the client's `user` to this payload, not
+     * to a profile read — so any field missing here is missing until /auth/me
+     * runs, and that is on window focus or the 60s refresh. For a permission
+     * it does not matter; the gates are the token's job and they are all here.
+     * For this one it is the whole screen: somebody who chose the redesign on
+     * her phone logged in at the office, got the classic shell AND the offer
+     * dialog a second time, and then watched the interface change under her a
+     * minute later. Found on the demo, where all 102 accounts are set to the
+     * redesign and every one of them opened on the old one.
+     *
+     * Not added to tokenClaimsDiffer: that list is what a STALE token must be
+     * re-minted for, and a preference read fresh by /me on the next tick is
+     * not one. Putting it there would mint a token for every account on the
+     * first /me after this deploys, to no effect.
+     */
+    ui_version: user.ui_version || null,
+    ui_version_asked: !!user.ui_version_asked,
   };
   const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
   return { token, user: payload };

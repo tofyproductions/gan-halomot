@@ -81,7 +81,8 @@
     "test:rtl-noflip": "node scripts/rtl-noflip.test.js",
     "test:confirm-safety": "node scripts/confirm-safety.test.js",
     "test:one-stylis": "node scripts/one-stylis.test.js",
-    "test:theme-parity": "node scripts/theme-parity.test.js"
+    "test:theme-parity": "node scripts/theme-parity.test.js",
+    "test:ui-version": "node scripts/ui-version-login.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
