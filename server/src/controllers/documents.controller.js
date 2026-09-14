@@ -1,5 +1,37 @@
 const { Registration, Child, Document } = require('../models');
 const { canAccessRegistration } = require('../utils/branch-scope');
+const { isRead } = require('../utils/viewer');
+const { ADMIN_VIEWER } = require('../constants/roles');
+
+/**
+ * "Is this registration outside what the caller may work on?"
+ *
+ * canAccessRegistration answers against the caller's WRITE scope on a write,
+ * which is right for a branch manager — another gan's registration must look
+ * like it does not exist, or the 404 itself tells her it does.
+ *
+ * The admin_viewer is the exception, and she is the reason this wrapper exists.
+ * Her read scope is every branch, so 404 on an upload would be a lie about a
+ * registration she can open and read on screen; worse, it preempts the guard
+ * that is supposed to answer. A multipart upload from a viewer is refused
+ * 403 VIEWER_NO_UPLOAD with NO proposal filed — deliberately, because a
+ * multipart body cannot be replayed later and the proposal would be one the
+ * office could never apply. Refusing her here instead returns the wrong code
+ * for the wrong reason. She is let through to the write, where the guard
+ * refuses her properly; a viewer uploading to a gan she DOES manage lands, as
+ * it should. viewer-e2e 13h is this case.
+ */
+async function outOfScope(req, registrationId) {
+  /**
+   * `actual_role`, not `role`. middleware/auth.js serves a viewer's WRITE as a
+   * branch_manager (the fallback that lets the write reach the code that will
+   * refuse or propose it), so `req.user.role` says branch_manager here and
+   * asking it would miss exactly the caller this exists for. `actual_role` is
+   * set on both the read swap and the write fallback for this reason.
+   */
+  if (req.user?.actual_role === ADMIN_VIEWER && !isRead(req)) return false;
+  return !(await canAccessRegistration(req, registrationId));
+}
 
 // The file is base64 inside a Mongo document, so it counts against the 16MB
 // document cap; 8MB raw (~11MB encoded) leaves comfortable room.
@@ -12,7 +44,7 @@ async function getByRegistration(req, res, next) {
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found' });
     }
-    if (!(await canAccessRegistration(req, registrationId))) {
+    if (await outOfScope(req, registrationId)) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
@@ -42,7 +74,7 @@ async function upload(req, res, next) {
     if (!registration) {
       return res.status(404).json({ error: 'Registration not found' });
     }
-    if (!(await canAccessRegistration(req, registrationId))) {
+    if (await outOfScope(req, registrationId)) {
       return res.status(404).json({ error: 'Registration not found' });
     }
 
@@ -76,7 +108,7 @@ async function download(req, res, next) {
     if (!document) {
       return res.status(404).json({ error: 'Document not found' });
     }
-    if (!(await canAccessRegistration(req, document.registration_id))) {
+    if (await outOfScope(req, document.registration_id)) {
       return res.status(404).json({ error: 'Document not found' });
     }
 

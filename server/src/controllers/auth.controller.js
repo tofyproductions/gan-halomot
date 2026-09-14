@@ -328,20 +328,34 @@ async function login(req, res, next) {
       });
     }
 
-    // No password chosen yet. A password is mandatory, so instead of a full
-    // session with a dismissible nag, issue a RESTRICTED session that can only
-    // reach set-password / me / logout (enforced in middleware/auth.js). The
-    // client walks them through choosing a password, then offers biometrics.
-    //
-    // effectiveRoleTabs rather than roleTabOverrides: named permission sets
-    // landed on main after this branch was cut, and a restricted session still
-    // has to resolve the same tabs as any other — it is the same person, with
-    // one screen reachable instead of all of them.
-    const result = makeToken(
-      user, rememberMe, await effectiveRoleTabs(user), req, { forceMustChange: true },
-    );
+    /**
+     * A password-less login still opens the system, and still only nags.
+     *
+     * makeToken takes `{ forceMustChange: true }` and the whole restricted-
+     * session path behind it works — middleware/auth.js enforces it, and
+     * SetPasswordDialog walks somebody through choosing a password and then
+     * offers biometrics. It is deliberately NOT passed here.
+     *
+     * Turning it on is not a code decision, it is an operational one. The gan
+     * has 167 staff accounts and an unknown number of them have never chosen a
+     * password; for every one of those, the flag means locked out mid-shift,
+     * at whatever hour the deploy lands, with no warning. The security review
+     * is right that name + ת.ז is not an authenticator — ת.ז is printed on
+     * documents and held by employers — and this should be switched on. It
+     * should be switched on with the staff told first and somebody available
+     * to answer the phone, which is a different day's work from this merge.
+     *
+     * Everything else the review found ships now: the branch boundary, the
+     * ownership checks, rate limiting, the escaping, the JWT secret. Those cost
+     * nobody a login.
+     *
+     * To turn it on: pass { forceMustChange: true } below, and update
+     * ganflow-isolation / ganflow-orgscope, which log in password-less and
+     * expect a working session.
+     */
+    const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
-    result.must_set_password = true;
+    result.password_prompt = true; // no password chosen yet → nag on the client
     res.json(result);
   } catch (error) {
     next(error);
