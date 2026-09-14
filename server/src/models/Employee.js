@@ -480,8 +480,10 @@ employeeSchema.post('save', async function relinkOrphanPunches(doc) {
       { $set: { employee_id: doc._id } }
     );
     if (result.modifiedCount > 0) {
+      // Log the employee _id, not the national ID — a ת.ז in combined access
+      // logs is PII sitting in log storage for no operational reason.
       // eslint-disable-next-line no-console
-      console.log(`[Employee] relinked ${result.modifiedCount} orphan punches to ${doc.full_name} (${doc.israeli_id})`);
+      console.log(`[Employee] relinked ${result.modifiedCount} orphan punches to employee ${doc._id}`);
     }
   } catch (err) {
     // Never fail the save because of the backfill

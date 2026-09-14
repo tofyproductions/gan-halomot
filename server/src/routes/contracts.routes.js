@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const contractsController = require('../controllers/contracts.controller');
+const { requireRole } = require('../middleware/auth');
+const manage = requireRole('system_admin', 'branch_manager', 'accountant');
 
 // GET /api/contracts/:registrationId/preview
 router.get('/:registrationId/preview', contractsController.preview);
@@ -16,12 +18,12 @@ router.get('/:registrationId/download', contractsController.download);
 router.get('/', contractsController.listContracts);
 
 // POST /api/contracts/upload
-router.post('/upload', contractsController.uploadContract);
+router.post('/upload', manage, contractsController.uploadContract);
 
 // GET /api/contracts/doc/:id/file
 router.get('/doc/:id/file', contractsController.getContractFile);
 
 // DELETE /api/contracts/doc/:id
-router.delete('/doc/:id', contractsController.deleteContract);
+router.delete('/doc/:id', manage, contractsController.deleteContract);
 
 module.exports = router;

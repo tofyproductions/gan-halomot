@@ -69,7 +69,7 @@ const ORIGIN = env.NODE_ENV === 'production'
   ? 'https://gan-halomot.onrender.com'
   : 'http://localhost:5173';
 
-function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = null) {
+function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = null, opts = {}) {
   // Resolve managed_branch_ids: explicit value first, single-branch managers
   // fall back to [branch_id] so they don't need separate configuration.
   let managed = (user.managed_branch_ids || []).map(b => b?._id || b).filter(Boolean);
@@ -98,8 +98,11 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     password_set: !!user.password_set,
     // Carried in the token so every request can be refused without a database
     // lookup. Cleared the moment a password is chosen — and the new token
-    // issued there is what lifts the restriction.
-    must_change_password: !!user.must_change_password,
+    // issued there is what lifts the restriction. forceMustChange makes a
+    // password-less first login a restricted session that can do ONE thing:
+    // choose a password. A password is mandatory now, so name+ת.ז alone no
+    // longer opens the system.
+    must_change_password: opts.forceMustChange ? true : !!user.must_change_password,
     // Where this person stands in the customer's org chart, when there is one.
     // It decides which screen they are given — districts, branches or people —
     // and it is a ceiling on what they may ask for, so it is read from the
@@ -325,9 +328,20 @@ async function login(req, res, next) {
       });
     }
 
-    const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
+    // No password chosen yet. A password is mandatory, so instead of a full
+    // session with a dismissible nag, issue a RESTRICTED session that can only
+    // reach set-password / me / logout (enforced in middleware/auth.js). The
+    // client walks them through choosing a password, then offers biometrics.
+    //
+    // effectiveRoleTabs rather than roleTabOverrides: named permission sets
+    // landed on main after this branch was cut, and a restricted session still
+    // has to resolve the same tabs as any other — it is the same person, with
+    // one screen reachable instead of all of them.
+    const result = makeToken(
+      user, rememberMe, await effectiveRoleTabs(user), req, { forceMustChange: true },
+    );
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
-    result.password_prompt = true; // no password chosen yet → nag on the client
+    result.must_set_password = true;
     res.json(result);
   } catch (error) {
     next(error);

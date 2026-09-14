@@ -21,26 +21,30 @@ router.put('/summer-camp', requireRole('system_admin', 'accountant', 'branch_man
 // MUST stay above '/:registrationId', which would swallow it.
 router.put('/camp-enrollment/bulk', requireRole('system_admin', 'accountant', 'branch_manager'), collectionsController.bulkCampEnrollment);
 
+// Writing money — the family's monthly billing — belongs to the roles that set
+// prices, not to anyone merely logged in. Same set as the summer-camp guard.
+const billingRoles = requireRole('system_admin', 'accountant', 'branch_manager');
+
 // GET /api/collections/:registrationId
 router.get('/:registrationId', collectionsController.getByRegistration);
 
 // PUT /api/collections/:registrationId/month/:monthIndex
-router.put('/:registrationId/month/:monthIndex', collectionsController.updateMonth);
+router.put('/:registrationId/month/:monthIndex', billingRoles, collectionsController.updateMonth);
 
 // POST /api/collections/:registrationId/recalculate
-router.post('/:registrationId/recalculate', collectionsController.recalculate);
+router.post('/:registrationId/recalculate', billingRoles, collectionsController.recalculate);
 
 // PUT /api/collections/:registrationId/camp-enrollment — is this child in the
 // camp. Per child, because siblings attend separately.
-router.put('/:registrationId/camp-enrollment', collectionsController.updateCampEnrollment);
+router.put('/:registrationId/camp-enrollment', billingRoles, collectionsController.updateCampEnrollment);
 
 // PUT /api/collections/:registrationId/exit-month
-router.put('/:registrationId/exit-month', collectionsController.updateExitMonth);
+router.put('/:registrationId/exit-month', billingRoles, collectionsController.updateExitMonth);
 
 // PUT /api/collections/:registrationId/registration-fee
-router.put('/:registrationId/registration-fee', collectionsController.updateRegistrationFee);
+router.put('/:registrationId/registration-fee', billingRoles, collectionsController.updateRegistrationFee);
 
 // POST /api/collections/backup
-router.post('/backup', collectionsController.backup);
+router.post('/backup', billingRoles, collectionsController.backup);
 
 module.exports = router;

@@ -2,6 +2,10 @@ const express = require('express');
 const multer = require('multer');
 const router = express.Router();
 const registrationController = require('../controllers/registration.controller');
+const { requireRole } = require('../middleware/auth');
+
+// Network-wide, cross-branch data operations — accounting/admin only.
+const dataOps = requireRole('system_admin', 'accountant');
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -9,11 +13,11 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/', registrationController.getAll);
 
 // POST /api/registration/fix-orphan-branch — assign null-branch regs to a branch
-router.post('/fix-orphan-branch', registrationController.fixOrphanBranch);
+router.post('/fix-orphan-branch', dataOps, registrationController.fixOrphanBranch);
 
 // POST /api/registration/academic-year/bulk — move many registrations to another
 // gan year at once. Declared before /:id so "academic-year" is not read as an id.
-router.post('/academic-year/bulk', registrationController.bulkSetAcademicYear);
+router.post('/academic-year/bulk', dataOps, registrationController.bulkSetAcademicYear);
 
 // GET /api/registration/:id
 router.get('/:id', registrationController.getById);
@@ -26,7 +30,9 @@ router.put('/:id', registrationController.update);
 
 // PUT /api/registration/:id/academic-year — move this registration to another
 // gan year, taking its child record and its collection row with it.
-router.put('/:id/academic-year', registrationController.setAcademicYear);
+router.put('/:id/academic-year',
+  requireRole('system_admin', 'accountant', 'branch_manager'),
+  registrationController.setAcademicYear);
 
 // POST /api/registration/:id/generate-link
 router.post('/:id/generate-link', registrationController.generateLink);
@@ -53,7 +59,6 @@ router.get('/contract-versions/:versionId/download', registrationController.down
 
 // POST /api/registration/:id/cancel — ביטול רישום: off the rosters, still in
 // גבייה until the cancellation debt is settled. Managers may cancel their own.
-const { requireRole } = require('../middleware/auth');
 router.post('/:id/cancel',
   requireRole('system_admin', 'branch_manager', 'accountant'),
   registrationController.cancel);
