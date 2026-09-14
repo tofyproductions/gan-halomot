@@ -1129,6 +1129,83 @@ async function main() {
     tokens.teacher = await login('מיכל גננת', '900000006');
   }
 
+  /* ================================================================ *
+   * 15. מה ששייך לה עצמה — ולא לגן
+   * ================================================================ */
+  head('בדיקה 15 — פעולות אישיות אינן הופכות להצעה');
+  {
+    /**
+     * The guard cannot tell a change to the gan from a change to the person
+     * using it, and its default — refuse and file — was applied to both. So a
+     * viewer marking her own notices as read filed a ProposedChange, and the
+     * office got a card asking it to approve `POST /api/my-decisions/seen`
+     * with a field called `up_to` and a UTC timestamp for a value: nothing
+     * anybody could act on, because there was nothing to act on. Meanwhile
+     * her notices never went quiet and her browser notifications never
+     * switched on — two things that simply did not work for this role, each
+     * one looking like a bug of its own.
+     *
+     * These routes now sign for themselves (allowSelfWrite). The assertion
+     * that matters is BOTH halves: 200 rather than 202, AND the write landed —
+     * a route that answers 200 and writes nothing would pass a status check
+     * and still be broken.
+     */
+    const propsBefore = await ProposedChange.countDocuments({});
+
+    const seenAt = new Date('2026-09-02T12:38:17.648Z').toISOString();
+    const seen = await request({
+      method: 'POST', path: '/api/my-decisions/seen', token: tokens.viewer,
+      body: { up_to: seenAt },
+    });
+    eq(seen.status, 200, '15a צופה מסמנת "קראתי" → 200 ולא 202');
+    const afterSeen = await User.findById(viewer._id).select('decisions_seen_at').lean();
+    eq(new Date(afterSeen?.decisions_seen_at || 0).toISOString(), seenAt,
+      '15a והתאריך באמת נשמר על המשתמשת');
+
+    /**
+     * This one was already right — /api/auth is in NO_WRITE_GATE_PREFIXES, so
+     * a viewer's own account was never gated. It is asserted here anyway,
+     * beside the two that were wrong: the three look identical from the
+     * outside, they are exempted by two different mechanisms, and a change to
+     * either mechanism should have to break a test rather than a gan.
+     */
+    const ui = await request({
+      method: 'PATCH', path: '/api/auth/ui-version', token: tokens.viewer,
+      body: { version: 'new', asked: true },
+    });
+    eq(ui.status, 200, '15b צופה בוחרת את העיצוב החדש → 200');
+    const afterUi = await User.findById(viewer._id).select('ui_version ui_version_asked').lean();
+    eq(afterUi?.ui_version, 'new', '15b והבחירה נשמרה');
+    eq(afterUi?.ui_version_asked, true, '15b ונרשם שהיא נשאלה');
+
+    const push = await request({
+      method: 'POST', path: '/api/push/register-web', token: tokens.viewer,
+      body: { endpoint: 'https://example.invalid/e2e-viewer', keys: { p256dh: 'p', auth: 'a' } },
+    });
+    eq(push.status, 200, '15c צופה מפעילה התראות בדפדפן → 200');
+    const { WebPushSubscription } = require('../src/models');
+    const sub = await WebPushSubscription.findOne({ endpoint: 'https://example.invalid/e2e-viewer' }).lean();
+    eq(String(sub?.user_id || ''), String(viewer._id), '15c והמנוי נרשם עליה');
+
+    eq(await ProposedChange.countDocuments({}), propsBefore,
+      '15d ואף אחת מהשלוש לא נשמרה כהצעה לאישור');
+
+    /**
+     * The line has to hold in the other direction too, or "sign for yourself"
+     * becomes a way around the queue. Renaming a branch she does not manage is
+     * the same HTTP shape — an authenticated write by the same viewer — and it
+     * must still be refused and filed.
+     */
+    const guardStillHolds = await request({
+      method: 'PUT', path: `/api/branches/${branchB._id}`, token: tokens.viewer,
+      body: { name: 'שם שאסור לה לשנות' },
+    });
+    eq(guardStillHolds.status, 202, '15e ושינוי אמיתי בגן עדיין נשמר לאישור (202)');
+    eq(await ProposedChange.countDocuments({}), propsBefore + 1, '15e ונוצרה בדיוק הצעה אחת');
+    const stillNamed = await Branch.findById(branchB._id).select('name').lean();
+    ok(stillNamed?.name !== 'שם שאסור לה לשנות', '15e והסניף לא שונה');
+  }
+
   // Referenced so lint/readers see the seeded users are deliberate.
   void [acc, viewer, viewer0, manager, teacher, Setting, empFixedA];
 }

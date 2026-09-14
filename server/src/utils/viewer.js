@@ -73,6 +73,19 @@ const SCREEN_LABELS = [
   ['/api/maintenance', 'אחזקה'],
   ['/api/activities', 'פעילויות'],
   ['/api/cibus-sync', 'סיבוס'],
+  /**
+   * The personal screens. Nothing here is about running a gan, and after
+   * allowSelfWrite was put on these routes a viewer's use of them no longer
+   * reaches the queue at all — these names are the second line, for the day a
+   * fifth personal route is written and nobody remembers to sign it. A card
+   * saying ההחלטות שלי is one somebody can dismiss on sight; one saying
+   * מסך אחר is one they have to come and ask about.
+   */
+  ['/api/my-decisions', 'ההחלטות שלי'],
+  ['/api/proposed-changes', 'שינויים לאישור'],
+  ['/api/notifications', 'התראות'],
+  ['/api/push', 'התראות במכשיר'],
+  ['/api/auth', 'החשבון שלי'],
 ];
 
 /** Body keys the approver will read, in words. Unknown keys stay as they are. */
@@ -84,6 +97,10 @@ const FIELD_LABELS = {
   branch_id: 'סניף', employee_id: 'עובד/ת', child_id: 'ילד/ה', status: 'סטטוס',
   is_active: 'פעיל/ה', title: 'כותרת', description: 'תיאור', timestamp: 'שעה',
   type: 'סוג', start_date: 'מתאריך', end_date: 'עד תאריך',
+  // The personal screens' fields. `up_to` was the one that reached the office
+  // as a bare word next to a UTC timestamp.
+  up_to: 'נקראו עד', ui_version: 'עיצוב הממשק', ui_version_asked: 'נשאל/ה על העיצוב',
+  platform: 'סוג מכשיר', endpoint: 'דפדפן', fcm_token: 'מכשיר',
 };
 
 /**
@@ -179,9 +196,41 @@ function screenLabelFor(url) {
   return hit ? hit[1] : 'מסך אחר';
 }
 
+/**
+ * A machine timestamp is not a value somebody can approve.
+ *
+ * The queue showed `2026-09-02T12:38:17.648Z` as the requested value, which is
+ * the wire format and nobody's reading format — it is in UTC, so it does not
+ * even say the hour the person here would recognise. Anything that parses as a
+ * full ISO instant is shown as a date and time in Israel; everything else is
+ * left exactly as it was, because guessing at a string is worse than printing
+ * it.
+ *
+ * Matched on the shape rather than on the field name: `up_to`, `timestamp`,
+ * `created_at` and whatever the next route calls it all arrive the same way.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})$/;
+
+function showInstant(v) {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v);
+  try {
+    return new Intl.DateTimeFormat('he-IL', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'Asia/Jerusalem',
+    }).format(d);
+  } catch {
+    // A runtime built without the Hebrew locale data. The ISO string is still
+    // the truth, and a wrong-looking date would be worse than a raw one.
+    return String(v);
+  }
+}
+
 function showValue(v) {
   if (v === null || v === undefined || v === '') return '—';
   if (typeof v === 'boolean') return v ? 'כן' : 'לא';
+  if (typeof v === 'string' && ISO_INSTANT.test(v)) return showInstant(v);
   return String(v);
 }
 
@@ -207,7 +256,7 @@ function viewerMessage(approver) {
 }
 
 module.exports = {
-  isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
+  showValue, isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, approverFor,
   screenLabelFor, summarizeBody, extractBranchId, viewerMessage, FIELD_LABELS, pathOnly,
   startsWithPrefix, NO_UPLOAD,
 };

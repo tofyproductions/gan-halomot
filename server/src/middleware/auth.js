@@ -673,7 +673,47 @@ function requireBranchScope(req, res, next) {
   });
 }
 
+/**
+ * "This route writes about the caller herself, and about nothing else."
+ *
+ * WHY A VIEWER MUST PASS IT. The write guard's default is the right one — a
+ * viewer's write is refused and filed for approval unless a gate signs for it
+ * — but it cannot tell a change to the gan from a change to the person using
+ * it. So marking a notice as read (`decisions_seen_at`) and registering the
+ * browser you want notifications on both became proposals: nothing happened,
+ * and the office got a card asking it to approve `POST /api/my-decisions/seen`
+ * with a field called `up_to` and an ISO timestamp for a value. Nobody could
+ * act on that, because there was nothing to act on — and meanwhile the
+ * viewer's notices never went quiet and her notifications never switched on.
+ *
+ * /api/auth was already exempt wholesale (NO_WRITE_GATE_PREFIXES above), which
+ * is why choosing a password or an interface always worked; these two are the
+ * routes nobody had reached yet.
+ *
+ * WHAT IT MAY BE PUT ON, and this is the whole contract: a route whose writes
+ * are keyed on the caller's own id and touch nothing a gan is run from. Not
+ * "a route that feels harmless" — `PUT /api/employees/:id` is keyed on an id
+ * too, and that one is exactly what the approval queue is for. If a route can
+ * change what anybody else sees, it does not belong here.
+ *
+ * WHY NOT NO_WRITE_GATE_PREFIXES, which already says this for /api/auth. That
+ * list exempts a whole prefix, which is right for /api/auth (every route under
+ * it is about the caller's own account) and wrong here: /api/push is where a
+ * broadcast route would naturally be added, and a prefix would exempt it
+ * silently. Per route, at the route table, a reader sees which writes were
+ * signed for and which were not.
+ *
+ * It is a no-op for every other role: outside a viewer's write there is no
+ * context to claim.
+ */
+function allowSelfWrite(reason) {
+  return (req, res, next) => {
+    viewerContext.claim(`self:${reason}`);
+    next();
+  };
+}
+
 module.exports = {
   authMiddleware, optionalAuth, requireRole, requireTab, requireTabWrite,
-  requireBranchScope, tabDecision,
+  requireBranchScope, tabDecision, allowSelfWrite,
 };
