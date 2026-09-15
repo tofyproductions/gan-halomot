@@ -1,6 +1,7 @@
 const { Order, Supplier, Branch, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 const { sendOrderEmail } = require('../services/email.service');
+const { deliveryFromResult, deliveryFromError } = require('../services/order-delivery.service');
 const env = require('../config/env');
 
 async function findOrCreateStockItem({ branch_id, product_id, name, supplier_id }) {
@@ -126,18 +127,33 @@ async function create(req, res, next) {
     // Send the order to the supplier and CC the creator. Wrapped in a
     // try/catch so a flaky SMTP server can't break the create itself —
     // the order is in the DB regardless.
+    //
+    // What the catch used to do was log and move on, which left the order
+    // looking exactly like one that went out. The outcome is recorded on the
+    // order now, whichever way it goes: the order still saves, and it no
+    // longer claims something that did not happen.
+    let delivery;
     try {
       const branch = await Branch.findById(branch_id).select('name address').lean();
       const creatorEmail = req.user?.email && !String(req.user.email).endsWith('@gan-halomot.local') ? req.user.email : null;
-      await sendOrderEmail({
+      const result = await sendOrderEmail({
         order: order.toObject(),
         supplier: supplier.toObject(),
         branch,
         creatorEmail,
         creatorName: req.user?.full_name || created_by || '',
       });
+      delivery = deliveryFromResult(result);
     } catch (mailErr) {
       console.error('Order email failed:', mailErr.message);
+      delivery = deliveryFromError(mailErr);
+    }
+    // Recording the outcome must not be able to undo the order either.
+    try {
+      await Order.updateOne({ _id: order._id }, { $set: delivery });
+      Object.assign(order, delivery);
+    } catch (writeErr) {
+      console.error('Order email status write failed:', writeErr.message);
     }
 
     res.status(201).json({ order: { ...order.toObject(), id: order._id } });
@@ -213,6 +229,11 @@ async function resendEmail(req, res, next) {
       });
     } catch (smtpErr) {
       console.error('Order email SMTP error:', smtpErr);
+      // The order remembers the failure even though the caller is told about
+      // it too — the person who clicked sees the toast, and the next person
+      // to open the order in a week sees the same fact.
+      await Order.updateOne({ _id: order._id }, { $set: deliveryFromError(smtpErr) })
+        .catch(e => console.error('Order email status write failed:', e.message));
       // Surface the real SMTP error code + message so the user can fix the
       // env vars / app password without needing access to the server logs.
       const detail = smtpErr.code || smtpErr.responseCode || '';
@@ -224,6 +245,9 @@ async function resendEmail(req, res, next) {
         has_pass: !!process.env.SMTP_PASS,
       });
     }
+
+    await Order.updateOne({ _id: order._id }, { $set: deliveryFromResult(result) })
+      .catch(e => console.error('Order email status write failed:', e.message));
 
     if (result?.skipped) {
       return res.status(400).json({
