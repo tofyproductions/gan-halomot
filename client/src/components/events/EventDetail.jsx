@@ -87,22 +87,29 @@ export default function EventDetail({ open, groupId, branches = [], onClose, onC
   };
 
   const exportPdf = async (branch) => {
+    // Item names, parent names and phones are entered by people (parents claim
+    // items from a public link) and get written into innerHTML — escape them so
+    // a name like `<img onerror=...>` is text, not script running in the staff
+    // session that exports the PDF.
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
     const el = document.createElement('div');
     el.setAttribute('dir', 'rtl');
     el.style.cssText = 'font-family: Arial, sans-serif; padding: 24px; color: #1a1a1a; width: 700px;';
     const rows = branch.groups.map((g) => {
-      const takers = g.claims.map((c) => `${c.parent_name}${c.parent_phone ? ` (${c.parent_phone})` : ''}`).join(', ');
+      const takers = g.claims.map((c) => `${esc(c.parent_name)}${c.parent_phone ? ` (${esc(c.parent_phone)})` : ''}`).join(', ');
       return `<tr>
-        <td style="border:1px solid #ddd;padding:8px;font-weight:bold;">${g.name}${g.total > 1 ? ` ×${g.total}` : ''}</td>
+        <td style="border:1px solid #ddd;padding:8px;font-weight:bold;">${esc(g.name)}${g.total > 1 ? ` ×${g.total}` : ''}</td>
         <td style="border:1px solid #ddd;padding:8px;">${takers || '<span style="color:#c00;">— חסר —</span>'}</td>
       </tr>`;
     }).join('');
     el.innerHTML = `
-      <h1 style="margin:0 0 4px;font-size:24px;">${ev.name}</h1>
-      <div style="color:#555;margin-bottom:4px;font-size:15px;">${branch.branch_name}</div>
+      <h1 style="margin:0 0 4px;font-size:24px;">${esc(ev.name)}</h1>
+      <div style="color:#555;margin-bottom:4px;font-size:15px;">${esc(branch.branch_name)}</div>
       <div style="color:#555;margin-bottom:16px;font-size:15px;">
-        ${fmtDate(ev.event_date)}${ev.event_time ? ` · ${ev.event_time}` : ''}
-        ${ev.description ? `<div style="margin-top:6px;">${ev.description}</div>` : ''}
+        ${fmtDate(ev.event_date)}${ev.event_time ? ` · ${esc(ev.event_time)}` : ''}
+        ${ev.description ? `<div style="margin-top:6px;">${esc(ev.description)}</div>` : ''}
       </div>
       <table style="border-collapse:collapse;width:100%;font-size:14px;">
         <thead><tr>

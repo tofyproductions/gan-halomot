@@ -1,10 +1,28 @@
 require('dotenv').config();
 
+const IS_PROD = (process.env.NODE_ENV || 'development') === 'production';
+
+/**
+ * A secret with a fallback default is not a secret. If JWT_SECRET is ever unset
+ * in production, the old fallback ('dev-secret-change-in-production') is public
+ * knowledge in this repo — anyone could forge a system_admin token. So in
+ * production a missing secret refuses to boot, exactly as PLATFORM_JWT_SECRET
+ * already does; in development the convenience default stays.
+ */
+function requireInProd(name, devFallback) {
+  const value = process.env[name];
+  if (value) return value;
+  if (IS_PROD) {
+    throw new Error(`Missing required environment variable ${name} in production`);
+  }
+  return devFallback;
+}
+
 const env = {
   PORT: parseInt(process.env.PORT, 10) || 3001,
   NODE_ENV: process.env.NODE_ENV || 'development',
   MONGODB_URI: process.env.MONGODB_URI,
-  JWT_SECRET: process.env.JWT_SECRET || 'dev-secret-change-in-production',
+  JWT_SECRET: requireInProd('JWT_SECRET', 'dev-secret-change-in-production'),
   FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
 
   // Email

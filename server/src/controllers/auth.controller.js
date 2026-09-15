@@ -69,7 +69,7 @@ const ORIGIN = env.NODE_ENV === 'production'
   ? 'https://gan-halomot.onrender.com'
   : 'http://localhost:5173';
 
-function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = null) {
+function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = null, opts = {}) {
   // Resolve managed_branch_ids: explicit value first, single-branch managers
   // fall back to [branch_id] so they don't need separate configuration.
   let managed = (user.managed_branch_ids || []).map(b => b?._id || b).filter(Boolean);
@@ -98,8 +98,11 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
     password_set: !!user.password_set,
     // Carried in the token so every request can be refused without a database
     // lookup. Cleared the moment a password is chosen — and the new token
-    // issued there is what lifts the restriction.
-    must_change_password: !!user.must_change_password,
+    // issued there is what lifts the restriction. forceMustChange makes a
+    // password-less first login a restricted session that can do ONE thing:
+    // choose a password. A password is mandatory now, so name+ת.ז alone no
+    // longer opens the system.
+    must_change_password: opts.forceMustChange ? true : !!user.must_change_password,
     // Where this person stands in the customer's org chart, when there is one.
     // It decides which screen they are given — districts, branches or people —
     // and it is a ceiling on what they may ask for, so it is read from the
@@ -325,6 +328,31 @@ async function login(req, res, next) {
       });
     }
 
+    /**
+     * A password-less login still opens the system, and still only nags.
+     *
+     * makeToken takes `{ forceMustChange: true }` and the whole restricted-
+     * session path behind it works — middleware/auth.js enforces it, and
+     * SetPasswordDialog walks somebody through choosing a password and then
+     * offers biometrics. It is deliberately NOT passed here.
+     *
+     * Turning it on is not a code decision, it is an operational one. The gan
+     * has 167 staff accounts and an unknown number of them have never chosen a
+     * password; for every one of those, the flag means locked out mid-shift,
+     * at whatever hour the deploy lands, with no warning. The security review
+     * is right that name + ת.ז is not an authenticator — ת.ז is printed on
+     * documents and held by employers — and this should be switched on. It
+     * should be switched on with the staff told first and somebody available
+     * to answer the phone, which is a different day's work from this merge.
+     *
+     * Everything else the review found ships now: the branch boundary, the
+     * ownership checks, rate limiting, the escaping, the JWT secret. Those cost
+     * nobody a login.
+     *
+     * To turn it on: pass { forceMustChange: true } below, and update
+     * ganflow-isolation / ganflow-orgscope, which log in password-less and
+     * expect a working session.
+     */
     const result = makeToken(user, rememberMe, await effectiveRoleTabs(user), req);
     result.hasWebauthn = (user.webauthn_credentials || []).length > 0;
     result.password_prompt = true; // no password chosen yet → nag on the client

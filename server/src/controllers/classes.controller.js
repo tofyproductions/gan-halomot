@@ -1,4 +1,13 @@
 const { ClassProvider, ClassProgram, ClassSession, Classroom } = require('../models');
+const { getBranchFilter } = require('../utils/branch-filter');
+
+// Accept only a YYYY-MM month before it becomes a $regex, so a crafted value
+// can neither broaden the date filter nor pin the server with catastrophic
+// backtracking (ReDoS).
+function monthPrefixFilter(month) {
+  const m = String(month || '');
+  return /^\d{4}-\d{2}$/.test(m) ? { $regex: `^${m}` } : undefined;
+}
 
 // --- Israel-local "now" (date + HH:mm) for the occurrence popup ------------
 function israelNow() {
@@ -111,10 +120,10 @@ async function deleteProgram(req, res, next) {
 // GET /classes/sessions?branch=&month=YYYY-MM  OR  ?program_id=
 async function listSessions(req, res, next) {
   try {
-    const filter = {};
+    const filter = { ...getBranchFilter(req, 'branch_id') };
     if (req.query.program_id) filter.program_id = req.query.program_id;
-    if (req.query.branch && req.query.branch !== 'all') filter.branch_id = req.query.branch;
-    if (req.query.month) filter.date = { $regex: `^${req.query.month}` };
+    const monthFilter = monthPrefixFilter(req.query.month);
+    if (monthFilter) filter.date = monthFilter;
     const sessions = await ClassSession.find(filter)
       .populate('program_id', 'name instructor_name color default_rate provider_id classroom_category')
       .sort({ date: 1, time: 1 }).lean();
@@ -301,9 +310,9 @@ async function dueSessions(req, res, next) {
  */
 async function paymentSummary(req, res, next) {
   try {
-    const filter = {};
-    if (req.query.branch && req.query.branch !== 'all') filter.branch_id = req.query.branch;
-    if (req.query.month) filter.date = { $regex: `^${req.query.month}` };
+    const filter = { ...getBranchFilter(req, 'branch_id') };
+    const monthFilter = monthPrefixFilter(req.query.month);
+    if (monthFilter) filter.date = monthFilter;
     const sessions = await ClassSession.find(filter)
       .populate('program_id', 'name instructor_name provider_id').lean();
     const byProgram = new Map();

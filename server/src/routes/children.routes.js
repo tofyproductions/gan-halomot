@@ -16,13 +16,13 @@ router.post('/:id/unhide', manage, childrenController.unhide);
 // GET /api/children/:id
 router.get('/:id', childrenController.getById);
 
-// PUT /api/children/:id
-router.put('/:id', childrenController.update);
+// PUT /api/children/:id — editing a child record is a management action.
+router.put('/:id', manage, childrenController.update);
 
 // PUT /api/children/:id/classroom
-router.put('/:id/classroom', childrenController.updateClassroom);
+router.put('/:id/classroom', manage, childrenController.updateClassroom);
 
 // DELETE /api/children/:id
-router.delete('/:id', childrenController.remove);
+router.delete('/:id', manage, childrenController.remove);
 
 module.exports = router;

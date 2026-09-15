@@ -55,6 +55,15 @@ export function AuthProvider({ children }) {
     registerNativePush(api);
   };
 
+  // Re-read the profile from the current token. Used by the forced set-password
+  // flow, which wants to apply the new token but hold off updating the global
+  // user until AFTER the biometric step, so the mandatory dialog stays mounted.
+  const refreshProfile = async () => {
+    const me = await api.get('/auth/me');
+    setUser(me.data.user);
+    return me.data.user;
+  };
+
   // Step 1. May return { needs_password: true } (no token) → caller must then
   // call loginWithPassword. Otherwise it logs in and may carry password_prompt.
   const login = async (full_name, id_number, rememberMe = false) => {
@@ -129,7 +138,7 @@ export function AuthProvider({ children }) {
     || (user?.managed_branch_ids || []).map(String).includes(String(branchId));
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager, canSeeAllBranches, managesBranch }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, refreshProfile, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager, canSeeAllBranches, managesBranch }}>
       {children}
     </AuthContext.Provider>
   );

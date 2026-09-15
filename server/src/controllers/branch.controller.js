@@ -1,5 +1,6 @@
 const { Branch, User } = require('../models');
 const { ADMIN_VIEWER } = require('../constants/roles');
+const { canAccessBranch } = require('../utils/branch-scope');
 
 async function getAll(req, res, next) {
   try {
@@ -66,6 +67,22 @@ async function update(req, res, next) {
     const branch = await Branch.findById(id);
     if (!branch) {
       return res.status(404).json({ error: 'Branch not found' });
+    }
+
+    /**
+     * Which gan, not just whether a gan. requireBranchScope on the route
+     * answers "may you act for a branch"; this answers "for THIS one", which
+     * is the half that keeps one branch manager out of another's gan.
+     *
+     * Raised here rather than in a route gate on purpose: for an admin_viewer
+     * this 403 is what the write guard files as a proposal for the office to
+     * approve, and a refusal at the door would file nothing.
+     */
+    if (!(await canAccessBranch(req, id))) {
+      return res.status(403).json({
+        error: 'אין לך הרשאה לערוך את הסניף הזה.',
+        code: 'BRANCH_OUT_OF_SCOPE',
+      });
     }
 
     if (name) branch.name = name;
