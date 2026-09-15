@@ -1,4 +1,5 @@
 const { Punch, Employee, AgentCommand } = require('../models');
+const { branchManagerClauses } = require('../services/branch-recipients.service');
 
 /**
  * POST /api/agent/:branchId/punches
@@ -187,10 +188,8 @@ async function maybeAlertClockDown(branch, now) {
   const { User } = require('../models');
   const recips = await User.find({
     is_active: true,
-    $or: [
-      { role: 'system_admin' },
-      { role: 'branch_manager', $or: [{ managed_branch_ids: branch._id }, { branch_id: branch._id }] },
-    ],
+    is_test_account: { $ne: true },
+    $or: [{ role: 'system_admin' }, ...branchManagerClauses(branch._id)],
   }).select('email').lean();
   const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
   if (!emails.length) return;
@@ -362,10 +361,8 @@ async function checkStaleAgents() {
 
       const recips = await User.find({
         is_active: true,
-        $or: [
-          { role: 'system_admin' },
-          { role: 'branch_manager', $or: [{ managed_branch_ids: branch._id }, { branch_id: branch._id }] },
-        ],
+        is_test_account: { $ne: true },
+        $or: [{ role: 'system_admin' }, ...branchManagerClauses(branch._id)],
       }).select('email').lean();
       const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
       if (!emails.length) continue;

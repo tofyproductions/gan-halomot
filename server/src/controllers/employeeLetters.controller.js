@@ -11,6 +11,7 @@ const { Employee, Branch, EmployeeLetter, User } = require('../models');
 const letters = require('../services/employeeLetters');
 const { htmlToPdf } = require('../services/htmlPdf');
 const letterhead = require('../services/letterhead');
+const { branchManagerFilter } = require('../services/branch-recipients.service');
 
 /** Branch ids this user may act on, or null for "everything". */
 function branchScopeOf(req) {
@@ -45,11 +46,7 @@ async function loadEmployee(req, employeeId) {
 async function issuerOptions(emp, currentUser) {
   const branchId = emp.branch_id ? String(emp.branch_id) : null;
   const managers = branchId
-    ? await User.find({
-        role: 'branch_manager',
-        is_active: true,
-        $or: [{ managed_branch_ids: branchId }, { branch_id: branchId }],
-      }).select('full_name role').sort({ full_name: 1 }).lean()
+    ? await User.find(branchManagerFilter(branchId)).select('full_name role').sort({ full_name: 1 }).lean()
     : [];
 
   const options = managers.map(m => ({

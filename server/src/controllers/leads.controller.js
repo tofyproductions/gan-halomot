@@ -2,6 +2,7 @@ const { Lead, Branch, User } = require('../models');
 const { dispatchEmail } = require('../services/email.service');
 const { sendSms } = require('../services/sms.service');
 const notificationService = require('../services/notification.service');
+const { branchManagerFilter } = require('../services/branch-recipients.service');
 
 const THANK_YOU_TEXT = 'תודה על פנייתכם, נחזור אליכם בהקדם. גן החלומות';
 
@@ -158,10 +159,7 @@ async function publicSubmit(req, res, next) {
 async function notifyNewLead(lead, branch) {
   let recipients = [];
   if (lead.branch_id) {
-    const managers = await User.find({
-      role: 'branch_manager',
-      $or: [{ managed_branch_ids: lead.branch_id }, { branch_id: lead.branch_id }],
-    }).select('email').lean();
+    const managers = await User.find(branchManagerFilter(lead.branch_id)).select('email').lean();
     recipients = managers.map(m => m.email).filter(Boolean);
   }
   // No branch (or no manager on it) → fall back to system admins.
