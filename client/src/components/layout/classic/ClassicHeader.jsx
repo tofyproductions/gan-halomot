@@ -35,6 +35,7 @@ import CelebrationIcon from '@mui/icons-material/Celebration';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import RuleFolderIcon from '@mui/icons-material/RuleFolder';
 import { useBranch } from '../../../hooks/useBranch';
+import { useAcademicYear, formatAcademicYear } from '../../../hooks/useAcademicYear';
 import { useUiVersion } from '../../../hooks/useUiVersion';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePendingProposals } from '../../../hooks/usePendingProposals';
@@ -104,6 +105,16 @@ export default function Header() {
     });
   }, []);
   const { branches, selectedBranch, changeBranch } = useBranch();
+  /**
+   * The year belongs beside the gan, on both interfaces.
+   *
+   * The rail got this picker when the year became a context; this bar did not,
+   * and it is what most people are actually looking at. The screens kept
+   * reading the context either way — so a classic user WAS looking at a
+   * specific year, with no way to see which one or move it. גבייה, ארכיון,
+   * גאנט, חופשות, סניפים and מחירון all answered for a year nobody here chose.
+   */
+  const { years, selectedYear, setSelectedYear, isCurrentYear } = useAcademicYear();
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
   const pendingProposals = usePendingProposals();
   const newLeadsCount = useNewLeadsCount();
@@ -226,6 +237,56 @@ export default function Header() {
               ]}
             </Select>
           )}
+
+          {/**
+           * Which year, next to which gan — the two facts every number on
+           * every screen is implicitly about, in the one place that qualifies
+           * all of them.
+           *
+           * No reload on change, unlike the branch selector beside it: the
+           * year is React context and every screen reading it re-renders on
+           * its own. Reloading here would throw away a half-filled form to
+           * deliver a value the app already has.
+           *
+           * Colours are literal rather than theme keys. This bar renders under
+           * classicTheme, which does not carry the redesign's palette — a key
+           * that resolves to nothing here is a blank control on the interface
+           * most people use.
+           */}
+          <Select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(e.target.value)}
+            size="small"
+            variant="outlined"
+            aria-label="שנת לימודים"
+            renderValue={(v) => formatAcademicYear(v)}
+            sx={{
+              minWidth: { md: 150 }, fontWeight: 800, fontSize: '0.8rem',
+              borderRadius: 2,
+              display: { xs: 'none', md: 'flex' },
+              // A year that is not the current one is marked, permanently.
+              // One picker is only safer than six if leaving it set is
+              // impossible to miss: a manager who moved to last year in the
+              // morning must not read last year's numbers as today's all
+              // afternoon.
+              bgcolor: isCurrentYear ? '#f8fafc' : '#fff7ed',
+              color: isCurrentYear ? 'text.primary' : '#b45309',
+              '& .MuiSelect-select': { py: 0.5, px: 1.5 },
+              '& .MuiSvgIcon-root': { color: isCurrentYear ? 'text.primary' : '#b45309' },
+              '& .MuiOutlinedInput-notchedOutline': { borderColor: isCurrentYear ? '#e2e8f0' : '#fdba74' },
+            }}
+          >
+            {[years.previous, years.current, years.next].map((y) => (
+              <MenuItem key={y.range} value={y.range} sx={{ fontWeight: 700, fontSize: '0.8125rem' }}>
+                {y.label}
+                {y.range === years.current.range && (
+                  <Box component="span" sx={{ ml: 1, fontSize: '0.6875rem', color: 'text.disabled' }}>
+                    נוכחית
+                  </Box>
+                )}
+              </MenuItem>
+            ))}
+          </Select>
 
           {isAdmin && (
             <Tooltip title="ניהול סניפים">
@@ -417,6 +478,37 @@ export default function Header() {
               </Select>
             </Box>
           )}
+
+          {/* The bar's year picker is desktop-only, so on a phone this drawer
+              is the only place the year can be seen or moved. Unconditional:
+              a manager with one gan still has three years. */}
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>שנת לימודים</Typography>
+            <Select
+              value={selectedYear}
+              onChange={(e) => setSelectedYear(e.target.value)}
+              size="small" fullWidth
+              aria-label="שנת לימודים"
+              renderValue={(v) => formatAcademicYear(v)}
+              sx={{
+                mt: 0.5, fontWeight: 800,
+                bgcolor: isCurrentYear ? '#fff' : '#fff7ed',
+                color: isCurrentYear ? 'text.primary' : '#b45309',
+                '& .MuiSvgIcon-root': { color: isCurrentYear ? 'text.primary' : '#b45309' },
+              }}
+            >
+              {[years.previous, years.current, years.next].map((y) => (
+                <MenuItem key={y.range} value={y.range} sx={{ fontWeight: 700 }}>
+                  {y.label}
+                  {y.range === years.current.range && (
+                    <Box component="span" sx={{ ml: 1, fontSize: '0.6875rem', color: 'text.disabled' }}>
+                      נוכחית
+                    </Box>
+                  )}
+                </MenuItem>
+              ))}
+            </Select>
+          </Box>
         </Box>
 
         <Divider />
