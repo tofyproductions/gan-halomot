@@ -345,9 +345,9 @@ export default function Header() {
                       >
                         <Icon sx={{ fontSize: '1.15rem', color: isActive ? 'primary.main' : 'text.secondary' }} />
                         {item.id === 'proposed_changes' && pendingProposals > 0
-                          ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                          ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                           : item.id === 'leads' && newLeadsCount > 0
-                            ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                            ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                             : item.label}
                       </MenuItem>
                     );
@@ -541,9 +541,9 @@ export default function Header() {
                         </ListItemIcon>
                         <ListItemText
                           primary={item.id === 'proposed_changes' && pendingProposals > 0
-                            ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                            ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                             : item.id === 'leads' && newLeadsCount > 0
-                              ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { right: -14 } }}>{item.label}</Badge>
+                              ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                               : item.label}
                           primaryTypographyProps={{ fontWeight: isActive ? 800 : 600, fontSize: '0.95rem' }}
                         />

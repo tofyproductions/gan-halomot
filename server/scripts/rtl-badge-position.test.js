@@ -85,8 +85,15 @@ console.log('\nשורת הטאבים נשארה כפי שהייתה');
   ok(/variant="scrollable"/.test(src), 'הגלילה האופקית לא בוטלה');
   ok(/scrollButtons="auto"/.test(src), 'כפתורי הגלילה נשארו');
   ok(/dir="rtl"/.test(src), 'כיוון הפריסה נשאר rtl');
-  ok(/value=\{tab\}/.test(src) && /onChange=\{handleChange\}/.test(src),
-    'בחירת הטאב הפעיל לא נגעה');
+  // The binding was `value={tab}` when this was written and is now
+  // `value={visibleTabs.length ? active : false}` — a guard added so a person
+  // whose permissions leave them no tabs does not select a tab that is not
+  // rendered, which MUI warns about and draws as a stuck indicator. The test
+  // was asserting the old spelling and failing on a change that was correct;
+  // what it actually has to protect is that the selection is still driven by
+  // state and still reports through handleChange.
+  ok(/<Tabs[\s\S]{0,200}?value=\{[^}]+\}/.test(src) && /onChange=\{handleChange\}/.test(src),
+    'בחירת הטאב הפעיל עדיין מונעת מ-state ומדווחת ל-handleChange');
 }
 
 console.log(`\n${failures === 0 ? '✅ הכל עבר' : `❌ ${failures} כשלונות`}\n`);
