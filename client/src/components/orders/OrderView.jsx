@@ -19,6 +19,22 @@ import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import ReceiveOrderDialog from './ReceiveOrderDialog';
 
+/**
+ * What the server knows about the mail to the supplier.
+ *
+ * The order used to say nothing at all: a send that failed and a send that
+ * arrived looked identical, and the first sign of trouble was the delivery
+ * that never came. `never` is what every order written before the server
+ * started recording this reads as — silence about the question, not an answer
+ * to it, so it says so rather than showing a green tick or a red one.
+ */
+const EMAIL_MAP = {
+  sent: { label: 'המייל נשלח לספק', color: 'success' },
+  failed: { label: 'המייל לא נשלח', color: 'error' },
+  skipped: { label: 'המייל לא נשלח', color: 'warning' },
+  never: { label: 'לא נשלח מייל', color: 'default' },
+};
+
 const STATUS_MAP = {
   draft: { label: 'טיוטה', color: 'default' },
   pending: { label: 'ממתין לאישור', color: 'warning' },
@@ -187,7 +203,24 @@ export default function OrderView() {
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h5" sx={{ fontWeight: 800 }}>הזמנה {order.order_number}</Typography>
-          <Chip label={status.label} color={status.color} size="small" sx={{ mt: 0.5 }} />
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap' }}>
+            <Chip label={status.label} color={status.color} size="small" />
+            {/* Beside the status, because "מאושר" and "הספק יודע על זה" are
+                two different facts and the first was being read as both. */}
+            <Chip
+              label={(EMAIL_MAP[order.email_status] || EMAIL_MAP.never).label}
+              color={(EMAIL_MAP[order.email_status] || EMAIL_MAP.never).color}
+              size="small"
+              variant={order.email_status === 'sent' ? 'filled' : 'outlined'}
+            />
+          </Stack>
+          {/* The reason, in full. A chip that says "לא נשלח" and makes somebody
+              ask the office why is a chip that cost more than it saved. */}
+          {order.email_error && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {order.email_error}
+            </Typography>
+          )}
         </Box>
         <Stack direction="row" spacing={1}>
           <Button
