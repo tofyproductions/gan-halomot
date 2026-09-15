@@ -28,6 +28,9 @@ const dailyMenuSchema = new mongoose.Schema({
 
   updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updated_by_name: { type: String, default: '' },
+
+  /** The import's run id, or ''. Same reasoning as `DailyLog.import_source`. */
+  import_source: { type: String, default: '', index: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 dailyMenuSchema.index({ branch_id: 1, date: 1 }, { unique: true });
