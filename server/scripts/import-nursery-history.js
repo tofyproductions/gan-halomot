@@ -26,9 +26,18 @@
  *                        actually has. Nothing here is specific to משה דיין;
  *                        קפלן arrives as another file and another branch.
  *   --write              actually write. Everything else is a dry run.
- *   --overwrite          replace fields that already hold something. Off by
- *                        default: a staff member's correction outranks a sheet
- *                        exported before they made it.
+ *   --overwrite          replace rows that already hold something. Off by
+ *                        default, and the default is insert-only: a row with
+ *                        anything in it is skipped whole and reported, never
+ *                        merged field by field. The history runs to September
+ *                        and the new board is already in use, so an overlap is
+ *                        evidence that an assumption here is wrong rather than
+ *                        a conflict to resolve automatically.
+ *   --undo "<run id>"    delete everything one run created, by the id stamped
+ *                        on the documents. Rows edited since are kept.
+ *   --manifest <path>    write the created _ids to a file as well.
+ *   --expect-db <name>   refuse to run unless MONGODB_URI points at this
+ *                        database. The last guard before a production write.
  *   --settings           extend the board's option and menu lists with what
  *                        the sheet held. Off by default, and reported either
  *                        way — ten dishes the kitchen served for months are
@@ -229,11 +238,16 @@ function isFilled(value) {
  * children it could not place, and every value it refused. Writes nothing
  * unless `write` is true.
  */
+/** The id this run stamps on everything it creates. */
+function makeRunId(branchName, at = new Date()) {
+  return `nursery-sheet:${branchName}:${at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}`;
+}
+
 async function importHistory(options) {
   const {
     file, branch: branchName, write = false, overwrite = false, settings = false,
     conflict = 'richest', scope = 'branch', from = null, to = null,
-    verbose = false, log = console.log,
+    verbose = false, log = console.log, runId = makeRunId(branchName),
   } = options;
 
   const models = require('../src/models');
@@ -269,7 +283,7 @@ async function importHistory(options) {
   const { canonical, merged } = canonicalNames(byDate);
 
   const report = {
-    file, branch: branch.name, write, overwrite, conflict, scope,
+    file, branch: branch.name, write, overwrite, conflict, scope, run_id: runId,
     sheets: parsed.sheets,
     roster: parsed.children.length,
     rooms: rooms.length, db_children: children.length,
@@ -284,6 +298,8 @@ async function importHistory(options) {
     unknown_dishes: new Map(), unknown_menu_keys: new Set(),
     today_rows: parsed.today.rows,
     merged_names: merged,
+    created_ids: [], created_menu_ids: [],
+    collisions: [],
     settings: null,
     broken,
   };
@@ -334,13 +350,36 @@ async function importHistory(options) {
       }
 
       const existing = await DailyLog.findOne({ child_id: child._id, date }).lean();
-      const finalSet = {};
-      for (const [path, value] of Object.entries(set)) {
-        if (!overwrite && existing && isFilled(valueAt(existing, path))) { report.fields_kept += 1; continue; }
-        finalSet[path] = value;
-      }
-      if (Object.keys(finalSet).length === 0) { report.logs_unchanged += 1; continue; }
 
+      // Insert only. A day that already holds something is left exactly as it
+      // is and reported — not merged, not patched field by field.
+      //
+      // The history being imported ran to September and the new board is
+      // already in use, so the two should not overlap at all. A row that does
+      // is not a merge to resolve; it is evidence that an assumption here is
+      // wrong — the wrong child was matched, or the wrong branch, or this ran
+      // once already. Deciding that automatically would bury the one signal
+      // worth stopping for. --overwrite is the deliberate way past it.
+      const filledPaths = existing
+        ? Object.keys(set).filter(path => isFilled(valueAt(existing, path)))
+        : [];
+      if (filledPaths.length > 0 && !overwrite) {
+        report.logs_unchanged += 1;
+        report.fields_kept += filledPaths.length;
+        if (report.collisions.length < 200) {
+          report.collisions.push({
+            date,
+            name: entry.name,
+            child_id: String(child._id),
+            fields: filledPaths,
+            imported: existing.import_source || '',
+            edited_by: existing.updated_by_name || '',
+          });
+        }
+        continue;
+      }
+
+      const finalSet = { ...set };
       report.fields_written += Object.keys(finalSet).length;
       report.child_days_written += 1;
       if (existing) report.logs_updated += 1; else report.logs_created += 1;
@@ -348,15 +387,17 @@ async function importHistory(options) {
       finalSet.child_name = entry.name || child.child_name;
       finalSet.classroom_id = child.classroom_id || null;
       finalSet.branch_id = branch._id;
+      finalSet.import_source = runId;
 
       if (verbose) log(`    ${date}  ${existing ? '~' : '+'} ${entry.name}  ${Object.keys(set).join(', ')}`);
 
       if (write) {
-        await DailyLog.updateOne(
+        const doc = await DailyLog.findOneAndUpdate(
           { child_id: child._id, date },
           { $set: finalSet, $setOnInsert: { child_id: child._id, date } },
-          { upsert: true, setDefaultsOnInsert: true }
-        );
+          { upsert: true, new: true, setDefaultsOnInsert: true, projection: { _id: 1 } }
+        ).lean();
+        if (doc) report.created_ids.push(String(doc._id));
       }
     }
 
@@ -367,19 +408,28 @@ async function importHistory(options) {
 
     if (Object.keys(selections).length > 0) {
       const existing = await DailyMenu.findOne({ branch_id: branch._id, date }).lean();
-      // Without --overwrite what is already there wins, line by line: the
-      // kitchen may have re-entered a day the sheet also holds.
-      const merged = overwrite ? selections : { ...selections, ...(existing?.selections || {}) };
-      if (JSON.stringify(merged) === JSON.stringify(existing?.selections || {})) {
+      // Same rule as the child's day: a menu the kitchen has already entered
+      // is the kitchen's, and the sheet does not get to argue with it.
+      if (existing && Object.keys(existing.selections || {}).length > 0 && !overwrite) {
         report.menus_unchanged += 1;
+        if (report.collisions.length < 200) {
+          report.collisions.push({
+            date, name: '(תפריט הסניף)', fields: Object.keys(existing.selections),
+            imported: existing.import_source || '', edited_by: existing.updated_by_name || '',
+          });
+        }
       } else {
         if (existing) report.menus_updated += 1; else report.menus_created += 1;
         if (write) {
-          await DailyMenu.updateOne(
+          const doc = await DailyMenu.findOneAndUpdate(
             { branch_id: branch._id, date },
-            { $set: { selections: merged }, $setOnInsert: { branch_id: branch._id, date } },
-            { upsert: true, setDefaultsOnInsert: true }
-          );
+            {
+              $set: { selections, import_source: runId },
+              $setOnInsert: { branch_id: branch._id, date },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true, projection: { _id: 1 } }
+          ).lean();
+          if (doc) report.created_menu_ids.push(String(doc._id));
         }
       }
     }
@@ -423,6 +473,49 @@ async function importHistory(options) {
   return report;
 }
 
+/**
+ * Take an import back out.
+ *
+ * Deletes only documents carrying this exact run id — so one branch's import,
+ * or one failed attempt, comes out without touching anything else. Nothing the
+ * staff has ever written carries the field at all.
+ *
+ * A row somebody has edited since the import is KEPT and reported. The undo
+ * exists to remove rows nobody wanted; a row a teacher has since corrected is
+ * a row somebody wants, and deleting it to tidy up an import would be the
+ * import doing damage on its way out.
+ */
+async function undoImport({ runId, write = false }) {
+  const { DailyLog, DailyMenu } = require('../src/models');
+
+  const logs = await DailyLog.find({ import_source: runId })
+    .select('_id date child_name updated_by updated_by_name').lean();
+  const menus = await DailyMenu.find({ import_source: runId }).select('_id date').lean();
+
+  const touched = logs.filter(l => l.updated_by || l.updated_by_name);
+  const removable = logs.filter(l => !l.updated_by && !l.updated_by_name);
+
+  if (write && removable.length) {
+    await DailyLog.deleteMany({ _id: { $in: removable.map(l => l._id) } });
+  }
+  if (write && menus.length) {
+    await DailyMenu.deleteMany({ _id: { $in: menus.map(m => m._id) } });
+  }
+
+  return { runId, write, found: logs.length, removed: removable.length, kept: touched, menus: menus.length };
+}
+
+/** The database this is about to write to, with no credentials in it. */
+function describeTarget(uri) {
+  try {
+    const u = new URL(uri);
+    const db = u.pathname.replace(/^\//, '') || '(ברירת מחדל)';
+    return { host: u.host, db, ok: true };
+  } catch {
+    return { host: '(לא ניתן לפענוח)', db: '(לא ידוע)', ok: false };
+  }
+}
+
 // --- The report -----------------------------------------------------------
 
 function printReport(report, log = console.log) {
@@ -434,7 +527,8 @@ function printReport(report, log = console.log) {
   log(`  סניף:     ${report.branch}`);
   log(`  התאמה:    --scope ${report.scope} (${scopeLabel}) — ${report.rooms} כיתות, ${report.db_children} ילדים`);
   log(`  מצב:      ${report.write ? 'כתיבה' : 'DRY RUN — לא נכתב כלום'}`);
-  log(`  התנגשות:  ${report.conflict}${report.overwrite ? ' | דריסת שדות קיימים' : ''}`);
+  log(`  התנגשות:  ${report.conflict}${report.overwrite ? '  ⚠ --overwrite: דריסת רשומות קיימות' : '  | insert-only'}`);
+  log(`  run id:   ${report.run_id}`);
   log(`  גיליונות: ${report.sheets.join(', ')}`);
   log(`  רוסטר:    ${report.roster} ילדים בגיליון "ילדים"`);
 
@@ -446,7 +540,7 @@ function printReport(report, log = console.log) {
   log(`  ימי-ילד שנכתבו:           ${report.child_days_written}`);
   log(`  DailyLog חדשים:           ${report.logs_created}`);
   log(`  DailyLog שיעודכנו:        ${report.logs_updated}`);
-  log(`  DailyLog ללא שינוי:       ${report.logs_unchanged}`);
+  log(`  DailyLog שדולגו (יש תוכן):${report.logs_unchanged}`);
   log(`  שדות שנכתבו:              ${report.fields_written}`);
   log(`  שדות שנשמרו כמו שהם:      ${report.fields_kept}${report.overwrite ? '' : '   (כבר יש בהם ערך; --overwrite כדי לדרוס)'}`);
   log(`  DailyMenu חדשים:          ${report.menus_created}`);
@@ -477,6 +571,16 @@ function printReport(report, log = console.log) {
   if (report.ambiguous.size) {
     log(`\n  ── ${report.ambiguous.size} ילדים לא חד-משמעיים — דולגו במכוון ──`);
     for (const [name, i] of list(report.ambiguous)) log(`    ${name}   ${i.count} ימים — ${i.reason}`);
+  }
+
+  if (report.collisions.length) {
+    log(`\n  ⚠ ── ${report.collisions.length} רשומות קיימות שדולגו ולא נגעתי בהן ──`);
+    log('    התנגשות כאן היא סימן שהנחה כלשהי שגויה — לא משהו להכריע אוטומטית.');
+    for (const c of report.collisions.slice(0, 25)) {
+      const who = c.edited_by ? `נערך ע"י ${c.edited_by}` : (c.imported ? `מייבוא ${c.imported}` : 'מקור לא ידוע');
+      log(`    ${c.date}  ${c.name}  [${c.fields.join(', ')}]  ${who}`);
+    }
+    if (report.collisions.length > 25) log(`    … ועוד ${report.collisions.length - 25}`);
   }
 
   if (report.merged_names.length) {
@@ -527,6 +631,12 @@ function printReport(report, log = console.log) {
     for (const a of report.settings.added) log(`    + ${a}`);
   }
 
+  if (report.write) {
+    log(`\n  ── מסלול חזרה ──`);
+    log(`    ${report.created_ids.length} DailyLog ו-${report.created_menu_ids.length} DailyMenu נושאים import_source = "${report.run_id}"`);
+    log(`    ביטול:  node scripts/import-nursery-history.js --undo "${report.run_id}" [--write]`);
+  }
+
   log(report.write ? '\n  נכתב.\n' : '\n  DRY RUN — לא נכתב כלום. הוסף --write כדי לכתוב.\n');
 }
 
@@ -553,6 +663,9 @@ function parseArgs(argv) {
     scope: str(arg('scope')) || 'branch',
     from: str(arg('from')),
     to: str(arg('to')),
+    undo: str(arg('undo')),
+    manifest: str(arg('manifest')),
+    expect: str(arg('expect-db')),
     declaredDry: has('dry-run'),
   };
 }
@@ -562,9 +675,35 @@ async function main() {
 
   const usage = (message) => {
     console.error(`\n  ${message}\n`);
-    console.error('  node scripts/import-nursery-history.js --file <xlsx> --branch "<שם סניף>" [--write]\n');
+    console.error('  node scripts/import-nursery-history.js --file <xlsx> --branch "<שם סניף>" [--write]');
+    console.error('  node scripts/import-nursery-history.js --undo "<run id>" [--write]\n');
     process.exit(1);
   };
+
+  const uri = process.env.MONGODB_URI;
+  if (!uri) usage('חסר MONGODB_URI');
+  const target = describeTarget(uri);
+
+  console.log('');
+  console.log(`  מסד יעד:  ${target.host}  /  ${target.db}`);
+  if (options.expect && options.expect !== target.db) {
+    console.error(`\n  עצירה: ציפית ל-"${options.expect}" והחיבור הוא ל-"${target.db}".\n`);
+    process.exit(1);
+  }
+
+  if (options.undo) {
+    await mongoose.connect(uri);
+    const r = await undoImport({ runId: options.undo, write: options.write });
+    console.log(`\n  ביטול ייבוא: ${r.runId}`);
+    console.log(`  נמצאו:    ${r.found} DailyLog, ${r.menus} DailyMenu`);
+    console.log(`  יימחקו:   ${r.removed} DailyLog, ${r.menus} DailyMenu`);
+    console.log(`  יישמרו:   ${r.kept.length} רשומות שנערכו מאז הייבוא`);
+    for (const k of r.kept.slice(0, 20)) console.log(`    ${k.date} ${k.child_name} — נערך ע"י ${k.updated_by_name || '?'}`);
+    console.log(r.write ? '\n  נמחק.\n' : '\n  DRY RUN — לא נמחק כלום. הוסף --write.\n');
+    await mongoose.disconnect();
+    return;
+  }
+
   if (!options.file) usage('חסר --file');
   if (!options.branch) usage('חסר --branch');
   if (!fs.existsSync(options.file)) usage(`הקובץ לא קיים: ${options.file}`);
@@ -572,10 +711,25 @@ async function main() {
   if (!['room', 'branch', 'all'].includes(options.scope)) usage('--scope חייב להיות room, branch או all');
   if (options.write && options.declaredDry) usage('--write ו---dry-run יחד — תחליט');
 
-  await mongoose.connect(process.env.MONGODB_URI);
+  await mongoose.connect(uri);
   try {
     const report = await importHistory(options);
     printReport(report);
+
+    // The ids as a file as well as a field. The field is what survives a crash
+    // halfway through; the file is what a person can read, diff and keep.
+    if (options.write && options.manifest) {
+      fs.writeFileSync(options.manifest, JSON.stringify({
+        run_id: report.run_id,
+        branch: report.branch,
+        file: report.file,
+        at: new Date().toISOString(),
+        daily_log_ids: report.created_ids,
+        daily_menu_ids: report.created_menu_ids,
+        undo: `node scripts/import-nursery-history.js --undo "${report.run_id}" --write`,
+      }, null, 2));
+      console.log(`  מניפסט: ${options.manifest}\n`);
+    }
   } catch (e) {
     if (e.known) { console.error(`\n  ${e.message}\n`); process.exitCode = 1; }
     else throw e;
@@ -588,4 +742,7 @@ if (require.main === module) {
   main().catch(e => { console.error(e); process.exit(1); });
 }
 
-module.exports = { importHistory, printReport, parseArgs, nameKey, resolveChild, birthKey };
+module.exports = {
+  importHistory, printReport, parseArgs, nameKey, resolveChild, birthKey,
+  undoImport, describeTarget, makeRunId,
+};

@@ -69,6 +69,20 @@ const dailyLogSchema = new mongoose.Schema({
   // Who touched it last, for the staff's own sake when two people share a room.
   updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updated_by_name: { type: String, default: '' },
+
+  /**
+   * Set only by the one-off import of the old Google Sheet, never by the board.
+   *
+   * Empty on every row a member of staff has ever written, and that is the
+   * point: four thousand rows arriving at once need a way to be found again
+   * and taken back out, and "everything created in the last ten minutes" is
+   * not one — the gan is open and writing its own day while the import runs.
+   *
+   * Holds the run's id, e.g. "nursery-sheet:כפר סבא - קפלן:20260915T214003Z",
+   * so one branch's import can be undone without touching the other's, and a
+   * second attempt can be undone without touching the first.
+   */
+  import_source: { type: String, default: '', index: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 // One row per child per day, enforced rather than assumed — two teachers

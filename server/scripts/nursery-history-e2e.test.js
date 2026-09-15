@@ -164,15 +164,64 @@ function check(label, actual, expected) {
   check('כל השדות דווחו כנשמרים', again.fields_kept > 0, true);
   check('לא נוצרו תפריטים נוספים', again.menus_created, 0);
   check('התפריטים דווחו כללא שינוי', again.menus_unchanged, wrote.menus_created);
+  check('כל רשומה קיימת מדווחת כהתנגשות', again.collisions.length > 0, true);
 
-  // --- 4. a staff correction outranks the sheet ---------------------------
-  console.log('\nתיקון של הצוות גובר על הגיליון');
-  await DailyLog.updateOne({ _id: sample._id }, { $set: { 'meals.breakfast.amount': '0%' } });
-  await importHistory({ ...opts, write: true });
-  check('ערך קיים לא נדרס', (await DailyLog.findById(sample._id).lean()).meals.breakfast.amount, '0%');
-  await importHistory({ ...opts, write: true, overwrite: true });
+  // --- 4. insert-only: a row with anything in it is skipped whole ---------
+  console.log('\ninsert-only — רשומה קיימת מדולגת ומדווחת, לא ממוזגת');
+  await DailyLog.updateOne({ _id: sample._id }, {
+    $set: { 'meals.breakfast.amount': '0%', 'meals.lunch.amount': '', staff_note: '', updated_by_name: 'גננת' },
+  });
+  const collided = await importHistory({ ...opts, write: true });
+  const after = await DailyLog.findById(sample._id).lean();
+  check('הערך של הצוות נשאר', after.meals.breakfast.amount, '0%');
+  check('ושדה שהצוות ריקן לא מולא מהגיליון', after.meals.lunch.amount, '');
+  const hit = collided.collisions.find(c => c.child_id === String(sample.child_id) && c.date === sample.date);
+  check('ההתנגשות מדווחת עם התאריך והילד', !!hit, true);
+  check('ועם השדות שגרמו לה', hit.fields.includes('meals.breakfast.amount'), true);
+  check('ועם מי נגע בה', hit.edited_by, 'גננת');
+
+  console.log('\n--overwrite הוא הדרך המפורשת לעקוף');
+  // An explicit id, because --overwrite re-stamps what it rewrites: the row's
+  // content now comes from THIS run, so this is the run that can take it back.
+  const RUN = 'nursery-sheet:test:overwrite';
+  await importHistory({ ...opts, write: true, overwrite: true, runId: RUN });
   check('--overwrite כן דורס', (await DailyLog.findById(sample._id).lean()).meals.breakfast.amount,
     sample.meals.breakfast.amount);
+  check('ומחדש את חותמת המקור', (await DailyLog.findById(sample._id).lean()).import_source, RUN);
+
+  // --- 4b. the undo button -----------------------------------------------
+  console.log('\nמסלול חזרה — undo לפי run id');
+  const { undoImport } = require('./import-nursery-history');
+  const stamped = await DailyLog.countDocuments({ import_source: RUN });
+  check('כל מה שנכתב נושא את ה-run id', stamped, wrote.logs_created);
+  check('ואין רשומה מיובאת בלי חותמת', await DailyLog.countDocuments({ import_source: '' }), 0);
+
+  // A row a teacher has since edited must survive the undo.
+  const survivor = await DailyLog.findOne({ import_source: RUN }).lean();
+  await DailyLog.updateOne({ _id: survivor._id }, { $set: { updated_by_name: 'גננת' } });
+
+  const undoDry = await undoImport({ runId: RUN });
+  check('undo יבש לא מוחק', await DailyLog.countDocuments({ import_source: RUN }), stamped);
+  check('הוא מוצא את כל מה שנוצר', undoDry.found, stamped);
+  check('ומחריג את מה שנערך מאז', undoDry.kept.length, 1);
+
+  const undone = await undoImport({ runId: RUN, write: true });
+  check('הכול נמחק חוץ מהנערך', await DailyLog.countDocuments({ import_source: RUN }), 1);
+  check('הדוח מדווח כמה הוסרו', undone.removed, stamped - 1);
+  check('התפריטים הוסרו גם הם', await DailyMenu.countDocuments({ import_source: RUN }), 0);
+  check('ו-undo של run אחר לא נוגע בכלום', (await undoImport({ runId: 'nursery-sheet:אחר' })).found, 0);
+
+  // Put it back, so the branch comparison below still has a database to read.
+  await DailyLog.deleteMany({});
+  await DailyMenu.deleteMany({});
+  const rewrote = await importHistory({ ...opts, write: true });
+  check('ייבוא חוזר אחרי undo מחזיר את הכול', rewrote.logs_created, wrote.logs_created);
+
+  console.log('\nזיהוי מסד היעד');
+  const { describeTarget } = require('./import-nursery-history');
+  const t = describeTarget('mongodb+srv://user:hunter2@cluster0.abc.mongodb.net/gan-halomot?retryWrites=true');
+  check('שם המסד מזוהה', t.db, 'gan-halomot');
+  check('והסיסמה לא מודפסת', /hunter2/.test(`${t.host} ${t.db}`), false);
 
   // --- 5. the range and the branch ----------------------------------------
   console.log('\nטווח תאריכים וסניף');
