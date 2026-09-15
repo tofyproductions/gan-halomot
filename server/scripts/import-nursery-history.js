@@ -164,9 +164,71 @@ function canonicalNames(byDate) {
   return { canonical, merged };
 }
 
-function resolveChild(entry, index) {
+/**
+ * The children the export and the database spell differently.
+ *
+ * Written out one by one, never derived. Fuzzy name matching across a gan is
+ * how a stranger ends up reading a family's record: "אלה צרור" and
+ * "אלה צביק ברנס" share a first name and are two different children, and no
+ * edit distance tells them apart. So each line below is a pair somebody looked
+ * at, and nothing that is not on this list is ever renamed.
+ *
+ * `db_birth_date` is the date of birth THE DATABASE HELD when the pair was
+ * checked, not the export's. Those are the same for two of the six and differ
+ * for the rest — the export has אגם הרוניאן born in June and appearing on a
+ * board in January, which is impossible, and it has no date at all for the two
+ * Kaplan children. Recording the export's value would refuse four real
+ * matches; recording the database's turns the check into the one that is
+ * actually useful: has this row changed since a person confirmed it?
+ *
+ * An empty string means the database held no date of birth. If one appears
+ * later the pair is skipped and reported, because a row that gained a date is
+ * a row somebody edited, and it deserves a second look rather than a rename.
+ */
+const NAME_ALIASES = [
+  // אושר ע"י עמית, 2026-09-15. ת. לידה זהה בשני הצדדים.
+  { branch: 'כפר סבא - משה דיין', from: 'אתי שיר', to: 'איתי שיר', db_birth_date: '2026-02-01' },
+  { branch: 'כפר סבא - משה דיין', from: 'רני רחל', to: 'רני רחל אילוז', db_birth_date: '2025-10-03' },
+  // שם משפחה נוסף במסד; ת. לידה נבדלת בשבעה ימים.
+  { branch: 'כפר סבא - משה דיין', from: 'יהב כהנא', to: 'יהב מלכה כהנא', db_birth_date: '2025-07-19' },
+  // אותו שם בדיוק. הייצוא אומר 2026-06-17 — ילד שנולד ביוני אינו יכול להופיע
+  // בלוח של ינואר, והמסד הוא הנכון. אושר במפורש.
+  { branch: 'כפר סבא - משה דיין', from: 'אגם הרוניאן', to: 'אגם הרוניאן', db_birth_date: '2026-01-17' },
+  // שתי הרשומות בקפלן חסרות תאריך לידה במסד.
+  { branch: 'כפר סבא - קפלן', from: 'פאר אסתר', to: 'פאר אסתר עומייסי', db_birth_date: '' },
+  { branch: 'כפר סבא - קפלן', from: 'תהלה לוקפור', to: 'תהילה לוקפור', db_birth_date: '' },
+];
+
+/** The aliases that apply to one branch, keyed by the name the export uses. */
+function aliasesFor(branchName) {
+  const map = new Map();
+  for (const a of NAME_ALIASES) if (a.branch === branchName) map.set(a.from, a);
+  return map;
+}
+
+function resolveChild(entry, index, alias = null) {
   const key = nameKey(entry.name);
   const candidates = index.get(key) || [];
+
+  // An aliased child is matched on the pair, and checked against the row that
+  // was confirmed rather than against the export.
+  if (alias) {
+    if (candidates.length === 0) return { child: null, reason: `מיפוי "${alias.from}" → "${alias.to}": היעד לא נמצא` };
+    if (candidates.length > 1) {
+      return { child: null, ambiguous: true, reason: `מיפוי "${alias.from}" → "${alias.to}": ${candidates.length} התאמות, לא חד-משמעי` };
+    }
+    const child = candidates[0];
+    const theirs = birthKey(child.birth_date);
+    if (theirs !== alias.db_birth_date) {
+      return {
+        child: null,
+        ambiguous: true,
+        reason: `מיפוי "${alias.from}" → "${alias.to}": ת. לידה במסד "${theirs || 'חסר'}" ולא "${alias.db_birth_date || 'חסר'}" כפי שאומת — דולג`,
+      };
+    }
+    return { child, via: 'מיפוי מפורש' };
+  }
+
   const dob = H.normalizeDateKey(entry.dob);
 
   if (candidates.length === 0) return { child: null, reason: 'לא נמצא ילד בשם הזה' };
@@ -281,6 +343,7 @@ async function importHistory(options) {
   const menuConfig = await nursery.getMenu();
   const knownDishes = H.knownDishSet(menuConfig);
   const { canonical, merged } = canonicalNames(byDate);
+  const aliases = aliasesFor(branch.name);
 
   const report = {
     file, branch: branch.name, write, overwrite, conflict, scope, run_id: runId,
@@ -298,6 +361,8 @@ async function importHistory(options) {
     unknown_dishes: new Map(), unknown_menu_keys: new Set(),
     today_rows: parsed.today.rows,
     merged_names: merged,
+    alias_hits: new Map(),
+    aliases_configured: [...aliases.values()],
     created_ids: [], created_menu_ids: [],
     collisions: [],
     settings: null,
@@ -330,8 +395,11 @@ async function importHistory(options) {
 
     // --- the children's day ---
     for (const raw of H.historyChildren(payload)) {
-      // One spelling per child, decided once across the whole export.
-      const entry = { ...raw, name: canonical.get(raw.name) || raw.name };
+      // One spelling per child, decided once across the whole export, and then
+      // the explicit map from the export's spelling to the database's.
+      const exportName = canonical.get(raw.name) || raw.name;
+      const alias = aliases.get(exportName) || null;
+      const entry = { ...raw, name: alias ? alias.to : exportName };
       report.child_days_seen += 1;
       const { set, unmapped, rejected } = H.dailyLogSet(entry.data);
 
@@ -342,12 +410,13 @@ async function importHistory(options) {
 
       if (Object.keys(set).length === 0) { report.child_days_empty += 1; continue; }
 
-      const { child, reason, ambiguous } = resolveChild(entry, index);
+      const { child, reason, ambiguous } = resolveChild(entry, index, alias);
       if (!child) {
         bump(ambiguous ? report.ambiguous : report.unresolved, entry.name,
           { reason, access_id: entry.accessId, dob: entry.dob });
         continue;
       }
+      if (alias) bump(report.alias_hits, `${alias.from} → ${alias.to}`, {});
 
       const existing = await DailyLog.findOne({ child_id: child._id, date }).lean();
 
@@ -583,6 +652,15 @@ function printReport(report, log = console.log) {
     if (report.collisions.length > 25) log(`    … ועוד ${report.collisions.length - 25}`);
   }
 
+  if (report.aliases_configured.length) {
+    log(`\n  ── ${report.aliases_configured.length} מיפויי שם מפורשים לסניף הזה ──`);
+    for (const a of report.aliases_configured) {
+      const hit = report.alias_hits.get(`${a.from} → ${a.to}`);
+      const dob = a.db_birth_date || 'ללא ת. לידה במסד';
+      log(`    "${a.from}" → "${a.to}"  [${dob}]  ${hit ? `${hit.count} ימי-ילד` : '— לא נוצל'}`);
+    }
+  }
+
   if (report.merged_names.length) {
     log(`\n  ── ${report.merged_names.length} איותי שם שאוחדו לפי accessId ──`);
     for (const m of report.merged_names) log(`    "${m.from}" (${m.days} ימים)  →  "${m.to}"`);
@@ -664,6 +742,9 @@ function parseArgs(argv) {
     from: str(arg('from')),
     to: str(arg('to')),
     undo: str(arg('undo')),
+    // Two branches can share one id deliberately: a follow-up run that fills
+    // gaps in both is one decision, and should come back out as one.
+    runId: str(arg('run-id')) || undefined,
     manifest: str(arg('manifest')),
     expect: str(arg('expect-db')),
     declaredDry: has('dry-run'),
@@ -745,4 +826,5 @@ if (require.main === module) {
 module.exports = {
   importHistory, printReport, parseArgs, nameKey, resolveChild, birthKey,
   undoImport, describeTarget, makeRunId,
+  NAME_ALIASES, aliasesFor,
 };

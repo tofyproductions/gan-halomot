@@ -68,6 +68,20 @@ function check(label, actual, expected) {
   const roster = parsed.children;
   const rosterNames = new Set(roster.map(c => c.name));
 
+  // The database spells six children differently from the export, and the
+  // import carries an explicit map. Seeding the export's spelling would be
+  // seeding a database that does not exist — so the fixture is seeded the way
+  // production actually reads, target name and confirmed date of birth.
+  const { aliasesFor } = require('./import-nursery-history');
+  const aliasSeed = (branchName) => {
+    const map = aliasesFor(branchName);
+    return (name, birth) => {
+      const a = map.get(name);
+      return a ? { name: a.to, birth: a.db_birth_date || null } : { name, birth };
+    };
+  };
+  const applyM = aliasSeed(BRANCH);
+
   const seed = (name, birth, classroom_id) => ({
     registration_id: new mongoose.Types.ObjectId(),
     child_name: name,
@@ -75,7 +89,7 @@ function check(label, actual, expected) {
     classroom_id, academic_year: '2026', is_active: true,
   });
 
-  await Child.insertMany(roster.map(c => seed(c.name, c.birth_date, room._id)));
+  await Child.insertMany(roster.map(c => { const a = applyM(c.name, c.birth_date); return seed(a.name, a.birth, room._id); }));
 
   // Everyone the history knows who is not on the roster any more, into בוגרים.
   const graduated = new Map();
@@ -84,7 +98,7 @@ function check(label, actual, expected) {
       if (!rosterNames.has(c.name)) graduated.set(c.name, c.dob);
     }
   }
-  await Child.insertMany([...graduated].map(([name, dob]) => seed(name, H.normalizeDateKey(dob) || null, older._id)));
+  await Child.insertMany([...graduated].map(([name, dob]) => { const a = applyM(name, H.normalizeDateKey(dob) || null); return seed(a.name, a.birth, older._id); }));
 
   const opts = { file: EXPORT, branch: BRANCH, log: () => {} };
   console.log(`\nנזרעו ${roster.length} ילדים בתינוקייה ו-${graduated.size} שסיימו, בבוגרים`);
@@ -261,7 +275,8 @@ function check(label, actual, expected) {
     // "איתן חכמון" and the import has to reach the same child through the
     // accessId rather than report a child nobody has.
     kNames.delete('איתן חרמון');
-    await Child.insertMany([...kNames].map(([n, dob]) => seed(n, H.normalizeDateKey(dob) || null, kRoom._id)));
+    const applyK = aliasSeed("כפר סבא - קפלן");
+    await Child.insertMany([...kNames].map(([n, dob]) => { const a = applyK(n, H.normalizeDateKey(dob) || null); return seed(a.name, a.birth, kRoom._id); }));
 
     const kOpts = { file: KAPLAN, branch: 'כפר סבא - קפלן', log: () => {} };
     const kDry = await importHistory({ ...kOpts });

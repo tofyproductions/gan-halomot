@@ -222,6 +222,51 @@ check('45897 → 2025-08-28', H.excelSerialToDateKey(45897), '2025-08-28');
 check('46190 → 2026-06-17', H.excelSerialToDateKey(46190), '2026-06-17');
 check('not a serial, not a date', H.excelSerialToDateKey('2025-08-28'), '');
 
+// --- The explicit name map ------------------------------------------------
+
+console.log('\nמיפוי שמות מפורש — רק מה שכתוב, ורק כשהמסד לא זז');
+const { resolveChild, NAME_ALIASES, aliasesFor } = require('./import-nursery-history');
+const idx = (name, ...kids) => new Map([[name.split(/\s+/).sort().join(' '), kids]]);
+const kid = (name, dob) => ({ _id: 'x', child_name: name, birth_date: dob ? new Date(`${dob}T00:00:00Z`) : null });
+const ALIAS = { from: 'אתי שיר', to: 'איתי שיר', db_birth_date: '2026-02-01' };
+
+check('מיפוי תופס כשת. הלידה במסד היא זו שאומתה',
+  resolveChild({ name: 'איתי שיר', dob: '2026-02-01' }, idx('איתי שיר', kid('איתי שיר', '2026-02-01')), ALIAS).child?.child_name,
+  'איתי שיר');
+check('הייצוא רשאי לחלוק על ת. הלידה — נבדק מול המסד',
+  resolveChild({ name: 'איתי שיר', dob: '1999-01-01' }, idx('איתי שיר', kid('איתי שיר', '2026-02-01')), ALIAS).child?.child_name,
+  'איתי שיר');
+check('אבל אם המסד זז מאז האימות — דילוג',
+  resolveChild({ name: 'איתי שיר', dob: '2026-02-01' }, idx('איתי שיר', kid('איתי שיר', '2026-03-09')), ALIAS).child,
+  null);
+check('והדילוג מדווח כדו-משמעי, לא כ"לא נמצא"',
+  resolveChild({ name: 'איתי שיר' }, idx('איתי שיר', kid('איתי שיר', '2026-03-09')), ALIAS).ambiguous, true);
+check('שני יעדים באותו שם — דילוג',
+  resolveChild({ name: 'איתי שיר' }, idx('איתי שיר', kid('איתי שיר', '2026-02-01'), kid('איתי שיר', '2026-02-01')), ALIAS).child,
+  null);
+check('יעד שנעלם — דילוג', resolveChild({ name: 'איתי שיר' }, new Map(), ALIAS).child, null);
+
+const MISSING_DOB = { from: 'פאר אסתר', to: 'פאר אסתר עומייסי', db_birth_date: '' };
+check('ת. לידה חסרה במסד היא ערך תקף לאימות',
+  resolveChild({ name: 'פאר אסתר עומייסי', dob: '2025-03-10' },
+    idx('פאר אסתר עומייסי', kid('פאר אסתר עומייסי', null)), MISSING_DOB).child?.child_name,
+  'פאר אסתר עומייסי');
+check('ואם הופיע תאריך — מישהו ערך, דילוג',
+  resolveChild({ name: 'פאר אסתר עומייסי' },
+    idx('פאר אסתר עומייסי', kid('פאר אסתר עומייסי', '2025-03-10')), MISSING_DOB).child,
+  null);
+
+console.log('\nהרשימה עצמה');
+check('שישה מיפויים בלבד', NAME_ALIASES.length, 6);
+check('כל אחד נושא סניף, מקור, יעד ות. לידה',
+  NAME_ALIASES.every(a => a.branch && a.from && a.to && typeof a.db_birth_date === 'string'), true);
+check('אין מקור כפול', new Set(NAME_ALIASES.map(a => `${a.branch}|${a.from}`)).size, NAME_ALIASES.length);
+check('ארבעה למשה דיין', aliasesFor('כפר סבא - משה דיין').size, 4);
+check('ושניים לקפלן', aliasesFor('כפר סבא - קפלן').size, 2);
+check('סניף אחר לא מקבל כלום', aliasesFor('הרצליה הרצוג').size, 0);
+check('"אלה צרור" אינה ברשימה — דומה בשם ואינה אותה ילדה',
+  NAME_ALIASES.some(a => a.from === 'אלה צרור'), false);
+
 // --- The two exports disagree ---------------------------------------------
 
 console.log('\nטלפון — ארבע צורות, מספר אחד');
