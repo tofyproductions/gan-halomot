@@ -33,7 +33,7 @@ function pdfStoragePath(auditId, branch) {
 function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
-const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth, Branch, User, Setting, SavedPayslip } = require('../models');
+const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth, Branch, User, Setting, SavedPayslip, SavedPayslipVersion } = require('../models');
 
 // Persist payslip PDF bytes to Mongo (durable) so the per-page preview survives
 // host restarts that wipe the ephemeral local disk. Best-effort.
@@ -2296,6 +2296,91 @@ function realEmployeeEmail(emp) {
   return null;
 }
 
+const payslipBytes = (d) => (d ? (d.buffer ? Buffer.from(d.buffer) : Buffer.from(d)) : null);
+
+/**
+ * Put the payslip currently on file into history before something replaces it.
+ *
+ * An approved cycle is closed, but one person's payslip may still be corrected
+ * after it was approved and sent. That correction overwrote SavedPayslip.data
+ * in place, so the document the employee actually received stopped existing.
+ * Nothing is deleted any more: the row being superseded is copied whole to
+ * SavedPayslipVersion, and only then may the caller write the new bytes.
+ *
+ * Identical bytes are NOT a replacement. A distribution re-run mails the same
+ * page again, and archiving that would grow a history of duplicates and — far
+ * worse — tell 68 employees their payslip had changed when nothing did.
+ *
+ * @returns {boolean} whether a version was archived (i.e. this is a real
+ *          replacement and the caller should count up `version`).
+ */
+async function archiveSupersededPayslip(existing, newBuf, { userId = null } = {}) {
+  const oldBuf = payslipBytes(existing?.data);
+  if (!oldBuf || !oldBuf.length) return false;      // nothing on file to lose
+  if (newBuf && oldBuf.equals(newBuf)) return false; // same document, re-sent
+
+  await SavedPayslipVersion.create({
+    employee_id: existing.employee_id,
+    israeli_id: existing.israeli_id || '',
+    year_month: existing.year_month,
+    branch: existing.branch || '',
+    version: existing.version || 1,
+    data: oldBuf,
+    audit_id: existing.audit_id || null,
+    page: existing.page ?? null,
+    sent_to: existing.sent_to || '',
+    sent_at: existing.sent_at || null,
+    sent_by: existing.sent_by || null,
+    delivered_to_employee: !!existing.delivered_to_employee,
+    manager_sent_to: existing.manager_sent_to || '',
+    manager_sent_at: existing.manager_sent_at || null,
+    superseded_at: new Date(),
+    superseded_by: userId,
+  });
+  return true;
+}
+
+/**
+ * File the manager's copy of one employee's page.
+ *
+ * The manager gets a merged PDF of her whole branch, which answers nothing when
+ * one employee asks about her own month — so each page is archived per employee
+ * as well. `delivered_to_employee` is NOT set: the employee has received
+ * nothing, and "התלושים שלי" must keep saying so.
+ *
+ * It goes through the same archive as the employee send, because it writes to
+ * the same `data` field and can land on a row the employee already received.
+ * What it must NOT do is set `replaced_at` — the manager's bundle never reached
+ * her, so "התלוש שלך הוחלף" would be a false statement. The bytes are kept,
+ * `version` counts up, the mark stays off.
+ */
+async function archiveManagerPayslipPage({
+  employeeId, israeliId = '', month, pageBuf, page = null,
+  branchLabel = '', auditId = null, userId = null, managerEmails = '',
+}) {
+  const existing = await SavedPayslip.findOne({ employee_id: employeeId, year_month: month }).lean();
+  const superseded = await archiveSupersededPayslip(existing, pageBuf, { userId });
+
+  await SavedPayslip.findOneAndUpdate(
+    { employee_id: employeeId, year_month: month },
+    {
+      // Deliberately does not touch delivered_to_employee on an existing row: a
+      // month already sent to the employee must not be demoted by a later
+      // manager send.
+      $set: {
+        data: pageBuf, audit_id: auditId, page, branch: branchLabel,
+        manager_sent_to: managerEmails, manager_sent_at: new Date(),
+        ...(superseded ? { version: (existing.version || 1) + 1 } : {}),
+      },
+      $setOnInsert: {
+        israeli_id: israeliId || '', sent_by: userId,
+        delivered_to_employee: false,
+      },
+    },
+    { upsert: true },
+  );
+}
+
 /**
  * Mail one employee their payslip page, then file it.
  *
@@ -2357,8 +2442,17 @@ async function deliverPayslipToEmployee({
 
   if (!toOverride) {
     try {
-      // Upsert on (employee, month): re-sending a corrected payslip REPLACES
-      // the archived one rather than leaving the employee with two.
+      // One ACTIVE payslip per (employee, month) — but the one being replaced
+      // goes to history first, never over the side. A correction filed after
+      // the month was approved and sent is allowed; losing what was sent is not.
+      const existing = await SavedPayslip.findOne({ employee_id: emp._id, year_month: month }).lean();
+      const superseded = await archiveSupersededPayslip(existing, pageBuf, { userId });
+
+      // `replaced_at` is the employee's claim, so it is set only when what was
+      // replaced is something SHE had. A manager-only copy being overwritten is
+      // archived all the same, but must not tell her that her payslip changed.
+      const replacedHers = superseded && existing?.delivered_to_employee === true;
+
       await SavedPayslip.findOneAndUpdate(
         { employee_id: emp._id, year_month: month },
         {
@@ -2367,6 +2461,8 @@ async function deliverPayslipToEmployee({
           // This send is the one that reaches the employee, so it is the one
           // that puts the payslip in "התלושים שלי".
           delivered_to_employee: true,
+          ...(superseded ? { version: (existing.version || 1) + 1 } : {}),
+          ...(replacedHers ? { replaced_at: new Date() } : {}),
           // Only overwrite the archived hours report when one actually went out
           // with this send; a payslip-only re-send must not erase it.
           ...(hoursBuf ? { hours_report_data: hoursBuf, hours_report_sent_at: new Date() } : {}),
@@ -2845,23 +2941,11 @@ async function sendPayslipsToManagers(req, res) {
                 const one = await PDFDocument.create();
                 (await one.copyPages(srcDoc, [e.page - 1])).forEach(pg => one.addPage(pg));
                 const oneBuf = Buffer.from(await one.save());
-                await SavedPayslip.findOneAndUpdate(
-                  { employee_id: e.employee_id, year_month: month },
-                  {
-                    // Deliberately does not touch delivered_to_employee on an
-                    // existing row: a month already sent to the employee must
-                    // not be demoted by a later manager send.
-                    $set: {
-                      data: oneBuf, audit_id: doc._id, page: e.page, branch: label,
-                      manager_sent_to: emails.join(', '), manager_sent_at: new Date(),
-                    },
-                    $setOnInsert: {
-                      israeli_id: e.israeli_id || '', sent_by: userId,
-                      delivered_to_employee: false,
-                    },
-                  },
-                  { upsert: true },
-                );
+                await archiveManagerPayslipPage({
+                  employeeId: e.employee_id, israeliId: e.israeli_id, month,
+                  pageBuf: oneBuf, page: e.page, branchLabel: label,
+                  auditId: doc._id, userId, managerEmails: emails.join(', '),
+                });
               } catch (se) {
                 console.error('archive manager payslip failed:', e.employee_id, se.message);
               }
@@ -3234,7 +3318,7 @@ async function listBranchPayslips(req, res) {
       .lean();
 
     const slips = await SavedPayslip.find({ employee_id: { $in: employees.map(e => e._id) } })
-      .select('employee_id year_month sent_to sent_at delivered_to_employee manager_sent_at')
+      .select('employee_id year_month sent_to sent_at delivered_to_employee manager_sent_at version replaced_at')
       .sort({ year_month: -1 })
       .lean();
 
@@ -3249,6 +3333,12 @@ async function listBranchPayslips(req, res) {
         // manager asked "did she get her payslip?" needs the difference.
         delivered_to_employee: !!s.delivered_to_employee,
         manager_sent_at: s.manager_sent_at,
+        // A payslip this employee already had, replaced by a later correction.
+        // The manager fields the question either way, so the screen that
+        // answers "did she get it" has to answer "is it still the one she got".
+        version: s.version || 1,
+        replaced: !!s.replaced_at,
+        replaced_at: s.replaced_at || null,
       }]);
     }
 
@@ -3644,6 +3734,7 @@ module.exports = {
   // Shared with the direct (audit-free) distribution — one implementation of
   // "mail the page, archive it, mark the month paid".
   deliverPayslipToEmployee,
+  archiveManagerPayslipPage,
   realEmployeeEmail,
   extractPage,
   coalesceBranchEntries,

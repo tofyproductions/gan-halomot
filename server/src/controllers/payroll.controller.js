@@ -3607,7 +3607,7 @@ async function myPayslips(req, res, next) {
     // out until the employee distribution runs.
     // The PDFs are fetched per row on demand; `has_*` is all the list needs.
     const saved = await SavedPayslip.find({ employee_id: emp._id, delivered_to_employee: true })
-      .select('year_month branch sent_at page audit_id hours_report_sent_at')
+      .select('year_month branch sent_at page audit_id hours_report_sent_at version replaced_at')
       .sort({ year_month: -1 })
       .lean();
     if (saved.length === 0) return res.json({ payslips: [] });
@@ -3640,6 +3640,13 @@ async function myPayslips(req, res, next) {
           file_url: hasPayslip.has(p.year_month) ? `/api/payroll/my-payslips/${p.year_month}/file` : null,
           hours_report_url: p.hours_report_sent_at ? `/api/payroll/my-payslips/${p.year_month}/hours-file` : null,
           hours_report_sent_at: p.hours_report_sent_at || null,
+          // A correction may be filed for one person after the month was
+          // approved and sent. The file behind `file_url` is then no longer the
+          // one she was originally mailed, and she is the last person who should
+          // have to work that out from a date.
+          version: p.version || 1,
+          replaced: !!p.replaced_at,
+          replaced_at: p.replaced_at || null,
         };
       }),
     });

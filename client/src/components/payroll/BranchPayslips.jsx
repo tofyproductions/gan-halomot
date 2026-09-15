@@ -274,14 +274,23 @@ export default function BranchPayslips() {
                           {slips.map(p => (
                             <Tooltip
                               key={p.year_month}
-                              title={p.delivered_to_employee
+                              title={(p.delivered_to_employee
                                 ? `נשלח לעובד/ת ${p.sent_at ? new Date(p.sent_at).toLocaleDateString('he-IL') : ''}${p.sent_to ? ` אל ${p.sent_to}` : ''}`
-                                : `טרם נשלח לעובד/ת — הגיע לניהול${p.manager_sent_at ? ` ב-${new Date(p.manager_sent_at).toLocaleDateString('he-IL')}` : ''}`}
+                                : `טרם נשלח לעובד/ת — הגיע לניהול${p.manager_sent_at ? ` ב-${new Date(p.manager_sent_at).toLocaleDateString('he-IL')}` : ''}`)
+                                // A correction filed after the month was
+                                // approved: the chip opens the CURRENT payslip,
+                                // which is not the one the employee was first
+                                // mailed. The manager fields that question.
+                                + (p.replaced
+                                  ? ` · הוחלף בתלוש מעודכן${p.replaced_at ? ` ב-${new Date(p.replaced_at).toLocaleDateString('he-IL')}` : ''} — גרסה ${p.version}`
+                                  : '')}
                             >
                               <Chip
                                 size="small"
                                 icon={<DescriptionIcon />}
-                                label={monthLabel(p.year_month)}
+                                label={p.replaced
+                                  ? `${monthLabel(p.year_month)} · הוחלף (גרסה ${p.version})`
+                                  : monthLabel(p.year_month)}
                                 // Filled = the employee has it. Outlined = only
                                 // this screen does. A manager asked "did she
                                 // get her payslip?" needs to see the difference
