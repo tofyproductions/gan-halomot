@@ -50,9 +50,36 @@ const savedPayslipSchema = new mongoose.Schema({
   // The monthly hours report that went out with (or instead of) the payslip.
   hours_report_data:    { type: Buffer, default: null },
   hours_report_sent_at: { type: Date, default: null },
+
+  /**
+   * Which version of this month's payslip `data` currently holds.
+   *
+   * An approved cycle is closed, but one person's payslip may still be
+   * corrected after it was approved and sent. That correction replaced these
+   * bytes in place and the previous document was lost. Now the version being
+   * replaced is copied to SavedPayslipVersion first and this counts up, so the
+   * number of archived versions is always `version - 1`.
+   *
+   * Defaults to 1, which is what every row written before this existed IS —
+   * mongoose reads the default for a missing path, so no row had to be touched.
+   */
+  version: { type: Number, default: 1 },
+
+  /**
+   * When a payslip the EMPLOYEE had already received was replaced.
+   *
+   * Not the same as "a new version was stored": the manager distribution also
+   * archives a page here, and overwriting a copy she never received is not a
+   * replacement of anything she holds. Only this field drives the "הוחלף" mark
+   * on her screen, so the mark is always a true statement about her.
+   */
+  replaced_at: { type: Date, default: null },
 }, { timestamps: true });
 
-// One archived payslip per employee per month (re-sending upserts/replaces).
+// One ACTIVE payslip per employee per month. Superseded versions live in
+// SavedPayslipVersion rather than widening this index — dropping and
+// re-creating a unique index on a live payroll collection is a migration, and
+// this does not need one.
 savedPayslipSchema.index({ employee_id: 1, year_month: 1 }, { unique: true });
 
 module.exports = mongoose.model('SavedPayslip', savedPayslipSchema);

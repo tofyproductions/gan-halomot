@@ -49,11 +49,27 @@ export default function MyPayslips() {
                   <TableCell>{p.year}</TableCell>
                   <TableCell sx={{ fontWeight: 700 }}>{p.net_amount} ₪</TableCell>
                   <TableCell>
-                    <Chip
-                      label={p.status === 'paid' ? 'שולם' : 'ממתין'}
-                      size="small"
-                      color={p.status === 'paid' ? 'success' : 'warning'}
-                    />
+                    <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <Chip
+                        label={p.status === 'paid' ? 'שולם' : 'ממתין'}
+                        size="small"
+                        color={p.status === 'paid' ? 'success' : 'warning'}
+                      />
+                      {/* A single correction may be filed after the month was
+                          approved and sent. The file below is then not the one
+                          she was originally mailed, and she should be told so
+                          rather than have to infer it from a date. */}
+                      {p.replaced && (
+                        <Tooltip title={`תלוש מעודכן הונפק${p.replaced_at ? ` ב-${new Date(p.replaced_at).toLocaleDateString('he-IL')}` : ''} והוא זה שמופיע כאן`}>
+                          <Chip
+                            label={`הוחלף — גרסה ${p.version}`}
+                            size="small"
+                            color="info"
+                            variant="outlined"
+                          />
+                        </Tooltip>
+                      )}
+                    </Stack>
                   </TableCell>
                   <TableCell>
                     {/* Both routes sit behind the bearer token, so a plain href
