@@ -8,9 +8,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ProductThumb from './ProductThumb';
+import QuoteImportDialog from './QuoteImportDialog';
 import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 
@@ -20,6 +22,7 @@ export default function SupplierManager() {
   const [supplierDialog, setSupplierDialog] = useState({ open: false, mode: 'add', data: {} });
   const [productDialog, setProductDialog] = useState({ open: false, supplierId: null, data: {} });
   const [importDialog, setImportDialog] = useState({ open: false, supplierId: null, text: '' });
+  const [quoteDialog, setQuoteDialog] = useState({ open: false, supplier: null });
   const [confirm, setConfirm] = useState({ open: false, type: '', id: null });
 
   const fetchSuppliers = useCallback(async () => {
@@ -164,8 +167,16 @@ export default function SupplierManager() {
                         <EditIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
-                    <Tooltip title="ייבוא מוצרים">
-                      <IconButton size="small" color="primary" onClick={() => setImportDialog({ open: true, supplierId: sid, text: '' })}>
+                    {/* The PDF first, and in the accent: a supplier sends a
+                        quote, not a comma-separated list, and the paste box
+                        beside it is the fallback for the ones who don't. */}
+                    <Tooltip title="ייבוא מהצעת מחיר (PDF)">
+                      <IconButton size="small" color="primary" onClick={() => setQuoteDialog({ open: true, supplier })}>
+                        <PictureAsPdfIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    <Tooltip title="ייבוא מוצרים מטקסט">
+                      <IconButton size="small" onClick={() => setImportDialog({ open: true, supplierId: sid, text: '' })}>
                         <UploadIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
@@ -310,6 +321,16 @@ export default function SupplierManager() {
           <Button variant="contained" onClick={handleSaveProduct}>{(productDialog.data._id || productDialog.data.id) ? 'שמור' : 'הוסף'}</Button>
         </DialogActions>
       </Dialog>
+
+      <QuoteImportDialog
+        open={quoteDialog.open}
+        supplier={quoteDialog.supplier}
+        onClose={() => setQuoteDialog({ open: false, supplier: null })}
+        onImported={() => {
+          const s = quoteDialog.supplier;
+          if (s) fetchProducts(s._id || s.id);
+        }}
+      />
 
       {/* Import Dialog */}
       <Dialog open={importDialog.open} onClose={() => setImportDialog({ open: false, supplierId: null, text: '' })} dir="rtl" maxWidth="md" fullWidth>

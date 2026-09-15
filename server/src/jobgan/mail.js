@@ -1,9 +1,11 @@
 /**
  * Outgoing mail for ג׳וב חלום.
  *
- * Reuses services/email.service.js#dispatchEmail — imported, never modified.
- * It already knows how to reach the three providers the system is configured
- * for, and a second implementation would be a second thing to keep working.
+ * Sends through ./mailer, which is this service's OWN implementation and
+ * imports nothing from the gan. It used to reuse services/email.service.js;
+ * that module loads config/env.js, which refuses to load in production without
+ * the gan's JWT_SECRET, and the board crashed on boot demanding a secret
+ * belonging to a system it must not touch. See mailer.js.
  *
  * ⚠️ BEFORE LAUNCH: the new domain needs its sender-authentication records
  * (SPF / DKIM / DMARC) set up. Mail from a fresh domain lands in spam, and the
@@ -15,15 +17,13 @@
  * because of a mail hiccup is the one outcome worth avoiding entirely.
  */
 
-const { dispatchEmail } = require('../services/email.service');
+const { dispatch, FROM } = require('./mailer');
 const { labelOf, AREAS, ROLES } = require('./constants');
-
-const FROM = process.env.JOBGAN_MAIL_FROM || 'ג׳וב חלום <noreply@jobgan.co.il>';
 const SITE = process.env.JOBGAN_PUBLIC_URL || 'https://jobs.dreamgan.com';
 
 async function safeSend(args) {
   try {
-    return await dispatchEmail({ from: FROM, ...args });
+    return await dispatch({ from: FROM, ...args });
   } catch (err) {
     console.error('[jobgan] שליחת מייל נכשלה:', err.message);
     return null;

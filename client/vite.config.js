@@ -74,6 +74,10 @@ export default defineConfig({
         manualChunks: (id) => {
           if (!id.includes('node_modules')) return undefined;
           if (id.includes('xlsx')) return 'vendor-xlsx';
+          // pdfjs reads a supplier's price quote, on the one screen that
+          // imports one. A chunk of its own so it stays off every other screen
+          // — bundle-budget.test.js asserts it is never preloaded.
+          if (id.includes('pdfjs-dist')) return 'vendor-pdfjs';
           if (id.includes('html2pdf') || id.includes('html2canvas') || id.includes('jspdf')) return 'vendor-pdf';
           if (id.includes('apexcharts')) return 'vendor-charts';
           if (id.includes('@dnd-kit')) return 'vendor-dnd';

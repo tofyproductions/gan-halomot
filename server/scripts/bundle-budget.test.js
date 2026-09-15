@@ -99,12 +99,18 @@ function main() {
     `התקציב ${budget.firstLoadGzipKB} — ספרייה כבדה חזרה למסלול הקריטי`);
 
   /**
-   * The three that are only ever needed by somebody doing a specific job:
-   * exporting a spreadsheet, rendering a contract, reading a chart. If one of
-   * them is preloaded, a static import somewhere put it back.
+   * The four that are only ever needed by somebody doing a specific job:
+   * exporting a spreadsheet, rendering a contract, reading a chart, reading a
+   * supplier's price quote. If one of them is preloaded, a static import
+   * somewhere put it back.
+   *
+   * Matched up to the hash separator, not by bare prefix: vite emits
+   * `vendor-pdf-D4d0t.js`, and `startsWith('vendor-pdf')` is also true of
+   * vendor-pdfjs — so a preloaded pdfjs would have been reported against the
+   * wrong name, sending the next person to look at the wrong import.
    */
-  for (const heavy of ['vendor-xlsx', 'vendor-pdf', 'vendor-charts']) {
-    ok(!files.some((f) => f.startsWith(heavy)),
+  for (const heavy of ['vendor-xlsx', 'vendor-pdf', 'vendor-charts', 'vendor-pdfjs']) {
+    ok(!files.some((f) => f.startsWith(`${heavy}-`)),
       `${heavy} לא נטען מראש`,
       'מישהו ייבא אותו סטטית בקובץ שנמצא במסלול הקריטי');
   }
