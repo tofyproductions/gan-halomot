@@ -104,6 +104,22 @@ const userSchema = new mongoose.Schema({
   bank_number: { type: String, default: '' },
   start_date: { type: Date, default: null },
   is_active: { type: Boolean, default: true },
+  /**
+   * A login that stands in for a person instead of being one.
+   *
+   * "Google Reviewer" exists so Google can sign in and review the store build,
+   * and is filed as a branch_manager of כפר סבא - קפלן — which put it in the
+   * recipient list beside the real manager, receiving her punch reminders and
+   * her staff's payslips. Deactivating it would break the review it exists for.
+   *
+   * So the account keeps working and stops receiving: every place that asks
+   * "who runs this branch" (services/branch-recipients.service.js) skips it.
+   * Nothing else reads this — it is not a permission and not a role.
+   *
+   * Absent means a real person. No existing account changes meaning by this
+   * field arriving.
+   */
+  is_test_account: { type: Boolean, default: false },
   webauthn_credentials: [{
     credential_id: { type: String, required: true },
     public_key: { type: String, required: true },

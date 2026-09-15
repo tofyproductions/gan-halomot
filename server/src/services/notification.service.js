@@ -12,6 +12,7 @@ const webpush = require('web-push');
 const env = require('../config/env');
 const { NotificationEvent, PushSubscription, WebPushSubscription, User } = require('../models');
 const fcmService = require('./fcm.service');
+const { branchManagerFilter } = require('./branch-recipients.service');
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -22,11 +23,7 @@ if (webPushConfigured) {
 
 async function branchManagerIds(branchId) {
   if (branchId) {
-    const managers = await User.find({
-      role: 'branch_manager',
-      is_active: { $ne: false },
-      $or: [{ managed_branch_ids: branchId }, { branch_id: branchId }],
-    }).select('_id').lean();
+    const managers = await User.find(branchManagerFilter(branchId)).select('_id').lean();
     if (managers.length) return managers.map(m => String(m._id));
   }
   const admins = await User.find({ role: 'system_admin', is_active: { $ne: false } }).select('_id').lean();

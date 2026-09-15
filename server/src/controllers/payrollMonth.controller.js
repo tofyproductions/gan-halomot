@@ -29,6 +29,7 @@ const {
 } = require('../services/augustBonus');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
 const { materializeScope } = require('../utils/branch-scope');
+const { branchManagersFilter, branchesCoveredBy } = require('../services/branch-recipients.service');
 const ISR_DAY = (ts) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ISR_HHMM = (ts) => new Date(ts).toLocaleTimeString('en-GB', { timeZone: 'Asia/Jerusalem', hour: '2-digit', minute: '2-digit' });
 
@@ -4297,11 +4298,8 @@ const waNumber = (phone = '') => {
 async function branchManagers(branchIds) {
   const ids = (Array.isArray(branchIds) ? branchIds : [branchIds]).filter(Boolean);
   if (!ids.length) return new Map();
-  const users = await User.find({
-    role: 'branch_manager',
-    is_active: { $ne: false },
-    $or: [{ managed_branch_ids: { $in: ids } }, { branch_id: { $in: ids } }],
-  }).select('full_name email phone managed_branch_ids branch_id').lean();
+  const users = await User.find(branchManagersFilter(ids))
+    .select('full_name role email phone managed_branch_ids branch_id').lean();
   if (!users.length) return new Map();
 
   // The login record and the payroll card are two rows about one person, and
@@ -4320,9 +4318,10 @@ async function branchManagers(branchIds) {
 
   const byBranch = new Map(ids.map(id => [String(id), []]));
   for (const u of users) {
-    const covers = (u.managed_branch_ids || []).map(String);
-    if (!covers.length && u.branch_id) covers.push(String(u.branch_id));
-    for (const bid of covers) {
+    // Same rule that selected her, applied again to file her — the fallback to
+    // branch_id is a branch_manager's alone, and reproducing it by hand here is
+    // how a viewer gets dropped a second time after being let in.
+    for (const bid of branchesCoveredBy(u, ids)) {
       if (!byBranch.has(bid)) continue;
       byBranch.get(bid).push(managerContact(u, {
         phone: phoneByUser.get(String(u._id)),

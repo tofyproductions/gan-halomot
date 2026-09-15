@@ -20,6 +20,7 @@ const userSync = require('../services/userSync');
 const form101 = require('../services/form101');
 const { scanForm101 } = require('../services/form101Scan');
 const { resolveBranchScope, materializeScope } = require('../utils/branch-scope');
+const { branchManagerFilter } = require('../services/branch-recipients.service');
 
 // --- helpers --------------------------------------------------------------
 
@@ -1704,10 +1705,7 @@ async function sendHoursReportsToManagers(req, res, next) {
     for (const br of branches) {
       const bid = String(br._id);
       if (allowed && !allowed.includes(bid)) continue;
-      const managers = await User.find({
-        role: 'branch_manager',
-        $or: [{ managed_branch_ids: br._id }, { branch_id: br._id }],
-      }).select('email full_name').lean();
+      const managers = await User.find(branchManagerFilter(br._id)).select('email full_name').lean();
       const emails = [...new Set(managers.map(m => m.email).filter(Boolean))];
       const employees = await Employee.find({ branch_id: br._id, is_active: true }).populate('branch_id', 'name').sort({ full_name: 1 }).lean();
       if (employees.length === 0) { results.push({ branch: br.name, status: 'no_employees' }); continue; }

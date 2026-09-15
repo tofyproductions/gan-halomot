@@ -34,6 +34,7 @@ function approvedPdfStoragePath(auditId, branch) {
   return path.join(PDF_STORAGE_DIR, String(auditId), 'approved', `${branchSlug(branch)}.pdf`);
 }
 const { PayslipAuditRecord, PayslipAuditPdf, Employee, PayrollMonth, Branch, User, Setting, SavedPayslip, SavedPayslipVersion } = require('../models');
+const { branchManagerFilter } = require('../services/branch-recipients.service');
 
 // Persist payslip PDF bytes to Mongo (durable) so the per-page preview survives
 // host restarts that wipe the ephemeral local disk. Best-effort.
@@ -2768,7 +2769,7 @@ async function managerBranchEmails(group, stored) {
   const br = group && group.br;
   if (!br) return [];
   if (stored[String(br._id)]) return [stored[String(br._id)]];
-  const mgrs = await User.find({ role: 'branch_manager', $or: [{ managed_branch_ids: br._id }, { branch_id: br._id }] }).select('email').lean();
+  const mgrs = await User.find(branchManagerFilter(br._id)).select('email').lean();
   return [...new Set(mgrs.map(m => m.email).filter(Boolean))];
 }
 
