@@ -51,6 +51,8 @@
     "demo:scramble": "node scripts/ganflow-demo-scramble.js",
     "demo:test": "node scripts/ganflow-demo-scramble.test.js",
     "demo:ui": "node scripts/ganflow-demo-ui-version.js",
+    "jobgan": "node src/jobgan/index.js",
+    "jobgan:test": "node scripts/jobgan-e2e.test.js",
     "test:sales": "node scripts/sales-pages.test.js",
     "test:rtl-badge": "node scripts/rtl-badge-position.test.js",
     "test:viewer-role": "node scripts/viewer-role-exists.test.js",

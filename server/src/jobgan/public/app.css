@@ -1,0 +1,332 @@
+/*
+ * ג׳וב חלום — the public board.
+ *
+ * PHONE FIRST, and not as a slogan: almost everybody arriving here follows a
+ * link from Facebook on a telephone, often a woman between 30 and 55 who is
+ * between jobs and has three minutes. Every choice below answers to that —
+ * 16px minimum body text, controls that are comfortable for a thumb, one
+ * column until there is room for two, and nothing that has to load before the
+ * first job is readable.
+ *
+ * The palette is deliberately not חלום's amber. That brand speaks to gan
+ * owners who buy software; this one speaks to somebody looking for work, who
+ * has never heard of it and does not need to.
+ */
+
+:root {
+  --ground:      #f6f4f0;
+  --card:        #ffffff;
+  --sunk:        #efece6;
+  --ink:         #1b1d1a;
+  --ink-soft:    #5b615b;
+  --ink-faint:   #8d938c;
+  --rule:        #ddd9d1;
+  --rule-soft:   #eae7e0;
+
+  --brand:       #1f5f52;   /* a garden green: calm, and not a bank's blue */
+  --brand-dark:  #17473e;
+  --brand-wash:  #e4efeb;
+  --cta:         #c2601f;   /* warm, for the one action per screen */
+  --cta-dark:    #a44f17;
+  --good:        #1f6b4a;
+  --warn:        #8f4a12;
+  --bad:         #97352f;
+  --bad-wash:    #f8eae8;
+
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(27,29,26,.06), 0 4px 14px rgba(27,29,26,.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground:    #161815;
+    --card:      #1d201c;
+    --sunk:      #242722;
+    --ink:       #e9ebe6;
+    --ink-soft:  #a3a9a1;
+    --ink-faint: #7c827a;
+    --rule:      #333730;
+    --rule-soft: #282c26;
+    --brand:     #6fc4ae;
+    --brand-dark:#8ad6c1;
+    --brand-wash:#1b2b27;
+    --cta:       #e5893f;
+    --cta-dark:  #f09a52;
+    --good:      #5fc494;
+    --warn:      #d9a05c;
+    --bad:       #e5817a;
+    --bad-wash:  #2b1c1a;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 4px 14px rgba(0,0,0,.25);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  direction: rtl;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Assistant", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+a { color: var(--brand); }
+
+/* ---------------- header ---------------- */
+
+.topbar {
+  background: var(--card);
+  border-bottom: 1px solid var(--rule);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+.topbar-in {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: .7rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+}
+.wordmark {
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-weight: 700;
+  font-size: 1.32rem;
+  color: var(--brand);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wordmark small {
+  display: block;
+  font-family: inherit;
+  font-size: .62rem;
+  font-weight: 400;
+  letter-spacing: .06em;
+  color: var(--ink-faint);
+  margin-top: -3px;
+}
+.topbar .spacer { flex: 1; }
+
+.wrap { max-width: 62rem; margin: 0 auto; padding: 1.1rem 1rem 4rem; }
+
+/* ---------------- buttons ---------------- */
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: .62rem 1.05rem;
+  min-height: 44px;          /* a thumb, not a mouse */
+  cursor: pointer;
+  background: var(--sunk);
+  color: var(--ink);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+}
+.btn:hover { filter: brightness(.97); }
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--cta); color: #fff; }
+.btn-primary:hover { background: var(--cta-dark); }
+.btn-brand { background: var(--brand); color: #fff; }
+.btn-ghost { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
+.btn-link { background: none; border: none; color: var(--brand); padding: .3rem; min-height: 0; text-decoration: underline; }
+.btn-sm { padding: .38rem .7rem; min-height: 36px; font-size: .9rem; }
+.btn[disabled] { opacity: .5; cursor: default; }
+.btn-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+
+:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+
+/* ---------------- hero ---------------- */
+
+.hero {
+  background: linear-gradient(180deg, var(--brand-wash), transparent);
+  border-bottom: 1px solid var(--rule-soft);
+}
+.hero-in { max-width: 62rem; margin: 0 auto; padding: 1.5rem 1rem 1.2rem; }
+.hero h1 {
+  font-family: "Frank Ruhl Libre", Georgia, serif;
+  font-size: clamp(1.5rem, 5.5vw, 2.1rem);
+  line-height: 1.2;
+  margin: 0 0 .3rem;
+  text-wrap: balance;
+}
+.hero p { margin: 0; color: var(--ink-soft); font-size: 1rem; }
+
+/* ---------------- filters ---------------- */
+
+.filters {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: .85rem;
+  display: grid;
+  gap: .6rem;
+  grid-template-columns: 1fr;
+  margin-bottom: 1.1rem;
+  box-shadow: var(--shadow);
+}
+@media (min-width: 40rem) { .filters { grid-template-columns: 1fr 1fr 1fr auto; align-items: end; } }
+
+.field { display: flex; flex-direction: column; gap: .25rem; }
+.field label { font-size: .82rem; font-weight: 600; color: var(--ink-soft); }
+.field input, .field select, .field textarea {
+  font: inherit;
+  font-size: 16px;            /* under 16 and iOS zooms the page on focus */
+  padding: .55rem .65rem;
+  min-height: 44px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  width: 100%;
+}
+.field textarea { min-height: 88px; resize: vertical; }
+.field .hint { font-size: .8rem; color: var(--ink-faint); }
+.field .err { font-size: .82rem; color: var(--bad); font-weight: 600; }
+.field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: var(--bad); }
+
+.checks { display: flex; flex-wrap: wrap; gap: .4rem; }
+.check {
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: .4rem .8rem;
+  font-size: .92rem;
+  cursor: pointer;
+  background: var(--card);
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+}
+.check input { position: absolute; opacity: 0; pointer-events: none; }
+.check.on { background: var(--brand-wash); border-color: var(--brand); color: var(--brand); font-weight: 600; }
+
+/* ---------------- job cards ---------------- */
+
+.jobs { display: grid; gap: .75rem; }
+.job {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: .95rem 1rem;
+  box-shadow: var(--shadow);
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.job:hover { border-color: var(--brand); }
+.job h3 { margin: 0 0 .15rem; font-size: 1.08rem; }
+.job .gan { color: var(--ink-soft); font-size: .93rem; margin: 0 0 .5rem; }
+.job .facts { display: flex; flex-wrap: wrap; gap: .35rem .5rem; margin-bottom: .5rem; }
+.tag {
+  font-size: .82rem;
+  background: var(--sunk);
+  border-radius: 6px;
+  padding: .15rem .5rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.tag.area { background: var(--brand-wash); color: var(--brand); font-weight: 600; }
+.pay { font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
+
+/* A paid placement says so. Selling the ORDER of results would cost the one
+   thing this board has, so what money buys is a label — and the label is the
+   honest half of the deal. */
+.promoted {
+  border-color: var(--cta);
+  position: relative;
+}
+.promoted::before {
+  content: "מודעה מקודמת";
+  position: absolute;
+  top: -.62rem;
+  inset-inline-start: .9rem;
+  background: var(--cta);
+  color: #fff;
+  font-size: .7rem;
+  font-weight: 700;
+  padding: .08rem .5rem;
+  border-radius: 4px;
+}
+
+/* ---------------- panels, notices ---------------- */
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 1.1rem;
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+.panel h2 { margin: 0 0 .2rem; font-size: 1.22rem; }
+.panel .sub { margin: 0 0 1rem; color: var(--ink-soft); font-size: .93rem; }
+
+.notice { border-radius: 8px; padding: .75rem .9rem; margin-bottom: .9rem; font-size: .94rem; }
+.notice-info { background: var(--brand-wash); color: var(--brand-dark); }
+.notice-warn { background: #fdf2e3; color: var(--warn); }
+.notice-bad  { background: var(--bad-wash); color: var(--bad); }
+.notice-good { background: var(--brand-wash); color: var(--good); }
+@media (prefers-color-scheme: dark) {
+  .notice-info { color: var(--brand); }
+  .notice-warn { background: #2a2117; }
+}
+
+.empty { text-align: center; padding: 2.5rem 1rem; color: var(--ink-soft); }
+.empty strong { display: block; font-size: 1.05rem; color: var(--ink); margin-bottom: .3rem; }
+
+.stack { display: grid; gap: .8rem; }
+@media (min-width: 40rem) { .two { grid-template-columns: 1fr 1fr; } }
+
+.meter { font-size: .84rem; color: var(--ink-soft); }
+.meter b { color: var(--brand); }
+
+.rowitem {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: .85rem 1rem;
+  background: var(--card);
+  margin-bottom: .6rem;
+}
+.rowitem .head { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.rowitem .head h4 { margin: 0; font-size: 1.02rem; }
+
+.pill { font-size: .78rem; font-weight: 700; padding: .12rem .55rem; border-radius: 999px; }
+.pill-new { background: var(--cta); color: #fff; }
+.pill-wait { background: var(--sunk); color: var(--ink-soft); }
+.pill-ok { background: var(--brand-wash); color: var(--brand); }
+.pill-off { background: var(--bad-wash); color: var(--bad); }
+
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: .2rem .8rem; font-size: .95rem; margin: .5rem 0 0; }
+.kv dt { color: var(--ink-faint); }
+.kv dd { margin: 0; }
+
+.tabs { display: flex; gap: .3rem; border-bottom: 1px solid var(--rule); margin-bottom: 1rem; overflow-x: auto; }
+.tab {
+  font: inherit; font-weight: 600; background: none; border: none;
+  padding: .6rem .8rem; cursor: pointer; color: var(--ink-soft);
+  border-bottom: 3px solid transparent; white-space: nowrap; min-height: 44px;
+}
+.tab.on { color: var(--brand); border-bottom-color: var(--brand); }
+
+footer.site {
+  border-top: 1px solid var(--rule);
+  margin-top: 2rem;
+  padding: 1.2rem 1rem 2rem;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: .86rem;
+}
+footer.site a { color: var(--ink-soft); margin: 0 .4rem; }
+
+.loading { text-align: center; padding: 2rem; color: var(--ink-faint); }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
