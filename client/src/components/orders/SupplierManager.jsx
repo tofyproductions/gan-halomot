@@ -10,6 +10,7 @@ import AddIcon from '@mui/icons-material/Add';
 import UploadIcon from '@mui/icons-material/Upload';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import ProductThumb from './ProductThumb';
 import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 
@@ -199,6 +200,7 @@ export default function SupplierManager() {
                         <TableCell sx={{ fontWeight: 700 }}>מק״ט</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>קטגוריה</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }} align="center">יח׳ מידה</TableCell>
                         <TableCell sx={{ fontWeight: 700 }} align="center">מחיר + מע״מ</TableCell>
                         <TableCell align="center"></TableCell>
                       </TableRow>
@@ -207,21 +209,20 @@ export default function SupplierManager() {
                       {prods.slice(0, 20).map(p => (
                         <TableRow key={p._id || p.id} hover>
                           <TableCell>
-                            {p.image_url ? (
-                              <Box component="img" src={p.image_url} sx={{ width: 36, height: 36, borderRadius: 1, objectFit: 'cover' }} />
-                            ) : (
-                              <Box sx={{ width: 36, height: 36, borderRadius: 1, bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', cursor: 'pointer' }}
-                                onClick={() => {
-                                  const url = prompt('הכנס URL לתמונה:');
-                                  if (url) {
-                                    api.put(`/products/${p._id || p.id}`, { image_url: url })
-                                      .then(() => { toast.success('תמונה עודכנה'); fetchProducts(sid); })
-                                      .catch(() => toast.error('שגיאה'));
-                                  }
-                                }}
-                                title="לחץ להוספת תמונה"
-                              >📷</Box>
-                            )}
+                            <Box
+                              onClick={() => {
+                                if (p.has_image) return;   // it already has one
+                                const url = prompt('הכנס URL לתמונה:');
+                                if (!url) return;
+                                api.put(`/products/${p._id || p.id}`, { image_url: url })
+                                  .then(() => { toast.success('תמונה עודכנה'); fetchProducts(sid); })
+                                  .catch(() => toast.error('שגיאה'));
+                              }}
+                              title={p.has_image || p.image_url ? '' : 'לחץ להוספת תמונה'}
+                              sx={{ cursor: p.has_image || p.image_url ? 'default' : 'pointer', display: 'inline-flex' }}
+                            >
+                              <ProductThumb product={p} size={36} />
+                            </Box>
                           </TableCell>
                           <TableCell>{p.sku}</TableCell>
                           <TableCell>{p.category}</TableCell>
@@ -233,6 +234,7 @@ export default function SupplierManager() {
                               </Box>
                             )}
                           </TableCell>
+                          <TableCell align="center" sx={{ color: 'text.secondary', fontSize: '0.8125rem' }}>{p.unit || '—'}</TableCell>
                           <TableCell align="center" sx={{ fontWeight: 700 }}>{formatCurrency(p.price_with_vat)}</TableCell>
                           <TableCell align="center">
                             <IconButton size="small"

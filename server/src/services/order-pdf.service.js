@@ -118,18 +118,20 @@ const itemNoteHTML = (it) => (it.note
 const orderNotesHTML = (order) => (order.notes
   ? `<div style="margin-top:6px;padding:6px 10px;border:2px solid #b45309;background:#fef3c7;font-weight:800;color:#92400e;">הערות: ${escNote(order.notes)}</div>` : '');
 
+const UNIT_CSS = '.items .unit { font-weight: 400; font-size: 0.85em; color: #555; }';
+
 function buildSupplierHTML({ order, supplier, branch }) {
   const itemsHTML = (order.items || []).map(it => `
     <tr>
       <td>${it.sku || ''}</td>
       <td class="product">${it.name || ''}${itemNoteHTML(it)}</td>
-      <td><b>${it.qty || 0}</b></td>
+      <td><b>${it.qty || 0}</b>${it.unit ? ` <span class="unit">${it.unit}</span>` : ''}</td>
     </tr>
   `).join('');
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
     <title>הזמנה לספק ${order.order_number}</title>
-    <style>${SHARED_CSS}</style>
+    <style>${SHARED_CSS}${UNIT_CSS}</style>
   </head><body>
     ${topBlock({ order, supplier, branch, variant: 'supplier' })}
     ${orderNotesHTML(order)}
@@ -150,7 +152,7 @@ function buildInternalHTML({ order, supplier, branch }) {
     <tr>
       <td>${it.sku || ''}</td>
       <td class="product">${it.name || ''}${itemNoteHTML(it)}</td>
-      <td><b>${it.qty || 0}</b></td>
+      <td><b>${it.qty || 0}</b>${it.unit ? ` <span class="unit">${it.unit}</span>` : ''}</td>
       <td>${fmt(it.unit_price)}</td>
       <td><b>${fmt(it.total)}</b></td>
     </tr>
@@ -158,7 +160,7 @@ function buildInternalHTML({ order, supplier, branch }) {
 
   return `<!doctype html><html dir="rtl" lang="he"><head><meta charset="utf-8">
     <title>הזמנה פנימית ${order.order_number}</title>
-    <style>${SHARED_CSS}</style>
+    <style>${SHARED_CSS}${UNIT_CSS}</style>
   </head><body>
     ${topBlock({ order, supplier, branch, variant: 'internal' })}
     ${orderNotesHTML(order)}

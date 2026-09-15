@@ -11,6 +11,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import SendIcon from '@mui/icons-material/Send';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import ProductThumb from './ProductThumb';
 import { useBranch } from '../../hooks/useBranch';
 import { formatCurrency } from '../../utils/hebrewYear';
 
@@ -255,20 +256,16 @@ export default function OrderForm() {
                             }}
                             onClick={() => addToCart(p)}
                           >
-                            {p.image_url ? (
-                              <Box
-                                component="img"
-                                src={p.image_url}
-                                sx={{ width: 44, height: 44, borderRadius: 1.5, objectFit: 'cover', flexShrink: 0 }}
-                              />
-                            ) : (
-                              <Box sx={{ width: 44, height: 44, borderRadius: 1.5, bgcolor: '#e2e8f0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>
-                                📦
-                              </Box>
-                            )}
+                            <ProductThumb product={p} size={44} radius={1.5} />
                             <Box sx={{ flex: 1 }}>
                               <Typography variant="body2" sx={{ fontWeight: 600 }}>{p.name}</Typography>
-                              <Typography variant="caption" color="text.secondary">{p.sku}</Typography>
+                              {/* The unit is not a detail next to the price — it IS the
+                                  price. ₪70 buys a CARTON of item 60246 and ₪3.68 buys a
+                                  single item 2101, and a row that shows only a number and
+                                  a name cannot tell you which one you just added. */}
+                              <Typography variant="caption" color="text.secondary">
+                                {p.sku}{p.unit ? ` · ${p.unit}` : ''}
+                              </Typography>
                               {p.standing_note && (
                                 <Typography variant="caption" sx={{ display: 'block', color: '#b45309', fontWeight: 700 }}>
                                   ⚠️ {p.standing_note}

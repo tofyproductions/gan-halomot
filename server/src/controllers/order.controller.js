@@ -74,17 +74,21 @@ async function getById(req, res, next) {
 async function withStandingNotes(items) {
   const ids = items.map(i => i.product_id).filter(Boolean);
   const products = ids.length
-    ? await Product.find({ _id: { $in: ids } }).select('standing_note').lean()
+    ? await Product.find({ _id: { $in: ids } }).select('standing_note unit').lean()
     : [];
-  const noteById = new Map(products.map(p => [String(p._id), p.standing_note || '']));
+  const byId = new Map(products.map(p => [String(p._id), p]));
   return items.map(item => ({
     product_id: item.product_id || null,
     sku: item.sku || '',
     name: item.name,
     qty: item.qty,
+    // Read off the product here rather than trusting what the browser sent, for
+    // the same reason the note is: it is the catalogue that says what a unit of
+    // this item is, and the order should record what the catalogue said.
+    unit: byId.get(String(item.product_id))?.unit || item.unit || '',
     unit_price: item.unit_price || 0,
     total: Number(((item.qty || 0) * (item.unit_price || 0)).toFixed(2)),
-    note: noteById.get(String(item.product_id)) || '',
+    note: byId.get(String(item.product_id))?.standing_note || '',
   }));
 }
 

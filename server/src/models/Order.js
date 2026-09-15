@@ -5,6 +5,10 @@ const orderItemSchema = new mongoose.Schema({
   sku: { type: String, default: '' },
   name: { type: String, required: true },
   qty: { type: Number, required: true },
+  // What one `qty` IS — קרטון, יחידה, שק. Snapshotted with the price it belongs
+  // to: "2" on a line the supplier reads is an instruction, and two cartons and
+  // two units are different deliveries at the same number.
+  unit: { type: String, default: '' },
   unit_price: { type: Number, default: 0 },
   total: { type: Number, default: 0 },
   // Snapshot of the product's standing_note at order time — the note the
