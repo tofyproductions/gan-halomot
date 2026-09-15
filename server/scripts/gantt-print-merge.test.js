@@ -20,8 +20,21 @@ const path = require('path');
 const vm = require('vm');
 
 const SRC = path.join(__dirname, '../../client/src/components/gantt/ganttPrint.js');
-const code = fs.readFileSync(SRC, 'utf8').replace(/^export /gm, '');
-const sandbox = { module: {}, exports: {}, console, Date, Math, Number, String, Set, Intl };
+// The builder grew an import of the theme tokens after this test was written,
+// and a vm context has no module loader — the file stopped parsing here while
+// the app kept working. The import is stripped and COLOR answered by a stub:
+// this test is about which cells a merge swallows, and a hex value cannot
+// change that answer.
+const code = fs.readFileSync(SRC, 'utf8')
+  .replace(/^import[\s\S]*?;$/gm, '')
+  .replace(/^export /gm, '');
+// Nested: the builder reads COLOR.gantt.row.meeting. Any path answers, and
+// any path used as a string is a valid hex.
+const anyColor = new Proxy({}, {
+  get: (_t, k) => (k === Symbol.toPrimitive || k === 'toString' ? () => '#000000' : anyColor),
+});
+const COLOR = anyColor;
+const sandbox = { module: {}, exports: {}, console, Date, Math, Number, String, Set, Intl, COLOR };
 vm.createContext(sandbox);
 vm.runInContext(`${code}\n;module.exports = { buildGanttPrintHtml };`, sandbox);
 const { buildGanttPrintHtml } = sandbox.module.exports;

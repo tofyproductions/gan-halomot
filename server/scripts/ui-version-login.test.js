@@ -35,7 +35,10 @@ try { require.resolve('mongodb-memory-server'); } catch {
 }
 
 const { MongoMemoryServer } = require('mongodb-memory-server');
-const { MongoClient } = require('mongodb');
+// mongoose ships the driver; requiring 'mongodb' by name needs it hoisted to
+// the top of node_modules, which it is not — so this test failed on a clean
+// checkout for a dependency the app already has.
+const { MongoClient } = require('mongoose').mongo;
 const { spawn } = require('child_process');
 const bcrypt = require('bcryptjs');
 const path = require('path');
