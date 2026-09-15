@@ -16,7 +16,24 @@ const { isEnabled, controlPlane, tenantConnection } = require('./connection');
  * refused in production for that reason.
  */
 
-const RESERVED = new Set(['www', 'app', 'api', 'admin', 'console', 'status', 'mail', 'static', 'cdn']);
+/**
+ * Names that are OURS, and can therefore never be a customer's slug.
+ *
+ * A reserved name is refused as a tenant rather than looked up, so the address
+ * falls through to whatever else serves it. Without that, a subdomain we run
+ * something else on is read as a customer nobody registered, and the whole
+ * site answers 404 — which is a confusing afternoon, because the service
+ * behind it is perfectly healthy and says so on its own port.
+ *
+ * `jobs` and `jobgan` are here for ג׳וב חלום, the public jobs board, which
+ * runs as its own service and is reached at jobs.dreamgan.com until it gets a
+ * domain of its own. Both spellings, because the address is a decision that
+ * may still be typed either way and getting it wrong looks like a DNS fault.
+ */
+const RESERVED = new Set([
+  'www', 'app', 'api', 'admin', 'console', 'status', 'mail', 'static', 'cdn',
+  'jobs', 'jobgan',
+]);
 
 /**
  * ANCHORED ON OUR OWN DOMAIN, deliberately.
