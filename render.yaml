@@ -110,3 +110,70 @@ services:
       # - key: PLATFORM_MONGODB_URI
       #   sync: false
     healthCheckPath: /api/health
+
+  # ---------------------------------------------------------------------------
+  # ג׳וב חלום — the public jobs board.
+  #
+  # A THIRD service on the same repository, and the reason it is a service
+  # rather than a flag is worth keeping written down. The platform layer above
+  # switches on INSIDE src/index.js when a variable appears; it is careful, but
+  # it still means the server four gans run their day on executes a branch
+  # belonging to somebody else's feature. This one is public — no login to read
+  # the board, traffic arriving from paid campaigns, and personal details of
+  # people who are nobody's customer — so it gets its own entry point instead.
+  # src/index.js does not change by one line for it to exist, and a bug here
+  # cannot reach a gan because nothing here runs there.
+  #
+  # THE ONE RULE HERE: MONGODB_URI AND PLATFORM_MONGODB_URI ARE NEVER SET ON
+  # THIS SERVICE. It has no use for either — it never calls connectDB — and
+  # src/jobgan/db.js refuses to start against any database whose name does not
+  # contain "jobgan", or against one equal to MONGODB_URI. The guard is there
+  # because the two connection strings differ by a few characters and mongoose
+  # creates collections on demand: a paste error would point the whole board at
+  # the gan's records and LOOK like it was working.
+  - type: web
+    name: jobgan
+    runtime: node
+    region: frankfurt
+    plan: free
+    # Server only. The front end is static files under src/jobgan/public, so
+    # there is no client bundle to build — which also means a broken build in
+    # client/ can never hold up a deploy of this service.
+    buildCommand: cd server && npm install
+    # No --expose-gc: this service renders no PDFs and launches no Chromium,
+    # which is the whole reason the other two carry the flag.
+    startCommand: cd server && node src/jobgan/index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Its own database. The name must contain "jobgan" or the process
+      # refuses to start.
+      - key: JOBGAN_MONGODB_URI
+        sync: false
+      # Its own signing key, deliberately NOT JWT_SECRET. One key shared across
+      # services means a token minted here verifies there — and a jobseeker's
+      # token would be accepted by the server that runs a gan.
+      - key: JOBGAN_JWT_SECRET
+        generateValue: true
+      # The manual review queue for a new gan's first ad. One operator, so a
+      # shared secret rather than an account and a login screen.
+      - key: JOBGAN_ADMIN_SECRET
+        generateValue: true
+      # Where the board lives, used in the links inside outgoing mail.
+      - key: JOBGAN_PUBLIC_URL
+        sync: false
+      # The From address. ⚠️ Before the first campaign, the sending domain needs
+      # its SPF/DKIM/DMARC records, or mail from a fresh domain lands in spam —
+      # and the failure is silent in the worst way: a gan sees no applications
+      # and concludes the board is dead, while they were there all along.
+      - key: JOBGAN_MAIL_FROM
+        sync: false
+      # Mail provider. Whichever of these is set is what services/email.service
+      # picks up; the board needs one or applications arrive with nobody told.
+      - key: GAS_EMAIL_URL
+        sync: false
+      - key: GAS_EMAIL_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+    healthCheckPath: /api/health
