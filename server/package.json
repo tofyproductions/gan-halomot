@@ -10,6 +10,7 @@
     "demo:viewer": "node scripts/viewer-demo-server.js",
     "import": "node scripts/import-from-gsheets.js",
     "test:terms": "node scripts/employment-terms.test.js",
+    "test:employee-age": "node scripts/employee-age.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",

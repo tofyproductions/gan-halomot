@@ -449,6 +449,10 @@ async function createEmployee(req, res, next) {
 // Hebrew labels for the change-approval diff view.
 const EMPLOYEE_FIELD_LABELS = {
   full_name: 'שם מלא', israeli_id: 'ת"ז', employee_number: 'מספר עובד', is_freelancer: 'עצמאי',
+  // Spelled out, because `gave_birth_date` below is already 'תאריך לידה' — the
+  // accountant's diff shows a label, not a field name, and two rows reading
+  // "תאריך לידה" is a change nobody can review.
+  birth_date: 'תאריך לידה של העובד/ת',
   receives_salary: 'מקבל/ת שכר',
   branch_id: 'סניף', phone: 'טלפון', email: 'אימייל', address: 'כתובת', gender: 'מין', position: 'תפקיד',
   start_date: 'תאריך תחילה', salary_type: 'סוג שכר', salary_is_net: 'נטו/ברוטו',
@@ -490,7 +494,7 @@ async function updateEmployee(req, res, next) {
 
     const fields = [
       'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
-      'branch_id', 'phone', 'email', 'address', 'gender',
+      'branch_id', 'phone', 'email', 'address', 'gender', 'birth_date',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',
       'travel_mode', 'travel_per_day', 'travel_monthly_flat', 'travel_override',

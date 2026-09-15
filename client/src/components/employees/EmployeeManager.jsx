@@ -31,6 +31,7 @@ import { branchColor } from '../../utils/branchColors';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { formatCurrency } from '../../utils/hebrewYear';
+import { ageFromBirthDate } from '../../utils/age';
 import HoursReportDialog from './HoursReportDialog';
 import ClockMatchDialog from './ClockMatchDialog';
 import EmployeeChangeRequests from './EmployeeChangeRequests';
@@ -38,6 +39,16 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import Badge from '@mui/material/Badge';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+
+// Bounds for the date-of-birth picker. Anything outside them is a typo rather
+// than a person, and is refused at the input instead of reaching the card.
+const BIRTH_DATE_MIN = '1900-01-01';
+const todayISO = () => {
+  // Local date, not `toISOString()` — that is UTC, and in Israel it rolls the
+  // day over hours early, which would reject a birthday typed on its own date.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 // Job titles carry gender in Hebrew, so the list follows the employee's own.
 // Pairs, not two lists, so switching gender can translate the title already on
@@ -76,6 +87,7 @@ const EMPTY_FORM = {
   branch_id: '',
   phone: '',
   email: '',
+  birth_date: '',
   // Almost the entire staff is female; a new card starts there and is changed
   // for the exceptions, rather than leaving every new hire ungendered.
   gender: 'female',
@@ -347,6 +359,7 @@ export default function EmployeeManager() {
         branch_id: emp.branch_id || '',
         phone: emp.phone || '',
         email: emp.email || '',
+        birth_date: emp.birth_date ? new Date(emp.birth_date).toISOString().slice(0, 10) : '',
         gender: emp.gender || '',
         position: emp.position || '',
         primary_classroom_id: emp.primary_classroom_id ? String(emp.primary_classroom_id) : '',
@@ -415,6 +428,11 @@ export default function EmployeeManager() {
     const { mode, data, original } = dialog;
     if (!data.full_name?.trim()) return toast.error('שם מלא חובה');
     if (!data.branch_id) return toast.error('סניף חובה');
+    // The picker's own min/max stop the arrows, not a typed year. Optional
+    // field, so an empty value is fine — only a present one has to be sane.
+    if (data.birth_date && (data.birth_date < BIRTH_DATE_MIN || data.birth_date > todayISO())) {
+      return toast.error('תאריך לידה לא תקין — לא בעתיד ולא לפני 1900');
+    }
 
     const distribution = mergePrimaryAmuta(original, data);
 
@@ -424,6 +442,7 @@ export default function EmployeeManager() {
       branch_id: data.branch_id,
       phone: data.phone || '',
       email: data.email || '',
+      birth_date: data.birth_date || null,
       gender: data.gender || '',
       position: data.position || '',
       start_date: data.start_date || null,
@@ -788,6 +807,7 @@ export default function EmployeeManager() {
             <TableRow>
               <TableCell sx={{ fontWeight: 700 }}>שם</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>ת״ז</TableCell>
+              <TableCell sx={{ fontWeight: 700 }} align="center">גיל</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>תפקיד</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>טלפון</TableCell>
               <TableCell sx={{ fontWeight: 700 }}>אימייל</TableCell>
@@ -804,6 +824,7 @@ export default function EmployeeManager() {
               const renderEmp = (emp) => {
                 const empId = emp._id || emp.id;
                 const rate = emp._display_rate;
+                const age = ageFromBirthDate(emp.birth_date);
                 const unpaidRole = emp.receives_salary === false;
                 const rateLabel = unpaidRole
                   ? 'ללא שכר'
@@ -831,6 +852,11 @@ export default function EmployeeManager() {
                     </TableCell>
                     <TableCell dir="ltr" sx={{ fontFamily: 'monospace', color: emp.israeli_id ? 'text.primary' : 'warning.main', fontSize: '0.8rem' }}>
                       {emp.israeli_id || '—'}
+                    </TableCell>
+                    {/* Most of the roster predates the field; `null` reads as
+                        `—`, never as 0. */}
+                    <TableCell align="center" sx={{ color: age == null ? 'text.disabled' : 'text.primary', fontSize: '0.85rem' }}>
+                      {age == null ? '—' : age}
                     </TableCell>
                     <TableCell>{emp.position || '—'}</TableCell>
                     <EditableCell empId={empId} field="phone" value={emp.phone} displayValue={emp.phone || '—'} dir="ltr" />
@@ -932,7 +958,7 @@ export default function EmployeeManager() {
                   </TableRow>
                 );
               };
-              const colCount = (canManage ? 11 : 10) - (hideSalary ? 2 : 0);
+              const colCount = (canManage ? 12 : 11) - (hideSalary ? 2 : 0);
               if (loading) return <TableRow><TableCell colSpan={colCount} sx={{ textAlign: 'center', py: 4 }}>טוען…</TableCell></TableRow>;
               const out = [];
               if (employeesByBranch) {
@@ -958,7 +984,7 @@ export default function EmployeeManager() {
                 }
                 if (out.length === 0) {
                   out.push(
-                    <TableRow key="empty"><TableCell colSpan={11} sx={{ border: 0 }}>
+                    <TableRow key="empty"><TableCell colSpan={colCount} sx={{ border: 0 }}>
                       {loadError ? (
                         <EmptyState state="error" title="הרשימה לא נטענה" hint={loadError}
                           action={fetchEmployees} actionLabel="נסה שוב" />
@@ -975,7 +1001,7 @@ export default function EmployeeManager() {
               // Single-branch view: simple flat list
               if (filteredEmployees.length === 0) {
                 return (
-                  <TableRow><TableCell colSpan={11} sx={{ border: 0 }}>
+                  <TableRow><TableCell colSpan={colCount} sx={{ border: 0 }}>
                     {loadError ? (
                       <EmptyState state="error" title="הרשימה לא נטענה" hint={loadError}
                         action={fetchEmployees} actionLabel="נסה שוב" />
@@ -1078,6 +1104,16 @@ export default function EmployeeManager() {
               <TextField label="ת״ז" value={dialog.data.israeli_id || ''} onChange={e => updateField('israeli_id', e.target.value)} fullWidth
                 inputProps={{ dir: 'ltr', maxLength: 9 }}
                 helperText="9 ספרות; חייב להתאים ל-userId בשעון"
+              />
+              {/* Her own date of birth — not `gave_birth_date`, which is the
+                  maternity field further down. The bounds are on the input so
+                  the picker itself refuses a year in the future or before 1900;
+                  handleSave repeats the check for a typed-in value. */}
+              <TextField label="תאריך לידה" type="date" value={dialog.data.birth_date || ''}
+                onChange={e => updateField('birth_date', e.target.value)} fullWidth
+                InputLabelProps={{ shrink: true }}
+                inputProps={{ min: BIRTH_DATE_MIN, max: todayISO() }}
+                helperText="הגיל מחושב מכאן ומוצג בטבלה"
               />
             </Stack>
             <Stack direction="row" spacing={2}>
