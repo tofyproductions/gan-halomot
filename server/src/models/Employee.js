@@ -209,6 +209,18 @@ const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
   israeli_id: { type: String, default: '', index: true, trim: true }, // 9-digit ת"ז, matches clock userId
+  /**
+   * Date of birth of the EMPLOYEE. Not to be confused with `gave_birth_date`
+   * further down, which is when a baby was born and belongs to maternity leave.
+   *
+   * Nullable and never required, by design. The whole roster predates the field
+   * and comes back `null`, which the employees table renders as `—`; making it
+   * required would refuse every unrelated save on eighty existing cards, and
+   * backfilling it is office work, not a migration.
+   *
+   * Cannot be derived from `israeli_id` — an Israeli ת"ז encodes no birth date.
+   */
+  birth_date: { type: Date, default: null },
   // Extra IDs the CLOCK sends for this worker when it was enrolled with a wrong
   // ת"ז (typo/digit-shift). Punches with these IDs are matched to this employee
   // too, so they don't come in as "unidentified". Stored normalized to 9 digits.
