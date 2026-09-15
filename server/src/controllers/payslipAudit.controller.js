@@ -1101,6 +1101,52 @@ async function saveAuditEdits(req, res) {
 }
 
 /**
+ * Has this audit's month already gone out to employees?
+ *
+ * The `approved` PDF slot is what the distribution reads, and promoting a new
+ * round over it replaced the file a paid month was produced from — silently,
+ * unrecoverably. So an approved cycle is closed.
+ *
+ * Closed from WHEN, though. Locking on `approved` alone breaks the accountant's
+ * ordinary second correction: a file returned before anything was distributed
+ * overwrites nothing anybody is holding. The line is the moment a payslip
+ * reached an employee — `delivered_to_employee`, not the manager copy, which is
+ * explicitly not a delivery to her.
+ *
+ * Scoped to the audit's own `year_month`. A count across all months would lock
+ * September because August went out, which is every month after the first.
+ *
+ * @returns {number} how many employees already have this month's payslip.
+ */
+async function distributedCountFor(doc) {
+  if (!doc?.year_month) return 0;
+  return SavedPayslip.countDocuments({
+    year_month: doc.year_month,
+    delivered_to_employee: true,
+  });
+}
+
+const CYCLE_LOCKED_ERROR = 'הסבב אושר ותלושים כבר נשלחו לעובדים לחודש הזה — סבב מאושר שהופץ נעול. '
+  + 'לתיקון של עובד/ת בודד/ת: שלחו תלוש מחליף פר-עובד. '
+  + 'להחלפת הקובץ של הסבב כולו: בצעו ביטול אישור לביקורת, ואז אשרו מחדש.';
+
+/**
+ * Refuse to overwrite the approved PDFs of a cycle that already reached
+ * employees. Returns true when it answered the request.
+ */
+async function refuseIfCycleLocked(doc, res) {
+  if (!doc.approved) return false;
+  const distributed = await distributedCountFor(doc);
+  if (!distributed) return false;
+  res.status(409).json({
+    error: CYCLE_LOCKED_ERROR,
+    year_month: doc.year_month,
+    distributed_count: distributed,
+  });
+  return true;
+}
+
+/**
  * PATCH /payslip-audit/history/:id/approve
  * Mark a saved audit as a "closed cycle" — the accountant has returned the
  * corrected payslips and we accept this as the final version for that month.
@@ -1132,6 +1178,11 @@ async function approveAudit(req, res) {
     }
 
     if (approvedFiles.length > 0) {
+      // Uploading over an already-distributed cycle is the same overwrite the
+      // fix-round promotion does, through a different door. A re-approve that
+      // uploads nothing destroys nothing and stays allowed.
+      if (await refuseIfCycleLocked(doc, res)) return;
+
       // Same branch twice would overwrite here too, and this is the copy the
       // distribution actually reads.
       const { entries: approvedEntries } = await coalesceBranchEntries(approvedFiles);
@@ -1705,6 +1756,13 @@ async function approveFixRound(req, res) {
     if (!doc) return res.status(404).json({ error: 'ביקורת לא נמצאה' });
     const round = (doc.fix_rounds || []).find((r) => r.round_no === Number(req.params.roundNo));
     if (!round) return res.status(404).json({ error: 'סבב לא נמצא' });
+
+    // Before anything is written: this approval promotes the round's PDFs over
+    // the `approved` slot the distribution reads. Once the month has reached
+    // employees, that is a silent replacement of what they were paid from.
+    // Checked ahead of the open-notes gate so a locked cycle says so plainly
+    // instead of first asking the user to settle notes it will not accept.
+    if (await refuseIfCycleLocked(doc, res)) return;
 
     const open = [];
     for (const it of round.items || []) {
