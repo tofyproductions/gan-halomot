@@ -12,6 +12,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CalculateIcon from '@mui/icons-material/Calculate';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -76,12 +77,92 @@ const TMT_5786 = [
   { label: 'דרגה 15',               prices: [952, 731, 734] },
 ];
 
-// Official state tables we have on file, keyed by academic year. A year without
-// an entry starts from the most recent table as an editable template.
+/**
+ * תשפ"ז — DERIVED, NOT READ OFF THE MINISTRY'S FORM.
+ *
+ * The form had not been published when the year started, and the gan cannot
+ * bill nothing until it is. What we had came from ארגון אמונה: the FULL TARIFF
+ * (parent + state) for the three age groups — 4,566 / 3,384 / 3,001.
+ *
+ * THOSE THREE ARE PER PAYMENT, AND THIS TABLE IS PER MONTH. That is the whole
+ * reason this block is delicate. Everything stored in `tiers` is a MONTHLY
+ * figure on a twelve-month year, and `installmentOf` below multiplies it by
+ * 12/11 to show what a parent is actually charged each time. אמונה's numbers
+ * are already the charged figure — the year divided into its eleven payments.
+ * Storing them verbatim would put them through the 12/11 a second time and bill
+ * every family 4,981 where the gan committed to 4,566: nine percent too much,
+ * on every invoice, silently, because both figures look equally plausible on
+ * the screen. So the tariff row is אמונה's number × 11/12, and the test
+ * `server/scripts/tmt-basis.test.js` divides it back out and fails if anyone
+ * ever pastes the raw figures in again.
+ *
+ * WHY THREE NUMBERS ARE ENOUGH TO DERIVE TWELVE ROWS. On this table's own
+ * basis the new tariff is 4,185.5 / 3,102 / 2,750.92 against תשפ"ו's
+ * 3,936 / 2,917 / 2,587 — a raise of 6.3339%, 6.3421% and 6.3362%. Three
+ * independent columns landing within a hundredth of a percent of one rate is
+ * not a coincidence, it is a uniform raise. So every subsidised cell here is
+ * its תשפ"ו value × that column's rate, rounded: the parent's SHARE of the
+ * tariff is held at what the state set last year, and only the tariff moves.
+ *
+ * WHAT THAT ASSUMES, AND WHAT IT DOES NOT. Rows 11 and 12 carry no subsidy —
+ * they ARE the tariff — so for them this is not an assumption at all, it is the
+ * figure אמונה sent, rebased. For rows 3–10 and 14–15 it assumes the state left
+ * each tier's percentage alone while raising the tariff. That is the ordinary
+ * shape of a uniform raise, and it is still an assumption: it is flagged on the
+ * screen through PROVISIONAL_TMT and it is what "טען מ-PDF" is for the moment
+ * the real form arrives.
+ *
+ * THE TARIFF ROW KEEPS ITS AGOROT on purpose. 4,185.5 is not a price anybody
+ * quotes; it is the monthly figure that comes back out as exactly 4,566 per
+ * payment. Rounding it to 4,186 for tidiness moves the charged figure off the
+ * committed one, which is the only number a parent ever sees.
+ *
+ * THE LABELS LOST THEIR INCOME BRACKETS ON PURPOSE. תשפ"ו's rows read
+ * "דרגה 3 (0–2,330)" — the bracket the state prints beside the tier. We were
+ * not told this year's brackets and the state usually moves them too, so
+ * carrying last year's over would put a number on the screen that nobody
+ * checked and that a manager would read as this year's. The tier alone is the
+ * part we actually know. tier-fee.service.js matches on the first run of digits
+ * in the label, so "דרגה 3" and "דרגה 3 (0–2,330)" are the same row to it and
+ * nothing that reads the matrix cares which form it is in.
+ */
+const TMT_5787 = [
+  { label: 'דרגה 3',  prices: [1230, 997, 1001] },
+  { label: 'דרגה 4',  prices: [1490, 1179, 1184] },
+  { label: 'דרגה 5',  prices: [1768, 1402, 1407] },
+  { label: 'דרגה 6',  prices: [1859, 1464, 1470] },
+  { label: 'דרגה 7',  prices: [2138, 1647, 1652] },
+  { label: 'דרגה 8',  prices: [2318, 1811, 1817] },
+  { label: 'דרגה 9',  prices: [2476, 1926, 1932] },
+  { label: 'דרגה 10', prices: [2586, 2029, 2035] },
+  { label: 'דרגה 11', prices: [4185.5, 3102, 2750.92] },
+  { label: 'דרגה 12', prices: [4185.5, 3102, 2750.92] },
+  { label: 'דרגה 14', prices: [1121, 888, 890] },
+  { label: 'דרגה 15', prices: [1012, 777, 781] },
+];
+
+// Tables taken from the ministry's own published form, keyed by academic year.
 const OFFICIAL_TMT = { 'תשפ"ו': TMT_5786 };
 
+// Tables we have but did not read off the ministry's form. Kept apart from
+// OFFICIAL_TMT rather than folded into it: the editor says which of the two a
+// year's numbers came from, and a provisional year must never be able to look
+// like a confirmed one just because both happen to fill the grid.
+const PROVISIONAL_TMT = {
+  'תשפ"ז': {
+    tiers: TMT_5787,
+    note: 'המספרים לשנת תשפ"ז נגזרו מהתעריף המלא שהתקבל מארגון אמונה — 4,566 / 3,384 / 3,001 לכל תשלום (כלומר אחרי הפריסה ל-11). הטבלה כאן היא חודשית, ולכן התעריף נשמר בה כ-4,185.5 / 3,102 / 2,750.92, ורק הפריסה מחזירה אותו ל-4,566. זו העלאה אחידה של 6.34% על טבלת תשפ"ו, בהנחה שאחוז השתתפות ההורים בכל דרגה לא השתנה. דרגות 11–12 הן התעריף עצמו ולכן ודאיות. טרם אומת מול טופס התמ"ת הרשמי — כשיפורסם, טען אותו דרך "טען מ-PDF".',
+  },
+};
+
+// The table we hold for a year, official or provisional, or null for a year we
+// hold nothing for (which starts from the most recent table as a template).
+function tableForYear(year) {
+  return OFFICIAL_TMT[year] || PROVISIONAL_TMT[year]?.tiers || null;
+}
+
 function tiersForYear(year) {
-  const t = OFFICIAL_TMT[year] || TMT_5786;
+  const t = tableForYear(year) || TMT_5786;
   return t.map(x => ({ label: x.label, prices: [...x.prices] }));
 }
 
@@ -238,6 +319,33 @@ export default function PricingManager() {
       })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בקריאת ה-PDF'))
       .finally(() => setUploading(false));
+  };
+
+  /**
+   * Put the year's own table back into the editor, over whatever is there.
+   *
+   * A branch that already saved a pricing document for the year never sees a
+   * table that arrives in the code afterwards — the saved document is what
+   * loads, and seeding only ever fills a branch that has none. That is correct
+   * (nobody's typed-in prices should change under them on a deploy) and it is
+   * also how a new state table reaches nobody. This is the explicit way to ask
+   * for it: the person asks, reviews the grid, and saves. Nothing is written
+   * until they press שמירה, exactly like "טען מ-PDF" beside it.
+   */
+  const loadYearTable = () => {
+    const table = tableForYear(year);
+    if (!table) return;
+    // Through normalize, not patch: the state's table is three columns and this
+    // branch may have added a fourth, which would leave every addon carrying a
+    // price for a column the matrix no longer has. normalize re-aligns addons
+    // and tiers to the columns that remain, which is the whole reason it exists.
+    setPricing(p => normalize({
+      ...p,
+      age_groups: [...DEFAULT_AGE_GROUPS],
+      tiers: table.map(t => ({ label: t.label, prices: [...t.prices] })),
+    }, year));
+    setDirty(true);
+    toast.success(`טבלת ${year} נטענה — בדוק ושמור`);
   };
 
   // --- subsidized matrix editing (index-aligned) ---
@@ -595,13 +703,29 @@ export default function PricingManager() {
                   >
                     טען מ-PDF
                   </Button>
+                  {tableForYear(year) && (
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<RestartAltIcon />}
+                      onClick={loadYearTable}
+                    >
+                      טען טבלת {year}
+                    </Button>
+                  )}
                   <Button size="small" startIcon={<AddIcon />} onClick={addAgeGroup}>הוסף קבוצת גיל</Button>
                 </Stack>
               </Stack>
 
-              {!OFFICIAL_TMT[year] && (
+              {!tableForYear(year) && (
                 <Alert severity="warning" sx={{ mb: 1.5 }}>
                   אין טבלת תמ"ת רשמית טעונה לשנת {year}. המספרים מבוססים על תשפ"ו כתבנית — עדכן אותם לפי מחירון התמ"ת החדש.
+                </Alert>
+              )}
+
+              {PROVISIONAL_TMT[year] && (
+                <Alert severity="info" sx={{ mb: 1.5 }}>
+                  {PROVISIONAL_TMT[year].note}
                 </Alert>
               )}
 
