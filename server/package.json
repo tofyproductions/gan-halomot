@@ -85,6 +85,7 @@
     "test:reconcile-alerts": "node scripts/reconcile-alerts.test.js",
     "test:day-board": "node scripts/day-board-kind.test.js",
     "test:collections-year": "node scripts/collections-year-scope.test.js",
+    "test:hours-range": "node scripts/hours-range-span.test.js",
     "test:nursery-history": "node scripts/nursery-history-import.test.js",
     "test:nursery-history-e2e": "node scripts/nursery-history-e2e.test.js",
     "import:nursery-history": "node scripts/import-nursery-history.js",

@@ -25,6 +25,8 @@ router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager'
 // Attendance & hours
 router.get('/attendance',                      c.attendanceByMonth);
 router.get('/employees/:id/hours-report',      c.hoursReport);
+// The same report summarised across a range of months, one row per month.
+router.get('/employees/:id/hours-range',       c.hoursRange);
 router.get('/hours-report-bulk',               c.hoursReportBulk);
 router.post('/hours-report/send-managers',     c.sendHoursReportsToManagers);
 // Rich monthly hours-report distribution (employees / managers / office / specific email)

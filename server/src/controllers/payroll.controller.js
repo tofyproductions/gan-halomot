@@ -1192,6 +1192,126 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
     };
 }
 
+/**
+ * GET /api/payroll/employees/:id/hours-range?from=YYYY-MM&to=YYYY-MM
+ *
+ * One row per month for one employee across a range — hours, days worked, and
+ * the leave tallies the payroll screen already computes (מחלה, חופשה,
+ * היעדרויות, חגים/סגירת גן, מילואים), plus the shortfall/extra figures and
+ * their shekel effect.
+ *
+ * Every number here is `computeHoursReportData` called once per month, which
+ * is the SAME function the single-month report and the emailed PDF use. It is
+ * not a second derivation: a range report that disagreed with the monthly one
+ * it summarises would be worse than no range report at all.
+ *
+ * `fetchMonthData` inside it computes a whole branch per month, so the range
+ * is capped. Twenty-four months covers "the last two years" — anything past
+ * that is a report somebody should be building from the payroll screen, not a
+ * request that quietly costs a minute of database time.
+ */
+const HOURS_RANGE_MAX_MONTHS = 24;
+
+/** The months from `from` to `to` inclusive, as YYYY-MM. Null if unusable. */
+function monthSpan(from, to) {
+  const parse = (ym) => {
+    const [y, m] = String(ym || '').split('-').map(Number);
+    return (y && m >= 1 && m <= 12) ? { y, m } : null;
+  };
+  const a = parse(from);
+  const b = parse(to);
+  if (!a || !b) return null;
+  const start = a.y * 12 + (a.m - 1);
+  const end = b.y * 12 + (b.m - 1);
+  if (end < start) return null;
+  if (end - start + 1 > HOURS_RANGE_MAX_MONTHS) return null;
+  const out = [];
+  for (let i = start; i <= end; i++) {
+    out.push(`${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+async function hoursRange(req, res, next) {
+  try {
+    const months = monthSpan(req.query.from, req.query.to);
+    if (!months) {
+      return res.status(400).json({
+        error: `טווח חודשים לא תקין. עד ${HOURS_RANGE_MAX_MONTHS} חודשים, וחודש הסיום אחרי חודש ההתחלה.`,
+      });
+    }
+
+    const rows = [];
+    let employee = null;
+    // Sequential on purpose: each month reads a whole branch, and firing the
+    // whole range at the database at once is how a five-month report becomes
+    // the reason somebody else's screen times out.
+    for (const month of months) {
+      const data = await computeHoursReportData(req.params.id, month, req.user);
+      if (!data) return res.status(404).json({ error: 'עובד לא נמצא' });
+      employee = data.employee;
+      const ls = data.leave_summary || {};
+      const pa = data.partial_absence || null;
+      /**
+       * DAYS THE GAN WAS SHUT, counted off the report's own rows.
+       *
+       * NOT `leave_summary.holiday_days`, which is `holiday_pay_auto.total_days`
+       * — a PAY figure, the days a חג is paid for. The two genuinely differ:
+       * אסתר's May shows two שבועות closure rows in the report and
+       * `holiday_days: 0`, because those days carried no holiday pay.
+       *
+       * "כמה ימים הגן היה סגור" is answered by the rows the report prints, so
+       * that is where it is counted from. Both travel, under their own names.
+       */
+      const closureDays = (data.days || []).filter(d => d.is_absence && d.leave_type === 'holiday').length;
+      rows.push({
+        month,
+        total_hours: data.totals.total_hours,
+        days_worked: data.totals.days_worked,
+        incomplete_days: data.totals.incomplete_days,
+        sick_days: Number(ls.sick_days) || 0,
+        vacation_days: Number(ls.vacation_days) || 0,
+        absence_days: Number(ls.absence_days) || 0,
+        closure_days: closureDays,
+        holiday_pay_days: Number(ls.holiday_days) || 0,
+        // מילואים is free text on the payroll screen (a number OR a note), so
+        // it travels as it was typed rather than being coerced to 0.
+        miluim: ls.miluim ?? '',
+        committed_hours: pa ? pa.committed_hours : null,
+        deduct_hours: pa ? pa.deduct_hours : null,
+        extra_hours: pa ? pa.extra_hours : null,
+        deduction: pa ? pa.deduction : null,
+        extra_pay: pa ? pa.extra_pay : null,
+      });
+    }
+
+    /** Sums the numeric columns. Never `miluim` — text does not add up. */
+    const sum = (key) => Math.round(rows.reduce((t, r) => t + (Number(r[key]) || 0), 0) * 100) / 100;
+
+    res.json({
+      employee,
+      from: months[0],
+      to: months[months.length - 1],
+      months: rows,
+      totals: {
+        months: rows.length,
+        total_hours: sum('total_hours'),
+        days_worked: sum('days_worked'),
+        incomplete_days: sum('incomplete_days'),
+        sick_days: sum('sick_days'),
+        vacation_days: sum('vacation_days'),
+        absence_days: sum('absence_days'),
+        closure_days: sum('closure_days'),
+        holiday_pay_days: sum('holiday_pay_days'),
+        deduct_hours: sum('deduct_hours'),
+        extra_hours: sum('extra_hours'),
+        deduction: sum('deduction'),
+        extra_pay: sum('extra_pay'),
+      },
+    });
+  } catch (err) { next(err); }
+}
+
 async function hoursReport(req, res, next) {
   try {
     const data = await computeHoursReportData(req.params.id, req.query.month, req.user);
@@ -3809,6 +3929,10 @@ module.exports = {
   removeEmployee,
   attendanceByMonth,
   hoursReport,
+  hoursRange,
+  // Exported for scripts/hours-range-span.test.js — the month arithmetic is
+  // the part of the range report that can be wrong without anything throwing.
+  monthSpan,
   hoursReportBulk,
   sendHoursReportsToManagers,
   listClockUsers,

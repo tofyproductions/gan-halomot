@@ -5,11 +5,13 @@ import {
   Typography, Box, Chip, Alert,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
+import DateRangeIcon from '@mui/icons-material/DateRange';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import WarningIcon from '@mui/icons-material/Warning';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { COLOR } from '../../theme/tokens';
+import HoursRangeDialog from './HoursRangeDialog';
 
 const HEBREW_DAY_NAMES = ['א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ש'];
 
@@ -53,6 +55,10 @@ function formatDate(yyyyMmDd) {
 
 export default function HoursReportDialog({ open, employee, onClose }) {
   const [month, setMonth] = useState(currentYearMonth());
+  // The range report is reached from here rather than from the employees list:
+  // this is the screen somebody is already on when one month turns out not to
+  // be the question they had.
+  const [rangeOpen, setRangeOpen] = useState(false);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -395,6 +401,15 @@ ${hasCommit ? `<div class="legend">
             </Button>
           </Stack>
 
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button size="small" variant="outlined" startIcon={<DateRangeIcon />} onClick={() => setRangeOpen(true)}>
+              ריכוז לפי טווח חודשים
+            </Button>
+            <Typography variant="caption" color="text.secondary">
+              סיכום של כמה חודשים בקובץ אחד — שעות, היעדרויות, מחלה, חופשה וחגים
+            </Typography>
+          </Stack>
+
           {!employee.israeli_id && (
             <Alert severity="warning">
               אין תעודת זהות על העובד הזה — החתמות לא יקושרו אליו באופן אוטומטי. עדכן את ה-ת״ז בטופס העריכה.
@@ -491,6 +506,12 @@ ${hasCommit ? `<div class="legend">
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
       </DialogActions>
+
+      <HoursRangeDialog
+        open={rangeOpen}
+        employee={employee}
+        onClose={() => setRangeOpen(false)}
+      />
     </Dialog>
   );
 }
