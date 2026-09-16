@@ -41,6 +41,9 @@ router.put('/:registrationId/camp-enrollment', billingRoles, collectionsControll
 // PUT /api/collections/:registrationId/exit-month
 router.put('/:registrationId/exit-month', billingRoles, collectionsController.updateExitMonth);
 
+// The standing note about a family — same writers as every other billing edit.
+router.put('/:registrationId/notes', billingRoles, collectionsController.updateNotes);
+
 // PUT /api/collections/:registrationId/registration-fee
 router.put('/:registrationId/registration-fee', billingRoles, collectionsController.updateRegistrationFee);
 

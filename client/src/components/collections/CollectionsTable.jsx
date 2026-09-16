@@ -391,6 +391,23 @@ export default function CollectionsTable() {
   };
 
   // Save exit month
+  /**
+   * The standing note about a family, saved on blur.
+   *
+   * Not on every keystroke: this is free text somebody types a sentence into,
+   * and a request per character would be both noise and a race. `fetchData` is
+   * deliberately NOT called — the row already shows what was typed, and
+   * reloading the whole table would move the cursor out from under the person
+   * still writing the next note.
+   */
+  const handleNotes = async (regId, notes) => {
+    try {
+      await api.put(`/collections/${regId}/notes`, { notes, year: selectedYear });
+    } catch {
+      toast.error('שגיאה בשמירת ההערה');
+    }
+  };
+
   const handleExitMonth = async (regId, value) => {
     const exit_month = value === '' ? null : parseInt(value, 10);
     try {
@@ -612,6 +629,7 @@ export default function CollectionsTable() {
                 );
               })}
               <TableCell sx={{ fontWeight: 700, minWidth: 100 }}>חודש יציאה</TableCell>
+              <TableCell sx={{ fontWeight: 700, minWidth: 180 }}>הערות</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -624,6 +642,7 @@ export default function CollectionsTable() {
                 onCellClick={handleCellClick}
                 onRegFeeClick={handleRegFeeClick}
                 onExitMonth={handleExitMonth}
+                onNotes={handleNotes}
                 getCellSx={getCellSx}
                 cellStateOf={cellStateOf}
                 onChildClick={(childId) => setSelectedChild(childId)}
@@ -641,6 +660,8 @@ export default function CollectionsTable() {
                   {formatCurrency(monthlySummary[m].collected)}
                 </TableCell>
               ))}
+              {/* חודש יציאה + הערות */}
+              <TableCell />
               <TableCell />
             </TableRow>
             <TableRow sx={{ bgcolor: COLOR.collections.summary.expected }}>
@@ -653,6 +674,8 @@ export default function CollectionsTable() {
                   {formatCurrency(monthlySummary[m].expected)}
                 </TableCell>
               ))}
+              {/* חודש יציאה + הערות */}
+              <TableCell />
               <TableCell />
             </TableRow>
             <TableRow sx={{ bgcolor: COLOR.collections.summary.debt }}>
@@ -671,6 +694,8 @@ export default function CollectionsTable() {
                   </TableCell>
                 );
               })}
+              {/* חודש יציאה + הערות */}
+              <TableCell />
               <TableCell />
             </TableRow>
           </TableBody>
@@ -1063,7 +1088,47 @@ export default function CollectionsTable() {
 }
 
 /* Grouped rows for a classroom */
-function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExitMonth, getCellSx, cellStateOf, onChildClick }) {
+/**
+ * The standing note about one family.
+ *
+ * Local state with a save on blur, rather than a controlled field wired
+ * straight to the table's data: the table reloads on every other edit in the
+ * screen, and a controlled field would throw away half a sentence the moment
+ * somebody marked a receipt in another row.
+ *
+ * `useEffect` re-seeds it when the row's note changes underneath — a reload
+ * after somebody else saved — but only while the field is not focused, so it
+ * cannot yank text out from under the person typing.
+ */
+function NotesCell({ value, onSave }) {
+  const [text, setText] = useState(value);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setText(value);
+  }, [value, focused]);
+
+  return (
+    <TextField
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        if (text !== value) onSave(text);
+      }}
+      variant="standard"
+      size="small"
+      multiline
+      maxRows={3}
+      placeholder="הערה על המשפחה"
+      inputProps={{ maxLength: 2000 }}
+      sx={{ width: '100%', '& .MuiInput-input': { fontSize: '0.78rem' } }}
+    />
+  );
+}
+
+function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExitMonth, onNotes, getCellSx, cellStateOf, onChildClick }) {
   const subtotals = {};
   columns.forEach(m => { subtotals[m] = 0; });
   rows.forEach(r => {
@@ -1076,7 +1141,7 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
     <>
       {/* Classroom header */}
       <TableRow>
-        <TableCell colSpan={columns.length + 3} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', left: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
+        <TableCell colSpan={columns.length + 4} sx={{ bgcolor: getClassroomColor(classroom).bg, fontWeight: 800, fontSize: '0.95rem', position: 'sticky', left: 0, borderRight: `4px solid ${getClassroomColor(classroom).primary}` }}>
           <Chip label={`${classroom} (${rows.length})`} size="small" sx={{ fontWeight: 700, bgcolor: getClassroomColor(classroom).primary, color: '#fff' }} />
         </TableCell>
       </TableRow>
@@ -1228,6 +1293,12 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
                 ))}
               </TextField>
             </TableCell>
+            <TableCell sx={{ minWidth: 180 }}>
+              <NotesCell
+                value={row.notes || ''}
+                onSave={(text) => onNotes(regId, text)}
+              />
+            </TableCell>
           </TableRow>
         );
       })}
@@ -1243,6 +1314,8 @@ function GroupRows({ classroom, rows, columns, onCellClick, onRegFeeClick, onExi
             {(subtotals[m] || 0) > 0 ? formatCurrency(subtotals[m]) : ''}
           </TableCell>
         ))}
+        {/* חודש יציאה + הערות */}
+        <TableCell />
         <TableCell />
       </TableRow>
     </>

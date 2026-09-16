@@ -29,6 +29,20 @@ const collectionSchema = new mongoose.Schema({
   registration_fee_receipt: { type: String, default: null },
 
   /**
+   * A standing note about this family, for the office.
+   *
+   * NOT `months[].notes`, which is about one month's payment and is shown
+   * inside that month's cell. This one is about the client: "משלמת במזומן
+   * תמיד", "האב מסרב לחתום", "לתאם מול הרווחה". It belongs to the row, not to
+   * a cell, and it is why it lives here and is shown in its own column at the
+   * end of the collections table.
+   *
+   * Empty string rather than null, so the column renders the same for a card
+   * that never had a note and one whose note was cleared.
+   */
+  notes: { type: String, default: '' },
+
+  /**
    * Is this child actually in the קייטנה?
    *
    * Deliberately three-state, and deliberately NOT defaulted to true.
