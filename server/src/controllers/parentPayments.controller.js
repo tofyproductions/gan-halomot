@@ -277,7 +277,9 @@ async function childPayments(req, res) {
 
   const [collection, discounts, camp, identities] = await Promise.all([
     Collection.findOne({ registration_id: reg._id, academic_year: academicYear }).lean(),
-    Discount.find({ is_active: true, branch_id: reg.branch_id }).lean(),
+    // Year-scoped for the same reason as the collections screen: a one-off
+    // credit must not reappear in next year's figures on a parent's phone.
+    Discount.find({ is_active: true, branch_id: reg.branch_id, academic_year: academicYear }).lean(),
     reg.branch_id
       ? SummerCamp.findOne({ branch_id: reg.branch_id, academic_year: academicYear, enabled: true }).lean()
       : null,

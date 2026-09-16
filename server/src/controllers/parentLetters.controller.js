@@ -41,7 +41,7 @@ async function paymentSummary(reg, academicYear) {
   try {
     const [collection, discounts, camp] = await Promise.all([
       Collection.findOne({ registration_id: reg._id, academic_year: academicYear }).lean(),
-      Discount.find({ is_active: true, branch_id: reg.branch_id }).lean(),
+      Discount.find({ is_active: true, branch_id: reg.branch_id, academic_year: academicYear }).lean(),
       reg.branch_id
         ? SummerCamp.findOne({ branch_id: reg.branch_id, academic_year: academicYear, enabled: true }).lean()
         : null,

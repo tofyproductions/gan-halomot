@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Discount, Registration, Classroom } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
+const { getAcademicYears } = require('../services/academic-year.service');
 
 /**
  * Resolve the branch a discount belongs to. The cross-branch view sends the
@@ -75,7 +76,12 @@ async function create(req, res, next) {
       scope, registration_id: registration_id || null,
       classroom_id: classroom_id || null,
       discount_type, value, month: month || null,
-      academic_year: academic_year || '',
+      // NEVER blank. A discount with no year is a discount that applies to
+      // every year forever, which is how a one-off April credit came off April
+      // again twelve months later. The caller's year wins; the current year is
+      // the fallback, because "this year" is what somebody creating a discount
+      // today means.
+      academic_year: academic_year || getAcademicYears().current.range,
       reason: reason || '',
     });
 

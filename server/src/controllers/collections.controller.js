@@ -61,8 +61,16 @@ async function getAll(req, res, next) {
       collectionByReg[String(c.registration_id)] = c;
     }
 
-    // Load discounts for this branch
-    const allDiscounts = await Discount.find({ is_active: true, ...getBranchFilter(req) }).lean();
+    // Load discounts for this branch, FOR THIS YEAR.
+    //
+    // The year was missing here and a discount is a thing that happened once:
+    // the 50% מבצע שאגת הארי credit belonged to April of 2025-2026 and to
+    // nothing else, and without this clause it came off April again in
+    // 2026-2027 — and would have every April after that. `academic_year` has
+    // been on the model all along; only the read forgot to use it.
+    const allDiscounts = await Discount.find({
+      is_active: true, academic_year: targetYear, ...getBranchFilter(req),
+    }).lean();
 
     // Summer-camp config, keyed by branch. Only the branches that run one this
     // year get a camp cell — for everyone else the column simply isn't there.
@@ -134,6 +142,7 @@ async function getAll(req, res, next) {
         exit_month: collection?.exit_month || null,
         registration_fee: reg.registration_fee || 0,
         registration_fee_receipt: detectedRegFeeReceipt || null,
+        notes: collection?.notes || '',
         months: monthData,
         camp: campCell,
       });
@@ -509,6 +518,37 @@ async function updateExitMonth(req, res, next) {
   }
 }
 
+/**
+ * PUT /api/collections/:registrationId/notes   { notes }
+ *
+ * The standing note about a family, saved from the last column of the
+ * collections table. Upserts, because a family nobody has billed yet has no
+ * Collection document and the note is often the first thing written about
+ * them — refusing here would mean the note can only be added after a payment.
+ */
+async function updateNotes(req, res, next) {
+  try {
+    const { registrationId } = req.params;
+    const notes = String(req.body?.notes ?? '').slice(0, 2000);
+
+    const registration = await Registration.findById(registrationId).select('_id child_id academic_year').lean();
+    if (!registration) return res.status(404).json({ error: 'רישום לא נמצא' });
+
+    const academicYear = normalizeYear(req.body?.year || registration.academic_year
+      || getAcademicYears().current.range);
+
+    const collection = await Collection.findOneAndUpdate(
+      { registration_id: registrationId, academic_year: academicYear },
+      { $set: { notes, last_updated: new Date() } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+
+    res.json({ message: 'ההערה נשמרה', notes: collection.notes });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function updateRegistrationFee(req, res, next) {
   try {
     const { registrationId } = req.params;
@@ -663,7 +703,7 @@ async function backup(req, res, next) {
 }
 
 module.exports = {
-  getAll, getByRegistration, updateMonth, updateExitMonth,
+  getAll, getByRegistration, updateMonth, updateExitMonth, updateNotes,
   updateRegistrationFee, recalculate, getHistory, backup,
   getSummerCamps, upsertSummerCamp, updateCampEnrollment, bulkCampEnrollment,
 };
