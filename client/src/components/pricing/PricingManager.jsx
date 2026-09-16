@@ -462,19 +462,41 @@ export default function PricingManager() {
     const th = (txt, bg = '#fde9c8') => `<th style="border:1px solid #ccc;padding:8px;background:${bg}">${esc(txt)}</th>`;
     const headerCells = ag.map(g => th(g)).join('');
 
-    // 1) Services basket — itemized by product, then a basket subtotal.
+    /**
+     * 1) Services basket — itemized by product, then a basket subtotal.
+     *
+     * EVERY FIGURE TWICE: MONTHLY, AND WHAT IS ACTUALLY CHARGED. The summary
+     * table below has always shown both, but the basket detail showed only the
+     * monthly price — so a parent reading "שעת הארכה אחר הצהריים ₪390" and then
+     * finding ₪425 on their invoice had no line on the sheet to reconcile it
+     * against, and the office got the phone call. The extension hours are the
+     * items families ask about one by one, which is exactly why they need the
+     * charged figure beside them and not only inside a total.
+     *
+     * A zero carries no second line. "פריסה ל-11: ₪0" is noise on a service
+     * this age group is not billed for, and an empty cell reads as free, which
+     * is what it is.
+     */
     const activeAddons = pricing.addons.filter(a => a.is_active !== false);
+    const perLine = (monthly) => (monthly > 0
+      ? `<div style="font-size:11px;color:#666">פריסה ל-${installments}: ${ils(installmentOf(monthly))}</div>`
+      : '');
     const addonRows = activeAddons.map(a => {
-      const cells = ag.map((_, ai) =>
-        `<td style="border:1px solid #ccc;padding:7px;text-align:center">${ils(a.prices?.[ai] || 0)}</td>`).join('');
+      const cells = ag.map((_, ai) => {
+        const monthly = Number(a.prices?.[ai]) || 0;
+        return `<td style="border:1px solid #ccc;padding:7px;text-align:center">${ils(monthly)}${perLine(monthly)}</td>`;
+      }).join('');
       return `<tr><td style="border:1px solid #ccc;padding:7px">${esc(a.label || '—')}</td>${cells}</tr>`;
     }).join('');
     const basketSubtotal = `<tr style="font-weight:800;background:#fff4e0">
       <td style="border:1px solid #ccc;padding:8px">סך סל השירותים (חודשי)</td>
-      ${ag.map((_, ai) => `<td style="border:1px solid #ccc;padding:8px;text-align:center">${ils(basketByAge[ai])}</td>`).join('')}
+      ${ag.map((_, ai) => `<td style="border:1px solid #ccc;padding:8px;text-align:center">${ils(basketByAge[ai])}${perLine(basketByAge[ai])}</td>`).join('')}
     </tr>`;
     const basketTable = activeAddons.length ? `
       <div style="font-size:16px;font-weight:800;margin:14px 0 6px">סל השירותים — פירוט</div>
+      <p style="font-size:12px;color:#555;margin:0 0 6px">
+        בכל תא: המחיר החודשי, ומתחתיו אותו פריט בפריסה ל-${installments} תשלומים — הסכום שמופיע בפועל בכל חיוב.
+      </p>
       <table style="border-collapse:collapse;width:100%;font-size:13px">
         <thead><tr>${th('פריט')}${headerCells}</tr></thead>
         <tbody>${addonRows}${basketSubtotal}</tbody>
