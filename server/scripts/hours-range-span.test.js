@@ -78,7 +78,47 @@ eq(monthSpan('אפריל', 'אוגוסט'), null, 'טקסט');
 eq(monthSpan('2026-04-15', '2026-08-15'), ['2026-04', '2026-05', '2026-06', '2026-07', '2026-08'],
   'תאריך מלא נקרא כחודש שלו — זה מה שדפדפן שולח משדה month עם יום');
 
-console.log(failures === 0
-  ? `\n✅  הכל עבר (${checks} בדיקות)\n`
-  : `\n❌  ${failures} בדיקות נכשלו\n`);
-process.exit(failures === 0 ? 0 : 1);
+head('שערי דוח הסניף — נדחים לפני שנוגעים במסד');
+
+/**
+ * The guards on the branch report all return before the first query, so they
+ * can be driven with no database at all. Anything past them needs Mongo and is
+ * covered by running the report itself, not here.
+ */
+async function branchGates() {
+  const { hoursRangeBulk } = require('../src/controllers/payroll.controller');
+  const ask = async (query, user = { role: 'system_admin' }) => {
+    let out = { status: 0, body: {} };
+    const res = {
+      json: (b) => { out = { status: 200, body: b }; },
+      status: (code) => ({ json: (b) => { out = { status: code, body: b }; } }),
+    };
+    await hoursRangeBulk({ query, user }, res, (e) => { out = { status: 500, body: { error: e.message } }; });
+    return out;
+  };
+  const BRANCH = '69dde62467ff14714973a158';
+
+  let r = await ask({ branch: BRANCH, from: '2026-08', to: '2026-04' });
+  ok(r.status === 400, 'טווח הפוך נדחה ב-400', JSON.stringify(r));
+
+  r = await ask({ branch: BRANCH, from: '2025-01', to: '2026-06' });
+  ok(r.status === 400, '18 חודשים נדחים — התקרה לדוח סניף היא 12', JSON.stringify(r));
+  ok(/12/.test(r.body.error || ''), 'וההודעה אומרת מה התקרה');
+
+  r = await ask({ from: '2026-04', to: '2026-08' });
+  ok(r.status === 400, 'בלי סניף נדחה', JSON.stringify(r));
+
+  r = await ask({ branch: 'all', from: '2026-04', to: '2026-08' });
+  ok(r.status === 400, '"כל הסניפים" נדחה — כבד מדי', JSON.stringify(r));
+
+  r = await ask({ branch: BRANCH, from: '2026-04', to: '2026-08' },
+    { role: 'branch_manager', managed_branch_ids: ['aaaaaaaaaaaaaaaaaaaaaaaa'] });
+  ok(r.status === 403, 'מנהלת של סניף אחר נחסמת ב-403', JSON.stringify(r));
+}
+
+branchGates().then(() => {
+  console.log(failures === 0
+    ? `\n✅  הכל עבר (${checks} בדיקות)\n`
+    : `\n❌  ${failures} בדיקות נכשלו\n`);
+  process.exit(failures === 0 ? 0 : 1);
+}).catch((e) => { console.error('💥 ', e); process.exit(1); });

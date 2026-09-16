@@ -982,7 +982,17 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
 
-    const branches = await Branch.find({}).select('_id name').lean();
+    /**
+     * Every branch's name, for labelling a punch made at another gan.
+     *
+     * Identical for every employee and every month, so a caller rendering a
+     * whole branch passes `opts.branchesCache` and reads it once instead of
+     * twenty-eight times. Omitted, it loads exactly as before — a cache, not
+     * a change of behaviour.
+     */
+    const branches = opts.branchesCache
+      ? (opts.branchesCache.list || (opts.branchesCache.list = await Branch.find({}).select('_id name').lean()))
+      : await Branch.find({}).select('_id name').lean();
     const branchById = new Map(branches.map(b => [String(b._id), b.name]));
     const homeBranchId = String(emp.branch_id?._id || emp.branch_id);
 
@@ -1308,6 +1318,145 @@ async function hoursRange(req, res, next) {
         deduction: sum('deduction'),
         extra_pay: sum('extra_pay'),
       },
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * GET /api/payroll/hours-range-bulk?branch=<id>&from=YYYY-MM&to=YYYY-MM
+ *
+ * The range report for a whole gan: every employee, every month in the span.
+ *
+ * ONE `fetchMonthData` PER MONTH, not per employee. That call computes the
+ * entire branch, and `computeHoursReportData` takes an `mdCache` for exactly
+ * this reason — a fresh cache per month, shared by everybody in it, turns
+ * twenty-eight employees over five months from 140 whole-branch computations
+ * into 5. Without it this endpoint would be the reason somebody else's screen
+ * times out.
+ *
+ * A single branch only, and at most twelve months. "Every gan for two years"
+ * is four times the work again and is a report to be built from the payroll
+ * screen, not asked for in one request.
+ */
+const HOURS_RANGE_BULK_MAX_MONTHS = 12;
+
+async function hoursRangeBulk(req, res, next) {
+  try {
+    const months = monthSpan(req.query.from, req.query.to);
+    if (!months) {
+      return res.status(400).json({ error: 'טווח חודשים לא תקין. חודש הסיום אחרי חודש ההתחלה.' });
+    }
+    if (months.length > HOURS_RANGE_BULK_MAX_MONTHS) {
+      return res.status(400).json({
+        error: `לדוח סניף אפשר עד ${HOURS_RANGE_BULK_MAX_MONTHS} חודשים בבת אחת (התבקשו ${months.length}).`,
+      });
+    }
+
+    const reqBranch = req.query.branch && req.query.branch !== 'all' ? req.query.branch : null;
+    if (!reqBranch) {
+      return res.status(400).json({ error: 'יש לבחור סניף — דוח טווח לכל הרשת בבת אחת כבד מדי.' });
+    }
+
+    // The same boundary the single-month bulk report enforces: a manager may
+    // ask only about a gan she manages, and the server decides that, not the
+    // screen. See hoursReportBulk.
+    const role = req.user?.role;
+    if (role && role !== 'system_admin' && role !== 'accountant') {
+      const managed = (req.user.managed_branch_ids || []).map(String);
+      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
+      const allowed = managed.length ? managed : fallback;
+      if (!allowed.includes(String(reqBranch))) {
+        return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+      }
+    }
+
+    const branch = await Branch.findById(reqBranch).select('name').lean();
+    if (!branch) return res.status(404).json({ error: 'סניף לא נמצא' });
+
+    const employees = await Employee.find({ is_active: true, branch_id: reqBranch })
+      .select('_id full_name israeli_id').sort({ full_name: 1 }).lean();
+
+    // employeeId → month → figures. Filled month by month so the cache holds.
+    const cells = new Map();
+    // The branch-name list, read once for the whole run rather than per call.
+    const branchesCache = {};
+    /**
+     * A few employees at a time, not all of them and not one.
+     *
+     * The month's whole-branch computation is already cached by the time the
+     * second employee is reached, so what is left per employee is a handful of
+     * round trips to the database — latency, not work. Sequentially that is
+     * twenty-eight waits in a row; five at a time cuts it to five rounds and
+     * still leaves the connection pool room for everybody else on the system.
+     * The first employee runs alone on purpose: she is the one who fills the
+     * month cache, and letting five race for it would compute the branch five
+     * times.
+     */
+    const POOL = 5;
+    const runPool = async (list, fn) => {
+      for (let i = 0; i < list.length; i += POOL) {
+        await Promise.all(list.slice(i, i + POOL).map(fn));
+      }
+    };
+
+    for (const month of months) {
+      const mdCache = new Map();
+      const record = async (emp) => {
+        const data = await computeHoursReportData(emp._id, month, req.user, { mdCache, branchesCache });
+        if (!data) return;
+        const ls = data.leave_summary || {};
+        const pa = data.partial_absence || null;
+        const closure = (data.days || []).filter(d => d.is_absence && d.leave_type === 'holiday').length;
+        if (!cells.has(String(emp._id))) cells.set(String(emp._id), {});
+        cells.get(String(emp._id))[month] = {
+          total_hours: data.totals.total_hours,
+          days_worked: data.totals.days_worked,
+          incomplete_days: data.totals.incomplete_days,
+          sick_days: Number(ls.sick_days) || 0,
+          vacation_days: Number(ls.vacation_days) || 0,
+          absence_days: Number(ls.absence_days) || 0,
+          closure_days: closure,
+          holiday_pay_days: Number(ls.holiday_days) || 0,
+          miluim: ls.miluim ?? '',
+          deduct_hours: pa ? pa.deduct_hours : null,
+          extra_hours: pa ? pa.extra_hours : null,
+          deduction: pa ? pa.deduction : null,
+          extra_pay: pa ? pa.extra_pay : null,
+        };
+      };
+      // One alone to warm the month cache, then the rest in small batches.
+      if (employees.length) await record(employees[0]);
+      await runPool(employees.slice(1), record);
+    }
+
+    const NUMERIC = ['total_hours', 'days_worked', 'incomplete_days', 'sick_days', 'vacation_days',
+      'absence_days', 'closure_days', 'holiday_pay_days', 'deduct_hours', 'extra_hours',
+      'deduction', 'extra_pay'];
+    const round = (n) => Math.round(n * 100) / 100;
+    const addInto = (target, cell) => {
+      for (const k of NUMERIC) target[k] = round((target[k] || 0) + (Number(cell[k]) || 0));
+    };
+
+    const rows = [];
+    const grand = {};
+    for (const emp of employees) {
+      const byMonth = cells.get(String(emp._id)) || {};
+      const totals = {};
+      for (const m of months) if (byMonth[m]) { addInto(totals, byMonth[m]); addInto(grand, byMonth[m]); }
+      rows.push({
+        employee_id: String(emp._id),
+        full_name: emp.full_name,
+        israeli_id: emp.israeli_id || '',
+        months: byMonth,
+        totals,
+      });
+    }
+
+    res.json({
+      branch: { id: String(branch._id), name: branch.name },
+      from: months[0], to: months[months.length - 1], month_list: months,
+      employees: rows,
+      totals: { ...grand, employees: rows.length, months: months.length },
     });
   } catch (err) { next(err); }
 }
@@ -3930,6 +4079,7 @@ module.exports = {
   attendanceByMonth,
   hoursReport,
   hoursRange,
+  hoursRangeBulk,
   // Exported for scripts/hours-range-span.test.js — the month arithmetic is
   // the part of the range report that can be wrong without anything throwing.
   monthSpan,

@@ -19,7 +19,9 @@ import { useBranch } from '../../hooks/useBranch';
 import { branchColor, ganMarkerByName } from '../../utils/branchColors';
 import HoursReportDialog from '../employees/HoursReportDialog';
 import MonthlyHoursReports from './MonthlyHoursReports';
+import BranchHoursRangeDialog from './BranchHoursRangeDialog';
 import DescriptionIcon from '@mui/icons-material/Description';
+import DateRangeIcon from '@mui/icons-material/DateRange';
 import PendingPunchApprovals from './PendingPunchApprovals';
 import { formatManualBy } from './punchApproval';
 import DayPunchesDialog from './DayPunchesDialog';
@@ -97,6 +99,7 @@ export default function AttendanceMonitor() {
   const [loading, setLoading] = useState(false);
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
   // Completing missing punches is the branch manager's job, so the same issues
   // screen the accountant uses is reachable from here — scoped server-side to
   // the branches this user manages.
@@ -625,6 +628,11 @@ export default function AttendanceMonitor() {
         }}
         actions={[
           {
+            label: 'ריכוז טווח חודשים',
+            icon: <DateRangeIcon />,
+            onClick: () => setRangeOpen(true),
+          },
+          {
             label: issuesCount ? `בעיות בהחתמה (${issuesCount})` : 'בעיות בהחתמה',
             icon: <ReportProblemIcon />,
             color: issuesCount ? 'warning' : 'inherit',
@@ -849,6 +857,13 @@ export default function AttendanceMonitor() {
         open={hoursDialog.open}
         employee={hoursDialog.employee}
         onClose={() => setHoursDialog({ open: false, employee: null })}
+      />
+
+      <BranchHoursRangeDialog
+        open={rangeOpen}
+        onClose={() => setRangeOpen(false)}
+        branch={selectedBranch}
+        branchName={selectedBranchName}
       />
 
       <MonthlyHoursReports
