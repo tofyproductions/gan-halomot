@@ -289,15 +289,38 @@ breath, and the shadow makes a late sync correct rather than merely eventual.
 - **Dry run is the default.** A pass prints every write it would make and makes
   none. `--write` is a deliberate act. Same reasoning as
   `import-nursery-history.js`, and the same reason: a mistyped connection
-  string should produce a printout, not an incident.
-- **Per branch.** משה דיין first, watched for a full day, then קפלן.
+  string should produce a printout, not an incident. Precisely: dry means
+  neither board changes and no shadow is written — the two boards are left
+  exactly as they were. It does not mean the process writes nothing at all.
+  `sheetSyncJob` still records that a branch was attempted and failed
+  (`SheetSyncState.last_error`) and which nights were audited (a `Setting`) in
+  any mode, deliberately, because diagnostics are needed most during the very
+  phase that exists in order to be judged. Neither touches `shadow` or a
+  child's day.
+- **Per branch.** משה דיין first, watched for a full day, then קפלן. `write`
+  therefore lives on the branch's own entry in the setting: a branch with no
+  `write` of its own runs read-only, and never inherits write-back from a
+  branch that has already earned it. The top-level `write: false` remains a
+  master off.
 - **A kill switch in Settings**, readable without a deploy. Off means the old
   board carries on exactly as it does today, with nothing to undo.
 - **Direction switches.** Read-only mode (sheet → us) is separately
   switchable from write-back, so the safe half can run while the other half is
   still being watched.
 - **A full log.** Every field written, which way, by which run, with the before
-  value.
+  value. Including the uneventful outcomes: a pass that read the board and
+  agreed with it says so with its counts, and a completed nightly audit says
+  how many children it compared. Silence in the log means one thing only —
+  the sync is switched off — because the rollout decision is made by reading
+  a read-only day and then a night with zero disagreements, and an empty log
+  is otherwise indistinguishable from a crashed interval or an audit that
+  compared nobody.
+- **`scripts/` is on the production runtime path**, for the first time in this
+  repo: `index.js` → `services/sheetSyncJob.js` → `sheet-sync/run.js` →
+  `scripts/lib/nursery-history.js`. That import is the one deliberate
+  exception to the rule that `src/` never reaches into `scripts/`, and it has
+  a deployment consequence — if `scripts/` is ever excluded from a deploy
+  bundle or a Docker layer as "not runtime", the server stops booting.
 
 ## Testing
 
@@ -329,7 +352,32 @@ recorded here so it is not lost.
 
 ## Deletion
 
-When the old board closes: turn off the switch, delete `server/src/services/
-sheet-sync/`, `SheetSyncState`, and the two fields added to `Child` and
-`DailyLog`. The new system is unchanged by their absence. The sheets stay as an
-archive, and `import-nursery-history.js` remains the way to read them.
+When the old board closes: turn off the switch, then remove the whole of it.
+The list matters more than it looks — `sheetSyncJob.js` sits OUTSIDE the
+`sheet-sync/` directory and `index.js` requires it synchronously, inside the
+`app.listen` callback, with no try/catch. Deleting the directory and leaving
+the job behind therefore throws at that line during boot and every job
+registered after it — the push-notification resend loop among them — is
+silently never scheduled, inside an unhandled rejection nobody is watching
+for. The real set, in an order that never leaves a dangling require:
+
+1. `server/src/index.js` — the `sheetSync` block (the require, the `setTimeout`
+   and the `setInterval`).
+2. `server/src/services/sheetSyncJob.js`.
+3. `server/src/services/sheet-sync/` — the whole directory.
+4. `server/src/models/SheetSyncState.js` and its line in `models/index.js`.
+5. `Child.sheet_access_id` and `DailyLog.sync_conflicts`.
+6. `parseChildRows` and its export in `scripts/lib/nursery-history.js` — added
+   for this feature and used by nothing else; the rest of that file is the
+   importer's and stays.
+7. `server/scripts/sheet-sync-*.js` — the matching script and the test suites —
+   and their entries in `package.json`.
+8. The two controller hunks that clear a conflict when the side that owns the
+   field edits it: `nursery.controller.js` (`updateLog`) and
+   `parentPortal.controller.js`.
+9. The `sync_conflicts` rendering in
+   `client/src/components/nursery/ChildDayCard.jsx` — both the per-field note
+   and the read-only block under מההורים, מהבית.
+
+The new system is unchanged by their absence. The sheets stay as an archive,
+and `import-nursery-history.js` remains the way to read them.
