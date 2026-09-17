@@ -340,6 +340,62 @@ scenario('two archive rows for the same date: the first one found is the one use
   });
 });
 
+// An archive row over an empty board is the second way this check can look
+// clean without having examined anything — the gan closes on a Saturday, the
+// archive job fires at 23:35 anyway, and `checked: 0, disagreed: []` is
+// byte-identical to a fully-audited night. `archive_found` cannot tell them
+// apart, because the row genuinely is there. The count of what the row named
+// is the only thing that can.
+
+scenario('an archive row listing nobody says so, rather than reading as clean', async () => {
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({ history: [archiveRow('2026-09-17', [])], logs: new Map() }),
+  });
+  check('the row was found', () => assert.strictEqual(res.archive_found, true));
+  check('nothing was compared', () => assert.strictEqual(res.checked, 0));
+  check('and the row is reported as having named nobody', () => {
+    assert.strictEqual(res.entries, 0);
+  });
+});
+
+scenario('an archive row whose children carry no accessId names nobody either', async () => {
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      // A board whose roster column was cleared: rows, names, values — and no
+      // identity on any of them, so there is nothing to audit the pairing
+      // against, which is the whole point of this check.
+      history: [archiveRow('2026-09-17', [
+        { name: 'נויה חגי', accessId: '', data: { 'התעורר בבית': '06:15' } },
+      ])],
+      logs: new Map(),
+    }),
+  });
+  check('nothing compared', () => assert.strictEqual(res.checked, 0));
+  check('no identifiable entry in the row', () => assert.strictEqual(res.entries, 0));
+});
+
+scenario('a real audit counts the children the archive named', async () => {
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      history: [archiveRow('2026-09-17', [
+        kid('id-1', 'נויה חגי', { 'התעורר בבית': '06:15' }),
+        kid('id-2', 'ליה לוין', { 'התעורר בבית': '' }),
+      ])],
+      logs: new Map([
+        ['c1', { home: { wake_time: '06:15' }, meals: {}, sleep: {}, missing: [] }],
+        ['c2', { home: { wake_time: '' }, meals: {}, sleep: {}, missing: [] }],
+      ]),
+    }),
+  });
+  check('two named, two compared', () => {
+    assert.strictEqual(res.entries, 2);
+    assert.strictEqual(res.checked, 2);
+  });
+});
+
 (async () => {
   for (const s of scenarios) {
     console.log(`\n${s.title}`);

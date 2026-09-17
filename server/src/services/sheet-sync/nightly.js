@@ -59,6 +59,15 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
     // able to tell "not yet" from "clean" or a vacuous zero-checked result
     // reads as a clean night that never actually happened.
     archive_found: false,
+    // And how many children that row actually named. `archive_found` closed
+    // the "no row yet" door; this is the door beside it — a row that exists
+    // and lists nobody. The gan closes on a Saturday, the archive job fires
+    // at 23:35 over an empty board, and every field above stays at its
+    // zero. A caller must be able to see that this check compared nothing,
+    // because "nothing disagreed" out of nothing compared is not evidence of
+    // anything, and the rollout gate this check exists to serve is a human
+    // reading exactly these numbers.
+    entries: 0,
   };
 
   const { history } = await d.readGrids(sheetId);
@@ -83,6 +92,10 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
   let entries;
   try { entries = historyChildren(JSON.parse(row[1])); } catch (e) { return { ...out, error: `archive JSON did not parse: ${e.message}` }; }
   const withId = (entries || []).filter(e => e.accessId);
+  out.entries = withId.length;
+  // Nobody to compare. Returned rather than worked through — an `$in: []`
+  // lookup answers about nobody — and the count above is what says so, so a
+  // caller cannot read this as an audit that found nothing wrong.
   if (withId.length === 0) return out;
 
   const asked = withId.map(e => e.accessId);
