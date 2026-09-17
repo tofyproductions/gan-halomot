@@ -420,7 +420,16 @@ connectDB().then(() => {
     // closes. Cheap when idle — one Setting read and an immediate return while
     // it is disabled, which is how it ships.
     const sheetSync = require('./services/sheetSyncJob');
-    const runSheetSync = () => sheetSync.tick().catch((e) => console.error('[sheet-sync] tick failed:', e.message));
+    // The tick returns what it did and says nothing itself, so the outcome has
+    // to be printed here like every other job in this block. It is the whole
+    // evidence the rollout is judged on — a read-only day, then a night with
+    // zero disagreements — and without it a working sync, a disabled one, a
+    // misconfigured branch and an audit that compared nobody all look the
+    // same from the log: empty.
+    const runSheetSync = () => sheetSync.tick()
+      .then(r => sheetSync.describeTick(r)
+        .forEach(l => (l.level === 'error' ? console.error(l.text) : console.log(l.text))))
+      .catch((e) => console.error('[sheet-sync] tick failed:', e.message));
     if (!platformMode) {
       setTimeout(runSheetSync, 2 * 60 * 1000);
       setInterval(runSheetSync, 2 * 60 * 1000);
