@@ -133,5 +133,12 @@ check('עידו pairs to his own row despite the extra title row', () => {
   assert.strictEqual(ido.values['התעורר בבית'], 0.2291666666666667);
 });
 
+const { a1 } = require('../src/services/sheet-sync/sheets-client');
+console.log('\na1 — ranges, including the Hebrew tab name');
+check('first cell', () => assert.strictEqual(a1('סדר יום', 0, 0), "'סדר יום'!A1"));
+check('column D, row 5', () => assert.strictEqual(a1('סדר יום', 4, 3), "'סדר יום'!D5"));
+check('past Z', () => assert.strictEqual(a1('ילדים', 0, 26), "'ילדים'!AA1"));
+check('the seventeenth column is Q', () => assert.strictEqual(a1('סדר יום', 1, 16), "'סדר יום'!Q2"));
+
 console.log(failures === 0 ? '\nOK\n' : `\n${failures} FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);
