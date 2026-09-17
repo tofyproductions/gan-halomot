@@ -18,6 +18,7 @@
     "test:sync-run": "node scripts/sheet-sync-run.test.js",
     "test:sync-nightly": "node scripts/sheet-sync-nightly.test.js",
     "test:sync-job": "node scripts/sheet-sync-job.test.js",
+    "test:sync-conflicts": "node scripts/sheet-sync-conflict-surface.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:reminder": "node scripts/manager-reminder.test.js",
     "test:recipients": "node scripts/branch-recipients.test.js",

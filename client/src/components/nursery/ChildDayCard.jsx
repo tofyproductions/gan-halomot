@@ -75,6 +75,27 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
       </Typography>
     ));
 
+  /**
+   * The same note, for the fields the parent owns.
+   *
+   * These four are written in the parent portal and are read-only here, so
+   * without this they are the one group of conflicts no screen in either
+   * system shows: the parent's value loses to the sheet, is kept on the log,
+   * and is then quietly dropped the next time the parent edits that field —
+   * deleted silently, from every human's point of view, which is the exact
+   * thing the conflict policy exists to prevent. Shown on the staff board
+   * rather than the portal on purpose: a parent should not be shown the gan's
+   * sync mechanics, and the staff are the ones who can act on knowing that
+   * the old board overrode what the family sent this morning.
+   */
+  const HOME_LABELS = {
+    'home.wake_time': 'התעורר',
+    'home.meal_time': 'אכל בבית — שעה',
+    'home.meal_amount': 'אכל בבית — כמות',
+    'home.parent_note': 'הערת הורים',
+  };
+  const homeConflicts = (log.sync_conflicts || []).filter(c => HOME_LABELS[c.field]);
+
   const mealRow = (key, label, hoursKey) => (
     <Box key={key}>
       <Typography variant="caption" color="primary" fontWeight={700}>{label}</Typography>
@@ -155,8 +176,10 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
             )}
           </Box>
         </Stack>
+        {conflictNote('attendance')}
 
-        {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note) && (
+        {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note
+          || homeConflicts.length > 0) && (
           <Box sx={{ mb: 2, p: 1.25, borderRadius: 2, bgcolor: 'action.hover' }}>
             <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
               <HomeIcon sx={{ fontSize: 15 }} color="success" />
@@ -177,6 +200,11 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
                 {home.parent_note}
               </Typography>
             )}
+            {homeConflicts.map((c, i) => (
+              <Typography key={i} variant="caption" sx={{ display: 'block', color: 'warning.main', mt: 0.25 }}>
+                ההורים רשמו {HOME_LABELS[c.field]}: {Array.isArray(c.ours) ? c.ours.join(', ') : c.ours || '—'} — הלוח הישן גבר
+              </Typography>
+            ))}
           </Box>
         )}
 
