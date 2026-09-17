@@ -141,6 +141,8 @@ router.use('/recruitment', require('./recruitment.routes'));
 router.use('/branch-certifications', require('./branchCertifications.routes'));
 // קורסים והכשרות — every עובדת's מד"א and התנהלות בטוחה, and when they run out.
 router.use('/employee-courses', require('./employeeCourses.routes'));
+// פערי רישום — the roster each branch actually keeps, against the cards here.
+router.use('/roster-gap', require('./rosterGap.routes'));
 router.use('/documents', require('./documents.routes'));
 router.use('/supplies', require('./supplies.routes'));
 router.use('/holidays', require('./holiday.routes'));

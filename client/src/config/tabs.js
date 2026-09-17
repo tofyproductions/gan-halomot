@@ -25,6 +25,9 @@ export const TAB_GROUPS = [
       // The id stays 'clicktac': per-user tab permissions are stored by id, and
       // renaming it would revoke the screen from whoever was granted it by hand.
       { id: 'clicktac',       label: 'רישום חיצוני', path: '/external-enrollment', defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
+      // Who is registered, against who has a card. Sits beside the two
+      // registration screens because it is the question they raise.
+      { id: 'roster_gap',     label: 'פערי רישום', path: '/roster-gap',      defaultRoles: ['system_admin', 'admin_viewer', 'accountant', 'branch_manager'] },
       // NOT A SCREEN — a WRITE GRANT, and that is why `path` is null.
       //
       // Seeing רישום חיצוני and acting on it are two different things: the tab

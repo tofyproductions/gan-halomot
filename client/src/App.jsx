@@ -57,6 +57,7 @@ const CollectionsTable = lazy(() => import('./components/collections/Collections
 const ContactListPDF = lazy(() => import('./components/contacts/ContactListPDF'));
 const ContractSigning = lazy(() => import('./components/employees/ContractSigning'));
 const CoursesPage = lazy(() => import('./components/compliance/CoursesPage'));
+const RosterGap = lazy(() => import('./components/admin/RosterGap'));
 const EmployeeLetters = lazy(() => import('./components/employees/EmployeeLetters'));
 const EmployeeManager = lazy(() => import('./components/employees/EmployeeManager'));
 const EmunahEnrollment = lazy(() => import('./components/registration/EmunahEnrollment'));
@@ -307,6 +308,11 @@ function AppRoutes() {
         <Route path="courses" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <CoursesPage />
+          </ProtectedRoute>
+        } />
+        <Route path="roster-gap" element={
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
+            <RosterGap />
           </ProtectedRoute>
         } />
         {/* Employee portal */}

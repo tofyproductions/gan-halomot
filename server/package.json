@@ -105,7 +105,8 @@
     "test:course-report": "node scripts/course-report.test.js",
     "test:screen-help": "node scripts/screen-help.test.js",
     "test:contract-delete": "node scripts/contract-delete.test.js",
-    "test:viewer-client": "node scripts/viewer-client-manager.test.js"
+    "test:viewer-client": "node scripts/viewer-client-manager.test.js",
+    "test:roster-gap": "node scripts/roster-gap.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
