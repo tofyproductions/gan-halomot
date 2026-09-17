@@ -32,7 +32,7 @@
 **Created:**
 
 - `server/src/services/sheet-sync/three-way.js` — the merge core. Pure: takes (sheet, ours, shadow), returns (in, out, conflicts). Where correctness lives; depends on nothing.
-- `server/src/services/sheet-sync/sheets-client.js` — Google Sheets API wrapper. Reads a tab as a grid, writes cell ranges. Knows nothing about the gan.
+- `server/src/services/sheet-sync/sheets-client.js` — Google Sheets API wrapper: auth, read a tab as a grid, write cell ranges. Knows nothing about the gan. Created in Task 1, extended in Task 4.
 - `server/src/services/sheet-sync/roster.js` — pairs `ילדים` rows to `סדר יום` rows by absolute row index, and to `Child` documents by `sheet_access_id`.
 - `server/src/services/sheet-sync/run.js` — one sync pass for one branch. Fetch, compare, apply, record.
 - `server/src/services/sheet-sync/nightly.js` — the archive check.
@@ -57,12 +57,15 @@
 ## Task 1: A read-only probe, and the credentials to run it
 
 **Files:**
+- Create: `server/src/services/sheet-sync/sheets-client.js` (auth and reading; Task 4 adds the rest)
 - Create: `server/scripts/sheet-sync-probe.js`
 - Create: `docs/superpowers/plans/2026-09-17-sheet-sync-credentials.md`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `probe({ sheetId, credentials })` → `{ tabs, rows: { children, today, history }, todayHasCurrentDate, sample }`. Task 4 reuses the auth block verbatim.
+- Produces: from `sheets-client.js` — `credentialsFromEnv()`, `clientFor(credentials)`, `tabNames(auth, sheetId)`, `readTab(auth, sheetId, title)`, `SCOPES`. From the probe script — `probe({ sheetId })`.
+
+**Note on direction:** `src/` never imports `scripts/` anywhere in this repo. The auth and read helpers therefore live in `src/services/sheet-sync/sheets-client.js` and the probe **script** imports them, not the other way round.
 
 This task exists first because everything downstream assumes the server can reach the sheet, and that assumption is the user's Google account, not code. It ends with a printout of the live board.
 
@@ -91,19 +94,17 @@ Create `docs/superpowers/plans/2026-09-17-sheet-sync-credentials.md` with exactl
 The key never enters the repository. `.env` and Render hold it; nothing else.
 ```
 
-- [ ] **Step 2: Write the probe**
+- [ ] **Step 2a: Write the client's auth and read half**
 
-Create `server/scripts/sheet-sync-probe.js`:
+Create `server/src/services/sheet-sync/sheets-client.js`:
 
 ```js
 /**
- * Read-only: can we reach the sheet, and does it look like the spec says.
+ * The Google Sheets API, and nothing about the gan.
  *
- * Writes nothing, ever — there is no --write and no code path that could
- * acquire one. It exists to be run before anything is built on top of it,
- * and again whenever the sheet surprises us.
- *
- *   node scripts/sheet-sync-probe.js --sheet <id>
+ * Lives in src/ rather than beside the probe script because src/ never
+ * imports scripts/ anywhere in this repository, and the sync service needs
+ * these same three functions. Task 4 adds the writing half here.
  */
 const { JWT } = require('google-auth-library');
 
@@ -140,13 +141,34 @@ async function tabNames(auth, sheetId) {
  * parsing problem somewhere with no tests.
  */
 async function readTab(auth, sheetId, title) {
-  const range = encodeURIComponent(`${title}`);
+  const range = encodeURIComponent(String(title));
   const res = await auth.request({
     url: `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}`
       + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER',
   });
   return res.data.values || [];
 }
+
+module.exports = { SCOPES, credentialsFromEnv, clientFor, tabNames, readTab };
+```
+
+- [ ] **Step 2b: Write the probe script**
+
+Create `server/scripts/sheet-sync-probe.js`:
+
+```js
+/**
+ * Read-only: can we reach the sheet, and does it look like the spec says.
+ *
+ * Writes nothing, ever — there is no --write and no code path that could
+ * acquire one. It exists to be run before anything is built on top of it,
+ * and again whenever the sheet surprises us.
+ *
+ *   node scripts/sheet-sync-probe.js --sheet <id>
+ */
+const {
+  credentialsFromEnv, clientFor, tabNames, readTab,
+} = require('../src/services/sheet-sync/sheets-client');
 
 async function probe({ sheetId, credentials }) {
   const auth = clientFor(credentials);
@@ -166,7 +188,7 @@ async function probe({ sheetId, credentials }) {
   };
 }
 
-module.exports = { probe, readTab, tabNames, clientFor, credentialsFromEnv, SCOPES };
+module.exports = { probe };
 
 if (require.main === module) {
   const i = process.argv.indexOf('--sheet');
@@ -721,32 +743,29 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 4: The Sheets client
+## Task 4: The Sheets client's writing half
 
 **Files:**
-- Create: `server/src/services/sheet-sync/sheets-client.js`
+- Modify: `server/src/services/sheet-sync/sheets-client.js` (created in Task 1)
 
 **Interfaces:**
-- Consumes: `clientFor`, `credentialsFromEnv`, `readTab`, `SCOPES` from `scripts/sheet-sync-probe.js` (Task 1).
+- Consumes: `clientFor`, `credentialsFromEnv`, `readTab` — already in this same file from Task 1.
 - Produces:
   - `readGrids(sheetId)` → `{ children: [][], today: [][], history: [][] }`
   - `writeCells(sheetId, updates)` where `updates` is `[{ tab, row, col, value }]` with zero-based `row`/`col`. Returns `{ written }`.
   - `a1(tab, row, col)` → `'סדר יום'!D5` style range string.
 
-- [ ] **Step 1: Write the client**
+- [ ] **Step 1: Extend the client**
 
-Create `server/src/services/sheet-sync/sheets-client.js`:
+Append to `server/src/services/sheet-sync/sheets-client.js`, keeping Task 1's exports and adding these to the `module.exports` object:
 
 ```js
-/**
- * The Google Sheets API, and nothing about the gan.
- *
- * Writes are `values.batchUpdate` on explicit single-cell ranges, never an
- * append and never a row operation. The old board reads its own live tab
- * positionally, so a row inserted or deleted here would move every child
- * below it on THEIR screen too.
- */
-const { clientFor, credentialsFromEnv, readTab } = require('../../../scripts/sheet-sync-probe');
+// --- Writing, and the two tabs the sync actually reads -------------------
+//
+// Writes are `values.batchUpdate` on explicit single-cell ranges, never an
+// append and never a row operation. The old board reads its own live tab
+// positionally, so a row inserted or deleted here would move every child
+// below it on THEIR screen too.
 const { SHEET } = require('../../../scripts/lib/nursery-history');
 
 /** Zero-based row/col to an A1 range, quoting the tab name for the Hebrew. */
@@ -795,7 +814,7 @@ async function writeCells(sheetId, updates) {
   return { written: updates.length };
 }
 
-module.exports = { readGrids, writeCells, a1 };
+module.exports = { SCOPES, credentialsFromEnv, clientFor, tabNames, readTab, readGrids, writeCells, a1 };
 ```
 
 - [ ] **Step 2: Test the A1 conversion, which is the only logic here**
