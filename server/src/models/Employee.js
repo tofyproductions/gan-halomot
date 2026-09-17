@@ -470,6 +470,47 @@ employeeSchema.pre('save', function normalizeIsraeliId(next) {
 });
 
 /**
+ * One ת"ז, one card.
+ *
+ * On the morning of 30.08.2026 two people were entered a second time, each
+ * with the surname and the given name the other way round and the same ת"ז.
+ * Nothing refused it, so for the next three weeks the clock punched one card
+ * while the payslips were filed against the other, one employee's history was
+ * split across two records with a payroll month on each, and the screen that
+ * answers "did she get her payslip" answered about whichever card it happened
+ * to be looking at. Merging them afterwards is a script that has to be told
+ * which card survives, because that is a payroll question.
+ *
+ * This runs after the normalizer above, so `051429389` and `51429389` are the
+ * same number by the time it looks, and it only looks when the field actually
+ * changed — an ordinary save of an unrelated field costs nothing.
+ *
+ * Empty is exempt: most of the roster predates the field, and refusing every
+ * blank would mean refusing every one of those cards on its next save.
+ *
+ * It looks at retired cards too. A person who left and came back is the same
+ * person, and her card is the one to reopen — a second card would put the two
+ * halves of her employment in two places, which is the thing that happened.
+ *
+ * The controllers check this too, and say it in Hebrew with the name of the
+ * card already holding the number. This one is the net under the paths that do
+ * not go through a controller — imports, scripts, a future endpoint.
+ */
+employeeSchema.pre('save', async function refuseDuplicateIsraeliId(next) {
+  if (!this.isModified('israeli_id')) return next();
+  const id = String(this.israeli_id || '').trim();
+  if (!id) return next();
+  const clash = await this.constructor.findOne({ israeli_id: id, _id: { $ne: this._id } })
+    .select('full_name is_active').lean();
+  if (clash) {
+    return next(new Error(
+      `ת"ז ${id} כבר רשומה על הכרטיס "${clash.full_name}"${clash.is_active === false ? ' (לא פעילה)' : ''}`,
+    ));
+  }
+  return next();
+});
+
+/**
  * Post-save hook: if an Employee gets an `israeli_id` (either at creation or
  * via an update that sets it for the first time), link any orphaned Punches
  * that were stored with `employee_id: null` but the same `israeli_id` in the

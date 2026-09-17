@@ -378,6 +378,50 @@ async function resolveAmutaDistribution(distribution, branchId) {
 }
 
 /**
+ * Is this ת"ז already on somebody else's card?
+ *
+ * Normalized through the same function the login sync uses, so `51429389` and
+ * `051429389` are one number rather than two cards. Blank is never a clash —
+ * most of the roster predates the field.
+ *
+ * Retired cards count. A person who left and came back is the same person, and
+ * her old card is the one to reopen: giving her a second one is what put one
+ * employee's punches on one card and her payslips on another for three weeks
+ * in August 2026, with a payroll month on each.
+ */
+async function findIdClash(rawId, excludeEmployeeId) {
+  const id = userSync.normalizeIsraeliId(rawId);
+  if (!id) return null;
+  const q = { israeli_id: id };
+  if (excludeEmployeeId) q._id = { $ne: excludeEmployeeId };
+  const hit = await Employee.findOne(q)
+    .select('full_name is_active branch_id')
+    .populate('branch_id', 'name')
+    .lean();
+  if (!hit) return null;
+  return {
+    id: String(hit._id),
+    full_name: hit.full_name,
+    is_active: hit.is_active !== false,
+    branch_name: hit.branch_id?.name || '',
+    israeli_id: id,
+  };
+}
+
+/**
+ * What the person at the screen needs in order to act, which is not "duplicate
+ * id" — it is whose card already holds the number, and whether that card is
+ * still in use, because the two lead to different next steps: open her card,
+ * or reopen it.
+ */
+function duplicateIdMessage(clash) {
+  const where = clash.branch_name ? ` בסניף ${clash.branch_name}` : '';
+  return clash.is_active
+    ? `ת"ז ${clash.israeli_id} כבר רשומה על "${clash.full_name}"${where}. זו אותה עובדת — יש לערוך את הכרטיס הקיים ולא ליצור חדש.`
+    : `ת"ז ${clash.israeli_id} רשומה על הכרטיס "${clash.full_name}"${where}, שאינו פעיל. אם היא חזרה לעבוד — יש להפעיל מחדש את הכרטיס הקיים, כדי שהוותק, ההחתמות והתלושים שלה יישארו במקום אחד.`;
+}
+
+/**
  * Accepts the full Employee payload. Notable: `amuta_distribution` can be
  * passed as an array of { amuta_id, hourly_rate, global_salary, ... }.
  */
@@ -390,6 +434,9 @@ async function createEmployee(req, res, next) {
     if (!mongoose.isValidObjectId(payload.branch_id)) {
       return res.status(400).json({ error: 'יש לבחור סניף תקין' });
     }
+    const clash = await findIdClash(payload.israeli_id, null);
+    if (clash) return res.status(409).json({ error: duplicateIdMessage(clash), duplicate_of: clash.id });
+
     payload.amuta_distribution = await resolveAmutaDistribution(payload.amuta_distribution, payload.branch_id);
 
     // A new card starts empty, so the plan is computed against a blank one —
@@ -492,6 +539,15 @@ async function updateEmployee(req, res, next) {
   try {
     const emp = await Employee.findById(req.params.id);
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    // Typing a number that belongs to another card is the same mistake as
+    // creating a second card with it, and it arrives here as an ordinary edit.
+    // Checked before anything else is applied, so a refused save changes
+    // nothing at all.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'israeli_id')) {
+      const clash = await findIdClash(req.body.israeli_id, emp._id);
+      if (clash) return res.status(409).json({ error: duplicateIdMessage(clash), duplicate_of: clash.id });
+    }
 
     const fields = [
       'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
@@ -4066,6 +4122,11 @@ async function myForm101File(req, res, next) {
 }
 
 module.exports = {
+  // Exported for scripts/duplicate-israeli-id.test.js: the wording is the whole
+  // point of the guard, so it is asserted rather than eyeballed.
+  findIdClash,
+  duplicateIdMessage,
+
   myPayslipFile,
   myHoursReportFile,
   myForm101,
