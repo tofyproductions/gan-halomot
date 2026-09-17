@@ -1,0 +1,126 @@
+{
+ "db": "gan-halomot",
+ "keep": "6a93ef8875782f0af2293f71",
+ "lose": "6a6b0c9e5cf66abc1edb3772",
+ "at": "2026-09-17T09:22:36.053Z",
+ "keep_name": "גאליה כהן",
+ "lose_name": "כהן גאליה",
+ "moves": [
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0ce15cf66abc1edb3800",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0ce15cf66abc1edb3802",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0cf05cf66abc1edb3818",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0cf05cf66abc1edb381a",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0cfd5cf66abc1edb382e",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0cfd5cf66abc1edb3830",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0d0b5cf66abc1edb383c",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0d0b5cf66abc1edb383e",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b1aa85cf66abc1edb42c5",
+   "label": ""
+  },
+  {
+   "collection": "Punch",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b1aa85cf66abc1edb42c7",
+   "label": ""
+  },
+  {
+   "collection": "SavedPayslip",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a79b325e1ea847369d6de86",
+   "label": "2026-07"
+  },
+  {
+   "collection": "SavedPayslip",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a9e47b0950ff90ecc93477c",
+   "label": "2026-08"
+  },
+  {
+   "collection": "PayrollMonth",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a78398bc8f84662d87608c7",
+   "label": "2026-07"
+  },
+  {
+   "collection": "PayrollMonth",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a9c7c6e950ff90ecc9261f4",
+   "label": "2026-08"
+  },
+  {
+   "collection": "EmployeeDocument",
+   "path": "employee_id",
+   "many": false,
+   "id": "6a6b0db15cf66abc1edb3908",
+   "label": ""
+  }
+ ],
+ "collisions": [
+  {
+   "collection": "PayrollMonth",
+   "key": "2026-09",
+   "loseId": "6a9e4216950ff90ecc9344d5"
+  }
+ ],
+ "resolutions": [
+  "PayrollMonth:2026-09=keep"
+ ],
+ "lose_was_active": false
+}

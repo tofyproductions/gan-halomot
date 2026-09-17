@@ -125,15 +125,22 @@ export default function BranchPayslips() {
     const q = search.trim().toLowerCase();
     if (q && !e.full_name?.toLowerCase().includes(q) && !String(e.israeli_id).includes(q)) return false;
     if (month && !e.payslips.some(p => p.year_month === month)) return !missingOnly ? false : true;
+    // "מי חסר" is a work list, and a former employee is not on it.
     if (missingOnly) {
+      if (e.is_active === false) return false;
       return month ? !e.payslips.some(p => p.year_month === month) : e.payslips.length === 0;
     }
     return true;
   });
 
-  const withoutAny = employees.filter(e => e.payslips.length === 0).length;
+  // Both counts are about people who SHOULD have a payslip and do not, so they
+  // ask only about current staff. Somebody who left in July is not missing
+  // September's payslip; counting her would turn a number the manager acts on
+  // into a number that only ever grows.
+  const current = employees.filter(e => e.is_active !== false);
+  const withoutAny = current.filter(e => e.payslips.length === 0).length;
   const missingThisMonth = month
-    ? employees.filter(e => !e.payslips.some(p => p.year_month === month)).length
+    ? current.filter(e => !e.payslips.some(p => p.year_month === month)).length
     : 0;
 
   const selectedEmployees = visible.filter(e => selected[e.id] && e.payslips.length);
@@ -258,7 +265,16 @@ export default function BranchPayslips() {
                       />
                     </TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>
-                      {emp.full_name}
+                      <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
+                        <span>{emp.full_name}</span>
+                        {/* She is here because she has a payslip, not because
+                            she works here. Without saying so, "אין תלוש
+                            לאוקטובר" reads as a problem rather than as the
+                            month after she left. */}
+                        {emp.is_active === false && (
+                          <Chip size="small" variant="outlined" label="לשעבר" sx={{ height: 20 }} />
+                        )}
+                      </Stack>
                       <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} dir="ltr">
                         {emp.israeli_id}
                       </Typography>
@@ -267,7 +283,8 @@ export default function BranchPayslips() {
                     <TableCell>{emp.branch_name || '—'}</TableCell>
                     <TableCell>
                       {slips.length === 0 ? (
-                        <Chip size="small" color="warning" variant="outlined"
+                        <Chip size="small" variant="outlined"
+                          color={emp.is_active === false ? 'default' : 'warning'}
                           label={month ? 'לא נשלח תלוש לחודש זה' : 'אין תלושים'} />
                       ) : (
                         <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center">

@@ -3357,7 +3357,7 @@ async function exportSavedPayslips(req, res) {
 async function listBranchPayslips(req, res) {
   try {
     const scope = await payslipBranchScope(req);
-    const filter = { is_active: true };
+    const filter = {};
     if (scope !== null) {
       if (!scope.length) return res.json({ employees: [], months: [], branches: [] });
       filter.branch_id = { $in: scope };
@@ -3370,8 +3370,21 @@ async function listBranchPayslips(req, res) {
       filter.branch_id = req.query.branch;
     }
 
+    // Everyone the branch scope covers, including people who have left.
+    //
+    // This used to filter on `is_active: true`, which reads as "the staff" and
+    // behaves as "delete the record". A payslip belongs to the month it was
+    // earned in, and turning a card off on the day someone leaves does not
+    // unpay her — but it did take her payslips off the one screen that answers
+    // "did she get it", along with the ten former employees and sixteen
+    // payslips that were invisible here when this was found.
+    //
+    // A person who left and never had a payslip is still not shown: she is not
+    // an answer to any question this screen is asked, and the list is read by
+    // a branch manager looking for a name she recognises. So the filter moves
+    // off the query and onto the result, where it can depend on the payslips.
     const employees = await Employee.find(filter)
-      .select('full_name israeli_id branch_id position')
+      .select('full_name israeli_id branch_id position is_active')
       .populate('branch_id', 'name')
       .sort({ full_name: 1 })
       .lean();
@@ -3402,15 +3415,22 @@ async function listBranchPayslips(req, res) {
     }
 
     res.json({
-      employees: employees.map(e => ({
-        id: e._id,
-        full_name: e.full_name,
-        israeli_id: e.israeli_id,
-        position: e.position || '',
-        branch_id: e.branch_id?._id || e.branch_id,
-        branch_name: e.branch_id?.name || '',
-        payslips: byEmployee.get(String(e._id)) || [],
-      })),
+      employees: employees
+        // See the comment on the query: a former employee earns her place here
+        // by having a payslip, and only by that.
+        .filter(e => e.is_active !== false || (byEmployee.get(String(e._id)) || []).length > 0)
+        .map(e => ({
+          id: e._id,
+          full_name: e.full_name,
+          israeli_id: e.israeli_id,
+          position: e.position || '',
+          // The screen marks her, because "why is there nothing for October"
+          // has a different answer for someone who left in September.
+          is_active: e.is_active !== false,
+          branch_id: e.branch_id?._id || e.branch_id,
+          branch_name: e.branch_id?.name || '',
+          payslips: byEmployee.get(String(e._id)) || [],
+        })),
       // Every month anyone in scope has a payslip for — the month filter.
       months: [...new Set(slips.map(s => s.year_month))].sort().reverse(),
     });
