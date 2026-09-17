@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Box, Typography, Button, Card, CardContent, Stack, Chip, TextField, MenuItem,
+  Box, Typography, Button, Card, CardContent, Stack, Chip, TextField, MenuItem, Menu, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, AlertTitle,
   CircularProgress, IconButton, Tooltip, Table, TableHead, TableRow, TableCell,
   TableBody, Tabs, Tab,
@@ -12,6 +12,8 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import GroupsIcon from '@mui/icons-material/Groups';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import DownloadIcon from '@mui/icons-material/Download';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import { toast } from 'react-toastify';
 import api, { openApiFile, apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import { FilePickButton, BusyButton } from '../shared/UploadControls';
@@ -71,6 +73,31 @@ export default function CoursesPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [branchFilter, setBranchFilter] = useState('');
+  const [reportAnchor, setReportAnchor] = useState(null);
+  const [reportBusy, setReportBusy] = useState(false);
+
+  /**
+   * The expired-and-missing report, for the branch the filter already names.
+   *
+   * Chromium renders it server-side, which takes a few seconds on a small
+   * instance — hence the busy state rather than a click that appears to do
+   * nothing until the file lands.
+   */
+  const downloadReport = async (type) => {
+    setReportAnchor(null);
+    setReportBusy(true);
+    try {
+      const params = new URLSearchParams();
+      params.set('branch', branchFilter || 'all');
+      if (type) params.set('types', type);
+      await openApiFile(`/employee-courses/report.pdf?${params.toString()}`,
+        { filename: `קורסים-${type ? (data.course_types?.[type] || type) : 'הכל'}.pdf` });
+    } catch (err) {
+      toast.error(apiError(err, 'שגיאה בהפקת הדוח'));
+    } finally {
+      setReportBusy(false);
+    }
+  };
   const [statusFilter, setStatusFilter] = useState(0);
   const [search, setSearch] = useState('');
   const [form, setForm] = useState(null);   // {employee, mode:'create'|'edit', id?, ...EMPTY_FORM}
@@ -274,6 +301,27 @@ export default function CoursesPage() {
           <Button variant="outlined" startIcon={<GroupsIcon />} onClick={() => setGroups(true)}>
             זימון קבוצתי
           </Button>
+          {/* The report is the same question this screen answers, on paper.
+              Which branch it covers is whatever the filter above already says,
+              so the button never asks twice — and the menu exists because the
+              ask is usually one course ("מי פג לה עזרה ראשונה") rather than
+              all of them. */}
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            endIcon={<ArrowDropDownIcon />}
+            disabled={reportBusy}
+            onClick={e => setReportAnchor(e.currentTarget)}
+          >
+            {reportBusy ? 'מפיק…' : 'דוח פג תוקף וחסרים'}
+          </Button>
+          <Menu anchorEl={reportAnchor} open={!!reportAnchor} onClose={() => setReportAnchor(null)}>
+            <MenuItem onClick={() => downloadReport('')}>כל סוגי הקורסים</MenuItem>
+            <Divider />
+            {Object.entries(data.course_types || {}).map(([key, label]) => (
+              <MenuItem key={key} onClick={() => downloadReport(key)}>{label}</MenuItem>
+            ))}
+          </Menu>
         </Stack>
       </Stack>
 

@@ -101,7 +101,8 @@
     "test:theme-parity": "node scripts/theme-parity.test.js",
     "test:ui-version": "node scripts/ui-version-login.test.js",
     "test:tmt-basis": "node scripts/tmt-basis.test.js",
-    "test:dup-id": "node scripts/duplicate-israeli-id.test.js"
+    "test:dup-id": "node scripts/duplicate-israeli-id.test.js",
+    "test:course-report": "node scripts/course-report.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

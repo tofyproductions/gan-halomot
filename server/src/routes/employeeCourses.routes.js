@@ -8,6 +8,10 @@ const c = require('../controllers/employeeCourses.controller');
 router.use(requireRole('system_admin', 'branch_manager', 'accountant'));
 
 router.get('/', c.list);
+// The same rows as the screen, as a document. Scoped in the controller like
+// everything else here — the file carries a ת"ז and a phone number per row,
+// so a manager gets her branches and nobody else's.
+router.get('/report.pdf', c.reportPdf);
 router.post('/', c.create);
 router.get('/:id/file', c.getFile);
 router.put('/:id', c.update);

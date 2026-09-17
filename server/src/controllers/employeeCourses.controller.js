@@ -1,6 +1,8 @@
 const { EmployeeCourse, Employee, Branch } = require('../models');
 const { resolveBranchScope, canAccessBranch } = require('../utils/branch-scope');
 const { COURSE_TYPES, WARN_DAYS, statusOf, daysLeft } = require('../services/compliance');
+const { buildHtml: buildCourseReportHtml } = require('../services/course-report');
+const { htmlToPdf } = require('../services/htmlPdf');
 
 /**
  * קורסים והכשרות — the tracking sheet, moved in.
@@ -195,4 +197,141 @@ async function getFile(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, create, update, remove, getFile };
+
+/**
+ * The same question the screen answers, as a document somebody can carry.
+ *
+ * Only what is wrong: expired, and missing. A page per course type, because
+ * the ask is usually "who is due for עזרה ראשונה" rather than the whole list,
+ * and because `types` then narrows it to exactly that page.
+ *
+ * Scope is `resolveBranchScope`, the same as the screen: a branch manager gets
+ * her branches and management gets all of them. It matters more here than on
+ * the screen — the file carries ת"ז and a phone number for every row, and a
+ * manager has no business holding those for another branch's staff.
+ *
+ *   GET /employee-courses/report.pdf?branch=<id|all>&types=first_aid,safe_conduct
+ */
+
+/**
+ * The courses a missing row actually means something for.
+ *
+ * The same two the screen calls "לטיפול" (client CoursesPage `worstOf`), and
+ * for the same reason: these are the ones every member of staff is expected to
+ * hold and to renew. Extending it to the caregiver courses was tried and
+ * produced 50 and 72 "חסרות" against the live roster — a cook and a branch
+ * manager are not short of קורס מטפלות מתקדמות, and a page of people who were
+ * never expected to hold a certificate is a page nobody reads twice.
+ *
+ * The other types still appear in the report; they simply contribute rows only
+ * when a certificate actually expired, which is the only shortfall the data
+ * can evidence on its own. Making "who owes a caregiver course" answerable
+ * needs a rule about which positions require it, and that is the gan's rule to
+ * state, not one to infer from a roster.
+ */
+const REQUIRED_TYPES = ['first_aid', 'safe_conduct'];
+
+/**
+ * Of several rows of one type, the one that decides her standing.
+ *
+ * Latest expiry wins, because that is the certificate that is still good (or
+ * least stale). A row with no expiry is a course that does not expire, and it
+ * beats any dated one — she has done it, permanently.
+ */
+function latestOfType(courses, type) {
+  const of = courses.filter(c => c.course_type === type);
+  if (of.length === 0) return null;
+  const permanent = of.find(c => !c.expires_at);
+  if (permanent) return permanent;
+  return of.slice().sort((a, b) => new Date(b.expires_at) - new Date(a.expires_at))[0];
+}
+
+async function reportPdf(req, res, next) {
+  try {
+    const scope = await resolveBranchScope(req);
+    const empFilter = { is_active: true };
+    if (scope !== null) {
+      if (!scope.length) return res.status(403).json({ error: 'אין לך סניפים בניהול' });
+      empFilter.branch_id = { $in: scope };
+    }
+    if (req.query.branch && req.query.branch !== 'all') {
+      if (scope !== null && !scope.map(String).includes(String(req.query.branch))) {
+        return res.status(403).json({ error: 'הסניף המבוקש אינו בניהולך' });
+      }
+      empFilter.branch_id = req.query.branch;
+    }
+
+    const wanted = String(req.query.types || '').split(',').map(s => s.trim()).filter(Boolean);
+    const types = (wanted.length ? wanted : Object.keys(COURSE_TYPES))
+      .filter(t => COURSE_TYPES[t]);
+    if (!types.length) return res.status(400).json({ error: 'לא נבחר סוג קורס תקין' });
+
+    const employees = await Employee.find(empFilter)
+      .select('full_name branch_id israeli_id phone')
+      .sort({ full_name: 1 })
+      .lean();
+    const [courses, branches] = await Promise.all([
+      EmployeeCourse.find({ employee_id: { $in: employees.map(e => e._id) }, is_archived: false })
+        .select('-file_data').lean(),
+      Branch.find(scope === null ? {} : { _id: { $in: scope } }).select('name').lean(),
+    ]);
+    const branchNames = new Map(branches.map(b => [String(b._id), b.name]));
+    const byEmployee = new Map();
+    for (const c of courses) {
+      const k = String(c.employee_id);
+      byEmployee.set(k, [...(byEmployee.get(k) || []), c]);
+    }
+
+    const sections = types.map(type => ({
+      key: type,
+      label: COURSE_TYPES[type],
+      rows: employees.map(e => {
+        const mine = byEmployee.get(String(e._id)) || [];
+        const latest = latestOfType(mine, type);
+        // No row at all is "missing" only where a certificate is expected.
+        if (!latest) {
+          if (!REQUIRED_TYPES.includes(type)) return null;
+          return { employee: e, status: 'missing', course: null };
+        }
+        return statusOf(latest.expires_at) === 'expired'
+          ? { employee: e, status: 'expired', course: latest }
+          : null;
+      }).filter(Boolean).map(r => ({
+        full_name: r.employee.full_name,
+        israeli_id: r.employee.israeli_id || '',
+        phone: r.employee.phone || '',
+        branch_name: branchNames.get(String(r.employee.branch_id)) || '',
+        status: r.status,
+        course: r.course && {
+          expires_at: r.course.expires_at,
+          external_url: r.course.external_url || '',
+          has_file: !!r.course.file_name,
+        },
+      })),
+    }));
+
+    const branchLabel = empFilter.branch_id && !empFilter.branch_id.$in
+      ? (branchNames.get(String(empFilter.branch_id)) || 'סניף')
+      : 'כל הסניפים';
+    const html = buildCourseReportHtml({
+      sections,
+      title: 'קורסים והכשרות — פג תוקף וחסרים',
+      subtitle: branchLabel,
+      generatedAt: new Intl.DateTimeFormat('he-IL', {
+        timeZone: 'Asia/Jerusalem', day: '2-digit', month: '2-digit', year: 'numeric',
+      }).format(new Date()),
+      appUrl: process.env.CLIENT_URL || '',
+    });
+
+    const pdf = await htmlToPdf(html);
+    const stamp = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="courses-${stamp}.pdf"; filename*=UTF-8''${encodeURIComponent(`קורסים-${branchLabel}-${stamp}.pdf`)}`,
+    );
+    res.send(pdf);
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, create, update, remove, getFile, reportPdf, latestOfType, REQUIRED_TYPES };
