@@ -63,6 +63,34 @@ check('fewer day rows than children is an error, not a partial pairing', () => {
   assert.ok(/rows/.test(short.errors[0]));
 });
 
+// `values` is keyed by the normalized header name, so on a repeat the last
+// column wins the read — while anything finding that column again by name
+// lands on the first. A caller would then read one cell and write another.
+// The headers are typed into wrapped cells and this normalizes whitespace, so
+// the collision is one live edit away.
+check('two columns that normalize to one name are refused, not resolved', () => {
+  const collided = [
+    ['סדר יום - גן החלומות'],
+    ['התעורר בבית', 'הערות', 'הערות\n', 'ארוחת בוקר'],
+    ['', '', 'ישן טוב', ''],
+    ['', '', '', ''],
+    ['', '', '', ''],
+    ['', '', '', ''],
+  ];
+  const clash = pairRows({ childRows: parseChildRows(childGrid), childGrid, todayRows: collided });
+  assert.strictEqual(clash.pairs.length, 0);
+  assert.ok(/הערות/.test(clash.errors[0]));
+});
+
+console.log('\npairRows — the header travels with the pairs');
+check('the header it keyed the values by comes back', () => {
+  assert.deepStrictEqual(paired.header, ['התעורר בבית', 'אכל בבית - שעה', 'אכל בבית - כמות', 'ארוחת בוקר']);
+});
+check('and so does the row it was found on', () => assert.strictEqual(paired.headerIndex, 1));
+check('every paired row sits below that header', () => {
+  assert.ok(paired.pairs.every(p => p.row > paired.headerIndex));
+});
+
 // A gap BEFORE the first named child — an empty slot nobody has been put in
 // yet, sitting between the roster header and נויה. Anchoring on the first
 // named child's row instead of on the roster's own header would shift every

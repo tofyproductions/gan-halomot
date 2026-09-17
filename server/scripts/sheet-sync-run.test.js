@@ -13,7 +13,7 @@
  */
 const assert = require('assert');
 const { runPass } = require('../src/services/sheet-sync/run');
-const { SHEET } = require('./lib/nursery-history');
+const { SHEET, splitMissing } = require('./lib/nursery-history');
 
 let failures = 0;
 function check(label, fn) {
@@ -42,7 +42,7 @@ function twoChildren() {
   ]);
 }
 
-function deps({ today, logs, shadow, children, roster, failWrite }) {
+function deps({ today, logs, shadow, children, roster, failWrite, looseAnswers }) {
   const writes = [];
   const saved = [];
   const calls = [];
@@ -62,7 +62,11 @@ function deps({ today, logs, shadow, children, roster, failWrite }) {
     childrenByAccessId: async (accessIds) => {
       calls.push('childrenByAccessId');
       state.askedFor = accessIds;
-      return children || twoChildren();
+      const all = children || twoChildren();
+      // A real lookup answers about what it was asked and nothing else. One
+      // scenario deliberately breaks that to prove the pass notices.
+      if (looseAnswers) return all;
+      return new Map([...all].filter(([id]) => accessIds.includes(id)));
     },
     loadLogs: async () => { calls.push('loadLogs'); return logs; },
     saveLog: async (childId, set, conflicts, ctx) => {
@@ -242,6 +246,74 @@ scenario('a roster row with a blank AccessID is never looked up', async () => {
   });
 });
 
+scenario('two roster rows carrying one AccessID are both left out', async () => {
+  const roster = [
+    ['ילדים - משה דיין', '', '', ''],
+    ['שם מלא', 'תאריך לידה', 'AccessID', 'מספר פלאפון'],
+    ['נויה חגי', 45897, 'id-1', '0500000000'],
+    // The row below נויה was copy-pasted and the AccessID came with it.
+    ['ליה לוין', 45887, 'id-1', '0500000000'],
+    ['יובל ראובני', 45895, 'id-3', '0500000000'],
+  ];
+  const d = deps({
+    roster,
+    today: todayGrid([['', '', '', ''], ['', '', '', ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: 'ישן טוב', home: {}, meals: {}, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { staff_note: '' } },
+    children: new Map([
+      ['id-1', { _id: 'c1', child_name: 'נויה חגי', classroom_id: null }],
+      ['id-3', { _id: 'c3', child_name: 'יובל ראובני', classroom_id: null }],
+    ]),
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('the repeated id is never asked about', () => assert.ok(!d.state.askedFor.includes('id-1')));
+  check('both rows that carry it are reported', () => {
+    const both = res.skipped.filter(s => s.access_id === 'id-1');
+    assert.strictEqual(both.length, 2);
+    assert.ok(both.every(s => /more than one roster row/.test(s.why)));
+  });
+  check('nothing is written into either of their rows', () => assert.strictEqual(d.writes.length, 0));
+  check('no log is written for the one child they both resolve to', () => {
+    assert.ok(!d.saved.some(s => s.childId === 'c1'));
+  });
+  check('the child on the row that is fine is still synced', () => {
+    assert.ok(res.skipped.every(s => s.access_id !== 'id-3'));
+    assert.ok(Object.prototype.hasOwnProperty.call(d.state.shadowSaved, 'id-3'));
+  });
+  check('and no shadow claims anything about the repeated id', () => {
+    assert.ok(!Object.prototype.hasOwnProperty.call(d.state.shadowSaved, 'id-1'));
+  });
+});
+
+scenario('a lookup that answers about something else is reported, not used', async () => {
+  const d = deps({
+    today: todayGrid([['', '', '', ''], ['', '', '', '']]),
+    logs: new Map(),
+    shadow: {},
+    looseAnswers: true,
+    // One id missing — no single Child carries it, which is what the default
+    // lookup does when two Child documents share one — and one id nobody asked
+    // about.
+    children: new Map([
+      ['id-1', { _id: 'c1', child_name: 'נויה חגי', classroom_id: null }],
+      ['id-99', { _id: 'c9', child_name: 'ילד אחר לגמרי', classroom_id: null }],
+    ]),
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('the id that resolved to nothing is reported', () => {
+    assert.ok(res.skipped.some(s => s.access_id === 'id-2' && /no single Child/.test(s.why)));
+  });
+  check('the unasked-for answer is reported', () => {
+    assert.ok(res.skipped.some(s => s.access_id === 'id-99' && /never asked/.test(s.why)));
+  });
+  check('and it is never synced', () => {
+    assert.ok(!d.saved.some(s => s.childId === 'c9'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(d.state.shadowSaved, 'id-99'));
+  });
+});
+
 // --- 6: the pairing refused ----------------------------------------------
 
 scenario('pairRows refusing aborts the pass instead of half-applying it', async () => {
@@ -261,6 +333,25 @@ scenario('pairRows refusing aborts the pass instead of half-applying it', async 
   check('nothing written', () => assert.strictEqual(d.writes.length, 0));
   check('the shadow is not advanced', () => assert.strictEqual(d.state.shadowSaved, null));
   check('the database was not even read', () => assert.ok(!d.calls.includes('childrenByAccessId')));
+});
+
+scenario('two columns that normalise to one name abort the pass', async () => {
+  const d = deps({
+    // The second הערות carries a trailing newline, which is what a header
+    // typed into a wrapped cell looks like. Read by name the last one wins;
+    // located by index the first one does. Writing one and reading the other
+    // is worse than not syncing.
+    today: todayGrid([['', '', '', ''], ['', '', '', '']], ['התעורר בבית', 'הערות', 'הערות\n', 'ארוחת בוקר']),
+    logs: new Map([['c1', { staff_note: 'ישן טוב', home: {}, meals: {}, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { staff_note: '' } },
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('it reports the refusal', () => assert.ok(res.errors.length > 0));
+  check('and names the column', () => assert.ok(/הערות/.test(res.errors[0])));
+  check('nothing written to the sheet', () => assert.strictEqual(d.writes.length, 0));
+  check('nothing saved', () => assert.strictEqual(d.saved.length, 0));
+  check('the shadow is not advanced', () => assert.strictEqual(d.state.shadowSaved, null));
 });
 
 // --- 7: a column we hold nothing for, on a child with no day yet ----------
@@ -341,6 +432,51 @@ scenario('both moved on מה חסר: the sheet wins and our list is kept whole',
   check('our list is kept as a list, not flattened to a string', () => {
     const s = d.saved.find(x => x.childId === 'c1');
     assert.deepStrictEqual(s.conflicts[0].ours, ['משחת החתלה']);
+  });
+});
+
+// --- 10b: the list's round trip back to the cell --------------------------
+//
+// `join(', ')` in run.js is the only place a list crosses back to the sheet,
+// and the sheet's own reader is `splitMissing`. Nothing else in this suite
+// touches the join — scenario 10 is incoming — so without this a change to
+// either side breaks the mirror with every test still green.
+
+scenario('a list we hold goes out as one cell the sheet can read back', async () => {
+  const header = ['התעורר בבית', 'מה חסר'];
+  const d = deps({
+    today: todayGrid([['', ''], ['', '']], header),
+    logs: new Map([['c1', { missing: ['טיטולים', 'מגבונים'], home: {}, meals: {}, sleep: {} }]]),
+    shadow: { 'id-1': { missing: [] } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('one cell written', () => assert.strictEqual(d.writes.length, 1));
+  check('joined exactly as the board has always shown it', () => {
+    assert.strictEqual(d.writes[0].value, 'טיטולים, מגבונים');
+  });
+  check('and the sheet\'s own reader gets the list back unchanged', () => {
+    assert.deepStrictEqual(splitMissing(d.writes[0].value), ['טיטולים', 'מגבונים']);
+  });
+});
+
+scenario('a list we emptied clears the cell, and reads back as empty', async () => {
+  const header = ['התעורר בבית', 'מה חסר'];
+  const d = deps({
+    // The sheet still holds what it held last pass; we are the side that
+    // emptied the list.
+    today: todayGrid([['', 'טיטולים'], ['', '']], header),
+    logs: new Map([['c1', { missing: [], home: {}, meals: {}, sleep: {} }]]),
+    shadow: { 'id-1': { missing: ['טיטולים'] } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('one cell written', () => assert.strictEqual(d.writes.length, 1));
+  check('and it is emptied, not left holding the old item', () => {
+    assert.strictEqual(d.writes[0].value, '');
+  });
+  check('which the sheet\'s reader takes as an empty list', () => {
+    assert.deepStrictEqual(splitMissing(d.writes[0].value), []);
   });
 });
 

@@ -39,7 +39,14 @@ function defaultDeps() {
       // of unrelated children under one key.
       const rows = await Child.find({ sheet_access_id: { $in: accessIds, $ne: '' } })
         .select('_id child_name sheet_access_id classroom_id').lean();
-      return new Map(rows.map(r => [r.sheet_access_id, r]));
+      // `sheet_access_id` is indexed, not unique, so two Child documents can
+      // hold one id. Keying them into a Map would quietly keep whichever came
+      // back last and file a whole day onto a child chosen by sort order. The
+      // id is dropped instead, and the pass reports the row as one it could
+      // not resolve.
+      const timesSeen = new Map();
+      for (const r of rows) timesSeen.set(r.sheet_access_id, (timesSeen.get(r.sheet_access_id) || 0) + 1);
+      return new Map(rows.filter(r => timesSeen.get(r.sheet_access_id) === 1).map(r => [r.sheet_access_id, r]));
     },
     loadLogs: async (childIds, date) => {
       const rows = await DailyLog.find({ child_id: { $in: childIds }, date }).lean();
@@ -143,8 +150,11 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
   const childRows = parseChildRows(childGrid);
 
   // Both tabs, both anchored on their own header row — see roster.js for why
-  // the first named child is not a safe origin.
-  const { pairs, errors } = pairRows({ childRows, childGrid, todayRows: todayGrid });
+  // the first named child is not a safe origin. The header comes back with the
+  // pairs so that the column a value was READ from and the column it is
+  // WRITTEN to are the same lookup over the same array; re-deriving it here is
+  // how those two drift apart.
+  const { pairs, errors, header, headerIndex } = pairRows({ childRows, childGrid, todayRows: todayGrid });
   // A refusal here is not a partial result to work around. Pairing is by
   // position and nothing else, so "most of it lined up" means the rest lined
   // up onto the wrong families. Nothing has been read or written yet, and
@@ -152,27 +162,58 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
   if (errors.length) { result.errors = errors; return result; }
   result.children = pairs.length;
 
-  // Every row and column written below is read off this grid, never computed
-  // beside it: `writeCells` has no bounds check of its own, and the Sheets API
-  // grows a sheet to fit an out-of-range write rather than refusing it. A
-  // target derived from anything but the grid we just read can therefore
-  // append phantom rows to the board the room is looking at.
-  const headerIndex = todayGrid.findIndex(r => (r || []).some(c => normalizeFieldName(c) === 'התעורר בבית'));
-  const header = (todayGrid[headerIndex] || []).map(normalizeFieldName);
-
   // A roster row whose AccessID cell is empty is not an identity. Asking the
   // database about '' would match every child who was never in the old sheet.
-  const identified = [];
+  //
+  // Neither is an AccessID that two rows carry. Both rows would resolve to one
+  // Child: the second row's merge overwrites the first against the same stale
+  // log, and in the other direction that child's outgoing value is written
+  // into BOTH rows, clobbering whatever the room typed in the other one. A
+  // copy-pasted roster row is an ordinary live edit, and this is the same
+  // refusal `scripts/sheet-sync-match.js` already makes when it establishes
+  // the links — a pass must not be more permissive than the script that
+  // decided which child is which.
+  //
+  // Skipped, not refused for the whole pass, and the distinction is
+  // deliberate: pairRows refuses a structural problem because position is the
+  // only mechanism it has, so a bad structure makes EVERY row suspect. A
+  // repeated id says nothing about the rows that do not carry it — they are
+  // still paired correctly and their day is still theirs. Same reasoning as
+  // the blank id above, and the same choice the match script makes.
+  const timesSeen = new Map();
   for (const p of pairs) {
-    if (p.access_id) identified.push(p);
-    else result.skipped.push({ access_id: '', name: p.name, row: p.row, why: 'the roster row carries no AccessID' });
+    if (p.access_id) timesSeen.set(p.access_id, (timesSeen.get(p.access_id) || 0) + 1);
   }
 
-  const byAccess = await d.childrenByAccessId(identified.map(p => p.access_id));
+  const identified = [];
+  for (const p of pairs) {
+    if (!p.access_id) {
+      result.skipped.push({ access_id: '', name: p.name, row: p.row, why: 'the roster row carries no AccessID' });
+    } else if (timesSeen.get(p.access_id) > 1) {
+      result.skipped.push({ access_id: p.access_id, name: p.name, row: p.row, why: 'more than one roster row carries this AccessID' });
+    } else {
+      identified.push(p);
+    }
+  }
+
+  const asked = identified.map(p => p.access_id);
+  const byAccess = await d.childrenByAccessId(asked);
   const known = identified.filter(p => byAccess.has(p.access_id));
+  // An id we asked about and got nothing back for. `Child.sheet_access_id` is
+  // indexed but not unique, so this covers two cases the Map cannot tell
+  // apart — no child carries the id, or several do and the lookup refused to
+  // pick one. Both mean the same thing here: there is no child this row can
+  // safely be, so the row is reported and left alone.
   for (const p of identified) {
     if (!byAccess.has(p.access_id)) {
-      result.skipped.push({ access_id: p.access_id, name: p.name, why: 'no Child carries this sheet_access_id' });
+      result.skipped.push({ access_id: p.access_id, name: p.name, why: 'no single Child carries this sheet_access_id' });
+    }
+  }
+  // And an answer about something nobody asked about means the lookup is not
+  // keyed the way this pass believes it is. Never used, always reported.
+  for (const id of byAccess.keys()) {
+    if (!asked.includes(id)) {
+      result.skipped.push({ access_id: id, name: '', why: 'the lookup answered about an id this pass never asked for' });
     }
   }
 
@@ -210,10 +251,17 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
       }
     }
 
+    // Every row and column below is read off the grid this pass just read,
+    // never computed beside it: `writeCells` has no bounds check of its own,
+    // and the Sheets API grows a sheet to fit an out-of-range write rather
+    // than refusing it. A target derived from anything but that grid can
+    // therefore append phantom rows to the board the room is looking at. The
+    // column is an index into the very header the values were keyed by, and
+    // the row must sit below that header and inside the grid.
     for (const [path, value] of Object.entries(toSheet)) {
       const col = header.indexOf(normalizeFieldName(COLUMN_FOR_PATH[path]));
       if (col < 0) continue;
-      if (pair.row < 0 || pair.row >= todayGrid.length) continue;
+      if (pair.row <= headerIndex || pair.row >= todayGrid.length) continue;
       cellWrites.push({
         tab: SHEET.today,
         row: pair.row,
