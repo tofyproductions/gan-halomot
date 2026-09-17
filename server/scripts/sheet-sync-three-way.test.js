@@ -163,5 +163,12 @@ check('both sides moved but landed on the same value — agreement, not conflict
   assert.deepStrictEqual(r.conflicts, []);
 });
 
+check('merge() and merge(null) do not throw — empty in, empty out', () => {
+  const r1 = merge();
+  assert.deepStrictEqual(r1, { toOurs: {}, toSheet: {}, conflicts: [] });
+  const r2 = merge(null);
+  assert.deepStrictEqual(r2, { toOurs: {}, toSheet: {}, conflicts: [] });
+});
+
 console.log(failures === 0 ? '\nOK\n' : `\n${failures} FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

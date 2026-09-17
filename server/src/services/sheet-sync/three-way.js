@@ -23,6 +23,14 @@ function blank(v) {
 
 function sameValue(a, b) {
   if (Array.isArray(a) || Array.isArray(b)) {
+    // `missing` (what a family needs to bring tomorrow) is the only list on
+    // the board, and it is typed by hand, in whatever order the staff member
+    // notices things, into one comma-joined cell. There is no "set" on the
+    // sheet's side to compare against — reordering the line IS the edit a
+    // person just made to it. Comparing by position, not by membership, is
+    // what lets that rewrite reach the other board; a set comparison here
+    // would make a staff member's re-typed line look unchanged and drop it
+    // silently, which is exactly the failure this file exists to prevent.
     const l = Array.isArray(a) ? a : [];
     const r = Array.isArray(b) ? b : [];
     return l.length === r.length && l.every((x, i) => x === r[i]);
@@ -31,7 +39,12 @@ function sameValue(a, b) {
   return a === b;
 }
 
-function merge({ sheet, ours, shadow }) {
+// No shape is refused. A caller passing nothing, or an explicit null, is not
+// a caller with malformed data — it is the first pass, or a field nobody has
+// touched on any side — and this file's whole premise is that "we don't know
+// yet" must resolve to "nothing moves", never to a thrown error.
+function merge(args) {
+  const { sheet, ours, shadow } = args || {};
   const s = sheet || {};
   const o = ours || {};
   const sh = shadow || {};
