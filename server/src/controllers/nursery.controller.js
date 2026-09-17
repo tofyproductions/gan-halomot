@@ -70,7 +70,16 @@ async function board(req, res) {
   const logs = children.length
     ? await DailyLog.find({ date, child_id: { $in: children.map(c => c._id) } }).lean()
     : [];
-  const byChild = new Map(logs.map(l => [String(l.child_id), l]));
+  // `.lean()` hands back the stored document, not the schema's idea of it: a
+  // row written before `sync_conflicts` existed comes back without the key at
+  // all rather than with its `[]` default. Normalised here, the same way
+  // services/sheet-sync/run.js already has to, so the board can always show
+  // what a conflict rejected without every reader re-deciding what a missing
+  // key means.
+  const byChild = new Map(logs.map(l => [String(l.child_id), {
+    ...l,
+    sync_conflicts: Array.isArray(l.sync_conflicts) ? l.sync_conflicts : [],
+  }]));
 
   const branchId = room.branch_id?._id || room.branch_id;
   const [options, menu, menuDoc, classDay] = await Promise.all([
@@ -221,15 +230,25 @@ async function updateLog(req, res) {
   }
   if (Object.keys(set).length === 0) return res.json({ ok: true, changed: 0 });
 
+  // Looking at both values and choosing one IS the resolution. Leaving the
+  // note up after the teacher has acted would make it furniture, and the next
+  // person would learn to ignore it. Captured before the bookkeeping fields
+  // below join `set`, so only the paths a human actually meant to change are
+  // the ones a conflict note gets pulled for.
+  const touched = Object.keys(set);
+
   set.child_name = child.child_name;
   set.classroom_id = child.classroom_id?._id || null;
   set.branch_id = child.classroom_id?.branch_id || null;
   set.updated_by = req.user.id;
   set.updated_by_name = req.user.full_name || '';
 
+  const update = { $set: set };
+  if (touched.length) update.$pull = { sync_conflicts: { field: { $in: touched } } };
+
   const log = await DailyLog.findOneAndUpdate(
     { child_id: child._id, date },
-    { $set: set, $setOnInsert: { child_id: child._id, date } },
+    { ...update, $setOnInsert: { child_id: child._id, date } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   ).lean();
 

@@ -56,49 +56,80 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
   const present = log.attendance === 'הגיע';
   const absent = log.attendance === 'חסר';
 
+  /**
+   * What a sync conflict rejected for one field, if this day has one.
+   *
+   * The sheet's value already won and sits in the cell above — that is the
+   * whole of the conflict policy (see `DailyLog.sync_conflicts`). This is
+   * what OURS held at the moment of the sync, so the person in the room sees
+   * both instead of a number nobody here typed with no explanation. `.lean()`
+   * on the board's own read does not backfill a document written before this
+   * field existed, so `log.sync_conflicts` may be `undefined` rather than
+   * `[]` — tolerated here rather than assumed away.
+   */
+  const conflictNote = (fieldPath) => (log.sync_conflicts || [])
+    .filter(c => c.field === fieldPath)
+    .map((c, i) => (
+      <Typography key={i} variant="caption" sx={{ display: 'block', color: 'warning.main', mt: 0.25 }}>
+        אצלנו נרשם: {Array.isArray(c.ours) ? c.ours.join(', ') : c.ours || '—'}
+      </Typography>
+    ));
+
   const mealRow = (key, label, hoursKey) => (
     <Box key={key}>
       <Typography variant="caption" color="primary" fontWeight={700}>{label}</Typography>
       <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-        <FieldButton
-          label="כמות" highlight
-          value={meals[key]?.amount}
-          onClick={(e) => open(e, {
-            kind: 'value', path: `meals.${key}.amount`, title: `${label} — כמות`,
-            options: options.meal_amounts, value: meals[key]?.amount,
-          })}
-        />
-        <FieldButton
-          label='תמ״ל' highlight
-          value={meals[key]?.formula}
-          onClick={(e) => open(e, {
-            kind: 'value', path: `meals.${key}.formula`, title: `${label} — תמ״ל`,
-            options: options.formula_amounts, value: meals[key]?.formula,
-          })}
-        />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <FieldButton
+            label="כמות" highlight
+            value={meals[key]?.amount}
+            onClick={(e) => open(e, {
+              kind: 'value', path: `meals.${key}.amount`, title: `${label} — כמות`,
+              options: options.meal_amounts, value: meals[key]?.amount,
+            })}
+          />
+          {conflictNote(`meals.${key}.amount`)}
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <FieldButton
+            label='תמ״ל' highlight
+            value={meals[key]?.formula}
+            onClick={(e) => open(e, {
+              kind: 'value', path: `meals.${key}.formula`, title: `${label} — תמ״ל`,
+              options: options.formula_amounts, value: meals[key]?.formula,
+            })}
+          />
+          {conflictNote(`meals.${key}.formula`)}
+        </Box>
       </Stack>
       {hoursKey && (
         <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-          <FieldButton
-            label="השכבה" highlight
-            value={sleep[hoursKey]?.start}
-            empty="--:--"
-            onClick={(e) => open(e, {
-              kind: 'time', path: `sleep.${hoursKey}.start`, title: 'שעת השכבה',
-              hours: options.hours[`sleep_${hoursKey}`] || options.hours.sleep_noon,
-              value: sleep[hoursKey]?.start,
-            })}
-          />
-          <FieldButton
-            label="השכמה" highlight
-            value={sleep[hoursKey]?.end}
-            empty="--:--"
-            onClick={(e) => open(e, {
-              kind: 'time', path: `sleep.${hoursKey}.end`, title: 'שעת השכמה',
-              hours: options.hours[`sleep_${hoursKey}`] || options.hours.sleep_noon,
-              value: sleep[hoursKey]?.end,
-            })}
-          />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <FieldButton
+              label="השכבה" highlight
+              value={sleep[hoursKey]?.start}
+              empty="--:--"
+              onClick={(e) => open(e, {
+                kind: 'time', path: `sleep.${hoursKey}.start`, title: 'שעת השכבה',
+                hours: options.hours[`sleep_${hoursKey}`] || options.hours.sleep_noon,
+                value: sleep[hoursKey]?.start,
+              })}
+            />
+            {conflictNote(`sleep.${hoursKey}.start`)}
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <FieldButton
+              label="השכמה" highlight
+              value={sleep[hoursKey]?.end}
+              empty="--:--"
+              onClick={(e) => open(e, {
+                kind: 'time', path: `sleep.${hoursKey}.end`, title: 'שעת השכמה',
+                hours: options.hours[`sleep_${hoursKey}`] || options.hours.sleep_noon,
+                value: sleep[hoursKey]?.end,
+              })}
+            />
+            {conflictNote(`sleep.${hoursKey}.end`)}
+          </Box>
         </Stack>
       )}
     </Box>
@@ -158,23 +189,29 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
         <Divider sx={{ my: 2 }} />
 
         <Stack direction="row" spacing={1}>
-          <FieldButton
-            label="יציאות" highlight
-            value={log.diapers}
-            onClick={(e) => open(e, {
-              kind: 'value', path: 'diapers', title: 'יציאות',
-              options: options.diapers, value: log.diapers,
-            })}
-          />
-          <FieldButton
-            label="חסר למחר"
-            value={(log.missing || []).join(', ')}
-            onClick={(e) => open(e, {
-              kind: 'value', path: 'missing', title: 'מה חסר למחר', multi: true,
-              options: options.missing, value: log.missing || [],
-            })}
-            sx={{ borderColor: (log.missing || []).length ? 'error.light' : undefined }}
-          />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <FieldButton
+              label="יציאות" highlight
+              value={log.diapers}
+              onClick={(e) => open(e, {
+                kind: 'value', path: 'diapers', title: 'יציאות',
+                options: options.diapers, value: log.diapers,
+              })}
+            />
+            {conflictNote('diapers')}
+          </Box>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <FieldButton
+              label="חסר למחר"
+              value={(log.missing || []).join(', ')}
+              onClick={(e) => open(e, {
+                kind: 'value', path: 'missing', title: 'מה חסר למחר', multi: true,
+                options: options.missing, value: log.missing || [],
+              })}
+              sx={{ borderColor: (log.missing || []).length ? 'error.light' : undefined }}
+            />
+            {conflictNote('missing')}
+          </Box>
         </Stack>
 
         {(log.missing || []).length > 0 && (
@@ -197,6 +234,7 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
           minRows={1}
           sx={{ mt: 2 }}
         />
+        {conflictNote('staff_note')}
       </CardContent>
 
       {picker?.kind === 'value' && (
