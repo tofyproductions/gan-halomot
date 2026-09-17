@@ -573,9 +573,18 @@ scenario('a clean pass says what it did', async () => {
     }),
   });
   const lines = describeTick(await tick(OPEN_HOUR, d));
-  check('one line', () => assert.strictEqual(lines.length, 1));
+  // Two: what the pass did, and why a child was left out. The count alone
+  // ("1 skipped") cannot say WHICH child or what was wrong with her, and the
+  // reason was already in hand — it was simply never printed.
+  check('the pass line, and a line naming the refusal', () =>
+    assert.strictEqual(lines.length, 2, lines.map(l => l.text).join(' | ')));
   check('at log level, not error — an ordinary day is not a problem', () => {
     assert.strictEqual(lines[0].level, 'log');
+  });
+  check('the skipped child is named, with the reason', () => {
+    assert.strictEqual(lines[1].level, 'error');
+    assert.ok(/ילד עזב/.test(lines[1].text), lines[1].text);
+    assert.ok(/sheet_access_id/.test(lines[1].text), lines[1].text);
   });
   check('carrying the counts a person needs, and the mode they are in', () => {
     assert.ok(/12 children/.test(lines[0].text), lines[0].text);
@@ -659,6 +668,70 @@ scenario('disagreements are named in the error stream', async () => {
   check('and the night is still marked done — it was a real audit', () => {
     assert.strictEqual(d.markNightlyRanCalls.length, 1);
   });
+});
+
+
+// ——— the quiet rule ————————————————————————————————————————————————
+//
+// A pass runs every two minutes for fourteen hours. On an ordinary day every
+// one of those 420 results is identical, and the one that is not is what the
+// rollout gate turns on. A log that prints all 420 buries it.
+
+/** The same wall-clock hour, later; and the next hour. */
+const OPEN_HOUR_LATER = new Date('2026-09-17T07:40:00Z');
+const NEXT_HOUR = new Date('2026-09-17T08:00:00Z');
+
+scenario('an unchanged pass in the same hour says nothing the second time', async () => {
+  const same = { date: '2026-09-17', children: 12, in: 0, out: 0, conflicts: 0, skipped: [], errors: [] };
+  const d = deps({ cfg: { enabled: true, branches: oneBranch }, runPass: async () => ({ ...same }) });
+  const first = describeTick(await tick(OPEN_HOUR, d));
+  const second = describeTick(await tick(OPEN_HOUR_LATER, d));
+  check('the first pass is printed', () => assert.strictEqual(first.length, 1));
+  check('the second is not', () => assert.strictEqual(second.length, 0, second.map(l => l.text).join(' | ')));
+});
+
+scenario('a pass that moved something is printed even in the same hour', async () => {
+  let n = 0;
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    runPass: async () => {
+      n += 1;
+      return { date: '2026-09-17', children: 12, in: n === 1 ? 0 : 3, out: 0, conflicts: 0, skipped: [], errors: [] };
+    },
+  });
+  describeTick(await tick(OPEN_HOUR, d));
+  const moved = describeTick(await tick(OPEN_HOUR_LATER, d));
+  check('the change is printed', () => assert.strictEqual(moved.length, 1, moved.map(l => l.text).join(' | ')));
+  check('and it carries the new count', () => assert.ok(/3 in/.test(moved[0].text), moved[0].text));
+});
+
+scenario('an unchanged pass still speaks once an hour', async () => {
+  const same = { date: '2026-09-17', children: 12, in: 0, out: 0, conflicts: 0, skipped: [], errors: [] };
+  const d = deps({ cfg: { enabled: true, branches: oneBranch }, runPass: async () => ({ ...same }) });
+  describeTick(await tick(OPEN_HOUR, d));
+  const sameHour = describeTick(await tick(OPEN_HOUR_LATER, d));
+  const nextHour = describeTick(await tick(NEXT_HOUR, d));
+  check('silent within the hour', () => assert.strictEqual(sameHour.length, 0));
+  check('a heartbeat when the hour turns', () =>
+    assert.strictEqual(nextHour.length, 1, nextHour.map(l => l.text).join(' | ')));
+});
+
+scenario('a refusal is never quiet, however often it repeats', async () => {
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    runPass: async () => ({
+      date: '2026-09-17', children: 0, in: 0, out: 0, conflicts: 0, skipped: [],
+      errors: ['סדר יום has 3 rows, needs 18 for 16 children'],
+    }),
+  });
+  const first = describeTick(await tick(OPEN_HOUR, d));
+  const second = describeTick(await tick(OPEN_HOUR_LATER, d));
+  check('printed the first time, at error level', () => {
+    assert.strictEqual(first.length, 1);
+    assert.strictEqual(first[0].level, 'error');
+  });
+  check('and again — a refusal is not a heartbeat', () =>
+    assert.strictEqual(second.length, 1, second.map(l => l.text).join(' | ')));
 });
 
 (async () => {

@@ -163,8 +163,31 @@ function firstTimeToday(date, key) {
   announced.add(key);
   return true;
 }
+/**
+ * The last day-pass line printed for each branch, and the hour it went out.
+ *
+ * A pass runs every two minutes for fourteen hours — 420 a day per branch, 840
+ * with both — and on an ordinary day every one of them says the same thing.
+ * The one line that reads "3 in, 1 conflicts" then scrolls past inside 419
+ * copies of its neighbour, on a host with a bounded log buffer, during the
+ * read-only day whose log IS the evidence the write-back decision rests on.
+ *
+ * This module already made that argument once, about the nightly check firing
+ * thirty times an hour, and then let the day pass emit fourteen times that
+ * volume. So: print when something changed, print every refusal and every
+ * failure whatever happened before, and print once an hour regardless so
+ * "it is still running and still quiet" stays visible.
+ */
+const lastPassLine = new Map();
+function passIsWorthPrinting(key, signature, hour) {
+  const prev = lastPassLine.get(key);
+  if (prev && prev.signature === signature && prev.hour === hour) return false;
+  lastPassLine.set(key, { signature, hour });
+  return true;
+}
+
 /** For the suite: a scenario must not inherit the previous one's silence. */
-function resetAnnouncements() { announced.clear(); announcedOn = null; }
+function resetAnnouncements() { announced.clear(); announcedOn = null; lastPassLine.clear(); }
 
 /**
  * Which mode this branch runs in.
@@ -265,7 +288,7 @@ async function tick(now = new Date(), deps = null) {
       try {
         // eslint-disable-next-line no-await-in-loop
         const passResult = await d.runPass({ branchId: b.branch_id, sheetId: b.sheet_id, date, mode });
-        out.push({ branch, sheet, mode, ...passResult });
+        out.push({ branch, sheet, mode, hour, ...passResult });
         // The second silent-failure mode: pairRows refused the structure, so
         // runPass returned before reading a child or writing a cell. Nothing
         // threw, so the catch below never sees this one — it has to be
@@ -429,7 +452,26 @@ function describeTick(result) {
     } else if (e.errors && e.errors.length) {
       error(`[sheet-sync] ${at} (${e.mode}): the pass refused — ${e.errors.map(String).join('; ')}`);
     } else if (e.children !== undefined) {
-      log(`[sheet-sync] ${at} (${e.mode}): ${e.children} children, ${e.in} in, ${e.out} out, ${e.conflicts} conflicts, ${(e.skipped || []).length} skipped`);
+      const skipped = e.skipped || [];
+      const signature = `${e.children}|${e.in}|${e.out}|${e.conflicts}|${skipped.length}`;
+      if (passIsWorthPrinting(`${e.branch}|${e.date}`, signature, e.hour)) {
+        log(`[sheet-sync] ${at} (${e.mode}): ${e.children} children, ${e.in} in, ${e.out} out, ${e.conflicts} conflicts, ${skipped.length} skipped`);
+      }
+      // A refusal is never quiet, and never a bare count. "1 skipped" cannot
+      // tell anybody that a child's supplies list is unwritable, and the
+      // reason is already in hand — it was simply never printed.
+      if (skipped.length) {
+        const byWhy = new Map();
+        for (const s of skipped) {
+          const why = s.why || 'לא צוין';
+          if (!byWhy.has(why)) byWhy.set(why, []);
+          byWhy.get(why).push([s.name, s.field].filter(Boolean).join(' · ') || s.access_id || '?');
+        }
+        for (const [why, who] of byWhy) {
+          if (!firstTimeToday(e.date, `skip|${e.branch}|${why}`)) continue;
+          error(`[sheet-sync] ${at}: ${who.length} × ${why} — ${who.slice(0, 10).join(', ')}${who.length > 10 ? ` +${who.length - 10}` : ''}`);
+        }
+      }
     } else if (e.auditPending) {
       // Nothing. The archive job writes its row around 23:30 and this check
       // starts at 23:00; saying so every two minutes would drown the night's
