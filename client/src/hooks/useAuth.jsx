@@ -1,6 +1,9 @@
 import { useState, useEffect, createContext, useContext } from 'react';
 import api from '../api/client';
 import { registerNativePush, unregisterNativePush } from '../utils/nativePush';
+import {
+  isAdminRole, isViewerRole, isManagerRole, managesBranchOf, canSeeAllBranchesRole,
+} from './roleFlags';
 
 const AuthContext = createContext(null);
 
@@ -122,20 +125,21 @@ export function AuthProvider({ children }) {
   };
 
   const isAuthenticated = !!user;
-  const isAdmin = user?.role === 'system_admin';
+  // Who this person is, and what that lets them reach.
+  //
+  // The rules live in ./roleFlags, free of React, so they can be asserted with
+  // real user shapes under plain node instead of being read back out of this
+  // file by a regular expression. See server/scripts/viewer-client-manager.test.js.
+  const isAdmin = isAdminRole(user);
   const isAccountant = user?.role === 'accountant';
   // "מנהל מערכת - לצפייה בלבד": reads what the admin reads across every
   // branch; acts as a branch manager inside managed_branch_ids; every other
   // write is queued for approval by the server (202 {proposed:true}).
-  const isViewer = user?.role === 'admin_viewer';
-  const isManager = user?.role === 'branch_manager' || isAdmin;
-  // Can use the cross-branch "כל הסניפים" view: admins always; accountants
-  // (they need cross-branch payroll consolidation); managers who oversee
-  // more than one branch (multi-branch heads like Lidor); viewers always.
-  const canSeeAllBranches = isAdmin || isAccountant || isViewer || (user?.managed_branch_ids?.length || 0) > 1;
+  const isViewer = isViewerRole(user);
+  const isManager = isManagerRole(user);
+  const canSeeAllBranches = canSeeAllBranchesRole(user);
   /** May this person edit rows of this branch directly? */
-  const managesBranch = (branchId) => isAdmin
-    || (user?.managed_branch_ids || []).map(String).includes(String(branchId));
+  const managesBranch = (branchId) => managesBranchOf(user, branchId);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, loginWithPassword, requestResetCode, resetWithCode, setPassword, refreshProfile, logout, isAuthenticated, isAdmin, isAccountant, isViewer, isManager, canSeeAllBranches, managesBranch }}>

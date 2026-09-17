@@ -230,11 +230,41 @@ function MissingChip({ missing }) {
 }
 
 export default function EmployeeManager() {
-  const { isAdmin, isManager, isAccountant, isViewer } = useAuth();
+  const { isAdmin, isManager, isAccountant, isViewer, user, managesBranch } = useAuth();
   const navigate = useNavigate();
   // Accountant (הנה"ח) manages employees with the same add/edit rights as a
   // manager — only the visible tab set differs (handled by tab access config).
+  /**
+   * The viewer who also runs a branch.
+   *
+   * "מנהל מערכת - לצפייה בלבד" reads everything the admin reads, across every
+   * branch, and the server has always let her WRITE inside the branches she
+   * manages — auth.js swaps her role to branch_manager for exactly those
+   * requests, and files everything else as a proposal. The screen never knew:
+   * `isManager` is a role test, admin_viewer is not that role, so the actions
+   * column, the edit buttons and "הוסף עובד" simply never rendered. The server
+   * said yes to a request the interface never offered to make.
+   *
+   * Which is why Elad — a partner who also runs תל אביב - יפו — could see all
+   * ninety employees and edit none of them. The flag itself is fixed in
+   * hooks/useAuth.jsx; what stays here is the per-row half below, because this
+   * is the screen that shows her every branch at once.
+   */
   const canManage = isManager || isAccountant;
+
+  /**
+   * ...and only inside her own branch.
+   *
+   * Everyone else already sees only what they may edit, because the server
+   * scopes their list to their branches. The viewer is the one person who sees
+   * every branch, so for her the row has to decide — otherwise widening
+   * `canManage` above would have put an edit button beside all ninety.
+   */
+  const canEditEmployee = (emp) => {
+    if (!canManage) return false;
+    if (!isViewer) return true;
+    return managesBranch(emp?.branch_id?._id || emp?.branch_id);
+  };
   const { branches, selectedBranch, selectedBranchName, isAllBranches } = useBranch();
   const [employees, setEmployees] = useState([]);
   // Every room in the network, fetched once. The picker narrows to the
@@ -881,6 +911,12 @@ export default function EmployeeManager() {
                     <TableCell align="center"><MissingChip missing={emp.missing_fields} /></TableCell>
                     {canManage && (
                       <TableCell align="center">
+                        {/* The column exists for every row — a table that
+                            drops a cell on some rows stops lining up — but a
+                            viewer gets its contents only where she may act. */}
+                        {!canEditEmployee(emp) ? (
+                          <Typography variant="caption" color="text.disabled">—</Typography>
+                        ) : (
                         <Stack direction="row" spacing={0.5} justifyContent="center" alignItems="center">
                           <Tooltip title={emp.is_active ? 'עובד פעיל — לחץ לכיבוי' : 'לא פעיל — לחץ להפעלה'}>
                             <Switch
@@ -953,6 +989,7 @@ export default function EmployeeManager() {
                             </Tooltip>
                           )}
                         </Stack>
+                        )}
                       </TableCell>
                     )}
                   </TableRow>
