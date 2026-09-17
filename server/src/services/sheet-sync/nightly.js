@@ -40,7 +40,17 @@ function defaultDeps() {
 
 async function verifyDay({ branchId, sheetId, date, deps = null }) {
   const d = deps || defaultDeps();
-  const out = { checked: 0, agreed: 0, disagreed: [] };
+  const out = {
+    checked: 0, agreed: 0, disagreed: [],
+    // `unresolved`: an accessId the archive carries that this check could not
+    // attach to exactly one Child. `unreadable`: a cell the archive carries
+    // that could not be turned into a value. Neither is a disagreement — there
+    // is nothing to compare a field against, or nobody to compare it for — but
+    // this is the only alarm this design has, and going quiet about either
+    // one is as much a failure as crying wolf over a data-quality artifact.
+    // Both are reported so they stay visible as their own signal.
+    unresolved: [], unreadable: [],
+  };
 
   const { history } = await d.readGrids(sheetId);
   // Two rows can share a date — the archive job fired twice on three real
@@ -61,11 +71,33 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
   const withId = (entries || []).filter(e => e.accessId);
   if (withId.length === 0) return out;
 
-  const byAccess = await d.childrenByAccessId(withId.map(e => e.accessId));
-  // An accessId the archive carries but no current Child answers to — a child
-  // who left, or an ambiguous id the lookup refused to resolve — is not a
-  // disagreement about a field; there is nobody on our side to compare
-  // against, so it is left out rather than named with data that isn't theirs.
+  const asked = withId.map(e => e.accessId);
+  const byAccess = await d.childrenByAccessId(asked);
+
+  // An accessId the archive carries but the lookup could not resolve to
+  // exactly one Child — `Child.sheet_access_id` is indexed but not unique, so
+  // this covers two cases the Map cannot tell apart: no child carries the id
+  // any more, or more than one does and the lookup refused to pick one. Both
+  // mean the same thing here: there is nobody on our side to compare this
+  // entry against. Unlike the daytime pass, that is not a row to leave alone
+  // until next time — it is an identity this check was built to catch failing
+  // to resolve, so it is named rather than dropped. Same reasoning as
+  // `runPass` in run.js, applied to the one place a duplicate id is itself the
+  // corruption worth flagging.
+  for (const entry of withId) {
+    if (!byAccess.has(entry.accessId)) {
+      out.unresolved.push({ access_id: entry.accessId, name: entry.name, why: 'no single Child carries this sheet_access_id' });
+    }
+  }
+  // And an answer about an id nobody asked about means the lookup is not
+  // keyed the way this check believes it is — the same defensive check
+  // run.js makes, for the same reason: never used, always reported.
+  for (const id of byAccess.keys()) {
+    if (!asked.includes(id)) {
+      out.unresolved.push({ access_id: id, name: '', why: 'the lookup answered about an id this check never asked for' });
+    }
+  }
+
   const known = withId.filter(e => byAccess.has(e.accessId));
   const logs = await d.loadLogs(known.map(e => String(byAccess.get(e.accessId)._id)), date);
 
@@ -75,8 +107,15 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
     // `dailyLogSet` drops blanks, which is right here too: a column the
     // archive holds nothing for is not a claim of "the room cleared it", it's
     // silence, and silence should agree with our side's silence rather than
-    // report a phantom disagreement every night.
-    const { set } = dailyLogSet(entry.data || {});
+    // report a phantom disagreement every night. It also separates a cell
+    // that held CONTENT but could not be turned into a value — a garbled time
+    // like the ones nursery-history.js's own comments document — into
+    // `rejected`, and that is not silence either. Comparing it as blank would
+    // manufacture a disagreement out of a data-quality problem, and this is
+    // the one report where a false alarm costs the most: cry wolf once and the
+    // real slip stops getting noticed. Mirrors `sheetSideOf` in run.js.
+    const { set, rejected } = dailyLogSet(entry.data || {});
+    const unreadable = new Set(rejected.map(r => r.path));
     out.checked += 1;
     let ok = true;
     // Only the columns the archive actually carries for this child are
@@ -88,6 +127,13 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
     for (const column of Object.keys(entry.data || {})) {
       const def = FIELD_MAP[normalizeFieldName(column)];
       if (!def) continue;
+      if (unreadable.has(def.path)) {
+        out.unreadable.push({
+          access_id: entry.accessId, name: child.child_name, field: def.path,
+          why: 'the archive cell holds something this check cannot read; excluded from comparison',
+        });
+        continue;
+      }
       const archiveValue = Object.prototype.hasOwnProperty.call(set, def.path)
         ? set[def.path] : (def.kind === 'list' ? [] : '');
       const ourValue = atPath(log, def.path);

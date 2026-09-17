@@ -126,6 +126,102 @@ scenario('a child in the archive that no Child carries the id for is skipped, no
   check('the unresolved child raises no disagreement about a name it cannot attach to anyone', () => {
     assert.ok(!res.disagreed.some(d => d.access_id === 'id-9'));
   });
+  check('but it is not silent either — this is the one alarm identity failures have', () => {
+    const u = res.unresolved.find(x => x.access_id === 'id-9');
+    assert.ok(u, 'expected id-9 to be named in unresolved');
+    assert.strictEqual(u.name, 'ילד עזב');
+    assert.match(u.why, /no single Child/);
+  });
+});
+
+scenario('an accessId two Child documents share is a named alarm, not a quiet skip', async () => {
+  // From outside, a duplicated sheet_access_id and a withdrawn child's id are
+  // the same observation: the lookup has nothing to hand back. `defaultDeps`
+  // collapses both into "absent from the Map" (see the $in guard below), so
+  // one scenario covers both underlying causes, same as run.js.
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      history: [archiveRow('2026-09-17', [kid('id-1', 'נויה חגי', { 'התעורר בבית': '06:15' })])],
+      logs: new Map(),
+      // Two Child documents both carry id-1 in real life; the lookup refuses
+      // to pick one and answers about nobody, exactly like `run.js`'s own
+      // de-duplication.
+      children: new Map(),
+    }),
+  });
+  check('nothing is checked — there is no single child to compare against', () => assert.strictEqual(res.checked, 0));
+  check('the ambiguous id is named, not dropped', () => {
+    const u = res.unresolved.find(x => x.access_id === 'id-1');
+    assert.ok(u, 'expected id-1 to be named in unresolved');
+    assert.strictEqual(u.name, 'נויה חגי');
+  });
+});
+
+scenario('a lookup that answers about something it was never asked about is reported, not used', async () => {
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      history: [archiveRow('2026-09-17', [kid('id-1', 'נויה חגי', { 'התעורר בבית': '06:15' })])],
+      logs: new Map([['c1', { home: { wake_time: '06:15' }, meals: {}, sleep: {}, missing: [] }]]),
+      // The fake lookup hands back an extra child nobody asked about — the
+      // same defensive check run.js makes against a misbehaving dependency.
+      children: new Map([
+        ['id-1', { _id: 'c1', child_name: 'נויה חגי' }],
+        ['id-99', { _id: 'c9', child_name: 'ילד אחר לגמרי' }],
+      ]),
+    }),
+  });
+  check('the asked-for child is still checked normally', () => assert.strictEqual(res.checked, 1));
+  check('the unasked-for answer is reported, never compared', () => {
+    const u = res.unresolved.find(x => x.access_id === 'id-99');
+    assert.ok(u, 'expected id-99 to be named in unresolved');
+    assert.match(u.why, /never asked/);
+    assert.ok(!res.disagreed.some(d => d.access_id === 'id-99'));
+  });
+});
+
+scenario('an archive cell that cannot be read is not compared as if it said nothing', async () => {
+  // Reproduces the reviewer's exact case: a garbled time cell against a real
+  // value on our side must not report "the archive said blank" — that turns a
+  // data-quality artifact into a manufactured identity alarm, on the one
+  // report where a false alarm costs the most.
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      history: [archiveRow('2026-09-17', [kid('id-1', 'נויה חגי', { 'התעורר בבית': 'garbled-not-a-time' })])],
+      logs: new Map([['c1', { home: { wake_time: '06:15' }, meals: {}, sleep: {}, missing: [] }]]),
+    }),
+  });
+  check('no disagreement is manufactured from an unreadable cell', () => {
+    assert.deepStrictEqual(res.disagreed, []);
+  });
+  check('the child still agrees — nothing readable to disagree about', () => assert.strictEqual(res.agreed, 1));
+  check('the unreadable cell is its own reported signal', () => {
+    assert.strictEqual(res.unreadable.length, 1);
+    assert.strictEqual(res.unreadable[0].access_id, 'id-1');
+    assert.strictEqual(res.unreadable[0].field, 'home.wake_time');
+  });
+});
+
+scenario('an unreadable cell does not block a real disagreement on another field in the same row', async () => {
+  const res = await verifyDay({
+    branchId: 'b1', sheetId: 's1', date: '2026-09-17',
+    deps: deps({
+      history: [archiveRow('2026-09-17', [kid('id-1', 'נויה חגי', {
+        'התעורר בבית': 'garbled-not-a-time',
+        'הערות': 'ישנה טוב',
+      })])],
+      logs: new Map([['c1', { home: { wake_time: '06:15' }, meals: {}, sleep: {}, missing: [], staff_note: '' }]]),
+    }),
+  });
+  check('the unreadable field is excluded, not treated as agreement or disagreement', () => {
+    assert.ok(!res.disagreed.some(d => d.field === 'home.wake_time'));
+  });
+  check('the readable field still disagrees normally', () => {
+    assert.ok(res.disagreed.some(d => d.field === 'staff_note'));
+  });
+  check('one unreadable field is reported', () => assert.strictEqual(res.unreadable.length, 1));
 });
 
 scenario('a field the archive never asked about is not compared, even if our record disagrees', async () => {
