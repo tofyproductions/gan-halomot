@@ -12,9 +12,11 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import BlockIcon from '@mui/icons-material/Block';
 import PaidIcon from '@mui/icons-material/Paid';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import { toast } from 'react-toastify';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import EmploymentTermsPanel from './EmploymentTermsPanel';
+import { useConfirm } from '../shared/ConfirmProvider';
 
 /**
  * הסכם העסקה for one employee — generate, send for mobile signature, confirm.
@@ -139,6 +141,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   const [history, setHistory] = useState([]);
   const [values, setValues] = useState({});
   const [previewHtml, setPreviewHtml] = useState('');
+  const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const [signUrl, setSignUrl] = useState('');
   const [waiveReason, setWaiveReason] = useState('');
@@ -227,6 +230,32 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
     try {
       await api.post(`/employment-contracts/${id}/approve`);
       toast.success('החוזה אושר');
+      load(); onChanged && onChanged();
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setBusy(false); }
+  };
+
+  /**
+   * A contract issued by mistake.
+   *
+   * The confirmation names what is being deleted rather than asking "are you
+   * sure": three identical rows created a minute apart look the same in a
+   * list, and the one fact that tells them apart is when each was sent.
+   */
+  const removeContract = async (h) => {
+    const when = new Date(h.created_at).toLocaleString('he-IL');
+    if (!(await confirm({
+      title: 'מחיקת חוזה',
+      message: `החוזה שנוצר ב-${when} יימחק לצמיתות.`
+        + (h.status === 'sent'
+          ? ' הוא כבר נשלח לחתימה — הקישור שנשלח יפסיק לעבוד מיד.'
+          : ''),
+      danger: true,
+    }))) return;
+    setBusy(true);
+    try {
+      await api.delete(`/employment-contracts/${h.id}`);
+      toast.success('החוזה נמחק');
       load(); onChanged && onChanged();
     } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
@@ -366,6 +395,14 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
                         {['signed', 'uploaded'].includes(h.status) && isApproverRole(role) && (
                           <Tooltip title="אשר סופית"><IconButton size="small" color="success" onClick={() => approve(h.id)}>
                             <CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
+                        )}
+                        {/* Only a contract nobody signed. A signed one is the
+                            evidence that the agreement exists; it is replaced,
+                            never removed. */}
+                        {['draft', 'sent'].includes(h.status) && isApproverRole(role) && (
+                          <Tooltip title="מחק חוזה שהונפק בטעות">
+                            <IconButton size="small" color="error" onClick={() => removeContract(h)}>
+                              <DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
                         )}
                       </Stack>
                     </TableCell>

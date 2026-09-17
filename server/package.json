@@ -103,7 +103,8 @@
     "test:tmt-basis": "node scripts/tmt-basis.test.js",
     "test:dup-id": "node scripts/duplicate-israeli-id.test.js",
     "test:course-report": "node scripts/course-report.test.js",
-    "test:screen-help": "node scripts/screen-help.test.js"
+    "test:screen-help": "node scripts/screen-help.test.js",
+    "test:contract-delete": "node scripts/contract-delete.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

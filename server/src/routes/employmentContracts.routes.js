@@ -51,5 +51,8 @@ router.post('/', c.create);
 router.post('/:id/send', c.send);
 router.post('/:id/approve', c.approve);
 router.get('/:id/file', c.file);
+// A contract issued by mistake — unsigned only, and the controller says why
+// when it is not. Deleting a sent one retires its signing link with it.
+router.delete('/:id', c.remove);
 
 module.exports = router;

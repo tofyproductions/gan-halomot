@@ -369,6 +369,61 @@ async function approve(req, res, next) {
   } catch (err) { next(err); }
 }
 
+
+/**
+ * DELETE /api/employment-contracts/:id — a contract issued by mistake.
+ *
+ * Three identical "נשלח לחתימה" rows against one employee, created within a
+ * minute of each other, is not history worth keeping: it is a form submitted
+ * three times, and leaving it there means the next person cannot tell which
+ * link the employee actually has.
+ *
+ * ONLY a contract nobody has signed. A signed or approved contract is the
+ * evidence that an employment agreement exists, and the point of an electronic
+ * signature is that the document behind it cannot quietly stop existing. A
+ * wrongly-signed contract is superseded by a new one, never deleted — and the
+ * refusal below says so rather than failing silently.
+ *
+ * A `waived` row is a recorded decision that this employee needs no contract,
+ * which is also somebody's answer to a question, so it stays too.
+ *
+ * Deleting a `sent` contract retires its link by construction: the row is what
+ * `publicGet` resolves the token against, so the moment it is gone the link
+ * stops opening. That is the desired behaviour — the whole reason to delete a
+ * mistaken send is that somebody may be holding a link they should not use.
+ */
+const DELETABLE = ['draft', 'sent'];
+
+async function remove(req, res, next) {
+  try {
+    if (!isApprover(req)) {
+      return res.status(403).json({ error: 'רק הנהלת חשבונות או מנהל מערכת יכולים למחוק חוזה' });
+    }
+    const doc = await EmploymentContract.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'חוזה לא נמצא' });
+
+    if (!DELETABLE.includes(doc.status)) {
+      const why = ['signed', 'approved', 'uploaded'].includes(doc.status)
+        ? 'חוזה חתום אינו נמחק — הוא הראיה שההסכם קיים. אם החוזה שגוי, יש להנפיק חוזה חדש שיחליף אותו.'
+        : 'ויתור על חוזה הוא החלטה מתועדת ואינו נמחק.';
+      return res.status(409).json({ error: why });
+    }
+
+    // Who removed what, kept where the rest of this controller keeps its
+    // record. There is no audit collection here, and inventing one for a
+    // delete that only ever touches an unsigned draft would be the wrong
+    // place to start.
+    const emp = await Employee.findById(doc.employee_id).select('full_name').lean();
+    console.log(
+      `[contracts] ${req.user?.full_name || req.user?.id} deleted a ${doc.status} contract`
+      + ` for ${emp?.full_name || doc.employee_id} (created ${doc.created_at?.toISOString?.() || '?'})`,
+    );
+
+    await doc.deleteOne();
+    res.json({ ok: true, deleted: String(doc._id), status: doc.status });
+  } catch (err) { next(err); }
+}
+
 /** POST /api/employment-contracts/waive  { employee_id, reason } */
 async function waive(req, res, next) {
   try {
@@ -809,6 +864,7 @@ async function saveTerms(req, res, next) {
 module.exports = {
   MAX_STORED_FILE_BYTES, MAX_INLINE_FILE_BYTES, maxUploadBytes,
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
+  remove, DELETABLE,
   listAnnexes, uploadAnnex, annexFile,
   termsHistory, previewTerms, saveTerms,
   publicGet, publicSign,
