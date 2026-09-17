@@ -52,7 +52,13 @@ function deps({ cfg, runPass, verifyDay } = {}) {
     },
     verifyDay: async (args) => {
       verifyDayCalls.push(args);
-      return verifyDay ? verifyDay(args) : { checked: 0, agreed: 0, disagreed: [], unresolved: [], unreadable: [] };
+      // archive_found defaults to true here — most scenarios are simulating a
+      // completed audit (the archive existed). Scenarios that specifically
+      // exercise the "archive not written yet" race pass their own
+      // verifyDay stub with archive_found: false.
+      return verifyDay
+        ? verifyDay(args)
+        : { checked: 0, agreed: 0, disagreed: [], unresolved: [], unreadable: [], archive_found: true };
     },
     recordFailure: async (branchId, sheetId, date, message) => {
       recordFailureCalls.push({ branchId, sheetId, date, message });
@@ -176,7 +182,9 @@ scenario('a clean pass never calls recordFailure', async () => {
 scenario('a nightly archive that will not parse is reported, not treated as agreement', async () => {
   const d = deps({
     cfg: { enabled: true, branches: oneBranch },
-    verifyDay: async () => ({ error: 'archive JSON did not parse: Unexpected token' }),
+    // A row that will not parse still proves a row exists (see nightly.js) —
+    // archive_found stays true here.
+    verifyDay: async () => ({ error: 'archive JSON did not parse: Unexpected token', archive_found: true }),
   });
   const res = await tick(NIGHTLY, d);
   check('the verify result carries the error through', () => {
@@ -234,7 +242,7 @@ scenario('a transient audit failure is retried on the next tick within the same 
     verifyDay: async () => {
       calls += 1;
       if (calls === 1) throw new Error('Sheets API timed out');
-      return { checked: 1, agreed: 1, disagreed: [], unresolved: [], unreadable: [] };
+      return { checked: 1, agreed: 1, disagreed: [], unresolved: [], unreadable: [], archive_found: true };
     },
   });
   const first = await tick(NIGHTLY, d);
@@ -262,6 +270,67 @@ scenario('a day-pass failure earlier in the day and a nightly audit failure late
   });
   check('the one recordFailure call on record is still the day pass\'s, untouched by the audit', () => {
     assert.strictEqual(d.recordFailureCalls[0].message, 'the sheet refused the write');
+  });
+});
+
+// --- fix round 2: an absent archive must never read as a clean audit ------
+//
+// The archive job's real write times run 23:28-23:37; NIGHTLY_HOUR is 23, so
+// the first tick or two of the hour will always find no row yet. verifyDay
+// signals that with archive_found: false rather than throwing, and it is
+// byte-identical in every OTHER field to a real, fully-audited, zero-
+// disagreement night. These scenarios pin that the job never marks that
+// night done, and never presents it as a completed audit.
+
+scenario('an absent archive is not marked done, and does not look like a clean audit', async () => {
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    verifyDay: async () => ({ checked: 0, agreed: 0, disagreed: [], unresolved: [], unreadable: [], archive_found: false }),
+  });
+  const res = await tick(NIGHTLY, d);
+  check('nothing is marked done for tonight', () => assert.strictEqual(d.markNightlyRanCalls.length, 0));
+  check('the branch result is pushed under its own key, never under "verify"', () => {
+    assert.strictEqual(res.ran[0].auditPending, true);
+    assert.strictEqual(res.ran[0].verify, undefined);
+  });
+});
+
+scenario('the archive appearing on a later tick within the same hour is the audit that actually counts', async () => {
+  let calls = 0;
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    verifyDay: async () => {
+      calls += 1;
+      // 23:00 and 23:02: not written yet. 23:04 onward: the archive job has
+      // finally run.
+      if (calls <= 2) return { checked: 0, agreed: 0, disagreed: [], unresolved: [], unreadable: [], archive_found: false };
+      return { checked: 3, agreed: 3, disagreed: [], unresolved: [], unreadable: [], archive_found: true };
+    },
+  });
+  const first = await tick(NIGHTLY, d);
+  check('the first tick finds nothing and marks nothing done', () => {
+    assert.strictEqual(first.ran[0].auditPending, true);
+    assert.strictEqual(d.markNightlyRanCalls.length, 0);
+  });
+  const second = await tick(NIGHTLY, d);
+  check('the second tick still finds nothing and still marks nothing done', () => {
+    assert.strictEqual(second.ran[0].auditPending, true);
+    assert.strictEqual(d.markNightlyRanCalls.length, 0);
+  });
+  const third = await tick(NIGHTLY, d);
+  check('the third tick finds the real archive and it is reported as an actual audit', () => {
+    assert.ok(third.ran[0].verify);
+    assert.strictEqual(third.ran[0].verify.checked, 3);
+  });
+  check('only now is tonight marked done', () => {
+    assert.strictEqual(d.markNightlyRanCalls.length, 1);
+  });
+  const fourth = await tick(NIGHTLY, d);
+  check('the fourth tick is skipped entirely — already done', () => {
+    assert.strictEqual(fourth.ran.length, 0);
+  });
+  check('verifyDay was called exactly three times — the two misses, then the one real audit', () => {
+    assert.strictEqual(d.verifyDayCalls.length, 3);
   });
 });
 

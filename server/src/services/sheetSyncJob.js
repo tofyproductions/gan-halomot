@@ -47,7 +47,19 @@
  *     did NOT throw, mirroring `reconcileDigestJob`'s own rule of only
  *     marking a date "done" once the real attempt actually went through — a
  *     transient failure (below) must still get retried on the next tick
- *     within the same hour, not silently wait for tomorrow.
+ *     within the same hour, not silently wait for tomorrow. "Went through"
+ *     is stronger than "did not throw": `verifyDay` also does not throw when
+ *     tonight's archive row does not exist yet, and it returns
+ *     `{ checked: 0, disagreed: [] }` for that — the exact same shape a
+ *     clean, fully-audited night has. The archive job's real write times run
+ *     23:28–23:37, so the first tick or two of the hour (23:00, 23:02) will
+ *     see this every single night. `verifyDay` carries a `archive_found`
+ *     flag for exactly this reason (see nightly.js); a night is only marked
+ *     done, and only logged as an audit result, when `archive_found` is
+ *     true. Not found is pushed onto this tick's result under its own key,
+ *     `auditPending`, never under `verify` — so nothing reading `tick()`'s
+ *     output can mistake "nothing has been compared yet" for "compared and
+ *     clean".
  *   - A THROW from `verifyDay` (its network read, or a database read of its
  *     own) must never reach `recordFailure`. `verifyDay` is an audit of a
  *     day the sync pass already finished; a Sheets API hiccup while auditing
@@ -170,26 +182,43 @@ async function tick(now = new Date(), deps = null) {
         try {
           // eslint-disable-next-line no-await-in-loop
           const v = await d.verifyDay({ branchId: b.branch_id, sheetId: b.sheet_id, date });
-          if (v.error) {
-            // The archive cell for tonight exists but did not parse — not a
-            // disagreement, there is nothing to compare yet.
-            console.error(`[sheet-sync] ${date} ${b.sheet_id}: nightly archive did not parse — ${v.error}`);
+          if (!v.archive_found) {
+            // The archive job usually writes tonight's row sometime after
+            // 23:00 (live timestamps run 23:28–23:37), so the first tick or
+            // two of the hour finding nothing is the ordinary case, not a
+            // problem. Pushed under its own key, `auditPending`, and never
+            // under `verify` — `checked: 0, disagreed: []` is what a clean,
+            // fully-audited night ALSO looks like, and this is the one
+            // place that distinction has to survive: a reader (or future
+            // code) scanning tick() output must not be able to mistake
+            // "nothing has been compared yet" for "compared and clean".
+            // Left unmarked on purpose, so the next tick — still inside the
+            // same 23:00 hour — tries again once the row actually exists.
+            out.push({ branch: String(b.branch_id), auditPending: true });
           } else {
-            if (v.disagreed.length) {
-              console.error(`[sheet-sync] ${date} ${b.sheet_id}: ${v.disagreed.length} disagreements with the nightly archive`);
-              v.disagreed.slice(0, 20).forEach((x) => console.error(`  ${x.name} · ${x.field} · ארכיון="${x.archive}" אצלנו="${x.ours}"`));
+            if (v.error) {
+              // The archive cell for tonight exists but did not parse — not a
+              // disagreement, there is nothing to compare yet.
+              console.error(`[sheet-sync] ${date} ${b.sheet_id}: nightly archive did not parse — ${v.error}`);
+            } else {
+              if (v.disagreed.length) {
+                console.error(`[sheet-sync] ${date} ${b.sheet_id}: ${v.disagreed.length} disagreements with the nightly archive`);
+                v.disagreed.slice(0, 20).forEach((x) => console.error(`  ${x.name} · ${x.field} · ארכיון="${x.archive}" אצלנו="${x.ours}"`));
+              }
+              if (v.unresolved.length) {
+                console.error(`[sheet-sync] ${date} ${b.sheet_id}: ${v.unresolved.length} accessId(s) the nightly check could not resolve to one child`);
+              }
             }
-            if (v.unresolved.length) {
-              console.error(`[sheet-sync] ${date} ${b.sheet_id}: ${v.unresolved.length} accessId(s) the nightly check could not resolve to one child`);
-            }
+            out.push({ branch: String(b.branch_id), verify: v });
+            // Marked only now, having actually gone through against a real
+            // archive row — a call that throws (below) must not mark
+            // tonight as done, or a transient hiccup would silently cancel
+            // the one alarm this design has for the rest of the night, and
+            // neither must a call that found no row yet (above), or the
+            // audit would report a clean night having examined nothing.
+            // eslint-disable-next-line no-await-in-loop
+            await d.markNightlyRan(b.branch_id, date);
           }
-          out.push({ branch: String(b.branch_id), verify: v });
-          // Marked only now, having actually gone through — a call that
-          // throws (below) must not mark tonight as done, or a transient
-          // hiccup would silently cancel the one alarm this design has for
-          // the rest of the night.
-          // eslint-disable-next-line no-await-in-loop
-          await d.markNightlyRan(b.branch_id, date);
         } catch (e) {
           // This is the audit failing, not the sync pass — see the file
           // header. Logged as its own thing, on purpose worded so it cannot

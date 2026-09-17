@@ -50,6 +50,15 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
     // one is as much a failure as crying wolf over a data-quality artifact.
     // Both are reported so they stay visible as their own signal.
     unresolved: [], unreadable: [],
+    // Whether tonight's archive row exists at all. `checked: 0, disagreed: []`
+    // means two very different things — "the row is there and nobody
+    // disagreed" and "there is no row yet, so nothing has been compared" —
+    // and they are byte-identical in every other field. The nightly archive
+    // job typically writes some time after this check first starts running
+    // (23:00), so callers that run this repeatedly through the night MUST be
+    // able to tell "not yet" from "clean" or a vacuous zero-checked result
+    // reads as a clean night that never actually happened.
+    archive_found: false,
   };
 
   const { history } = await d.readGrids(sheetId);
@@ -63,6 +72,11 @@ async function verifyDay({ branchId, sheetId, date, deps = null }) {
   // than resolved here.
   const row = (history || []).slice(1).find(r => String(r[0] || '').startsWith(date));
   if (!row) return out; // the archive has not been written yet — not a failure
+
+  // A row exists from here on, whatever it turns out to hold — even one that
+  // will not parse still proves the archive job ran and wrote something for
+  // tonight, which is the fact `archive_found` exists to carry.
+  out.archive_found = true;
 
   // historyChildren takes the PARSED payload, not the cell's text — it
   // distinguishes the two blob shapes and throws on anything else.

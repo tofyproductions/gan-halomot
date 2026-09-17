@@ -50,6 +50,9 @@ scenario('agreement is the proof the pairing held', async () => {
   check('one child checked', () => assert.strictEqual(res.checked, 1));
   check('one agreed', () => assert.strictEqual(res.agreed, 1));
   check('nothing disagreed', () => assert.deepStrictEqual(res.disagreed, []));
+  check('the archive row was actually found — this is a real audit, not a vacuous one', () => {
+    assert.strictEqual(res.archive_found, true);
+  });
 });
 
 scenario('a slipped pairing shows up as a named disagreement', async () => {
@@ -82,7 +85,7 @@ scenario('a slipped pairing shows up as a named disagreement', async () => {
   });
 });
 
-scenario('no archive row yet is not a failure', async () => {
+scenario('no archive row yet is not a failure — but it must not read as a clean audit either', async () => {
   const res = await verifyDay({
     branchId: 'b1', sheetId: 's1', date: '2026-09-17',
     deps: deps({ history: [], logs: new Map() }),
@@ -90,6 +93,14 @@ scenario('no archive row yet is not a failure', async () => {
   check('checked nothing, reported nothing', () => {
     assert.strictEqual(res.checked, 0);
     assert.deepStrictEqual(res.disagreed, []);
+  });
+  // The archive job usually writes tonight's row well after this check first
+  // starts running. `{checked: 0, disagreed: []}` is EXACTLY what a real,
+  // fully-audited, zero-disagreement night also looks like — archive_found
+  // is the only field that tells the two apart, and a caller that ignores it
+  // would report a clean night having examined nothing.
+  check('archive_found is false — nothing was actually compared yet', () => {
+    assert.strictEqual(res.archive_found, false);
   });
 });
 
@@ -105,6 +116,9 @@ scenario('an archive row whose JSON does not parse is reported, not thrown', asy
   check('nothing disagreed', () => assert.deepStrictEqual(res.disagreed, []));
   check('the parse failure is named, not swallowed', () => {
     assert.ok(res.error, 'expected an error field explaining the corrupt row');
+  });
+  check('archive_found is still true — a row that will not parse still proves a row exists', () => {
+    assert.strictEqual(res.archive_found, true);
   });
 });
 
