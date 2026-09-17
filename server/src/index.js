@@ -416,6 +416,16 @@ connectDB().then(() => {
       setInterval(runReconcileReminder, 60 * 60 * 1000);
     }
 
+    // The old תינוקייה board and the new one, kept in step until the old one
+    // closes. Cheap when idle — one Setting read and an immediate return while
+    // it is disabled, which is how it ships.
+    const sheetSync = require('./services/sheetSyncJob');
+    const runSheetSync = () => sheetSync.tick().catch((e) => console.error('[sheet-sync] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runSheetSync, 2 * 60 * 1000);
+      setInterval(runSheetSync, 2 * 60 * 1000);
+    }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.

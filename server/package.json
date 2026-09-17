@@ -17,6 +17,7 @@
     "test:sync-merge": "node scripts/sheet-sync-three-way.test.js",
     "test:sync-run": "node scripts/sheet-sync-run.test.js",
     "test:sync-nightly": "node scripts/sheet-sync-nightly.test.js",
+    "test:sync-job": "node scripts/sheet-sync-job.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:reminder": "node scripts/manager-reminder.test.js",
     "test:recipients": "node scripts/branch-recipients.test.js",
