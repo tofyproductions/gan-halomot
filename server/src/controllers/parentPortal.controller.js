@@ -326,6 +326,22 @@ async function updateChildDay(req, res) {
   }
   if (Object.keys(set).length === 0) return res.json({ ok: true, changed: 0 });
 
+  // The parent writes the morning-at-home fields and the staff write the
+  // rest, so whichever side owns a field is the side that can resolve a
+  // conflict on it — this is the other half of the clear that
+  // nursery.controller.js's updateLog does for the fields staff own. Without
+  // it, a sync conflict on a home.* field could never be cleared by anybody:
+  // the staff board does not render or write these fields, and nothing else
+  // ever removes a sync_conflicts entry. It would simply accumulate on the
+  // document forever.
+  //
+  // Captured before `set` is used to build $setOnInsert below, same
+  // ordering as the staff side, so only the paths this request actually
+  // wrote — never a bookkeeping field — end up in the $pull's $in list.
+  const touched = Object.keys(set);
+  const update = { $set: set };
+  if (touched.length) update.$pull = { sync_conflicts: { field: { $in: touched } } };
+
   // Written on insert only. A parent's first update of the morning may well
   // create the row before any teacher has touched it, and the row still has to
   // know which child and which room it belongs to for the staff board to find
@@ -333,7 +349,7 @@ async function updateChildDay(req, res) {
   const log = await DailyLog.findOneAndUpdate(
     { child_id: child._id, date },
     {
-      $set: set,
+      ...update,
       $setOnInsert: {
         child_id: child._id,
         date,
