@@ -7,6 +7,12 @@
  *
  *   node scripts/sheet-sync-probe.js --sheet <id>
  */
+// Every script in this directory starts here, and this one forgot: without it
+// the credential lives in .env and the probe insists it is not set, which
+// reads as "the service account is wrong" rather than "nothing loaded the
+// file".
+require('dotenv').config();
+
 const {
   credentialsFromEnv, clientFor, tabNames, readTab,
 } = require('../src/services/sheet-sync/sheets-client');
