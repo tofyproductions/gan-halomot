@@ -12,6 +12,7 @@ import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
 import PunchEntryTaskGate from '../attendance/PunchEntryTaskGate';
 import { MyDecisionsPopup } from '../payroll/MyDecisions';
+import HelpButton from '../shared/HelpButton';
 
 /**
  * The shell: a fixed rail, and everything else.
@@ -64,7 +65,13 @@ export default function AppShell() {
         {/* Where you are, and what the browser tab says — both from
             config/screenMeta, both here rather than in each of 62 screens, so
             renaming a screen in the rail renames it in the tab strip too. */}
-        <Breadcrumb />
+        {/* The breadcrumb says where you are; the "?" says what you can do
+            once you are there. Same row, because they answer the same
+            question from two sides. */}
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Breadcrumb />
+          <HelpButton />
+        </Box>
 
         {/* Screens arrive one at a time now (see App.jsx), and the boundary is
             HERE rather than around the whole route tree so the rail, the branch

@@ -50,6 +50,7 @@ import NotificationsOffIcon from '@mui/icons-material/NotificationsOff';
 import ViewQuiltIcon from '@mui/icons-material/ViewQuilt';
 import { TAB_GROUPS, hasTabAccess } from '../../../config/tabs';
 import { ganMarkerByName } from '../../../utils/branchColors';
+import HelpButton from '../../shared/HelpButton';
 
 const ICON_BY_TAB = {
   dashboard: DashboardIcon,
@@ -356,6 +357,11 @@ export default function Header() {
               </Box>
             );
           })}
+
+          {/* Same "?" in the same corner on both interfaces. A help button
+              that exists on one of them teaches half the office to stop
+              looking. */}
+          <HelpButton />
 
           <Divider orientation="vertical" flexItem sx={{ mx: 0.5, borderColor: '#e2e8f0' }} />
 
