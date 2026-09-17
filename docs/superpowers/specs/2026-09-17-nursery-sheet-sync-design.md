@@ -39,7 +39,9 @@ and the old system untouched.
 **In:** the two תינוקייה sheets — משה דיין
 (`19t4MY0z4Y4UNLanpqlFz-E4HqolmG7wrIsQNDLKTOMw`) and קפלן
 (`1R5XL3-RC0UggFaLjjO2WcAd96ZTz9M4F7aLEEE6_8KQ`), both owned by
-`totofy10@gmail.com`. Per-child day data and the daily menu, both directions.
+`totofy10@gmail.com`. Per-child day data, both directions. The daily menu is
+held back until where the old board stores a day's selection is established —
+see `תפריט` below.
 
 **Out:**
 
@@ -80,38 +82,60 @@ old board ⟷ Google Sheet ⟷ sync service ⟷ DailyLog / DailyMenu ⟷ new boa
 
 ## What the sheet holds
 
-Each sheet has two tabs.
+An xlsx export of the משה דיין sheet, taken on 17.09.2026, settles the shape.
+There are **five** tabs, not the two the Drive preview showed.
 
-**`ילדים`** — `שם מלא, תאריך לידה, AccessID, מספר פלאפון`. `AccessID` is a UUID
-the old system already assigns and keeps stable per child.
+**`ילדים`** — `שם מלא, תאריך לידה, AccessID, מספר פלאפון`, from row 3. Sixteen
+children. `AccessID` is a UUID the old system assigns and keeps stable.
 
-**`היסטוריה`** — `Date, JSON_Data, Timestamp`. One row per day, holding every
-child's whole day.
-
-The JSON comes in two shapes, because the two branches' scripts diverged:
-משה דיין writes `{"children":[...]}`, קפלן writes a bare `[...]`. Each child
-carries `name, age, dob, phone, accessId, data`, and `data` is a flat map whose
-keys are the gan's own Hebrew:
+**`סדר יום`** — **the live board.** Row 2 is the header; row 3 onward is one
+row per child, seventeen columns:
 
 ```
-נוכחות · ארוחת בוקר · תמ"ל בוקר
-שנת בוקר שעת השכבה · שנת בוקר שעת השכמה
-ארוחת צהריים · תמ"ל צהריים
-שנת צהריים שעת השכבה · שנת צהריים שעת השכמה
-ארוחת 4 · תמ"ל 4 · יציאות · מה חסר · הערות
-התעורר בבית · אכל בבית - שעה · אכל בבית - כמות · הערת הורים
+התעורר בבית · אכל בבית - שעה · אכל בבית - כמות
+ארוחת בוקר · תמ״ל בוקר · שנת בוקר שעת השכבה · שנת בוקר שעת השכמה
+ארוחת צהריים · תמ״ל צהריים · שנת צהריים שעת השכבה · שנת צהריים שעת השכמה
+ארוחת 4 · תמ״ל 4 · יציאות · מה חסר · הערות · הערת הורים
 ```
 
-These map one-to-one onto `DailyLog`. The mapping is already written and
-already tested — `scripts/lib/nursery-history.js` does exactly this for the
-history import, and the sync reuses it rather than restating it.
+It carries **no name, no id and no date**. A row is a child only by virtue of
+sitting at the same offset as that child in `ילדים` — see Identity.
 
-**Open question, resolved first in implementation:** whether today's in-progress
-day is written to a `היסטוריה` row continuously (an upsert keyed by date) or
-held elsewhere until the day closes. The 05:22 modification time and the
-presence of a row for the current date both point at the former, but the sync
-reads live data and must not guess. The first implementation task settles it by
-observation before anything is built on top of it.
+**`היסטוריה`** — `Date, JSON_Data, Timestamp`. 245 rows, one per past day,
+each a full snapshot of all sixteen children **with `accessId`**. Written once
+a night: the last six timestamps are 23:36, 23:36, 23:37, 23:32, 23:28, 23:35.
+
+**There is no row for the current date.** This is the open question from the
+first draft, and the answer is the inconvenient one: `היסטוריה` is an archive,
+not a live store. A live sync cannot read it.
+
+The JSON has two shapes, because the branches' scripts diverged: משה דיין
+writes `{"children":[...]}`, קפלן a bare `[...]`. `scripts/lib/nursery-history.js`
+already parses both and maps the Hebrew keys onto `DailyLog`; the sync reuses
+that mapping rather than restating it.
+
+**`הגדרות`** — the option lists behind the board: portions as `0, 0.25, 0.5,
+0.75, 1`; formula millilitres `20…60`; the what-is-missing list (תמ״ל, מגבונים,
+משחת החתלה, בגדי החלפה, טטרה, סינרים…). These correspond to the lists the new
+board keeps in `Setting`.
+
+**`תפריט`** — the dish *bank*, by meal and category (בוקר and צהריים each with
+חלבון/פחמימה/ירק/קבוע; ארוחת 4 with כריך/פרי). It is the menu of what may be
+chosen, not the choice for a given day. Where the old board records **the day's
+selection** is not yet established; it is not in these five tabs in any form
+this export makes obvious. Resolved before menu sync is built — and until it
+is, menu sync stays out and only the per-child day is synced.
+
+### How values are encoded
+
+The sheet stores times and portions as numbers, not text:
+
+- times as day fractions — `0.2604` is `06:15`
+- portions as fractions — `0.5` is the `50%` the board renders
+
+`import-nursery-history.js` already documents this and already stores portions
+as they are shown. The Sheets API must be asked for the right rendering, and
+the conversion belongs in one place — `day-shape.js` — not at each call site.
 
 ## The hard part: both directions
 
@@ -128,8 +152,8 @@ both. Copying in either direction destroys a real edit silently, and a teacher
 who sees a number she did not write stops trusting the board, which is worse
 than either number being wrong.
 
-The sheet cannot break the tie either: `Timestamp` is one value for the whole
-day's row. It says the day was touched, never which field.
+The sheet cannot break the tie either. The live tab carries no time at all —
+see Conflict policy.
 
 ### Shadow copy
 
@@ -149,30 +173,81 @@ the same field of the same child inside one sync interval.
 
 ### Conflict policy
 
-**Later wins, and the loser is kept.**
+The direction approved on 17.09.2026 was "later wins, and the loser is kept".
+The second half stands. The first half cannot be implemented as stated, and the
+reason is worth writing down rather than quietly working around.
 
-The rejected value is written to a `sync_conflicts` entry on the log and
-surfaced on the new board beside the field — "בלוח הישן נרשם: 50%". Nothing is
-deleted silently; the person in the room sees both and settles it.
+**There is no timestamp on the live data at all.** `סדר יום` carries seventeen
+value columns and nothing else — no date, no modification time, per row or per
+sheet. The `Timestamp` column that the first draft proposed to compare against
+belongs to `היסטוריה`, which is written once at ~23:30 and says only that a
+night's archive was taken. Nothing in the old system records when a field
+changed, so "later" is not a question the data can answer.
 
-"Later" is decided by our own per-field touch time against the sheet row's
-`Timestamp`. This is coarse on the sheet's side by construction — it is the
-best the old system offers — which is exactly why the loser is kept rather than
-discarded.
+So the tiebreak is positional rather than temporal:
+
+**The sheet wins the field, and our value is kept and shown.**
+
+The sheet wins because during the transition the room is still working in the
+old board — it is where the person who most recently had the child in front of
+them is typing. Choosing our side would mean a teacher watching her own entry
+replaced by one she cannot see the origin of.
+
+The rejected value is written to `sync_conflicts` on the log and rendered on
+the new board beside the field — "אצלנו נרשם: 50%" — with the run that
+rejected it. Nothing is deleted silently; the person in the room sees both
+values and settles it. That was the point of the approved rule, and it is
+preserved exactly.
+
+Conflicts are also counted per run. A rising count means people are working
+both boards at once on the same children, which is the signal to pick a cutover
+date rather than to tune a merge rule.
 
 ## Identity
 
-Children are matched on `AccessID`, stored on `Child` as `sheet_access_id`.
+Two different problems, because the live tab and the archive disagree.
 
-Not on name. The name path is known-bad in this data: `נדיה גרוס` exists twice,
-and the תמ"ת reconciliation work already documented six children the two
-systems spell differently. The UUID is stable, already assigned, and already in
-the sheet.
+**In `סדר יום` (live), identity is row position.** The tab has no id column.
+Child *n* of `ילדים` owns row *n* of `סדר יום`, and the export confirms the
+pairing holds exactly: fifteen of sixteen rows matched the board's own
+rendering field for field, and the sixteenth — ליה לוין — is blank on both.
+
+This is load-bearing and fragile, so it is treated as such:
+
+- **Both tabs are read in one request, every pass.** The order is never cached
+  between runs; a child added or removed shifts every row below them.
+- **Blank rows are data.** A child with nothing filled in is an empty row that
+  holds the alignment. Any read that drops blank rows silently shifts every
+  subsequent child onto the wrong record — which is exactly the mistake made
+  while investigating this, and it is recorded here because the code will be
+  tempted into it too. The test suite asserts a blank middle row keeps its
+  place.
+- **Writes set cells, never insert or delete rows**, in either tab. Changing
+  the row count would corrupt the old board's own reading of itself.
+- **A pass aborts** if `סדר יום` holds fewer data rows than `ילדים` has
+  children, rather than pairing what it can.
+
+**In `היסטוריה` (archive), identity is `accessId`** — carried per child in the
+JSON, and stable.
+
+`Child.sheet_access_id` stores that UUID, so the two paths converge on one
+identity. Never the name: `נדיה גרוס` exists twice, and the תמ״ת work already
+documented six children the two systems spell differently.
 
 The first run produces a **match report** — every sheet child, the `Child` it
 resolved to, and the evidence — and writes nothing until a human approves it.
-Unmatched children are reported and skipped. A name is never guessed into an
-identity.
+Unmatched children are reported and skipped, never guessed.
+
+### The nightly check
+
+The archive's weakness — written once at ~23:30 — is also its strength: it is
+an authoritative, id-carrying snapshot of the day the sync spent all day
+mirroring positionally.
+
+So every night after the row appears, the sync re-reads it and compares it to
+what it recorded during the day. Agreement is the proof that the row pairing
+held. Disagreement is an alert naming the children, and it is the alignment
+alarm that a positional scheme otherwise has no way to raise.
 
 ## Components
 
