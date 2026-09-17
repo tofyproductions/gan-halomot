@@ -132,17 +132,20 @@ scenario('runPass rejecting is recorded as a failure, and only that', async () =
 });
 
 scenario('runPass resolving with errors.length > 0 is recorded too, though nothing threw', () => {
+  // pairRows (roster.js) reports its refusals as plain strings, e.g.
+  // "סדר יום has 3 rows, needs 5 for 4 children" — not error objects — so the
+  // fake here matches that real shape rather than an invented one.
   const d = deps({
     cfg: { enabled: true, branches: oneBranch },
     runPass: async () => ({
       date: '2026-09-17', children: 0, in: 0, out: 0, conflicts: 0, skipped: [],
-      errors: [{ reason: 'the roster and today tabs do not line up' }],
+      errors: ['סדר יום has 3 rows, needs 5 for 4 children'],
     }),
   });
   return tick(OPEN_HOUR, d).then((res) => {
     check('recordFailure called once even though runPass resolved', () => assert.strictEqual(d.recordFailureCalls.length, 1));
     check('the message names the structural refusal', () => {
-      assert.strictEqual(d.recordFailureCalls[0].message, 'the roster and today tabs do not line up');
+      assert.strictEqual(d.recordFailureCalls[0].message, 'סדר יום has 3 rows, needs 5 for 4 children');
     });
     check('the pass result (with its errors) still comes back in ran[]', () => {
       assert.strictEqual(res.ran[0].errors.length, 1);

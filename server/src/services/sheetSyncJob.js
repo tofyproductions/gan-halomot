@@ -93,7 +93,13 @@ async function tick(now = new Date(), deps = null) {
         // threw, so the catch below never sees this one — it has to be
         // checked for on the happy path.
         if (passResult.errors && passResult.errors.length) {
-          const message = passResult.errors.map((e) => e.reason || e.message || JSON.stringify(e)).join('; ');
+          // `pairRows` (roster.js) reports its refusals as plain strings, not
+          // objects — this stays defensive about that shape rather than
+          // assuming it, so a future error carrying more structure still
+          // produces a readable message instead of "[object Object]".
+          const message = passResult.errors
+            .map((e) => (typeof e === 'string' ? e : (e.reason || e.message || JSON.stringify(e))))
+            .join('; ');
           // eslint-disable-next-line no-await-in-loop
           await d.recordFailure(b.branch_id, b.sheet_id, date, message);
         }
