@@ -22,9 +22,26 @@ function atPath(doc, path) {
   return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), doc);
 }
 
-/** The FIELD_MAP entry whose `path` is this one, for writing back out. */
+/**
+ * The FIELD_MAP entry whose `path` is this one, for writing back out.
+ *
+ * Inverting a map is only safe when it is injective, and nothing about
+ * FIELD_MAP's shape enforces that: two columns given the same `path` — a
+ * copy-pasted line, a column renamed on the board and added beside the old
+ * one — would leave this table one entry short, and the missing path is the
+ * live trigger for writing a child's value into whatever column an index
+ * lookup happens to land on. It is a static fact about a constant, so it is
+ * checked once here, at load, where it either always holds or never does,
+ * rather than being discovered at 07:00 against a live board.
+ */
 const COLUMN_FOR_PATH = Object.entries(FIELD_MAP)
-  .reduce((acc, [column, def]) => { acc[def.path] = column; return acc; }, {});
+  .reduce((acc, [column, def]) => {
+    if (acc[def.path]) {
+      throw new Error(`FIELD_MAP is not invertible: "${column}" and "${acc[def.path]}" both map to ${def.path}`);
+    }
+    acc[def.path] = column;
+    return acc;
+  }, {});
 
 function defaultDeps() {
   const { readGrids, writeCells } = require('./sheets-client');
@@ -115,7 +132,7 @@ function sheetSideOf(pair) {
     const def = FIELD_MAP[name];
     if (!def) continue;
     if (unreadable.has(def.path)) {
-      dropped.push({ access_id: pair.access_id, name: pair.name, field: name, why: 'the cell holds something this pass cannot read; left as it is' });
+      dropped.push({ kind: 'field', access_id: pair.access_id, name: pair.name, field: name, why: 'the cell holds something this pass cannot read; left as it is' });
       continue;
     }
     flat[def.path] = Object.prototype.hasOwnProperty.call(set, def.path)
@@ -141,6 +158,16 @@ function ourSideOf(log, sheetFlat) {
 }
 
 async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
+  // `mode` decides whether anything at all leaves this function, and it comes
+  // from a Setting a person edits by hand. Anything that is not one of the two
+  // words behaves exactly like 'dry' if it is merely compared against 'write'
+  // — safe for the data, and the worst possible outcome for the operator, who
+  // reads a result carrying non-zero `in` and `out` and believes write-back
+  // has been on for days while the two boards quietly diverge. Refused before
+  // a single cell is read.
+  if (mode !== 'dry' && mode !== 'write') {
+    throw new Error(`sheet-sync: unknown mode "${mode}" — expected "dry" or "write"`);
+  }
   const d = deps || defaultDeps();
   const result = { date, children: 0, in: 0, out: 0, conflicts: 0, skipped: [], errors: [] };
 
@@ -188,9 +215,9 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
   const identified = [];
   for (const p of pairs) {
     if (!p.access_id) {
-      result.skipped.push({ access_id: '', name: p.name, row: p.row, why: 'the roster row carries no AccessID' });
+      result.skipped.push({ kind: 'row', access_id: '', name: p.name, row: p.row, why: 'the roster row carries no AccessID' });
     } else if (timesSeen.get(p.access_id) > 1) {
-      result.skipped.push({ access_id: p.access_id, name: p.name, row: p.row, why: 'more than one roster row carries this AccessID' });
+      result.skipped.push({ kind: 'row', access_id: p.access_id, name: p.name, row: p.row, why: 'more than one roster row carries this AccessID' });
     } else {
       identified.push(p);
     }
@@ -206,14 +233,14 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
   // safely be, so the row is reported and left alone.
   for (const p of identified) {
     if (!byAccess.has(p.access_id)) {
-      result.skipped.push({ access_id: p.access_id, name: p.name, why: 'no single Child carries this sheet_access_id' });
+      result.skipped.push({ kind: 'row', access_id: p.access_id, name: p.name, why: 'no single Child carries this sheet_access_id' });
     }
   }
   // And an answer about something nobody asked about means the lookup is not
   // keyed the way this pass believes it is. Never used, always reported.
   for (const id of byAccess.keys()) {
     if (!asked.includes(id)) {
-      result.skipped.push({ access_id: id, name: '', why: 'the lookup answered about an id this pass never asked for' });
+      result.skipped.push({ kind: 'row', access_id: id, name: '', why: 'the lookup answered about an id this pass never asked for' });
     }
   }
 
@@ -258,31 +285,84 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
     // therefore append phantom rows to the board the room is looking at. The
     // column is an index into the very header the values were keyed by, and
     // the row must sit below that header and inside the grid.
+    //
+    // `queued` is the half of `toSheet` that a write was actually made for,
+    // and it — never `toSheet` — is what the shadow is allowed to claim
+    // below. The two used to be able to diverge, and the divergence is the
+    // worst class of bug this file has: the shadow's entire meaning is "this
+    // is what the sheet holds", so claiming a value that was never sent makes
+    // the next pass read the sheet's unchanged cell as the sheet having
+    // moved, our record as having stayed still, and revert a staff member's
+    // edit on the new board with no conflict raised and nothing logged.
+    const queued = {};
     for (const [path, value] of Object.entries(toSheet)) {
-      const col = header.indexOf(normalizeFieldName(COLUMN_FOR_PATH[path]));
-      if (col < 0) continue;
-      if (pair.row <= headerIndex || pair.row >= todayGrid.length) continue;
+      const report = (why) => result.skipped.push({
+        kind: 'cell', access_id: pair.access_id, name: pair.name, field: path, why,
+      });
+
+      // `normalizeFieldName(undefined)` is '', and `header.indexOf('')` finds
+      // the first blank header column — real boards carry trailing blanks —
+      // so an unmapped path does NOT fall through to the `col < 0` guard
+      // below. It lands on an arbitrary empty column of the board the room is
+      // looking at. Rejected on the name, before any index lookup.
+      const column = COLUMN_FOR_PATH[path] ? normalizeFieldName(COLUMN_FOR_PATH[path]) : '';
+      if (!column) { report('no sheet column is mapped to this field; nothing was written'); continue; }
+
+      // One cell, one value: `missing` is several things and the board has
+      // always shown them comma-joined in a single cell. Which makes an item
+      // that itself contains the separator unwritable — the sheet's own
+      // reader (`splitMissing`) would hand back more items than we sent, the
+      // next pass would read that as the sheet having been edited, and our
+      // list would be rewritten to the longer one on the parent-facing board.
+      // Not reachable from the board's multi-select, reachable from the API
+      // and from a hand-edited options list, so it is refused here rather
+      // than trusted not to happen.
+      const offending = Array.isArray(value) ? value.filter(v => /[,|]/.test(String(v))) : [];
+      if (offending.length) {
+        report(`an item carries the list separator and cannot survive the round trip: ${offending.join(' / ')}`);
+        continue;
+      }
+
+      // Neither of the two bounds guards should ever be reachable: the column
+      // was in the header a moment ago, when the value was read out of it,
+      // and `pairRows` already refused a grid too short for the roster. An
+      // unreachable branch is exactly where a silent `continue` costs the
+      // most — it is the branch nobody will ever look for — so both say so.
+      const col = header.indexOf(column);
+      if (col < 0) { report(`the live tab has no "${column}" column any more; nothing was written`); continue; }
+      if (pair.row <= headerIndex || pair.row >= todayGrid.length) {
+        report(`row ${pair.row} is outside the grid this pass read; nothing was written`);
+        continue;
+      }
+
       cellWrites.push({
         tab: SHEET.today,
         row: pair.row,
         col,
-        // One cell, one value: `missing` is several things and the board has
-        // always shown them comma-joined in a single cell.
         value: Array.isArray(value) ? value.join(', ') : value,
       });
+      queued[path] = value;
       result.out += 1;
     }
 
-    // What the sheet will hold once this pass finishes: what it held, with our
-    // outgoing values over the top. A field nobody could read is deliberately
-    // absent — next pass it is unclassifiable rather than falsely agreed, and
-    // unclassifiable resolves to a conflict a person sees, not a silent wipe.
-    nextShadow[pair.access_id] = { ...sheetFlat, ...toSheet };
+    // What the sheet will hold once this pass finishes: what it held, with the
+    // outgoing values that were actually queued over the top. A field nobody
+    // could read is deliberately absent — next pass it is unclassifiable
+    // rather than falsely agreed, and unclassifiable resolves to a conflict a
+    // person sees, not a silent wipe. A field we declined to write is absent
+    // from `queued` for the same reason: the sheet still holds what it held,
+    // and that is what this must go on saying.
+    nextShadow[pair.access_id] = { ...sheetFlat, ...queued };
   }
 
-  // A dry run answers "what would this do" and must leave no trace anywhere:
-  // not in the database, not in the sheet, and above all not in the shadow,
-  // which would make the real run that follows believe it had already agreed.
+  // A dry run answers "what would this do" and leaves no trace of the answer:
+  // no child's day is altered on either board, and above all no shadow is
+  // written, which would make the real run that follows believe it had
+  // already agreed. It is not a claim that the process as a whole writes
+  // nothing while in dry mode — `sheetSyncJob` still records that a branch
+  // was attempted and how the night's audit went, deliberately, because
+  // diagnostics are most needed during the read-only phase. Those touch
+  // neither board nor shadow. See that file's header.
   if (mode === 'write') {
     if (cellWrites.length) await d.writeCells(sheetId, cellWrites);
     // Only now: the shadow claims the two sides agreed, and it may only make

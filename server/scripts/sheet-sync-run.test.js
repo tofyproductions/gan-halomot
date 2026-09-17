@@ -12,8 +12,8 @@
  *   node scripts/sheet-sync-run.test.js
  */
 const assert = require('assert');
-const { runPass } = require('../src/services/sheet-sync/run');
-const { SHEET, splitMissing } = require('./lib/nursery-history');
+const { runPass, COLUMN_FOR_PATH } = require('../src/services/sheet-sync/run');
+const { SHEET, splitMissing, FIELD_MAP } = require('./lib/nursery-history');
 
 let failures = 0;
 function check(label, fn) {
@@ -543,6 +543,149 @@ scenario('a sheet write that fails must not leave an advanced shadow behind', as
   check('so the next pass still sees our edit as an edit', () => {
     assert.ok(!d.calls.includes('saveShadow'));
   });
+});
+
+// --- 14: the shadow may only claim what was actually queued ---------------
+//
+// The shadow's entire meaning is "this is what the sheet holds". The write
+// loop declines some cells; if the shadow claims them anyway, the next pass
+// sees the sheet disagreeing with a shadow that says our value is already
+// there, reads that as "the sheet moved and we did not", and quietly reverts
+// the staff member's edit on the new board with no conflict raised.
+//
+// The live trigger is COLUMN_FOR_PATH losing an entry — two FIELD_MAP columns
+// sharing one path silently drops one on inversion. Simulated here by
+// deleting an entry, because that is exactly the state the inversion leaves
+// behind, and because the guard that is supposed to catch it does not:
+// normalizeFieldName(undefined) is '', and header.indexOf('') finds the first
+// blank header column, which real boards have trailing.
+
+scenario('a path with no column of its own is not written into a blank column, and not claimed', async () => {
+  const header = ['התעורר בבית', 'הערות', ''];
+  const d = deps({
+    today: todayGrid([['', '', ''], ['', '', '']], header),
+    logs: new Map([['c1', { staff_note: 'ישן טוב', home: {}, meals: {}, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { staff_note: '' } },
+  });
+  const had = COLUMN_FOR_PATH.staff_note;
+  delete COLUMN_FOR_PATH.staff_note;
+  let res;
+  try {
+    res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  } finally {
+    COLUMN_FOR_PATH.staff_note = had;
+  }
+
+  check('nothing is written into the trailing blank column', () => {
+    assert.strictEqual(d.writes.length, 0);
+  });
+  check('and nothing is counted as having gone out', () => assert.strictEqual(res.out, 0));
+  check('the shadow states what the sheet really holds, not what we failed to send', () => {
+    assert.strictEqual(d.state.shadowSaved['id-1'].staff_note, '');
+  });
+  check('the refusal is reported rather than passed over in silence', () => {
+    const r = res.skipped.find(s => s.field === 'staff_note');
+    assert.ok(r, 'expected the declined cell to be reported');
+    assert.strictEqual(r.kind, 'cell');
+  });
+});
+
+scenario('every FIELD_MAP column keeps its own path — the inversion loses nothing', () => {
+  check('COLUMN_FOR_PATH has one entry per column', () => {
+    assert.strictEqual(Object.keys(COLUMN_FOR_PATH).length, Object.keys(FIELD_MAP).length);
+  });
+});
+
+// --- 15: a comma inside a מה חסר item ------------------------------------
+//
+// One cell, one comma-joined list, and the reader splits on the comma. An
+// item that contains one is therefore not round-trippable: written out it
+// comes back as two items, the next pass sees a sheet that "moved", and our
+// two-item list is rewritten to three on the parent-facing board with no
+// alarm. Not reachable through the board's multi-select, reachable through
+// the API and through an admin-edited options list.
+
+scenario('an item carrying the separator is refused, not written', async () => {
+  const header = ['התעורר בבית', 'מה חסר'];
+  const d = deps({
+    today: todayGrid([['', ''], ['', '']], header),
+    logs: new Map([['c1', { missing: ['חיתולים, גדול', 'מגבונים'], home: {}, meals: {}, sleep: {} }]]),
+    shadow: { 'id-1': { missing: [] } },
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('the cell is not written', () => assert.strictEqual(d.writes.length, 0));
+  check('the shadow keeps saying what the sheet holds', () => {
+    assert.deepStrictEqual(d.state.shadowSaved['id-1'].missing, []);
+  });
+  check('and the item is named so somebody can fix it', () => {
+    const r = res.skipped.find(s => s.field === 'missing');
+    assert.ok(r, 'expected the refused list to be reported');
+    assert.strictEqual(r.kind, 'cell');
+    assert.ok(/חיתולים, גדול/.test(r.why), 'expected the offending item to be named');
+  });
+});
+
+scenario('a list with no separator inside an item still goes out normally', async () => {
+  const header = ['התעורר בבית', 'מה חסר'];
+  const d = deps({
+    today: todayGrid([['', ''], ['', '']], header),
+    logs: new Map([['c1', { missing: ['חיתולים גדול', 'מגבונים'], home: {}, meals: {}, sleep: {} }]]),
+    shadow: { 'id-1': { missing: [] } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  check('one cell written', () => assert.strictEqual(d.writes.length, 1));
+  check('and it reads back as the same two items', () => {
+    assert.deepStrictEqual(splitMissing(d.writes[0].value), ['חיתולים גדול', 'מגבונים']);
+  });
+});
+
+// --- 16: `skipped` is read by a person ------------------------------------
+
+scenario('every skipped entry says which kind of thing was skipped', async () => {
+  const roster = [
+    ['ילדים - משה דיין', '', '', ''],
+    ['שם מלא', 'תאריך לידה', 'AccessID', 'מספר פלאפון'],
+    ['נויה חגי', 45897, 'id-1', '0500000000'],
+    ['ילד ללא מזהה', 45887, '', '0500000000'],
+  ];
+  const header = ['התעורר בבית', 'הערות'];
+  const d = deps({
+    roster,
+    // 3.5 is not a time: an unreadable cell, reported as a field rather than
+    // as a row, on the same pass as a row with no identity at all.
+    today: todayGrid([[3.5, ''], ['', '']], header),
+    logs: new Map(),
+    shadow: {},
+    children: new Map([['id-1', { _id: 'c1', child_name: 'נויה חגי', classroom_id: null }]]),
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  check('both kinds are present', () => {
+    assert.ok(res.skipped.some(s => s.kind === 'row'), 'expected a skipped row');
+    assert.ok(res.skipped.some(s => s.kind === 'field'), 'expected a skipped field');
+  });
+  check('and nothing is left undiscriminated', () => {
+    const nameless = res.skipped.filter(s => !s.kind);
+    assert.deepStrictEqual(nameless, []);
+  });
+});
+
+// --- 17: the mode is the operator's, and it is not spell-checked anywhere -
+
+scenario('an unrecognised mode is refused outright, never silently dry-run', async () => {
+  const d = deps({
+    today: todayGrid([['', '', '', ''], ['', '', '', '']]),
+    logs: new Map(),
+    shadow: {},
+  });
+  let threw = null;
+  try {
+    await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'Write', deps: d });
+  } catch (e) { threw = e; }
+  check('it throws', () => assert.ok(threw, 'expected an unknown mode to be refused'));
+  check('and names the mode it was given', () => assert.ok(/Write/.test(threw.message)));
+  check('nothing was read before refusing', () => assert.ok(!d.calls.includes('readGrids')));
 });
 
 (async () => {
