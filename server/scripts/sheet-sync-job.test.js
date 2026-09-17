@@ -37,8 +37,14 @@ function deps({ cfg, runPass, verifyDay } = {}) {
   const runPassCalls = [];
   const verifyDayCalls = [];
   const recordFailureCalls = [];
+  const markNightlyRanCalls = [];
+  // A plain Map standing in for the Setting document: persists across
+  // several `tick()` calls made with the SAME `d`, exactly like the real
+  // Setting persists across ticks in production, so a test can call tick()
+  // twice and see the second call behave as "already ran tonight".
+  const nightlyRanStore = new Map();
   return {
-    runPassCalls, verifyDayCalls, recordFailureCalls,
+    runPassCalls, verifyDayCalls, recordFailureCalls, markNightlyRanCalls, nightlyRanStore,
     readSetting: async () => cfg || {},
     runPass: async (args) => {
       runPassCalls.push(args);
@@ -50,6 +56,11 @@ function deps({ cfg, runPass, verifyDay } = {}) {
     },
     recordFailure: async (branchId, sheetId, date, message) => {
       recordFailureCalls.push({ branchId, sheetId, date, message });
+    },
+    readNightlyRan: async (branchId) => nightlyRanStore.get(branchId) || null,
+    markNightlyRan: async (branchId, date) => {
+      markNightlyRanCalls.push({ branchId, date });
+      nightlyRanStore.set(branchId, date);
     },
   };
 }
@@ -173,6 +184,84 @@ scenario('a nightly archive that will not parse is reported, not treated as agre
   });
   check('recordFailure is not involved — the nightly check is not a sync pass', () => {
     assert.strictEqual(d.recordFailureCalls.length, 0);
+  });
+});
+
+// --- fix round 1: the nightly check must run once, and must not masquerade
+//     as a sync failure --------------------------------------------------
+
+scenario('the nightly check runs once per branch per date, however many ticks land inside the hour', async () => {
+  const d = deps({ cfg: { enabled: true, branches: oneBranch } });
+  await tick(NIGHTLY, d);
+  await tick(NIGHTLY, d);
+  await tick(NIGHTLY, d);
+  check('verifyDay fetched the archive only once, not once per tick', () => {
+    assert.strictEqual(d.verifyDayCalls.length, 1);
+  });
+  check('the "done for tonight" marker was written once', () => {
+    assert.strictEqual(d.markNightlyRanCalls.length, 1);
+    assert.deepStrictEqual(d.markNightlyRanCalls[0], { branchId: 'b1', date: '2026-09-17' });
+  });
+});
+
+scenario('a new date is a fresh check, even for the same branch', async () => {
+  const d = deps({ cfg: { enabled: true, branches: oneBranch } });
+  await tick(NIGHTLY, d); // 2026-09-17
+  await tick(new Date('2026-09-18T20:00:00Z'), d); // 2026-09-18, 23:00 Israel time
+  check('verifyDay ran once per night, twice total', () => assert.strictEqual(d.verifyDayCalls.length, 2));
+});
+
+scenario('a nightly audit that throws is the audit failing, not the sync — recordFailure is never called', async () => {
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    verifyDay: async () => { throw new Error('Sheets API timed out'); },
+  });
+  const res = await tick(NIGHTLY, d);
+  check('recordFailure was never called', () => assert.strictEqual(d.recordFailureCalls.length, 0));
+  check('the branch result carries an auditError, not error (that key means the sync pass failed)', () => {
+    assert.strictEqual(res.ran[0].auditError, 'Sheets API timed out');
+    assert.strictEqual(res.ran[0].error, undefined);
+  });
+  check('a failed audit attempt is not marked done — it must be retried, not skipped for the rest of the night', () => {
+    assert.strictEqual(d.markNightlyRanCalls.length, 0);
+  });
+});
+
+scenario('a transient audit failure is retried on the next tick within the same hour, and then marked done', async () => {
+  let calls = 0;
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    verifyDay: async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('Sheets API timed out');
+      return { checked: 1, agreed: 1, disagreed: [], unresolved: [], unreadable: [] };
+    },
+  });
+  const first = await tick(NIGHTLY, d);
+  const second = await tick(NIGHTLY, d);
+  const third = await tick(NIGHTLY, d);
+  check('the first tick sees the audit failure', () => assert.strictEqual(first.ran[0].auditError, 'Sheets API timed out'));
+  check('the second tick retries and succeeds', () => assert.ok(second.ran[0].verify));
+  check('the third tick is skipped — already done for tonight', () => assert.strictEqual(third.ran.length, 0));
+  check('verifyDay was called exactly twice (the failure, then the success)', () => {
+    assert.strictEqual(d.verifyDayCalls.length, 2);
+  });
+});
+
+scenario('a day-pass failure earlier in the day and a nightly audit failure later are recorded independently', async () => {
+  const d = deps({
+    cfg: { enabled: true, branches: oneBranch },
+    runPass: async () => { throw new Error('the sheet refused the write'); },
+    verifyDay: async () => { throw new Error('Sheets API timed out'); },
+  });
+  await tick(OPEN_HOUR, d);
+  check('the day pass failure was recorded', () => assert.strictEqual(d.recordFailureCalls.length, 1));
+  await tick(NIGHTLY, d);
+  check('the nightly audit failure did NOT add a second recordFailure call', () => {
+    assert.strictEqual(d.recordFailureCalls.length, 1);
+  });
+  check('the one recordFailure call on record is still the day pass\'s, untouched by the audit', () => {
+    assert.strictEqual(d.recordFailureCalls[0].message, 'the sheet refused the write');
   });
 });
 
