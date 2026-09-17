@@ -15,6 +15,7 @@
     "test:contracts": "node scripts/contract-upload.test.js",
     "test:sync-roster": "node scripts/sheet-sync-roster.test.js",
     "test:sync-merge": "node scripts/sheet-sync-three-way.test.js",
+    "test:sync-run": "node scripts/sheet-sync-run.test.js",
     "test:contract-hours": "node scripts/contract-weekly-hours.test.js",
     "test:reminder": "node scripts/manager-reminder.test.js",
     "test:recipients": "node scripts/branch-recipients.test.js",
