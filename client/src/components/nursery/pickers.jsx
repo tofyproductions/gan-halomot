@@ -34,15 +34,21 @@ export function FieldButton({ label, value, empty = '—', onClick, highlight, s
         border: '1px solid',
         borderColor: filled && highlight ? 'primary.main' : 'divider',
         bgcolor: filled && highlight ? 'action.selected' : 'transparent',
+        // A flex column does not clip its children on its own: a long value
+        // (four items to bring tomorrow) ran straight out of the tile and
+        // across the card. `noWrap` only elides once the text has a width
+        // to be narrower than.
+        overflow: 'hidden',
         ...sx,
       }}
     >
-      <Typography variant="caption" color="text.secondary" noWrap>{label}</Typography>
+      <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: '100%' }}>{label}</Typography>
       <Typography
         variant="body2"
         fontWeight={filled ? 700 : 400}
         color={filled ? 'text.primary' : 'text.disabled'}
         noWrap
+        sx={{ maxWidth: '100%', px: 0.5 }}
       >
         {filled ? String(value) : empty}
       </Typography>

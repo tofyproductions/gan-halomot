@@ -406,7 +406,9 @@ export default function ChildDayCard({
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <FieldButton
               label="חסר למחר"
-              value={(log.missing || []).join(', ')}
+              // The items themselves are the chips under the tile; the tile
+              // says how many, or names them when one or two fit.
+              value={(log.missing || []).length > 2 ? `${log.missing.length} פריטים` : (log.missing || []).join(', ')}
               onClick={(e) => open(e, {
                 kind: 'value', path: 'missing', title: 'מה חסר למחר', multi: true,
                 options: options.missing, value: log.missing || [],
