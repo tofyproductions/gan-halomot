@@ -211,7 +211,7 @@ export default function ParentLogin() {
             <form onSubmit={handleLogin}>
               <Stack spacing={2}>
                 <TextField
-                  label="תעודת זהות"
+                  label="תעודת זהות של ההורה"
                   value={idNumber}
                   onChange={(e) => setIdNumber(digitsOnly(e.target.value, 9))}
                   inputMode="numeric"

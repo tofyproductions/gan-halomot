@@ -53,7 +53,9 @@ async function start(req, res) {
   const parent = await findParent(idNumber);
   if (!parent) {
     return res.status(404).json({
-      error: 'לא נמצא ילד פעיל הרשום למספר תעודת הזהות הזה. לבירור יש לפנות לגן.',
+      // Said in terms of the parent, not the child: the first thing a parent
+      // types after this message used to be the child's number.
+      error: 'מספר תעודת הזהות הזה אינו רשום כהורה של ילד/ה פעיל/ה. יש להזין את תעודת הזהות של ההורה (לא של הילד/ה). לבירור יש לפנות לגן.',
     });
   }
 
