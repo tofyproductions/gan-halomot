@@ -142,6 +142,7 @@ function TodayCard({ day, childName, onOpen }) {
         sx={{
           border: 0,
           bgcolor: (t) => t.playful.teal.bg,
+          background: (t) => t.playful.teal.grad,
           color: (t) => t.playful.teal.on,
         }}
       >
@@ -228,6 +229,7 @@ function AnnouncementCard({ latest, total, onOpen }) {
         sx={urgent ? {
           border: 0,
           bgcolor: (t) => t.playful.coral.bg,
+          background: (t) => t.playful.coral.grad,
           color: (t) => t.playful.coral.on,
         } : undefined}
       >

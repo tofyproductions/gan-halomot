@@ -134,6 +134,7 @@ export default function ParentPortal() {
           sx={{
             px: 2, pt: 'max(16px, env(safe-area-inset-top))', pb: 3.5,
             bgcolor: (t) => t.playful.coral.bg,
+            background: (t) => t.playful.coral.grad,
             color: (t) => t.playful.coral.on,
             // On a phone it runs edge to edge and curves into the page. On a
             // wide screen that same block became a banner across 1400px with

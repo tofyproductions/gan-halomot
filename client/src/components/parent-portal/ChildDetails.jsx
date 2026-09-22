@@ -125,7 +125,9 @@ function Hero({ name, classroom, year, photo }) {
         ) : (
           <Box sx={{
             position: 'absolute', inset: 0,
-            background: 'linear-gradient(140deg, #C9702A 0%, #8A3F06 100%)',
+            // The same colour as the header above it, one step lighter: the
+            // hero sits on the header's curve and must read as part of it.
+            background: 'linear-gradient(140deg, #EE7A33 0%, #CC4519 100%)',
           }} />
         )}
 

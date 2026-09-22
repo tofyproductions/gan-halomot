@@ -55,27 +55,49 @@ const BODY = '"Rubik", "Assistant", system-ui, -apple-system, sans-serif';
  * dark text, so it stays bright.
  */
 export const PLAYFUL = {
-  // ONE FAMILY, 22.09.2026. The first set was four unrelated hues — a red
-  // header over an orange hero over a green day card, with a violet icon
-  // underneath — and the screen read as four apps. These are four tones of
-  // the same earth the management screens are built from: deep clay for the
-  // header and anything urgent, sage for the day, sand for the selected tab,
-  // and a warm taupe for the quiet actions. The names stayed (`coral`,
-  // `teal`…) so no screen had to change; the roles are what they were.
+  // ONE COLOUR, 22.09.2026, in three strengths. The screen had been four
+  // hues (red, orange, green, violet), then four earth tones — and the earth
+  // tones read as "dead". What was asked for: two colours at most, alive,
+  // not shouting, not pastel, "maybe a gradient of the same colour". So:
+  // one warm coral-orange, the gan's own, as a gradient. The header and
+  // anything urgent wear it mid-strength; the day card wears it deep; the
+  // selected tab wears its tint. The names stayed (`coral`, `teal`…) so no
+  // screen changed; `teal` is simply the deep end of the same colour now,
+  // and `violet` is the colour itself.
   //
-  // Contrast, measured: white on clay 7.6:1, on sage 5.1:1, on taupe 7.0:1;
-  // ink on sand 9.8:1. The `soft` tints carry their `softOn` at 7:1 or more.
+  // Contrast, measured for the small line: white on #CC4519 4.7:1, on
+  // #B83E14 5.2:1, on #8C2E0E 8.4:1; the tab's #7A2A0C on #FBD9C8 7.3:1.
+  // `grad` runs light→dark so the lively end sits away from the text
+  // (RTL: text on the right, the light corner bottom-left).
   light: {
-    coral: { bg: '#8A3F06', on: '#FFFFFF', soft: '#F6E7DA', softOn: '#7A3A08' },
-    teal: { bg: '#4F6F5A', on: '#FFFFFF', soft: '#E6EEE8', softOn: '#365243' },
-    amber: { bg: '#E9C27E', on: '#3A2A08', soft: '#FBF1DF', softOn: '#6B4A00' },
-    violet: { bg: '#6B5647', on: '#FFFFFF', soft: '#EFE9E4', softOn: '#4E3D31' },
+    coral: {
+      bg: '#CC4519', on: '#FFFFFF', soft: '#FBD9C8', softOn: '#7A2A0C',
+      grad: 'linear-gradient(225deg, #B83E14 0%, #CC4519 55%, #EE7A33 100%)',
+    },
+    teal: {
+      bg: '#A83A12', on: '#FFFFFF', soft: '#FBD9C8', softOn: '#7A2A0C',
+      grad: 'linear-gradient(225deg, #8C2E0E 0%, #A83A12 55%, #C9431A 100%)',
+    },
+    amber: { bg: '#FBD9C8', on: '#7A2A0C', soft: '#FDEDE4', softOn: '#7A2A0C' },
+    violet: {
+      bg: '#CC4519', on: '#FFFFFF', soft: '#FBD9C8', softOn: '#7A2A0C',
+      grad: 'linear-gradient(225deg, #B83E14 0%, #CC4519 55%, #EE7A33 100%)',
+    },
   },
   dark: {
-    coral: { bg: '#6E3306', on: '#FFFFFF', soft: '#2E1B0E', softOn: '#F2B98F' },
-    teal: { bg: '#3B5444', on: '#FFFFFF', soft: '#1A241E', softOn: '#A9CDB5' },
-    amber: { bg: '#C9A15E', on: '#241900', soft: '#2C2210', softOn: '#F2CB74' },
-    violet: { bg: '#4F3F34', on: '#FFFFFF', soft: '#211A15', softOn: '#D6C4B4' },
+    coral: {
+      bg: '#A83A12', on: '#FFFFFF', soft: '#3A1A0E', softOn: '#F5B08A',
+      grad: 'linear-gradient(225deg, #8C2E0E 0%, #A83A12 55%, #C9431A 100%)',
+    },
+    teal: {
+      bg: '#7E2B0D', on: '#FFFFFF', soft: '#2E150B', softOn: '#F5B08A',
+      grad: 'linear-gradient(225deg, #66220A 0%, #7E2B0D 55%, #A83A12 100%)',
+    },
+    amber: { bg: '#3A1A0E', on: '#F5B08A', soft: '#2E150B', softOn: '#F5B08A' },
+    violet: {
+      bg: '#A83A12', on: '#FFFFFF', soft: '#3A1A0E', softOn: '#F5B08A',
+      grad: 'linear-gradient(225deg, #8C2E0E 0%, #A83A12 55%, #C9431A 100%)',
+    },
   },
 };
 
