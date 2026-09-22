@@ -1,6 +1,7 @@
 const { Candidate, Branch } = require('../models');
 const { resolveBranchScope } = require('../utils/branch-scope');
 const recruitment = require('../services/recruitment.service');
+const storage = require('../services/storage.service');
 
 /**
  * גיוס עובדים — the queue between somebody asking for work and a manager
@@ -116,6 +117,17 @@ function shape(c, branchNames, senderName = '') {
     awaiting_decision: c.status === 'interview_scheduled'
       && !!c.interview?.at && new Date(c.interview.at) <= new Date(),
     message: c.applications?.[c.applications.length - 1]?.message || '',
+    // The three answers the form now asks for. '' means UNANSWERED — anybody
+    // who arrived through mail-sorter was never asked — and the screen has to
+    // be able to say so rather than render a blank as לא.
+    city: c.city || '',
+    mobility: c.mobility || '',
+    gan_experience: c.gan_experience || '',
+    email: c.email || '',
+    source: c.applications?.[c.applications.length - 1]?.source || '',
+    cv: (c.cv?.storage_key || c.cv?.data)
+      ? { filename: c.cv.filename || 'קורות חיים', size_bytes: c.cv.size_bytes || 0 }
+      : null,
     // Only the earlier ones — the current application is the row itself.
     history: (c.applications || []).slice(0, -1).map(a => ({ at: a.at, branch: a.requested_branch })),
     events: (c.events || []).map(e => ({ at: e.at, type: e.type, note: e.note, by: e.by_name })),
@@ -223,6 +235,35 @@ async function counts(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+/**
+ * GET /api/recruitment/:id/cv — the CV that came with the application.
+ *
+ * Scoped like every other row on this screen: a manager reaches the people in
+ * her branches and nobody else's. Streamed through the server rather than
+ * answered with a bucket redirect, so the same bearer token that authorised
+ * the row authorises the file.
+ */
+async function downloadCv(req, res, next) {
+  try {
+    const { doc, error, status } = await loadScoped(req, req.params.id);
+    if (error) return res.status(status).json({ error });
+    const cv = doc.cv || {};
+    let buf = null;
+    if (cv.storage_key) {
+      const signed = await storage.signedReadUrl(cv.storage_key);
+      const upstream = await fetch(signed);
+      if (!upstream.ok) return res.status(502).json({ error: `שליפת הקובץ נכשלה (${upstream.status})` });
+      buf = Buffer.from(await upstream.arrayBuffer());
+    } else if (cv.data) {
+      buf = Buffer.from(cv.data, 'base64');
+    }
+    if (!buf) return res.status(404).json({ error: 'לא צורפו קורות חיים' });
+    res.setHeader('Content-Type', cv.mimetype || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(cv.filename || 'cv')}`);
+    res.send(buf);
+  } catch (error) { next(error); }
 }
 
 /** POST /api/recruitment/pull — fetch from mail-sorter now, without waiting. */
@@ -493,4 +534,5 @@ module.exports = {
   list, counts, pull, scheduleInterview, markNotRelevant, markNoAnswer,
   recordOutcome, reschedule,
   STALE_HOURS, RETRY_DAYS, interviewWhatsapp,
+  downloadCv,
 };

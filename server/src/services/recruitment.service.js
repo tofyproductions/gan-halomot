@@ -104,14 +104,26 @@ function retentionFrom(date = new Date(), notBefore = null) {
 async function intake({
   full_name, phone, requested_branch, message = '', at = new Date(),
   source = 'mail_sorter', source_ref = '', raw_subject = '',
+  city = '', mobility = '', gan_experience = '', email = '', cv = null,
 }, branches) {
   const key = normalizePhone(phone);
   if (!key) return { candidate: null, created: false, reopened: false };
 
   const { branch_ids, unmatched } = resolveBranches(requested_branch, branches);
+  // Only 'yes' and 'no' are answers. Anything else — including the empty
+  // string every mail-sorter arrival carries — stays unanswered rather than
+  // being coerced into a 'no' the applicant never said.
+  const choice = (v) => (v === 'yes' || v === 'no' ? v : '');
+  const extras = {
+    city: String(city || '').trim().slice(0, 60),
+    mobility: choice(mobility),
+    gan_experience: choice(gan_experience),
+    email: String(email || '').trim().slice(0, 120),
+  };
   const application = {
     at, source, source_ref, requested_branch: String(requested_branch || ''),
     raw_subject, message: message || '',
+    ...extras,
   };
 
   const existing = await Candidate.findOne({ phone: key });
@@ -128,6 +140,8 @@ async function intake({
       applications: [application],
       events: [{ at, type: 'applied', note: String(requested_branch || '') }],
       retain_until: retentionFrom(at),
+      ...extras,
+      ...(cv ? { cv } : {}),
     });
     return { candidate, created: true, reopened: false };
   }
@@ -146,6 +160,11 @@ async function intake({
   if (branch_ids.length) existing.branch_ids = branch_ids;
   existing.branch_unmatched = unmatched;
   if (String(full_name || '').trim()) existing.full_name = String(full_name).trim();
+  // The latest application is the current truth about a person, but only where
+  // it actually said something: a later arrival that skipped a question must
+  // not erase the answer an earlier one gave.
+  for (const [k, v] of Object.entries(extras)) if (v) existing[k] = v;
+  if (cv) existing.cv = cv;
   if (wasClosed) {
     existing.status = 'new';
     existing.next_action_at = at;

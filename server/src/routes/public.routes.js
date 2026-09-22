@@ -56,10 +56,32 @@ router.post('/event/:token/claim', publicController.claimItem);
 router.post('/event/:token/release', publicController.releaseItem);
 
 // --- New-parent leads (public inquiry form, no auth) ---
+const { publicFormLimiter } = require('../middleware/rateLimit');
 const leads = require('../controllers/leads.controller');
 // GET /api/public/lead-branches — branch list for the general form dropdown
 router.get('/lead-branches', leads.publicBranches);
 // POST /api/public/lead — submit an inquiry
-router.post('/lead', leads.publicSubmit);
+router.post('/lead', publicFormLimiter, leads.publicSubmit);
+
+// --- דרושים (public hiring page, no auth) ---
+//
+// The form at the bottom of /careers. A paid campaign points at that page, so
+// this is the one write endpoint in the system that strangers are actively
+// invited to use — hence the limiter, and hence the CV going through its own
+// multer instance with a hard ceiling rather than the unbounded one above.
+const careers = require('../controllers/careers.controller');
+const cvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: careers.MAX_CV_BYTES, files: 1 },
+});
+function cvUploadErrors(err, _req, res, next) {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'הקובץ גדול מדי — עד 8MB' });
+  }
+  if (err) return res.status(400).json({ error: 'שגיאה בצירוף הקובץ' });
+  next();
+}
+router.get('/careers/branches', careers.publicBranches);
+router.post('/careers/apply', publicFormLimiter, cvUpload.single('cv'), cvUploadErrors, careers.publicApply);
 
 module.exports = router;

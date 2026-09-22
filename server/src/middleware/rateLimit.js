@@ -29,4 +29,26 @@ const otpLimiter = rateLimit({
   message: { error: 'יותר מדי ניסיונות. נסו שוב בעוד כמה דקות.' },
 });
 
-module.exports = { authLimiter, otpLimiter };
+/**
+ * The public forms a stranger can reach: the parent inquiry, and the hiring
+ * application a paid Facebook campaign sends traffic to.
+ *
+ * Neither is an authentication surface, so the brake is not about guessing a
+ * secret. It is about what ONE submit costs us: a database row, a file in the
+ * bucket, an email to every branch manager and a push to each of their phones.
+ * Unthrottled, a bored person with a loop empties the SMS balance's neighbour
+ * — the mail quota — and buries eighty real applicants under ten thousand
+ * fake ones on the morning the campaign goes live.
+ *
+ * Generous per window, because a family and a jobseeker on the same office
+ * Wi-Fi share an IP and neither should ever meet this.
+ */
+const publicFormLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'נשלחו יותר מדי פניות. נסו שוב בעוד כמה דקות.' },
+});
+
+module.exports = { authLimiter, otpLimiter, publicFormLimiter };

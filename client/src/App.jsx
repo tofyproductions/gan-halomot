@@ -69,6 +69,7 @@ const GanttEditor = lazy(() => import('./components/gantt/GanttEditor'));
 const GiftsManager = lazy(() => import('./components/nursery/GiftsManager'));
 const HolidayManager = lazy(() => import('./components/holidays/HolidayManager'));
 const LeadForm = lazy(() => import('./components/leads/LeadForm'));
+const CareersPage = lazy(() => import('./components/careers/CareersPage'));
 const LeadsPage = lazy(() => import('./components/leads/LeadsPage'));
 const MaintenancePage = lazy(() => import('./components/maintenance/MaintenancePage'));
 const MyAccount = lazy(() => import('./components/account/MyAccount'));
@@ -161,6 +162,14 @@ function AppRoutes() {
       {/* Public new-parent inquiry (marketed link). Standalone, outside the shell. */}
       <Route path="/lead" element={<LeadForm />} />
       <Route path="/lead/:branchId" element={<LeadForm />} />
+      {/* דף הדרושים — where the Facebook campaign lands. Standalone for the
+          same reason as everything else in this block, and lazy for a sharper
+          one: it carries the brand's fonts, photographs and its own palette,
+          and none of that belongs in the bundle a manager downloads to look at
+          a payroll table. Both paths answer, because the ad creative in the
+          wild spells it both ways. */}
+      <Route path="/careers" element={<CareersPage />} />
+      <Route path="/apply" element={<CareersPage />} />
       {/* Parent portal. Standalone like the rest of this block — it has its own
           accounts, its own token key and its own HTTP client, so mounting the
           management shell around it would fire staff API calls with a token

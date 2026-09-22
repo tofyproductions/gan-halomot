@@ -19,10 +19,10 @@ const mongoose = require('mongoose');
 const notificationEventSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['new_lead', 'punch_pending_manager', 'punch_pending_accountant'],
+    enum: ['new_lead', 'new_candidate', 'punch_pending_manager', 'punch_pending_accountant'],
     required: true,
   },
-  ref_collection: { type: String, required: true }, // 'Lead' | 'Punch'
+  ref_collection: { type: String, required: true }, // 'Lead' | 'Candidate' | 'Punch'
   ref_id: { type: mongoose.Schema.Types.ObjectId, required: true },
   recipient_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 

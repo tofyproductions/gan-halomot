@@ -34,6 +34,18 @@ const applicationSchema = new mongoose.Schema({
   requested_branch: { type: String, default: '' },
   raw_subject: { type: String, default: '' },
   message: { type: String, default: '' },
+
+  // --- What the form asked THIS time -------------------------------------
+  //
+  // Kept per arrival and not only on the candidate, for the same reason
+  // `requested_branch` is: somebody who applied a year ago from חדרה without a
+  // car and applies again from כפר סבא with one has not contradicted
+  // herself, she has moved. The candidate carries the latest answer; the
+  // history is here.
+  city: { type: String, default: '' },
+  mobility: { type: String, enum: ['yes', 'no', ''], default: '' },
+  gan_experience: { type: String, enum: ['yes', 'no', ''], default: '' },
+  email: { type: String, default: '' },
 }, { _id: false });
 
 /** A call that was made. Kept per attempt so the schedule can be reconstructed. */
@@ -89,6 +101,25 @@ const candidateSchema = new mongoose.Schema({
   branch_ids: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Branch', index: true }],
   /** The label as chosen, kept for display: 'כפר סבא', 'משרד', … */
   requested_branch: { type: String, default: '' },
+
+  /**
+   * The three answers a manager wants BEFORE she picks up the phone.
+   *
+   * Where they live, whether they can get to a branch that is not walking
+   * distance, and whether they have stood in a גן before. All three decide
+   * whether the call happens at all, and all three were previously discovered
+   * in the first minute of it — which is the minute that gets wasted eighty
+   * times a campaign.
+   *
+   * Empty is a real value and means UNANSWERED, not "no". The form asks, but
+   * an application that arrives from anywhere else does not, and rendering a
+   * blank as לא would invent a fact about a person.
+   */
+  city: { type: String, default: '' },
+  mobility: { type: String, enum: ['yes', 'no', ''], default: '' },
+  gan_experience: { type: String, enum: ['yes', 'no', ''], default: '' },
+  /** Optional. Only used to confirm to them that the application arrived. */
+  email: { type: String, default: '' },
   /** True when the form's branch matched nothing — needs a human, not a guess. */
   branch_unmatched: { type: Boolean, default: false },
 
@@ -144,6 +175,26 @@ const candidateSchema = new mongoose.Schema({
     filename: { type: String, default: '' },
     _id: false,
   }],
+
+  /**
+   * The CV, when it came WITH the application rather than as a stray file.
+   *
+   * A form upload has no matching problem at all — the bytes arrive in the
+   * same request as the phone number — so it is stored here directly rather
+   * than in `attachments`, which exists for the mail-sorter case where a file
+   * and a person have to be guessed into each other.
+   *
+   * Bytes go to object storage when a bucket is configured and this keeps the
+   * key; `data` is the fallback for an installation without one.
+   */
+  cv: {
+    storage_key: { type: String, default: null },
+    data: { type: String, default: null },        // base64, no data: prefix
+    filename: { type: String, default: '' },
+    mimetype: { type: String, default: '' },
+    size_bytes: { type: Number, default: 0 },
+    uploaded_at: { type: Date, default: null },
+  },
 
   /**
    * Two years from the last thing that happened, unless a callback is set for

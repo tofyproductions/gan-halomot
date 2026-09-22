@@ -48,6 +48,20 @@ const EXEMPT = [
    */
   path.join('components', 'layout', 'classic') + path.sep,
   path.join('theme', 'classicTheme.js'),
+  /**
+   * דף הדרושים — a public MARKETING page, exempt for the same reason the
+   * parent portal is: it is not the staff application and it is not supposed
+   * to look like it. It answers a Facebook ad, it is the first thing a
+   * stranger ever sees of גן החלומות, and its palette is the brand's
+   * rather than the admin interface's — the gradients and the photograph
+   * frames on it have no meaning anywhere else and belong in no shared token.
+   *
+   * The budget exists to stop the STAFF screens drifting into six shades of
+   * the same blue. Counting a landing page against it would either corrupt
+   * tokens.js with marketing colours or produce a recruitment page that looks
+   * like a payroll table.
+   */
+  path.join('components', 'careers') + path.sep,
 ];
 
 const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\s*\(/g;

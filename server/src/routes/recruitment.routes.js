@@ -26,6 +26,9 @@ router.get('/', ctrl.list);
 
 router.post('/pull', ctrl.pull);
 
+// The CV that arrived with the application. Scoped in the controller.
+router.get('/:id/cv', ctrl.downloadCv);
+
 router.post('/:id/interview', ctrl.scheduleInterview);
 router.post('/:id/not-relevant', ctrl.markNotRelevant);
 router.post('/:id/no-answer', ctrl.markNoAnswer);

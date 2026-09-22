@@ -12,6 +12,7 @@ import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import BlockIcon from '@mui/icons-material/Block';
 import PhoneMissedIcon from '@mui/icons-material/PhoneMissed';
 import HistoryIcon from '@mui/icons-material/History';
+import DescriptionIcon from '@mui/icons-material/Description';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
@@ -74,6 +75,24 @@ export default function RecruitmentPage() {
   const [move, setMove] = useState(null);
 
   const viewKey = VIEWS[view].key;
+
+
+  /**
+   * The CV, fetched with the bearer token and opened as a blob.
+   *
+   * A plain link would be an unauthenticated request for a private document,
+   * and the endpoint would — correctly — refuse it.
+   */
+  const openCv = async (row) => {
+    try {
+      const res = await api.get(`/recruitment/${row.id}/cv`, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch {
+      toast.error('פתיחת קורות החיים נכשלה');
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -268,6 +287,40 @@ export default function RecruitmentPage() {
                   <Typography variant="caption" color="text.secondary">הגיע/ה {fmtDate(row.applied_at)}</Typography>
                   <IconButton size="small" onClick={() => setHistory(row)}><HistoryIcon fontSize="small" /></IconButton>
                 </Stack>
+
+                {/* What the form asked, when it was asked. A candidate who came
+                    through mail-sorter answered none of these and shows none
+                    of them — an empty row is better than four "לא נענה" chips
+                    on every historical person. */}
+                {(row.city || row.mobility || row.gan_experience || row.cv) && (
+                  <Stack direction="row" spacing={0.8} flexWrap="wrap" useFlexGap sx={{ mt: 1.2 }}>
+                    {row.city && (
+                      <Chip size="small" variant="outlined" label={`מתגורר/ת ב${row.city}`} />
+                    )}
+                    {row.mobility && (
+                      <Chip
+                        size="small" variant="outlined"
+                        color={row.mobility === 'yes' ? 'success' : 'default'}
+                        label={row.mobility === 'yes' ? 'נייד/ת' : 'אין רכב'}
+                      />
+                    )}
+                    {row.gan_experience && (
+                      <Chip
+                        size="small" variant="outlined"
+                        color={row.gan_experience === 'yes' ? 'success' : 'default'}
+                        label={row.gan_experience === 'yes' ? 'ניסיון בגן' : 'בלי ניסיון בגן'}
+                      />
+                    )}
+                    {row.cv && (
+                      <Chip
+                        size="small" color="primary" icon={<DescriptionIcon />}
+                        label="קורות חיים"
+                        onClick={() => openCv(row)}
+                        sx={{ cursor: 'pointer' }}
+                      />
+                    )}
+                  </Stack>
+                )}
 
                 {row.message && (
                   <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary', whiteSpace: 'pre-wrap' }}>
