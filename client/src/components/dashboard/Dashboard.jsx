@@ -14,9 +14,10 @@ import StatBoard from '../ui/StatBoard';
 import NotificationsPanel from './NotificationsPanel';
 import MoveRequestsPanel from './MoveRequestsPanel';
 import { useAuth } from '../../hooks/useAuth';
-import {
-  DndContext, PointerSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
-} from '@dnd-kit/core';
+// The class columns carry drag-and-drop, and dnd-kit with them. The dashboard
+// is the first screen, so the grid is loaded after it — bundle-budget.test.js
+// keeps that library off the critical path.
+const ClassroomGrid = lazy(() => import('./ClassroomGrid'));
 
 /**
  * The chart library is 564KB — larger than the rest of this screen put
@@ -26,57 +27,6 @@ import {
  */
 const OccupancyChart = lazy(() => import('./OccupancyChart'));
 
-
-/** A column that accepts a dropped child, lit while one hovers over it. */
-function ClassColumn({ name, roomId, cc, droppable, dragging, children }) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `room-${roomId || name}`,
-    disabled: !droppable,
-    data: { classroom_id: roomId, name },
-  });
-  const fromHere = dragging && String(dragging.classroom_id) === String(roomId);
-  return (
-    <Card
-      ref={setNodeRef}
-      sx={{
-        borderTop: `5px solid ${cc.primary}`,
-        outline: isOver && !fromHere ? `2px dashed ${cc.primary}` : 'none',
-        outlineOffset: -2,
-        transition: (t) => `outline-color ${t.motion.fast}`,
-      }}
-    >
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
-
-/** One child; grabbable by a manager, a plain button for everyone else. */
-function KidRow({ kid, cc, draggable, onOpen }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: `kid-${kid.id}`,
-    disabled: !draggable,
-    data: kid,
-  });
-  return (
-    <Box
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      onClick={onOpen}
-      sx={{
-        p: 1, mb: 0.5, bgcolor: cc.bg, borderRadius: 2, fontSize: '0.9rem',
-        cursor: draggable ? 'grab' : 'pointer',
-        opacity: isDragging ? 0.4 : 1,
-        borderRight: `3px solid ${cc.border}`,
-        '&:hover': { bgcolor: cc.border, transform: 'translateX(-2px)' },
-        transition: (t) => `all ${t.motion.fast}`,
-        touchAction: draggable ? 'none' : 'auto',
-      }}
-    >
-      {kid.child_name || '—'}
-    </Box>
-  );
-}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -181,28 +131,6 @@ export default function Dashboard() {
    */
   const { user } = useAuth();
   const mayDrag = ['system_admin', 'branch_manager'].includes(user?.role);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-  );
-  const [dragging, setDragging] = useState(null);
-
-  const onDragEnd = async ({ active, over }) => {
-    setDragging(null);
-    if (!over || !active?.data?.current) return;
-    const kid = active.data.current;
-    const target = over.data?.current;
-    if (!target?.classroom_id || String(target.classroom_id) === String(kid.classroom_id)) return;
-    // eslint-disable-next-line no-alert
-    if (!window.confirm(`להעביר את ${kid.child_name} לכיתה "${target.name}"?\n\nהמעבר מתעדכן בכל המערכת ומשפיע על התשלום.`)) return;
-    try {
-      await api.put(`/children/${kid.id}/classroom`, { classroom_id: target.classroom_id });
-      toast.success(`${kid.child_name} הועבר/ה ל${target.name}`);
-      load(true);
-    } catch (err) {
-      toast.error(err.response?.data?.error || 'המעבר נכשל');
-    }
-  };
 
   if (loading) {
     return (
@@ -376,43 +304,16 @@ export default function Dashboard() {
           יופיעו במסכי הכיתות והנוכחות.
         </Alert>
       )}
-      <DndContext sensors={sensors} onDragStart={(e) => setDragging(e.active?.data?.current || null)} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2, mb: 4 }}>
-        {Object.entries(classrooms).map(([name, kids]) => {
-          const capacity = data?.classroomCapacity?.find(c => c.name === name)?.capacity || 0;
-          const count = Array.isArray(kids) ? kids.length : 0;
-          const cc = getClassroomColor(name);
-          const roomId = data?.classroomIds?.[name] || null;
-          return (
-            <ClassColumn key={name} name={name} roomId={roomId} cc={cc} droppable={mayDrag && !!roomId} dragging={dragging}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, pb: 1, borderBottom: `1px solid ${cc.border}` }}>
-                  <Typography sx={{ fontWeight: 700, color: cc.primary }}>{name}</Typography>
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                    <Typography sx={{ fontWeight: 800, color: cc.primary }}>{count}</Typography>
-                    {capacity > 0 && (
-                      <Typography variant="caption" color="text.secondary">/ {capacity}</Typography>
-                    )}
-                  </Box>
-                </Box>
-                {Array.isArray(kids) && kids.map((k, i) => (
-                  <KidRow
-                    key={k.id || i}
-                    kid={k}
-                    cc={cc}
-                    draggable={mayDrag && !!k.id}
-                    onOpen={() => (k.id || k._id) && setSelectedChild(k.id || k._id)}
-                  />
-                ))}
-            </ClassColumn>
-          );
-        })}
-        {Object.keys(classrooms).length === 0 && (
-          <Box sx={{ textAlign: 'center', py: 6, gridColumn: '1 / -1' }}>
-            <Typography color="text.secondary">אין ילדים רשומים עדיין. התחל ברישום חדש.</Typography>
-          </Box>
-        )}
-      </Box>
-      </DndContext>
+      <Suspense fallback={<Skeleton variant="rounded" height={220} sx={{ mb: 4 }} />}>
+        <ClassroomGrid
+          classrooms={classrooms}
+          capacity={data?.classroomCapacity || []}
+          classroomIds={data?.classroomIds || {}}
+          mayDrag={mayDrag}
+          onOpenChild={setSelectedChild}
+          onMoved={() => load(true)}
+        />
+      </Suspense>
 
       {/* Pending Leads */}
       {pendingLeads.length > 0 && (

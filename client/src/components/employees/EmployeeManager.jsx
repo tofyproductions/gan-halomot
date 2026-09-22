@@ -282,6 +282,19 @@ export default function EmployeeManager() {
    */
   const [loadError, setLoadError] = useState(null);
   const [dialog, setDialog] = useState({ open: false, mode: 'add', data: { ...EMPTY_FORM }, original: null });
+  /**
+   * A raise typed into the card gets a DATE, and goes through the dated path.
+   *
+   * The rate fields below used to write straight onto the card, which is the
+   * bug employmentTerms.js was written to close: payroll recomputes every
+   * open month from the card, so a raise entered in March re-priced January.
+   * The contracts screen and the raise-request screen already record terms
+   * with an effective date; this dialog was the last open door. When an
+   * approver changes a rate here, the card is saved WITHOUT the rate change
+   * and the change itself is recorded through /employment-contracts/terms,
+   * from the month the date lands in.
+   */
+  const [terms, setTerms] = useState({ date: '', preview: null, error: '' });
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const [hoursDialog, setHoursDialog] = useState({ open: false, employee: null });
   // Employment contract — status per employee, and the per-employee dialog.
@@ -453,9 +466,47 @@ export default function EmployeeManager() {
    * The guard is `saving`, and it is released in `finally` so a failed save
    * leaves a button you can press again.
    */
+  const RATE_FIELDS = ['hourly_rate', 'global_salary', 'global_ot_rate', 'required_hours'];
+  const sameNum = (a, b) => (a === '' || a == null ? null : Number(a)) === (b === '' || b == null ? null : Number(b));
+  const ratesChanged = (() => {
+    if (dialog.mode !== 'edit' || !dialog.original) return false;
+    const before = flattenPrimaryAmuta(dialog.original);
+    if ((dialog.original.salary_type || 'hourly') !== (dialog.data.salary_type || 'hourly')) return true;
+    return RATE_FIELDS.some(k => !sameNum(before[k], dialog.data[k]));
+  })();
+  const termsApprover = isAdmin || isAccountant;
+  const termsViaDatedPath = ratesChanged && termsApprover;
+
+  const termsInput = () => ({
+    employee_id: dialog.data.id,
+    effective_date: terms.date,
+    salary_type: dialog.data.salary_type,
+    hourly_rate: dialog.data.hourly_rate === '' ? null : Number(dialog.data.hourly_rate),
+    global_salary: dialog.data.global_salary === '' ? null : Number(dialog.data.global_salary),
+    global_ot_rate: dialog.data.global_ot_rate === '' ? null : Number(dialog.data.global_ot_rate),
+    required_hours: dialog.data.required_hours === '' ? null : Number(dialog.data.required_hours),
+    note: 'עודכן מכרטיס העובד',
+  });
+
+  useEffect(() => {
+    if (!dialog.open) { setTerms({ date: '', preview: null, error: '' }); return undefined; }
+    if (!termsViaDatedPath || !terms.date) { setTerms(t => ({ ...t, preview: null, error: '' })); return undefined; }
+    let alive = true;
+    const h = setTimeout(() => {
+      api.post('/employment-contracts/terms/preview', termsInput())
+        .then(res => { if (alive) setTerms(t => ({ ...t, preview: res.data, error: '' })); })
+        .catch(err => { if (alive) setTerms(t => ({ ...t, preview: null, error: err.response?.data?.error || 'לא ניתן לחשב תצוגה מקדימה' })); });
+    }, 400);
+    return () => { alive = false; clearTimeout(h); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialog.open, termsViaDatedPath, terms.date, dialog.data.salary_type, dialog.data.hourly_rate, dialog.data.global_salary, dialog.data.global_ot_rate, dialog.data.required_hours]);
+
   const handleSave = async () => {
     if (saving) return;
     const { mode, data, original } = dialog;
+    if (termsViaDatedPath && !terms.date) {
+      return toast.error('שיניתם שכר — יש לבחור מאיזה תאריך התנאים החדשים בתוקף');
+    }
     if (!data.full_name?.trim()) return toast.error('שם מלא חובה');
     if (!data.branch_id) return toast.error('סניף חובה');
     // The picker's own min/max stop the arrows, not a typed year. Optional
@@ -464,7 +515,12 @@ export default function EmployeeManager() {
       return toast.error('תאריך לידה לא תקין — לא בעתיד ולא לפני 1900');
     }
 
-    const distribution = mergePrimaryAmuta(original, data);
+    // On the dated path the card keeps its CURRENT rates in this save; the
+    // terms call after it moves them, dated. Otherwise the raise would land on
+    // the card first and the terms row would record "no change".
+    const distribution = termsViaDatedPath
+      ? mergePrimaryAmuta(original, flattenPrimaryAmuta(original))
+      : mergePrimaryAmuta(original, data);
 
     const payload = {
       full_name: data.full_name.trim(),
@@ -476,7 +532,7 @@ export default function EmployeeManager() {
       gender: data.gender || '',
       position: data.position || '',
       start_date: data.start_date || null,
-      salary_type: data.salary_type,
+      salary_type: termsViaDatedPath ? (original.salary_type || 'hourly') : data.salary_type,
       salary_is_net: data.salary_is_net,
       travel_mode: data.travel_mode || 'per_day',
       travel_per_day: Number(data.travel_per_day) || 0,
@@ -553,13 +609,20 @@ export default function EmployeeManager() {
         return;
       } else {
         const res = await api.put(`/payroll/employees/${data.id}`, payload);
+        let termsMsg = '';
+        if (termsViaDatedPath) {
+          const t = await api.post('/employment-contracts/terms', termsInput());
+          const fin = t.data?.finalized_months || [];
+          termsMsg = ` · תנאי השכר החדשים בתוקף מחודש ${t.data?.effective_month}`
+            + (fin.length ? ` (חודשים שכבר נסגרו ולא ישתנו: ${fin.join(', ')})` : '');
+        }
         // Branch-manager edits don't apply directly — they wait for the accountant.
         if (res.data?.pending_approval) {
           toast.info(`השינויים (${res.data.changes_count}) נשלחו לאישור הנהלת החשבונות`, { autoClose: 6000 });
-        } else if (res.data?.no_changes) {
+        } else if (res.data?.no_changes && !termsMsg) {
           toast.info('לא בוצעו שינויים');
         } else {
-          toast.success('עובד עודכן');
+          toast.success(`עובד עודכן${termsMsg}`, { autoClose: termsMsg ? 9000 : 5000 });
         }
       }
       closeDialog();
@@ -1393,6 +1456,32 @@ export default function EmployeeManager() {
                   InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
                 />
               </Stack>
+            )}
+            {termsViaDatedPath && (
+              <Alert severity="info" icon={false} sx={{ borderRadius: 2, '& .MuiAlert-message': { width: '100%' } }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
+                  שיניתם את תנאי השכר — מאיזה תאריך הם בתוקף?
+                </Typography>
+                <TextField
+                  type="date" size="small" label="בתוקף מתאריך" InputLabelProps={{ shrink: true }}
+                  value={terms.date} onChange={e => setTerms(t => ({ ...t, date: e.target.value }))}
+                  sx={{ width: 200 }}
+                />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.8 }}>
+                  חודשים לפני התאריך ממשיכים להשתלם לפי התנאים הקודמים. השכר מחושב לפי חודש שלם — תאריך באמצע חודש מזיז את כל אותו החודש לתנאים החדשים.
+                </Typography>
+                {terms.error && <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>{terms.error}</Typography>}
+                {terms.preview && (
+                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontWeight: 700 }}>
+                    בתוקף מחודש {terms.preview.effective_month}
+                    {terms.preview.mid_month ? ' (התאריך באמצע החודש — כל החודש לפי החדש)' : ''}
+                    {terms.preview.nothing_changed ? ' · התנאים זהים לקיימים' : ''}
+                    {(terms.preview.finalized_months || []).length
+                      ? ` · חודשים שכבר נסגרו ולא ישתנו: ${terms.preview.finalized_months.join(', ')}`
+                      : ''}
+                  </Typography>
+                )}
+              </Alert>
             )}
 
             <Divider />

@@ -79,6 +79,10 @@ export default defineConfig({
           // — bundle-budget.test.js asserts it is never preloaded.
           if (id.includes('pdfjs-dist')) return 'vendor-pdfjs';
           if (id.includes('html2pdf') || id.includes('html2canvas') || id.includes('jspdf')) return 'vendor-pdf';
+          // pdf-lib staples the file cabinet's documents into one PDF. It is
+          // imported lazily, on the click — a chunk of its own keeps it off
+          // the critical path (in the catch-all it tripled `vendor`).
+          if (id.includes('pdf-lib') || id.includes('@pdf-lib')) return 'vendor-pdflib';
           if (id.includes('apexcharts')) return 'vendor-charts';
           if (id.includes('@dnd-kit')) return 'vendor-dnd';
           if (id.includes('signature')) return 'vendor-signature';

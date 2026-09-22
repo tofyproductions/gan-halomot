@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box, Paper, Typography, Stack, Chip, Button, IconButton, Tooltip, Divider,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, MenuItem, Alert,
-  LinearProgress,
+  LinearProgress, Checkbox,
 } from '@mui/material';
+import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
@@ -22,6 +23,7 @@ import BadgeIcon from '@mui/icons-material/Badge';
 import AccountBalanceIcon from '@mui/icons-material/AccountBalance';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { mergePdfs, downloadBlob } from '../../utils/mergePdfs';
 
 /**
  * תיק המסמכים של העובד/ת — everything the system holds about one person.
@@ -45,6 +47,10 @@ import api from '../../api/client';
 const SHELF = {
   employment_contract: { label: 'חוזה העסקה', icon: <GavelIcon fontSize="small" />, color: 'primary' },
   form_101: { label: 'טופס 101', icon: <AssignmentIndIcon fontSize="small" />, color: 'warning' },
+  // One shelf for both: a payslip and its month's hours report are asked for
+  // together almost every time, and were two shelves apart. The server still
+  // files them as two rows; the screen folds them into one row per month.
+  payroll: { label: 'תלושים ודוחות שעות', icon: <ReceiptLongIcon fontSize="small" />, color: 'success' },
   payslip: { label: 'תלושי שכר', icon: <ReceiptLongIcon fontSize="small" />, color: 'success' },
   hours_report: { label: 'דוחות שעות', icon: <ScheduleIcon fontSize="small" />, color: 'info' },
   certificate: { label: 'תעודות והסמכות', icon: <WorkspacePremiumIcon fontSize="small" />, color: 'success' },
@@ -68,6 +74,25 @@ const UPLOADABLE = [
   'employment_contract', 'form_101', 'recommendation', 'certificate',
   'id_document', 'bank_details', 'health', 'payslip', 'hours_report', 'other',
 ];
+
+/** Where a row is shown. Payslips and hours reports share the payroll shelf. */
+const shelfOf = (item) => (item.shelf === 'payslip' || item.shelf === 'hours_report' ? 'payroll' : item.shelf);
+/** The month a payroll row belongs to — its id is `payslip-YYYY-MM` / `hours-YYYY-MM`. */
+const monthOf = (item) => (item.id.match(/(\d{4}-\d{2})$/) || [])[1] || '';
+
+/** The bytes behind a row, whichever way its endpoint hands them over. */
+async function fetchBlob(item) {
+  if (item.fetch_mode === 'base64') {
+    const res = await api.get(item.href);
+    const { data, mimetype } = res.data;
+    const bytes = atob(data);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    return new Blob([arr], { type: mimetype || 'application/octet-stream' });
+  }
+  const res = await api.get(item.href, { responseType: 'blob' });
+  return res.data;
+}
 
 const fmtDate = (d) => {
   if (!d) return '';
@@ -93,6 +118,9 @@ async function openFromApi(href, { download = false, filename = '' } = {}) {
 
 export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChanged }) {
   const [items, setItems] = useState([]);
+  const [employeeName, setEmployeeName] = useState('');
+  const [selected, setSelected] = useState(() => new Set()); // item ids picked for one bundle
+  const [bundling, setBundling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [shelfFilter, setShelfFilter] = useState('');
   const [busyRow, setBusyRow] = useState('');
@@ -104,7 +132,7 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
     if (!employeeId) { setItems([]); return; }
     setLoading(true);
     api.get(`/employee-file/${employeeId}`)
-      .then(res => setItems(res.data.items || []))
+      .then(res => { setItems(res.data.items || []); setEmployeeName(res.data.employee?.full_name || ''); setSelected(new Set()); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בטעינת תיק המסמכים'))
       .finally(() => setLoading(false));
   }, [employeeId]);
@@ -113,7 +141,7 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
 
   const counts = useMemo(() => {
     const m = {};
-    for (const it of items) m[it.shelf] = (m[it.shelf] || 0) + 1;
+    for (const it of items) m[shelfOf(it)] = (m[shelfOf(it)] || 0) + 1;
     return m;
   }, [items]);
 
@@ -125,18 +153,76 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
   );
 
   const visible = useMemo(
-    () => (shelfFilter ? items.filter(i => i.shelf === shelfFilter) : items),
+    () => (shelfFilter ? items.filter(i => shelfOf(i) === shelfFilter) : items),
     [items, shelfFilter],
   );
 
   const grouped = useMemo(() => {
     const m = new Map();
     for (const it of visible) {
-      if (!m.has(it.shelf)) m.set(it.shelf, []);
-      m.get(it.shelf).push(it);
+      const k = shelfOf(it);
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(it);
     }
     return Object.keys(SHELF).filter(k => m.has(k)).map(k => [k, m.get(k)]);
   }, [visible]);
+
+  // The payroll shelf, one row per month: the payslip (when it was produced)
+  // and the hours report side by side, newest month first.
+  const payrollMonths = useMemo(() => {
+    const byMonth = new Map();
+    for (const it of items) {
+      if (shelfOf(it) !== 'payroll') continue;
+      const ym = monthOf(it);
+      if (!byMonth.has(ym)) byMonth.set(ym, { ym, payslip: null, hours: null });
+      byMonth.get(ym)[it.shelf === 'payslip' ? 'payslip' : 'hours'] = it;
+    }
+    return [...byMonth.values()].sort((a, b) => b.ym.localeCompare(a.ym));
+  }, [items]);
+
+  /* --- one PDF out of several rows ---------------------------------- */
+  const toggle = (ids, on) => setSelected(prev => {
+    const next = new Set(prev);
+    ids.forEach(id => (on ? next.add(id) : next.delete(id)));
+    return next;
+  });
+  const isSelected = (ids) => ids.length > 0 && ids.every(id => selected.has(id));
+
+  /**
+   * Fetch each chosen row through its own endpoint and staple them in the
+   * order they appear on the screen — shelf by shelf, newest first — so six
+   * months of payslips come out in the order a reader expects.
+   */
+  const bundle = async (chosen, filename) => {
+    if (!chosen.length) return;
+    setBundling(true);
+    try {
+      const parts = [];
+      for (const it of chosen) {
+        try {
+          parts.push({ blob: await fetchBlob(it), name: it.title });
+        } catch {
+          parts.push({ blob: new Blob([], { type: 'text/plain' }), name: it.title }); // reported as skipped below
+        }
+      }
+      const { blob, pages, skipped } = await mergePdfs(parts);
+      if (!pages) { toast.error('אף אחד מהמסמכים שנבחרו אינו PDF או תמונה'); return; }
+      downloadBlob(blob, filename);
+      if (skipped.length) toast.warn(`לא נכללו (לא PDF/תמונה): ${skipped.join(', ')}`, { autoClose: 8000 });
+      else toast.success(`הופק קובץ אחד — ${pages} עמודים`);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'הפקת הקובץ נכשלה');
+    } finally { setBundling(false); }
+  };
+  const bundleSelected = () => {
+    const chosen = [];
+    for (const [, rows] of grouped) for (const it of rows) if (selected.has(it.id)) chosen.push(it);
+    bundle(chosen, `${employeeName || 'עובד'} — מסמכים.pdf`);
+  };
+  const bundleMonth = (m) => bundle(
+    [m.payslip, m.hours].filter(Boolean),
+    `${employeeName || 'עובד'} — ${m.ym} תלוש ודוח שעות.pdf`,
+  );
 
   const openItem = async (item, { download = false, refresh = false } = {}) => {
     setBusyRow(item.id);
@@ -226,6 +312,17 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
         <FolderOpenIcon color="primary" />
         <Typography sx={{ fontWeight: 800, flex: 1 }}>תיק המסמכים</Typography>
         <Chip size="small" label={`${items.length} מסמכים`} />
+        {selected.size > 0 && (
+          <>
+            <Button
+              size="small" variant="outlined" color="secondary" startIcon={<PictureAsPdfIcon />}
+              onClick={bundleSelected} disabled={bundling}
+            >
+              {bundling ? 'מפיק…' : `הפק PDF אחד (${selected.size})`}
+            </Button>
+            <Button size="small" color="inherit" onClick={() => setSelected(new Set())} disabled={bundling}>נקה בחירה</Button>
+          </>
+        )}
         <input
           type="file" ref={fileInput} onChange={pickFile}
           style={{ display: 'none' }}
@@ -265,10 +362,21 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
             ))}
           </Stack>
 
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1 }}>
+            סמנו כמה מסמכים כדי להפיק אותם כקובץ PDF אחד — למשל תלושים של חצי שנה.
+          </Typography>
+
           <Stack spacing={2}>
             {grouped.map(([shelf, rows]) => (
               <Box key={shelf}>
                 <Stack direction="row" alignItems="center" spacing={0.8} sx={{ mb: 0.6 }}>
+                  <Checkbox
+                    size="small" sx={{ p: 0.3 }}
+                    checked={isSelected(rows.map(r => r.id))}
+                    indeterminate={!isSelected(rows.map(r => r.id)) && rows.some(r => selected.has(r.id))}
+                    onChange={(e) => toggle(rows.map(r => r.id), e.target.checked)}
+                    inputProps={{ 'aria-label': `בחר את כל ${SHELF[shelf].label}` }}
+                  />
                   <Box sx={{ color: 'text.secondary', display: 'flex' }}>{SHELF[shelf].icon}</Box>
                   <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
                     {SHELF[shelf].label}
@@ -276,6 +384,76 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
                   <Typography variant="caption" color="text.secondary">({rows.length})</Typography>
                 </Stack>
                 <Divider sx={{ mb: 0.8 }} />
+                {shelf === 'payroll' ? (
+                  <Stack spacing={0.6}>
+                    {payrollMonths.filter(m => rows.some(r => monthOf(r) === m.ym)).map(m => {
+                      const ids = [m.payslip, m.hours].filter(Boolean).map(i => i.id);
+                      const busy = ids.includes(busyRow);
+                      return (
+                        <Stack
+                          key={m.ym} direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap
+                          sx={{ px: 1.2, py: 0.8, borderRadius: 2, bgcolor: 'background.default', opacity: busy ? 0.5 : 1 }}
+                        >
+                          <Checkbox size="small" sx={{ p: 0.3 }} checked={isSelected(ids)} onChange={(e) => toggle(ids, e.target.checked)} />
+                          <Typography variant="body2" sx={{ fontWeight: 800, minWidth: 90 }}>{m.ym}</Typography>
+                          {/* the payslip */}
+                          <Stack direction="row" alignItems="center" spacing={0.3} sx={{ minWidth: 220 }}>
+                            <ReceiptLongIcon fontSize="small" sx={{ color: m.payslip ? 'success.main' : 'text.disabled' }} />
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: m.payslip ? 'text.primary' : 'text.disabled' }}>
+                              תלוש
+                            </Typography>
+                            {m.payslip ? (
+                              <>
+                                {(m.payslip.badges || []).map(b => (
+                                  <Chip key={b} size="small" variant="outlined" label={b} sx={{ height: 20, fontSize: '0.65rem' }} />
+                                ))}
+                                <Tooltip title="פתח תלוש"><IconButton size="small" onClick={() => openItem(m.payslip)}><OpenInNewIcon fontSize="small" /></IconButton></Tooltip>
+                                <Tooltip title="הורד תלוש"><IconButton size="small" onClick={() => openItem(m.payslip, { download: true })}><DownloadIcon fontSize="small" /></IconButton></Tooltip>
+                              </>
+                            ) : (
+                              <Typography variant="caption" color="text.disabled">— טרם הופק</Typography>
+                            )}
+                          </Stack>
+                          {/* the hours report */}
+                          <Stack direction="row" alignItems="center" spacing={0.3} sx={{ minWidth: 220 }}>
+                            <ScheduleIcon fontSize="small" sx={{ color: m.hours ? 'info.main' : 'text.disabled' }} />
+                            <Typography variant="caption" sx={{ fontWeight: 700, color: m.hours ? 'text.primary' : 'text.disabled' }}>
+                              דוח שעות
+                            </Typography>
+                            {m.hours ? (
+                              <>
+                                {(m.hours.badges || []).map(b => (
+                                  <Chip key={b} size="small" variant="outlined" label={b} sx={{ height: 20, fontSize: '0.65rem' }} />
+                                ))}
+                                <Tooltip title="פתח דוח שעות"><IconButton size="small" onClick={() => openItem(m.hours)}><OpenInNewIcon fontSize="small" /></IconButton></Tooltip>
+                                <Tooltip title="הורד דוח שעות"><IconButton size="small" onClick={() => openItem(m.hours, { download: true })}><DownloadIcon fontSize="small" /></IconButton></Tooltip>
+                                {m.hours.refresh_href && (
+                                  <Tooltip title="חשב מחדש מול ההחתמות של היום ושמור עותק מעודכן בתיק">
+                                    <IconButton size="small" onClick={() => openItem(m.hours, { refresh: true })}><RefreshIcon fontSize="small" /></IconButton>
+                                  </Tooltip>
+                                )}
+                              </>
+                            ) : (
+                              <Typography variant="caption" color="text.disabled">—</Typography>
+                            )}
+                          </Stack>
+                          <Box sx={{ flex: 1 }} />
+                          {m.payslip && m.hours && (
+                            <Tooltip title="תלוש + דוח שעות של החודש בקובץ PDF אחד">
+                              <Button
+                                size="small" variant="outlined" startIcon={<PictureAsPdfIcon />}
+                                onClick={() => bundleMonth(m)} disabled={bundling}
+                                sx={{ py: 0, fontSize: '0.72rem' }}
+                              >
+                                הפק יחד
+                              </Button>
+                            </Tooltip>
+                          )}
+                        </Stack>
+                      );
+                    })}
+                  </Stack>
+                ) : (
                 <Stack spacing={0.6}>
                   {rows.map(item => (
                     <Stack
@@ -288,6 +466,7 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
                         opacity: busyRow === item.id ? 0.5 : 1,
                       }}
                     >
+                      <Checkbox size="small" sx={{ p: 0.3 }} checked={selected.has(item.id)} onChange={(e) => toggle([item.id], e.target.checked)} />
                       <Typography variant="body2" sx={{ fontWeight: 700, minWidth: 180 }}>
                         {item.title}
                       </Typography>
@@ -331,6 +510,7 @@ export default function EmployeeFileCabinet({ employeeId, refreshKey = 0, onChan
                     </Stack>
                   ))}
                 </Stack>
+                )}
               </Box>
             ))}
           </Stack>
