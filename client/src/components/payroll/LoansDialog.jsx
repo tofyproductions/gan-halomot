@@ -10,6 +10,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import PauseCircleOutlineIcon from '@mui/icons-material/PauseCircleOutline';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import MergeTypeIcon from '@mui/icons-material/MergeType';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
@@ -40,11 +41,22 @@ function buildSchedule(startMonth, count, amount) {
   return out;
 }
 const isNew = (l) => Array.isArray(l.payments) && l.payments.length > 0;
+/** Consolidated into a newer loan as of `ym` — owes nothing here any more. */
+const isMerged = (l, ym) => !!(l.merged_at_month && ym >= l.merged_at_month);
+/** What a loan still owed BEFORE `ym` — the figure that moves on a merge. */
+function balanceBefore(l, ym) {
+  const total = Number(l.total_amount) || 0;
+  const ded = isNew(l)
+    ? l.payments.filter(p => p.month < ym).reduce((s, p) => s + (Number(p.amount) || 0), 0)
+    : (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
+  return Math.max(0, total - ded);
+}
 function deductedThrough(l, ym) {
   if (!isNew(l)) return (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
   return l.payments.filter(p => p.month <= ym).reduce((s, p) => s + (Number(p.amount) || 0), 0);
 }
 function monthAmount(l, ym) {
+  if (isMerged(l, ym)) return 0;
   if (!isNew(l)) {
     const active = (Number(l.installments_paid) || 0) < (Number(l.installments_total) || 0);
     return active ? (Number(l.installment_amount) || 0) : 0;
@@ -61,6 +73,8 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
   const [saving, setSaving] = useState(false);
   const [editIdx, setEditIdx] = useState(-1);
   const [editDraft, setEditDraft] = useState(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [merge, setMerge] = useState({ new_amount: '', installment_amount: '', start_month: ym, notes: '' });
 
   useEffect(() => {
     if (!open || !row) return;
@@ -214,8 +228,77 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
 
   const saveAll = () => persist(loans);
 
+  /**
+   * איחוד הלוואות — one new loan carrying the old balances plus fresh money.
+   *
+   * The old loans are NOT deleted. Every shekel they deducted is on a payslip
+   * already, and a deleted loan takes that history off this screen. They stay,
+   * closed as "אוחדה" from the start month, with the balance that moved
+   * recorded on them. Their schedule is cut at that month so nothing deducts
+   * twice; the new loan deducts from that same month.
+   *
+   * Count is derived, not typed: balance ÷ monthly, rounded up, and the last
+   * instalment takes the remainder — so ₪10,000 at ₪2,000 is five equal ones,
+   * and ₪10,000 at ₪3,000 is 3,000 × 3 + 1,000.
+   */
+  const mergeCandidates = loans.filter(l => !isMerged(l, ym) && balanceBefore(l, merge.start_month || ym) > 0);
+  const mergeCarried = mergeCandidates.reduce((s, l) => s + balanceBefore(l, merge.start_month || ym), 0);
+  const mergeTotal = mergeCarried + (Number(merge.new_amount) || 0);
+  const mergeInst = Number(merge.installment_amount) || 0;
+  const mergeCount = mergeInst > 0 ? Math.ceil(mergeTotal / mergeInst) : 0;
+  const mergeLast = mergeInst > 0 ? mergeTotal - mergeInst * (mergeCount - 1) : 0;
+
+  const doMerge = async () => {
+    const start = merge.start_month || ym;
+    if (!mergeCandidates.length) { toast.error('אין הלוואה פעילה לאחד'); return; }
+    if (!mergeInst || mergeTotal <= 0) { toast.error('חובה למלא תשלום חודשי'); return; }
+    const lines = mergeCandidates.map(l => `${l.start_month || '—'}: יתרה ${Math.round(balanceBefore(l, start)).toLocaleString('he-IL')} ₪`);
+    const okGo = await confirm({
+      title: 'איחוד הלוואות',
+      message: `${lines.join(' · ')}${Number(merge.new_amount) ? ` + חדש ${Number(merge.new_amount).toLocaleString('he-IL')} ₪` : ''}\n\n`
+        + `הלוואה אחת של ${Math.round(mergeTotal).toLocaleString('he-IL')} ₪ — ${mergeCount} תשלומים של ${mergeInst.toLocaleString('he-IL')} ₪`
+        + (mergeLast !== mergeInst ? ` (האחרון ${Math.round(mergeLast).toLocaleString('he-IL')} ₪)` : '')
+        + ` החל מ-${start}.\n\nההלוואות הישנות ייסגרו ולא ינוכו יותר. ההיסטוריה שלהן נשארת.`,
+      confirm_label: 'אחד',
+    });
+    if (!okGo) return;
+
+    const schedule = buildSchedule(start, mergeCount, mergeInst);
+    if (schedule.length) schedule[schedule.length - 1] = { ...schedule[schedule.length - 1], amount: Math.round(mergeLast * 100) / 100 };
+    const carriedNote = mergeCandidates
+      .map(l => `${Math.round(balanceBefore(l, start)).toLocaleString('he-IL')} ₪ מהלוואה מ-${l.start_month || '—'}`)
+      .join(', ');
+    const newLoan = {
+      total_amount: Math.round(mergeTotal * 100) / 100,
+      installment_amount: mergeInst,
+      installments_total: mergeCount,
+      installments_paid: 0,
+      start_month: start,
+      payments: schedule,
+      started_at: new Date(),
+      notes: [`איחוד: ${carriedNote}`, Number(merge.new_amount) ? `+ ${Number(merge.new_amount).toLocaleString('he-IL')} ₪ חדש` : '', merge.notes || '']
+        .filter(Boolean).join(' '),
+    };
+    const next = loans.map(l => {
+      if (!mergeCandidates.includes(l)) return l;
+      const balance = Math.round(balanceBefore(l, start) * 100) / 100;
+      return {
+        ...l,
+        payments: isNew(l) ? l.payments.filter(p => p.month < start) : l.payments,
+        merged_at_month: start,
+        merged_balance: balance,
+        merged_note: `אוחדה ב-${start} להלוואה של ${Math.round(mergeTotal).toLocaleString('he-IL')} ₪`,
+      };
+    });
+    next.push(newLoan);
+    setLoans(next);
+    persist(next);
+    setMergeOpen(false);
+    setMerge({ new_amount: '', installment_amount: '', start_month: ym, notes: '' });
+  };
+
   const monthDeduction = loans.reduce((s, l) => s + monthAmount(l, ym), 0);
-  const activeCount = loans.filter(l => (Number(l.total_amount) || 0) - deductedThrough(l, ym) > 0).length;
+  const activeCount = loans.filter(l => !isMerged(l, ym) && (Number(l.total_amount) || 0) - deductedThrough(l, ym) > 0).length;
 
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
@@ -258,7 +341,8 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                 {loans.map((l, idx) => {
                   const total = Number(l.total_amount) || 0;
                   const deducted = deductedThrough(l, ym);
-                  const remaining = Math.max(0, total - deducted);
+                  const merged = isMerged(l, ym);
+                  const remaining = merged ? 0 : Math.max(0, total - deducted);
                   const active = remaining > 0;
                   const newModel = isNew(l);
                   const mainRow = (
@@ -267,9 +351,15 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                       <TableCell>{Number(l.installment_amount).toLocaleString('he-IL')} ₪</TableCell>
                       <TableCell>{l.start_month || '—'}</TableCell>
                       <TableCell>{Math.round(deducted).toLocaleString('he-IL')} ₪</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>{Math.round(remaining).toLocaleString('he-IL')} ₪</TableCell>
+                      <TableCell sx={{ fontWeight: 700 }}>
+                        {merged
+                          ? <Typography variant="caption" color="text.secondary">{Math.round(Number(l.merged_balance) || 0).toLocaleString('he-IL')} ₪ עברו להלוואה המאוחדת</Typography>
+                          : `${Math.round(remaining).toLocaleString('he-IL')} ₪`}
+                      </TableCell>
                       <TableCell>
-                        {newModel ? (
+                        {merged ? (
+                          <Typography variant="caption" color="text.secondary">—</Typography>
+                        ) : newModel ? (
                           <Stack spacing={0.4} alignItems="center">
                             <TextField
                               size="small" type="number" value={monthAmount(l, ym)}
@@ -298,9 +388,11 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                           </Stack>
                         )}
                       </TableCell>
-                      <TableCell sx={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.notes || '—'}</TableCell>
+                      <TableCell sx={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis' }}>{merged ? (l.merged_note || l.notes) : (l.notes || '—')}</TableCell>
                       <TableCell>
-                        <Chip size="small" label={active ? 'פעילה' : 'שולם'} color={active ? 'warning' : 'success'} variant="outlined" />
+                        {merged
+                          ? <Chip size="small" label="אוחדה" color="default" variant="outlined" />
+                          : <Chip size="small" label={active ? 'פעילה' : 'שולם'} color={active ? 'warning' : 'success'} variant="outlined" />}
                       </TableCell>
                       <TableCell>
                         <Stack direction="row" spacing={0}>
@@ -343,6 +435,45 @@ export default function LoansDialog({ open, row, month, onClose, onSaved }) {
                 })}
               </TableBody>
             </Table>
+          )}
+
+          {activeCount > 0 && (
+            <>
+              <Divider />
+              <Stack direction="row" alignItems="center" spacing={1}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }}>איחוד הלוואות</Typography>
+                <Button size="small" variant={mergeOpen ? 'outlined' : 'contained'} color="secondary" startIcon={<MergeTypeIcon />} onClick={() => setMergeOpen(v => !v)}>
+                  {mergeOpen ? 'ביטול' : 'אחד הלוואות'}
+                </Button>
+              </Stack>
+              {mergeOpen && (
+                <Stack spacing={1.2} sx={{ p: 1.5, bgcolor: 'background.sunken', borderRadius: 2 }}>
+                  <Typography variant="caption" color="text.secondary">
+                    היתרה של כל ההלוואות הפעילות ({Math.round(mergeCarried).toLocaleString('he-IL')} ₪) תעבור להלוואה אחת חדשה, יחד עם סכום נוסף אם יש. הישנות ייסגרו ולא ינוכו יותר — ההיסטוריה שלהן נשארת.
+                  </Typography>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+                    <TextField size="small" type="number" label="סכום חדש (נוסף)"
+                      value={merge.new_amount} onChange={e => setMerge({ ...merge, new_amount: e.target.value })} sx={{ width: 150 }} />
+                    <TextField size="small" type="number" label="תשלום חודשי"
+                      value={merge.installment_amount} onChange={e => setMerge({ ...merge, installment_amount: e.target.value })} sx={{ width: 130 }} />
+                    <TextField size="small" type="month" label="חודש התחלה" InputLabelProps={{ shrink: true }}
+                      value={merge.start_month} onChange={e => setMerge({ ...merge, start_month: e.target.value })} sx={{ width: 150 }} />
+                    <TextField size="small" label="הערות (אופציונלי)"
+                      value={merge.notes} onChange={e => setMerge({ ...merge, notes: e.target.value })} sx={{ flex: 1, minWidth: 160 }} />
+                  </Stack>
+                  <Alert severity={mergeInst > 0 ? 'info' : 'warning'} icon={false} sx={{ py: 0.5 }}>
+                    {mergeInst > 0
+                      ? <>הלוואה אחת של <b>{Math.round(mergeTotal).toLocaleString('he-IL')} ₪</b> — <b>{mergeCount}</b> תשלומים של {mergeInst.toLocaleString('he-IL')} ₪{mergeLast !== mergeInst && mergeCount > 0 ? ` (האחרון ${Math.round(mergeLast).toLocaleString('he-IL')} ₪)` : ''}, החל מ-{merge.start_month || ym}.</>
+                      : <>יתרה להעברה: {Math.round(mergeCarried).toLocaleString('he-IL')} ₪. מלא/י תשלום חודשי כדי לראות את הפריסה.</>}
+                  </Alert>
+                  <Box>
+                    <Button variant="contained" color="secondary" startIcon={<MergeTypeIcon />} onClick={doMerge} disabled={saving || !mergeInst}>
+                      אחד ל-{mergeCount || '—'} תשלומים
+                    </Button>
+                  </Box>
+                </Stack>
+              )}
+            </>
           )}
 
           <Divider />

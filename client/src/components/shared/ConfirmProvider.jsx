@@ -106,7 +106,8 @@ export function ConfirmProvider({ children }) {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={1.5}>
-            <Typography variant="body1">
+            {/* pre-line: a call site may break its message into lines. */}
+            <Typography variant="body1" sx={{ whiteSpace: 'pre-line' }}>
               {opts.message || 'האם להמשיך?'}
             </Typography>
             {opts.remember_key && !opts.danger && (

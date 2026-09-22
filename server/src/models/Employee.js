@@ -40,6 +40,13 @@ const loanSchema = new mongoose.Schema({
   },
   started_at: { type: Date, default: null },
   notes: { type: String, default: '' },
+  // Consolidated into a newer loan. The loan stays — every deduction it
+  // already made is on a payslip — but from this month it deducts nothing
+  // and its balance is 0 here: `merged_balance` is what moved into the new
+  // loan, and the new loan's total carries it.
+  merged_at_month: { type: String, default: '' },           // 'YYYY-MM' — first month it no longer deducts
+  merged_balance: { type: Number, default: 0 },             // ₪ carried into the new loan
+  merged_note: { type: String, default: '' },
 }, { _id: true });
 
 const bonusSchema = new mongoose.Schema({

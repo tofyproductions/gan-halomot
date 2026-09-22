@@ -42,7 +42,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
-    monthly_fee: '', phone: '', email: '', medical_alerts: '',
+    monthly_fee: '', registration_fee: '', phone: '', email: '', medical_alerts: '',
     fee_effective_from: '', previous_monthly_fee: '', academic_year: '',
   });
 
@@ -72,6 +72,7 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
         const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
         setEditForm({
           monthly_fee: String(reg?.monthly_fee || ''),
+          registration_fee: reg?.registration_fee != null ? String(reg.registration_fee) : '',
           phone: c.phone || reg?.parent_phone || '',
           email: c.email || reg?.parent_email || '',
           medical_alerts: c.medical_alerts || '',
@@ -110,6 +111,15 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
           payload.previous_monthly_fee = null;
         }
         await api.put(`/registrations/${registration._id || registration.id}`, payload);
+      }
+      // דמי רישום: a one-time figure with no effective-from logic. Sent on its
+      // own so a fee-only edit does not drag the monthly-fee fields along.
+      const regFeeChanged = registration && editForm.registration_fee !== ''
+        && Number(editForm.registration_fee) !== Number(registration.registration_fee || 0);
+      if (regFeeChanged) {
+        await api.put(`/registrations/${registration._id || registration.id}`, {
+          registration_fee: Number(editForm.registration_fee) || 0,
+        });
       }
 
       // The year moves through the registration, which carries the child and
@@ -309,6 +319,16 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                       onChange={e => setEditForm({ ...editForm, previous_monthly_fee: e.target.value })}
                       InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
                       helperText="ישולם עבור החודשים שלפני 'החל מחודש'. ריק = חל רטרואקטיבית."
+                    />
+                    <TextField
+                      label="דמי רישום"
+                      type="number"
+                      size="small"
+                      fullWidth
+                      value={editForm.registration_fee}
+                      onChange={e => setEditForm({ ...editForm, registration_fee: e.target.value })}
+                      InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                      helperText="סכום חד-פעמי. הנחה = לכתוב את הסכום אחרי ההנחה."
                     />
                     <TextField
                       label="החל מחודש"

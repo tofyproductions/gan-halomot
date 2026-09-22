@@ -1542,7 +1542,9 @@ async function getMonth(req, res, next) {
           const hasSchedule = (l) => Array.isArray(l.payments) && l.payments.length > 0;
           // This month's scheduled deduction (per-month payments[] is the source of
           // truth; legacy loans fall back to the count-based rule).
+          const merged = (l) => !!(l.merged_at_month && month >= l.merged_at_month);
           const monthAmt = (l) => {
+            if (merged(l)) return 0;
             if (hasSchedule(l)) { const p = l.payments.find(x => x.month === month); return p ? Math.max(0, Number(p.amount) || 0) : 0; }
             if ((l.installments_paid || 0) >= (l.installments_total || 0)) return 0;
             return Math.max(0, Number(l.installment_amount) || 0);
@@ -1552,7 +1554,7 @@ async function getMonth(req, res, next) {
             : (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
           const monthDeduction = list.reduce((s, l) => s + monthAmt(l), 0);
           return {
-            count: list.filter(l => ((Number(l.total_amount) || 0) - deductedThrough(l)) > 0).length,
+            count: list.filter(l => !merged(l) && ((Number(l.total_amount) || 0) - deductedThrough(l)) > 0).length,
             month_deduction: Math.round(monthDeduction * 100) / 100,
             loans: list.map(l => {
               const total = Number(l.total_amount) || 0;
@@ -1580,9 +1582,13 @@ async function getMonth(req, res, next) {
                 paying_installments: payingTotal,      // denominator for "X of Y"
                 month_amount: Math.round(monthAmt(l) * 100) / 100,   // this month's deduction
                 deducted_through: Math.round(ded * 100) / 100,
-                remaining: Math.round(Math.max(0, total - ded) * 100) / 100,
+                // A consolidated loan owes nothing here — its balance moved.
+                remaining: merged(l) ? 0 : Math.round(Math.max(0, total - ded) * 100) / 100,
                 paused: !!(p && p.paused),                            // this month is a paused (skipped) month
-                active: (total - ded) > 0,
+                active: !merged(l) && (total - ded) > 0,
+                merged_at_month: l.merged_at_month || '',
+                merged_balance: Number(l.merged_balance) || 0,
+                merged_note: l.merged_note || '',
               };
             }),
           };

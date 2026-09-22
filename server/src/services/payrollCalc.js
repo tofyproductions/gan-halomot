@@ -125,6 +125,8 @@ function splitDayOvertime(totalMinutes) {
  */
 function loanDeductionForMonth(loan, ym) {
   if (!loan) return 0;
+  // Consolidated: the balance now lives in another loan, which deducts it.
+  if (loan.merged_at_month && ym >= loan.merged_at_month) return 0;
   if (Array.isArray(loan.payments) && loan.payments.length > 0) {
     const p = loan.payments.find(x => x.month === ym);
     return p ? Math.max(0, Number(p.amount) || 0) : 0;
@@ -767,4 +769,4 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   };
 }
 
-module.exports = { calculateMonthlySalary, collapseToSpan, billableDayPunches };
+module.exports = { calculateMonthlySalary, collapseToSpan, billableDayPunches, loanDeductionForMonth };
