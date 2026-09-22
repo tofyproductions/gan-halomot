@@ -24,7 +24,7 @@ const upload = multer({
  * manager to upload them means they are uploaded a week later or not at all.
  * The controller narrows each of them to their own branches.
  */
-const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant');
+const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant', 'classroom_board');
 
 // Diagnostic: which of the four things an upload needs is actually broken.
 router.get('/selftest', allow, ctrl.selftest);

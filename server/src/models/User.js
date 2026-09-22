@@ -68,6 +68,22 @@ const userSchema = new mongoose.Schema({
    */
   custom_role_id: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomRole', default: null },
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
+
+  /**
+   * The ONE room a `classroom_board` account belongs to, and the token that
+   * names it in the link the tablet is opened with.
+   *
+   * Null for every human account. A board is not a person with a wider scope
+   * that happens to be looking at a room — the room IS its scope, and every
+   * query it makes is narrowed to this id rather than to its branch.
+   *
+   * `board_token` is unguessable and lives in the URL. It is not the secret:
+   * the password is. It is there so a tablet in צעירים opens צעירים
+   * without anybody choosing from a list of every room in the network, and so
+   * that a link handed to the wrong room cannot silently work.
+   */
+  classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null },
+  board_token: { type: String, default: null, index: true, sparse: true },
   // Branches the user manages. For branch_manager / accountant roles this is
   // the source of truth for "which branches am I allowed to see". Defaults
   // to an empty list — when empty AND role==='branch_manager', falls back to

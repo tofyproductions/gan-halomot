@@ -4,7 +4,24 @@ const {
   isRead, isViewer, isBlockedForViewer, isWriteBlockedForViewer, isMultipart, pathOnly,
   startsWithPrefix, NO_UPLOAD,
 } = require('../utils/viewer');
-const { ADMIN_VIEWER } = require('../constants/roles');
+const { CLASSROOM_BOARD, ADMIN_VIEWER } = require('../constants/roles');
+
+/**
+ * Everything a `classroom_board` token may reach. Anything else is refused
+ * above, before a controller runs.
+ *
+ * The daily board and the photographs are the job. /auth/me is how the tablet
+ * learns who it is after a reload, /auth/logout is how a room hands the tablet
+ * back, and the webauthn pair is the fingerprint that replaces retyping the
+ * password every morning — which is the only reason anybody keeps using it.
+ */
+const BOARD_ALLOWED = [
+  /^\/api\/nursery(\/|$)/,
+  /^\/api\/photos(\/|$)/,
+  /^\/api\/auth\/(me|logout)$/,
+  /^\/api\/auth\/webauthn\//,
+];
+
 const viewerContext = require('../utils/viewerContext');
 
 /**
@@ -316,6 +333,32 @@ function authMiddleware(req, res, next) {
      * rather than by method, because the whole point is that this token may
      * write ONE thing.
      */
+    /**
+     * A board is one screen, and the list of what it may reach is HERE rather
+     * than spread across the routers.
+     *
+     * Several routers are guarded by nothing but a logged-in user — גיוס says
+     * so in its own header, and decides per row from branch scope instead. A
+     * board account has a branch_id, so a tablet token would have walked into
+     * the candidate list of the gan it hangs in, and into anything else built
+     * the same way tomorrow.
+     *
+     * So the allowlist is a wall, not a set of doors: a path that is not on it
+     * is refused before any controller sees the request, and a feature added
+     * next year is closed to boards until somebody decides otherwise. That is
+     * the right default for an account that lives unlocked on a wall in a room
+     * full of three-year-olds and whoever came to collect them.
+     */
+    if (decoded.role === CLASSROOM_BOARD) {
+      const path = (req.originalUrl || '').split('?')[0];
+      const allowed = BOARD_ALLOWED.some(re => re.test(path));
+      if (!allowed) {
+        return res.status(403).json({
+          error: 'לוח הכיתה משמש ללוח העדכונים ולתמונות בלבד.',
+        });
+      }
+    }
+
     if (decoded.must_change_password) {
       // originalUrl, not req.path: this middleware runs inside many routers and
       // req.path is relative to whichever one mounted it, so a '/me' somewhere

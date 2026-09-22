@@ -1,4 +1,5 @@
 const { Child, Classroom, DailyLog, DailyMenu, ClassroomDay, Setting } = require('../models');
+const { CLASSROOM_BOARD } = require('../constants/roles');
 const nursery = require('../services/nursery.service');
 
 /**
@@ -29,6 +30,17 @@ const nursery = require('../services/nursery.service');
  */
 async function visibleClassrooms(user) {
   const rooms = await nursery.boardClassrooms();
+
+  // A board account is ONE room. Not its branch narrowed by a dropdown — the
+  // room is the account's whole scope, and the list it is handed has one entry
+  // so the screen cannot offer it a second. A board whose room was archived or
+  // deleted gets nothing rather than falling through to the branch below,
+  // which would turn a stale tablet into a window on every class in the gan.
+  if (user.role === CLASSROOM_BOARD) {
+    const mine = String(user.classroom_id || '');
+    return mine ? rooms.filter(r => String(r._id) === mine) : [];
+  }
+
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   const managed = (user.managed_branch_ids || []).map(String);

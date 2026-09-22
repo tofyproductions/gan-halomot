@@ -1,4 +1,5 @@
 const { Photo, Child, Classroom } = require('../models');
+const { CLASSROOM_BOARD } = require('../constants/roles');
 const storage = require('../services/storage.service');
 const photos = require('../services/photo.service');
 const nursery = require('../services/nursery.service');
@@ -25,6 +26,13 @@ async function visibleClassrooms(user) {
   const rooms = dedupeNewest(
     await Classroom.find({ is_active: true }).populate('branch_id', 'name').lean(),
   );
+  // A board account is ONE room — the same rule as the daily board, and for
+  // the same reason: the tablet on that wall photographs that room.
+  if (user.role === CLASSROOM_BOARD) {
+    const mine = String(user.classroom_id || '');
+    return mine ? rooms.filter(r => String(r._id) === mine) : [];
+  }
+
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   const managed = (user.managed_branch_ids || []).map(String);

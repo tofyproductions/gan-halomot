@@ -54,6 +54,8 @@ router.use('/my-decisions', require('./decisions.routes'));
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table
 router.use('/employee-documents', require('./employeeDocuments.routes'));
+// לוחות כיתה — the tablet accounts on the classroom walls.
+router.use('/classroom-boards', require('./classroomBoard.routes'));
 // רישומי עובדים — what a new hire filled in about themselves, waiting for
 // somebody to turn it into an employee card.
 router.use('/employee-onboarding', require('./employeeOnboarding.routes'));

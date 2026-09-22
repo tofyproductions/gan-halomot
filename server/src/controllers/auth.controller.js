@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { User, Setting } = require('../models');
+const { CLASSROOM_BOARD } = require('../constants/roles');
 const env = require('../config/env');
 
 const {
@@ -134,8 +135,26 @@ function makeToken(user, rememberMe, roleTabs = { add: [], remove: [] }, req = n
      */
     ui_version: user.ui_version || null,
     ui_version_asked: !!user.ui_version_asked,
+    /**
+     * A לוח כיתה's whole scope is ONE room, and the claim that carries it
+     * has to be in every token this function makes.
+     *
+     * Not only at sign-in. /auth/me re-mints whenever the claims it builds
+     * differ from the ones the caller holds, so a payload without this would
+     * have quietly replaced a working board token with one that has no room
+     * at all — mid-morning, on a tablet nobody is watching, and failing closed
+     * into a blank screen rather than loudly.
+     *
+     * `undefined` rather than null for everyone else: an absent key never
+     * reaches the signed token, so no human account changes shape.
+     */
+    classroom_id: user.classroom_id ? String(user.classroom_id) : undefined,
   };
-  const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn: rememberMe ? '30d' : '24h' });
+  // A tablet on a wall must not be signed out overnight. A board that has to
+  // be re-authenticated before the day can be recorded is a board that stops
+  // being filled in, which is the only failure that actually matters here.
+  const expiresIn = user.role === CLASSROOM_BOARD ? '180d' : (rememberMe ? '30d' : '24h');
+  const token = jwt.sign(payload, env.JWT_SECRET, { expiresIn });
   return { token, user: payload };
 }
 

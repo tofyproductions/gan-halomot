@@ -159,6 +159,7 @@ export default function NurseryBoard() {
   // boxes never disagree about what exists.
   const branches = [...new Set(data.classrooms.map(c => c.branch).filter(Boolean))];
   const roomsInBranch = data.classrooms.filter(c => c.branch === branch);
+  const onlyRoom = data.classrooms.length === 1 ? data.classrooms[0] : null;
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
@@ -172,6 +173,18 @@ export default function NurseryBoard() {
       </Stack>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+        {/* One room means no choice, and two dropdowns holding one option each
+            read as controls somebody forgot to fill in. That is the classroom
+            tablet's normal state, and it is also true for anyone scoped to a
+            single room — so the rule is "is there anything to pick", not "who
+            is asking". The room's name is stated below instead. */}
+        {onlyRoom ? (
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1 }}>
+            <Chip label={onlyRoom.branch} size="small" />
+            <Chip label={onlyRoom.name} size="small" color="primary" sx={{ fontWeight: 700 }} />
+          </Stack>
+        ) : (
+        <>
         <TextField
           select label="סניף" size="small" value={branch} fullWidth
           onChange={(e) => {
@@ -193,6 +206,8 @@ export default function NurseryBoard() {
             <MenuItem key={c.id} value={String(c.id)}>{c.name}</MenuItem>
           ))}
         </TextField>
+        </>
+        )}
         <TextField
           type="date" label="תאריך" size="small" value={date} fullWidth
           InputLabelProps={{ shrink: true }}

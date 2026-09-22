@@ -24,6 +24,7 @@
     "test:careers": "node scripts/careers-apply-e2e.test.js",
     "test:onboarding": "node scripts/employee-onboarding-e2e.test.js",
     "test:email-astral": "node scripts/email-astral.test.js",
+    "test:classroom-board": "node scripts/classroom-board-e2e.test.js",
     "test:punch-scope": "node scripts/punch-out-of-scope.test.js",
     "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
     "test:decisions": "node scripts/my-decisions.test.js",

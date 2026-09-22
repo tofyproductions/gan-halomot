@@ -16,7 +16,12 @@ const { requireTab, requireRole } = require('../middleware/auth');
  * A teacher who can see the room's day and cannot record it has been given
  * nothing.
  */
-const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant');
+/**
+ * `classroom_board` is on this list because the board IS what it is for. The
+ * controller narrows it to its own room, so admitting it here grants one
+ * screen for one classroom rather than the nursery tab across a branch.
+ */
+const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant', 'classroom_board');
 
 router.get('/board', allow, ctrl.board);
 router.patch('/log/:childId', allow, ctrl.updateLog);

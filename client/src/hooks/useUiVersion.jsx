@@ -81,7 +81,9 @@ export function UiVersionProvider({ children }) {
    */
   const [answeredHere, setAnsweredHere] = useState(false);
 
-  const asked = answeredHere || !!user?.ui_version_asked;
+  // A לוח כיתה is a tablet, not a person with a preference. Treated as
+  // already asked so the offer dialog is never put to a wall.
+  const asked = user?.role === 'classroom_board' || answeredHere || !!user?.ui_version_asked;
 
   const persist = useCallback(async (body) => {
     try {

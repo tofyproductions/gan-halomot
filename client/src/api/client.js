@@ -39,7 +39,12 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       // Don't redirect if already on login page or login request
       const isLoginRequest = error.config?.url?.includes('/auth/');
-      if (!isLoginRequest && window.location.pathname !== '/login') {
+      // A classroom tablet has its own sign-in, reached from its own link.
+      // Sending it to /login would put a staff password screen on a wall in a
+      // room full of children, and the board's own link would be gone from
+      // the address bar.
+      const isBoard = window.location.pathname.startsWith('/board/');
+      if (!isLoginRequest && !isBoard && window.location.pathname !== '/login') {
         localStorage.removeItem('token');
         window.location.href = '/login';
       }

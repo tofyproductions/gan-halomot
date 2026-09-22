@@ -105,6 +105,16 @@ function onboardingUploadErrors(err, _req, res, next) {
   if (err) return res.status(400).json({ error: 'שגיאה בצירוף המסמכים' });
   next();
 }
+// --- לוח כיתה (the tablet's own sign-in) ---
+//
+// The link says WHICH board; the password is the secret. Rate limited with
+// the other public forms, because a board password is short enough to be
+// typed by somebody holding a tablet and therefore short enough to be guessed
+// by somebody who should not be holding one.
+const board = require('../controllers/classroomBoard.controller');
+router.get('/board/:token', board.publicInfo);
+router.post('/board/:token/login', publicFormLimiter, board.publicLogin);
+
 router.get('/employee-registration/branches', onboarding.publicBranches);
 router.post(
   '/employee-registration',

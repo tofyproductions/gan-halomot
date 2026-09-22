@@ -27,6 +27,26 @@ export default function ProtectedRoute({ children, roles, tab }) {
     return <Navigate to="/login" replace />;
   }
 
+  /**
+   * A לוח כיתה belongs on its own page and nowhere else.
+   *
+   * The server already refuses it everything outside the daily board, so this
+   * is not what keeps data safe — but without it a tablet that reaches any
+   * other address is handed the management shell: a navigation rail, a
+   * "צפי השכר שלי" panel apologising that it has no data, and an offer to
+   * change the interface. On a wall in a room full of three-year-olds that
+   * reads as a broken system, and every one of those screens is one more
+   * thing for somebody to tap.
+   *
+   * Sent back to its OWN link, which the kiosk remembers when it signs in.
+   */
+  if (user?.role === 'classroom_board') {
+    const back = (() => {
+      try { return localStorage.getItem('boardLink'); } catch { return null; }
+    })();
+    return <Navigate to={back || '/login'} replace />;
+  }
+
   // The tab decides when there is one; hasTabAccess already falls back to the
   // tab's own default roles, so this is the stricter rule and not a looser one.
   if (tab) {

@@ -105,6 +105,10 @@ export const TAB_GROUPS = [
       // room — a teacher needs it more than anyone, and a board filled in by
       // management is a board filled in by somebody who was not there.
       { id: 'nursery',    label: 'לוח יומי',      path: '/nursery',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },
+      // The tablet accounts on the classroom walls: one per room, opened from a
+      // link with a password an admin sets, so the board is filled in without
+      // anybody signing in as herself.
+      { id: 'classroom_boards', label: 'לוחות כיתה', path: '/classroom-boards', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // Same gate as the board: the person who notices the wipes ran out is in
       // the room, not the office.
       { id: 'supplies',   label: 'מה חסר',      path: '/supplies', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'teacher', 'assistant'] },

@@ -70,6 +70,8 @@ const GiftsManager = lazy(() => import('./components/nursery/GiftsManager'));
 const HolidayManager = lazy(() => import('./components/holidays/HolidayManager'));
 const LeadForm = lazy(() => import('./components/leads/LeadForm'));
 const CareersPage = lazy(() => import('./components/careers/CareersPage'));
+const BoardKiosk = lazy(() => import('./components/nursery/BoardKiosk'));
+const ClassroomBoards = lazy(() => import('./components/nursery/ClassroomBoards'));
 const JoinForm = lazy(() => import('./components/careers/JoinForm'));
 const LeadsPage = lazy(() => import('./components/leads/LeadsPage'));
 const MaintenancePage = lazy(() => import('./components/maintenance/MaintenancePage'));
@@ -177,6 +179,10 @@ function AppRoutes() {
           hired. Standalone like the rest of this block: they have no account,
           and nothing they send here becomes an employee without a human. */}
       <Route path="/join" element={<JoinForm />} />
+      {/* לוח כיתה — the tablet on a classroom wall. Standalone like the rest
+          of this block: it signs in as its own account from the link and must
+          never be bounced to the staff login, which belongs to people. */}
+      <Route path="/board/:token" element={<BoardKiosk />} />
       {/* Parent portal. Standalone like the rest of this block — it has its own
           accounts, its own token key and its own HTTP client, so mounting the
           management shell around it would fire staff API calls with a token
@@ -314,6 +320,11 @@ function AppRoutes() {
         <Route path="employee-onboarding" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <OnboardingQueue />
+          </ProtectedRoute>
+        } />
+        <Route path="classroom-boards" element={
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager']}>
+            <ClassroomBoards />
           </ProtectedRoute>
         } />
         <Route path="share-links" element={

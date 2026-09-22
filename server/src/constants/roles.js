@@ -10,10 +10,23 @@
  */
 const ADMIN_VIEWER = 'admin_viewer';
 
+/**
+ * `classroom_board` — "לוח כיתה": the tablet on the wall of one room.
+ *
+ * Not a person. One account per classroom, opened from a link, unlocked with a
+ * password once and with the tablet's own fingerprint after that, and left
+ * logged in all day where anybody in the room can reach it — which is the
+ * whole point and also the whole risk. It sees ONE room's daily board and that
+ * room's photographs, and nothing else in this system: no other class, no
+ * employee, no salary, no parent's telephone number. A tablet that walks out
+ * of the gan is worth what is on that one screen.
+ */
+const CLASSROOM_BOARD = 'classroom_board';
+
 const ROLES = [
   'system_admin', 'branch_manager', 'accountant',
   'class_leader', 'teacher', 'assistant', 'cook',
-  ADMIN_VIEWER,
+  ADMIN_VIEWER, CLASSROOM_BOARD,
 ];
 
 const ROLE_LABELS = {
@@ -25,6 +38,7 @@ const ROLE_LABELS = {
   assistant: 'סייעת',
   cook: 'מבשלת',
   [ADMIN_VIEWER]: 'מנהל מערכת - לצפייה בלבד',
+  [CLASSROOM_BOARD]: 'לוח כיתה',
 };
 
-module.exports = { ROLES, ADMIN_VIEWER, ROLE_LABELS };
+module.exports = { ROLES, ADMIN_VIEWER, CLASSROOM_BOARD, ROLE_LABELS };
