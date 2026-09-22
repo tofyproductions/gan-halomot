@@ -76,7 +76,7 @@ export default function ClassroomGrid({ classrooms, capacity, classroomIds, mayD
     const target = over.data?.current;
     if (!target?.classroom_id || String(target.classroom_id) === String(kid.classroom_id)) return;
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`להעביר את ${kid.child_name} לכיתה "${target.name}"?\n\nהמעבר מתעדכן בכל המערכת ומשפיע על התשלום.`)) return;
+    if (!window.confirm(`להעביר את ${kid.child_name} לכיתה "${target.name}"?\n\nהמעבר מתעדכן בכל המערכת. התשלום לא משתנה.`)) return;
     try {
       await api.put(`/children/${kid.id}/classroom`, { classroom_id: target.classroom_id });
       toast.success(`${kid.child_name} הועבר/ה ל${target.name}`);

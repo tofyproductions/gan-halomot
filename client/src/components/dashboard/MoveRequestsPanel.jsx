@@ -11,9 +11,10 @@ import api from '../../api/client';
 /**
  * מעברי כיתה ממתינים — what a תינוקייה board asked for, waiting on the manager.
  *
- * On the dashboard rather than behind a tab, because it is a decision with a
- * fee behind it and a family waiting on it, and a queue nobody opens is a
- * queue that fills. Empty, it draws nothing at all — the dashboard is busy
+ * On the dashboard rather than behind a tab, because a family is waiting on
+ * it, and a queue nobody opens is a queue that fills. The fee does not change
+ * with a mid-year move; the manager's approval is about the room, not the
+ * money. Empty, it draws nothing at all — the dashboard is busy
  * enough without a panel announcing there is nothing in it.
  *
  * Approving is the move. The child changes room here and nowhere earlier,
@@ -35,7 +36,7 @@ export default function MoveRequestsPanel({ onChanged }) {
   const decide = async (row, verb) => {
     if (verb === 'approve') {
       // eslint-disable-next-line no-alert
-      if (!window.confirm(`לאשר את המעבר של ${row.child_name} ל${row.to}?\n\nהילד/ה יועבר/תועבר מיד. המעבר משפיע על התשלום.`)) return;
+      if (!window.confirm(`לאשר את המעבר של ${row.child_name} ל${row.to}?\n\nהילד/ה יועבר/תועבר מיד. התשלום לא משתנה.`)) return;
     }
     let reason = '';
     if (verb === 'reject') {
@@ -65,7 +66,7 @@ export default function MoveRequestsPanel({ onChanged }) {
       </Stack>
       {!mayDecide && (
         <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
-          מנהלת הסניף מאשרת מעברים — המעבר משפיע על התשלום.
+          מנהלת הסניף מאשרת מעברים בין כיתות. התשלום לא משתנה.
         </Alert>
       )}
       <Stack spacing={1}>

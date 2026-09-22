@@ -126,7 +126,7 @@ export default function ChildDayCard({
    */
   const askMove = () => {
     // eslint-disable-next-line no-alert
-    if (!window.confirm(`להעביר את ${child.name} לכיתת הפעוטות?\n\nהבקשה תישלח למנהלת הסניף לאישור. המעבר משפיע על התשלום.`)) return;
+    if (!window.confirm(`להעביר את ${child.name} לכיתת הפעוטות?\n\nהבקשה תישלח למנהלת הסניף לאישור — בלעדיו המעבר לא מתבצע. התשלום לא משתנה.`)) return;
     // eslint-disable-next-line no-alert
     const keep = window.confirm(`להשאיר את ${child.name} בלוח העדכונים של התינוקייה ל-3 החודשים הקרובים?\n\nכן — ההורים ימשיכו לקבל עדכונים מכאן.\nביטול — הילד/ה יוסר/תוסר מהלוח עם המעבר.`);
     onRequestMove?.(child.id, keep);
@@ -236,18 +236,29 @@ export default function ChildDayCard({
   );
 
   return (
-    <Card sx={{ opacity: absent ? 0.6 : 1 }}>
+    <Card sx={{ opacity: absent ? 0.7 : 1, borderTop: 4, borderTopColor: present ? 'success.main' : absent ? 'error.main' : 'transparent' }}>
       <CardContent sx={{ pb: 2 }}>
         <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-          <IconButton
-            size="small"
-            disabled={readOnly}
-            color={present ? 'success' : absent ? 'error' : 'default'}
-            onClick={() => patch('attendance', present ? 'חסר' : 'הגיע')}
-            aria-label={present ? 'נוכח' : 'סמן נוכחות'}
-          >
-            {present ? <CheckCircleIcon /> : <CancelIcon />}
-          </IconButton>
+          {/* Green = here today, red = not coming. Two chips, not one icon:
+              the old grey ✕ for "not marked yet" read as "absent", and a room
+              cannot tell "nobody marked him" from "he is not coming". Tapping
+              the lit chip again clears it. */}
+          <Stack direction="row" spacing={0.4}>
+            <Chip
+              size="small" icon={<CheckCircleIcon />} label="הגיע"
+              color="success" variant={present ? 'filled' : 'outlined'}
+              disabled={readOnly}
+              onClick={() => patch('attendance', present ? '' : 'הגיע')}
+              sx={{ fontWeight: present ? 800 : 500, opacity: absent ? 0.5 : 1 }}
+            />
+            <Chip
+              size="small" icon={<CancelIcon />} label="לא הגיע"
+              color="error" variant={absent ? 'filled' : 'outlined'}
+              disabled={readOnly}
+              onClick={() => patch('attendance', absent ? '' : 'חסר')}
+              sx={{ fontWeight: absent ? 800 : 500, opacity: present ? 0.5 : 1 }}
+            />
+          </Stack>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
             <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
               <Typography variant="subtitle1" fontWeight={700} noWrap>{child.name}</Typography>
