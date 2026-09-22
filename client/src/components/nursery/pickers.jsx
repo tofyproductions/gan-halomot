@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-  Popover, Box, Stack, Chip, Typography, Button, ButtonBase, Divider,
+  Popover, Box, Stack, Chip, Typography, Button, ButtonBase, Divider, TextField,
 } from '@mui/material';
 
 /**
@@ -133,15 +133,41 @@ export function ValuePicker({ anchorEl, open, onClose, title, options, value, mu
  * scroll through twenty-four. Minutes are in fives; nobody is recording that
  * a baby fell asleep at 09:37.
  */
-export function TimePicker({ anchorEl, open, onClose, title, hours, minutes, value, onPick }) {
-  const [h, setH] = useState('');
-  const [m, setM] = useState('');
+/**
+ * A clock time, typed.
+ *
+ * The first version was two rows of chips — pick an hour, pick a minute,
+ * save — and it was, in the words of the person filling it in forty times a
+ * day, the least convenient way there is to write a time. Now it is what a
+ * time is: four digits. "1115" becomes 11:15, "915" becomes 09:15, a colon is
+ * fine but not needed, Enter saves. "עכשיו" is one tap, because the nap
+ * usually ended a moment ago. The hour list that used to gate the chips now
+ * only warns when the typed hour falls outside the room's day — a 03:00
+ * bedtime is far more often a typo than a fact, but it is still allowed.
+ */
+export function TimePicker({ anchorEl, open, onClose, title, hours, value, onPick }) {
+  const [raw, setRaw] = useState('');
 
-  const seed = () => {
-    const [hh = '', mm = ''] = String(value || '').split(':');
-    setH(hh);
-    setM(mm);
+  const seed = () => setRaw(String(value || ''));
+
+  // What the digits typed so far mean, or null while they do not yet.
+  const parsed = (() => {
+    const digits = raw.replace(/\D/g, '');
+    if (digits.length < 3) return null;
+    const hh = digits.length === 3 ? digits.slice(0, 1) : digits.slice(0, 2);
+    const mm = digits.length === 3 ? digits.slice(1, 3) : digits.slice(2, 4);
+    const h = Number(hh);
+    const m = Number(mm);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h > 23 || m > 59) return null;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+  })();
+  const unusual = parsed && Array.isArray(hours) && hours.length > 0 && !hours.includes(parsed.slice(0, 2));
+
+  const now = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
+  const save = () => { if (parsed) { onPick(parsed); onClose(); } };
 
   return (
     <Popover
@@ -151,7 +177,7 @@ export function TimePicker({ anchorEl, open, onClose, title, hours, minutes, val
       TransitionProps={{ onEnter: seed }}
       anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-      slotProps={{ paper: { sx: { p: 1.5, maxWidth: 300 } } }}
+      slotProps={{ paper: { sx: { p: 1.5, width: 260 } } }}
     >
       {title && (
         <Typography variant="caption" color="primary" fontWeight={700} sx={{ display: 'block', mb: 1 }}>
@@ -159,36 +185,36 @@ export function TimePicker({ anchorEl, open, onClose, title, hours, minutes, val
         </Typography>
       )}
 
-      <Typography variant="caption" color="text.secondary">שעה</Typography>
-      <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1.5, mt: 0.5 }}>
-        {hours.map(x => (
-          <Chip key={x} label={x} size="small"
-            color={h === x ? 'primary' : 'default'}
-            variant={h === x ? 'filled' : 'outlined'}
-            onClick={() => setH(x)} />
-        ))}
+      <TextField
+        autoFocus
+        fullWidth
+        size="small"
+        placeholder="למשל 1115"
+        value={raw}
+        onChange={(e) => setRaw(e.target.value.replace(/[^\d:]/g, '').slice(0, 5))}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } }}
+        inputProps={{
+          inputMode: 'numeric',
+          dir: 'ltr',
+          style: { textAlign: 'center', fontSize: '1.4rem', fontWeight: 700, letterSpacing: 2 },
+        }}
+        helperText={
+          parsed
+            ? (unusual ? `${parsed} — מחוץ לשעות הרגילות של הכיתה, בטוח/ה?` : parsed)
+            : 'הקלידו את השעה כספרות: 1115 = 11:15'
+        }
+        FormHelperTextProps={{ sx: { textAlign: 'center', color: unusual ? 'warning.main' : 'text.secondary', fontWeight: parsed ? 700 : 400 } }}
+      />
+
+      <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+        <Chip label="עכשיו" size="small" variant="outlined" onClick={() => setRaw(now())} />
       </Stack>
 
-      <Typography variant="caption" color="text.secondary">דקות</Typography>
-      <Stack direction="row" flexWrap="wrap" gap={0.5} sx={{ mb: 1.5, mt: 0.5 }}>
-        {minutes.map(x => (
-          <Chip key={x} label={x} size="small"
-            color={m === x ? 'primary' : 'default'}
-            variant={m === x ? 'filled' : 'outlined'}
-            onClick={() => setM(x)} />
-        ))}
-      </Stack>
-
-      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between' }}>
+      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between', mt: 1.5 }}>
         <Button size="small" color="error" onClick={() => { onPick(''); onClose(); }}>
           נקה
         </Button>
-        <Button
-          size="small"
-          variant="contained"
-          disabled={!h || !m}
-          onClick={() => { onPick(`${h}:${m}`); onClose(); }}
-        >
+        <Button size="small" variant="contained" disabled={!parsed} onClick={save}>
           שמירה
         </Button>
       </Box>

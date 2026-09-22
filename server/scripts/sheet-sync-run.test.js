@@ -688,6 +688,86 @@ scenario('an unrecognised mode is refused outright, never silently dry-run', asy
   check('nothing was read before refusing', () => assert.ok(!d.calls.includes('readGrids')));
 });
 
+// --- 15: the old board reads numbers ---------------------------------------
+//
+// The parent's board is an Apps Script that formats what getValues() hands
+// it: a time is a fraction of a day, a portion a ratio. Our strings reached
+// the sheet and rendered "---" on that board — a whole morning entered on the
+// new board and invisible to the parent. Cells go out as the board stores
+// them; the shadow keeps our canonical strings, which is what the reader
+// turns the number back into.
+
+scenario('a time and a portion go out as the numbers the old board formats', async () => {
+  const d = deps({
+    today: todayGrid([['', '', '', ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: '', home: { wake_time: '06:30', meal_time: '11:15' }, meals: { breakfast: { amount: '50%' } }, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { 'home.wake_time': '', 'home.meal_time': '', 'meals.breakfast.amount': '' } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+
+  const byCol = new Map(d.writes.map(w => [w.col, w.value]));
+  check('three cells written', () => assert.strictEqual(d.writes.length, 3));
+  check('06:30 is 0.2708… of a day', () => assert.ok(Math.abs(byCol.get(0) - 390 / 1440) < 1e-9, String(byCol.get(0))));
+  check('11:15 is 0.46875 of a day', () => assert.strictEqual(byCol.get(1), 675 / 1440));
+  check('50% is 0.5', () => assert.strictEqual(byCol.get(2), 0.5));
+  check('the shadow keeps the strings the reader will produce from those numbers', () => {
+    assert.strictEqual(d.state.shadowSaved['id-1']['home.wake_time'], '06:30');
+    assert.strictEqual(d.state.shadowSaved['id-1']['meals.breakfast.amount'], '50%');
+  });
+});
+
+scenario('a note that looks like a formula is still written as a sentence', async () => {
+  const d = deps({
+    today: todayGrid([['', '', '', ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: '=SUM(A1:A9)', home: {}, meals: {}, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { staff_note: '' } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  check('written verbatim, as a string', () => assert.strictEqual(d.writes[0].value, '=SUM(A1:A9)'));
+});
+
+scenario('a cell an earlier pass wrote as text is re-sent once as a number', async () => {
+  // Sheet, ours and shadow all say "11:15" — nothing for the merge to do —
+  // but the cell is a string, so the old board shows "---".
+  const d = deps({
+    today: todayGrid([['', '11:15', '50%', ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: '', home: { meal_time: '11:15' }, meals: { breakfast: { amount: '50%' } }, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { 'home.wake_time': '', 'home.meal_time': '11:15', 'meals.breakfast.amount': '50%', staff_note: '' } },
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  const byCol = new Map(d.writes.map(w => [w.col, w.value]));
+  check('both text cells re-sent', () => assert.strictEqual(d.writes.length, 2));
+  check('as numbers', () => { assert.strictEqual(byCol.get(1), 675 / 1440); assert.strictEqual(byCol.get(2), 0.5); });
+  check('counted as going out', () => assert.strictEqual(res.out, 2));
+  check('no conflict raised', () => assert.strictEqual(res.conflicts, 0));
+  check('nothing pulled in', () => assert.strictEqual(d.saved.length, 0));
+});
+
+scenario('a number the board already holds is left alone', async () => {
+  const d = deps({
+    today: todayGrid([['', 675 / 1440, 0.5, ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: '', home: { meal_time: '11:15' }, meals: { breakfast: { amount: '50%' } }, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { 'home.wake_time': '', 'home.meal_time': '11:15', 'meals.breakfast.amount': '50%', staff_note: '' } },
+  });
+  await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  check('no writes', () => assert.strictEqual(d.writes.length, 0));
+});
+
+scenario("a text cell a person typed differently from ours is the merge's business, not the repair's", async () => {
+  const d = deps({
+    today: todayGrid([['', '11:30', '', ''], ['', '', '', '']]),
+    logs: new Map([['c1', { staff_note: '', home: { meal_time: '11:15' }, meals: {}, sleep: {}, missing: [] }]]),
+    shadow: { 'id-1': { 'home.wake_time': '', 'home.meal_time': '11:15', 'meals.breakfast.amount': '', staff_note: '' } },
+  });
+  const res = await runPass({ branchId: 'b1', sheetId: 's1', date: '2026-09-17', mode: 'write', deps: d });
+  check('the sheet moved, so it comes IN', () => {
+    const s = d.saved.find(x => x.childId === 'c1');
+    assert.strictEqual(s.set['home.meal_time'], '11:30');
+  });
+  check('and nothing is written over it', () => assert.strictEqual(d.writes.length, 0));
+  void res;
+});
+
 (async () => {
   for (const s of scenarios) {
     console.log(`\n${s.title}`);

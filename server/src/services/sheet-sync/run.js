@@ -43,6 +43,50 @@ const COLUMN_FOR_PATH = Object.entries(FIELD_MAP)
     return acc;
   }, {});
 
+/**
+ * A value as the OLD board stores it, for writing into its cell.
+ *
+ * The board is an Apps Script that reads its own tab with getValues() and
+ * formats numbers: a time is a fraction of a day (0.46875 → 11:15) and a
+ * portion is a ratio (0.5 → 50%). Handed the strings this system keeps —
+ * "11:15", "50%" — it rendered "---", so a morning entered on the new board
+ * reached the sheet and never reached the parent. Our canonical strings stay
+ * canonical everywhere else: the shadow keeps them, and the reader
+ * (`cellToTime` / `cellToPortion`) turns the number back into the same string,
+ * so the next pass sees agreement rather than a change.
+ *
+ * Text is written as text, except a bare number ("40" of formula), which the
+ * board always held as a number and renders as one. A note is never turned
+ * into a number, and never into anything the sheet could evaluate: writes are
+ * RAW, so "=SUM(...)" in a parent's note stays a sentence.
+ */
+function cellForBoard(kind, value) {
+  if (Array.isArray(value)) return value.join(', ');
+  if (value === null || value === undefined || value === '') return '';
+  const s = String(value).trim();
+  if (kind === 'time') {
+    const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(s);
+    if (!m) return s;
+    return (Number(m[1]) * 60 + Number(m[2])) / 1440;
+  }
+  if (kind === 'portion') {
+    const pct = /^(\d{1,3})%$/.exec(s);
+    if (pct) return Number(pct[1]) / 100;
+    if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+    return s;
+  }
+  if (kind === 'text' && /^\d+(\.\d+)?$/.test(s)) return Number(s);
+  return s;
+}
+
+/** Does the live cell hold our value as text where the board wants a number? */
+function needsNumericRepair(kind, rawCell, ourValue) {
+  if (typeof rawCell !== 'string' || rawCell === '') return false;
+  if (!(kind === 'time' || kind === 'portion' || kind === 'text')) return false;
+  const converted = cellForBoard(kind, ourValue);
+  return typeof converted === 'number' && rawCell.trim() === String(ourValue).trim();
+}
+
 function defaultDeps() {
   const { readGrids, writeCells } = require('./sheets-client');
   const { Child, DailyLog, SheetSyncState } = require('../../models');
@@ -294,8 +338,24 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
     // the next pass read the sheet's unchanged cell as the sheet having
     // moved, our record as having stayed still, and revert a staff member's
     // edit on the new board with no conflict raised and nothing logged.
+    // Cells this pass (or an earlier one) wrote as text into a column the old
+    // board reads as a number: the value agrees on both sides, so the merge
+    // has nothing to say about it, and it would stay "---" on the parent's
+    // board forever. Re-sent once, as a number; from then on it reads as
+    // agreed. Only where the sheet's cell is exactly our string — a cell a
+    // person typed differently is theirs, and the merge decides about it.
+    const outgoing = { ...toSheet };
+    for (const [column, def] of Object.entries(FIELD_MAP)) {
+      if (Object.prototype.hasOwnProperty.call(outgoing, def.path)) continue;
+      const col = header.indexOf(normalizeFieldName(column));
+      if (col < 0 || pair.row <= headerIndex || pair.row >= todayGrid.length) continue;
+      const raw = (todayGrid[pair.row] || [])[col];
+      const ours = ourFlat[def.path];
+      if (needsNumericRepair(def.kind, raw, ours)) outgoing[def.path] = ours;
+    }
+
     const queued = {};
-    for (const [path, value] of Object.entries(toSheet)) {
+    for (const [path, value] of Object.entries(outgoing)) {
       const report = (why) => result.skipped.push({
         kind: 'cell', access_id: pair.access_id, name: pair.name, field: path, why,
       });
@@ -339,7 +399,7 @@ async function runPass({ branchId, sheetId, date, mode = 'dry', deps = null }) {
         tab: SHEET.today,
         row: pair.row,
         col,
-        value: Array.isArray(value) ? value.join(', ') : value,
+        value: cellForBoard(FIELD_MAP[normalizeFieldName(COLUMN_FOR_PATH[path])]?.kind, value),
       });
       queued[path] = value;
       result.out += 1;
