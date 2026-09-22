@@ -106,10 +106,19 @@ export function ValuePicker({ anchorEl, open, onClose, title, options, value, mu
           );
         })}
       </Stack>
-      {multi && (
-        <>
-          <Divider sx={{ my: 1.5 }} />
-          <Stack direction="row" spacing={1} justifyContent="flex-end">
+      <Divider sx={{ my: 1.5 }} />
+      <Stack direction="row" spacing={1} justifyContent="space-between">
+        {/* Tapping the chosen chip again clears it too, but nobody guesses
+            that. A field entered by mistake needs a way out that says so. */}
+        <Button
+          size="small" color="error"
+          disabled={multi ? draft.length === 0 : !current}
+          onClick={() => { onPick(multi ? [] : ''); onClose(); }}
+        >
+          נקה
+        </Button>
+        {multi && (
+          <Stack direction="row" spacing={1}>
             <Button size="small" onClick={onClose}>ביטול</Button>
             <Button
               size="small"
@@ -119,8 +128,8 @@ export function ValuePicker({ anchorEl, open, onClose, title, options, value, mu
               אישור
             </Button>
           </Stack>
-        </>
-      )}
+        )}
+      </Stack>
     </Popover>
   );
 }
