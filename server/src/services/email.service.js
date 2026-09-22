@@ -60,6 +60,39 @@ async function sendViaResend({ to, cc, subject, html, text, from, fileAttachment
 }
 
 /**
+ * Emoji do not survive the Apps Script relay, and the wreckage is public.
+ *
+ * Hebrew is two bytes per character and arrives perfectly; an emoji is four,
+ * a surrogate pair, and somewhere in the GAS round trip it comes out as a row
+ * of replacement characters. A candidate's confirmation mail read
+ * "KIBALNU ET HAMUAMADUT SHELACH ??????" where a rainbow should have been --
+ * the first thing that gan ever sent her, and it looked broken.
+ *
+ * The relay is a Google Apps Script we do not deploy from here, so the fix
+ * actually available is to stop handing it characters it mangles. They come
+ * out of the SUBJECT and the BODY only: the `attachments` below are HTML the
+ * script converts to PDF through a different path that renders them fine, and
+ * a poster losing its star would be this fix causing its own bug.
+ *
+ * Removing rather than transliterating on purpose. The sentence is complete
+ * without the picture, and no substitute reads better than nothing.
+ */
+/** Emoji, pictographs, and the variation selectors that follow them. */
+const ASTRAL_RUN = /([ \t]*)((?:[\u{10000}-\u{10FFFF}]|[←-⇿⌀-⏿☀-➿⬀-⯿︎️⃣])+)([ \t]*)/gu;
+
+function withoutAstral(value) {
+  if (typeof value !== 'string' || !value) return value;
+  // One pass, with the spaces AROUND the run in hand, because the whitespace
+  // is the whole difficulty. A first attempt collapsed every double space in
+  // the string and quietly reflowed the indentation of every HTML body that
+  // had no emoji in it at all -- a formatter pretending to be a filter.
+  //
+  // A run surrounded by text on both sides leaves one space ("A [x] B" -> "A B");
+  // a run at an edge leaves nothing ("[x] A" -> "A", "A [x]" -> "A").
+  return value.replace(ASTRAL_RUN, (_m, before, _run, after) => (before && after ? ' ' : ''));
+}
+
+/**
  * Send via a Google Apps Script web-app endpoint. The Apps Script runs as
  * the user's Gmail account and uses GmailApp.sendEmail, so no SMTP port
  * is involved and no domain has to be verified — Gmail's normal sending
@@ -72,9 +105,9 @@ async function sendViaGAS({ to, cc, subject, html, text, attachments, fileAttach
     secret: env.GAS_EMAIL_SECRET || '',
     to: Array.isArray(to) ? to : [to].filter(Boolean),
     cc: Array.isArray(cc) ? cc : (cc ? [cc] : []),
-    subject,
-    html,
-    text: text || '',
+    subject: withoutAstral(subject),
+    html: withoutAstral(html),
+    text: withoutAstral(text || ''),
     attachments: attachments || [], // [{ name, html }] — Apps Script converts each HTML to PDF
     // [{ filename, contentBase64, contentType }] — Apps Script attaches raw files
     // (requires the Apps Script to support the `files` field; ignored otherwise).
@@ -349,4 +382,7 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
   return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
 }
 
-module.exports = { sendAgreementEmail, sendRegistrationLink, sendOrderEmail, buildOrderHTML, dispatchEmail };
+module.exports = {
+  sendAgreementEmail, sendRegistrationLink, sendOrderEmail, buildOrderHTML, dispatchEmail,
+  withoutAstral,
+};

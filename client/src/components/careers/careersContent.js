@@ -77,8 +77,28 @@ export const ROLES = [
  * carries no gallery, which is the honest state rather than a wrong one.
  */
 
-/** wa.me wants a country-code number and a pre-written first message. */
+/**
+ * wa.me wants a country-code number and a pre-written first message.
+ *
+ * The message is the FIRST thing a manager reads from a stranger, so it is
+ * written as that person would write it. It said "אני מתעניין/ת במשרת
+ * גיוס", which nobody says — "משרת גיוס" is a job IN recruitment, which is
+ * not the job on offer. It now names the gan, names the branch, says the
+ * manager runs it, and asks for a call back, which is the whole of what the
+ * sender actually wants.
+ */
 const wa = (num, text) => `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
+
+/**
+ * The opener, in one place so the four cards cannot drift apart.
+ *
+ * `male` is not a detail to skip: three of these managers are women and one is
+ * a man, and a message that opens by addressing him in the feminine is the
+ * first impression this gan makes on somebody it wants to hire.
+ */
+const intro = (name, where, male = false) => `הי ${name}, אני מתעניין/ת במשרה `
+  + `בגן החלומות ${where} שבניהולך.\n`
+  + `אשמח ש${male ? 'תחזור' : 'תחזרי'} אליי.`;
 
 export const CONTACTS = [
   {
@@ -88,7 +108,7 @@ export const CONTACTS = [
     tel: '+972543599422',
     address: 'משה דיין 9 / שאול המלך 5',
     cta: 'דברו איתי בוואטסאפ',
-    whatsapp: wa('972543599422', 'הי לידור, אני מתעניין/ת במשרת גיוס לסניף כפר סבא'),
+    whatsapp: wa('972543599422', intro('לידור', 'סניף כפר סבא')),
   },
   {
     name: 'סניף הרצליה',
@@ -97,7 +117,7 @@ export const CONTACTS = [
     tel: '+972507227800',
     address: 'הרצוג 5, הרצליה',
     cta: 'דברו איתי בוואטסאפ',
-    whatsapp: wa('972507227800', 'הי טובה, אני מתעניין/ת במשרת גיוס לסניף הרצליה'),
+    whatsapp: wa('972507227800', intro('טובה', 'סניף הרצליה')),
   },
   {
     name: 'סניף תל אביב',
@@ -106,7 +126,7 @@ export const CONTACTS = [
     tel: '+972545243288',
     address: 'אייזיק חריף 21, תל אביב',
     cta: 'דברו איתי בוואטסאפ',
-    whatsapp: wa('972545243288', 'הי אלעד, אני מתעניין/ת במשרת גיוס לסניף תל אביב'),
+    whatsapp: wa('972545243288', intro('אלעד', 'סניף תל אביב', true)),
   },
   {
     name: 'המשרד הראשי',
@@ -116,6 +136,6 @@ export const CONTACTS = [
     address: 'מענה כללי ומידע נוסף',
     cta: 'צרו קשר עם המשרד',
     office: true,
-    whatsapp: wa('972529480580', 'הי אורלי, אני מתעניין/ת במשרת גיוס לגן החלומות'),
+    whatsapp: wa('972529480580', 'הי אורלי, אני מתעניין/ת במשרה בגן החלומות.\nאשמח שתחזרי אליי.'),
   },
 ];
