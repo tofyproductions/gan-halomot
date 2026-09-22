@@ -93,7 +93,17 @@ function getClient() {
 // Photographs were the first thing to live here, but not the last: a signed
 // contract is a scan, and a scan from a phone is routinely larger than the
 // 16MB a MongoDB document can hold. 'pdf' is on the list for that.
-const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'heic', 'pdf'];
+//
+// תיק העובד added the rest. A recommendation arrives as a Word file about
+// as often as a scan, and an extension that is not on this list is silently
+// rewritten to 'jpg' — the file still downloads correctly, because the type
+// and the real filename are served from the document row, but the object in
+// the bucket then claims to be something it cannot be opened as, which is a
+// trap for whoever eventually reads that bucket by hand.
+const ALLOWED_EXT = [
+  'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'pdf',
+  'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'rtf',
+];
 
 function makeKey(prefix, ext = 'jpg') {
   // An allowlist, not a scrub. Stripping the punctuation out of
