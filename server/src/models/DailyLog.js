@@ -66,6 +66,26 @@ const dailyLogSchema = new mongoose.Schema({
   missing: { type: [String], default: [] },
   staff_note: { type: String, default: '' },
 
+  /**
+   * Fields where the sheet and this record both moved since the last sync.
+   *
+   * The sheet's value won and is in the field above; this is what ours held,
+   * kept so the board can show it and the person in the room can settle it.
+   * Never a silent overwrite — see services/sheet-sync/three-way.js.
+   *
+   * Cleared for a field the moment somebody edits that field on the board:
+   * looking at both values and choosing one IS the resolution, and leaving
+   * the note up afterwards would make it furniture.
+   */
+  sync_conflicts: {
+    type: [{
+      field: { type: String, default: '' },
+      ours: { type: mongoose.Schema.Types.Mixed, default: '' },
+      at: { type: Date, default: Date.now },
+    }],
+    default: [],
+  },
+
   // Who touched it last, for the staff's own sake when two people share a room.
   updated_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   updated_by_name: { type: String, default: '' },

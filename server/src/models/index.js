@@ -108,12 +108,14 @@ const PushSubscription = require('./PushSubscription');
 const DataDeletionRequest = require('./DataDeletionRequest');
 const NotificationEvent = require('./NotificationEvent');
 const WebPushSubscription = require('./WebPushSubscription');
+const SheetSyncState = require('./SheetSyncState');
 
 const real = {
   PushSubscription,
   DataDeletionRequest,
   NotificationEvent,
   WebPushSubscription,
+  SheetSyncState,
   PayrollRollup,
   User,
   CustomRole,

@@ -45,6 +45,21 @@ const childSchema = new mongoose.Schema({
   hidden_at: { type: Date, default: null },
   hidden_by_name: { type: String, default: '' },
   hide_note: { type: String, default: '' },
+
+  /**
+   * The UUID the old Apps Script board assigned this child, from the sheet's
+   * `ילדים` tab.
+   *
+   * The only identity the two systems share. Names are not usable here —
+   * `נדיה גרוס` exists twice, and the תמ"ת reconciliation already documented
+   * six children the two systems spell differently.
+   *
+   * Empty on every child the old board never knew, which is most of them:
+   * only the two תינוקייה branches were ever on it. Set by
+   * scripts/sheet-sync-match.js after a human reads the match report, and by
+   * nothing else. Deleted with the sync when the old board closes.
+   */
+  sheet_access_id: { type: String, default: '', index: true },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 childSchema.index({ registration_id: 1 });

@@ -492,6 +492,44 @@ function parseChildren(workbook) {
 }
 
 /**
+ * The roster tab, WITH the grid row each child sits on.
+ *
+ * `parseChildren` above answers "who was in this sheet", which is all the
+ * history importer needs — it pairs on `accessId` carried in the JSON. The
+ * live `סדר יום` tab carries no id at all, so pairing there is by position,
+ * and position is exactly what `parseChildren` throws away when it skips a
+ * blank row.
+ *
+ * Same parsing, one more field, and the two do not share an implementation
+ * on purpose: the importer's behaviour is covered by four suites and must not
+ * move because the sync needed something else.
+ *
+ * `row` is the zero-based index into the grid as read, so it can be turned
+ * back into an A1 range without counting anything again.
+ */
+function parseChildRows(rows) {
+  const headerIndex = (rows || []).findIndex(r => (r || []).some(c => normalizeFieldName(c) === 'שם מלא'));
+  if (headerIndex < 0) return [];
+  const header = (rows[headerIndex] || []).map(normalizeFieldName);
+  const col = (name) => header.indexOf(name);
+  const out = [];
+  for (let i = headerIndex + 1; i < rows.length; i += 1) {
+    const row = rows[i];
+    if (isEmptyRow(row)) continue;
+    const name = cellToText(row[col('שם מלא')]);
+    if (!name) continue;
+    out.push({
+      row: i,
+      name,
+      birth_date: excelSerialToDateKey(row[col('תאריך לידה')]),
+      access_id: cellToText(row[col('AccessID')]),
+      phone: normalizePhone(row[col('מספר פלאפון')]),
+    });
+  }
+  return out;
+}
+
+/**
  * The history tab: every past day, grouped by date.
  *
  * A row whose JSON will not parse is reported rather than thrown on — one
@@ -641,6 +679,6 @@ module.exports = {
   FIELD_MAP, dailyLogSet,
   menuKey, menuSelections, knownDishSet,
   snapshotScore, chooseSnapshot,
-  readWorkbook, parseChildren, parseHistory, parseToday, parseOptions, parseMenu,
+  readWorkbook, parseChildren, parseChildRows, parseHistory, parseToday, parseOptions, parseMenu,
   SHEET, TIME_RE,
 };

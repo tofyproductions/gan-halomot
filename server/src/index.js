@@ -416,6 +416,25 @@ connectDB().then(() => {
       setInterval(runReconcileReminder, 60 * 60 * 1000);
     }
 
+    // The old תינוקייה board and the new one, kept in step until the old one
+    // closes. Cheap when idle — one Setting read and an immediate return while
+    // it is disabled, which is how it ships.
+    const sheetSync = require('./services/sheetSyncJob');
+    // The tick returns what it did and says nothing itself, so the outcome has
+    // to be printed here like every other job in this block. It is the whole
+    // evidence the rollout is judged on — a read-only day, then a night with
+    // zero disagreements — and without it a working sync, a disabled one, a
+    // misconfigured branch and an audit that compared nobody all look the
+    // same from the log: empty.
+    const runSheetSync = () => sheetSync.tick()
+      .then(r => sheetSync.describeTick(r)
+        .forEach(l => (l.level === 'error' ? console.error(l.text) : console.log(l.text))))
+      .catch((e) => console.error('[sheet-sync] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runSheetSync, 2 * 60 * 1000);
+      setInterval(runSheetSync, 2 * 60 * 1000);
+    }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.
