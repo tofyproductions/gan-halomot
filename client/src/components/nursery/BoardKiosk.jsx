@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Box, Paper, Typography, Stack, Button, TextField, Alert, CircularProgress, Chip,
+  IconButton, Tooltip,
 } from '@mui/material';
 import FingerprintIcon from '@mui/icons-material/Fingerprint';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
+import LogoutIcon from '@mui/icons-material/Logout';
 import api from '../../api/client';
 import NurseryBoard from './NurseryBoard';
 
@@ -173,6 +175,29 @@ export default function BoardKiosk() {
     );
   }
 
+  /**
+   * The way out.
+   *
+   * A board signs itself in for six months and every other address in the
+   * application sends it back here, which is right for a tablet on a wall and
+   * a trap for the person who opened the link once to see what it looked
+   * like: "/" redirects to the board, and the board has no door. Somebody has
+   * to be able to hand the device back and be themselves again.
+   *
+   * Deliberately small and deliberately confirmed. It sits where a wall-
+   * mounted tablet will not be tapped by accident, and the question it asks
+   * names the consequence — the room will need the password again.
+   */
+  const leave = () => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm('לצאת מלוח הכיתה?\n\nהטאבלט יתנתק, ובכניסה הבאה יהיה צריך את סיסמת הלוח שוב.')) return;
+    try {
+      localStorage.removeItem('token');
+      localStorage.removeItem('boardLink');
+    } catch { /* private mode */ }
+    window.location.href = '/login';
+  };
+
   if (signedIn) {
     return (
       <Box sx={{ p: { xs: 1.5, sm: 3 }, minHeight: '100vh', bgcolor: 'background.default' }}>
@@ -190,6 +215,13 @@ export default function BoardKiosk() {
           </Alert>
         )}
         <NurseryBoard />
+        <Stack direction="row" justifyContent="center" sx={{ mt: 4, opacity: 0.5 }}>
+          <Tooltip title="יציאה מלוח הכיתה">
+            <IconButton size="small" onClick={leave} aria-label="יציאה מלוח הכיתה">
+              <LogoutIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       </Box>
     );
   }
@@ -247,6 +279,10 @@ export default function BoardKiosk() {
               <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center' }}>
                 הסיסמה מוגדרת על ידי מנהל המערכת. הלוח הזה מציג את הכיתה הזו בלבד.
               </Typography>
+              {/* Not everybody who opens this link meant to become a board. */}
+              <Button size="small" color="inherit" sx={{ opacity: 0.6 }} href="/login">
+                כניסה רגילה למערכת
+              </Button>
             </>
           )}
         </Stack>
