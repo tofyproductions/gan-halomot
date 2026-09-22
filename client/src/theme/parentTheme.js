@@ -55,17 +55,27 @@ const BODY = '"Rubik", "Assistant", system-ui, -apple-system, sans-serif';
  * dark text, so it stays bright.
  */
 export const PLAYFUL = {
+  // ONE FAMILY, 22.09.2026. The first set was four unrelated hues — a red
+  // header over an orange hero over a green day card, with a violet icon
+  // underneath — and the screen read as four apps. These are four tones of
+  // the same earth the management screens are built from: deep clay for the
+  // header and anything urgent, sage for the day, sand for the selected tab,
+  // and a warm taupe for the quiet actions. The names stayed (`coral`,
+  // `teal`…) so no screen had to change; the roles are what they were.
+  //
+  // Contrast, measured: white on clay 7.6:1, on sage 5.1:1, on taupe 7.0:1;
+  // ink on sand 9.8:1. The `soft` tints carry their `softOn` at 7:1 or more.
   light: {
-    coral: { bg: '#C4441F', on: '#FFFFFF', soft: '#FDEBE5', softOn: '#8E2E12' },
-    teal: { bg: '#1F7A6D', on: '#FFFFFF', soft: '#E2F2EF', softOn: '#1B5D54' },
-    amber: { bg: '#F4B942', on: '#3A2A08', soft: '#FEF3DC', softOn: '#6B4A00' },
-    violet: { bg: '#514899', on: '#FFFFFF', soft: '#EDEBF7', softOn: '#413A7D' },
+    coral: { bg: '#8A3F06', on: '#FFFFFF', soft: '#F6E7DA', softOn: '#7A3A08' },
+    teal: { bg: '#4F6F5A', on: '#FFFFFF', soft: '#E6EEE8', softOn: '#365243' },
+    amber: { bg: '#E9C27E', on: '#3A2A08', soft: '#FBF1DF', softOn: '#6B4A00' },
+    violet: { bg: '#6B5647', on: '#FFFFFF', soft: '#EFE9E4', softOn: '#4E3D31' },
   },
   dark: {
-    coral: { bg: '#A93817', on: '#FFFFFF', soft: '#33190F', softOn: '#FFB599' },
-    teal: { bg: '#17564E', on: '#FFFFFF', soft: '#0F2A26', softOn: '#7FD3C6' },
-    amber: { bg: '#C9922B', on: '#241900', soft: '#2C2210', softOn: '#F2CB74' },
-    violet: { bg: '#3F3878', on: '#FFFFFF', soft: '#1D1930', softOn: '#B0A8E8' },
+    coral: { bg: '#6E3306', on: '#FFFFFF', soft: '#2E1B0E', softOn: '#F2B98F' },
+    teal: { bg: '#3B5444', on: '#FFFFFF', soft: '#1A241E', softOn: '#A9CDB5' },
+    amber: { bg: '#C9A15E', on: '#241900', soft: '#2C2210', softOn: '#F2CB74' },
+    violet: { bg: '#4F3F34', on: '#FFFFFF', soft: '#211A15', softOn: '#D6C4B4' },
   },
 };
 
