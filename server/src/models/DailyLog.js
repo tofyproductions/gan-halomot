@@ -34,6 +34,10 @@ const dailyLogSchema = new mongoose.Schema({
   // Did the child come in at all. Blank means nobody has said yet, which is
   // different from מסומן חסר — the board shows the two differently.
   attendance: { type: String, enum: ['', 'הגיע', 'חסר'], default: '' },
+  // True when the system filled `attendance` in rather than a person: a staff
+  // entry implies the child is here, a parent's "not coming" implies not. An
+  // inferred mark yields to the next fact; a mark a person set does not.
+  attendance_auto: { type: Boolean, default: false },
 
   // --- What the parent sent from home, before the day starts ---
   home: {
@@ -41,6 +45,8 @@ const dailyLogSchema = new mongoose.Schema({
     meal_time: { type: String, default: '' },     // HH:MM
     meal_amount: { type: String, default: '' },   // a portion, or free text ("120 מ״ל")
     parent_note: { type: String, default: '' },
+    // The parent said, from home, that the child is not coming today.
+    not_coming: { type: Boolean, default: false },
   },
 
   // --- What the staff record through the day ---

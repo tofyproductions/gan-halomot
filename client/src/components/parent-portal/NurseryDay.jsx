@@ -109,6 +109,7 @@ export default function NurseryDay({ childId }) {
   const [mealTime, setMealTime] = useState('');
   const [mealAmount, setMealAmount] = useState('');
   const [note, setNote] = useState('');
+  const [notComing, setNotComing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -119,7 +120,8 @@ export default function NurseryDay({ childId }) {
       setMealTime(home.meal_time || '');
       setMealAmount(home.meal_amount || '');
       setNote(home.parent_note || '');
-      setEditing(!(home.wake_time || home.meal_time || home.meal_amount || home.parent_note));
+      setNotComing(!!home.not_coming);
+      setEditing(!(home.wake_time || home.meal_time || home.meal_amount || home.parent_note || home.not_coming));
     } catch (err) {
       setError(parentApiError(err, 'לא הצלחנו לטעון את היום'));
     } finally {
@@ -138,6 +140,7 @@ export default function NurseryDay({ childId }) {
         'home.meal_time': mealTime,
         'home.meal_amount': mealAmount,
         'home.parent_note': note,
+        'home.not_coming': notComing,
       });
       setSaved(true);
       setEditing(false);
@@ -202,6 +205,9 @@ export default function NurseryDay({ childId }) {
                 </Typography>
               </Stack>
 
+              {notComing && (
+                <Chip color="error" label="הודעתם: לא מגיע/ה היום" sx={{ fontWeight: 800, mb: 1.5 }} />
+              )}
               <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1.5 }}>
                 <Tile icon={<WbSunnyIcon />} label="התעורר/ה" value={wake} />
                 <Tile icon={<EmojiFoodBeverageIcon />} label="אכל/ה בבית" value={mealTime} />
@@ -220,6 +226,16 @@ export default function NurseryDay({ childId }) {
             </>
           ) : (
             <Stack spacing={2} sx={{ mt: 2 }}>
+              {/* One tap, before the times: the morning a child stays home is
+                  the morning nobody fills in a wake-up time. It marks the day
+                  on the staff board by itself. */}
+              <Button
+                fullWidth size="large"
+                variant={notComing ? 'contained' : 'outlined'} color="error"
+                onClick={() => setNotComing(v => !v)}
+              >
+                {notComing ? 'לא מגיע/ה היום ✓ (לחצו לביטול)' : 'לא מגיע/ה היום'}
+              </Button>
               <Stack direction="row" spacing={2}>
                 <TextField
                   label="שעת התעוררות" type="time" size="small" fullWidth

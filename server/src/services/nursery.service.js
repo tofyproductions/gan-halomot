@@ -125,6 +125,39 @@ function boardKind(classroom) {
 }
 
 /** Is this child currently carried on a board that is not their room's? */
+/**
+ * Fill in attendance from what just happened, when nobody has said.
+ *
+ * The old board marked attendance by itself and the staff liked that. The
+ * rule is the obvious one: a teacher who records a bottle for a child has
+ * a child in front of her, and a parent who says "not coming today" has
+ * said it. What the system infers is marked `attendance_auto`, so the next
+ * fact can move it — a parent's "not coming" at 07:00 gives way to the
+ * breakfast entry at 09:00 — while a mark a person set on the card stays
+ * put until that person changes it.
+ *
+ * Returns the fields to write, or null when nothing should change.
+ *   current   the log as it stands ({ attendance, attendance_auto })
+ *   explicit  the attendance value in this request, if a person sent one
+ *   staffData true when this request writes any staff-recorded field
+ *   notComing true/false when the parent set the flag, undefined otherwise
+ */
+function inferAttendance(current, { explicit, staffData, notComing } = {}) {
+  const cur = current?.attendance || '';
+  const auto = !!current?.attendance_auto;
+  if (explicit !== undefined) return { attendance: explicit, attendance_auto: false };
+  if (staffData && (cur === '' || auto) && cur !== 'הגיע') {
+    return { attendance: 'הגיע', attendance_auto: true };
+  }
+  if (notComing === true && (cur === '' || auto) && cur !== 'חסר') {
+    return { attendance: 'חסר', attendance_auto: true };
+  }
+  if (notComing === false && cur === 'חסר' && auto) {
+    return { attendance: '', attendance_auto: false };
+  }
+  return null;
+}
+
 function extensionActive(child, now = new Date()) {
   const ext = child && child.board_extension;
   if (!ext || !ext.classroom_id || !ext.until) return false;
@@ -273,7 +306,7 @@ function normalizeDateKey(raw) {
 
 module.exports = {
   isNurseryClassroom, nurseryClassrooms, classroomCategory,
-  boardKind, boardClassrooms, boardKindForChild, extensionActive,
+  boardKind, boardClassrooms, boardKindForChild, extensionActive, inferAttendance,
   getOptions, getMenu, todayKey, normalizeDateKey,
   DEFAULT_OPTIONS, DEFAULT_MENU, OPTIONS_KEY, MENU_KEY,
   NURSERY_CATEGORY,

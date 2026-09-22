@@ -79,5 +79,22 @@ console.log('\nthe infant check itself is unchanged — צעירים is NOT a ת
 check('צעירים is not nursery', nursery.isNurseryClassroom({ category: 'צעירים' }), false);
 check('תינוקייה is nursery', nursery.isNurseryClassroom({ category: 'תינוקייה' }), true);
 
+console.log('\nattendance the system fills in by itself (inferAttendance)');
+const J = (v) => JSON.stringify(v);
+const inf = (cur, opts) => J(nursery.inferAttendance(cur, opts));
+check('a staff entry on an unmarked day → הגיע, auto', inf({ attendance: '' }, { staffData: true }), J({ attendance: 'הגיע', attendance_auto: true }));
+check('a staff entry when a person already marked חסר → untouched', inf({ attendance: 'חסר', attendance_auto: false }, { staffData: true }), 'null');
+check('a staff entry when the parent said not coming (auto חסר) → הגיע wins, still auto', inf({ attendance: 'חסר', attendance_auto: true }, { staffData: true }), J({ attendance: 'הגיע', attendance_auto: true }));
+check('a staff entry when already הגיע → nothing to write', inf({ attendance: 'הגיע', attendance_auto: true }, { staffData: true }), 'null');
+check('an explicit mark is never auto', inf({ attendance: 'הגיע', attendance_auto: true }, { explicit: 'חסר', staffData: true }), J({ attendance: 'חסר', attendance_auto: false }));
+check('an explicit clear is honoured', inf({ attendance: 'הגיע', attendance_auto: true }, { explicit: '' }), J({ attendance: '', attendance_auto: false }));
+check('parent: not coming on an unmarked day → חסר, auto', inf({ attendance: '' }, { notComing: true }), J({ attendance: 'חסר', attendance_auto: true }));
+check('parent: not coming after staff marked הגיע by hand → untouched', inf({ attendance: 'הגיע', attendance_auto: false }, { notComing: true }), 'null');
+check('parent: not coming after an auto הגיע → the later fact wins', inf({ attendance: 'הגיע', attendance_auto: true }, { notComing: true }), J({ attendance: 'חסר', attendance_auto: true }));
+check('parent cancels not-coming → the auto חסר is cleared', inf({ attendance: 'חסר', attendance_auto: true }, { notComing: false }), J({ attendance: '', attendance_auto: false }));
+check('parent cancels not-coming but a person marked חסר → untouched', inf({ attendance: 'חסר', attendance_auto: false }, { notComing: false }), 'null');
+check('a home-only update from staff (no staff data) → nothing', inf({ attendance: '' }, { staffData: false }), 'null');
+check('no log yet → a staff entry still marks הגיע', inf(null, { staffData: true }), J({ attendance: 'הגיע', attendance_auto: true }));
+
 console.log(failures === 0 ? '\nOK\n' : `\n${failures} FAILED\n`);
 process.exit(failures === 0 ? 0 : 1);

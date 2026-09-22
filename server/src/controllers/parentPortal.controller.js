@@ -311,6 +311,9 @@ const PARENT_DAY_FIELDS = {
   },
   'home.meal_amount': (v) => String(v ?? '').trim().slice(0, 60),
   'home.parent_note': (v) => String(v ?? '').trim().slice(0, 500),
+  // "לא מגיע/ה היום" — a boolean, and the one home field that marks the day's
+  // attendance on the staff board by itself.
+  'home.not_coming': (v) => (v === true || v === 'true' ? true : (v === false || v === 'false' || v === '' ? false : null)),
 };
 
 async function updateChildDay(req, res) {
@@ -353,6 +356,13 @@ async function updateChildDay(req, res) {
   // ordering as the staff side, so only the paths this request actually
   // wrote — never a bookkeeping field — end up in the $pull's $in list.
   const touched = Object.keys(set);
+
+  if ('home.not_coming' in set) {
+    const existing = await DailyLog.findOne({ child_id: child._id, date }).select('attendance attendance_auto').lean();
+    const inferred = nursery.inferAttendance(existing, { notComing: set['home.not_coming'] });
+    if (inferred) Object.assign(set, inferred);
+  }
+
   const update = { $set: set };
   if (touched.length) update.$pull = { sync_conflicts: { field: { $in: touched } } };
 

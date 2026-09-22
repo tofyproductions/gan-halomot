@@ -245,14 +245,16 @@ export default function ChildDayCard({
               the lit chip again clears it. */}
           <Stack direction="row" spacing={0.4}>
             <Chip
-              size="small" icon={<CheckCircleIcon />} label="הגיע"
+              size="small" icon={<CheckCircleIcon />} label={present && log.attendance_auto ? 'הגיע ·אוטו' : 'הגיע'}
+              title={log.attendance_auto ? 'סומן אוטומטית — לחיצה קובעת ידנית' : undefined}
               color="success" variant={present ? 'filled' : 'outlined'}
               disabled={readOnly}
               onClick={() => patch('attendance', present ? '' : 'הגיע')}
               sx={{ fontWeight: present ? 800 : 500, opacity: absent ? 0.5 : 1 }}
             />
             <Chip
-              size="small" icon={<CancelIcon />} label="לא הגיע"
+              size="small" icon={<CancelIcon />} label={absent && log.attendance_auto ? 'לא הגיע ·אוטו' : 'לא הגיע'}
+              title={log.attendance_auto ? 'סומן אוטומטית לפי הודעת ההורים — לחיצה קובעת ידנית' : undefined}
               color="error" variant={absent ? 'filled' : 'outlined'}
               disabled={readOnly}
               onClick={() => patch('attendance', absent ? '' : 'חסר')}
@@ -320,7 +322,7 @@ export default function ChildDayCard({
           </Alert>
         )}
 
-        {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note
+        {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note || home.not_coming
           || homeConflicts.length > 0) && (
           <Box
             sx={{
@@ -346,6 +348,11 @@ export default function ChildDayCard({
                 answer is a fact the room wants ("nobody said when he woke"),
                 and a block that changes shape per child is a block that has to
                 be re-read every time. */}
+            {home.not_coming && (
+              <Stack direction="row" justifyContent="center" sx={{ mb: 1 }}>
+                <Chip size="small" color="error" icon={<CancelIcon />} label="ההורים הודיעו: לא מגיע/ה היום" sx={{ fontWeight: 800 }} />
+              </Stack>
+            )}
             <Stack direction="row" spacing={1}>
               <HomeTile label="אכל בבוקר" parts={[home.meal_time, home.meal_amount]} />
               <HomeTile label="התעורר" parts={[home.wake_time]} />

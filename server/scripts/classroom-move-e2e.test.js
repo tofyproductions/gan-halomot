@@ -140,7 +140,7 @@ async function main() {
   console.log(`\nשרת עלה על :${PORT}, מסד נתונים בזיכרון (${host})`);
 
   const {
-    User, Branch, Classroom, Child, Registration, ClassroomMoveRequest, NotificationEvent,
+    User, Branch, Classroom, Child, Registration, ClassroomMoveRequest, NotificationEvent, DailyLog,
   } = require('../src/models');
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
@@ -232,6 +232,35 @@ async function main() {
     body: { date: today, attendance: 'הגיע' },
   });
   eq(patch.status, 200, 'עדכון נוכחות לילד מורחב מתקבל');
+
+  head('3א. נוכחות מסומנת לבד: רישום של הצוות = הגיע, הודעת הורה = לא הגיע');
+  const meal = await request({
+    method: 'PATCH', path: `/api/nursery/log/${noa._id}`, token: ganToken,
+    body: { date: today, 'meals.breakfast.amount': '50%' },
+  });
+  eq(meal.status, 200, 'רישום ארוחה לנועה');
+  eq(meal.body?.log?.attendance, 'הגיע', 'סומנה "הגיע" בלי שאף אחד לחץ');
+  eq(meal.body?.log?.attendance_auto, true, 'ומסומן שזה אוטומטי');
+  const manual = await request({
+    method: 'PATCH', path: `/api/nursery/log/${noa._id}`, token: ganToken,
+    body: { date: today, attendance: 'חסר' },
+  });
+  eq(manual.body?.log?.attendance, 'חסר', 'הגננת קבעה ידנית "לא הגיע"');
+  eq(manual.body?.log?.attendance_auto, false, 'ידני — לא אוטומטי');
+  const meal2 = await request({
+    method: 'PATCH', path: `/api/nursery/log/${noa._id}`, token: ganToken,
+    body: { date: today, 'meals.lunch.amount': '75%' },
+  });
+  eq(meal2.body?.log?.attendance, 'חסר', 'רישום נוסף לא דורס סימון ידני');
+  // The parent's word, written straight into the log the way the portal does.
+  await DailyLog.updateOne({ child_id: dan._id, date: today }, { $set: { 'home.not_coming': true, attendance: 'חסר', attendance_auto: true } }, { upsert: true });
+  const danMeal = await request({
+    method: 'PATCH', path: `/api/nursery/log/${dan._id}`, token: ganToken,
+    body: { date: today, 'meals.breakfast.amount': '25%' },
+  });
+  eq(danMeal.status, 200, 'דן — ההורים אמרו לא מגיע, אבל הצוות רשם ארוחה');
+  eq(danMeal.body?.log?.attendance, 'הגיע', 'העובדה המאוחרת מנצחת: הגיע');
+  eq(danMeal.body?.log?.home?.not_coming, true, 'הודעת ההורים נשארת רשומה');
 
   /* ---------------------------------------------------------------- */
   head('4. שלושה ימים לפני הסוף — הלוח שואל; "כן" = חודש נוסף מהיום');

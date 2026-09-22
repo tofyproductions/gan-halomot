@@ -290,6 +290,14 @@ async function updateLog(req, res) {
   // the ones a conflict note gets pulled for.
   const touched = Object.keys(set);
 
+  // Attendance the system can tell on its own — see nursery.inferAttendance.
+  const existing = await DailyLog.findOne({ child_id: child._id, date }).select('attendance attendance_auto').lean();
+  const inferred = nursery.inferAttendance(existing, {
+    explicit: 'attendance' in set ? set.attendance : undefined,
+    staffData: touched.some(p => p !== 'attendance' && !p.startsWith('home.')),
+  });
+  if (inferred) Object.assign(set, inferred);
+
   set.child_name = child.child_name;
   set.classroom_id = child.classroom_id?._id || null;
   set.branch_id = child.classroom_id?.branch_id || null;
