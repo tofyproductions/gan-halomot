@@ -2638,7 +2638,14 @@ async function listPunchesForDay(req, res, next) {
 
     // Keep only punches whose IL-local calendar date equals the requested date
     const punches = raw.filter(p => israelDateKey(new Date(p.timestamp)) === date);
-    res.json({ punches });
+    // The day's in/out decision, if one exists — so the editor can show a
+    // >2-punch day as settled, proposed, or still open, and let the viewer
+    // settle it right here instead of hunting for the payroll issues screen.
+    const resolution = employee_id
+      ? await PunchResolution.findOne({ employee_id, date })
+        .select('status labels minutes note proposed_by_name resolved_at').lean()
+      : null;
+    res.json({ punches, resolution });
   } catch (err) { next(err); }
 }
 
@@ -3258,13 +3265,16 @@ async function approvePunch(req, res, next) {
     }
 
     // Accounting/admin approving an employee self-report the branch manager
-    // hasn't reviewed at all — a deliberate bypass, not the normal stage 1.
-    // Requires an explicit flag from the client so a plain click can never
-    // silently skip her: PendingPunchApprovals.jsx only sends it after the
-    // "this overrides the branch manager" confirmation dialog.
-    const override = req.body?.override_manager === true;
-
-    if ((st === 'pending_manager' || st === 'pending') && isFinal && override) {
+    // hasn't reviewed at all. Accounting's yes is FINAL at every stage: the
+    // manager's stage exists so that accounting is not the only pair of eyes
+    // on a self-report, not so that accounting's decision can wait on her.
+    // This used to require an `override_manager` flag, and without it a
+    // system admin (who also counts as a manager below) fell through to the
+    // stage-1 branch and merely forwarded the punch to… accounting — himself
+    // — which read as "I approved it and it is still waiting". The bypass is
+    // still recorded on the punch and the manager is told after the fact;
+    // the flag is accepted and ignored so older clients keep working.
+    if ((st === 'pending_manager' || st === 'pending') && isFinal) {
       p.approval_status = 'approved';
       p.approval_decided_by = req.user.id;
       p.approval_decided_at = new Date();

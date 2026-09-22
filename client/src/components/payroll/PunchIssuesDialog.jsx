@@ -64,7 +64,7 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   const [newPunch, setNewPunch] = useState({}); // key → {time, role} — a punch missing from the middle of the day (e.g. "back from an errand")
   const [selfEntry, setSelfEntry] = useState(false); // accountant's fallback
   const [reminders, setReminders] = useState({});    // branch_id → send result
-  const [transfer, setTransfer] = useState({});      // day key → HH:mm typed by the manager
+  const [transfer, setTransfer] = useState({});      // day key → { out, in } — left the first branch / arrived at the second
   const [branch, setBranch] = useState(ALL);         // which branch tab is open
 
   const load = useCallback(() => {
@@ -113,10 +113,16 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
   /** Split a day opened at one branch and closed at another. */
   const splitBranchDay = (day) => {
     const k = keyOf(day);
-    const t = (transfer[k] || '').trim();
-    if (!/^\d{2}:\d{2}$/.test(t)) return toast.error('הזן/י שעת מעבר בין הסניפים');
+    const t = transfer[k] || {};
+    const out = (t.out || '').trim();
+    // Arrived-at defaults to left-at: one drive-free transfer is the common
+    // case and a single typed time must keep working.
+    const inn = (t.in || out).trim();
+    if (!/^\d{2}:\d{2}$/.test(out)) return toast.error(`הזן/י את שעת היציאה מ${day.in_branch_name}`);
+    if (!/^\d{2}:\d{2}$/.test(inn)) return toast.error(`הזן/י את שעת הכניסה ל${day.out_branch_name}`);
+    if (inn < out) return toast.error('הכניסה לסניף השני לא יכולה להיות לפני היציאה מהראשון');
     return withBusy(k, api.post(`/payroll-month/${month}/punch-issues/split-branch`, {
-      employee_id: day.employee_id, date: day.date, transfer_time: t,
+      employee_id: day.employee_id, date: day.date, out_time: out, in_time: inn,
     })
       .then(r => {
         toast.success(r.data?.status === 'pending'
@@ -706,8 +712,8 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                       </Stack>
                       <Alert severity="warning" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
                         לא נסגרה החתמה ב{item.in_branch_name} ולא נפתחה ב{item.out_branch_name}. כל היום נזקף כרגע
-                        ל{item.in_branch_name} — ולסניפים יש תעריפים ועמותות שונים. הזינו את שעת המעבר בפועל
-                        והמערכת תפצל ליציאה מ{item.in_branch_name} וכניסה ל{item.out_branch_name}.
+                        ל{item.in_branch_name} — ולסניפים יש תעריפים ועמותות שונים. הזינו מתי יצאה מ{item.in_branch_name}
+                        ומתי נכנסה ל{item.out_branch_name}; הזמן שביניהם לא נספר. אותה שעה בשני השדות = מעבר ישיר.
                       </Alert>
                       {item.pending_resolution && (
                         <Alert severity="info" icon={false} sx={{ py: 0.2, mb: 1, fontSize: '0.78rem' }}>
@@ -717,10 +723,17 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                       {canFix && (
                         <Stack direction="row" spacing={1} alignItems="center">
                           <TextField
-                            size="small" type="time" label="שעת המעבר" InputLabelProps={{ shrink: true }}
-                            sx={{ width: 150 }}
-                            value={transfer[k] || ''}
-                            onChange={(e) => setTransfer(t => ({ ...t, [k]: e.target.value }))}
+                            size="small" type="time" label={`יציאה מ${item.in_branch_name}`} InputLabelProps={{ shrink: true }}
+                            sx={{ width: 190 }}
+                            value={transfer[k]?.out || ''}
+                            onChange={(e) => setTransfer(t => ({ ...t, [k]: { ...(t[k] || {}), out: e.target.value } }))}
+                          />
+                          <TextField
+                            size="small" type="time" label={`כניסה ל${item.out_branch_name}`} InputLabelProps={{ shrink: true }}
+                            sx={{ width: 190 }}
+                            value={transfer[k]?.in || ''}
+                            placeholder={transfer[k]?.out || ''}
+                            onChange={(e) => setTransfer(t => ({ ...t, [k]: { ...(t[k] || {}), in: e.target.value } }))}
                           />
                           <BusyButton size="small" variant="contained" color="error" loading={!!busy[k]}
                             onClick={() => splitBranchDay(item)}>

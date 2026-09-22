@@ -3908,6 +3908,27 @@ async function resolvePunchDay(req, res, next) {
     const base = {
       employee_id, date, branch_id, labels: clean, minutes, note: note || '',
     };
+    // Accounting labelling a punch "in" or "out" IS the final word on it. A
+    // self-reported punch still waiting for its branch manager would otherwise
+    // stay uncounted under a day that reads as settled — the day approved, the
+    // punch not, and the salary short by exactly that session. Bypassing the
+    // manager here is deliberate and recorded the same way approvePunch does.
+    if (isApprover) {
+      const usedIds = clean.filter(l => l.role !== 'ignore').map(l => l.punch_id);
+      const now = new Date();
+      await Punch.updateMany(
+        { _id: { $in: usedIds }, approval_status: { $in: ['pending', 'pending_manager'] } },
+        { $set: {
+          approval_status: 'approved', approval_decided_by: req.user?.id || null, approval_decided_at: now,
+          manager_bypassed: true, manager_bypassed_by: req.user?.id || null,
+          manager_bypassed_by_name: req.user?.full_name || '', manager_bypassed_at: now,
+        } },
+      );
+      await Punch.updateMany(
+        { _id: { $in: usedIds }, approval_status: 'pending_accountant' },
+        { $set: { approval_status: 'approved', approval_decided_by: req.user?.id || null, approval_decided_at: now } },
+      );
+    }
     const doc = await PunchResolution.findOneAndUpdate(
       { employee_id, date },
       isApprover
@@ -4640,14 +4661,21 @@ async function deleteSpecialDay(req, res, next) {
 
 /**
  * POST /api/payroll-month/:month/punch-issues/split-branch
- * { employee_id, date, transfer_time }
+ * { employee_id, date, out_time, in_time }   (legacy: transfer_time = both)
  *
  * She clocked in at one branch and out at another without closing the first.
  * The fix is the pair she should have punched: an OUT at the first branch and
- * an IN at the second, both at the moment she moved. That turns one mis-billed
- * session into two correctly-priced ones — the rates and the amuta follow the
- * in-punch's branch, so until the day is split the second branch's hours are
- * paid at the first branch's rate and booked to the wrong legal entity.
+ * an IN at the second. That turns one mis-billed session into two correctly-
+ * priced ones — the rates and the amuta follow the in-punch's branch, so until
+ * the day is split the second branch's hours are paid at the first branch's
+ * rate and booked to the wrong legal entity.
+ *
+ * TWO times, not one. "The moment she moved" was one field, and it made the
+ * drive between the branches — or the two hours at home in between — count
+ * as paid time at one branch or the other. The person who forgot to clock
+ * out of the first gan and clocked into the second at 13:21 did not leave the
+ * first at 13:21. Leaving and arriving are entered separately; the gap is
+ * simply not billed. Entering the same time in both is still allowed.
  *
  * Same two-stage rule as labelling a multi-punch day: a branch manager
  * proposes, accounting confirms.
@@ -4660,11 +4688,13 @@ async function splitCrossBranchDay(req, res, next) {
       return res.status(403).json({ error: 'אין הרשאה' });
     }
     const { employee_id, date, transfer_time } = req.body || {};
+    const out_time = String(req.body?.out_time || transfer_time || '');
+    const in_time = String(req.body?.in_time || transfer_time || '');
     if (!employee_id || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
       return res.status(400).json({ error: 'employee_id ותאריך נדרשים' });
     }
-    if (!/^\d{2}:\d{2}$/.test(String(transfer_time || ''))) {
-      return res.status(400).json({ error: 'יש להזין שעת מעבר בפורמט HH:mm' });
+    if (!/^\d{2}:\d{2}$/.test(out_time) || !/^\d{2}:\d{2}$/.test(in_time)) {
+      return res.status(400).json({ error: 'יש להזין שעת יציאה מהסניף הראשון ושעת כניסה לשני (HH:mm)' });
     }
 
     const dayFrom = ilDateTimeOf(date, '00:00');
@@ -4682,9 +4712,13 @@ async function splitCrossBranchDay(req, res, next) {
       return res.status(409).json({ error: 'שתי ההחתמות באותו סניף — אין מה לפצל' });
     }
 
-    const transferAt = ilDateTimeOf(date, transfer_time);
-    if (transferAt <= new Date(inP.timestamp) || transferAt >= new Date(outP.timestamp)) {
-      return res.status(400).json({ error: 'שעת המעבר חייבת להיות בין הכניסה ליציאה' });
+    const leftAt = ilDateTimeOf(date, out_time);
+    const arrivedAt = ilDateTimeOf(date, in_time);
+    if (leftAt <= new Date(inP.timestamp) || arrivedAt >= new Date(outP.timestamp)) {
+      return res.status(400).json({ error: 'שעות המעבר חייבות להיות בין הכניסה ליציאה של היום' });
+    }
+    if (arrivedAt < leftAt) {
+      return res.status(400).json({ error: 'הכניסה לסניף השני לא יכולה להיות לפני היציאה מהראשון' });
     }
 
     const emp = await Employee.findById(employee_id).select('israeli_id branch_id').lean();
@@ -4694,11 +4728,13 @@ async function splitCrossBranchDay(req, res, next) {
     // manual punches already use.
     const approvalStatus = isApprover ? 'approved' : 'pending_accountant';
     const baseSn = -Date.now();
-    const note = `פיצול יום דו-סניפי (${date}) — מעבר בין סניפים בשעה ${transfer_time}`;
-    // The OUT lands one second before the IN. Both are "the moment she moved",
-    // but giving them the same instant leaves their order to chance — and every
-    // reader that sorts a day chronologically (the grid, the salary walk) would
-    // then be free to read it as in→in→out→out.
+    const note = out_time === in_time
+      ? `פיצול יום דו-סניפי (${date}) — מעבר בין סניפים בשעה ${out_time}`
+      : `פיצול יום דו-סניפי (${date}) — יציאה ${out_time}, כניסה לסניף השני ${in_time}`;
+    // When both times are the same instant the OUT lands one second before
+    // the IN: giving them the same timestamp leaves their order to chance, and
+    // every reader that sorts a day chronologically (the grid, the salary
+    // walk) would then be free to read it as in→in→out→out.
     const mk = (branchId, state, i, at) => Punch.create({
       branch_id: branchId,
       employee_id,
@@ -4719,8 +4755,9 @@ async function splitCrossBranchDay(req, res, next) {
       manager_approved_at: new Date(),
     });
     // OUT of the branch she came from, IN to the branch she moved to.
-    const outOfFirst = await mk(inP.branch_id, 1, 0, transferAt);
-    const intoSecond = await mk(outP.branch_id, 0, 1, new Date(transferAt.getTime() + 1000));
+    const outOfFirst = await mk(inP.branch_id, 1, 0, leftAt);
+    const intoSecond = await mk(outP.branch_id, 0, 1,
+      arrivedAt.getTime() === leftAt.getTime() ? new Date(leftAt.getTime() + 1000) : arrivedAt);
 
     // The day now has four punches, which would otherwise resurface as a
     // ">2 punches" problem. Record the intended reading so it doesn't.
@@ -4730,7 +4767,9 @@ async function splitCrossBranchDay(req, res, next) {
       { punch_id: intoSecond._id, role: 'in' },
       { punch_id: outP._id, role: 'out' },
     ];
-    const minutes = Math.max(0, Math.round((new Date(outP.timestamp) - new Date(inP.timestamp)) / 60000));
+    // Two sessions; the gap between leaving and arriving is not paid time.
+    const minutes = Math.max(0, Math.round((leftAt - new Date(inP.timestamp)) / 60000))
+      + Math.max(0, Math.round((new Date(outP.timestamp) - intoSecond.timestamp) / 60000));
     await PunchResolution.findOneAndUpdate(
       { employee_id, date },
       {
