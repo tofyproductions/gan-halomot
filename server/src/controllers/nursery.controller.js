@@ -109,6 +109,15 @@ async function board(req, res) {
   // services/sheet-sync/run.js already has to, so the board can always show
   // what a conflict rejected without every reader re-deciding what a missing
   // key means.
+  // Rows the rule never saw — written before it existed, or pulled in by the
+  // sheet sync — settle here, on read, and are written back so the parent's
+  // live view and the history agree with what the board shows.
+  await Promise.all(logs.map(async (l) => {
+    const fix = nursery.settleAttendance(l);
+    if (!fix) return;
+    Object.assign(l, fix);
+    await DailyLog.updateOne({ _id: l._id }, { $set: fix });
+  }));
   const byChild = new Map(logs.map(l => [String(l.child_id), {
     ...l,
     sync_conflicts: Array.isArray(l.sync_conflicts) ? l.sync_conflicts : [],

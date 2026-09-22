@@ -130,6 +130,13 @@ function defaultDeps() {
         },
         { upsert: true },
       );
+      // A meal the old board recorded is a child who came in, the same as a
+      // meal recorded on the new one. The board's PATCH infers that; this
+      // path never goes through it.
+      const nursery = require('../nursery.service');
+      const log = await DailyLog.findOne({ child_id: childId, date: ctx.date }).lean();
+      const fix = nursery.settleAttendance(log);
+      if (fix) await DailyLog.updateOne({ _id: log._id }, { $set: fix });
     },
     loadShadow: async (branchId, date) => {
       const s = await SheetSyncState.findOne({ branch_id: branchId, date }).lean();

@@ -142,6 +142,32 @@ function boardKind(classroom) {
  *   staffData true when this request writes any staff-recorded field
  *   notComing true/false when the parent set the flag, undefined otherwise
  */
+/** Does this log hold anything the staff recorded — a meal, a nap, a diaper, a note. */
+function hasStaffData(log) {
+  if (!log) return false;
+  const meals = log.meals || {};
+  const sleep = log.sleep || {};
+  const vals = [
+    ...['breakfast', 'lunch', 'snack'].flatMap(m => [meals[m]?.amount, meals[m]?.formula]),
+    ...['morning', 'noon'].flatMap(n => [sleep[n]?.start, sleep[n]?.end]),
+    log.diapers, log.staff_note,
+  ];
+  if (vals.some(v => String(v ?? '').trim() !== '')) return true;
+  return Array.isArray(log.missing) && log.missing.length > 0;
+}
+
+/**
+ * The attendance a log SHOULD show given everything on it — for rows written
+ * before the rule existed, or by the sheet sync, which never went through
+ * the board's PATCH. Null when the row already says what it should.
+ */
+function settleAttendance(log) {
+  const staff = inferAttendance(log, { staffData: hasStaffData(log) });
+  if (staff) return staff;
+  if (log?.home?.not_coming) return inferAttendance(log, { notComing: true });
+  return null;
+}
+
 function inferAttendance(current, { explicit, staffData, notComing } = {}) {
   const cur = current?.attendance || '';
   const auto = !!current?.attendance_auto;
@@ -306,7 +332,7 @@ function normalizeDateKey(raw) {
 
 module.exports = {
   isNurseryClassroom, nurseryClassrooms, classroomCategory,
-  boardKind, boardClassrooms, boardKindForChild, extensionActive, inferAttendance,
+  boardKind, boardClassrooms, boardKindForChild, extensionActive, inferAttendance, hasStaffData, settleAttendance,
   getOptions, getMenu, todayKey, normalizeDateKey,
   DEFAULT_OPTIONS, DEFAULT_MENU, OPTIONS_KEY, MENU_KEY,
   NURSERY_CATEGORY,

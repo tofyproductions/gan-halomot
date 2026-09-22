@@ -262,6 +262,17 @@ async function main() {
   eq(danMeal.body?.log?.attendance, 'הגיע', 'העובדה המאוחרת מנצחת: הגיע');
   eq(danMeal.body?.log?.home?.not_coming, true, 'הודעת ההורים נשארת רשומה');
 
+  head('3ב. רשומה שנכתבה לפני החוק (או מהסנכרון) מסתדרת בקריאת הלוח');
+  const legacy = await Child.create({
+    registration_id: noa.registration_id, child_name: 'רוני ישן', classroom_id: nursery._id,
+    branch_id: ks._id, academic_year: YEAR, is_active: true,
+  });
+  await DailyLog.create({ child_id: legacy._id, date: today, child_name: 'רוני ישן', classroom_id: nursery._id, branch_id: ks._id, meals: { lunch: { amount: '50%', formula: '' } } });
+  const boardX = await request({ path: `/api/nursery/board?classroom=${room}`, token: ganToken });
+  const roni = (boardX.body?.children || []).find(c => c.name === 'רוני ישן');
+  eq(roni?.log?.attendance ?? roni?.attendance, 'הגיע', 'ארוחה שנרשמה בלי החוק → הגיע בקריאה');
+  eq((await DailyLog.findOne({ child_id: legacy._id, date: today }).lean()).attendance_auto, true, 'ונכתב חזרה למסד');
+
   /* ---------------------------------------------------------------- */
   head('4. שלושה ימים לפני הסוף — הלוח שואל; "כן" = חודש נוסף מהיום');
   const soon = new Date(); soon.setDate(soon.getDate() + 2); soon.setHours(23, 59, 59, 999);
