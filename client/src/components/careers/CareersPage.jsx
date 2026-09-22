@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../../api/client';
-import { BRANDS, PERKS, ROLES, GALLERY, CONTACTS } from './careersContent';
+import { BRANDS, PERKS, ROLES, CONTACTS } from './careersContent';
 import ApplyForm from './ApplyForm';
 import { startAdTags, stopAdTags } from './adTags';
 
@@ -307,34 +307,18 @@ export default function CareersPage() {
         </Card>
       </Section>
 
-      {/* ——— gallery ——— */}
-      <Section title="🏡 הגנים שלנו 🏡" subtitle="סיור בסניפים המדהימים שלנו" tint="tinted">
-        <div style={{
-          display: 'grid', gap: 20,
-          gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-        }}>
-          {GALLERY.map((g, i) => (
-            <figure
-              key={g.src} data-reveal
-              style={{
-                margin: 0, borderRadius: 20, overflow: 'hidden',
-                boxShadow: C.shadow, background: '#fff',
-                transitionDelay: `${i * 80}ms`,
-              }}
-            >
-              <img
-                className="ph" src={g.src} alt={g.alt} loading="lazy" decoding="async"
-                style={{ display: 'block', width: '100%', height: 300, objectFit: 'cover' }}
-              />
-              <figcaption style={{
-                padding: '13px 16px', fontWeight: 700, color: C.muted, fontSize: '.95rem',
-              }}>
-                {g.caption}
-              </figcaption>
-            </figure>
-          ))}
-        </div>
-      </Section>
+      {/* ——— gallery ———
+          DELIBERATELY ABSENT until it is wired to the Drive folder the gan
+          already curates. The old page fetched this section at runtime from an
+          Apps Script, so the three <img> tags in its HTML were stale defaults
+          rather than what visitors actually saw — and one of them showed a
+          child's face uncovered, while the gan's own current photographs have
+          them covered with stickers. Shipping copies of the defaults would
+          have published, under a paid campaign, exactly the photograph
+          somebody had already decided not to publish.
+
+          The folder is the source of truth. Until this reads it, the page has
+          no gallery rather than the wrong one. */}
 
       {/* ——— branches ——— */}
       <Section title="📍 הסניפים שלנו 📍" subtitle="מצאו את הסניף הקרוב אליכם וצרו קשר ישיר">

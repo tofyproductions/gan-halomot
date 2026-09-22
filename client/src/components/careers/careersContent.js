@@ -63,11 +63,19 @@ export const ROLES = [
   },
 ];
 
-export const GALLERY = [
-  { src: '/careers/team.webp', alt: 'צוות גן החלומות בפעילות עם הילדים', caption: 'הנבחרת שלנו – משפחה אחת גדולה' },
-  { src: '/careers/activity.webp', alt: 'ילד בפעילות חושית בגן', caption: 'לומדים ונהנים מכל רגע' },
-  { src: '/careers/space.webp', alt: 'חגיגה בגן', caption: 'חוגגים ביחד כל רגע' },
-];
+/**
+ * The gallery is not here yet, on purpose.
+ *
+ * The old page loaded it from a Drive folder at runtime through its Apps
+ * Script, which means the <img> tags written into its HTML were defaults
+ * nobody had looked at in a while — and one of them showed a child's face
+ * uncovered, while the photographs the gan actually curates have them covered.
+ * Copying the defaults across would have published under a paid campaign the
+ * very picture somebody had already replaced.
+ *
+ * The next step is to read that same folder from here. Until then the page
+ * carries no gallery, which is the honest state rather than a wrong one.
+ */
 
 /** wa.me wants a country-code number and a pre-written first message. */
 const wa = (num, text) => `https://wa.me/${num}?text=${encodeURIComponent(text)}`;
