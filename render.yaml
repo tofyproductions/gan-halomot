@@ -70,6 +70,54 @@ services:
         sync: false
       - key: R2_BUCKET
         sync: false
+      # Outgoing mail. services/email.service picks up whichever of the three
+      # routes is configured, so this list is longer than any one send needs:
+      # SMTP is the Gmail account directly (an APP PASSWORD, never the account
+      # password), Resend is the API, and GAS relays through a Google Apps
+      # Script so no domain has to be verified. Without any of them a send
+      # throws rather than pretending — which matters, because half of what
+      # this system does ends in an email nobody is watching for.
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: GAS_EMAIL_URL
+        sync: false
+      - key: GAS_EMAIL_SECRET
+        sync: false
+      # SMS (SMS4Free) — a parent's one-time sign-in code, the password reset,
+      # and the urgent messages a branch manager sends. SMS_USER is the phone
+      # the account was registered with; SMS_SENDER is the name a parent sees.
+      # One prepaid balance pays for all of it, which is why sending is capped
+      # per branch per month.
+      - key: SMS_KEY
+        sync: false
+      - key: SMS_USER
+        sync: false
+      - key: SMS_PASS
+        sync: false
+      - key: SMS_SENDER
+        sync: false
+      # mail-sorter — the ONE service that reads the mailboxes, shared with
+      # tofy. גן takes the טופס 101 forms from it instead of opening the inbox
+      # itself. Unset means the גן reads the mailbox directly again, which is
+      # the double-scan this was built to stop — and a double scan is paid for
+      # twice.
+      - key: MAIL_SORTER_URL
+        sync: false
+      - key: MAIL_SORTER_TOKEN
+        sync: false
+      # The task board's read-only sync (routes/sync.routes.js). The route
+      # closes itself entirely when this is unset, so an absent key is a
+      # feature switched off rather than a hole.
+      - key: TASKS_SYNC_KEY
+        sync: false
     healthCheckPath: /api/health
 
   # ---------------------------------------------------------------------------
