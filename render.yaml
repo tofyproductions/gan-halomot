@@ -46,6 +46,30 @@ services:
       # the Render dashboard — a service-account key must never live in the repo.
       - key: FCM_SERVICE_ACCOUNT
         sync: false
+      # Object storage — Cloudflare R2. The bucket holds the gan's photographs,
+      # scanned contracts and תיק העובד's documents; the database keeps only the
+      # key. Without all four the server falls back to storing files inline in
+      # Mongo, which caps an upload at 11MB instead of 40MB — it does not break,
+      # it quietly gets smaller, which is exactly the kind of thing nobody
+      # notices until a manager cannot file a scan.
+      #
+      # THE BUCKET IS PRIVATE and must stay that way. Reads are short-lived
+      # signed links minted per request. A public bucket would mean a child's
+      # photograph, a ת"ז scan and a payslip reachable forever by anyone who ever
+      # saw the address.
+      #
+      # services/storage.service.js also accepts STORAGE_ENDPOINT /
+      # STORAGE_REGION / STORAGE_ACCESS_KEY_ID / STORAGE_SECRET_ACCESS_KEY /
+      # STORAGE_BUCKET, which is the same thing for a provider that is not R2
+      # (Supabase, S3). Set one set or the other, not both — STORAGE_* wins.
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
     healthCheckPath: /api/health
 
   # ---------------------------------------------------------------------------
