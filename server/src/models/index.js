@@ -72,6 +72,7 @@ const ContractAnnex = require('./ContractAnnex');
 const SpecialDay = require('./SpecialDay');
 const CibusSync = require('./CibusSync');
 const EmployeeDocument = require('./EmployeeDocument');
+const EmployeeOnboarding = require('./EmployeeOnboarding');
 const Form101Sync = require('./Form101Sync');
 const Form101Inbox = require('./Form101Inbox');
 const Setting = require('./Setting');
@@ -169,6 +170,7 @@ const real = {
   SpecialDay,
   CibusSync,
   EmployeeDocument,
+  EmployeeOnboarding,
   Form101Sync,
   Form101Inbox,
   Setting,

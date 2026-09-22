@@ -139,11 +139,18 @@ async function childDetails(req, res) {
     // the infant rooms keep one; a three-year-old's parent has no bottle log
     // to read and should not be shown an empty one.
     is_nursery: nursery.isNurseryClassroom(child.classroom_id),
-    // Which KIND of day this child has. Every child has one now — 'full' is
-    // the bottle log and the morning-at-home form (תינוקייה, צעירים), 'light'
-    // is what the class did, what the kitchen served and the photographs.
-    // The screen reads this rather than re-deciding from the room's name.
-    day_board: nursery.boardKind(child.classroom_id),
+    // Which KIND of day this child has — 'full' is the bottle log and the
+    // morning-at-home form (תינוקייה, צעירים), 'light' is what the class
+    // did, what the kitchen served and the photographs. The screen reads this
+    // rather than re-deciding from the room's name.
+    //
+    // NULL for בוגרים, which keep no board at all (services/nursery#boardKind).
+    // Sent as null rather than as the string 'none' on purpose: the portal
+    // already draws the tab on `if (data.day_board)`, so the room that has no
+    // day simply has no tab, with nothing on the client to keep in step.
+    day_board: nursery.boardKind(child.classroom_id) === 'none'
+      ? null
+      : nursery.boardKind(child.classroom_id),
   });
 }
 
@@ -165,10 +172,17 @@ async function childDay(req, res) {
   if (!own) return res.status(404).json({ error: 'לא נמצא' });
 
   const { child } = own;
-  // Every child has a day now. Which kind decides what is fetched below and
-  // what the screen draws: the infant rooms keep the bottle log, the older
-  // ones get the class's own line, the kitchen's menu and the photographs.
+  // Which kind decides what is fetched below and what the screen draws: the
+  // infant rooms keep the bottle log, the older ones get the class's own line,
+  // the kitchen's menu and the photographs.
   const kind = nursery.boardKind(child.classroom_id);
+  // בוגרים have no board. The tab is already gone from the screen, so this
+  // is only reachable by a stale page or a typed URL — and it must refuse
+  // rather than answer with an empty day, which reads as "the gan recorded
+  // nothing today" about staff who did nothing wrong.
+  if (kind === 'none') {
+    return res.status(404).json({ error: 'אין לוח יומי לכיתה זו' });
+  }
 
   const today = nursery.todayKey();
   const date = nursery.normalizeDateKey(req.query.date) || today;

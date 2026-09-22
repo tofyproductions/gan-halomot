@@ -22,6 +22,7 @@
     "test:punch-commitment": "node scripts/punch-commitment.test.js",
     "test:employee-file": "node scripts/employee-file-e2e.test.js",
     "test:careers": "node scripts/careers-apply-e2e.test.js",
+    "test:onboarding": "node scripts/employee-onboarding-e2e.test.js",
     "test:punch-scope": "node scripts/punch-out-of-scope.test.js",
     "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
     "test:decisions": "node scripts/my-decisions.test.js",

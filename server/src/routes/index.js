@@ -54,6 +54,9 @@ router.use('/my-decisions', require('./decisions.routes'));
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table
 router.use('/employee-documents', require('./employeeDocuments.routes'));
+// רישומי עובדים — what a new hire filled in about themselves, waiting for
+// somebody to turn it into an employee card.
+router.use('/employee-onboarding', require('./employeeOnboarding.routes'));
 // תיק העובד — every file the system holds about one person, read out of the
 // six stores that already hold them (contracts, uploads, certificates, sick
 // notes, issued letters, payslips + hours reports).

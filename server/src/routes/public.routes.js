@@ -84,4 +84,34 @@ function cvUploadErrors(err, _req, res, next) {
 router.get('/careers/branches', careers.publicBranches);
 router.post('/careers/apply', publicFormLimiter, cvUpload.single('cv'), cvUploadErrors, careers.publicApply);
 
+// --- רישום עובד/ת חדש/ה (public, no auth) ---
+//
+// The link is permanent and pasted into WhatsApp, so it WILL be forwarded.
+// Nothing here creates an employee: a submission is a row waiting for a human
+// (see the controller), and the rate limit is the same one the other two
+// public forms share.
+const onboarding = require('../controllers/employeeOnboarding.controller');
+const onboardingUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: onboarding.MAX_FILE_BYTES, files: onboarding.MAX_FILES },
+});
+function onboardingUploadErrors(err, _req, res, next) {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'קובץ גדול מדי — עד 8MB למסמך' });
+  }
+  if (err && err.code === 'LIMIT_FILE_COUNT') {
+    return res.status(413).json({ error: `אפשר לצרף עד ${onboarding.MAX_FILES} מסמכים` });
+  }
+  if (err) return res.status(400).json({ error: 'שגיאה בצירוף המסמכים' });
+  next();
+}
+router.get('/employee-registration/branches', onboarding.publicBranches);
+router.post(
+  '/employee-registration',
+  publicFormLimiter,
+  onboardingUpload.any(),
+  onboardingUploadErrors,
+  onboarding.publicSubmit,
+);
+
 module.exports = router;

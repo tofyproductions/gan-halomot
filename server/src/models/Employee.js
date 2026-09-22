@@ -354,6 +354,19 @@ const employeeSchema = new mongoose.Schema({
   // that the name on the transfer legitimately differs from the payslip, rather
   // than reading it as a typo. Empty = the account is the employee's own.
   bank_account_holder: { type: String, default: '' },
+
+  /**
+   * Who to ring if something happens on a shift.
+   *
+   * Asked on the רישום עובד/ת form and carried onto the card, because the
+   * moment it is needed is the one moment nobody has time to look for it in a
+   * WhatsApp thread from two years ago.
+   */
+  emergency_contact: {
+    name: { type: String, default: '' },
+    phone: { type: String, default: '' },
+    relation: { type: String, default: '' },
+  },
   pension_fund: { type: String, default: '' },     // קופת פנסיה (שם/מספר) — for the accountant
   education_fund: { type: String, default: '' },   // קרן השתלמות (שם/מספר)
 

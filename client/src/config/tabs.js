@@ -17,6 +17,11 @@ export const TAB_GROUPS = [
     items: [
       // Management overview (child counts, branch KPIs) — NOT for regular staff.
       { id: 'dashboard',      label: 'לוח בקרה', path: '/',                  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // The public links, in one place to copy from. They are not secret —
+      // they are advertised — but they are ours to hand out, and a manager
+      // looking for "the link for parents" was asking somebody in the office
+      // every time.
+      { id: 'share_links',    label: 'קישורים להפצה', path: '/share-links',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'leads',          label: 'פניות הורים', path: '/leads',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'registrations',  label: 'רישום',     path: '/registrations',     defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The supervised branches enroll in קליקטאק and are approved by משרד
@@ -70,6 +75,10 @@ export const TAB_GROUPS = [
       // branch dropdown, because these are private phone numbers of people who
       // do not work here.
       { id: 'recruitment',        label: 'גיוס',    path: '/recruitment',        defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
+      // What a new hire filled in about themselves, waiting to become a card.
+      // A branch manager reads her own hire's form and can refuse one; only
+      // accounting approves, because approving writes somebody the payroll pays.
+      { id: 'employee_onboarding', label: 'רישומי עובדים', path: '/employee-onboarding', defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'] },
       { id: 'attendance',         label: 'החתמות',  path: '/attendance',         defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The salary table itself is accountant/admin. A branch manager files what
       // she knows from 'עדכוני שכר' instead — she has no business seeing every

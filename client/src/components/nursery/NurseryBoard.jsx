@@ -47,6 +47,13 @@ export default function NurseryBoard() {
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [classroomId, setClassroomId] = useState('');
+  // Which gan first, THEN which room in it.
+  //
+  // One flat list of every room in the network was thirty-odd lines reading
+  // "כפר סבא - משה דיין — פעוטות 25", and a manager who works in one
+  // building scrolled past four other buildings to reach her own. The branch
+  // is the first question anybody actually asks.
+  const [branch, setBranch] = useState('');
   const [date, setDate] = useState('');
   // The older rooms' one line. Held as a draft and saved by hand: it is a
   // sentence somebody is in the middle of typing, not a tap on a chip.
@@ -63,6 +70,9 @@ export default function NurseryBoard() {
       const res = await api.get('/nursery/board', { params });
       setData(res.data);
       setClassroomId(String(res.data.classroom?.id || ''));
+      // Read back rather than set on click: the first load picks the room for
+      // us, and the branch box has to show where that room actually is.
+      setBranch(res.data.classroom?.branch || '');
       setDate(res.data.date);
       setActivity(res.data.activity || '');
       setActivitySaved(false);
@@ -145,6 +155,11 @@ export default function NurseryBoard() {
   // read here, so the two never disagree about a room somebody re-categorised.
   const light = data.classroom?.board === 'light';
 
+  // Branch order follows the room list the server already sorted, so the two
+  // boxes never disagree about what exists.
+  const branches = [...new Set(data.classrooms.map(c => c.branch).filter(Boolean))];
+  const roomsInBranch = data.classrooms.filter(c => c.branch === branch);
+
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
@@ -158,13 +173,24 @@ export default function NurseryBoard() {
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
         <TextField
+          select label="סניף" size="small" value={branch} fullWidth
+          onChange={(e) => {
+            const next = e.target.value;
+            setBranch(next);
+            // Moving building moves the room with it — leaving the old room
+            // selected would show one gan's board under another gan's name.
+            const first = data.classrooms.find(c => c.branch === next);
+            if (first) { setClassroomId(String(first.id)); load({ classroom: String(first.id) }); }
+          }}
+        >
+          {branches.map(b => <MenuItem key={b} value={b}>{b}</MenuItem>)}
+        </TextField>
+        <TextField
           select label="כיתה" size="small" value={classroomId} fullWidth
           onChange={(e) => { setClassroomId(e.target.value); load({ classroom: e.target.value }); }}
         >
-          {data.classrooms.map(c => (
-            <MenuItem key={c.id} value={String(c.id)}>
-              {c.branch} — {c.name}
-            </MenuItem>
+          {roomsInBranch.map(c => (
+            <MenuItem key={c.id} value={String(c.id)}>{c.name}</MenuItem>
           ))}
         </TextField>
         <TextField

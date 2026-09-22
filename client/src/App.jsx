@@ -70,6 +70,7 @@ const GiftsManager = lazy(() => import('./components/nursery/GiftsManager'));
 const HolidayManager = lazy(() => import('./components/holidays/HolidayManager'));
 const LeadForm = lazy(() => import('./components/leads/LeadForm'));
 const CareersPage = lazy(() => import('./components/careers/CareersPage'));
+const JoinForm = lazy(() => import('./components/careers/JoinForm'));
 const LeadsPage = lazy(() => import('./components/leads/LeadsPage'));
 const MaintenancePage = lazy(() => import('./components/maintenance/MaintenancePage'));
 const MyAccount = lazy(() => import('./components/account/MyAccount'));
@@ -98,6 +99,8 @@ const Pickup = lazy(() => import('./components/pickup/Pickup'));
 const PricingManager = lazy(() => import('./components/pricing/PricingManager'));
 const ProposedChanges = lazy(() => import('./components/admin/ProposedChanges'));
 const RecruitmentPage = lazy(() => import('./components/recruitment/RecruitmentPage'));
+const OnboardingQueue = lazy(() => import('./components/employees/OnboardingQueue'));
+const ShareLinks = lazy(() => import('./components/links/ShareLinks'));
 const RegistrationTracker = lazy(() => import('./components/registration/RegistrationTracker'));
 const RegistrationWizard = lazy(() => import('./components/registration/RegistrationWizard'));
 const RequestsManager = lazy(() => import('./components/employees/RequestsManager'));
@@ -170,6 +173,10 @@ function AppRoutes() {
           wild spells it both ways. */}
       <Route path="/careers" element={<CareersPage />} />
       <Route path="/apply" element={<CareersPage />} />
+      {/* רישום עובד/ת — a permanent link handed to somebody who was already
+          hired. Standalone like the rest of this block: they have no account,
+          and nothing they send here becomes an employee without a human. */}
+      <Route path="/join" element={<JoinForm />} />
       {/* Parent portal. Standalone like the rest of this block — it has its own
           accounts, its own token key and its own HTTP client, so mounting the
           management shell around it would fire staff API calls with a token
@@ -302,6 +309,16 @@ function AppRoutes() {
         <Route path="recruitment" element={
           <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
             <RecruitmentPage />
+          </ProtectedRoute>
+        } />
+        <Route path="employee-onboarding" element={
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
+            <OnboardingQueue />
+          </ProtectedRoute>
+        } />
+        <Route path="share-links" element={
+          <ProtectedRoute roles={['system_admin', 'admin_viewer', 'branch_manager', 'accountant']}>
+            <ShareLinks />
           </ProtectedRoute>
         } />
         <Route path="parent-letters" element={

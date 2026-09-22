@@ -90,16 +90,40 @@ async function nurseryClassrooms(filter = {}) {
  */
 const FULL_BOARD_CATEGORIES = new Set(['תינוקייה', 'צעירים']);
 
+/**
+ * בוגרים keep no daily board at all.
+ *
+ * The light board was extended to them so an older child's family would see
+ * something rather than nothing. In practice nobody fills it: the staff of a
+ * בוגרים room do not work from a screen the way an infant room does, and a
+ * board that is always empty is worse than no board — a parent reads a blank
+ * "היום בגן" as "the gan recorded nothing today", which is a complaint about
+ * staff who did nothing wrong. The room list on the staff screen was carrying
+ * the same weight: half the rooms in the dropdown were ones nobody opens.
+ *
+ * So the category is not a lighter board, it is no board. 'none' is returned
+ * here and every caller already asks this function rather than deciding for
+ * itself — the staff list filters it out, and the parent portal drops the tab.
+ */
+const NO_BOARD_CATEGORIES = new Set(['בוגרים']);
+
 function boardKind(classroom) {
-  return FULL_BOARD_CATEGORIES.has(classroomCategory(classroom)) ? 'full' : 'light';
+  const category = classroomCategory(classroom);
+  if (NO_BOARD_CATEGORIES.has(category)) return 'none';
+  return FULL_BOARD_CATEGORIES.has(category) ? 'full' : 'light';
 }
 
 /**
- * Every active room the daily board covers — which is now all of them.
+ * Every active room the daily board covers — everything except בוגרים, which
+ * keeps no board (see boardKind).
  *
  * Same de-duplication as the infant list: a branch mid-rollover holds this
  * year's room and last year's under the same name, and the board must offer
  * one of them.
+ *
+ * An UNCATEGORISED room stays in. It is far more likely to be a room somebody
+ * never labelled than a בוגרים room in disguise, and hiding a real class
+ * because of a blank field is the expensive mistake of the two.
  */
 async function boardClassrooms(filter = {}) {
   const { dedupeNewest } = require('./classroomList');
@@ -107,7 +131,7 @@ async function boardClassrooms(filter = {}) {
     .populate('branch_id', 'name')
     .sort({ name: 1 })
     .lean();
-  return dedupeNewest(rooms);
+  return dedupeNewest(rooms).filter(r => boardKind(r) !== 'none');
 }
 
 /**
