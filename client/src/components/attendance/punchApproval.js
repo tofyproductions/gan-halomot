@@ -181,3 +181,123 @@ export function formatManualBy(manualBy) {
   if (!manualBy.name) return role || 'לא ידוע';
   return role ? `${manualBy.name} · ${role}` : manualBy.name;
 }
+
+/* ------------------------------------------------------------------ *
+ *  ההתחייבות מול הדיווח
+ *
+ *  A pending punch is a bare time, and "16:05" only means something next to
+ *  what she was contracted to work that weekday. Reading it off the
+ *  commitments screen meant leaving the approval queue, so the approval was
+ *  made against nothing. These functions answer the question in place.
+ *
+ *  Kept here, with no React in them, for the same reason as everything above:
+ *  the rules (Saturday, a day off, an alternating week, a schedule that was
+ *  never filled in) are all cases where the honest answer is "no target", and
+ *  a screen that quietly showed 00:00 for any of them would be worse than one
+ *  that shows nothing.
+ * ------------------------------------------------------------------ */
+
+/** 'YYYY-MM-DD' → 0=Sunday … 6=Saturday, read at noon so no timezone can shift the day. */
+export function weekdayOfISO(isoDate) {
+  if (!isoDate) return null;
+  const d = new Date(`${isoDate}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d.getDay();
+}
+
+/** 'HH:MM' → minutes since midnight, or null. */
+export function hhmmToMinutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || '').trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+/**
+ * What the contract says about ONE date.
+ *
+ * kind:
+ *   'no_commitment' — nobody ever filled in a weekly schedule for her
+ *   'weekend'       — Saturday; there is no committed schedule to compare to
+ *   'alternating'   — her חופש לסרוגין day. Which weeks she works it is not
+ *                     recorded, so neither presence nor absence is a gap.
+ *   'off'           — a declared day off
+ *   'unset'         — a working day whose hours were never entered
+ *   'window'        — start_hhmm..end_hhmm, plus `hours`
+ */
+export function commitmentForDate(commitment, isoDate) {
+  const weekday = weekdayOfISO(isoDate);
+  if (weekday === 6) return { kind: 'weekend', weekday };
+  if (!commitment) return { kind: 'no_commitment', weekday };
+  if (commitment.is_alternating_off && commitment.alternating_day === weekday) {
+    return { kind: 'alternating', weekday };
+  }
+  const day = (commitment.days || []).find(d => d.day === weekday);
+  if (!day || day.is_off) return { kind: 'off', weekday };
+  const start = hhmmToMinutes(day.start_hhmm);
+  const end = hhmmToMinutes(day.end_hhmm);
+  if (start == null || end == null) return { kind: 'unset', weekday };
+  return {
+    kind: 'window',
+    weekday,
+    start_hhmm: day.start_hhmm,
+    end_hhmm: day.end_hhmm,
+    hours: (end - start) / 60,
+  };
+}
+
+/**
+ * How far a single reported punch sits from the edge it is claiming.
+ *
+ * A כניסה (state 0) is measured against the committed start and a יציאה
+ * (state 1) against the committed end, in minutes, signed: positive is LATER
+ * than committed. Null whenever there is no edge to measure against — see
+ * `commitmentForDate` for the four ways that happens.
+ */
+export function punchDelta(window, punch) {
+  if (!window || window.kind !== 'window' || !punch) return null;
+  const t = new Date(punch.timestamp);
+  if (Number.isNaN(t.getTime())) return null;
+  const actual = t.getHours() * 60 + t.getMinutes();
+  const target = hhmmToMinutes(punch.state === 0 ? window.start_hhmm : window.end_hhmm);
+  if (target == null) return null;
+  return { minutes: actual - target, edge: punch.state === 0 ? 'start' : 'end' };
+}
+
+/** "+12 דק׳ / −40 דק׳ / בדיוק", for a chip that has room for three words. */
+export function formatDelta(delta) {
+  if (!delta) return '';
+  const m = delta.minutes;
+  if (m === 0) return 'בדיוק';
+  const sign = m > 0 ? '+' : '−';
+  const abs = Math.abs(m);
+  if (abs < 60) return `${sign}${abs} דק׳`;
+  const h = Math.floor(abs / 60);
+  const rem = abs % 60;
+  return rem ? `${sign}${h}:${String(rem).padStart(2, '0')} ש׳` : `${sign}${h} ש׳`;
+}
+
+/**
+ * Is this worth the manager's eye?
+ *
+ * A punch inside a quarter-hour of its committed edge is the ordinary noise of
+ * a workday and colouring it makes the colour meaningless. Past that it is
+ * marked — amber at a quarter of an hour, red at an hour — so a genuinely
+ * short or long day is visible without reading the numbers.
+ */
+export function deltaSeverity(delta) {
+  if (!delta) return 'none';
+  const abs = Math.abs(delta.minutes);
+  if (abs < 15) return 'none';
+  if (abs < 60) return 'warn';
+  return 'alert';
+}
+
+export const COMMITMENT_NOTE = {
+  no_commitment: 'לא הוגדרה התחייבות שבועית',
+  weekend: 'שבת — אין התחייבות',
+  alternating: 'יום לסרוגין — לא ידוע אם השבוע עבדה',
+  off: 'יום חופש לפי ההתחייבות',
+  unset: 'יום עבודה בלי שעות מוגדרות',
+};

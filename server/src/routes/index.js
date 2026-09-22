@@ -54,6 +54,10 @@ router.use('/my-decisions', require('./decisions.routes'));
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table
 router.use('/employee-documents', require('./employeeDocuments.routes'));
+// תיק העובד — every file the system holds about one person, read out of the
+// six stores that already hold them (contracts, uploads, certificates, sick
+// notes, issued letters, payslips + hours reports).
+router.use('/employee-file', require('./employeeFile.routes'));
 // טופס 101 — the roster view, the mail scan and its review queue
 router.use('/form-101', require('./form101.routes'));
 // Class tracking (מעקב חוגים) — providers, programs, sessions + occurrence popup

@@ -19,6 +19,8 @@
     "test:year-picker": "node scripts/year-picker-parity.test.js",
     "test:order-delivery": "node scripts/order-delivery.test.js",
     "test:punch-approval": "node scripts/punch-approval-stage.test.js",
+    "test:punch-commitment": "node scripts/punch-commitment.test.js",
+    "test:employee-file": "node scripts/employee-file-e2e.test.js",
     "test:punch-scope": "node scripts/punch-out-of-scope.test.js",
     "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
     "test:decisions": "node scripts/my-decisions.test.js",

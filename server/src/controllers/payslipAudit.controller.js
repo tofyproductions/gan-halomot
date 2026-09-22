@@ -3275,8 +3275,14 @@ async function downloadHoursReport(req, res) {
     if (!await assertPayslipAccess(req, res, req.params.id)) return;
     const { id, ym } = req.params;
 
+    // תיק העובד offers both readings of the same month: the snapshot that was
+    // filed, and the month as it stands today. `?refresh=1` is the second one
+    // — it re-renders against the punches as they are now and replaces the
+    // stored copy, so "שמור בתיק" never quietly means "as of some day
+    // nobody remembers" once an approval changed the hours.
+    const refresh = req.query.refresh === '1' || req.query.refresh === 'true';
     const existing = await SavedPayslip.findOne({ employee_id: id, year_month: ym }).lean();
-    if (existing?.hours_report_data) {
+    if (!refresh && existing?.hours_report_data) {
       const bytes = existing.hours_report_data.buffer
         ? Buffer.from(existing.hours_report_data.buffer)
         : Buffer.from(existing.hours_report_data);

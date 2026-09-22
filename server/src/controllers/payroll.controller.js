@@ -3112,7 +3112,40 @@ async function listPendingPunches(req, res, next) {
       if (branchQ) f.branch_id = branchQ;
       pending_accountant = await load(f);
     }
-    res.json({ pending_manager, pending_accountant });
+
+    // What the row is being judged AGAINST.
+    //
+    // A pending punch is a bare time. Whether 16:05 is a late finish, an
+    // ordinary one or an hour of overtime is a question about her contracted
+    // schedule for that weekday, and answering it meant leaving the screen for
+    // the commitments table — so in practice nobody did, and the reports were
+    // approved against nothing. The weekly schedule is small, there is at most
+    // one row per employee, and the list is already in hand: sending it along
+    // lets the row state the commitment beside the time.
+    const empIds = [...new Set(
+      [...pending_manager, ...pending_accountant]
+        .map(p => p.employee_id?._id)
+        .filter(Boolean)
+        .map(String),
+    )];
+    const commitmentRows = empIds.length
+      ? await EmployeeCommitment.find({ employee_id: { $in: empIds } })
+        .select('employee_id days is_alternating_off alternating_day alternating_per_month')
+        .lean()
+      : [];
+    const commitments = {};
+    for (const c of commitmentRows) {
+      commitments[String(c.employee_id)] = {
+        days: (c.days || []).map(d => ({
+          day: d.day, is_off: !!d.is_off,
+          start_hhmm: d.start_hhmm || '', end_hhmm: d.end_hhmm || '',
+        })),
+        is_alternating_off: !!c.is_alternating_off,
+        alternating_day: c.alternating_day == null ? null : c.alternating_day,
+      };
+    }
+
+    res.json({ pending_manager, pending_accountant, commitments });
   } catch (err) { next(err); }
 }
 
@@ -4115,9 +4148,12 @@ async function myForm101File(req, res, next) {
     if (!emp) return res.status(404).json({ error: 'לא נמצא רישום עובד/ת עבור המשתמש' });
     const d = await EmployeeDocument.findOne({
       _id: req.params.id, employee_id: emp._id, doc_type: 'form_101',
-    }).select('file_data file_name file_mimetype name').lean();
-    if (!d?.file_data) return res.status(404).json({ error: 'אין קובץ' });
-    res.json({ data: d.file_data, name: d.file_name || d.name || 'טופס 101', mimetype: d.file_mimetype || 'application/pdf' });
+    }).select('file_data storage_key file_name file_mimetype name').lean();
+    // Read through the shared reader: a form filed since תיק העובד may live in
+    // the bucket, and `file_data` alone would tell her she never filed one.
+    const data = await require('../services/employeeDocumentFile').readEmployeeDocumentBase64(d);
+    if (!data) return res.status(404).json({ error: 'אין קובץ' });
+    res.json({ data, name: d.file_name || d.name || 'טופס 101', mimetype: d.file_mimetype || 'application/pdf' });
   } catch (err) { next(err); }
 }
 

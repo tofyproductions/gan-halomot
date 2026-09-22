@@ -12,7 +12,14 @@ const employeeDocumentSchema = new mongoose.Schema({
   month: { type: String, default: null },        // optional 'YYYY-MM' context
   name: { type: String, required: true },         // label shown in the list
   description: { type: String, default: '' },     // detail for the accountant
-  file_data: { type: String, required: true },    // base64 (no data: prefix)
+  // Where the bytes are. A scan off a phone is routinely bigger than the 16MB
+  // a MongoDB document can hold, so an upload goes to object storage when a
+  // bucket is configured and this keeps only the key. `file_data` stays for
+  // every document filed before that changed, and for installations with no
+  // bucket at all — exactly the two-way split EmploymentContract already uses.
+  file_data: { type: String, default: null },     // base64 (no data: prefix)
+  storage_key: { type: String, default: null },
+  size_bytes: { type: Number, default: 0 },
   file_name: { type: String, default: '' },       // original filename
   file_mimetype: { type: String, default: 'application/octet-stream' },
   created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -24,7 +31,21 @@ const employeeDocumentSchema = new mongoose.Schema({
   // label — which reads as missing for anyone whose file happens to be named
   // something else, and as present for a note that merely mentions 101.
   // A form the tax authority requires is not a naming convention.
-  doc_type: { type: String, enum: ['form_101', 'other'], default: 'other', index: true },
+  //
+  // The list widened when the screen did: תיק העובד keeps a recommendation, a
+  // certificate, a copy of a ת"ז and a bank form beside the 101, and "which
+  // shelf is this on" must not go back to matching words against a label. The
+  // 101 members of this enum keep their exact old meaning, so the
+  // "who is missing a 101 for this year" query is untouched.
+  doc_type: {
+    type: String,
+    enum: [
+      'form_101', 'employment_contract', 'recommendation', 'certificate',
+      'id_document', 'bank_details', 'health', 'payslip', 'hours_report', 'other',
+    ],
+    default: 'other',
+    index: true,
+  },
   // טופס 101 is filed per TAX YEAR (calendar year, refiled every January), so
   // "has one" is always "has one for this year". Null for 'other'.
   tax_year: { type: Number, default: null },

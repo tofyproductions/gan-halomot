@@ -15,6 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   applyDecision, approvalMessage, rejectionMessage, stageOf, manualSource,
   STAGE_LABEL, STAGE_ORDER,
+  commitmentForDate, punchDelta, formatDelta, deltaSeverity, COMMITMENT_NOTE,
 } from './punchApproval';
 
 /**
@@ -35,9 +36,67 @@ import {
  * reaches three counted readings becomes a "החתמה כפולה" that blocks the send).
  * The screens showing those numbers have to be told.
  */
+/**
+ * מה היא התחייבה לעבוד באותו יום — on the row, not one screen away.
+ *
+ * Deliberately a chip and not a column: the queue is scanned, and a manager
+ * reading twenty rows needs "07:30–16:00" where her eye already is. The days
+ * with no target say so in words instead of showing a window that does not
+ * exist, because "00:00–00:00" beside a Saturday reads as a gap.
+ */
+function CommitmentTag({ window: win }) {
+  if (!win) return null;
+  if (win.kind !== 'window') {
+    return (
+      <Tooltip title="אין שעות התחייבות להשוות מולן ביום הזה">
+        <Chip
+          size="small" variant="outlined"
+          label={COMMITMENT_NOTE[win.kind] || ''}
+          sx={{ height: 20, fontSize: '0.65rem', color: 'text.secondary' }}
+        />
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title="שעות ההתחייבות לפי הסכם ההעסקה, ליום הזה בשבוע">
+      <Chip
+        size="small" variant="outlined" color="info"
+        label={`התחייבות ${win.start_hhmm}–${win.end_hhmm} · ${win.hours.toFixed(1)} ש׳`}
+        sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }}
+      />
+    </Tooltip>
+  );
+}
+
+/** How far this one reading is from the edge it claims. Silent when there is
+ *  nothing to compare to, and uncoloured inside a quarter of an hour. */
+function DeltaTag({ window: win, punch }) {
+  const delta = punchDelta(win, punch);
+  if (!delta) return null;
+  const severity = deltaSeverity(delta);
+  const color = severity === 'alert' ? 'error.main'
+    : severity === 'warn' ? 'warning.dark'
+      : 'text.secondary';
+  return (
+    <Tooltip title={delta.edge === 'start'
+      ? `מול שעת ההתחלה שבהתחייבות (${win.start_hhmm})`
+      : `מול שעת הסיום שבהתחייבות (${win.end_hhmm})`}>
+      <Typography
+        variant="caption"
+        sx={{ color, fontWeight: severity === 'none' ? 500 : 800, whiteSpace: 'nowrap' }}
+      >
+        {formatDelta(delta)}
+      </Typography>
+    </Tooltip>
+  );
+}
+
 export default function PendingPunchApprovals({ onChanged }) {
   const { isAdmin, isAccountant } = useAuth();
   const [punches, setPunches] = useState([]);
+  // The contracted weekly schedule per employee, as the pending list sends it.
+  // Small enough to ride along; without it every row is a bare time.
+  const [commitments, setCommitments] = useState({});
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [reject, setReject] = useState({ open: false, punch: null, note: '' });
@@ -80,7 +139,10 @@ export default function PendingPunchApprovals({ onChanged }) {
   const load = useCallback(() => {
     setLoading(true);
     api.get('/payroll/punches/pending')
-      .then(res => setPunches([...(res.data.pending_manager || []), ...(res.data.pending_accountant || [])]))
+      .then((res) => {
+        setPunches([...(res.data.pending_manager || []), ...(res.data.pending_accountant || [])]);
+        setCommitments(res.data.commitments || {});
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -200,11 +262,16 @@ export default function PendingPunchApprovals({ onChanged }) {
                 </Stack>
 
                 <Stack spacing={1}>
-                  {groups.map(group => (
+                  {groups.map((group) => {
+                    const win = commitmentForDate(
+                      commitments[group.employee_db_id], group.iso_date,
+                    );
+                    return (
                     <Paper key={group.key} variant="outlined" sx={{ borderRadius: 2, p: 1.2 }}>
                       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
                         <Typography sx={{ fontWeight: 700, minWidth: 130 }}>{group.employee_name}</Typography>
                         <Typography variant="caption" color="text.secondary">{group.date}</Typography>
+                        <CommitmentTag window={win} />
                         {group.employee_db_id && (
                           <Tooltip title="הצג את כל החתמות היום — שעון ודיווחים — לפני האישור">
                             <Chip
@@ -227,6 +294,7 @@ export default function PendingPunchApprovals({ onChanged }) {
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
                                 {new Date(p.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}
                               </Typography>
+                              <DeltaTag window={win} punch={p} />
                               {/* Who typed this in. An employee reporting her own day and a
                                   manager filling one in are different claims about the hours. */}
                               <Tooltip title={src.key === 'unknown' ? 'נוצר לפני שהמערכת תיעדה מי מזין' : `הוזן ע״י ${src.label}`}>
@@ -295,7 +363,8 @@ export default function PendingPunchApprovals({ onChanged }) {
                         </Box>
                       )}
                     </Paper>
-                  ))}
+                    );
+                  })}
                 </Stack>
               </Box>
             ))}

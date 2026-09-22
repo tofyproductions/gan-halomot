@@ -9,6 +9,7 @@ const {
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
   User, PunchEntryTask, PayrollRollup,
 } = require('../models');
+const { readEmployeeDocumentBase64 } = require('../services/employeeDocumentFile');
 const { ADMIN_VIEWER } = require('../constants/roles');
 const env = require('../config/env');
 const { calculateMonthlySalary } = require('../services/payrollCalc');
@@ -5084,12 +5085,22 @@ async function sendToAccountant(req, res, next) {
       });
     }
     const docs = await EmployeeDocument.find({ employee_id: { $in: empIds }, month })
-      .select('employee_id name file_data file_name file_mimetype').lean();
+      .select('employee_id name file_data storage_key file_name file_mimetype').lean();
     for (const d of docs) {
       const nm = nameById.get(String(d.employee_id)) || 'עובד';
+      // A document filed since תיק העובד may live in object storage rather
+      // than in its own row. Reaching for `file_data` alone would attach an
+      // empty file to the accountant's email and say nothing about it.
+      let contentBase64 = null;
+      try {
+        contentBase64 = await readEmployeeDocumentBase64(d);
+      } catch (err) {
+        console.error('[payroll-month] שליפת מסמך מהאחסון נכשלה:', err.message);
+      }
+      if (!contentBase64) continue;
       fileAttachments.push({
         filename: safeName(`${nm} - ${d.name}`) + extOf(d.file_name, d.file_mimetype),
-        contentBase64: d.file_data,
+        contentBase64,
         contentType: d.file_mimetype || mimeFromName(d.file_name),
       });
     }

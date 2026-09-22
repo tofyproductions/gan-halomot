@@ -1,4 +1,5 @@
 const { EmployeeRequest, Employee, PayrollMonth, EmployeeCommitment, EmployeeDocument } = require('../models');
+const { readEmployeeDocumentBase64 } = require('../services/employeeDocumentFile');
 const { scanSickNote } = require('../services/sickNoteScan');
 const { workingWeekdays } = require('../services/commitmentAnalysis');
 const { computeBalance } = require('../services/pregnancyExam');
@@ -19,9 +20,13 @@ async function attachCertFromDocuments(request) {
     .select('name file_name').lean();
   const hit = findDocumentForDate(docs, request.from_date);
   if (!hit) return null;
-  const full = await EmployeeDocument.findById(hit._id).select('name file_name file_data').lean();
-  if (!full || !full.file_data) return null;
-  request.medical_file_data = full.file_data;
+  const full = await EmployeeDocument.findById(hit._id)
+    .select('name file_name file_data storage_key').lean();
+  // The copy is base64 on the request either way — EmployeeRequest keeps its
+  // certificate inline — but the SOURCE may now be in the bucket.
+  const data = await readEmployeeDocumentBase64(full);
+  if (!data) return null;
+  request.medical_file_data = data;
   request.medical_file_name = full.file_name || full.name;
   await request.save();
   return { doc_name: full.name };

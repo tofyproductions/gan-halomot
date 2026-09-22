@@ -1,20 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box, Paper, Typography, Stack, Button, TextField, MenuItem, Chip, Alert,
   Dialog, DialogTitle, DialogContent, DialogActions, Divider, IconButton,
-  Table, TableHead, TableBody, TableRow, TableCell, Tooltip, LinearProgress,
-  Autocomplete,
+  Tooltip, LinearProgress, Autocomplete,
 } from '@mui/material';
 import DescriptionIcon from '@mui/icons-material/Description';
 import GavelIcon from '@mui/icons-material/Gavel';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import VerifiedIcon from '@mui/icons-material/Verified';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import DeleteIcon from '@mui/icons-material/Delete';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
+import EmployeeFileCabinet from './EmployeeFileCabinet';
 
 /**
  * הנפקת מסמכים לעובד.
@@ -59,10 +57,12 @@ export default function EmployeeLetters() {
   const [empId, setEmpId] = useState('');
   const [ctx, setCtx] = useState(null);
   const [issuers, setIssuers] = useState([]);
-  const [history, setHistory] = useState([]);
   const [form, setForm] = useState(null);      // { type, values }
   const [previewHtml, setPreviewHtml] = useState('');
   const [busy, setBusy] = useState(false);
+  // Bumped whenever this screen files something, so the cabinet below reloads
+  // and the document that was just issued is in it without a page refresh.
+  const [cabinetKey, setCabinetKey] = useState(0);
 
   useEffect(() => {
     api.get('/payroll/employees', { params: { active: true } })
@@ -98,19 +98,12 @@ export default function EmployeeLetters() {
     if (id) setParams({ employee: id }, { replace: true }); else setParams({}, { replace: true });
   };
 
-  const loadHistory = useCallback((id) => {
-    api.get('/employee-letters', { params: id ? { employee_id: id } : {} })
-      .then(res => setHistory(res.data.letters || []))
-      .catch(() => {});
-  }, []);
-
   useEffect(() => {
-    if (!empId) { setCtx(null); setIssuers([]); setHistory([]); return; }
+    if (!empId) { setCtx(null); setIssuers([]); return; }
     api.get(`/employee-letters/context/${empId}`)
       .then(res => { setCtx(res.data.context); setIssuers(res.data.issuers || []); })
       .catch(err => { setCtx(null); toast.error(err.response?.data?.error || 'שגיאה'); });
-    loadHistory(empId);
-  }, [empId, loadHistory]);
+  }, [empId]);
 
   /** Sensible starting values per document, on top of the server's context. */
   const openForm = (type) => {
@@ -169,9 +162,9 @@ export default function EmployeeLetters() {
       const res = await api.post('/employee-letters', {
         employee_id: empId, type: form.type, overrides: form.values,
       });
-      toast.success('המסמך הונפק');
+      toast.success('המסמך הונפק ונשמר בתיק');
       setForm(null); setPreviewHtml('');
-      loadHistory(empId);
+      setCabinetKey(k => k + 1);
       openPdf(res.data.letter.id);
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בהנפקה');
@@ -190,13 +183,6 @@ export default function EmployeeLetters() {
     }
   };
 
-  const removeLetter = async (id) => {
-    try {
-      await api.delete(`/employee-letters/${id}`);
-      toast.success('נמחק');
-      loadHistory(empId);
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
-  };
 
   if (loading) return <LoadingSpinner />;
 
@@ -204,10 +190,10 @@ export default function EmployeeLetters() {
 
   return (
     <Box dir="rtl">
-      <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>הנפקת מסמכים לעובד</Typography>
+      <Typography variant="h5" sx={{ fontWeight: 800, mb: 0.5 }}>מסמכים לעובד</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-        הפרטים הקבועים — שם, ת״ז, תפקיד, סניף, תאריך תחילת העסקה, ותק וימי הודעה מוקדמת — נשלפים
-        אוטומטית מכרטיס העובד. יש למלא רק את מה שהמערכת לא יכולה לדעת.
+        כל מה שהמערכת מחזיקה על העובד/ת — חוזה, טופס 101, תעודות, אישורים, תלושים ודוחות
+        שעות — יושב בתיק אחד למטה. מכאן גם מנפיקים מסמכים חדשים, והם נשמרים בתיק מיד.
       </Typography>
 
       <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2.5 }}>
@@ -288,43 +274,10 @@ export default function EmployeeLetters() {
         </Stack>
       )}
 
+      {/* התיק עצמו. הטבלה שעמדה כאן הציגה רק את מה שהמסך הזה הנפיק —
+          the letters, and nothing else the system holds about the same person. */}
       {ctx && (
-        <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-          <Typography sx={{ fontWeight: 800, mb: 1 }}>מסמכים שהונפקו</Typography>
-          {history.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">עדיין לא הונפקו מסמכים לעובד/ת זו.</Typography>
-          ) : (
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 700 }}>מסמך</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>הונפק ב</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>חתום/ה</TableCell>
-                  <TableCell sx={{ fontWeight: 700 }}>הונפק ע״י</TableCell>
-                  <TableCell align="left" />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {history.map(h => (
-                  <TableRow key={h.id} hover>
-                    <TableCell sx={{ fontWeight: 600 }}>{h.title}</TableCell>
-                    <TableCell>{new Date(h.created_at).toLocaleString('he-IL')}</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>{h.signed_by_name || h.issued_by_name || '—'}</TableCell>
-                    <TableCell sx={{ color: 'text.secondary', fontSize: '0.8rem' }}>{h.issued_by_name || '—'}</TableCell>
-                    <TableCell align="left">
-                      <IconButton size="small" onClick={() => openPdf(h.id)} title="פתח PDF">
-                        <OpenInNewIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton size="small" color="error" onClick={() => removeLetter(h.id)} title="מחק">
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </Paper>
+        <EmployeeFileCabinet employeeId={empId} refreshKey={cabinetKey} />
       )}
 
       {/* Issue dialog */}
