@@ -37,6 +37,63 @@ function age(birth) {
   return y === 0 ? `${m} חודשים` : `${y}.${m}`;
 }
 
+/**
+ * A tile that shows and does not take a tap.
+ *
+ * Reads like FieldButton because it sits among them, but it is a Box and not a
+ * ButtonBase on purpose: what the parent wrote is the one thing on this card
+ * the gan did not write, and a teacher who edits it has overwritten the only
+ * thing that family said this morning. Rendering it as a button would invite
+ * exactly that, and would announce itself to a screen reader as something that
+ * can be pressed.
+ *
+ * Wraps rather than truncating — "120 מ״ל סימילאק" is two lines and cutting
+ * it to "120 מ״ל…" loses which formula.
+ */
+function HomeTile({ label, parts }) {
+  const shown = (parts || []).map(p => (p == null ? '' : String(p).trim())).filter(Boolean);
+  const filled = shown.length > 0;
+  return (
+    <Box
+      sx={{
+        flex: 1, minWidth: 0, py: 1, px: 0.75, borderRadius: 2,
+        border: '1px solid', borderColor: 'divider',
+        bgcolor: 'background.paper',
+        textAlign: 'center',
+      }}
+    >
+      <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+        {label}
+      </Typography>
+      <Typography
+        variant="body2"
+        fontWeight={filled ? 700 : 400}
+        color={filled ? 'text.primary' : 'text.disabled'}
+        sx={{ wordBreak: 'break-word' }}
+      >
+        {/* Each piece in its own <bdi>.
+            "06:45 / 100%" is two left-to-right runs inside a right-to-left
+            line, so the browser reorders them as one block and the tile read
+            "100% / 06:45" — the time and the portion swapped, which on this
+            particular card is a sentence about when a baby last ate. It only
+            looked right for the children whose amount ends in Hebrew
+            ("120 מ״ל סימילאק"), which is the worst kind of bug: correct in
+            the example somebody checked. <bdi> isolates each piece so the
+            order written here is the order shown. */}
+        {filled
+          ? shown.map((part, i) => (
+            // eslint-disable-next-line react/no-array-index-key
+            <span key={i}>
+              {i > 0 && ' / '}
+              <bdi>{part}</bdi>
+            </span>
+          ))
+          : '—'}
+      </Typography>
+    </Box>
+  );
+}
+
 export default function ChildDayCard({ child, options, onPatch, readOnly }) {
   const log = child.log || {};
   const meals = log.meals || {};
@@ -180,28 +237,54 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
 
         {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note
           || homeConflicts.length > 0) && (
-          <Box sx={{ mb: 2, p: 1.25, borderRadius: 2, bgcolor: 'action.hover' }}>
-            <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 0.5 }}>
-              <HomeIcon sx={{ fontSize: 15 }} color="success" />
-              <Typography variant="caption" fontWeight={700} color="success.main">
-                מההורים, מהבית
-              </Typography>
+          <Box
+            sx={{
+              mb: 2, p: 1.25, borderRadius: 3,
+              border: '1px solid', borderColor: 'success.soft',
+              bgcolor: 'action.hover',
+            }}
+          >
+            <Stack direction="row" justifyContent="center" sx={{ mb: 1 }}>
+              <Chip
+                size="small" icon={<HomeIcon />} label="עדכוני הורים (בבית)"
+                sx={{ bgcolor: 'success.soft', color: 'success.softOn', fontWeight: 700 }}
+              />
             </Stack>
-            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
-              {home.wake_time && <Typography variant="body2">התעורר {home.wake_time}</Typography>}
-              {(home.meal_time || home.meal_amount) && (
-                <Typography variant="body2">
-                  אכל {home.meal_time || ''} {home.meal_amount ? `(${home.meal_amount})` : ''}
-                </Typography>
-              )}
+
+            {/* Two tiles, the way the rest of this card reads — a label above a
+                value, in a box. As text on one line ("התעורר 06:15 אכל
+                06:30 (25%)") it was the only part of the card a teacher had to
+                actually parse, and it is the part she reads first, standing up,
+                holding somebody.
+
+                Both are drawn even when only one was filled in: a missing
+                answer is a fact the room wants ("nobody said when he woke"),
+                and a block that changes shape per child is a block that has to
+                be re-read every time. */}
+            <Stack direction="row" spacing={1}>
+              <HomeTile label="אכל בבוקר" parts={[home.meal_time, home.meal_amount]} />
+              <HomeTile label="התעורר" parts={[home.wake_time]} />
             </Stack>
+
             {home.parent_note && (
-              <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap' }}>
-                {home.parent_note}
-              </Typography>
+              <Box
+                sx={{
+                  mt: 1, p: 1, borderRadius: 2,
+                  border: '1px solid', borderColor: 'warning.soft',
+                  bgcolor: 'warning.soft',
+                }}
+              >
+                <Typography variant="caption" fontWeight={700} sx={{ color: 'warning.softOn', display: 'block', mb: 0.25 }}>
+                  הערת הורים:
+                </Typography>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'warning.softOn' }}>
+                  {home.parent_note}
+                </Typography>
+              </Box>
             )}
+
             {homeConflicts.map((c, i) => (
-              <Typography key={i} variant="caption" sx={{ display: 'block', color: 'warning.main', mt: 0.25 }}>
+              <Typography key={i} variant="caption" sx={{ display: 'block', color: 'warning.main', mt: 0.5 }}>
                 ההורים רשמו {HOME_LABELS[c.field]}: {Array.isArray(c.ours) ? c.ours.join(', ') : c.ours || '—'} — הלוח הישן גבר
               </Typography>
             ))}
