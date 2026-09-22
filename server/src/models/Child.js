@@ -36,6 +36,25 @@ const childSchema = new mongoose.Schema({
   is_active: { type: Boolean, default: true },
 
   /**
+   * Kept on a board that is not their room's, until a date.
+   *
+   * A child who moves up to פעוטות does not stop being somebody's baby the
+   * same week: the family still wants the bottle log, and the תינוקייה staff
+   * who know the child still fill it in. So the board can carry a child from
+   * another room for a while — three months at the move, one month per
+   * renewal — and the screen asks, three days before the end, whether to keep
+   * going. An extension that nobody renews simply ends; nothing is deleted.
+   *
+   * `classroom_id` is the BOARD's room (the תינוקייה), never the child's own.
+   */
+  board_extension: {
+    classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null },
+    until: { type: Date, default: null },
+    set_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    set_at: { type: Date, default: null },
+  },
+
+  /**
    * הסרה זמנית בידי המנהלת — the child dropped off the ClickTac/תמ"ת list and
    * the manager saw it before the next file upload proved it. Set together
    * with is_active=false; distinguishes this reversible, human-declared state

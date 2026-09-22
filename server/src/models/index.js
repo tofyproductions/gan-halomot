@@ -73,6 +73,7 @@ const SpecialDay = require('./SpecialDay');
 const CibusSync = require('./CibusSync');
 const EmployeeDocument = require('./EmployeeDocument');
 const EmployeeOnboarding = require('./EmployeeOnboarding');
+const ClassroomMoveRequest = require('./ClassroomMoveRequest');
 const Form101Sync = require('./Form101Sync');
 const Form101Inbox = require('./Form101Inbox');
 const Setting = require('./Setting');
@@ -173,6 +174,7 @@ const real = {
   CibusSync,
   EmployeeDocument,
   EmployeeOnboarding,
+  ClassroomMoveRequest,
   Form101Sync,
   Form101Inbox,
   Setting,

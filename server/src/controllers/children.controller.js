@@ -1,4 +1,5 @@
-const { Child, Registration, Classroom } = require('../models');
+const { Child, Registration, Classroom, ClassroomMoveRequest } = require('../models');
+const notificationService = require('../services/notification.service');
 const { normalizeYear, getAcademicYears } = require('../services/academic-year.service');
 const { registrationIdsInScope, canAccessRegistration } = require('../utils/branch-scope');
 
@@ -168,12 +169,16 @@ async function updateClassroom(req, res, next) {
       return res.status(404).json({ error: 'Classroom not found' });
     }
 
-    child.classroom_id = classroom_id;
-    await child.save();
+    const fromRoom = child.classroom_id
+      ? await Classroom.findById(child.classroom_id).select('name branch_id').lean()
+      : null;
+    await moveChild(child, classroom);
 
-    if (child.registration_id) {
-      await Registration.findByIdAndUpdate(child.registration_id, { classroom_id });
-    }
+    // A direct move is the manager's own act, so the notification is a
+    // record rather than a request: the branch's managers (and, when the
+    // mover IS the manager, the admins behind her) see that it happened.
+    notifyMoved(child, fromRoom, classroom, req.user)
+      .catch(err => console.error('[children] move notify failed:', err.message));
 
     const updated = await Child.findById(id).populate('classroom_id', 'name').lean();
     updated.id = updated._id;
@@ -184,6 +189,149 @@ async function updateClassroom(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+/**
+ * The one place a child changes room.
+ *
+ * Direct (a drag on the dashboard) and approved (a תינוקייה's request the
+ * manager said yes to) both end here, so the two can never disagree about
+ * what a move consists of: the child, the registration behind the child, and
+ * an extension that no longer makes sense. A child moved INTO the room they
+ * were being carried on does not need carrying any more.
+ */
+async function moveChild(child, classroom) {
+  child.classroom_id = classroom._id;
+  if (child.board_extension?.classroom_id
+    && String(child.board_extension.classroom_id) === String(classroom._id)) {
+    child.board_extension = { classroom_id: null, until: null, set_by: null, set_at: new Date() };
+  }
+  await child.save();
+  if (child.registration_id) {
+    await Registration.findByIdAndUpdate(child.registration_id, { classroom_id: classroom._id });
+  }
+}
+
+async function notifyMoved(child, fromRoom, toRoom, actor) {
+  const branchId = toRoom.branch_id || fromRoom?.branch_id || null;
+  const ids = await notificationService.branchManagerIds(branchId);
+  const body = `${child.child_name}: ${fromRoom?.name || 'ללא כיתה'} ← ${toRoom.name}`
+    + (actor?.full_name ? ` (${actor.full_name})` : '');
+  await Promise.all(ids
+    // The person who dragged does not need to be told what she just did.
+    .filter(id => String(id) !== String(actor?.id))
+    .map(recipient_id => notificationService.createEvent({
+      type: 'child_moved', ref_collection: 'Child', ref_id: child._id, recipient_id,
+      title: 'ילד/ה הועבר/ה כיתה', body, url: '/',
+    })));
+  // Informational: nothing to act on, so it must not be re-sent hourly until
+  // somebody "resolves" it. Closed the moment it is created.
+  await notificationService.resolveEvents({ ref_collection: 'Child', ref_id: child._id });
+}
+
+/* ------------------------------------------------------------------ *
+ *  מעברי כיתה ממתינים — the תינוקייה asked, the manager decides
+ * ------------------------------------------------------------------ */
+
+const decides = (req) => ['system_admin', 'branch_manager'].includes(req.user?.role);
+
+/** GET /api/children/move-requests?status=pending */
+async function listMoveRequests(req, res, next) {
+  try {
+    const status = String(req.query.status || 'pending');
+    const filter = status === 'all' ? {} : { status };
+    const { resolveBranchScope } = require('../utils/branch-scope');
+    const scope = await resolveBranchScope(req);
+    if (scope !== null) filter.branch_id = { $in: scope };
+    const rows = await ClassroomMoveRequest.find(filter).sort({ created_at: 1 }).limit(200).lean();
+    res.json({
+      requests: rows.map(r => ({
+        id: String(r._id),
+        child_id: String(r.child_id),
+        child_name: r.child_name,
+        from: r.from_name,
+        to: r.to_name,
+        keep_on_board: !!r.keep_on_board,
+        status: r.status,
+        requested_by_name: r.requested_by_name,
+        created_at: r.created_at,
+        decided_by_name: r.decided_by_name,
+        decided_at: r.decided_at,
+        reject_reason: r.reject_reason,
+      })),
+      may_decide: decides(req),
+    });
+  } catch (error) { next(error); }
+}
+
+async function loadRequest(req, id) {
+  const request = await ClassroomMoveRequest.findById(id);
+  if (!request) return { error: 'הבקשה לא נמצאה', status: 404 };
+  if (request.status !== 'pending') return { error: 'הבקשה כבר טופלה', status: 400 };
+  if (!decides(req)) return { error: 'רק מנהלת סניף או מנהל מערכת מאשרים מעבר כיתה', status: 403 };
+  const { resolveBranchScope } = require('../utils/branch-scope');
+  const scope = await resolveBranchScope(req);
+  if (scope !== null && !scope.map(String).includes(String(request.branch_id))) {
+    return { error: 'הבקשה שייכת לסניף שאינו בניהולך', status: 403 };
+  }
+  return { request };
+}
+
+/**
+ * POST /api/children/move-requests/:id/approve
+ *
+ * The move happens HERE and nowhere earlier. If the תינוקייה asked to keep
+ * the child on its board, that starts now too: three months from the day of
+ * approval, not the day of the request.
+ */
+async function approveMoveRequest(req, res, next) {
+  try {
+    const { request, error, status } = await loadRequest(req, req.params.id);
+    if (error) return res.status(status).json({ error });
+    const child = await Child.findById(request.child_id);
+    const room = await Classroom.findById(request.to_classroom_id).select('name branch_id').lean();
+    if (!child || !room) return res.status(404).json({ error: 'הילד/ה או הכיתה כבר לא קיימים' });
+
+    const fromRoom = request.from_classroom_id
+      ? await Classroom.findById(request.from_classroom_id).select('name branch_id').lean()
+      : null;
+    await moveChild(child, room);
+    if (request.keep_on_board && request.from_classroom_id) {
+      const until = new Date();
+      until.setMonth(until.getMonth() + 3);
+      until.setHours(23, 59, 59, 999);
+      child.board_extension = {
+        classroom_id: request.from_classroom_id, until, set_by: req.user?.id || null, set_at: new Date(),
+      };
+      await child.save();
+    }
+
+    request.status = 'approved';
+    request.decided_by = req.user?.id || null;
+    request.decided_by_name = req.user?.full_name || '';
+    request.decided_at = new Date();
+    await request.save();
+
+    await notificationService.resolveEvents({ ref_collection: 'ClassroomMoveRequest', ref_id: request._id });
+    notifyMoved(child, fromRoom, room, req.user).catch(() => {});
+    res.json({ ok: true });
+  } catch (error) { next(error); }
+}
+
+/** POST /api/children/move-requests/:id/reject  { reason } */
+async function rejectMoveRequest(req, res, next) {
+  try {
+    const { request, error, status } = await loadRequest(req, req.params.id);
+    if (error) return res.status(status).json({ error });
+    request.status = 'rejected';
+    request.reject_reason = String(req.body?.reason || '').slice(0, 300);
+    request.decided_by = req.user?.id || null;
+    request.decided_by_name = req.user?.full_name || '';
+    request.decided_at = new Date();
+    await request.save();
+    await notificationService.resolveEvents({ ref_collection: 'ClassroomMoveRequest', ref_id: request._id });
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 }
 
 async function remove(req, res, next) {
@@ -272,4 +420,7 @@ async function listHidden(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getById, update, updateClassroom, remove, hide, unhide, listHidden };
+module.exports = {
+  getAll, getById, update, updateClassroom, remove, hide, unhide, listHidden,
+  listMoveRequests, approveMoveRequest, rejectMoveRequest,
+};

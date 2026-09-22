@@ -72,12 +72,33 @@ async function board(req, res) {
 
   // A light room has no per-child day to fetch. Reading the roster anyway
   // would be twenty documents nothing on the screen displays.
+  // The room's own children, plus the ones CARRIED on this board: a child who
+  // moved up to פעוטות and was kept here for a while so the family still
+  // gets the bottle log. They are drawn with a mark and a date, and three days
+  // before the date the card asks whether to keep going.
+  const today = nursery.todayKey();
   const children = kind === 'full'
-    ? await Child.find({ classroom_id: room._id, is_active: true })
-      .select('child_name birth_date phone parent_name classroom_id')
+    ? await Child.find({
+      is_active: true,
+      $or: [
+        { classroom_id: room._id },
+        { 'board_extension.classroom_id': room._id, 'board_extension.until': { $gte: new Date(`${today}T00:00:00+03:00`) } },
+      ],
+    })
+      .select('child_name birth_date phone parent_name classroom_id board_extension')
+      .populate('classroom_id', 'name')
       .sort({ birth_date: -1, child_name: 1 })
       .lean()
     : [];
+
+  // Open move requests, so the button that asked is not offered twice and
+  // the card can say the manager has it.
+  const { ClassroomMoveRequest } = require('../models');
+  const pendingMoves = children.length
+    ? await ClassroomMoveRequest.find({ child_id: { $in: children.map(c => c._id) }, status: 'pending' })
+      .select('child_id to_name').lean()
+    : [];
+  const pendingByChild = new Map(pendingMoves.map(m => [String(m.child_id), m]));
 
   const logs = children.length
     ? await DailyLog.find({ date, child_id: { $in: children.map(c => c._id) } }).lean()
@@ -125,12 +146,26 @@ async function board(req, res) {
     // never has to ask twice; the full rooms simply have nothing in it.
     activity: classDay?.activity || '',
     activity_updated_by: classDay?.updated_by_name || '',
-    children: children.map(c => ({
-      id: c._id,
-      name: c.child_name,
-      birth_date: c.birth_date,
-      log: byChild.get(String(c._id)) || null,
-    })),
+    children: children.map(c => {
+      const carried = String(c.classroom_id?._id || c.classroom_id) !== String(room._id);
+      const until = carried && c.board_extension?.until ? new Date(c.board_extension.until) : null;
+      const daysLeft = until ? Math.ceil((until - new Date(`${today}T00:00:00+03:00`)) / 86400000) : null;
+      const pending = pendingByChild.get(String(c._id));
+      return {
+        id: c._id,
+        name: c.child_name,
+        birth_date: c.birth_date,
+        log: byChild.get(String(c._id)) || null,
+        // Marked as פעוט/ה with the room they actually belong to now.
+        carried,
+        own_classroom: carried ? (c.classroom_id?.name || '') : '',
+        board_until: until ? until.toISOString().slice(0, 10) : null,
+        // "Ask me" — the last three days of the extension, the card asks
+        // whether to keep the child on for another month.
+        board_expiring: daysLeft !== null && daysLeft <= 3,
+        pending_move: pending ? { to: pending.to_name } : null,
+      };
+    }),
   });
 }
 
@@ -224,12 +259,18 @@ async function updateLog(req, res) {
     .populate('classroom_id', 'name category branch_id')
     .lean();
   if (!child) return res.status(404).json({ error: 'לא נמצא' });
-  if (nursery.boardKind(child.classroom_id) !== 'full') {
-    return res.status(400).json({ error: 'הדיווח האישי קיים לתינוקייה ולצעירים בלבד' });
+  if (nursery.boardKindForChild(child, child.classroom_id) !== 'full') {
+    return res.status(400).json({ error: 'הדיווח האישי קיים לתינוקייה בלבד' });
   }
 
+  // The board this child's day lives on: their own room, or the room they are
+  // carried on. A פעוט kept on the תינוקייה board is written by the
+  // תינוקייה staff, who are the ones the family is still talking to.
+  const boardRoomId = nursery.extensionActive(child)
+    ? String(child.board_extension.classroom_id)
+    : String(child.classroom_id?._id);
   const rooms = await visibleClassrooms(req.user);
-  if (!rooms.some(r => String(r._id) === String(child.classroom_id?._id))) {
+  if (!rooms.some(r => String(r._id) === boardRoomId)) {
     return res.status(403).json({ error: 'אין לך הרשאה לכיתה זו' });
   }
 
@@ -456,6 +497,159 @@ async function saveMenu(req, res) {
   return res.json({ ok: true, menu: next });
 }
 
+
+/* ------------------------------------------------------------------ *
+ *  Children carried on a board that is not their room's
+ * ------------------------------------------------------------------ */
+
+const EXTENSION_MONTHS_AT_MOVE = 3;
+const EXTENSION_MONTHS_RENEW = 1;
+
+const addMonths = (from, n) => {
+  const d = new Date(from);
+  d.setMonth(d.getMonth() + n);
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
+/** The room, if this caller may run its board. */
+async function boardRoomFor(req, classroomId) {
+  const rooms = await visibleClassrooms(req.user);
+  const room = rooms.find(r => String(r._id) === String(classroomId));
+  if (!room) return { error: 'אין לך הרשאה לכיתה זו', status: 403 };
+  if (nursery.boardKind(room) !== 'full') return { error: 'לכיתה הזו אין לוח אישי', status: 400 };
+  return { room };
+}
+
+/**
+ * GET /api/nursery/board/candidates?classroom=
+ *
+ * The children of the SAME BRANCH who could be carried on this board and are
+ * not: the פעוטות who just moved up. Same branch only — a תינוקייה in כפר סבא
+ * has no business carrying a child from תל אביב.
+ */
+async function boardCandidates(req, res) {
+  const { room, error, status } = await boardRoomFor(req, req.query.classroom);
+  if (error) return res.status(status).json({ error });
+  const branchId = room.branch_id?._id || room.branch_id;
+  const rooms = await Classroom.find({ branch_id: branchId, is_active: true, _id: { $ne: room._id } })
+    .select('name category').lean();
+  // Only the rooms with no board of their own. Offering a child from another
+  // תינוקייה would put one child on two boards.
+  const eligible = rooms.filter(r => nursery.boardKind(r) === 'none');
+  const today = new Date(`${nursery.todayKey()}T00:00:00+03:00`);
+  const kids = await Child.find({
+    classroom_id: { $in: eligible.map(r => r._id) },
+    is_active: true,
+    $or: [
+      { 'board_extension.classroom_id': null },
+      { 'board_extension.until': { $lt: today } },
+    ],
+  }).select('child_name birth_date classroom_id').populate('classroom_id', 'name').sort({ child_name: 1 }).lean();
+  res.json({
+    candidates: kids.map(k => ({ id: k._id, name: k.child_name, classroom: k.classroom_id?.name || '' })),
+  });
+}
+
+/**
+ * POST /api/nursery/board/extend  { classroom, child_id, months? }
+ *
+ * Put a child on this board, or keep them on it. Three months when they are
+ * added; one month on a renewal, which is what the card offers three days
+ * before the end. The date is set from TODAY on a renewal, not stacked on the
+ * old end — "one more month" means from now.
+ */
+async function extendOnBoard(req, res) {
+  const { room, error, status } = await boardRoomFor(req, req.body?.classroom);
+  if (error) return res.status(status).json({ error });
+  const child = await Child.findOne({ _id: req.body?.child_id, is_active: true }).populate('classroom_id', 'branch_id name');
+  if (!child) return res.status(404).json({ error: 'לא נמצא' });
+  const roomBranch = String(room.branch_id?._id || room.branch_id);
+  if (String(child.classroom_id?.branch_id) !== roomBranch) {
+    return res.status(400).json({ error: 'הילד/ה אינו/ה בסניף של הכיתה הזו' });
+  }
+  if (String(child.classroom_id?._id) === String(room._id)) {
+    return res.status(400).json({ error: 'הילד/ה כבר בכיתה הזו' });
+  }
+  const renewing = nursery.extensionActive(child) && String(child.board_extension.classroom_id) === String(room._id);
+  const months = Number(req.body?.months) || (renewing ? EXTENSION_MONTHS_RENEW : EXTENSION_MONTHS_AT_MOVE);
+  child.board_extension = {
+    classroom_id: room._id,
+    until: addMonths(new Date(), months),
+    set_by: req.user?.id || null,
+    set_at: new Date(),
+  };
+  await child.save();
+  res.json({ ok: true, until: child.board_extension.until.toISOString().slice(0, 10), months });
+}
+
+/** POST /api/nursery/board/release  { classroom, child_id } — "no, let them go". */
+async function releaseFromBoard(req, res) {
+  const { room, error, status } = await boardRoomFor(req, req.body?.classroom);
+  if (error) return res.status(status).json({ error });
+  const child = await Child.findOne({ _id: req.body?.child_id, 'board_extension.classroom_id': room._id });
+  if (!child) return res.status(404).json({ error: 'הילד/ה אינו/ה מורחב/ת על הלוח הזה' });
+  child.board_extension = { classroom_id: null, until: null, set_by: req.user?.id || null, set_at: new Date() };
+  await child.save();
+  res.json({ ok: true });
+}
+
+/**
+ * POST /api/nursery/board/move-request  { classroom, child_id, keep_on_board }
+ *
+ * "העבר לכיתת הפעוטות". Not the move — the ask. The room decides the fee, so
+ * the branch manager decides the room; this files the request and tells her.
+ * The target is the branch's צעירים room for the child's year; if there is
+ * more than one it is whichever is named first, and the manager can always
+ * drag the child elsewhere afterwards.
+ */
+async function requestMove(req, res) {
+  const { room, error, status } = await boardRoomFor(req, req.body?.classroom);
+  if (error) return res.status(status).json({ error });
+  const child = await Child.findOne({ _id: req.body?.child_id, is_active: true, classroom_id: room._id })
+    .populate('classroom_id', 'name branch_id');
+  if (!child) return res.status(404).json({ error: 'הילד/ה אינו/ה בכיתה הזו' });
+
+  const { ClassroomMoveRequest, User } = require('../models');
+  const open = await ClassroomMoveRequest.findOne({ child_id: child._id, status: 'pending' }).lean();
+  if (open) return res.status(409).json({ error: 'כבר קיימת בקשת מעבר שממתינה לאישור' });
+
+  const branchId = room.branch_id?._id || room.branch_id;
+  const targets = await Classroom.find({ branch_id: branchId, is_active: true, academic_year: child.academic_year })
+    .select('name category').sort({ name: 1 }).lean();
+  const target = targets.find(r => nursery.classroomCategory(r) === 'צעירים');
+  if (!target) {
+    return res.status(400).json({ error: `לא נמצאה כיתת פעוטות לשנת ${child.academic_year} בסניף הזה` });
+  }
+
+  const request = await ClassroomMoveRequest.create({
+    child_id: child._id,
+    child_name: child.child_name,
+    branch_id: branchId,
+    from_classroom_id: room._id,
+    to_classroom_id: target._id,
+    from_name: room.name,
+    to_name: target.name,
+    keep_on_board: req.body?.keep_on_board === true || req.body?.keep_on_board === 'true',
+    requested_by: req.user?.id || null,
+    requested_by_name: req.user?.full_name || '',
+  });
+
+  // The branch manager gets it in the app; nobody else needs to.
+  const notificationService = require('../services/notification.service');
+  notificationService.branchManagerIds(branchId).then((ids) => {
+    ids.forEach((recipient_id) => notificationService.createEvent({
+      type: 'child_move_request', ref_collection: 'ClassroomMoveRequest', ref_id: request._id, recipient_id,
+      title: 'בקשת מעבר כיתה ממתינה לאישור',
+      body: `${child.child_name}: ${room.name} ← ${target.name}`,
+      url: '/',
+    }).catch(err => console.error('[move-request] push failed:', err.message)));
+  }).catch(() => {});
+
+  res.status(201).json({ ok: true, request_id: String(request._id), to: target.name });
+}
+
 module.exports = {
   board, updateLog, setClassroomDay, setMenu, settings, saveOptions, saveMenu,
+  boardCandidates, extendOnBoard, releaseFromBoard, requestMove,
 };

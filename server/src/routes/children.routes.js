@@ -8,6 +8,14 @@ const manage = requireRole('system_admin', 'branch_manager', 'accountant');
 // GET /api/children
 router.get('/', childrenController.getAll);
 
+// מעברי כיתה ממתינים — what a תינוקייה board asked for, decided by the
+// branch manager because the room decides the fee. Before /:id for the same
+// reason as 'hidden' below. Accountants may read; only managers and admins
+// decide (enforced in the controller).
+router.get('/move-requests', manage, childrenController.listMoveRequests);
+router.post('/move-requests/:id/approve', manage, childrenController.approveMoveRequest);
+router.post('/move-requests/:id/reject', manage, childrenController.rejectMoveRequest);
+
 // הסרה זמנית — declared before /:id so 'hidden' is not read as an id.
 router.get('/hidden', manage, childrenController.listHidden);
 router.post('/:id/hide', manage, childrenController.hide);

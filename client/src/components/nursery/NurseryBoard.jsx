@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Stack, Typography, Card, CardContent, TextField, MenuItem, Alert,
   CircularProgress, Accordion, AccordionSummary, AccordionDetails, Chip,
-  Button, Snackbar,
+  Button, Snackbar, Dialog, DialogTitle, DialogContent, DialogActions, List, ListItemButton,
+  ListItemText,
 } from '@mui/material';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RestaurantIcon from '@mui/icons-material/Restaurant';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -103,6 +105,55 @@ export default function NurseryBoard() {
       }));
     } catch (err) {
       setToast(err.response?.data?.error || 'השמירה נכשלה');
+    }
+  };
+
+  /* --- a פעוט carried on this board ---------------------------------- */
+  const [addOpen, setAddOpen] = useState(false);
+  const [candidates, setCandidates] = useState(null); // null = loading
+
+  const openAdd = async () => {
+    setAddOpen(true);
+    setCandidates(null);
+    try {
+      const res = await api.get('/nursery/board/candidates', { params: { classroom: classroomId } });
+      setCandidates(res.data.candidates || []);
+    } catch (err) {
+      setToast(err.response?.data?.error || 'טעינת הילדים נכשלה');
+      setCandidates([]);
+    }
+  };
+
+  const extendChild = async (childId, months) => {
+    try {
+      const res = await api.post('/nursery/board/extend', { classroom: classroomId, child_id: childId, months });
+      setToast(`נשאר/ת בלוח עד ${res.data.until}`);
+      setAddOpen(false);
+      load({ classroom: classroomId });
+    } catch (err) {
+      setToast(err.response?.data?.error || 'הפעולה נכשלה');
+    }
+  };
+
+  const releaseChild = async (childId) => {
+    try {
+      await api.post('/nursery/board/release', { classroom: classroomId, child_id: childId });
+      setToast('הוסר/ה מהלוח');
+      load({ classroom: classroomId });
+    } catch (err) {
+      setToast(err.response?.data?.error || 'הפעולה נכשלה');
+    }
+  };
+
+  const requestMove = async (childId, keepOnBoard) => {
+    try {
+      const res = await api.post('/nursery/board/move-request', {
+        classroom: classroomId, child_id: childId, keep_on_board: keepOnBoard,
+      });
+      setToast(`הבקשה נשלחה למנהלת הסניף (ל${res.data.to})`);
+      load({ classroom: classroomId });
+    } catch (err) {
+      setToast(err.response?.data?.error || 'שליחת הבקשה נכשלה');
     }
   };
 
@@ -304,6 +355,16 @@ export default function NurseryBoard() {
         <Alert severity="info">אין ילדים פעילים בכיתה זו.</Alert>
       )}
 
+      {/* A פעוט whose family still gets the day. Picked by name from the
+          branch's older rooms and carried here for three months. */}
+      {!light && isToday && (
+        <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1.5 }}>
+          <Button size="small" variant="outlined" startIcon={<PersonAddIcon />} onClick={openAdd}>
+            הוספת ילד/ה מהפעוטות
+          </Button>
+        </Stack>
+      )}
+
       <Box sx={{
         display: 'grid',
         gap: 2,
@@ -316,9 +377,35 @@ export default function NurseryBoard() {
             options={data.options}
             onPatch={patchChild}
             readOnly={!isToday}
+            onExtend={(id) => extendChild(id, 1)}
+            onRelease={releaseChild}
+            onRequestMove={requestMove}
           />
         ))}
       </Box>
+
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} maxWidth="xs" fullWidth dir="rtl">
+        <DialogTitle sx={{ fontWeight: 800 }}>הוספת ילד/ה מהפעוטות ללוח</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            הילד/ה יישאר/תישאר בלוח של הכיתה הזו ל-3 חודשים, וההורים ימשיכו לקבל עדכונים. שלושה ימים לפני הסוף הלוח ישאל אם להמשיך.
+          </Typography>
+          {candidates === null ? <CircularProgress size={22} /> : candidates.length === 0 ? (
+            <Alert severity="info" icon={false}>אין ילדים בכיתות הפעוטות של הסניף שאינם כבר בלוח.</Alert>
+          ) : (
+            <List dense disablePadding>
+              {candidates.map(c => (
+                <ListItemButton key={c.id} onClick={() => extendChild(c.id, 3)}>
+                  <ListItemText primary={c.name} secondary={c.classroom} />
+                </ListItemButton>
+              ))}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddOpen(false)}>סגירה</Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={!!toast}

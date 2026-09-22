@@ -24,6 +24,14 @@ const { requireTab, requireRole } = require('../middleware/auth');
 const allow = requireTab('nursery', 'system_admin', 'branch_manager', 'class_leader', 'teacher', 'assistant', 'classroom_board');
 
 router.get('/board', allow, ctrl.board);
+// A child carried on this board from another room — the פעוט whose family
+// still gets the bottle log. Same permission as the board: whoever fills it
+// decides who is on it. The move itself is only ASKED for here; the branch
+// manager answers under /api/children/move-requests.
+router.get('/board/candidates', allow, ctrl.boardCandidates);
+router.post('/board/extend', allow, ctrl.extendOnBoard);
+router.post('/board/release', allow, ctrl.releaseFromBoard);
+router.post('/board/move-request', allow, ctrl.requestMove);
 router.patch('/log/:childId', allow, ctrl.updateLog);
 // The older rooms' whole day: one line for the class. Same permission as the
 // per-child log — whoever fills the board fills this.

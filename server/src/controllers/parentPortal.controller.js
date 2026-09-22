@@ -148,9 +148,9 @@ async function childDetails(req, res) {
     // Sent as null rather than as the string 'none' on purpose: the portal
     // already draws the tab on `if (data.day_board)`, so the room that has no
     // day simply has no tab, with nothing on the client to keep in step.
-    day_board: nursery.boardKind(child.classroom_id) === 'none'
+    day_board: nursery.boardKindForChild(child, child.classroom_id) === 'none'
       ? null
-      : nursery.boardKind(child.classroom_id),
+      : nursery.boardKindForChild(child, child.classroom_id),
   });
 }
 
@@ -175,7 +175,7 @@ async function childDay(req, res) {
   // Which kind decides what is fetched below and what the screen draws: the
   // infant rooms keep the bottle log, the older ones get the class's own line,
   // the kitchen's menu and the photographs.
-  const kind = nursery.boardKind(child.classroom_id);
+  const kind = nursery.boardKindForChild(child, child.classroom_id);
   // בוגרים have no board. The tab is already gone from the screen, so this
   // is only reachable by a stale page or a typed URL — and it must refuse
   // rather than answer with an empty day, which reads as "the gan recorded
@@ -321,7 +321,7 @@ async function updateChildDay(req, res) {
   // The morning-at-home form belongs to the rooms whose day is made of it.
   // A four-year-old's parent is not asked how much of a bottle was drunk, and
   // a request naming those fields for such a child writes nothing.
-  if (nursery.boardKind(child.classroom_id) !== 'full') {
+  if (nursery.boardKindForChild(child, child.classroom_id) !== 'full') {
     return res.status(400).json({ error: 'הדיווח מהבית קיים לתינוקייה ולצעירים בלבד' });
   }
 

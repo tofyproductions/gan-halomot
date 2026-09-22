@@ -19,10 +19,17 @@ const mongoose = require('mongoose');
 const notificationEventSchema = new mongoose.Schema({
   type: {
     type: String,
-    enum: ['new_lead', 'new_candidate', 'punch_pending_manager', 'punch_pending_accountant'],
+    enum: [
+      'new_lead', 'new_candidate', 'punch_pending_manager', 'punch_pending_accountant',
+      // A תינוקייה asked to move a child up; the branch manager decides,
+      // because the room decides the fee.
+      'child_move_request',
+      // A manager or admin moved a child directly (drag on the dashboard).
+      'child_moved',
+    ],
     required: true,
   },
-  ref_collection: { type: String, required: true }, // 'Lead' | 'Candidate' | 'Punch'
+  ref_collection: { type: String, required: true }, // 'Lead' | 'Candidate' | 'Punch' | 'ClassroomMoveRequest' | 'Child'
   ref_id: { type: mongoose.Schema.Types.ObjectId, required: true },
   recipient_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 

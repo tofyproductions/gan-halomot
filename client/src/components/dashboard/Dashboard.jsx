@@ -12,6 +12,11 @@ import ChildDetailDialog from '../shared/ChildDetailDialog';
 import StockShortageTile from './StockShortageTile';
 import StatBoard from '../ui/StatBoard';
 import NotificationsPanel from './NotificationsPanel';
+import MoveRequestsPanel from './MoveRequestsPanel';
+import { useAuth } from '../../hooks/useAuth';
+import {
+  DndContext, PointerSensor, TouchSensor, useSensor, useSensors, useDraggable, useDroppable,
+} from '@dnd-kit/core';
 
 /**
  * The chart library is 564KB — larger than the rest of this screen put
@@ -20,6 +25,58 @@ import NotificationsPanel from './NotificationsPanel';
  * chart fills in behind them. That order is also the right one to read in.
  */
 const OccupancyChart = lazy(() => import('./OccupancyChart'));
+
+
+/** A column that accepts a dropped child, lit while one hovers over it. */
+function ClassColumn({ name, roomId, cc, droppable, dragging, children }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `room-${roomId || name}`,
+    disabled: !droppable,
+    data: { classroom_id: roomId, name },
+  });
+  const fromHere = dragging && String(dragging.classroom_id) === String(roomId);
+  return (
+    <Card
+      ref={setNodeRef}
+      sx={{
+        borderTop: `5px solid ${cc.primary}`,
+        outline: isOver && !fromHere ? `2px dashed ${cc.primary}` : 'none',
+        outlineOffset: -2,
+        transition: (t) => `outline-color ${t.motion.fast}`,
+      }}
+    >
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+/** One child; grabbable by a manager, a plain button for everyone else. */
+function KidRow({ kid, cc, draggable, onOpen }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `kid-${kid.id}`,
+    disabled: !draggable,
+    data: kid,
+  });
+  return (
+    <Box
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      onClick={onOpen}
+      sx={{
+        p: 1, mb: 0.5, bgcolor: cc.bg, borderRadius: 2, fontSize: '0.9rem',
+        cursor: draggable ? 'grab' : 'pointer',
+        opacity: isDragging ? 0.4 : 1,
+        borderRight: `3px solid ${cc.border}`,
+        '&:hover': { bgcolor: cc.border, transform: 'translateX(-2px)' },
+        transition: (t) => `all ${t.motion.fast}`,
+        touchAction: draggable ? 'none' : 'auto',
+      }}
+    >
+      {kid.child_name || '—'}
+    </Box>
+  );
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -86,6 +143,19 @@ export default function Dashboard() {
    * network's. Refetching on branch change is the other half: switching the
    * branch in the header used to leave the board showing the old data.
    */
+  // `quiet` refreshes the numbers without blanking the board — after a drag
+  // the person is looking at the column she just dropped into, and a loading
+  // screen in its place reads as "did that work?".
+  const load = (quiet = false) => {
+    if (!quiet) setLoading(true);
+    return api.get('/dashboard/stats', {
+      params: selectedBranch ? { branch: selectedBranch } : {},
+    })
+      .then((res) => setData(res.data))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  };
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -97,6 +167,42 @@ export default function Dashboard() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [selectedBranch]);
+
+  /**
+   * Drag a child to another column to move them.
+   *
+   * Managers and admins only — they are the people who approve a move, so
+   * their own drag needs no second approval; it is recorded and the branch's
+   * other managers are told. Everybody else sees the same columns with
+   * nothing to grab.
+   *
+   * A drop needs a few pixels of travel before it counts, or every tap that
+   * meant "open this child" becomes a move to the same column.
+   */
+  const { user } = useAuth();
+  const mayDrag = ['system_admin', 'branch_manager'].includes(user?.role);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  );
+  const [dragging, setDragging] = useState(null);
+
+  const onDragEnd = async ({ active, over }) => {
+    setDragging(null);
+    if (!over || !active?.data?.current) return;
+    const kid = active.data.current;
+    const target = over.data?.current;
+    if (!target?.classroom_id || String(target.classroom_id) === String(kid.classroom_id)) return;
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`להעביר את ${kid.child_name} לכיתה "${target.name}"?\n\nהמעבר מתעדכן בכל המערכת ומשפיע על התשלום.`)) return;
+    try {
+      await api.put(`/children/${kid.id}/classroom`, { classroom_id: target.classroom_id });
+      toast.success(`${kid.child_name} הועבר/ה ל${target.name}`);
+      load(true);
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'המעבר נכשל');
+    }
+  };
 
   if (loading) {
     return (
@@ -183,6 +289,7 @@ export default function Dashboard() {
           about it. The five KPI cards it used to sit above are gone — they are
           what StatBoard replaced, hand-typed hexes and all. */}
       <NotificationsPanel />
+      <MoveRequestsPanel onChanged={() => load(true)} />
 
       {/* The one screen whose whole job is "at a glance" was the only one NOT
           using StatBoard — five identical centred cards, each with a hand-typed
@@ -269,14 +376,15 @@ export default function Dashboard() {
           יופיעו במסכי הכיתות והנוכחות.
         </Alert>
       )}
+      <DndContext sensors={sensors} onDragStart={(e) => setDragging(e.active?.data?.current || null)} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 2, mb: 4 }}>
         {Object.entries(classrooms).map(([name, kids]) => {
           const capacity = data?.classroomCapacity?.find(c => c.name === name)?.capacity || 0;
           const count = Array.isArray(kids) ? kids.length : 0;
           const cc = getClassroomColor(name);
+          const roomId = data?.classroomIds?.[name] || null;
           return (
-            <Card key={name} sx={{ borderTop: `5px solid ${cc.primary}` }}>
-              <CardContent>
+            <ClassColumn key={name} name={name} roomId={roomId} cc={cc} droppable={mayDrag && !!roomId} dragging={dragging}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, pb: 1, borderBottom: `1px solid ${cc.border}` }}>
                   <Typography sx={{ fontWeight: 700, color: cc.primary }}>{name}</Typography>
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -287,22 +395,15 @@ export default function Dashboard() {
                   </Box>
                 </Box>
                 {Array.isArray(kids) && kids.map((k, i) => (
-                  <Box
-                    key={i}
-                    onClick={() => k._id && setSelectedChild(k._id)}
-                    sx={{
-                      p: 1, mb: 0.5, bgcolor: cc.bg, borderRadius: 2, fontSize: '0.9rem',
-                      cursor: k._id ? 'pointer' : 'default',
-                      borderRight: `3px solid ${cc.border}`,
-                      '&:hover': k._id ? { bgcolor: cc.border, transform: 'translateX(-2px)' } : {},
-                      transition: (t) => `all ${t.motion.fast}`,
-                    }}
-                  >
-                    {k.child_name || '—'}
-                  </Box>
+                  <KidRow
+                    key={k.id || i}
+                    kid={k}
+                    cc={cc}
+                    draggable={mayDrag && !!k.id}
+                    onOpen={() => (k.id || k._id) && setSelectedChild(k.id || k._id)}
+                  />
                 ))}
-              </CardContent>
-            </Card>
+            </ClassColumn>
           );
         })}
         {Object.keys(classrooms).length === 0 && (
@@ -311,6 +412,7 @@ export default function Dashboard() {
           </Box>
         )}
       </Box>
+      </DndContext>
 
       {/* Pending Leads */}
       {pendingLeads.length > 0 && (

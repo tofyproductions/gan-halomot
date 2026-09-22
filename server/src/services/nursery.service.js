@@ -105,12 +105,51 @@ const FULL_BOARD_CATEGORIES = new Set(['תינוקייה', 'צעירים']);
  * here and every caller already asks this function rather than deciding for
  * itself — the staff list filters it out, and the parent portal drops the tab.
  */
-const NO_BOARD_CATEGORIES = new Set(['בוגרים']);
+const NO_BOARD_CATEGORIES = new Set(['בוגרים', 'צעירים']);
 
+/**
+ * צעירים (what the gan calls פעוטות) joined בוגרים on 22.09.2026, and the
+ * reason is worth keeping: the board is a תינוקייה thing. The old board never
+ * had a sheet for the older rooms, and giving them one here was the mistake
+ * the gan corrected — a room whose staff never open the screen is a room whose
+ * families read a blank day.
+ *
+ * What DOES happen is that a handful of children move up to פעוטות while
+ * their parents still get the day. That is not a room's board, it is a
+ * child's: see `boardKindForChild` and Child.board_extension.
+ */
 function boardKind(classroom) {
   const category = classroomCategory(classroom);
   if (NO_BOARD_CATEGORIES.has(category)) return 'none';
   return FULL_BOARD_CATEGORIES.has(category) ? 'full' : 'light';
+}
+
+/** Is this child currently carried on a board that is not their room's? */
+function extensionActive(child, now = new Date()) {
+  const ext = child && child.board_extension;
+  if (!ext || !ext.classroom_id || !ext.until) return false;
+  return new Date(ext.until) >= startOfDay(now);
+}
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+/**
+ * Which board THIS child's day is kept on — 'full', 'light' or 'none'.
+ *
+ * Usually the room's answer. The exception is the child who moved up to
+ * פעוטות and was kept on the תינוקייה board for a while so the family keeps
+ * getting the bottle log: their room says 'none' and their extension says
+ * 'full', and the extension wins for as long as it runs. The parent portal
+ * asks this rather than boardKind so the day tab follows the child, not the
+ * room the child just left.
+ */
+function boardKindForChild(child, classroom) {
+  if (extensionActive(child)) return 'full';
+  return boardKind(classroom);
 }
 
 /**
@@ -234,7 +273,7 @@ function normalizeDateKey(raw) {
 
 module.exports = {
   isNurseryClassroom, nurseryClassrooms, classroomCategory,
-  boardKind, boardClassrooms,
+  boardKind, boardClassrooms, boardKindForChild, extensionActive,
   getOptions, getMenu, todayKey, normalizeDateKey,
   DEFAULT_OPTIONS, DEFAULT_MENU, OPTIONS_KEY, MENU_KEY,
   NURSERY_CATEGORY,

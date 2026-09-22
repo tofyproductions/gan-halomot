@@ -154,7 +154,9 @@ async function main() {
   const tlv = await Branch.create({ name: 'תל אביב - יפו', address: 'יפו 1' });
 
   const YEAR = '2026-2027';
-  const roomA = await Classroom.create({ name: 'צעירים', branch_id: ks._id, academic_year: YEAR, is_active: true });
+  const roomA = await Classroom.create({ name: 'תינוקייה ב', branch_id: ks._id, academic_year: YEAR, is_active: true });
+  // פעוטות keep no daily board since 22.09.2026 — same as בוגרים. Must not be offered.
+  await Classroom.create({ name: 'צעירים', branch_id: ks._id, academic_year: YEAR, is_active: true });
   const roomB = await Classroom.create({ name: 'תינוקייה א', branch_id: ks._id, academic_year: YEAR, is_active: true });
   const roomC = await Classroom.create({ name: 'תינוקייה', branch_id: tlv._id, academic_year: YEAR, is_active: true });
 
@@ -198,7 +200,8 @@ async function main() {
   const before = await request({ path: '/api/classroom-boards', token: adminToken });
   eq(before.status, 200, 'הרשימה נטענת');
   eq((before.body?.boards || []).length, 0, 'אין עדיין לוחות');
-  ok((before.body?.missing || []).length === 3, 'ושלוש הכיתות מוצגות כחסרות לוח');
+  ok((before.body?.missing || []).length === 3, 'ושלוש כיתות התינוקייה מוצגות כחסרות לוח');
+  ok(!(before.body?.missing || []).some(m => m.classroom === 'צעירים'), 'כיתת הפעוטות אינה מוצעת להגדרת לוח');
 
   const created = await request({
     method: 'POST', path: '/api/classroom-boards', token: adminToken,
@@ -206,7 +209,7 @@ async function main() {
   });
   eq(created.status, 201, 'הלוח נוצר');
   const board = created.body.board;
-  eq(board.classroom, 'צעירים', 'ומשויך לכיתה');
+  eq(board.classroom, 'תינוקייה ב', 'ומשויך לכיתה');
   ok(!!board.board_token, 'עם קישור משלו');
   eq(board.has_password, true, 'וסיסמה');
 
@@ -233,7 +236,7 @@ async function main() {
   head('2. הקישור אומר איזה לוח הוא — ולא יותר מזה');
   const info = await request({ path: `/api/public/board/${board.board_token}` });
   eq(info.status, 200, 'נענה בלי התחברות');
-  eq(info.body?.classroom, 'צעירים', 'שם הכיתה');
+  eq(info.body?.classroom, 'תינוקייה ב', 'שם הכיתה');
   eq(info.body?.branch, 'כפר סבא - משה דיין', 'ושם הסניף');
   eq(info.body?.has_biometric, false, 'עדיין בלי כניסה ביומטרית');
   ok(!('password_hash' in (info.body || {})), 'ושום דבר נוסף');
@@ -250,20 +253,20 @@ async function main() {
   const boardToken = signedIn.body.token;
   ok(!!boardToken, 'והתקבל טוקן');
   eq(signedIn.body.user.role, 'classroom_board', 'בתפקיד לוח כיתה');
-  eq(signedIn.body.user.classroom, 'צעירים', 'עם הכיתה שלו');
+  eq(signedIn.body.user.classroom, 'תינוקייה ב', 'עם הכיתה שלו');
 
   head('4. הלוח רואה את הכיתה שלו — ורק אותה');
   const boardView = await request({ path: '/api/nursery/board', token: boardToken });
   eq(boardView.status, 200, 'הלוח נטען');
   eq((boardView.body?.classrooms || []).length, 1, '⚠️ רשימת הכיתות באורך אחת');
-  eq(boardView.body?.classroom?.name, 'צעירים', 'והיא הכיתה שלו');
+  eq(boardView.body?.classroom?.name, 'תינוקייה ב', 'והיא הכיתה שלו');
   ok((boardView.body?.children || []).some(c => c.name === 'יעל כהן'), 'הילדים של הכיתה מוצגים');
   ok(!(boardView.body?.children || []).some(c => c.name === 'איתי לוי'),
     'וילד מכיתה אחרת אינו מוצג');
 
   // Asking for somebody else's room by id must not produce it.
   const askedOther = await request({ path: `/api/nursery/board?classroom=${roomB._id}`, token: boardToken });
-  eq(askedOther.body?.classroom?.name, 'צעירים',
+  eq(askedOther.body?.classroom?.name, 'תינוקייה ב',
     '⚠️ בקשה מפורשת לכיתה אחרת חוזרת לכיתה שלו, לא לשלה');
 
   head('5. הקיר — כל השאר סגור, גם מה שאין עליו שומר תפקיד');
@@ -308,7 +311,7 @@ async function main() {
   const afterMe = meCall.body?.token || boardToken;
   const stillMine = await request({ path: '/api/nursery/board', token: afterMe });
   eq(stillMine.status, 200, 'הלוח עדיין נטען');
-  eq(stillMine.body?.classroom?.name, 'צעירים', '⚠️ ועדיין על הכיתה שלו');
+  eq(stillMine.body?.classroom?.name, 'תינוקייה ב', '⚠️ ועדיין על הכיתה שלו');
   eq((await request({ path: '/api/recruitment', token: afterMe })).status, 403,
     'והקיר עדיין עומד');
 

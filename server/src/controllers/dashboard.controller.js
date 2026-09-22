@@ -91,11 +91,21 @@ async function getStats(req, res, next) {
       .lean();
 
     const classrooms = {};
+    // name → room id for this year's real rooms, so every column the board
+    // draws is also a drop target with an id behind it.
+    const roomIdByName = {};
+    for (const c of await Classroom.find({ is_active: true, academic_year: targetYear, ...branchFilter })
+      .select('_id name').lean()) {
+      if (isRealRoom(c) && !roomIdByName[c.name]) roomIdByName[c.name] = String(c._id);
+    }
     for (const child of children) {
       const groupName = groupNameFor(child, yearRoomIds);
       if (!classrooms[groupName]) classrooms[groupName] = [];
       classrooms[groupName].push({
         id: child._id,
+        // The room the child is in now, and the group's own room, so a drag on
+        // the dashboard can say "from here to there" without a second lookup.
+        classroom_id: child.classroom_id?._id || child.classroom_id || null,
         child_name: child.child_name,
         birth_date: child.birth_date,
         parent_name: child.parent_name,
@@ -167,6 +177,7 @@ async function getStats(req, res, next) {
 
     res.json({
       classrooms,
+      classroomIds: roomIdByName,
       // Said out loud rather than left to be inferred from a group's name: a
       // cohort registered for the year and placed nowhere in it is the exact
       // situation this board existed to make visible and was hiding.

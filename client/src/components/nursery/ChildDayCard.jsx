@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import {
   Card, CardContent, Box, Stack, Typography, IconButton, Chip, TextField, Divider,
+  Alert, Button, Tooltip,
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import HomeIcon from '@mui/icons-material/Home';
+import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import EventBusyIcon from '@mui/icons-material/EventBusy';
 import { FieldButton, ValuePicker, TimePicker } from './pickers';
 
 /**
@@ -94,7 +97,9 @@ function HomeTile({ label, parts }) {
   );
 }
 
-export default function ChildDayCard({ child, options, onPatch, readOnly }) {
+export default function ChildDayCard({
+  child, options, onPatch, readOnly, onExtend, onRelease, onRequestMove,
+}) {
   const log = child.log || {};
   const meals = log.meals || {};
   const sleep = log.sleep || {};
@@ -109,6 +114,23 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
   };
   const close = () => setPicker(null);
   const patch = (path, value) => onPatch(child.id, { [path]: value });
+
+  /**
+   * "העבר לכיתת הפעוטות" — two questions, in this order, on purpose.
+   *
+   * The first is the brake: a move changes what the family pays, and the
+   * button sits an inch from the attendance toggle. The second is the one
+   * only this person can answer — does the family still want the bottle log
+   * — and it is asked NOW, while she is thinking about this child, because
+   * the manager who approves later has no way of knowing.
+   */
+  const askMove = () => {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(`להעביר את ${child.name} לכיתת הפעוטות?\n\nהבקשה תישלח למנהלת הסניף לאישור. המעבר משפיע על התשלום.`)) return;
+    // eslint-disable-next-line no-alert
+    const keep = window.confirm(`להשאיר את ${child.name} בלוח העדכונים של התינוקייה ל-3 החודשים הקרובים?\n\nכן — ההורים ימשיכו לקבל עדכונים מכאן.\nביטול — הילד/ה יוסר/תוסר מהלוח עם המעבר.`);
+    onRequestMove?.(child.id, keep);
+  };
 
   const present = log.attendance === 'הגיע';
   const absent = log.attendance === 'חסר';
@@ -227,13 +249,65 @@ export default function ChildDayCard({ child, options, onPatch, readOnly }) {
             {present ? <CheckCircleIcon /> : <CancelIcon />}
           </IconButton>
           <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-            <Typography variant="subtitle1" fontWeight={700} noWrap>{child.name}</Typography>
+            <Stack direction="row" alignItems="center" spacing={0.75} flexWrap="wrap" useFlexGap>
+              <Typography variant="subtitle1" fontWeight={700} noWrap>{child.name}</Typography>
+              {/* A child who moved up and is carried here for a while. The mark
+                  says so and names their real room, because a card that looks
+                  like every other card is how a פעוט gets a תינוקייה portion. */}
+              {child.carried && (
+                <Tooltip title={`עבר/ה ל${child.own_classroom || 'פעוטות'}. נשאר/ת בלוח עד ${child.board_until || '—'}`}>
+                  <Chip size="small" color="secondary" variant="outlined" label="פעוט/ה" sx={{ height: 20, fontSize: '0.7rem' }} />
+                </Tooltip>
+              )}
+              {child.pending_move && (
+                <Tooltip title={`בקשת מעבר ל${child.pending_move.to} ממתינה לאישור מנהלת הסניף`}>
+                  <Chip size="small" color="warning" variant="outlined" label="מעבר ממתין" sx={{ height: 20, fontSize: '0.7rem' }} />
+                </Tooltip>
+              )}
+            </Stack>
             {age(child.birth_date) && (
               <Typography variant="caption" color="text.secondary">{age(child.birth_date)}</Typography>
             )}
           </Box>
+          {/* Only for the room's OWN children: a carried פעוט has already moved.
+              The button asks; the branch manager answers, because the room
+              decides the fee. */}
+          {!readOnly && !child.carried && !child.pending_move && onRequestMove && (
+            <Tooltip title="העבר לכיתת הפעוטות">
+              <IconButton size="small" onClick={() => askMove()} aria-label="העבר לכיתת הפעוטות">
+                <TrendingUpIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
         </Stack>
         {conflictNote('attendance')}
+
+        {/* The last three days of a carried child's stay: ask, in place, where
+            the people who know the child are. כן = one more month from
+            today; לא = off the board at the end. Not a push notification — the
+            board IS where the גננות are, and a question nobody is standing in
+            front of is a question that gets answered by the calendar. */}
+        {child.carried && child.board_expiring && !readOnly && (
+          <Alert
+            severity="warning" icon={<EventBusyIcon fontSize="inherit" />}
+            sx={{ mb: 1.5, py: 0.5, '& .MuiAlert-message': { width: '100%' } }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+              האם להשאיר את {child.name} בלוח העדכונים?
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
+              השהייה בלוח מסתיימת ב-{child.board_until}.
+            </Typography>
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="contained" color="warning" onClick={() => onExtend?.(child.id)}>
+                כן, עוד חודש
+              </Button>
+              <Button size="small" variant="outlined" color="inherit" onClick={() => onRelease?.(child.id)}>
+                לא, להסיר
+              </Button>
+            </Stack>
+          </Alert>
+        )}
 
         {(home.wake_time || home.meal_time || home.meal_amount || home.parent_note
           || homeConflicts.length > 0) && (
