@@ -30,6 +30,9 @@ const { MATCH_THRESHOLD } = require('./constants');
  */
 async function candidateChildIds({ DailyLog, Child }, { classroom_id, date }) {
   if (!classroom_id || !date) return [];
+  // Required late so this file stays loadable without the model layer, which
+  // is what lets face-matcher.test.js run as pure logic.
+  const consent = require('../faceConsent.service');
 
   const logs = await DailyLog.find({
     classroom_id,
@@ -37,11 +40,16 @@ async function candidateChildIds({ DailyLog, Child }, { classroom_id, date }) {
     attendance: { $ne: 'חסר' },     // present, or not yet marked either way
   }).select('child_id').lean();
 
-  if (logs.length) return logs.map((l) => l.child_id);
+  const present = logs.length
+    ? logs.map((l) => l.child_id)
+    : (await Child.find({ classroom_id, is_active: { $ne: false } })
+      .select('_id').lean()).map((c) => c._id);
 
-  const roster = await Child.find({ classroom_id, is_active: { $ne: false } })
-    .select('_id').lean();
-  return roster.map((c) => c._id);
+  // The boundary of the whole feature. A child whose parents did not tick the
+  // box is not a candidate — no template is made for them, nothing is matched
+  // against them, and their gallery works exactly like everyone else's minus
+  // the automatic filter.
+  return consent.filterConsenting(present);
 }
 
 /** Cosine of two unit-length vectors. Plain arrays from Mongo, typed from ONNX. */

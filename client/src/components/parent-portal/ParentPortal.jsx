@@ -15,6 +15,7 @@ import DeleteAccountRequest from '../shared/DeleteAccountRequest';
 import { DISPLAY } from '../../theme/parentTheme';
 import useParentColorMode from '../../theme/useParentColorMode';
 import ChildDetails from './ChildDetails';
+import FaceConsentDialog from './FaceConsentDialog';
 
 /**
  * What a parent sees after signing in.
@@ -107,6 +108,9 @@ export default function ParentPortal() {
 
   return (
     <ThemeProvider theme={theme}>
+      {/* ההסכמה לזיהוי פנים. נשאלת פעם אחת, לא חוסמת שום דבר חוץ מעצמה,
+          ומופיעה רק כשהנוסח באמת השתנה. */}
+      <FaceConsentDialog />
       {/* Re-applied under THIS theme. The one at the app root was built with
           the staff palette, so without this the page keeps the management
           system's cold grey behind the content — visible the moment anybody

@@ -45,6 +45,12 @@ router.post('/data-deletion/me', dataDeletion.requestParent);
 // Every one of these resolves the parent's children afresh and refuses an id
 // that is not among them — see parentPortal.controller.
 const portal = require('../controllers/parentPortal.controller');
+// ההסכמה לזיהוי פנים. לא חוסמת שום דבר — מי שלא מסמן רואה את כל הגלריה,
+// פשוט בלי הסינון האוטומטי. זו כל ההגנה: הסכמה שנכפתה כתנאי כניסה אינה
+// נחשבת חופשית כשמדובר במידע ביומטרי של קטין.
+router.get('/face-consent', portal.getFaceConsent);
+router.post('/face-consent', portal.setFaceConsent);
+
 router.get('/editable-fields', portal.editableFields);
 router.get('/children/:childId', portal.childDetails);
 router.patch('/children/:childId', portal.updateChild);

@@ -173,6 +173,10 @@ async function main() {
     name: 'תינוקייה הרצליה', branch_id: other._id, academic_year: YEAR, is_active: true,
   });
 
+  // Consent is the boundary of the whole feature, so every child here carries
+  // a parent id and the parent accounts below decide who may be recognised.
+  const PARENT_ID = { 'F-1': '300000001', 'F-2': '300000002', 'F-3': '300000003', 'F-4': '300000004' };
+
   const mkChild = async (name, roomDoc, branch, uid) => {
     const reg = await Registration.create({
       unique_id: uid,
@@ -192,6 +196,7 @@ async function main() {
       branch_id: branch._id,
       academic_year: YEAR,
       is_active: true,
+      parent_id_number: PARENT_ID[uid],
     });
   };
 
@@ -211,6 +216,26 @@ async function main() {
   });
   const shira = await login('שירה גננת', '910000001');
   const tamar = await login('תמר גננת', '910000002');
+
+  // דני's family agreed to face recognition; מאיה's did not. Both children are
+  // in the room, both are photographed, both appear in the classroom gallery —
+  // the only difference is that nothing may be learned about מאיה.
+  const { ParentAccount } = require('../src/models');
+  await ParentAccount.create({
+    id_number: PARENT_ID['F-1'],
+    full_name: 'הורה של דני',
+    face_consent: { given: true, at: new Date(), version: '2026-09' },
+  });
+  await ParentAccount.create({
+    id_number: PARENT_ID['F-2'],
+    full_name: 'הורה של מאיה',
+    face_consent: { given: false },
+  });
+  await ParentAccount.create({
+    id_number: PARENT_ID['F-4'],
+    full_name: 'הורה של רוני',
+    face_consent: { given: true, at: new Date(), version: '2026-09' },
+  });
 
   const DATE = '2026-09-22';
   // The daily board: דני and מאיה came in, יונתן did not.
@@ -267,7 +292,8 @@ async function main() {
   });
   eq(cand.status, 200, 'רשימת המועמדים נטענת');
   const names = (cand.body.children || []).map((c) => c.name);
-  ok(names.includes('דני לוי') && names.includes('מאיה כהן'), 'שני הנוכחים מוצעים');
+  ok(names.includes('דני לוי'), 'מי שההורים שלו הסכימו — מוצע');
+  ok(!names.includes('מאיה כהן'), 'מי שההורים שלו לא הסכימו — לא מוצע כלל');
   ok(!names.includes('יונתן אבן'), 'מי שסומן חסר — לא מוצע');
   ok(!names.includes('רוני גל'), 'ילד מסניף אחר — בוודאי שלא');
   ok(names.every(Boolean), 'לכל כפתור יש שם');
@@ -283,6 +309,7 @@ async function main() {
   eq(named.status, 200, 'השם נשמר');
   eq(named.body.references, 1, 'נוצרה טביעת ייחוס אחת');
   ok(named.body.taught, 'הפרצוף לימד את המערכת');
+  ok(named.body.consent, 'ההסכמה נבדקה ונמצאה');
 
   const refs = await ChildFaceReference.find({ child_id: dani._id }).lean();
   eq(refs.length, 1, 'הטביעה קיימת במסד');
@@ -330,7 +357,27 @@ async function main() {
   eq(crossChild.status, 403, 'הדבקת ילד מסניף אחר על תמונה שלי נדחית');
 
   /* ---------------------------------------------------------------- */
-  head('7. פרצוף שהטביעה שלו נמחקה אינו מוצע — אין ממה ללמוד');
+  head('7. ילד ללא הסכמת הורים — אפשר לתייג, אסור ללמוד');
+  const noConsentPhoto = await mkPhoto(room, ks, [
+    { bbox: [5, 5, 95, 95], det_score: 0.93, child_id: null, embedding: axis(7) },
+  ]);
+  const taggedNoConsent = await request({
+    method: 'POST',
+    path: `/api/face-tagging/${noConsentPhoto._id}/0`,
+    token: shira,
+    body: { child_id: String(maya._id) },
+  });
+  eq(taggedNoConsent.status, 200, 'התיוג עצמו מתקבל — זו הערה של אדם על תמונה');
+  eq(taggedNoConsent.body.consent, false, 'אבל ההסכמה חסרה');
+  ok(!taggedNoConsent.body.taught, 'ולכן לא נוצרה טביעה');
+  eq(await ChildFaceReference.countDocuments({ child_id: maya._id }), 0,
+    'אין שום מידע ביומטרי על הילדה הזו');
+  const mayaPhoto = await Photo.findById(noConsentPhoto._id).lean();
+  ok(mayaPhoto.child_ids.map(String).includes(String(maya._id)),
+    'והתמונה כן מגיעה למשפחה שלה');
+
+  /* ---------------------------------------------------------------- */
+  head('8. פרצוף שהטביעה שלו נמחקה אינו מוצע — אין ממה ללמוד');
   const stale = await mkPhoto(room, ks, [
     { bbox: [0, 0, 80, 80], det_score: 0.9, child_id: null },
   ]);

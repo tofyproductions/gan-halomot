@@ -37,6 +37,25 @@ const parentAccountSchema = new mongoose.Schema({
 
   full_name: { type: String, default: '' },
 
+  /**
+   * הסכמה לזיהוי פנים — תיבה נפרדת, ובכוונה לא תנאי כניסה.
+   *
+   * מדיניות הפרטיות היא חובה; זיהוי הפנים הוא לא. הורה שלא מסמן נכנס
+   * לאפליקציה כרגיל ורואה את כל גלריית הכיתה — פשוט בלי הסינון האוטומטי.
+   *
+   * ההפרדה הזו היא כל ההגנה המשפטית: הסכמה שנכפתה כתנאי כניסה אינה נחשבת
+   * חופשית כשמדובר במידע ביומטרי של קטין, והורה אחד שמתלונן מספיק. המחיר
+   * הוא תיבת סימון אחת.
+   *
+   * `version` נשמר כי המסמך ישתנה, ו"הוא הסכים" חייב להיות ניתן להוכחה מול
+   * הנוסח שהוא באמת קרא.
+   */
+  face_consent: {
+    given: { type: Boolean, default: false },
+    at: { type: Date, default: null },
+    version: { type: String, default: '' },
+  },
+
   // bcrypt, never a reversible form. Empty until the parent activates.
   password_hash: { type: String, default: '' },
   // False until a code has been verified AND a password chosen. While false

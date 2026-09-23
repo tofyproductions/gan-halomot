@@ -936,6 +936,42 @@ async function childPhotos(req, res) {
  *                   own gallery at once, and teaches nothing until a member of
  *                   staff agrees.
  */
+/**
+ * הסכמה לזיהוי פנים — קריאה וכתיבה.
+ *
+ * תיבה נפרדת ובכוונה לא תנאי כניסה: מדיניות הפרטיות היא חובה, זיהוי הפנים
+ * הוא לא. מי שלא מסמן נכנס כרגיל ורואה את כל גלריית הכיתה, פשוט בלי הסינון.
+ *
+ * הגרסה נשמרת כי המסמך ישתנה, ו"הוא הסכים" חייב להיות ניתן להוכחה מול הנוסח
+ * שהוא באמת קרא.
+ */
+const CONSENT_VERSION = '2026-09';
+
+async function getFaceConsent(req, res) {
+  const account = await ParentAccount.findById(req.parent.pid).select('face_consent').lean();
+  if (!account) return res.status(404).json({ error: 'לא נמצא' });
+  const c = account.face_consent || {};
+  return res.json({
+    version: CONSENT_VERSION,
+    given: Boolean(c.given),
+    at: c.at || null,
+    // נשאל מחדש רק כשהנוסח באמת השתנה, לא בכל כניסה.
+    needs_asking: !c.at || (c.version !== CONSENT_VERSION),
+  });
+}
+
+async function setFaceConsent(req, res) {
+  const given = Boolean(req.body?.given);
+  await ParentAccount.updateOne({ _id: req.parent.pid }, {
+    $set: {
+      'face_consent.given': given,
+      'face_consent.at': new Date(),
+      'face_consent.version': CONSENT_VERSION,
+    },
+  });
+  return res.json({ ok: true, given, version: CONSENT_VERSION });
+}
+
 async function decidePhotoFace(req, res) {
   const own = await loadOwnChild(req);
   if (!own) return res.status(404).json({ error: 'לא נמצא' });
@@ -1270,6 +1306,8 @@ async function childGantt(req, res) {
 
 module.exports = {
   decidePhotoFace,
+  getFaceConsent,
+  setFaceConsent,
   sharedDocumentFile,
   // Exported for controllers/parentPayments, which must apply the same
   // ownership test: the child id in the URL is only ever a lookup, and the

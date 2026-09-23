@@ -5,6 +5,7 @@ const {
 const storage = require('./storage.service');
 const { candidateChildIds, expandTwins } = require('./face/matcher');
 const { REFERENCES_PER_CHILD } = require('./face/constants');
+const consent = require('./faceConsent.service');
 
 /**
  * The teachers' tagging queue — the screen the whole feature lives or dies on.
@@ -202,7 +203,11 @@ async function nameFace({ photoId, faceIndex, childId, user }) {
 
   // The embedding survives only for EMBEDDING_TTL_DAYS, and a face whose
   // numbers are already gone can still be tagged — it just cannot teach.
-  if (face.embedding && face.embedding.length) {
+  // Neither can one whose family did not agree to face recognition: the tag is
+  // a person's note about a photograph, the template is biometric data about a
+  // minor, and only the second needs permission.
+  const mayTeach = await consent.mayStoreReference(childId);
+  if (mayTeach && face.embedding && face.embedding.length) {
     await ChildFaceReference.create({
       child_id: childId,
       embedding: face.embedding,
@@ -218,10 +223,11 @@ async function nameFace({ photoId, faceIndex, childId, user }) {
   return {
     ok: true,
     references,
+    consent: mayTeach,
     // Worth surfacing: a child at the ceiling needs no more naming, which is
     // the signal the bootstrap week is finished for them.
     at_ceiling: references >= REFERENCES_PER_CHILD,
-    taught: Boolean(face.embedding && face.embedding.length),
+    taught: Boolean(mayTeach && face.embedding && face.embedding.length),
   };
 }
 
@@ -309,7 +315,8 @@ async function resolveParentClaim({ photoId, faceIndex, agree }) {
   face.decided_by = 'staff';
   await photo.save();
 
-  if (face.embedding && face.embedding.length) {
+  const mayTeachClaim = await consent.mayStoreReference(childId);
+  if (mayTeachClaim && face.embedding && face.embedding.length) {
     await ChildFaceReference.create({
       child_id: childId,
       embedding: face.embedding,
@@ -320,7 +327,11 @@ async function resolveParentClaim({ photoId, faceIndex, agree }) {
     });
     await ChildFaceReference.trim(childId);
   }
-  return { ok: true, agreed: true, taught: Boolean(face.embedding && face.embedding.length) };
+  return {
+    ok: true,
+    agreed: true,
+    taught: Boolean(mayTeachClaim && face.embedding && face.embedding.length),
+  };
 }
 
 /** How much is left, for the teacher and for the branch manager. */
