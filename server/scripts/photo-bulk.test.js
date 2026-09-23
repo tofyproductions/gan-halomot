@@ -329,7 +329,68 @@ async function main() {
   eq(r.body.deleted, 0, 'לא נמחק כלום');
   ok(await Photo.findById(ids[2]), 'והתמונה עדיין שם');
 
-  console.log('\n8. בקשה ריקה נדחית');
+  /**
+   * תיוג מהגלריה אומר "הילד בתמונה", לא "זה הפרצוף שלו", ולכן הוא בדרך כלל
+   * לא מלמד כלום — וזה הפתיע בפועל: עשר תמונות מתויגות לילד, שמונה טביעות.
+   * המקרה היחיד שבו אין עמימות הוא פרצוף אחד פתוח וילד אחד שנוסף.
+   */
+  console.log('\n8. בחירה מרובה מלמדת רק כשאין שום עמימות');
+  const { ParentAccount, ChildFaceReference } = require('../src/models');
+  await ParentAccount.create({
+    id_number: '930000001', full_name: 'הורה של דני',
+    face_consent: { given: true, at: new Date(), version: '2026-09' },
+  });
+  await Child.updateOne({ _id: dani._id }, { $set: { parent_id_number: '930000001' } });
+
+  // וקטור יחידה — התוכן לא משנה כאן, רק שהוא קיים ונשמר כמו שהוא.
+  const vec = (k) => Array.from({ length: 512 }, (_, i) => (i === k ? 1 : 0));
+  const withFaces = async (classroomDoc, faces) => {
+    const [id] = await upload(classroomDoc, 1);
+    await Photo.updateOne({ _id: id }, {
+      $set: { face_scan_status: 'done', faces },
+    });
+    return id;
+  };
+  const openFace = (k) => ({
+    bbox: [10, 10, 60, 60], det_score: 0.9, child_id: null, embedding: vec(k),
+  });
+
+  const one = await withFaces(room, [openFace(0)]);
+  r = await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [one], child_ids: [String(dani._id)],
+  });
+  eq(r.body.taught, 1, 'פרצוף אחד וילד אחד — נוצרה טביעה');
+  let after = await Photo.findById(one).select('faces child_ids').lean();
+  eq(String(after.faces[0].child_id), String(dani._id), 'והפרצוף עצמו נושא את השם');
+  eq(after.faces[0].decided_by, 'staff', 'כהחלטת אדם');
+  eq(await ChildFaceReference.countDocuments({ child_id: dani._id }), 1, 'טביעה אחת בדיוק');
+
+  const two = await withFaces(room, [openFace(1), openFace(2)]);
+  r = await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [two], child_ids: [String(dani._id)],
+  });
+  eq(r.body.taught, 0, 'שני פרצופים פתוחים — לא ידוע מי מהם, לא לומדים');
+  after = await Photo.findById(two).select('faces child_ids').lean();
+  ok(after.faces.every((f) => !f.child_id), 'ואף פרצוף לא קיבל שם');
+  eq(after.child_ids.length, 1, 'אבל התמונה כן מסומנת — זו הערה של אדם');
+
+  const twoKids = await withFaces(room, [openFace(3)]);
+  r = await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [twoKids], child_ids: [String(dani._id), String(maya._id)],
+  });
+  eq(r.body.taught, 0, 'שני ילדים על פרצוף אחד — עמום, לא לומדים');
+
+  // מאיה בלי הסכמת הורים: התיוג נשמר, הטביעה לא נוצרת. אותו כלל כמו ב"מי זה?".
+  const noConsent = await withFaces(room, [openFace(4)]);
+  r = await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [noConsent], child_ids: [String(maya._id)],
+  });
+  eq(r.body.taught, 0, 'בלי הסכמה — לא נוצרת טביעה');
+  after = await Photo.findById(noConsent).select('faces child_ids').lean();
+  eq(String(after.faces[0].child_id), String(maya._id), 'אבל הפרצוף כן מסומן');
+  eq(await ChildFaceReference.countDocuments({ child_id: maya._id }), 0, 'ואין שום מידע ביומטרי עליה');
+
+  console.log('\n9. בקשה ריקה נדחית');
   r = await postJson('/api/photos/bulk-delete', token, { photo_ids: [] });
   eq(r.status, 400, 'רשימה ריקה היא שגיאה, לא "מחק הכל"');
 

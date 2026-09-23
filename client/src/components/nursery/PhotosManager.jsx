@@ -129,7 +129,12 @@ export default function PhotosManager() {
         child_ids: bulkChildIds,
         mode: bulkMode,
       });
-      setToast(`${data.changed} ${data.changed === 1 ? 'תמונה סומנה' : 'תמונות סומנו'}`);
+      // רוב התיוגים מהגלריה לא מלמדים כלום — רק אלה שבהם נשאר פרצוף אחד
+      // בלי שם. שווה להגיד כשזה כן קרה.
+      const learned = data.taught
+        ? ` · ${data.taught} ${data.taught === 1 ? 'לימדה' : 'לימדו'} את הזיהוי`
+        : '';
+      setToast(`${data.changed} ${data.changed === 1 ? 'תמונה סומנה' : 'תמונות סומנו'}${learned}`);
       setBulkTagOpen(false);
       setBulkChildIds([]);
       clearSelection();

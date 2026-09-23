@@ -5,6 +5,7 @@ const {
 const storage = require('../services/storage.service');
 const photos = require('../services/photo.service');
 const nursery = require('../services/nursery.service');
+const tagging = require('../services/faceTagging.service');
 
 /**
  * The gan's photographs, from the staff side.
@@ -300,6 +301,7 @@ async function bulkTag(req, res) {
   const photos_ = await Photo.find({ _id: { $in: ids } });
   let changed = 0;
   let refused = 0;
+  let taught = 0;
 
   for (const photo of photos_) {
     // ההרשאה נבדקת לכל תמונה בנפרד. בחירה מרובה היא בדיוק המקום שבו קל
@@ -313,16 +315,46 @@ async function bulkTag(req, res) {
     const allowed = new Set(roster.map(c => String(c._id)));
     const incoming = childIds.filter(id => allowed.has(id));
 
+    const before = photo.child_ids.map(String);
     const next = mode === 'replace'
       ? incoming
-      : [...new Set([...photo.child_ids.map(String), ...incoming])];
+      : [...new Set([...before, ...incoming])];
 
     photo.child_ids = next.slice(0, 40);
     await photo.save();
     changed += 1;
+
+    /**
+     * המקרה היחיד שבו בחירה מרובה יכולה גם ללמד.
+     *
+     * תיוג מהגלריה אומר "הילד הזה בתמונה" ולא "זה הפרצוף שלו", ובתמונה עם
+     * ארבעה אנשים אין דרך לדעת על מי מדובר — ולכן היא לא יוצרת טביעה ולא
+     * מלמדת כלום. זה הפתיע: עשר תמונות היו מתויגות לילד ורק שמונה לימדו.
+     *
+     * אבל כשנשאר פרצוף אחד בלי שם ונוסף ילד אחד, אין שום עמימות: הפרצוף הזה
+     * הוא הילד הזה. אז במקרה הזה בלבד זה עובר דרך אותו מסלול כמו "מי זה?",
+     * עם אותה בדיקת הסכמה ואותה תקרה. שני פרצופים או שני ילדים — לא נוגעים.
+     */
+    const added = incoming.filter((id) => !before.includes(id));
+    const openFaces = (photo.faces || [])
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => !f.child_id && !f.not_a_child);
+    const onOtherFace = added.length === 1
+      && (photo.faces || []).some((f) => String(f.child_id || '') === added[0]);
+
+    if (added.length === 1 && openFaces.length === 1 && !onOtherFace) {
+      const out = await tagging.nameFace({
+        photoId: photo._id,
+        faceIndex: openFaces[0].i,
+        childId: added[0],
+      });
+      if (out.taught) taught += 1;
+    }
   }
 
-  return res.json({ ok: true, changed, refused });
+  return res.json({
+    ok: true, changed, refused, taught,
+  });
 }
 
 async function bulkRemove(req, res) {
