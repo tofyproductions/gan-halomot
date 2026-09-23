@@ -7,6 +7,7 @@ const parentVisibility = require('../services/parentVisibility');
 const nursery = require('../services/nursery.service');
 const storage = require('../services/storage.service');
 const photoService = require('../services/photo.service');
+const parentFaces = require('../services/parentFaces.service');
 const giftService = require('../services/gift.service');
 const { findParent, contactFromChild, normalizeIdNumber } = require('../services/parentDirectory.service');
 const { EDITABLE, diffEditable, recordChange } = require('../services/parentChanges.service');
@@ -874,23 +875,93 @@ async function childPhotos(req, res) {
       : [],
   ]);
 
-  const shape = (rows) => rows.map(r => ({
-    id: r._id,
-    date: r.date,
-    caption: r.caption || '',
-    source: r.source,
-    width: r.width,
-    height: r.height,
-    url: r.url,
-    thumb_url: r.thumb_url,
-  }));
+  // What this parent has asked not to see. A preference, not a correction —
+  // the tag stays right for everyone else and nothing is learned from it.
+  const hidden = await parentFaces.hiddenIds({
+    parentId: own.account._id, childIds,
+  });
+
+  const mineSet = new Set(childIds.map(String));
+
+  const shape = (rows, { withFaces = false } = {}) => rows
+    .filter(r => !hidden.has(String(r._id)))
+    .map(r => {
+      const faces = r.faces || [];
+      // Which faces in this photograph are THIS family's, so the gallery can
+      // offer "that is not my child" on the right one. A correction aimed at a
+      // whole photograph teaches nothing when five children are in it.
+      const myFaces = faces
+        .map((f, index) => ({ index, awaiting_staff: !!f.awaiting_staff, child_id: f.child_id }))
+        .filter(f => mineSet.has(String(f.child_id)))
+        .map(({ index, awaiting_staff }) => ({ index, awaiting_staff }));
+
+      return {
+        id: r._id,
+        date: r.date,
+        caption: r.caption || '',
+        source: r.source,
+        width: r.width,
+        height: r.height,
+        url: r.url,
+        thumb_url: r.thumb_url,
+        my_faces: myFaces,
+        // Positions only, and only for their own child or for faces nobody
+        // has claimed. Where every OTHER face belongs is not theirs to know:
+        // the photograph already shows the children, and naming them would
+        // turn a gallery into a directory of other people's families.
+        ...(withFaces ? { faces: parentFaces.faceBoxes(r, childIds) } : {}),
+      };
+    });
 
   return res.json({
     storage_ready: true,
     window_days: CLASSROOM_WINDOW_DAYS,
     mine: shape(await photoService.withUrls(mine)),
-    classroom: shape(await photoService.withUrls(classroom)),
+    classroom: shape(await photoService.withUrls(classroom), { withFaces: true }),
   });
+}
+
+/**
+ * A parent's three answers about who is in a photograph.
+ *
+ * POST .../photos/:photoId/faces  { action, face_index }
+ *
+ *   not_my_child  — a CORRECTION. The tag comes off for everyone, and the
+ *                   system learns from it.
+ *   hide / unhide — a PREFERENCE. The tag is right; they just do not want the
+ *                   photograph. Nothing is learned. Without the split, a
+ *                   parent hiding a frame where their child is crying would
+ *                   teach the recogniser that their child is not their child.
+ *   is_my_child   — an ADDITION from the classroom gallery. Counts for their
+ *                   own gallery at once, and teaches nothing until a member of
+ *                   staff agrees.
+ */
+async function decidePhotoFace(req, res) {
+  const own = await loadOwnChild(req);
+  if (!own) return res.status(404).json({ error: 'לא נמצא' });
+
+  const childIds = own.group.years.map(y => y._id);
+  const { photoId } = req.params;
+  const { action } = req.body || {};
+  const faceIndex = Number(req.body?.face_index);
+
+  const ctx = {
+    parentId: own.account._id,
+    childId: own.child._id,
+    childIds,
+    photoId,
+    faceIndex,
+  };
+
+  let result;
+  if (action === 'hide') result = await parentFaces.hide(ctx);
+  else if (action === 'unhide') result = await parentFaces.unhide(ctx);
+  else if (action === 'not_my_child') result = await parentFaces.notMyChild(ctx);
+  else if (action === 'is_my_child') result = await parentFaces.isMyChild(ctx);
+  else return res.status(400).json({ error: 'פעולה לא מוכרת' });
+
+  if (!result.ok) return res.status(400).json({ error: result.reason });
+  return res.json(result);
 }
 
 /**
@@ -1198,6 +1269,7 @@ async function childGantt(req, res) {
 }
 
 module.exports = {
+  decidePhotoFace,
   sharedDocumentFile,
   // Exported for controllers/parentPayments, which must apply the same
   // ownership test: the child id in the URL is only ever a lookup, and the

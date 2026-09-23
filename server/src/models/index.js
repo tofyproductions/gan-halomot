@@ -99,6 +99,7 @@ const DailyMenu = require('./DailyMenu');
 const ClassroomDay = require('./ClassroomDay');
 const Photo = require('./Photo');
 const ChildFaceReference = require('./ChildFaceReference');
+const ParentPhotoHidden = require('./ParentPhotoHidden');
 const GiftCampaign = require('./GiftCampaign');
 const GiftSelection = require('./GiftSelection');
 const Candidate = require('./Candidate');
@@ -201,6 +202,7 @@ const real = {
   ClassroomDay,
   Photo,
   ChildFaceReference,
+  ParentPhotoHidden,
   GiftCampaign,
   GiftSelection,
   Candidate,

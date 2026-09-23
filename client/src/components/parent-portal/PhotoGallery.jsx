@@ -5,6 +5,8 @@ import {
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
+import PersonOffIcon from '@mui/icons-material/PersonOff';
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
 
 /**
@@ -87,6 +89,7 @@ export default function PhotoGallery({ childId, childName }) {
   const [open, setOpen] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState('');
+  const [busy, setBusy] = useState(false);
   const fileInput = useRef(null);
 
   const load = async () => {
@@ -107,6 +110,35 @@ export default function PhotoGallery({ childId, childName }) {
     e.target.value = '';
     if (!files.length) return;
     send(files);
+  };
+
+  /**
+   * ההורה הוא הסמכות על מי הילד שלו.
+   *
+   * שתי פעולות שנראות דומות ואסור שיהיו אותו כפתור: "זה לא הילד שלי" הוא
+   * תיקון — התג יורד לכולם והמערכת לומדת ממנו. "אל תציג לי את זה" הוא העדפה
+   * — התמונה נכונה, פשוט לא רוצים אותה, ואסור ללמוד מזה כלום. אם נאחד אותם,
+   * הורה שמסתיר תמונה שהילד שלו בוכה בה מלמד את המערכת שהילד שלו הוא לא
+   * הילד שלו, ואחרי עשר כאלה הגלריה של המשפחה תפסיק לעבוד.
+   */
+  const decide = async (photo, action, faceIndex) => {
+    setBusy(true);
+    try {
+      await parentApi.post(`/children/${childId}/photos/${photo.id}/faces`, {
+        action, face_index: faceIndex,
+      });
+      setToast({
+        not_my_child: 'תודה, הסימון הוסר',
+        hide: 'התמונה לא תוצג לכם יותר',
+        is_my_child: 'סומן. הגן יאשר, ומאז נזהה לבד',
+      }[action] || 'נשמר');
+      setOpen(null);
+      await load();
+    } catch (err) {
+      setError(parentApiError(err, 'הפעולה לא הצליחה'));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const send = async (files) => {
@@ -202,18 +234,94 @@ export default function PhotoGallery({ childId, childName }) {
             <CloseIcon />
           </IconButton>
           {open && (
-            <Box
-              component="img"
-              src={open.url}
-              alt={open.caption || ''}
-              sx={{ width: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }}
-            />
+            <Box sx={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+              <Box
+                component="img"
+                src={open.url}
+                alt={open.caption || ''}
+                sx={{ width: '100%', maxHeight: '85vh', objectFit: 'contain', display: 'block' }}
+              />
+              {/* הפרצופים שאף אחד לא סימן, כמסגרות על התמונה עצמה. מיקום
+                  באחוזים מתוך מידות התמונה, כך שזה מחזיק בכל גודל מסך.
+                  "פרצוף 1" ו"פרצוף 2" לא אומרים כלום להורה; מסגרת על הפנים
+                  אומרת הכול. */}
+              {!(open.my_faces || []).length
+                && (open.faces || []).filter(f => !f.taken).map(f => (
+                  <Box
+                    key={f.index}
+                    role="button"
+                    aria-label={`סימון ${childName} כאן`}
+                    onClick={() => !busy && decide(open, 'is_my_child', f.index)}
+                    sx={{
+                      position: 'absolute',
+                      insetInlineStart: `${(100 * f.bbox[0]) / (open.width || 1)}%`,
+                      top: `${(100 * f.bbox[1]) / (open.height || 1)}%`,
+                      width: `${(100 * (f.bbox[2] - f.bbox[0])) / (open.width || 1)}%`,
+                      height: `${(100 * (f.bbox[3] - f.bbox[1])) / (open.height || 1)}%`,
+                      border: '3px solid',
+                      borderColor: 'primary.main',
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      boxShadow: '0 0 0 9999px rgba(0,0,0,0)',
+                      transition: 'background-color .15s',
+                      '&:hover': { bgcolor: 'rgba(255,255,255,0.18)' },
+                    }}
+                  />
+                ))}
+            </Box>
           )}
         </Box>
         {open?.caption && (
           <Box sx={{ p: 1.5 }}>
             <Typography variant="body2">{open.caption}</Typography>
           </Box>
+        )}
+
+        {/* תמונה שהילד שלכם מסומן בה — שני הכפתורים, ובמכוון נפרדים. */}
+        {open && (open.my_faces || []).length > 0 && (
+          <Stack spacing={1} sx={{ p: 1.5 }}>
+            {open.my_faces.some(f => f.awaiting_staff) && (
+              <Typography variant="caption" color="text.secondary">
+                סימנתם את {childName} בתמונה הזו. ממתין לאישור הגן.
+              </Typography>
+            )}
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button
+                size="small"
+                color="inherit"
+                disabled={busy}
+                startIcon={<PersonOffIcon />}
+                onClick={() => decide(open, 'not_my_child', open.my_faces[0].index)}
+              >
+                זה לא {childName}
+              </Button>
+              <Button
+                size="small"
+                color="inherit"
+                disabled={busy}
+                startIcon={<VisibilityOffIcon />}
+                onClick={() => decide(open, 'hide')}
+              >
+                אל תציגו לי את זה
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary">
+              &quot;זה לא {childName}&quot; מתקן את הזיהוי בגן.
+              &quot;אל תציגו לי&quot; מסתיר רק אצלכם ולא משנה כלום אחר.
+            </Typography>
+          </Stack>
+        )}
+
+        {/* תמונת כיתה שהילד שלכם לא מסומן בה — אפשר להצביע עליו. */}
+        {open && !(open.my_faces || []).length && (open.faces || []).length > 0 && (
+          <Stack spacing={1} sx={{ p: 1.5 }}>
+            <Typography variant="body2">
+              {childName} בתמונה הזו? סמנו וניזכר לבד בפעם הבאה.
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              לחצו על המסגרת שסביב הפנים שלו/ה בתמונה למעלה.
+            </Typography>
+          </Stack>
         )}
       </Dialog>
 

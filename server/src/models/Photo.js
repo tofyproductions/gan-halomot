@@ -100,6 +100,18 @@ const photoSchema = new mongoose.Schema({
       // not offer it again tomorrow.
       not_a_child: { type: Boolean, default: false },
       /**
+       * A parent said this is their child, and no member of staff has agreed
+       * yet.
+       *
+       * The tag counts immediately — they get the photograph in their gallery,
+       * which is what they asked for and costs nobody anything, since they can
+       * already see it in the classroom gallery. What it does NOT do while
+       * this is true is become a reference. A parent tapping the wrong face
+       * would otherwise teach the system another family's child as their own,
+       * systematically, and break recognition for both families.
+       */
+      awaiting_staff: { type: Boolean, default: false },
+      /**
        * The embedding, kept only briefly.
        *
        * This is biometric data and the system's whole posture is to hold as

@@ -240,6 +240,89 @@ async function markNotAChild({ photoId, faceIndex }) {
   return { ok: res.matchedCount > 0 };
 }
 
+/**
+ * Faces a PARENT claimed, waiting for a member of staff to agree.
+ *
+ * A parent's tag counts for their own gallery straight away — they can already
+ * see the photograph in the classroom gallery, so nothing is revealed by
+ * letting them keep it. What it must not do unchecked is become a reference:
+ * a parent who taps the wrong face would teach the system another family's
+ * child as their own, systematically, and break recognition for both families.
+ *
+ * So it waits here. Confirming turns it into a reference like any staff tag;
+ * rejecting takes it off.
+ */
+async function parentClaims({ classroomIds, limit = 20 }) {
+  const rows = await Photo.aggregate([
+    { $match: { classroom_id: { $in: classroomIds }, source: 'staff' } },
+    { $unwind: { path: '$faces', includeArrayIndex: 'face_index' } },
+    { $match: { 'faces.awaiting_staff': true, 'faces.child_id': { $ne: null } } },
+    { $sort: { date: -1 } },
+    { $limit: limit },
+    {
+      $project: {
+        photo_id: '$_id', face_index: 1, date: 1, classroom_id: 1,
+        child_id: '$faces.child_id', det_score: '$faces.det_score',
+      },
+    },
+  ]);
+  if (!rows.length) return [];
+
+  const names = await Child.find({ _id: { $in: rows.map((r) => r.child_id) } })
+    .select('child_name').lean();
+  const byId = new Map(names.map((n) => [String(n._id), n.child_name]));
+
+  return rows.map((r) => ({
+    photo_id: String(r.photo_id),
+    face_index: r.face_index,
+    date: r.date,
+    classroom_id: String(r.classroom_id),
+    child_id: String(r.child_id),
+    child_name: byId.get(String(r.child_id)) || '',
+    crop_url: `/api/face-tagging/crop/${r.photo_id}/${r.face_index}`,
+  }));
+}
+
+/** A member of staff agrees with a parent, or does not. */
+async function resolveParentClaim({ photoId, faceIndex, agree }) {
+  const photo = await Photo.findById(photoId).select('+faces.embedding');
+  if (!photo) return { ok: false, reason: 'photo not found' };
+  const face = photo.faces[faceIndex];
+  if (!face || !face.awaiting_staff) return { ok: false, reason: 'nothing waiting there' };
+
+  const childId = face.child_id;
+  face.awaiting_staff = false;
+
+  if (!agree) {
+    face.child_id = null;
+    face.confidence = null;
+    face.decided_by = 'staff';
+    const stillThere = photo.faces.some((f) => String(f.child_id) === String(childId));
+    if (!stillThere) {
+      photo.child_ids = photo.child_ids.filter((id) => String(id) !== String(childId));
+    }
+    await photo.save();
+    return { ok: true, agreed: false };
+  }
+
+  // Agreed: it becomes evidence, exactly like a face the teacher named herself.
+  face.decided_by = 'staff';
+  await photo.save();
+
+  if (face.embedding && face.embedding.length) {
+    await ChildFaceReference.create({
+      child_id: childId,
+      embedding: face.embedding,
+      source_photo: photo._id,
+      source: 'parent',
+      det_score: face.det_score,
+      branch_id: photo.branch_id,
+    });
+    await ChildFaceReference.trim(childId);
+  }
+  return { ok: true, agreed: true, taught: Boolean(face.embedding && face.embedding.length) };
+}
+
 /** How much is left, for the teacher and for the branch manager. */
 async function progress({ classroomIds }) {
   const [row] = await Photo.aggregate([
@@ -281,4 +364,5 @@ async function progress({ classroomIds }) {
 
 module.exports = {
   queue, candidates, crop, nameFace, markNotAChild, progress,
+  parentClaims, resolveParentClaim,
 };

@@ -128,7 +128,8 @@
     "face:models": "node scripts/face-models.js",
     "face:switch": "node scripts/face-switch.js",
     "test:face-recall": "node scripts/face-recall.test.js",
-    "test:face-health": "node scripts/face-health.test.js"
+    "test:face-health": "node scripts/face-health.test.js",
+    "test:face-parent": "node scripts/face-parent-corrections.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

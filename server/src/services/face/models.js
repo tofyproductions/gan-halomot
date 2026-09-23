@@ -31,13 +31,29 @@ const MODELS = {
     file: 'det_10g.onnx',
     bytes: 16923827,
     sha256: '5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91',
+    url: 'https://huggingface.co/maze/faceX/resolve/main/det_10g.onnx',
   },
   recogniser: {
     file: 'w600k_r50.onnx',
     bytes: 174383860,
     sha256: '4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43',
+    url: 'https://huggingface.co/maze/faceX/resolve/main/w600k_r50.onnx',
   },
 };
+
+/**
+ * About those URLs.
+ *
+ * Downloading weights from a stranger's account would normally be an
+ * unacceptable way to decide which child appears in a photograph. It is
+ * acceptable here for one reason: the checksums above were taken from the
+ * files this system was MEASURED on, and nothing is loaded unless it hashes
+ * to exactly those. A substituted or tampered file is rejected, so the URL is
+ * a delivery route and not a trust relationship.
+ *
+ * Both were verified byte-for-byte against the local copies before being
+ * written down here.
+ */
 
 /**
  * Cache location, in order of preference.
@@ -98,26 +114,52 @@ function sha256(buffer) {
  * would load as a valid graph and quietly produce different answers — which is
  * the one failure mode nothing downstream could catch.
  */
-async function ensure(name) {
-  const local = findLocal(name);
-  if (local) return local;
-
-  const storage = require('../storage.service');
-  if (!storage.isConfigured()) {
-    throw new Error(
-      `face: ${MODELS[name].file} is not on this machine and object storage is `
-      + 'not configured. Run scripts/face-models.js --upload from a machine '
-      + 'that has the models, or set FACE_MODEL_DIR.',
-    );
-  }
-
-  const buffer = await storage.getObject(objectKey(name));
+function verify(name, buffer) {
   const digest = sha256(buffer);
   if (digest !== MODELS[name].sha256) {
     throw new Error(
       `face: ${MODELS[name].file} does not match its pinned checksum `
       + `(got ${digest.slice(0, 12)}…). Refusing to load it.`,
     );
+  }
+  return buffer;
+}
+
+async function ensure(name) {
+  const local = findLocal(name);
+  if (local) return local;
+
+  const storage = require('../storage.service');
+  let buffer = null;
+
+  // The gan's own bucket first: no external dependency, and close to the
+  // server. Any failure here is not fatal — the bucket is a cache, not the
+  // source of truth, and the checksum is what makes that safe.
+  if (storage.isConfigured()) {
+    try {
+      buffer = verify(name, await storage.getObject(objectKey(name)));
+    } catch (e) {
+      console.log(`[face] ${MODELS[name].file} not usable from the bucket (${e.message})`);
+      buffer = null;
+    }
+  }
+
+  if (!buffer) {
+    console.log(`[face] downloading ${MODELS[name].file} (${Math.round(MODELS[name].bytes / 1e6)}MB)…`);
+    const res = await fetch(MODELS[name].url);
+    if (!res.ok) throw new Error(`face: ${MODELS[name].file} download failed (${res.status})`);
+    buffer = verify(name, Buffer.from(await res.arrayBuffer()));
+
+    // Put it in the bucket so this is the only instance that ever has to go
+    // out to the internet for it.
+    if (storage.isConfigured()) {
+      await storage.putObject({
+        key: objectKey(name), body: buffer, contentType: 'application/octet-stream',
+      }).then(
+        () => console.log(`[face] cached ${MODELS[name].file} in the bucket`),
+        (e) => console.log(`[face] could not cache it (${e.message}) — harmless`),
+      );
+    }
   }
 
   const target = cacheTarget(name);

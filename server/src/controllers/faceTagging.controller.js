@@ -116,6 +116,31 @@ async function decide(req, res, next) {
   } catch (e) { return next(e); }
 }
 
+/** GET /api/face-tagging/parent-claims */
+async function getParentClaims(req, res, next) {
+  try {
+    const ids = await scopeIds(req.user, req.query.classroom_id);
+    if (!ids.length) return res.json({ claims: [] });
+    return res.json({ claims: await tagging.parentClaims({ classroomIds: ids }) });
+  } catch (e) { return next(e); }
+}
+
+/** POST /api/face-tagging/parent-claims/:photoId/:faceIndex  { agree } */
+async function resolveClaim(req, res, next) {
+  try {
+    const { photoId, faceIndex } = req.params;
+    const photo = await Photo.findById(photoId).select('classroom_id').lean();
+    if (!photo) return res.status(404).json({ error: 'תמונה לא נמצאה' });
+    const ids = await scopeIds(req.user, photo.classroom_id);
+    if (!ids.length) return res.status(403).json({ error: 'לא ניתן לתייג בכיתה הזו' });
+
+    const result = await tagging.resolveParentClaim({
+      photoId, faceIndex: Number(faceIndex), agree: Boolean(req.body.agree),
+    });
+    return res.status(result.ok ? 200 : 400).json(result);
+  } catch (e) { return next(e); }
+}
+
 module.exports = {
-  getQueue, getCandidates, getCrop, decide,
+  getQueue, getCandidates, getCrop, decide, getParentClaims, resolveClaim,
 };

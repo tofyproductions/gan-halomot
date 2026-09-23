@@ -58,6 +58,10 @@ router.patch('/children/:childId/day', portal.updateChildDay);
 // Photographs. Two streams on the way out — the child's own, and the
 // classroom's week — and a parent's upload is only ever their own child's.
 router.get('/children/:childId/photos', portal.childPhotos);
+// ההורה הוא הסמכות על מי הילד שלו: "זה לא הילד שלי" מוריד את התג לכולם
+// ומלמד, "אל תציג לי את זה" מסתיר רק אצלו ולא מלמד כלום, ו"זה כן הילד שלי"
+// מגלריית הכיתה נספר מיד אבל לא מלמד עד שגננת מאשרת.
+router.post('/children/:childId/photos/:photoId/faces', portal.decidePhotoFace);
 router.post('/children/:childId/photos', photoUpload.array('photos', 5), portal.uploadChildPhoto);
 // The gift round: what the family chose, and the photographs they may choose
 // from — their child's own, never the classroom gallery.
