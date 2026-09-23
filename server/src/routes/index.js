@@ -123,6 +123,10 @@ router.use('/nursery', require('./nursery.routes'));
 // The gan's photographs. Bytes in object storage, permission in the row —
 // a staff photo belongs to the classroom, a parent's belongs to the family.
 router.use('/photos', require('./photos.routes'));
+// The teachers' "who is this?" queue. Separate from /photos because it is a
+// different job done at a different moment — thirty photographs come off a
+// phone in the garden, and naming the faces in them happens sitting down.
+router.use('/face-tagging', require('./faceTagging.routes'));
 // מבצעי מתנות — a round of gifts, the family's picks and the staff's final
 // choice, ending in one file for the supplier.
 router.use('/gifts', require('./gifts.routes'));

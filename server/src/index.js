@@ -445,6 +445,19 @@ connectDB().then(() => {
     const faceScanner = require('./services/face/scanner');
     if (!platformMode) faceScanner.start();
 
+    // מחיקת טביעות הפנים הזמניות. תמונה היא מידע אישי רגיל; טביעה היא מידע
+    // ביומטרי על קטין, והיא נשמרת רק כדי שגננת תוכל לתייג פרצוף ושילד
+    // שנרשם מאוחר ייקלט למפרע. אחרי 30 יום היא מיותרת — התג הוא התשובה.
+    // בלי ה-job הזה הגן יצבור ~180,000 טביעות בשנה במקום 4,400.
+    const facePurge = require('./services/facePurgeJob');
+    const runFacePurge = () => facePurge.tick()
+      .then(r => facePurge.describeTick(r).forEach(l => console.log(l.text)))
+      .catch(e => console.error('[face-purge] failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runFacePurge, facePurge.FIRST_RUN_MS);
+      setInterval(runFacePurge, facePurge.EVERY_MS);
+    }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.

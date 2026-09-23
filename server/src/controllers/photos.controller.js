@@ -275,4 +275,7 @@ async function selftest(_req, res) {
   return res.json({ ok: steps.every(s => s.ok), steps });
 }
 
+// `visibleClassrooms` is also used by the face-tagging screen, which has to
+// answer exactly the same question — which rooms may this person act on — and
+// must not answer it differently.
 module.exports = { upload, list, tag, remove, selftest, visibleClassrooms, listClassrooms };

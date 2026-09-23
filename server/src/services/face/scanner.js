@@ -4,6 +4,7 @@ const {
 const storage = require('../storage.service');
 const engine = require('./index');
 const { candidateChildIds, assign, expandTwins } = require('./matcher');
+const { EMBEDDING_TTL_DAYS } = require('./constants');
 
 /**
  * The background scanner: one photograph at a time, forever, quietly.
@@ -33,6 +34,11 @@ const HEALTH_KEY = 'face_recognition_health';
 // uploads at pickup sees tags before the parents' evening digest goes out.
 const IDLE_MS = 20_000;
 const BUSY_MS = 250;
+
+// How long before the same photograph is worth trying again. Long enough that
+// the sweep does not spin over the same rows while a teacher is mid-queue,
+// short enough that naming a child pays off within the hour.
+const REMATCH_COOLDOWN_MS = 30 * 60 * 1000;
 
 let timer = null;
 let running = false;
@@ -140,6 +146,13 @@ async function scanOne(photo) {
     }
   }
 
+  // Carry the numbers for now. A teacher naming an unmatched face in the
+  // tagging queue needs them to build a reference from it, and a child
+  // enrolled next month needs them to be found in photographs already
+  // scanned. facePurgeJob empties them after EMBEDDING_TTL_DAYS, which is the
+  // whole reason this system holds 4,400 biometric templates and not 180,000.
+  decisions.forEach((d, i) => { d.embedding = Array.from(faces[i].embedding); });
+
   const twins = await twinMap();
   const childIds = expandTwins(
     decisions.filter((d) => d.child_id).map((d) => d.child_id),
@@ -159,13 +172,95 @@ async function scanOne(photo) {
   return { status: 'done', faces: faces.length, tagged: childIds.length };
 }
 
+/**
+ * Try the unnamed faces again, now that more is known.
+ *
+ * During the bootstrap week a child has no references, so nothing can match
+ * them and every one of their faces lands in the teacher's queue. The moment
+ * she names the first one, the system could recognise that child in all the
+ * photographs already taken — but those are marked done and would never be
+ * looked at again.
+ *
+ * So when the main queue is empty, this goes back over faces that are still
+ * unnamed and still have their numbers, and matches them against the
+ * references that exist now. It is what makes the teacher's work shrink as she
+ * does it rather than only paying off tomorrow.
+ *
+ * Runs on one photograph at a time, like everything else here.
+ */
+async function rematchOne() {
+  const photo = await Photo.findOne({
+    face_scan_status: 'done',
+    faces: {
+      $elemMatch: {
+        child_id: null,
+        not_a_child: { $ne: true },
+        embedding: { $exists: true },
+      },
+    },
+    // Only worth revisiting while the numbers are still around; after the
+    // purge there is nothing to match with.
+    face_scanned_at: { $gte: new Date(Date.now() - EMBEDDING_TTL_DAYS * 86400_000) },
+    face_rematched_at: { $lt: new Date(Date.now() - REMATCH_COOLDOWN_MS) },
+  }).select('+faces.embedding').sort({ face_rematched_at: 1 }).lean();
+
+  if (!photo) return false;
+
+  const open = photo.faces
+    .map((f, i) => ({ f, i }))
+    .filter(({ f }) => !f.child_id && !f.not_a_child && f.embedding && f.embedding.length);
+
+  const candidates = await candidateChildIds({ DailyLog, Child }, photo);
+  // Children already named in THIS photograph cannot be in it twice, so they
+  // are out of the running for the faces that are still open.
+  const spoken = new Set(photo.faces.filter((f) => f.child_id).map((f) => String(f.child_id)));
+  const eligible = candidates.filter((id) => !spoken.has(String(id)));
+
+  const references = eligible.length
+    ? await ChildFaceReference.find({ child_id: { $in: eligible } })
+      .select('child_id embedding').lean()
+    : [];
+
+  const stamp = { face_rematched_at: new Date() };
+  if (!references.length) {
+    await Photo.updateOne({ _id: photo._id }, { $set: stamp });
+    return true;
+  }
+
+  const decisions = assign(open.map(({ f }) => f), references);
+  const found = decisions.filter((d) => d.child_id);
+  if (!found.length) {
+    await Photo.updateOne({ _id: photo._id }, { $set: stamp });
+    return true;
+  }
+
+  const set = { ...stamp };
+  decisions.forEach((d, n) => {
+    if (!d.child_id) return;
+    set[`faces.${open[n].i}.child_id`] = d.child_id;
+    set[`faces.${open[n].i}.confidence`] = d.confidence;
+  });
+
+  const twins = await twinMap();
+  const childIds = expandTwins(
+    [...photo.child_ids.map(String), ...found.map((d) => d.child_id)],
+    twins,
+  );
+  set.child_ids = childIds;
+
+  await Photo.updateOne({ _id: photo._id }, { $set: set });
+  return true;
+}
+
 /** Take the oldest unscanned photograph, if the switch is on. Returns true if it worked. */
 async function tick() {
   if (!await isEnabled()) return false;
 
   const photo = await Photo.findOne({ face_scan_status: 'pending' })
     .sort({ created_at: 1 }).lean();
-  if (!photo) return false;
+  // Nothing new to scan is the moment to go back over what could not be named
+  // before — never at the same time, because there is one CPU.
+  if (!photo) return rematchOne();
 
   const startedAt = Date.now();
   try {

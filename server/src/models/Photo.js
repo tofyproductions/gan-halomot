@@ -72,6 +72,10 @@ const photoSchema = new mongoose.Schema({
     index: true,
   },
   face_scanned_at: { type: Date, default: null },
+  // When the unnamed faces in this photograph were last tried again against
+  // the references that exist now. Epoch rather than null so "never tried"
+  // sorts first and needs no special case in the query.
+  face_rematched_at: { type: Date, default: () => new Date(0) },
   // Why a scan failed, kept so a stuck queue can be diagnosed from the data
   // rather than from logs that have already rotated away.
   face_scan_error: { type: String, default: '' },
@@ -91,6 +95,23 @@ const photoSchema = new mongoose.Schema({
         enum: ['system', 'staff', 'parent'],
         default: 'system',
       },
+      // A teacher who looked at this face and said "not a child" — a doll, an
+      // ear, a poster on the wall. Kept rather than deleted so the queue does
+      // not offer it again tomorrow.
+      not_a_child: { type: Boolean, default: false },
+      /**
+       * The embedding, kept only briefly.
+       *
+       * This is biometric data and the system's whole posture is to hold as
+       * little of it as possible — once a face is matched, the tag is the
+       * answer and this is redundant. It survives EMBEDDING_TTL_DAYS for two
+       * jobs that both need the original numbers: a teacher naming this face
+       * in the tagging queue, which turns it into a reference, and
+       * back-filling a child enrolled after the photograph was taken.
+       *
+       * facePurgeJob empties it after that. See services/face/constants.js.
+       */
+      embedding: { type: [Number], default: undefined, select: false },
     }],
     default: [],
   },
@@ -103,5 +124,8 @@ photoSchema.index({ child_ids: 1, date: -1 });
 // The scan queue: oldest unscanned first, so a backlog drains in the order the
 // photographs arrived rather than newest-first, which would strand the tail.
 photoSchema.index({ face_scan_status: 1, created_at: 1 });
+// The back-fill sweep: scanned photographs whose unnamed faces are worth
+// trying again, least-recently-tried first.
+photoSchema.index({ face_scan_status: 1, face_rematched_at: 1 });
 
 module.exports = mongoose.model('Photo', photoSchema);

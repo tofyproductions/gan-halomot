@@ -8,6 +8,7 @@ import {
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
+import FaceTagging from './FaceTagging';
 
 /**
  * The gan's photographs, staff side.
@@ -36,6 +37,10 @@ export default function PhotosManager() {
   const [diag, setDiag] = useState(null);
   const [draftIds, setDraftIds] = useState([]);
   const fileInput = useRef(null);
+  // "מי זה?" יושב כאן ולא בטאב נפרד: הרגע שבו כדאי לתייג הוא הרגע שאחרי
+  // ההעלאה, והגננת כבר על המסך הזה. המונה הוא מה שמזמין אותה פנימה.
+  const [mode, setMode] = useState('gallery');
+  const [waiting, setWaiting] = useState(0);
 
   // The photos feature's OWN room list — every category, this year only.
   // It used to borrow the nursery board's list, which is infant-rooms-only by
@@ -147,7 +152,27 @@ export default function PhotosManager() {
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', pb: 6 }}>
-      <Typography variant="h5" fontWeight={700} sx={{ mb: 2 }}>תמונות</Typography>
+      <Stack direction="row" alignItems="center" spacing={2} sx={{ mb: 2 }}>
+        <Typography variant="h5" fontWeight={700}>תמונות</Typography>
+        <ToggleButtonGroup
+          exclusive
+          size="small"
+          value={mode}
+          onChange={(_, v) => v && setMode(v)}
+        >
+          <ToggleButton value="gallery">הגלריה</ToggleButton>
+          <ToggleButton value="tagging">
+            מי זה?
+            {waiting > 0 && (
+              <Chip label={waiting} size="small" color="primary" sx={{ ml: 1, height: 20 }} />
+            )}
+          </ToggleButton>
+        </ToggleButtonGroup>
+      </Stack>
+
+      {mode === 'tagging' && <FaceTagging onWaitingChange={setWaiting} />}
+      {mode === 'gallery' && (
+      <>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
         <TextField
@@ -281,6 +306,8 @@ export default function PhotosManager() {
       </Dialog>
 
       <Snackbar open={!!toast} autoHideDuration={2500} onClose={() => setToast('')} message={toast} />
+      </>
+      )}
     </Box>
   );
 }
