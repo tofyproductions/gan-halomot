@@ -947,6 +947,25 @@ async function childPhotos(req, res) {
  */
 const CONSENT_VERSION = '2026-09';
 
+async function getPhotoDigest(req, res) {
+  const a = await ParentAccount.findById(req.parent.pid).select('photo_digest').lean();
+  if (!a) return res.status(404).json({ error: 'לא נמצא' });
+  return res.json({
+    mode: (a.photo_digest && a.photo_digest.mode) || 'daily',
+    last_sent_at: (a.photo_digest && a.photo_digest.last_sent_at) || null,
+  });
+}
+
+async function setPhotoDigest(req, res) {
+  const mode = req.body?.mode;
+  if (!['daily', 'weekly', 'off'].includes(mode)) {
+    return res.status(400).json({ error: 'בחירה לא מוכרת' });
+  }
+  await ParentAccount.updateOne({ _id: req.parent.pid },
+    { $set: { 'photo_digest.mode': mode } });
+  return res.json({ ok: true, mode });
+}
+
 async function getFaceConsent(req, res) {
   const account = await ParentAccount.findById(req.parent.pid).select('face_consent').lean();
   if (!account) return res.status(404).json({ error: 'לא נמצא' });
@@ -1306,6 +1325,8 @@ async function childGantt(req, res) {
 
 module.exports = {
   decidePhotoFace,
+  getPhotoDigest,
+  setPhotoDigest,
   getFaceConsent,
   setFaceConsent,
   sharedDocumentFile,

@@ -6,6 +6,8 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import PersonOffIcon from '@mui/icons-material/PersonOff';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import { TextField, MenuItem } from '@mui/material';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import parentApi, { parentApiError, UPLOAD_TIMEOUT_MS } from '../../api/parentClient';
 
@@ -90,6 +92,7 @@ export default function PhotoGallery({ childId, childName }) {
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState('');
   const [busy, setBusy] = useState(false);
+  const [digest, setDigest] = useState('');
   const fileInput = useRef(null);
 
   const load = async () => {
@@ -104,6 +107,24 @@ export default function PhotoGallery({ childId, childName }) {
   };
 
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [childId]);
+
+  useEffect(() => {
+    parentApi.get('/photo-digest')
+      .then(({ data }) => setDigest(data.mode))
+      .catch(() => {});
+  }, []);
+
+  const setDigestMode = async (mode) => {
+    setDigest(mode);
+    try {
+      await parentApi.post('/photo-digest', { mode });
+      setToast({
+        daily: 'נעדכן אתכם פעם ביום',
+        weekly: 'סיכום שבועי, בשישי',
+        off: 'לא נשלח התראות על תמונות',
+      }[mode]);
+    } catch { setError('ההגדרה לא נשמרה'); }
+  };
 
   const pick = (e) => {
     const files = [...(e.target.files || [])];
@@ -221,6 +242,25 @@ export default function PhotoGallery({ childId, childName }) {
               בתמונות הכיתה מופיעים גם ילדים אחרים. הן לצפייה משפחתית — נא לא לשתף מחוץ למשפחה.
             </Alert>
           )}
+
+          {/* מתי לעדכן אתכם. פעם ביום היא ברירת המחדל, כי מאה תמונות ביום
+              מארבעה סניפים זו התראה כל כמה דקות — ותוך שבוע מכבים התראות,
+              וביחד איתן גם את אלה על תשלומים ואיסוף. */}
+          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 2 }}>
+            <NotificationsIcon fontSize="small" color="action" />
+            <TextField
+              select
+              size="small"
+              label="עדכון על תמונות חדשות"
+              value={digest || 'daily'}
+              onChange={(e) => setDigestMode(e.target.value)}
+              sx={{ minWidth: 220 }}
+            >
+              <MenuItem value="daily">פעם ביום</MenuItem>
+              <MenuItem value="weekly">סיכום שבועי, בשישי</MenuItem>
+              <MenuItem value="off">בלי התראות</MenuItem>
+            </TextField>
+          </Stack>
         </CardContent>
       </Card>
 

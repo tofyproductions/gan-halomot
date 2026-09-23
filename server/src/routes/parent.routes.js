@@ -48,6 +48,10 @@ const portal = require('../controllers/parentPortal.controller');
 // ההסכמה לזיהוי פנים. לא חוסמת שום דבר — מי שלא מסמן רואה את כל הגלריה,
 // פשוט בלי הסינון האוטומטי. זו כל ההגנה: הסכמה שנכפתה כתנאי כניסה אינה
 // נחשבת חופשית כשמדובר במידע ביומטרי של קטין.
+// יומי / שבועי (שישי 13:00) / כבוי. ברירת מחדל יומי.
+router.get('/photo-digest', portal.getPhotoDigest);
+router.post('/photo-digest', portal.setPhotoDigest);
+
 router.get('/face-consent', portal.getFaceConsent);
 router.post('/face-consent', portal.setFaceConsent);
 

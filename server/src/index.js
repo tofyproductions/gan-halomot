@@ -462,6 +462,18 @@ connectDB().then(() => {
       setInterval(runFaceHealth, faceHealth.EVERY_MS);
     }
 
+    // "3 תמונות חדשות של דני" — פעם ביום, על הילד שלהם. זה מה שהופך את
+    // האפליקציה להרגל, וזה גם הדבר שהכי קל לשרוף: בלי תקרה ההורים מכבים
+    // התראות, וכשיכבו — יכבו גם את אלה על תשלומים ואיסוף.
+    const photoDigest = require('./services/photoDigestJob');
+    const runPhotoDigest = () => photoDigest.tick()
+      .then(r => photoDigest.describeTick(r).forEach(l => console.log(l.text)))
+      .catch(e => console.error('[photo-digest] failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runPhotoDigest, photoDigest.FIRST_RUN_MS);
+      setInterval(runPhotoDigest, photoDigest.EVERY_MS);
+    }
+
     const facePurge = require('./services/facePurgeJob');
     const runFacePurge = () => facePurge.tick()
       .then(r => facePurge.describeTick(r).forEach(l => console.log(l.text)))
