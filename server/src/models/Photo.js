@@ -58,11 +58,50 @@ const photoSchema = new mongoose.Schema({
   uploaded_by_user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   uploaded_by_parent: { type: mongoose.Schema.Types.ObjectId, ref: 'ParentAccount', default: null },
   uploaded_by_name: { type: String, default: '' },
+
+  // --- Face recognition ---
+  // `child_ids` above stays the single answer to "who is in this photograph",
+  // whether a person or the scanner put a name there. What follows is how that
+  // answer was reached, which the gallery never needs and a correction always
+  // does: a parent saying "that is not my child" about a photograph with five
+  // faces in it teaches nothing unless the system can say which face it meant.
+  face_scan_status: {
+    type: String,
+    enum: ['pending', 'done', 'failed', 'skipped'],
+    default: 'pending',
+    index: true,
+  },
+  face_scanned_at: { type: Date, default: null },
+  // Why a scan failed, kept so a stuck queue can be diagnosed from the data
+  // rather than from logs that have already rotated away.
+  face_scan_error: { type: String, default: '' },
+
+  faces: {
+    type: [{
+      bbox: { type: [Number], required: true },          // x1, y1, x2, y2
+      det_score: { type: Number, required: true },
+      child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
+      // Cosine similarity to the matched child's best reference. Null when
+      // nobody matched — that face goes to the "who is this?" queue.
+      confidence: { type: Number, default: null },
+      // Who decided. 'system' is the scanner; the others are corrections, and
+      // they are never overwritten by a later scan.
+      decided_by: {
+        type: String,
+        enum: ['system', 'staff', 'parent'],
+        default: 'system',
+      },
+    }],
+    default: [],
+  },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
 // The two queries this collection exists to answer: a classroom's week, and
 // one child's photographs.
 photoSchema.index({ classroom_id: 1, source: 1, date: -1 });
 photoSchema.index({ child_ids: 1, date: -1 });
+// The scan queue: oldest unscanned first, so a backlog drains in the order the
+// photographs arrived rather than newest-first, which would strand the tail.
+photoSchema.index({ face_scan_status: 1, created_at: 1 });
 
 module.exports = mongoose.model('Photo', photoSchema);

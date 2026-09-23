@@ -158,6 +158,24 @@ async function deleteObject(key) {
   await getClient().send(new DeleteObjectCommand({ Bucket: bucketName(), Key: key }));
 }
 
+/**
+ * Read an object back into memory.
+ *
+ * Everything else here hands a signed URL to a browser and lets it fetch the
+ * bytes itself. The face scanner is the one caller that needs the bytes on the
+ * server: it runs in the background with nobody's session attached, so there
+ * is no browser to sign a URL for, and fetching our own signed URL over the
+ * network to reach our own bucket would be a round trip to nowhere.
+ */
+async function getObject(key) {
+  const res = await getClient().send(
+    new GetObjectCommand({ Bucket: bucketName(), Key: key }),
+  );
+  const chunks = [];
+  for await (const chunk of res.Body) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
 module.exports = {
-  isConfigured, makeKey, putObject, signedReadUrl, deleteObject, READ_URL_TTL_S,
+  isConfigured, makeKey, putObject, getObject, signedReadUrl, deleteObject, READ_URL_TTL_S,
 };

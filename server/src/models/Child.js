@@ -14,6 +14,12 @@ const childSchema = new mongoose.Schema({
   parent2_id_number: { type: String, default: null },
   parent2_phone: { type: String, default: null },
   parent2_email: { type: String, default: null },
+
+  // Identical twins share one id here, and the face scanner tags both whenever
+  // it matches either. No recogniser on earth tells identical twins apart, and
+  // there is nothing to gain by trying: twins have the same parents, so the
+  // photograph reaches the right family whichever name goes on it.
+  twin_group_id: { type: String, default: null, index: true },
   address: { type: String, default: null },
   medical_alerts: { type: String, default: null },
   allergies: { type: String, default: null },

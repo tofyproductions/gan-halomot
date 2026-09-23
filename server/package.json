@@ -119,7 +119,10 @@
     "test:contract-delete": "node scripts/contract-delete.test.js",
     "test:viewer-client": "node scripts/viewer-client-manager.test.js",
     "test:roster-gap": "node scripts/roster-gap.test.js",
-    "test:face-parity": "node scripts/face-parity.test.js"
+    "test:face-parity": "node scripts/face-parity.test.js",
+    "test:face-matcher": "node scripts/face-matcher.test.js",
+    "test:face-boot": "node scripts/face-boot.test.js",
+    "test:face-resolution": "node scripts/face-resolution.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
