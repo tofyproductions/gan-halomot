@@ -309,6 +309,30 @@ async function main() {
   ok(!names.includes('רוני גל'), 'ילד מסניף אחר — בוודאי שלא');
   ok(names.every(Boolean), 'לכל כפתור יש שם');
 
+  // "ילד אחר מהכיתה": הרשימה הקצרה יכולה להצטמצם לשם אחד, ואז אין דרך להגיע
+  // לשאר. הרשימה המלאה מתעלמת מנוכחות ומהסכמה, ומסמנת מי חסר הסכמה — התיוג
+  // מותר, הלמידה לא.
+  const full = await request({
+    path: `/api/face-tagging/candidates?classroom_id=${room._id}&all=1`, token: shira,
+  });
+  eq(full.status, 200, 'הרשימה המלאה נטענת');
+  const fullNames = (full.body.children || []).map((c) => c.name);
+  ok(fullNames.includes('מאיה כהן'), 'ילדה בלי הסכמה כן מופיעה ברשימה המלאה');
+  ok(fullNames.includes('יונתן אבן'), 'גם מי שסומן חסר');
+  ok(!fullNames.includes('רוני גל'), 'אבל ילד מסניף אחר — לא');
+  eq(
+    (full.body.children || []).find((c) => c.name === 'מאיה כהן')?.consent,
+    false,
+    'ומסומן שאין לה הסכמה',
+  );
+  eq(
+    (full.body.children || []).find((c) => c.name === 'דני לוי')?.consent,
+    true,
+    'ולמי שיש — מסומן שיש',
+  );
+  const noRoom = await request({ path: '/api/face-tagging/candidates?all=1', token: shira });
+  eq(noRoom.status, 400, 'רשימה מלאה בלי כיתה נדחית ולא מחזירה ערבוב של כיתות');
+
   /* ---------------------------------------------------------------- */
   head('3. מתן שם: התמונה מתויגת, ונוצרת טביעת ייחוס');
   const named = await request({

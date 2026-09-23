@@ -122,6 +122,45 @@ async function candidates({ classroomId, date }) {
 }
 
 /**
+ * כל הכיתה — מסלול המילוט של הכפתורים.
+ *
+ * `candidates` למעלה מציג מי שנכח ומי שההורים שלו הסכימו, וזה נכון ברוב
+ * המוחלט של הפעמים. אבל זה גם אומר שיכול להישאר כפתור אחד על המסך: בתינוקיה
+ * 20 נכחו עשרה ילדים ולשניים בלבד בכל הכיתה יש הסכמה — אז הגננת רואה שם אחד
+ * ואין לה שום דרך להגיע לתשעה האחרים.
+ *
+ * אז כאן חוזרת כל הכיתה, בלי סינון נוכחות ובלי סינון הסכמה, עם דגל שאומר מי
+ * מהם ההורים לא הסכימו. התיוג עצמו מותר גם בלי הסכמה — זו הערה של אדם על
+ * תמונה, והמשפחה מקבלת את התמונה. מה שלא קורה בלעדיה הוא הלמידה: השרת לא
+ * יוצר טביעה, ולכן זה לא מלמד את המערכת כלום. זה בדיוק מה שנקבע מראש.
+ */
+async function roster({ classroomId }) {
+  const children = await Child.find({ classroom_id: classroomId, is_active: { $ne: false } })
+    .select('child_name twin_group_id')
+    .lean();
+  if (!children.length) return [];
+
+  const ids = children.map((c) => c._id);
+  const consenting = new Set(
+    (await consent.filterConsenting(ids)).map(String),
+  );
+  const refCounts = await ChildFaceReference.aggregate([
+    { $match: { child_id: { $in: ids } } },
+    { $group: { _id: '$child_id', n: { $sum: 1 } } },
+  ]);
+  const counts = new Map(refCounts.map((r) => [String(r._id), r.n]));
+
+  return children
+    .map((c) => ({
+      id: String(c._id),
+      name: c.child_name,
+      references: counts.get(String(c._id)) || 0,
+      consent: consenting.has(String(c._id)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'he'));
+}
+
+/**
  * The cropped face, rendered on the fly.
  *
  * `crop_url` above is relative to the API client's own base, which already
@@ -388,6 +427,7 @@ async function progress({ classroomIds }) {
 }
 
 module.exports = {
-  queue, candidates, crop, nameFace, markNotAChild, progress,
+  queue, candidates,
+  roster, crop, nameFace, markNotAChild, progress,
   parentClaims, resolveParentClaim,
 };

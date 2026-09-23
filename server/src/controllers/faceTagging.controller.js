@@ -45,13 +45,27 @@ async function getQueue(req, res, next) {
   } catch (e) { return next(e); }
 }
 
-/** GET /api/face-tagging/candidates?classroom_id=&date= */
+/**
+ * GET /api/face-tagging/candidates?classroom_id=&date=[&all=1]
+ *
+ * בלי `all` — מי שנכח ומי שההורים שלו הסכימו, כלומר הכפתורים עצמם. עם `all`
+ * — כל הכיתה, למקרה שהילד שבתמונה לא ברשימה הקצרה.
+ */
 async function getCandidates(req, res, next) {
   try {
-    const { classroom_id: classroomId, date } = req.query;
+    const { classroom_id: classroomId, date, all } = req.query;
     const ids = await scopeIds(req.user, classroomId);
     if (!ids.length) return res.status(403).json({ error: 'לא ניתן לתייג בכיתה הזו' });
-    return res.json({ children: await tagging.candidates({ classroomId, date }) });
+    // בלי כיתה מפורשת `ids` הוא כל הכיתות שמותרות לה, ורשימה של כמה כיתות
+    // אינה מה שהמסך הזה מבקש. `ids[0]` ולא המחרוזת מהשאילתה — אותה סיבה
+    // שבגללה `scopeIds` מחזיר את המזהה מהחדר שנמצא ולא מהדפדפן.
+    if (all === '1' && !classroomId) {
+      return res.status(400).json({ error: 'צריך לבחור כיתה' });
+    }
+    const children = all === '1'
+      ? await tagging.roster({ classroomId: ids[0] })
+      : await tagging.candidates({ classroomId, date });
+    return res.json({ children });
   } catch (e) { return next(e); }
 }
 

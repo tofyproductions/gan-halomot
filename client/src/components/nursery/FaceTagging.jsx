@@ -4,9 +4,11 @@ import {
 import {
   Box, Card, CardContent, Typography, Stack, Button, Alert, CircularProgress,
   LinearProgress, TextField, MenuItem, Chip, Snackbar,
+  Dialog, DialogTitle, DialogContent, List, ListItemButton, ListItemText,
 } from '@mui/material';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import BlockIcon from '@mui/icons-material/Block';
+import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import api, { apiError } from '../../api/client';
 
 /**
@@ -19,6 +21,12 @@ import api, { apiError } from '../../api/client';
  * לכן אין כאן שדה חיפוש ואין רשימה של 220 ילדים. המערכת כבר יודעת מאיזו כיתה
  * התמונה ומי נכח באותו בוקר, ולכן על המסך יושבים בערך תריסר שמות והפעולה היא
  * הקשה אחת.
+ *
+ * יש מאחורי זה גם דלת אחורית, ולא סתם: הרשימה הקצרה מסננת גם לפי הסכמת
+ * ההורים, ובתינוקיה 20 נכחו עשרה ילדים ולשניים בכל הכיתה יש הסכמה — כלומר
+ * כפתור אחד על המסך ואין דרך להגיע לתשעה האחרים. "ילד אחר מהכיתה" פותח את כל
+ * הכיתה עם חיפוש. הוא כפתור קטן ומשני בכוונה: המסלול המהיר חייב להישאר
+ * המסלול שרואים.
  *
  * ושלושה דברים נוספים קיימים רק בשביל השתי שניות האלה:
  * - המסך עובר לפרצוף הבא **מיד**, לפני שהשרת ענה. אם משהו נכשל זה חוזר
@@ -48,6 +56,12 @@ export default function FaceTagging({ onWaitingChange }) {
   // חיתוך שלא נטען הוא ריבוע אפור עם ספינר שלא נגמר, ואין שום דבר על המסך
   // שאומר למה. זה מה שקרה כשהנתיב חזר עם /api כפול.
   const [cropError, setCropError] = useState('');
+
+  // "ילד אחר" — כל הכיתה, לא רק מי שנכח ומי שהוריו הסכימו.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [rosterList, setRosterList] = useState(null);   // null = עוד לא נטען
+  const [rosterQuery, setRosterQuery] = useState('');
+  const rosterCache = useRef(new Map());
   // מטמון לרשימות השמות: אותה כיתה באותו יום נשאלת שוב ושוב.
   const candidateCache = useRef(new Map());
 
@@ -140,6 +154,26 @@ export default function FaceTagging({ onWaitingChange }) {
       })
       .catch((e) => setToast(`לא נשמר: ${apiError(e)}`));
   }, [current, progress, onWaitingChange]);
+
+  /** פותח את הרשימה המלאה של הכיתה שהתמונה הנוכחית שייכת אליה. */
+  const openPicker = useCallback(() => {
+    if (!current) return;
+    setRosterQuery('');
+    setPickerOpen(true);
+    const room = current.classroom_id;
+    if (rosterCache.current.has(room)) {
+      setRosterList(rosterCache.current.get(room));
+      return;
+    }
+    setRosterList(null);
+    api.get('/face-tagging/candidates', { params: { classroom_id: room, all: 1 } })
+      .then(({ data }) => {
+        const list = data.children || [];
+        rosterCache.current.set(room, list);
+        setRosterList(list);
+      })
+      .catch((e) => { setRosterList([]); setToast(apiError(e)); });
+  }, [current]);
 
   // כשנגמר התור — לבדוק אם השרת סיים לשייך עוד בינתיים.
   useEffect(() => {
@@ -291,10 +325,60 @@ export default function FaceTagging({ onWaitingChange }) {
                   לא בטוחה — אחר כך
                 </Button>
               </Stack>
+
+              {/* הכפתורים למעלה הם מי שנכח ומי שהוריו הסכימו, וזה יכול
+                  להצטמצם לשם אחד. זו הדרך להגיע לשאר הכיתה. */}
+              <Button
+                startIcon={<PersonSearchIcon />}
+                size="small"
+                color="inherit"
+                onClick={openPicker}
+              >
+                ילד אחר מהכיתה
+              </Button>
             </Stack>
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>כל הכיתה</DialogTitle>
+        <DialogContent>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            label="חיפוש"
+            value={rosterQuery}
+            onChange={(e) => setRosterQuery(e.target.value)}
+            sx={{ mb: 1 }}
+          />
+          {rosterList === null && (
+            <Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={24} /></Stack>
+          )}
+          {rosterList !== null && !rosterList.length && (
+            <Alert severity="info">אין ילדים פעילים בכיתה הזו.</Alert>
+          )}
+          <List dense>
+            {(rosterList || [])
+              .filter((c) => c.name.includes(rosterQuery.trim()))
+              .map((c) => (
+                <ListItemButton
+                  key={c.id}
+                  onClick={() => { setPickerOpen(false); decide({ child_id: c.id }, c.name); }}
+                >
+                  <ListItemText
+                    primary={c.name}
+                    /* בלי הסכמת ההורים התיוג נשמר והתמונה מגיעה למשפחה, אבל
+                       המערכת לא לומדת מזה כלום — עדיף שזה יהיה כתוב. */
+                    secondary={c.consent ? null : 'ללא הסכמה — יתויג, לא יילמד'}
+                  />
+                  {!c.references && <Chip label="חדש" size="small" />}
+                </ListItemButton>
+              ))}
+          </List>
+        </DialogContent>
+      </Dialog>
 
       <Snackbar
         open={Boolean(toast)}
