@@ -170,8 +170,26 @@ async function upload(req, res) {
       });
       saved.push(row);
     } catch (err) {
-      console.error('[photos] upload failed:', err.message);
-      failed.push({ name: file.originalname, error: 'לא הצלחנו לעבד את הקובץ' });
+      console.error('[photos] upload failed:', file.originalname, err.message);
+      /**
+       * HEIC מאייפון, וזה לא מקרה נדיר.
+       *
+       * הספרייה שקוראת תמונות כאן לא מצליחה לפתוח קובץ HEIC של אייפון מודרני
+       * — "Number of references in iref box exceeds the limit of 16", כי
+       * התמונה נושאת מפת HDR ומפת עומק. נבדקו שמונה קבצים מאייפון אמיתי,
+       * ושמונה מתוכם נכשלו. אי אפשר להעלות את המגבלה מכאן.
+       *
+       * האפליקציה ממירה ל-JPEG לפני השליחה, ולכן זה לא אמור להגיע — אבל
+       * גרסה ישנה שעל טלפון של מישהי כן תשלח כך, וההודעה חייבת להגיד את
+       * הסיבה ולא "לא הצלחנו לעבד את הקובץ".
+       */
+      const heic = /heif|heic/i.test(err.message || '') || /\.hei[cf]$/i.test(file.originalname || '');
+      failed.push({
+        name: file.originalname,
+        error: heic
+          ? 'קובץ HEIC שאי אפשר לקרוא. עדכנו את האפליקציה, או העבירו את המצלמה ל"תואם ביותר".'
+          : 'לא הצלחנו לעבד את הקובץ',
+      });
     }
   }
 

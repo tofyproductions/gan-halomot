@@ -153,8 +153,23 @@ export async function pump() {
 export async function enqueue(files, { classroomId, date }) {
   duplicateCount = 0;
   const accepted = [];
+  const rejected = [];
+
   for (const raw of files) {
-    const file = await compressImage(raw);
+    const { file, error } = await compressImage(raw);
+
+    /**
+     * קובץ שחייב המרה ולא הומר לא נכנס לתור.
+     *
+     * להעלות אותו בכל זאת היה מייצר שלוש נסיעות רשת שנגמרות ב"לא הצלחנו
+     * לעבד את הקובץ" — הודעה שלא אומרת לגננת שהבעיה היא HEIC ושיש לה פתרון
+     * בהגדרות המצלמה. עדיף להגיד לה עכשיו, לפני שהיא מחכה.
+     */
+    if (error) {
+      rejected.push({ name: raw.name, error });
+      continue;
+    }
+
     const id = await put({
       file,
       name: file.name,
@@ -167,9 +182,10 @@ export async function enqueue(files, { classroomId, date }) {
     });
     accepted.push(id);
   }
+
   await announce();
   pump().catch(() => {});
-  return accepted.length;
+  return { queued: accepted.length, rejected };
 }
 
 /** ניסיון חוזר ידני למה שוויתרנו עליו. */

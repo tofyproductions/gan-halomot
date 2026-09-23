@@ -101,8 +101,14 @@ export default function PhotosManager() {
   const send = async (files) => {
     setError('');
     try {
-      const n = await enqueue(files, { classroomId });
-      setToast(n === 1 ? 'התמונה נשלחת' : `${n} תמונות נשלחות`);
+      const { queued, rejected } = await enqueue(files, { classroomId });
+      if (queued) setToast(queued === 1 ? 'התמונה נשלחת' : `${queued} תמונות נשלחות`);
+      // HEIC שלא הצלחנו להמיר — נאמר עכשיו ולא אחרי שלוש נסיעות רשת
+      // שנגמרות ב"לא הצלחנו לעבד את הקובץ".
+      if (rejected.length) {
+        setError(`${rejected.length} ${rejected.length === 1 ? 'קובץ לא נשלח' : 'קבצים לא נשלחו'}: `
+          + rejected[0].error);
+      }
     } catch (err) {
       setError(apiError(err, 'לא הצלחנו להוסיף לתור'));
     }
