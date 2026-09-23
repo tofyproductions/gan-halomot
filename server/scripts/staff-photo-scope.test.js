@@ -47,10 +47,10 @@ const check = (name, cond, detail = '') => {
   const babies = await Classroom.create({
     name: 'תינוקיה', branch_id: kaplan._id, academic_year: YEAR, is_active: true,
   });
-  await Classroom.create({
+  const olderRoom = await Classroom.create({
     name: 'בוגרים', branch_id: kaplan._id, academic_year: YEAR, is_active: true,
   });
-  await Classroom.create({
+  const dayanRoom = await Classroom.create({
     name: 'פעוטות', branch_id: dayan._id, academic_year: YEAR, is_active: true,
   });
 
@@ -100,20 +100,22 @@ const check = (name, cond, detail = '') => {
   console.log('');
   console.log('הכיתה של הגננת:');
   const withRoom = {
-    role: 'class_leader', branch_id: kaplan._id, managed_branch_ids: [], classroom_id: babies._id,
+    role: 'class_leader', branch_id: kaplan._id, managed_branch_ids: [],
+    classroom_ids: [babies._id],
   };
   check('רואה את הכיתה שלה בלבד',
     names(await visibleClassrooms(withRoom)) === 'תינוקיה',
     names(await visibleClassrooms(withRoom)));
 
   const assistantSameRoom = {
-    role: 'assistant', branch_id: kaplan._id, managed_branch_ids: [], classroom_id: babies._id,
+    role: 'assistant', branch_id: kaplan._id, managed_branch_ids: [],
+    classroom_ids: [babies._id],
   };
   check('  וכל הצוות של אותה כיתה רואה את אותו דבר',
     names(await visibleClassrooms(assistantSameRoom)) === 'תינוקיה');
 
   const noRoom = {
-    role: 'teacher', branch_id: kaplan._id, managed_branch_ids: [], classroom_id: null,
+    role: 'teacher', branch_id: kaplan._id, managed_branch_ids: [], classroom_ids: [],
   };
   check('  ומי שלא שויכה לכיתה רואה את הסניף — לא ננעלת',
     names(await visibleClassrooms(noRoom)) === 'בוגרים, תינוקיה',
@@ -127,21 +129,71 @@ const check = (name, cond, detail = '') => {
   await Classroom.updateOne({ _id: babies._id }, { $set: { is_active: true } });
 
   console.log('');
+  console.log('שיוך לכמה כיתות:');
+  const two = {
+    role: 'assistant', branch_id: kaplan._id, managed_branch_ids: [],
+    classroom_ids: [babies._id, olderRoom._id],
+  };
+  check('רואה בדיוק את שתי הכיתות שלה',
+    names(await visibleClassrooms(two)) === 'בוגרים, תינוקיה',
+    names(await visibleClassrooms(two)));
+
+  // גננת אחת בשני סניפים — מקרה אמיתי, ולכן הכיתות גוברות על סינון הסניף.
+  const across = {
+    role: 'class_leader', branch_id: kaplan._id, managed_branch_ids: [],
+    classroom_ids: [babies._id, dayanRoom._id],
+  };
+  check('  וכיתה בסניף אחר נכנסת גם היא',
+    names(await visibleClassrooms(across)) === 'פעוטות, תינוקיה',
+    names(await visibleClassrooms(across)));
+
+  const acrossUser = await User.create({
+    role: 'class_leader', branch_id: kaplan._id, managed_branch_ids: [],
+    classroom_ids: [babies._id, dayanRoom._id],
+    full_name: 'שתי כיתות', id_number: '324199200',
+    email: 'two@scope.test', password_hash: 'x', is_active: true,
+  });
+  const acrossScope = await resolveBranchScope({
+    user: { ...across, id: acrossUser._id, _id: acrossUser._id },
+  });
+  check('  והסניף השני נכנס להרשאה — אחרת היא רואה כיתה ונדחית עליה',
+    acrossScope.map(String).includes(String(dayan._id)), JSON.stringify(acrossScope));
+  await acrossUser.deleteOne();
+
+  check('  רשימה ריקה מחזירה לסניף',
+    names(await visibleClassrooms({
+      role: 'teacher', branch_id: kaplan._id, managed_branch_ids: [], classroom_ids: [],
+    })) === 'בוגרים, תינוקיה');
+
+  console.log('');
   console.log('כשמעבירים עובדת לסניף אחר:');
-  // ה-classroom_id הישן נשאר על השורה. אם הוא נבדק לפני הסניף הוא גובר,
-  // והעובדת ממשיכה לראות — ולהעלות אל — כיתה בסניף שהיא כבר לא עובדת בו.
+  /**
+   * שיוך מפורש לכיתה שורד החלפת סניף — וזו החלטה, לא תקלה.
+   *
+   * קודם `classroom_id` היה שדה שאיש לא הגדיר ביודעין, ולכן מצביע ישן שגבר
+   * על הסניף היה באג. עכשיו הרשימה נקבעת במסך ההרשאות ביד של מנהל מערכת,
+   * והמקרה "עובדת בשתי כיתות בשני סניפים" הוא בדיוק מה שהיא נועדה לו. לשלול
+   * שיוך מפורש בגלל שינוי בשדה אחר היה מבטל את הפיצ'ר בשקט.
+   *
+   * המחיר: מי שמעביר סניף צריך לעדכן גם את הכיתות. המסך מציג אותן, ולכן זה
+   * גלוי ולא נסתר.
+   */
   const moved = {
     role: 'class_leader',
     branch_id: dayan._id,
     managed_branch_ids: [],
-    classroom_id: babies._id,     // עדיין מצביע על קפלן
+    classroom_ids: [babies._id],     // שויכה במפורש לחדר בקפלן
   };
-  check('הכיתה הישנה לא גוברת על הסניף החדש',
-    !names(await visibleClassrooms(moved)).includes('תינוקיה'),
+  check('השיוך המפורש נשמר גם אחרי החלפת סניף',
+    names(await visibleClassrooms(moved)) === 'תינוקיה',
     names(await visibleClassrooms(moved)));
-  check('  והיא רואה את הסניף החדש',
-    names(await visibleClassrooms(moved)) === 'פעוטות',
-    names(await visibleClassrooms(moved)));
+
+  const movedNoRooms = {
+    role: 'class_leader', branch_id: dayan._id, managed_branch_ids: [], classroom_ids: [],
+  };
+  check('  ומי שלא שויכה לכיתה עוברת עם הסניף',
+    names(await visibleClassrooms(movedNoRooms)) === 'פעוטות',
+    names(await visibleClassrooms(movedNoRooms)));
 
   console.log('');
   console.log('מנהלת מערכת:');

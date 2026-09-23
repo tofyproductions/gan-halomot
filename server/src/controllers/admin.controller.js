@@ -1,5 +1,7 @@
 const bcrypt = require('bcryptjs');
-const { User, Setting, Employee, CustomRole } = require('../models');
+const {
+  User, Setting, Employee, CustomRole, Classroom,
+} = require('../models');
 const { ROLES } = require('../constants/roles');
 const { ALL_TAB_IDS, defaultTabsForRole } = require('../constants/tabs');
 
@@ -36,9 +38,10 @@ async function setRoleTabs(req, res, next) {
 async function listUsers(req, res, next) {
   try {
     const found = await User.find({ is_active: true })
-      .select('full_name email role custom_role_id branch_id managed_branch_ids position tab_overrides_add tab_overrides_remove')
+      .select('full_name email role custom_role_id branch_id managed_branch_ids classroom_ids position tab_overrides_add tab_overrides_remove')
       .populate('branch_id', 'name')
       .populate('managed_branch_ids', 'name')
+      .populate('classroom_ids', 'name')
       .populate('custom_role_id', 'name base_role')
       .sort({ full_name: 1 });
 
@@ -52,6 +55,9 @@ async function listUsers(req, res, next) {
       o.custom_role_name = o.custom_role_id?.name || null;
       o.custom_role_base_role = o.custom_role_id?.base_role || null;
       o.custom_role_id = o.custom_role_id?._id ? String(o.custom_role_id._id) : null;
+  o.classroom_ids = (o.classroom_ids || []).map(c => (c && c._id
+    ? { id: String(c._id), name: c.name }
+    : { id: String(c), name: '' }));
       return o;
     });
 
@@ -122,13 +128,40 @@ async function updateUserRole(req, res, next) {
     if (Array.isArray(managed_branch_ids)) {
       setObj.managed_branch_ids = managed_branch_ids.filter(x => x && typeof x === 'string');
     }
+    // הכיתות שהעובדת משויכת אליהן. רשימה ריקה היא בחירה מפורשת — "תראי את
+    // כל הסניף" — ולכן היא נשמרת ולא מתעלמים ממנה.
+    if (Array.isArray(req.body?.classroom_ids)) {
+      setObj.classroom_ids = req.body.classroom_ids
+        .filter(x => x && typeof x === 'string').slice(0, 20);
+    }
     const updated = await User.findByIdAndUpdate(id, setObj, { new: true })
-      .select('full_name email role custom_role_id branch_id managed_branch_ids tab_overrides_add tab_overrides_remove')
+      .select('full_name email role custom_role_id branch_id managed_branch_ids classroom_ids tab_overrides_add tab_overrides_remove')
       .populate('branch_id', 'name')
       .populate('managed_branch_ids', 'name')
+      .populate('classroom_ids', 'name')
       .populate('custom_role_id', 'name base_role');
     if (!updated) return res.status(404).json({ error: 'משתמש לא נמצא' });
     res.json({ user: shapeUser(updated) });
+  } catch (err) { next(err); }
+}
+
+/**
+ * כל הכיתות הפעילות, לבורר השיוך.
+ *
+ * לא `photos.controller#visibleClassrooms`: זו רשימה למנהל מערכת שמשייך
+ * מישהי אחרת, ולכן היא של כל הגן ולא של מי ששואל.
+ */
+async function listAllClassrooms(req, res, next) {
+  try {
+    const { dedupeNewest } = require('../services/classroomList');
+    const rooms = dedupeNewest(
+      await Classroom.find({ is_active: true }).populate('branch_id', 'name').lean(),
+    );
+    res.json({
+      classrooms: rooms
+        .map(r => ({ id: String(r._id), name: r.name, branch: r.branch_id?.name || '' }))
+        .sort((a, b) => a.branch.localeCompare(b.branch, 'he') || a.name.localeCompare(b.name, 'he')),
+    });
   } catch (err) { next(err); }
 }
 
@@ -138,6 +171,9 @@ function shapeUser(doc) {
   o.custom_role_name = o.custom_role_id?.name || null;
   o.custom_role_base_role = o.custom_role_id?.base_role || null;
   o.custom_role_id = o.custom_role_id?._id ? String(o.custom_role_id._id) : null;
+  o.classroom_ids = (o.classroom_ids || []).map(c => (c && c._id
+    ? { id: String(c._id), name: c.name }
+    : { id: String(c), name: '' }));
   return o;
 }
 
@@ -276,9 +312,10 @@ async function createCustomRoleFromUser(req, res, next) {
     await user.save();
 
     const fresh = await User.findById(user._id)
-      .select('full_name email role custom_role_id branch_id managed_branch_ids tab_overrides_add tab_overrides_remove')
+      .select('full_name email role custom_role_id branch_id managed_branch_ids classroom_ids tab_overrides_add tab_overrides_remove')
       .populate('branch_id', 'name')
       .populate('managed_branch_ids', 'name')
+      .populate('classroom_ids', 'name')
       .populate('custom_role_id', 'name base_role');
 
     res.json({
@@ -478,6 +515,7 @@ async function emailTest(req, res, next) {
 }
 
 module.exports = {
+  listAllClassrooms,
   listUsers, updateUserTabs, updateUserRole, resetPassword,
   getRoleTabs, setRoleTabs, emailDiagnostic, emailTest,
   listCustomRoles, createCustomRoleFromUser, updateCustomRole, deleteCustomRole,

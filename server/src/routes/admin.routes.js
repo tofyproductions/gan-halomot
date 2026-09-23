@@ -6,6 +6,8 @@ const dataDeletion = require('../controllers/dataDeletion.controller');
 router.use(authMiddleware, requireRole('system_admin'));
 
 router.get('/users', ctrl.listUsers);
+// כל הכיתות הפעילות, לבורר השיוך במסך ההרשאות.
+router.get('/classrooms', ctrl.listAllClassrooms);
 router.patch('/users/:id/tabs', ctrl.updateUserTabs);
 router.patch('/users/:id/role', ctrl.updateUserRole);
 router.post('/users/:id/reset-password', ctrl.resetPassword);

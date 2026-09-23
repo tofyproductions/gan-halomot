@@ -37,15 +37,17 @@ async function resolveBranchScope(req) {
   let role = req.user?.role;
   let managed = (req.user?.managed_branch_ids || []).map(String);
   let ownBranch = req.user?.branch_id ? String(req.user.branch_id) : null;
+  let classroomIds = (req.user?.classroom_ids || []).map(String);
 
   if (uid) {
     try {
       const dbUser = await User.findById(uid)
-        .select('role managed_branch_ids branch_id').lean();
+        .select('role managed_branch_ids branch_id classroom_ids').lean();
       if (dbUser) {
         role = dbUser.role;
         managed = (dbUser.managed_branch_ids || []).map(String);
         ownBranch = dbUser.branch_id ? String(dbUser.branch_id) : null;
+        classroomIds = (dbUser.classroom_ids || []).map(String);
       }
     } catch { /* fall back to the token */ }
   }
@@ -64,7 +66,22 @@ async function resolveBranchScope(req) {
    * סניפים, השיוך שלו הוא הסניף שלו, נקודה.
    */
   if (!BRANCH_MANAGING_ROLES.includes(role)) {
-    return ownBranch ? [ownBranch] : [];
+    /**
+     * גננת שמשויכת לכיתה בסניף אחר עובדת שם.
+     *
+     * השיוך לכיתות הוא מה שמגדיר איפה היא עובדת, ולכן הסניפים של הכיתות
+     * האלה נכנסים להרשאה יחד עם הסניף הרשום שלה. בלי זה, לשייך אותה לחדר
+     * בסניף שני היה נותן לה כיתה שהיא רואה אבל כל בקשה עליה נדחית ב-403 —
+     * הרשאה שניתנה ומיד נשללת היא גרועה מהרשאה שלא ניתנה.
+     */
+    const branches = new Set(ownBranch ? [ownBranch] : []);
+    if (classroomIds.length) {
+      const { Classroom } = require('../models');
+      const rooms = await Classroom.find({ _id: { $in: classroomIds } })
+        .select('branch_id').lean();
+      rooms.forEach((r) => r.branch_id && branches.add(String(r.branch_id)));
+    }
+    return [...branches];
   }
   if (managed.length) return managed;
   return ownBranch ? [ownBranch] : [];

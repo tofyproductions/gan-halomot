@@ -77,12 +77,13 @@ function effectiveMap(user, roleTabs = {}, customRole = null) {
   return m;
 }
 
-function RoleDialog({ open, user, branches, customRoles, onClose, onSaved, onRoleCreated }) {
+function RoleDialog({ open, user, branches, classrooms, customRoles, onClose, onSaved, onRoleCreated }) {
   // One dropdown, two kinds of answer. 'role:<builtin>' or 'custom:<id>' —
   // keeping them as two pieces of state is how a screen ends up sending both
   // and meaning neither.
   const [choice, setChoice] = useState('role:teacher');
   const [managed, setManaged] = useState([]);
+  const [rooms, setRooms] = useState([]);
   const [saving, setSaving] = useState(false);
   const [nameDialog, setNameDialog] = useState(null);   // the "build a role" name
   const [creating, setCreating] = useState(false);
@@ -91,6 +92,7 @@ function RoleDialog({ open, user, branches, customRoles, onClose, onSaved, onRol
     if (open && user) {
       setChoice(user.custom_role_id ? `custom:${user.custom_role_id}` : `role:${user.role || 'teacher'}`);
       setManaged((user.managed_branch_ids || []).map(b => b._id || b.id || b));
+      setRooms((user.classroom_ids || []).map(c => c.id || c._id || c));
     }
   }, [open, user]);
 
@@ -104,8 +106,13 @@ function RoleDialog({ open, user, branches, customRoles, onClose, onSaved, onRol
     setSaving(true);
     try {
       const body = chosenCustom
-        ? { custom_role_id: chosenCustom._id, managed_branch_ids: managed }
-        : { role: choice.slice(5), custom_role_id: null, managed_branch_ids: managed };
+        ? { custom_role_id: chosenCustom._id, managed_branch_ids: managed, classroom_ids: rooms }
+        : {
+          role: choice.slice(5),
+          custom_role_id: null,
+          managed_branch_ids: managed,
+          classroom_ids: rooms,
+        };
       const res = await api.patch(`/admin/users/${user._id}/role`, body);
       onSaved(res.data.user);
       toast.success('עודכן. שינויים נכנסים לתוקף אחרי התחברות מחדש.');
@@ -205,6 +212,40 @@ function RoleDialog({ open, user, branches, customRoles, onClose, onSaved, onRol
               ואז מסירים את אותו גן.
             </Typography>
           </FormControl>
+
+          {/* שיוך לכיתות. גננת עובדת בכיתה אחת, לפעמים בשתיים, ולפעמים בשתי
+              כיתות בשני סניפים — ולכן זו רשימה, והיא גוברת על הסניף. */}
+          <FormControl fullWidth>
+            <InputLabel>כיתות משויכות</InputLabel>
+            <Select
+              multiple
+              value={rooms}
+              onChange={e => setRooms(
+                typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value,
+              )}
+              input={<OutlinedInput label="כיתות משויכות" />}
+              renderValue={(selected) => (
+                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                  {selected.map(id => {
+                    const c = classrooms.find(x => x.id === id);
+                    return <Chip key={id} label={c ? `${c.branch} — ${c.name}` : id} size="small" />;
+                  })}
+                </Stack>
+              )}
+            >
+              {classrooms.map(c => (
+                <MenuItem key={c.id} value={c.id}>
+                  <Checkbox checked={rooms.indexOf(c.id) > -1} size="small" />
+                  <ListItemText primary={`${c.branch} — ${c.name}`} />
+                </MenuItem>
+              ))}
+            </Select>
+            <Typography variant="caption" sx={{ mt: 0.5, color: 'text.secondary' }}>
+              גננת או סייעת תראה במסך התמונות **רק** את הכיתות האלה, גם אם הן בשני
+              סניפים. ריק = כל הכיתות בסניף שלה. השיוך נשמר גם אם מחליפים לה סניף,
+              אז אחרי מעבר כדאי לעדכן גם כאן.
+            </Typography>
+          </FormControl>
         </Stack>
       </DialogContent>
       <DialogActions>
@@ -253,6 +294,7 @@ export default function PermissionsManager() {
   // below, so they get their own callout instead of vanishing silently.
   const [unlinked, setUnlinked] = useState([]);
   const [branches, setBranches] = useState([]);
+  const [classrooms, setClassrooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState({});
   const [edits, setEdits] = useState({}); // userId -> { tabId -> bool }
@@ -275,15 +317,17 @@ export default function PermissionsManager() {
   async function load() {
     setLoading(true);
     try {
-      const [usersRes, branchesRes, roleTabsRes, customRes] = await Promise.all([
+      const [usersRes, branchesRes, classroomsRes, roleTabsRes, customRes] = await Promise.all([
         api.get('/admin/users'),
         api.get('/branches'),
+        api.get('/admin/classrooms'),
         api.get('/admin/role-tabs'),
         api.get('/admin/custom-roles'),
       ]);
       setUsers(usersRes.data.users || []);
       setUnlinked(usersRes.data.unlinked_employees || []);
       setBranches(branchesRes.data.branches || []);
+      setClassrooms(classroomsRes.data.classrooms || []);
       setRoleTabs(roleTabsRes.data.role_tabs || {});
       setCustomRoles(customRes.data.roles || []);
       setCustomRolesDirty({});
@@ -829,6 +873,7 @@ export default function PermissionsManager() {
         open={roleDialog.open}
         user={roleDialog.user}
         branches={branches}
+        classrooms={classrooms}
         customRoles={customRoles}
         onClose={() => setRoleDialog({ open: false, user: null })}
         onSaved={(fresh) => setUsers(prev => prev.map(u => u._id === fresh._id ? { ...u, ...fresh } : u))}

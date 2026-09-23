@@ -83,6 +83,22 @@ const userSchema = new mongoose.Schema({
    * that a link handed to the wrong room cannot silently work.
    */
   classroom_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Classroom', default: null },
+
+  /**
+   * הכיתות שהעובדת הזו משויכת אליהן — רבים, ובכוונה.
+   *
+   * גננת עובדת בכיתה אחת, לפעמים בשתיים, ולפעמים בשתי כיתות בשני סניפים
+   * שונים. `classroom_id` הבודד למעלה שייך ללוח הכיתה — טאבלט שהוא חדר אחד
+   * ותמיד יישאר אחד — ולכן זה שדה נפרד ולא הרחבה שלו.
+   *
+   * כשהרשימה מלאה היא **גוברת על הסניף**: הגננת רואה בדיוק את הכיתות האלה
+   * ותו לא, גם אם הן בשני סניפים. סייעת בתינוקייה לא צריכה את גלריית
+   * הבוגרים, ומסך שמציע לה חמש כיתות הוא מסך שממנו היא תעלה לכיתה הלא
+   * נכונה מתישהו.
+   *
+   * כשהיא ריקה — נופלים חזרה לסניף, כדי שאף אחת לא תינעל בגלל שדה שטרם מולא.
+   */
+  classroom_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'Classroom', default: [] },
   board_token: { type: String, default: null, index: true, sparse: true },
   // Branches the user manages. For branch_manager / accountant roles this is
   // the source of truth for "which branches am I allowed to see". Defaults
