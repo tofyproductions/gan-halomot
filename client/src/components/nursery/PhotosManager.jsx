@@ -9,6 +9,9 @@ import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import FaceTagging from './FaceTagging';
+import {
+  enqueue, subscribe, pump, retryFailed, discardFailed,
+} from '../../utils/uploadQueue';
 
 /**
  * The gan's photographs, staff side.
@@ -30,7 +33,6 @@ export default function PhotosManager() {
   const [classroomId, setClassroomId] = useState('');
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [tagging, setTagging] = useState(null);
@@ -41,6 +43,7 @@ export default function PhotosManager() {
   // ההעלאה, והגננת כבר על המסך הזה. המונה הוא מה שמזמין אותה פנימה.
   const [mode, setMode] = useState('gallery');
   const [waiting, setWaiting] = useState(0);
+  const [queue, setQueue] = useState({ pending: 0, failed: 0, busy: false });
 
   // The photos feature's OWN room list — every category, this year only.
   // It used to borrow the nursery board's list, which is infant-rooms-only by
@@ -84,21 +87,24 @@ export default function PhotosManager() {
     if (files.length) send(files);
   };
 
+  /**
+   * הגננת לוחצת שלח, והמסך חוזר אליה מיד.
+   *
+   * המתחרה כאן הוא ווטסאפ, ושם שיתוף לא מבקש שנייה אחת של המתנה. קודם היה
+   * פה פס התקדמות שהיא הייתה תקועה מולו — 50 תמונות על וויפי של גן זה כ-75
+   * שניות. עכשיו הקבצים מכווצים בטלפון (46 מגה הופכים ל-15), נכנסים לתור
+   * ששמור על המכשיר, והעלאה קורית ברקע תמונה-תמונה.
+   *
+   * אם היא תסגור את האפליקציה באמצע, התור מחכה וממשיך בפתיחה הבאה. שום
+   * צילום לא הולך לאיבוד בגלל מעלית בלי קליטה.
+   */
   const send = async (files) => {
-    setUploading(true);
     setError('');
     try {
-      const form = new FormData();
-      files.slice(0, 30).forEach(f => form.append('photos', f));
-      form.append('classroom_id', classroomId);
-      const res = await api.post('/photos/upload', form, { timeout: UPLOAD_TIMEOUT_MS });
-      setToast(`${res.data.saved} תמונות הועלו`);
-      if (res.data.failed?.length) setError(`${res.data.failed.length} קבצים לא נקלטו`);
-      await load();
+      const n = await enqueue(files, { classroomId });
+      setToast(n === 1 ? 'התמונה נשלחת' : `${n} תמונות נשלחות`);
     } catch (err) {
-      setError(apiError(err, 'ההעלאה נכשלה'));
-    } finally {
-      setUploading(false);
+      setError(apiError(err, 'לא הצלחנו להוסיף לתור'));
     }
   };
 
@@ -195,15 +201,32 @@ export default function PhotosManager() {
         <input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={pick} />
         <Button
           variant="contained" startIcon={<AddPhotoAlternateIcon />}
-          disabled={uploading || !classroomId}
+          disabled={!classroomId}
           onClick={() => fileInput.current?.click()}
           sx={{ whiteSpace: 'nowrap' }}
         >
-          {uploading ? 'מעלה…' : 'העלאת תמונות'}
+          העלאת תמונות
         </Button>
       </Stack>
 
-      {uploading && <LinearProgress sx={{ mb: 2 }} />}
+      {/* לא פס שחוסם — שורת מצב. היא כבר יכולה לעשות דברים אחרים. */}
+      {(queue.pending > 0 || queue.failed > 0) && (
+        <Alert
+          severity={queue.failed ? 'warning' : 'info'}
+          sx={{ mb: 2 }}
+          action={queue.failed ? (
+            <Stack direction="row" spacing={1}>
+              <Button size="small" onClick={() => retryFailed()}>נסה שוב</Button>
+              <Button size="small" color="inherit" onClick={() => discardFailed()}>מחק</Button>
+            </Stack>
+          ) : null}
+        >
+          {queue.pending > 0 && `נשלחות ברקע: ${queue.pending}`}
+          {queue.pending > 0 && queue.failed > 0 && ' · '}
+          {queue.failed > 0 && `${queue.failed} לא נשלחו`}
+        </Alert>
+      )}
+      {queue.pending > 0 && <LinearProgress sx={{ mb: 2 }} />}
       {error && (
         <Alert
           severity="error" sx={{ mb: 2 }} onClose={() => setError('')}

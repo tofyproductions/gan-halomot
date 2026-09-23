@@ -4,10 +4,15 @@ import { BrowserRouter } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import App from './App';
+import { startAutoResume } from './utils/uploadQueue';
 import RTLProvider from './components/layout/RTLProvider';
 import { AuthProvider } from './hooks/useAuth';
 import { UiVersionProvider } from './hooks/useUiVersion';
 import UpdateBanner from './components/shared/UpdateBanner';
+
+// תמונות שממתינות בתור ממשיכות לעלות ברגע שיש רשת ושהאפליקציה פתוחה —
+// גם אם היא נסגרה באמצע ההעלאה אתמול. התור שמור על המכשיר.
+startAutoResume();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

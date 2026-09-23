@@ -45,11 +45,31 @@ async function renderVariants(buffer) {
   const base = sharp(buffer, { failOn: 'none' }).rotate();
   const meta = await base.metadata();
 
-  const full = await base
-    .clone()
-    .resize({ width: FULL_MAX, height: FULL_MAX, fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: FULL_QUALITY, mozjpeg: true })
-    .toBuffer();
+  /**
+   * A photograph the phone already shrank is left alone.
+   *
+   * The app now resizes to these exact dimensions before uploading, which cuts
+   * 46MB of a morning's fifty photographs down to 15MB. Re-encoding it here
+   * would compress an already-compressed JPEG a second time — visible mush on
+   * a child's face, for nothing — and spend a second of the single CPU per
+   * photograph to produce it.
+   *
+   * The bounds and the quality are the same numbers on both sides
+   * (client/src/utils/imageCompress.js). They have to be: larger there means
+   * double compression, smaller means quality thrown away that cannot come
+   * back, because the original is deliberately not kept.
+   */
+  const alreadySmall = meta.format === 'jpeg'
+    && (meta.width || 0) <= FULL_MAX && (meta.height || 0) <= FULL_MAX
+    && (meta.orientation || 1) === 1;
+
+  const full = alreadySmall
+    ? buffer
+    : await base
+      .clone()
+      .resize({ width: FULL_MAX, height: FULL_MAX, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: FULL_QUALITY, mozjpeg: true })
+      .toBuffer();
 
   const thumb = await base
     .clone()
