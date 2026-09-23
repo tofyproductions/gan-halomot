@@ -465,6 +465,20 @@ connectDB().then(() => {
     // "3 תמונות חדשות של דני" — פעם ביום, על הילד שלהם. זה מה שהופך את
     // האפליקציה להרגל, וזה גם הדבר שהכי קל לשרוף: בלי תקרה ההורים מכבים
     // התראות, וכשיכבו — יכבו גם את אלה על תשלומים ואיסוף.
+    // תמונה חיה שנתיים לימודים ואז נמחקת, וילד שעזב מאבד את טביעת הפנים
+    // מיד. זו הפעולה היחידה כאן שאי אפשר לבטל, ולכן יש תקרה על כמה אפשר
+    // למחוק בריצה אחת, והיא עוברת על אוסף התמונות בלבד — חוזים ותלושים
+    // יושבים באותו דלי ואין לה דרך להגיע אליהם.
+    const photoRetention = require('./services/photoRetentionJob');
+    const runPhotoRetention = () => photoRetention.tick()
+      .then(r => photoRetention.describeTick(r)
+        .forEach(l => (l.level === 'error' ? console.error(l.text) : console.log(l.text))))
+      .catch(e => console.error('[photo-retention] failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runPhotoRetention, photoRetention.FIRST_RUN_MS);
+      setInterval(runPhotoRetention, photoRetention.EVERY_MS);
+    }
+
     const photoDigest = require('./services/photoDigestJob');
     const runPhotoDigest = () => photoDigest.tick()
       .then(r => photoDigest.describeTick(r).forEach(l => console.log(l.text)))

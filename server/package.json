@@ -131,7 +131,8 @@
     "test:face-health": "node scripts/face-health.test.js",
     "test:face-parent": "node scripts/face-parent-corrections.test.js",
     "face:demo": "node scripts/face-demo.js",
-    "test:face-digest": "node scripts/face-digest.test.js"
+    "test:face-digest": "node scripts/face-digest.test.js",
+    "test:face-retention": "node scripts/face-retention.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
