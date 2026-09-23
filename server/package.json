@@ -118,7 +118,8 @@
     "test:screen-help": "node scripts/screen-help.test.js",
     "test:contract-delete": "node scripts/contract-delete.test.js",
     "test:viewer-client": "node scripts/viewer-client-manager.test.js",
-    "test:roster-gap": "node scripts/roster-gap.test.js"
+    "test:roster-gap": "node scripts/roster-gap.test.js",
+    "test:face-parity": "node scripts/face-parity.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
@@ -142,6 +143,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.9.15",
+    "onnxruntime-node": "^1.30.0",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
     "puppeteer-core": "^23.0.0",
