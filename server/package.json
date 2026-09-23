@@ -123,7 +123,12 @@
     "test:face-matcher": "node scripts/face-matcher.test.js",
     "test:face-boot": "node scripts/face-boot.test.js",
     "test:face-resolution": "node scripts/face-resolution.test.js",
-    "test:face-tagging": "node scripts/face-tagging-e2e.test.js"
+    "test:face-tagging": "node scripts/face-tagging-e2e.test.js",
+    "face:recall": "node scripts/face-recall.js",
+    "face:models": "node scripts/face-models.js",
+    "face:switch": "node scripts/face-switch.js",
+    "test:face-recall": "node scripts/face-recall.test.js",
+    "test:face-health": "node scripts/face-health.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

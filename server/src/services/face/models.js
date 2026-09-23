@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -29,12 +30,12 @@ const MODELS = {
   detector: {
     file: 'det_10g.onnx',
     bytes: 16923827,
-    sha256: null,               // filled by scripts/face-model-pin.js on first fetch
+    sha256: '5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91',
   },
   recogniser: {
     file: 'w600k_r50.onnx',
     bytes: 174383860,
-    sha256: null,
+    sha256: '4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43',
   },
 };
 
@@ -74,4 +75,60 @@ function cacheTarget(name) {
   return path.join(dir, MODELS[name].file);
 }
 
-module.exports = { MODELS, findLocal, cacheTarget, candidateDirs };
+/** The key a model lives under in the gan's own bucket. */
+function objectKey(name) {
+  return `models/buffalo_l/${MODELS[name].file}`;
+}
+
+function sha256(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+/**
+ * Get a model onto this machine, whatever it takes.
+ *
+ * Local first — a laptop that ran the Python feasibility test already has the
+ * exact files. Otherwise from the gan's own bucket, which is where
+ * scripts/face-models.js puts them: fetching from the internet at runtime
+ * would make face recognition depend on a third party staying up and on a
+ * download URL that has outlived two renames already.
+ *
+ * The hash is checked on arrival, not merely the size. These weights decide
+ * which child a photograph is labelled with, and a truncated or swapped file
+ * would load as a valid graph and quietly produce different answers — which is
+ * the one failure mode nothing downstream could catch.
+ */
+async function ensure(name) {
+  const local = findLocal(name);
+  if (local) return local;
+
+  const storage = require('../storage.service');
+  if (!storage.isConfigured()) {
+    throw new Error(
+      `face: ${MODELS[name].file} is not on this machine and object storage is `
+      + 'not configured. Run scripts/face-models.js --upload from a machine '
+      + 'that has the models, or set FACE_MODEL_DIR.',
+    );
+  }
+
+  const buffer = await storage.getObject(objectKey(name));
+  const digest = sha256(buffer);
+  if (digest !== MODELS[name].sha256) {
+    throw new Error(
+      `face: ${MODELS[name].file} does not match its pinned checksum `
+      + `(got ${digest.slice(0, 12)}…). Refusing to load it.`,
+    );
+  }
+
+  const target = cacheTarget(name);
+  // Written beside the target and moved, so a process killed mid-download
+  // cannot leave a half-file that `findLocal` would later accept on size.
+  const tmp = `${target}.partial`;
+  fs.writeFileSync(tmp, buffer);
+  fs.renameSync(tmp, target);
+  return target;
+}
+
+module.exports = {
+  MODELS, findLocal, cacheTarget, candidateDirs, ensure, objectKey, sha256,
+};

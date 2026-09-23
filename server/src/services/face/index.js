@@ -1,7 +1,7 @@
 const sharp = require('sharp');
 const { detect } = require('./detect');
 const { align, SIZE: CROP } = require('./align');
-const { findLocal, MODELS } = require('./models');
+const { ensure, MODELS } = require('./models');
 const C = require('./constants');
 
 /**
@@ -34,16 +34,12 @@ async function ready() {
 
   loading = (async () => {
     const ort = require('onnxruntime-node');
+    // Fetches from the gan's own bucket on a cold instance and verifies the
+    // checksum. Render's disk does not survive a deploy, so this runs once per
+    // instance — during a background scan, with nobody waiting on a request.
     const paths = {};
     for (const name of Object.keys(MODELS)) {
-      const p = findLocal(name);
-      if (!p) {
-        throw new Error(
-          `face: ${MODELS[name].file} not found. Set FACE_MODEL_DIR, or run `
-          + 'scripts/face-fetch-models.js to download it.',
-        );
-      }
-      paths[name] = p;
+      paths[name] = await ensure(name);
     }
 
     // One thread each. The box has a single CPU that also serves the app and

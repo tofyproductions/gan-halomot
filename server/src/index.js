@@ -449,6 +449,19 @@ connectDB().then(() => {
     // ביומטרי על קטין, והיא נשמרת רק כדי שגננת תוכל לתייג פרצוף ושילד
     // שנרשם מאוחר ייקלט למפרע. אחרי 30 יום היא מיותרת — התג הוא התשובה.
     // בלי ה-job הזה הגן יצבור ~180,000 טביעות בשנה במקום 4,400.
+    // התקלה שלא תדווח: התור נתקע, או שהמודלים לא נטענו אחרי דיפלוי, ומבחוץ
+    // לא קורה כלום. התמונות ממשיכות לעלות, הגלריה עובדת, ואף אחד לא מקבל
+    // שגיאה — ההורים פשוט יניחו שהילד לא צולם. לכן הבדיקה היא "יש עבודה
+    // ממתינה ואף אחד לא עובד", ולא "האם נזרקה שגיאה".
+    const faceHealth = require('./services/faceHealthJob');
+    const runFaceHealth = () => faceHealth.tick()
+      .then(r => faceHealth.describeTick(r).forEach(l => console.error(l.text)))
+      .catch(e => console.error('[face-health] failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runFaceHealth, faceHealth.FIRST_RUN_MS);
+      setInterval(runFaceHealth, faceHealth.EVERY_MS);
+    }
+
     const facePurge = require('./services/facePurgeJob');
     const runFacePurge = () => facePurge.tick()
       .then(r => facePurge.describeTick(r).forEach(l => console.log(l.text)))
