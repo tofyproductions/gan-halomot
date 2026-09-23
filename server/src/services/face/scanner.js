@@ -146,12 +146,24 @@ async function scanOne(photo) {
     }
   }
 
-  // Carry the numbers for now. A teacher naming an unmatched face in the
-  // tagging queue needs them to build a reference from it, and a child
-  // enrolled next month needs them to be found in photographs already
-  // scanned. facePurgeJob empties them after EMBEDDING_TTL_DAYS, which is the
-  // whole reason this system holds 4,400 biometric templates and not 180,000.
-  decisions.forEach((d, i) => { d.embedding = Array.from(faces[i].embedding); });
+  /**
+   * Carry the numbers — but only where somebody agreed to that.
+   *
+   * A teacher naming an unmatched face needs them to build a reference from
+   * it, and a child enrolled next month needs them to be found in photographs
+   * already scanned, so they are kept for EMBEDDING_TTL_DAYS and then purged.
+   *
+   * `candidates` has already been through the consent filter: it is the
+   * children in this room whose families agreed to face recognition. When it
+   * is empty, nothing in this photograph could ever be matched or taught, and
+   * storing an embedding would be keeping biometric data about children for a
+   * purpose nobody consented to and no feature could use. So it is not stored.
+   * The faces are still found, the photograph still reaches the classroom
+   * gallery, and a teacher can still tag it by hand.
+   */
+  if (candidates.length) {
+    decisions.forEach((d, i) => { d.embedding = Array.from(faces[i].embedding); });
+  }
 
   const twins = await twinMap();
   const childIds = expandTwins(

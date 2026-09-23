@@ -219,6 +219,14 @@ async function nameFace({ photoId, faceIndex, childId, user }) {
     await ChildFaceReference.trim(childId);
   }
 
+  // Named as a child whose family did not agree: the tag stands — it is a
+  // person's note about a photograph — but the 512 numbers have no purpose
+  // here and no permission, so they go now rather than waiting out the TTL.
+  if (!mayTeach) {
+    await Photo.updateOne({ _id: photo._id },
+      { $unset: { [`faces.${faceIndex}.embedding`]: '' } });
+  }
+
   const references = await ChildFaceReference.countDocuments({ child_id: childId });
   return {
     ok: true,

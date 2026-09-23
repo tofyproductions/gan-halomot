@@ -35,15 +35,36 @@ const axis = (i) => { const v = new Array(512).fill(0); v[i] = 1; return v; };
   const mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri(), { dbName: 'parent_corrections' });
 
-  const { Photo, ParentPhotoHidden, ChildFaceReference } = require('../src/models');
+  const {
+    Photo, ParentPhotoHidden, ChildFaceReference, Child, ParentAccount,
+  } = require('../src/models');
   const svc = require('../src/services/parentFaces.service');
   const tagging = require('../src/services/faceTagging.service');
 
   const dani = new mongoose.Types.ObjectId();
   const maya = new mongoose.Types.ObjectId();
+  const danisDad = '400000001';
   const parent = new mongoose.Types.ObjectId();
   const room = new mongoose.Types.ObjectId();
   const mine = [dani];
+
+  // דני's family agreed to face recognition. Without that the tag would still
+  // stand — a person's note about a photograph — but no template would ever be
+  // built, which is the boundary face-tagging-e2e covers in its own right.
+  await Child.create({
+    _id: dani,
+    registration_id: new mongoose.Types.ObjectId(),
+    child_name: 'דני',
+    classroom_id: room,
+    academic_year: '2026-2027',
+    is_active: true,
+    parent_id_number: danisDad,
+  });
+  await ParentAccount.create({
+    id_number: danisDad,
+    full_name: 'הורה של דני',
+    face_consent: { given: true, at: new Date(), version: '2026-09' },
+  });
 
   const mkPhoto = (faces) => Photo.create({
     key: `p/${Math.random().toString(36).slice(2)}.jpg`,
