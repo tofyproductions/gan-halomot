@@ -5,6 +5,7 @@ import {
   DialogActions, IconButton, Snackbar, LinearProgress, ToggleButton,
   ToggleButtonGroup, Paper,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -380,7 +381,12 @@ export default function PhotosManager() {
                 onClick={(e) => { e.stopPropagation(); toggleSelect(p); }}
                 sx={{
                   position: 'absolute', top: 4, insetInlineEnd: 4,
-                  display: 'flex', borderRadius: '50%', bgcolor: 'rgba(255,255,255,.85)',
+                  display: 'flex',
+                  borderRadius: '50%',
+                  // דרך הערכה ולא כתיבה ידנית של הצבע: העיגול יושב על תמונה,
+                  // ולכן הוא חייב להיות לבן חלקית כדי שהסימון ייראה על רקע
+                  // בהיר. ראצ'ט design-hex סופר כל צבע שנכתב ביד, והוא צודק.
+                  bgcolor: (t) => alpha(t.palette.common.white, 0.85),
                   color: isSelected ? 'primary.main' : 'text.disabled', lineHeight: 0, p: '1px',
                 }}
               >
