@@ -30,6 +30,12 @@ assert.ok(C.MATCH_THRESHOLD < C.DET_SCORE_MIN,
   'the two thresholds answer different questions and must not be swapped');
 console.log('  ok   measured constants intact');
 
+const engine = require('../src/services/face');
+assert.strictEqual(typeof engine.releaseIfIdle, 'function', 'models must be releasable');
+// Nothing is loaded, so there is nothing to release — and asking must not throw.
+assert.strictEqual(engine.releaseIfIdle(), false);
+console.log('  ok   models can be released when idle');
+
 const scanner = require('../src/services/face/scanner');
 for (const fn of ['start', 'stop', 'tick', 'scanOne', 'health']) {
   assert.strictEqual(typeof scanner[fn], 'function', `scanner.${fn} missing`);

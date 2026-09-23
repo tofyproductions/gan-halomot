@@ -20,6 +20,35 @@ const C = require('./constants');
 
 let sessions = null;
 let loading = null;
+let lastUsed = 0;
+
+/**
+ * How long the networks stay in memory after the last photograph.
+ *
+ * They cost about 900MB resident on a box that has 2GB and also launches
+ * Chromium to render payslips. Holding them forever to save a two-second
+ * reload from local disk is the wrong trade: the queue is a background job
+ * nobody waits on, and a payslip run that meets a loaded model is an
+ * out-of-memory kill of the whole site.
+ */
+const IDLE_RELEASE_MS = 10 * 60 * 1000;
+
+/**
+ * Let them go when nothing has needed them for a while.
+ *
+ * The files stay on disk, so coming back is a local read rather than a
+ * download. Called on a timer that does not hold the process open.
+ */
+function releaseIfIdle() {
+  if (!sessions || Date.now() - lastUsed < IDLE_RELEASE_MS) return false;
+  sessions = null;
+  if (global.gc) global.gc();      // --expose-gc is already in the start command
+  console.log('[face] models released after idle');
+  return true;
+}
+
+const idleTimer = setInterval(releaseIfIdle, 60_000);
+if (idleTimer.unref) idleTimer.unref();
 
 /**
  * Load both networks, once per process.
@@ -29,6 +58,7 @@ let loading = null;
  * 191MB of weights. The second call waits for the first instead.
  */
 async function ready() {
+  lastUsed = Date.now();
   if (sessions) return sessions;
   if (loading) return loading;
 
@@ -145,4 +175,6 @@ function similarity(a, b) {
   return sum;
 }
 
-module.exports = { analyze, similarity, ready, embed, constants: C };
+module.exports = {
+  analyze, similarity, ready, embed, releaseIfIdle, constants: C,
+};
