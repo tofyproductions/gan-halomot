@@ -134,7 +134,8 @@
     "test:face-digest": "node scripts/face-digest.test.js",
     "test:face-retention": "node scripts/face-retention.test.js",
     "test:photo-duplicate": "node scripts/photo-duplicate.test.js",
-    "test:photo-scope": "node scripts/staff-photo-scope.test.js"
+    "test:photo-scope": "node scripts/staff-photo-scope.test.js",
+    "test:photo-bulk": "node scripts/photo-bulk.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

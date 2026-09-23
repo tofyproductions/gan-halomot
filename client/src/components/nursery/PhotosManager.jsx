@@ -3,10 +3,13 @@ import {
   Box, Card, CardContent, Typography, Stack, TextField, MenuItem, Button,
   Alert, CircularProgress, Chip, Dialog, DialogTitle, DialogContent,
   DialogActions, IconButton, Snackbar, LinearProgress, ToggleButton,
-  ToggleButtonGroup,
+  ToggleButtonGroup, Paper,
 } from '@mui/material';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
+import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import FaceTagging from './FaceTagging';
 import {
@@ -44,6 +47,14 @@ export default function PhotosManager() {
   const [mode, setMode] = useState('gallery');
   const [waiting, setWaiting] = useState(0);
   const [queue, setQueue] = useState({ pending: 0, failed: 0, duplicates: 0, busy: false });
+  // בחירה מרובה. ברגע שמשהו מסומן, הקשה על תמונה מסמנת ולא פותחת — זו
+  // ההתנהגות של כל גלריה, והיא חוסכת מצב-עריכה שצריך להיכנס אליו ולצאת.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkChildIds, setBulkChildIds] = useState([]);
+  const [bulkMode, setBulkMode] = useState('add');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busyBulk, setBusyBulk] = useState(false);
 
   // The photos feature's OWN room list — every category, this year only.
   // It used to borrow the nursery board's list, which is infant-rooms-only by
@@ -79,12 +90,66 @@ export default function PhotosManager() {
     }
   }, [classroomId, filter]);
 
-  useEffect(() => { if (classroomId) load(classroomId, filter); /* eslint-disable-next-line */ }, [classroomId]);
+  useEffect(() => {
+    // הבחירה מתאפסת בכל החלפת כיתה. בלי זה גננת שבחרה עשרים תמונות
+    // בתינוקייה, עברה לבוגרים והקישה "מחיקה" הייתה מוחקת את העשרים מהחדר
+    // השני — המסך כבר לא מציג אותן, והמספר בסרגל נראה כאילו הוא מדבר על מה
+    // שמולה.
+    clearSelection();
+    if (classroomId) load(classroomId, filter);
+    /* eslint-disable-next-line */
+  }, [classroomId]);
 
   const pick = (e) => {
     const files = [...(e.target.files || [])];
     e.target.value = '';
     if (files.length) send(files);
+  };
+
+  const idOf = (p) => String(p._id || p.id);
+  const selectionMode = selected.size > 0;
+
+  const toggleSelect = (p) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      const id = idOf(p);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelected(new Set());
+  const selectAll = () => setSelected(new Set(photos.map(idOf)));
+
+  // תמונה אחת יכולה לשאת כמה ילדים, ולכן הבחירה כאן מרובה גם היא.
+  const applyBulkTag = async () => {
+    setBusyBulk(true);
+    try {
+      const { data } = await api.post('/photos/bulk-tag', {
+        photo_ids: [...selected],
+        child_ids: bulkChildIds,
+        mode: bulkMode,
+      });
+      setToast(`${data.changed} ${data.changed === 1 ? 'תמונה סומנה' : 'תמונות סומנו'}`);
+      setBulkTagOpen(false);
+      setBulkChildIds([]);
+      clearSelection();
+      await load();
+    } catch (err) {
+      setError(apiError(err, 'הסימון נכשל'));
+    } finally { setBusyBulk(false); }
+  };
+
+  const applyBulkDelete = async () => {
+    setBusyBulk(true);
+    try {
+      const { data } = await api.post('/photos/bulk-delete', { photo_ids: [...selected] });
+      setToast(`${data.deleted} ${data.deleted === 1 ? 'תמונה נמחקה' : 'תמונות נמחקו'}`);
+      setConfirmDelete(false);
+      clearSelection();
+      await load();
+    } catch (err) {
+      setError(apiError(err, 'המחיקה נכשלה'));
+    } finally { setBusyBulk(false); }
   };
 
   /**
@@ -198,7 +263,7 @@ export default function PhotosManager() {
 
         <ToggleButtonGroup
           size="small" exclusive value={filter}
-          onChange={(_, v) => { if (v) { setFilter(v); load(classroomId, v); } }}
+          onChange={(_, v) => { if (v) { clearSelection(); setFilter(v); load(classroomId, v); } }}
         >
           <ToggleButton value="all">הכל</ToggleButton>
           <ToggleButton value="untagged">לא מסומנות</ToggleButton>
@@ -276,24 +341,156 @@ export default function PhotosManager() {
         display: 'grid', gap: 1,
         gridTemplateColumns: { xs: 'repeat(3, 1fr)', sm: 'repeat(4, 1fr)', md: 'repeat(6, 1fr)' },
       }}>
-        {photos.map(p => (
-          <Box
-            key={p._id || p.id}
-            onClick={() => openTagging(p)}
-            sx={{
-              position: 'relative', aspectRatio: '1', borderRadius: 2,
-              overflow: 'hidden', cursor: 'pointer', bgcolor: 'action.hover',
-            }}
-          >
-            <Box component="img" src={p.thumb_url} alt="" loading="lazy"
-              sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-            {(p.child_ids || []).length === 0 && (
-              <Chip label="לא מסומנת" size="small" color="warning"
-                sx={{ position: 'absolute', bottom: 4, insetInlineStart: 4 }} />
-            )}
-          </Box>
-        ))}
+        {photos.map(p => {
+          const id = idOf(p);
+          const isSelected = selected.has(id);
+          return (
+            <Box
+              key={id}
+              // ברגע שמשהו מסומן, הקשה מסמנת ולא פותחת. אחרת גננת שבחרה
+              // עשרים תמונות והקישה על העשרים ואחת הייתה מאבדת את הבחירה
+              // לתוך דיאלוג שלא ביקשה.
+              onClick={() => (selectionMode ? toggleSelect(p) : openTagging(p))}
+              sx={{
+                position: 'relative', aspectRatio: '1', borderRadius: 2,
+                overflow: 'hidden', cursor: 'pointer', bgcolor: 'action.hover',
+                outline: isSelected ? '3px solid' : 'none',
+                outlineColor: 'primary.main',
+                outlineOffset: '-3px',
+              }}
+            >
+              <Box
+                component="img" src={p.thumb_url} alt="" loading="lazy"
+                sx={{
+                  width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+                  opacity: isSelected ? 0.75 : 1, transition: 'opacity .12s',
+                }}
+              />
+
+              {/* הסימון עצמו — תמיד גלוי, כי על טלפון אין ריחוף. */}
+              <Box
+                role="checkbox"
+                aria-checked={isSelected}
+                aria-label="בחירה"
+                onClick={(e) => { e.stopPropagation(); toggleSelect(p); }}
+                sx={{
+                  position: 'absolute', top: 4, insetInlineEnd: 4,
+                  display: 'flex', borderRadius: '50%', bgcolor: 'rgba(255,255,255,.85)',
+                  color: isSelected ? 'primary.main' : 'text.disabled', lineHeight: 0, p: '1px',
+                }}
+              >
+                {isSelected ? <CheckCircleIcon /> : <RadioButtonUncheckedIcon />}
+              </Box>
+
+              {(p.child_ids || []).length === 0 && (
+                <Chip label="לא מסומנת" size="small" color="warning"
+                  sx={{ position: 'absolute', bottom: 4, insetInlineStart: 4 }} />
+              )}
+              {(p.child_ids || []).length > 0 && (
+                <Chip
+                  label={(p.child_ids || []).length} size="small" color="success"
+                  sx={{ position: 'absolute', bottom: 4, insetInlineStart: 4, minWidth: 28 }}
+                />
+              )}
+            </Box>
+          );
+        })}
       </Box>
+
+      {/* סרגל הפעולות. צף בתחתית כדי שהאגודל יגיע אליו בלי לגלול חזרה. */}
+      {selectionMode && (
+        <Paper
+          elevation={8}
+          sx={{
+            position: 'sticky', bottom: 12, mt: 2, p: 1.5, borderRadius: 3,
+            display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap',
+          }}
+        >
+          <Typography variant="subtitle2" sx={{ me: 1 }}>
+            {`נבחרו ${selected.size}`}
+          </Typography>
+          <Button size="small" onClick={selectAll}>בחר הכל</Button>
+          <Button size="small" color="inherit" onClick={clearSelection}>נקה</Button>
+          <Box sx={{ flex: 1 }} />
+          <Button
+            size="small" variant="contained" startIcon={<LocalOfferIcon />}
+            onClick={() => { setBulkChildIds([]); setBulkMode('add'); setBulkTagOpen(true); }}
+          >
+            סימון ילדים
+          </Button>
+          <Button
+            size="small" color="error" startIcon={<DeleteOutlineIcon />}
+            onClick={() => setConfirmDelete(true)}
+          >
+            מחיקה
+          </Button>
+        </Paper>
+      )}
+
+      {/* סימון קבוצתי. תמונה אחת יכולה לשאת כמה ילדים, ולכן גם הבחירה כאן. */}
+      <Dialog open={bulkTagOpen} onClose={() => setBulkTagOpen(false)} fullWidth maxWidth="sm">
+        <DialogTitle>{`מי מופיע ב-${selected.size} התמונות?`}</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <Stack direction="row" flexWrap="wrap" sx={{ gap: 1 }}>
+              {(data?.children || []).map(c => {
+                const on = bulkChildIds.includes(String(c.id));
+                return (
+                  <Chip
+                    key={c.id}
+                    label={c.name}
+                    color={on ? 'primary' : 'default'}
+                    variant={on ? 'filled' : 'outlined'}
+                    onClick={() => setBulkChildIds(prev => (on
+                      ? prev.filter(x => x !== String(c.id))
+                      : [...prev, String(c.id)]))}
+                  />
+                );
+              })}
+            </Stack>
+
+            <ToggleButtonGroup
+              size="small" exclusive value={bulkMode}
+              onChange={(_, v) => v && setBulkMode(v)}
+            >
+              <ToggleButton value="add">הוספה לסימון הקיים</ToggleButton>
+              <ToggleButton value="replace">החלפה</ToggleButton>
+            </ToggleButtonGroup>
+
+            <Typography variant="caption" color="text.secondary">
+              {bulkMode === 'add'
+                ? 'מי שכבר מסומן בתמונה יישאר מסומן.'
+                : 'הסימון הקיים בתמונות האלה יימחק ויוחלף במה שנבחר כאן.'}
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBulkTagOpen(false)}>ביטול</Button>
+          <Button
+            variant="contained"
+            disabled={busyBulk || (bulkMode === 'add' && !bulkChildIds.length)}
+            onClick={applyBulkTag}
+          >
+            {busyBulk ? 'שומר…' : 'שמירה'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* מחיקה היא הפעולה היחידה כאן שאי אפשר לבטל, ולכן היא נאמרת במספרים. */}
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
+        <DialogTitle>{`למחוק ${selected.size} תמונות?`}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            התמונות יימחקו לצמיתות, גם מהגלריה של ההורים. אי אפשר לבטל.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(false)}>ביטול</Button>
+          <Button color="error" variant="contained" disabled={busyBulk} onClick={applyBulkDelete}>
+            {busyBulk ? 'מוחק…' : 'מחיקה'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={!!tagging} onClose={() => setTagging(null)} fullWidth maxWidth="sm">
         <DialogTitle>מי בתמונה?</DialogTitle>

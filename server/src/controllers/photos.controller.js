@@ -38,23 +38,6 @@ async function visibleClassrooms(user) {
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
   /**
-   * גננת רואה את הכיתה שלה — לא את כל הסניף.
-   *
-   * כל הצוות של אותה כיתה מעלה ורואה את אותן תמונות, וזה בדיוק מה שצריך:
-   * מי שהיה בחדר הוא מי שיודע מה קרה בו. אבל סייעת בתינוקייה לא צריכה לראות
-   * את גלריית הבוגרים, ובמסך שמציע לה חמש כיתות לבחור מהן היא גם תעלה
-   * לכיתה הלא נכונה מתישהו.
-   *
-   * כשאין לה `classroom_id` היא רואה את הסניף כמו קודם — עדיף גננת שרואה
-   * יותר מדי מגננת שננעלה בגלל שדה שאיש לא מילא.
-   */
-  if (CLASSROOM_SCOPED_ROLES.includes(user.role) && user.classroom_id) {
-    const mine = String(user.classroom_id);
-    const hit = rooms.filter(r => String(r._id) === mine);
-    if (hit.length) return hit;
-  }
-
-  /**
    * `managed_branch_ids` הוא שדה של הנהלה. על שורה של גננת הוא רעש שנשאר
    * שם, ולצרף אותו היה נותן לה לראות כיתות בסניף שהיא לא עובדת בו — בדיוק
    * ההפך מהכוונה. אצל מי שלא מנהל סניפים, השיוך הוא הסניף שלו.
@@ -67,7 +50,31 @@ async function visibleClassrooms(user) {
   // No branches at all = sees nothing, not everything. The old fallback
   // showed a scope-less account every room in the network.
   if (allowed.size === 0) return [];
-  return rooms.filter(r => allowed.has(String(r.branch_id?._id || r.branch_id)));
+  const inBranch = rooms.filter(r => allowed.has(String(r.branch_id?._id || r.branch_id)));
+
+  /**
+   * גננת רואה את הכיתה שלה — לא את כל הסניף.
+   *
+   * כל הצוות של אותה כיתה מעלה ורואה את אותן תמונות, וזה בדיוק מה שצריך:
+   * מי שהיה בחדר הוא מי שיודע מה קרה בו. אבל סייעת בתינוקייה לא צריכה לראות
+   * את גלריית הבוגרים, ובמסך שמציע לה חמש כיתות היא גם תעלה לכיתה הלא נכונה
+   * מתישהו.
+   *
+   * הצמצום נעשה **בתוך** הסניף ולא לפניו, וזה לא ניסוח: כשמעבירים עובדת
+   * לסניף אחר ה-`classroom_id` הישן נשאר על השורה, ואם הוא נבדק ראשון הוא
+   * גובר — העובדת עברה למשה דיין והמערכת המשיכה להראות לה את תינוקיית קפלן,
+   * כולל הרשאה להעלות לשם.
+   *
+   * כשאין לה `classroom_id`, או שהוא כבר לא בסניף שלה, היא רואה את הסניף
+   * כמו קודם — עדיף גננת שרואה יותר מדי מגננת שננעלה בגלל שדה שהתיישן.
+   */
+  if (CLASSROOM_SCOPED_ROLES.includes(user.role) && user.classroom_id) {
+    const mine = String(user.classroom_id);
+    const hit = inBranch.filter(r => String(r._id) === mine);
+    if (hit.length) return hit;
+  }
+
+  return inBranch;
 }
 
 /**
@@ -268,6 +275,82 @@ async function tag(req, res) {
 }
 
 /**
+ * סימון או מחיקה של כמה תמונות בבת אחת.
+ *
+ * גננת שחוזרת מהחצר עם ארבעים תמונות שכולן של אותה קבוצת ילדים לא אמורה
+ * לפתוח ארבעים דיאלוגים. וגם: ארבעים בקשות רשת נפרדות על וויפי של גן הן
+ * ארבעים הזדמנויות שאחת תיפול באמצע ותשאיר חצי עבודה.
+ *
+ * `mode: 'add'` הוא ברירת המחדל ולא במקרה. תמונות שונות כבר נושאות סימונים
+ * שונים, ו'replace' על בחירה מרובה היה מוחק את מה שכבר סומן בכל אחת מהן —
+ * הרס שקט שאי אפשר לבטל. מי שבאמת מתכוון להחליף מבקש זאת במפורש.
+ *
+ * הסימון הקבוצתי **לא מלמד את זיהוי הפנים**: הוא אומר מי בתמונה, לא איזה
+ * פרצוף בה הוא מי. טביעת ייחוס נבנית רק מתיוג של פרצוף מסוים, במסך "מי זה?".
+ */
+async function bulkTag(req, res) {
+  const ids = (req.body?.photo_ids || []).slice(0, 200);
+  const childIds = (req.body?.child_ids || []).map(String);
+  const mode = req.body?.mode === 'replace' ? 'replace' : 'add';
+  if (!ids.length) return res.status(400).json({ error: 'לא נבחרו תמונות' });
+
+  const photos_ = await Photo.find({ _id: { $in: ids } });
+  let changed = 0;
+  let refused = 0;
+
+  for (const photo of photos_) {
+    // ההרשאה נבדקת לכל תמונה בנפרד. בחירה מרובה היא בדיוק המקום שבו קל
+    // להניח שכולן מאותה כיתה, והמסך אפילו לא מציג אחרות — אבל בקשה אפשר
+    // לשלוח גם בלי המסך.
+    const room = await assertRoom(req.user, photo.classroom_id);
+    if (!room) { refused += 1; continue; }
+
+    const roster = await Child.find({ classroom_id: room._id, is_active: true })
+      .select('_id').lean();
+    const allowed = new Set(roster.map(c => String(c._id)));
+    const incoming = childIds.filter(id => allowed.has(id));
+
+    const next = mode === 'replace'
+      ? incoming
+      : [...new Set([...photo.child_ids.map(String), ...incoming])];
+
+    photo.child_ids = next.slice(0, 40);
+    await photo.save();
+    changed += 1;
+  }
+
+  return res.json({ ok: true, changed, refused });
+}
+
+async function bulkRemove(req, res) {
+  const ids = (req.body?.photo_ids || []).slice(0, 200);
+  if (!ids.length) return res.status(400).json({ error: 'לא נבחרו תמונות' });
+
+  const photos_ = await Photo.find({ _id: { $in: ids } });
+  let deleted = 0;
+  let refused = 0;
+
+  for (const photo of photos_) {
+    const room = await assertRoom(req.user, photo.classroom_id);
+    if (!room) { refused += 1; continue; }
+
+    // הבייטים לפני השורה, ואם האחסון נכשל — השורה יורדת בכל זאת. שורה
+    // ששרדה מחיקה מציגה לגננת תמונה שהיא הרגע מחקה; אובייקט יתום לא מציג
+    // כלום לאף אחד. זו החצי הנכון לוותר עליו.
+    try {
+      await storage.deleteObject(photo.key);
+      if (photo.thumb_key) await storage.deleteObject(photo.thumb_key);
+    } catch (err) {
+      console.error('[photos] bulk delete storage failed:', photo._id, err.message);
+    }
+    await Photo.deleteOne({ _id: photo._id });
+    deleted += 1;
+  }
+
+  return res.json({ ok: true, deleted, refused });
+}
+
+/**
  * Remove a photograph, bytes and all.
  *
  * The row goes whether or not the object does. A storage failure that left the
@@ -352,4 +435,7 @@ async function selftest(_req, res) {
 // `visibleClassrooms` is also used by the face-tagging screen, which has to
 // answer exactly the same question — which rooms may this person act on — and
 // must not answer it differently.
-module.exports = { upload, list, tag, remove, selftest, visibleClassrooms, listClassrooms };
+module.exports = {
+  upload, list, tag, remove, selftest, visibleClassrooms, listClassrooms,
+  bulkTag, bulkRemove,
+};

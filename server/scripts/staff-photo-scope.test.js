@@ -127,6 +127,23 @@ const check = (name, cond, detail = '') => {
   await Classroom.updateOne({ _id: babies._id }, { $set: { is_active: true } });
 
   console.log('');
+  console.log('כשמעבירים עובדת לסניף אחר:');
+  // ה-classroom_id הישן נשאר על השורה. אם הוא נבדק לפני הסניף הוא גובר,
+  // והעובדת ממשיכה לראות — ולהעלות אל — כיתה בסניף שהיא כבר לא עובדת בו.
+  const moved = {
+    role: 'class_leader',
+    branch_id: dayan._id,
+    managed_branch_ids: [],
+    classroom_id: babies._id,     // עדיין מצביע על קפלן
+  };
+  check('הכיתה הישנה לא גוברת על הסניף החדש',
+    !names(await visibleClassrooms(moved)).includes('תינוקיה'),
+    names(await visibleClassrooms(moved)));
+  check('  והיא רואה את הסניף החדש',
+    names(await visibleClassrooms(moved)) === 'פעוטות',
+    names(await visibleClassrooms(moved)));
+
+  console.log('');
   console.log('מנהלת מערכת:');
   check('רואה הכל', (await visibleClassrooms({ role: 'system_admin' })).length === 3);
   check('ומשתמש בלי סניף בכלל לא רואה כלום',

@@ -32,6 +32,10 @@ router.get('/selftest', allow, ctrl.selftest);
 router.get('/classrooms', allow, ctrl.listClassrooms);
 router.get('/', allow, ctrl.list);
 router.post('/upload', allow, upload.array('photos', 30), ctrl.upload);
+// פעולה קבוצתית. מוגדרת לפני '/:id' — אחרת 'bulk-tag' ייקרא כמזהה תמונה.
+router.post('/bulk-tag', allow, ctrl.bulkTag);
+router.post('/bulk-delete', allow, ctrl.bulkRemove);
+
 router.patch('/:id', allow, ctrl.tag);
 router.delete('/:id', allow, ctrl.remove);
 
