@@ -39,7 +39,12 @@ require.cache[storagePath] = {
     getObject: async (key) => bucket.get(key),
     deleteObject: async (key) => { bucket.delete(key); },
     signedReadUrl: async (key) => `https://example.test/${key}`,
-    makeKey: (p) => p,
+    // Same shape as the real one: a random name and a .jpg extension. The
+    // first version returned the prefix unchanged, which has no extension —
+    // so `key.replace(/\.jpg$/, '_t.jpg')` produced the SAME key for the full
+    // size and the thumbnail, they overwrote each other, and the test's object
+    // count was quietly measuring one file instead of two.
+    makeKey: (p, ext = 'jpg') => `${p}/${crypto.randomBytes(8).toString('hex')}.${ext}`,
     READ_URL_TTL_S: 1800,
   },
 };
@@ -68,7 +73,7 @@ function post({ path, token, fields, files }) {
   const boundary = `----t${Date.now()}`;
   const parts = [];
   for (const [k, v] of Object.entries(fields || {})) {
-    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`, 'utf8'));
   }
   for (const f of files || []) {
     parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photos"; filename="${f.name}"\r\nContent-Type: image/jpeg\r\n\r\n`));
@@ -125,13 +130,17 @@ async function main() {
   const originalListen = express.application.listen;
   express.application.listen = function patched(...a) { return originalListen.apply(this, a); };
   require('../src/index.js');
+  // The request object emits 'error' on a refused connection, and without a
+  // handler that rejection is unhandled and the promise never settles — which
+  // is a hung test rather than a failing one, and far harder to read.
   for (let i = 0; i < 100; i += 1) {
-    try {
-      const r = await new Promise((res) => {
-        http.get({ host: '127.0.0.1', port: PORT, path: '/api/health' }, (x) => res(x.statusCode));
-      });
-      if (r === 200) break;
-    } catch { /* not up */ }
+    const code = await new Promise((res) => {
+      const r = http.get({ host: '127.0.0.1', port: PORT, path: '/api/health' },
+        (x) => { x.resume(); res(x.statusCode); });
+      r.on('error', () => res(0));
+      r.setTimeout(1000, () => { r.destroy(); res(0); });
+    });
+    if (code === 200) break;
     await sleep(200);
   }
 
@@ -157,7 +166,12 @@ async function main() {
   });
 
   const login = await new Promise((resolve) => {
-    const payload = JSON.stringify({ full_name: 'גננת', id_number: '920000001', password: PASSWORD });
+    // Buffer, not a string. `'גננת'.length` is 4 characters and 8 bytes, so a
+    // Content-Length taken from the string truncates the body mid-JSON and the
+    // login fails with a parse error three layers away from the cause.
+    const payload = Buffer.from(JSON.stringify({
+      full_name: 'גננת', id_number: '920000001', password: PASSWORD,
+    }));
     const req = http.request({
       host: '127.0.0.1',
       port: PORT,
@@ -201,7 +215,9 @@ async function main() {
   eq(again.body.saved, 0, 'אבל שום דבר לא נשמר');
   eq((again.body.duplicates || []).length, 1, 'ומדווח שזו כפילות');
   eq(await Photo.countDocuments(), 1, 'יש שורה אחת במסד');
-  eq(bucket.size, objectsAfterFirst, 'ולא נשארו אובייקטים יתומים בדלי');
+  eq(bucket.size, objectsAfterFirst,
+    'ולא נשארו אובייקטים יתומים בדלי — הכפילות ניקתה אחרי עצמה');
+  eq(objectsAfterFirst, 2, 'להעלאה אחת יש שני אובייקטים: מלאה וממוזערת');
 
   console.log('\n2. שם קובץ שונה אינו משנה');
   ok((again.body.duplicates || [])[0]?.name === 'shared-again.jpg',
