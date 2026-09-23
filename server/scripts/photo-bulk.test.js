@@ -390,7 +390,49 @@ async function main() {
   eq(String(after.faces[0].child_id), String(maya._id), 'אבל הפרצוף כן מסומן');
   eq(await ChildFaceReference.countDocuments({ child_id: maya._id }), 0, 'ואין שום מידע ביומטרי עליה');
 
-  console.log('\n9. בקשה ריקה נדחית');
+  /**
+   * הטביעה היא מה שבאמת רגיש כאן, ועד התיקון הזה היא שרדה את התמונה שיצרה
+   * אותה — היא ירדה רק כשהילד עזב את הגן, כלומר עד שנתיים אחרי שמישהו לחץ
+   * "מחק". מי שמוחק תמונה מתכוון גם לזה.
+   */
+  console.log('\n9. מחיקת תמונה מוחקת גם את מה שנלמד ממנה');
+  const learner = await withFaces(room, [openFace(7)]);
+  r = await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [learner], child_ids: [String(dani._id)],
+  });
+  eq(r.body.taught, 1, 'התמונה לימדה');
+  const refsBefore = await ChildFaceReference.countDocuments({ child_id: dani._id });
+  ok(refsBefore > 0, 'ויש טביעה ממנה');
+
+  r = await postJson('/api/photos/bulk-delete', token, { photo_ids: [learner] });
+  eq(r.body.deleted, 1, 'התמונה נמחקה');
+  eq(
+    await ChildFaceReference.countDocuments({ source_photo: learner }),
+    0,
+    'והטביעה שנוצרה ממנה ירדה איתה',
+  );
+
+  // מחיקה בודדת היא מסלול אחר לגמרי בקוד, ולכן נבדקת בנפרד.
+  const single = await withFaces(room, [openFace(8)]);
+  await postJson('/api/photos/bulk-tag', token, {
+    photo_ids: [single], child_ids: [String(dani._id)],
+  });
+  ok(await ChildFaceReference.countDocuments({ source_photo: single }) === 1, 'גם היא לימדה');
+  const del = await new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1', port: PORT, path: `/api/photos/${single}`, method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+    req.end();
+  });
+  eq(del, 200, 'מחיקה בודדת עברה');
+  eq(
+    await ChildFaceReference.countDocuments({ source_photo: single }),
+    0,
+    'וגם היא לקחה איתה את הטביעה',
+  );
+
+  console.log('\n10. בקשה ריקה נדחית');
   r = await postJson('/api/photos/bulk-delete', token, { photo_ids: [] });
   eq(r.status, 400, 'רשימה ריקה היא שגיאה, לא "מחק הכל"');
 

@@ -1,5 +1,6 @@
 const { Photo, Setting, Child, ChildFaceReference } = require('../models');
 const storage = require('./storage.service');
+const { forgetPhotos } = require('./faceForget');
 const { dispatchEmail } = require('./email.service');
 
 /**
@@ -155,6 +156,7 @@ async function tick(now = new Date()) {
       if (photo.thumb_key && photo.thumb_key !== photo.key) {
         await storage.deleteObject(photo.thumb_key);
       }
+      await forgetPhotos([photo._id]);
       await Photo.deleteOne({ _id: photo._id });
       deleted += 1;
     } catch (err) {

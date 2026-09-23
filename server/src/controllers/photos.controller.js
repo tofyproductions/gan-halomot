@@ -6,6 +6,7 @@ const storage = require('../services/storage.service');
 const photos = require('../services/photo.service');
 const nursery = require('../services/nursery.service');
 const tagging = require('../services/faceTagging.service');
+const { forgetPhotos } = require('../services/faceForget');
 
 /**
  * The gan's photographs, from the staff side.
@@ -378,6 +379,8 @@ async function bulkRemove(req, res) {
     } catch (err) {
       console.error('[photos] bulk delete storage failed:', photo._id, err.message);
     }
+    // גם מה שנלמד מהתמונה הזו. ראה services/faceForget.js.
+    await forgetPhotos([photo._id]);
     await Photo.deleteOne({ _id: photo._id });
     deleted += 1;
   }
@@ -405,6 +408,7 @@ async function remove(req, res) {
   } catch (err) {
     console.error('[photos] storage delete failed:', err.message);
   }
+  await forgetPhotos([photo._id]);
   await photo.deleteOne();
 
   return res.json({ ok: true });
