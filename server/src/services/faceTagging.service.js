@@ -82,7 +82,7 @@ async function queue({ classroomIds, limit = 12 }) {
     date: r.date,
     classroom_id: String(r.classroom_id),
     det_score: r.det_score,
-    crop_url: `/api/face-tagging/crop/${r.photo_id}/${r.face_index}`,
+    crop_url: `/face-tagging/crop/${r.photo_id}/${r.face_index}`,
   }));
 }
 
@@ -121,7 +121,13 @@ async function candidates({ classroomId, date }) {
     .sort((a, b) => a.references - b.references || a.name.localeCompare(b.name, 'he'));
 }
 
-/** The cropped face, rendered on the fly. */
+/**
+ * The cropped face, rendered on the fly.
+ *
+ * `crop_url` above is relative to the API client's own base, which already
+ * ends in /api — repeating it produced /api/api/... and a 404, and the screen
+ * showed a broken-image square with nothing to explain it.
+ */
 async function crop({ photoId, faceIndex }) {
   const photo = await Photo.findById(photoId).select('key faces width height').lean();
   const face = photo && photo.faces && photo.faces[faceIndex];
@@ -293,7 +299,7 @@ async function parentClaims({ classroomIds, limit = 20 }) {
     classroom_id: String(r.classroom_id),
     child_id: String(r.child_id),
     child_name: byId.get(String(r.child_id)) || '',
-    crop_url: `/api/face-tagging/crop/${r.photo_id}/${r.face_index}`,
+    crop_url: `/face-tagging/crop/${r.photo_id}/${r.face_index}`,
   }));
 }
 

@@ -45,6 +45,9 @@ export default function FaceTagging({ onWaitingChange }) {
   // ותג img רגיל לא נושא אותו.
   const crops = useRef(new Map());
   const [cropUrl, setCropUrl] = useState('');
+  // חיתוך שלא נטען הוא ריבוע אפור עם ספינר שלא נגמר, ואין שום דבר על המסך
+  // שאומר למה. זה מה שקרה כשהנתיב חזר עם /api כפול.
+  const [cropError, setCropError] = useState('');
   // מטמון לרשימות השמות: אותה כיתה באותו יום נשאלת שוב ושוב.
   const candidateCache = useRef(new Map());
 
@@ -93,7 +96,10 @@ export default function FaceTagging({ onWaitingChange }) {
   useEffect(() => {
     if (!current) { setCropUrl(''); return; }
     let alive = true;
-    fetchCrop(current).then((url) => { if (alive) setCropUrl(url); }).catch(() => {});
+    setCropError('');
+    fetchCrop(current)
+      .then((url) => { if (alive) { setCropUrl(url); setCropError(''); } })
+      .catch(() => { if (alive) { setCropUrl(''); setCropError('החיתוך לא נטען'); } });
     queue.slice(1, 1 + PREFETCH).forEach((f) => { fetchCrop(f).catch(() => {}); });
     return () => { alive = false; };
   }, [current, queue, fetchCrop]);
@@ -218,9 +224,21 @@ export default function FaceTagging({ onWaitingChange }) {
                   justifyContent: 'center',
                 }}
               >
-                {cropUrl
-                  ? <Box component="img" src={cropUrl} alt="" sx={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <CircularProgress size={28} />}
+                {cropUrl && (
+                  <Box
+                    component="img"
+                    src={cropUrl}
+                    alt=""
+                    onError={() => { setCropUrl(''); setCropError('החיתוך לא נטען'); }}
+                    sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                )}
+                {!cropUrl && !cropError && <CircularProgress size={28} />}
+                {!cropUrl && cropError && (
+                  <Typography variant="caption" color="text.secondary" sx={{ px: 2, textAlign: 'center' }}>
+                    {cropError}
+                  </Typography>
+                )}
               </Box>
 
               <Typography variant="caption" color="text.secondary">

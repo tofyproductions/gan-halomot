@@ -285,6 +285,17 @@ async function main() {
   eq(q1.body.faces?.[0]?.det_score, 0.92, 'הברור ביותר מוצע ראשון');
   eq(q1.body.progress?.waiting, 2, 'המונה מראה שניים');
 
+  // הכתובת שחוזרת נצרכת דרך לקוח ה-API, שה-baseURL שלו כבר מסתיים ב-/api.
+  // נתיב שמתחיל ב-/api נותן /api/api/... — 404 שמצטייר כריבוע שבור, בלי
+  // הודעת שגיאה בשום מקום. נבדק כאן כמו שהלקוח מחבר אותו בפועל.
+  const cropPath = q1.body.faces?.[0]?.crop_url || '';
+  ok(!cropPath.startsWith('/api'), 'הנתיב לא חוזר על התחילית /api');
+  eq(
+    new URL(`/api${cropPath}`, 'http://x').pathname,
+    `/api/face-tagging/crop/${photo._id}/0`,
+    'הצירוף עם בסיס הלקוח מגיע לראוט האמיתי',
+  );
+
   /* ---------------------------------------------------------------- */
   head('2. הכפתורים הם מי שנכח, לא כל הגן');
   const cand = await request({
