@@ -83,6 +83,11 @@ export default defineConfig({
           // imported lazily, on the click — a chunk of its own keeps it off
           // the critical path (in the catch-all it tripled `vendor`).
           if (id.includes('pdf-lib') || id.includes('@pdf-lib')) return 'vendor-pdflib';
+          // libheif ב-WASM, שלושה מגה, ורק כדי לפענח HEIC בדפדפן שלא יודע
+          // לבד — כלומר כרום. הוא מיובא עצלנית ב-utils/imageCompress, ובלי
+          // השורה הזו הוא נופל לתוך `vendor` ונטען לכל מי שפותח את האפליקציה,
+          // כולל הורה שרק בא לראות תשלום.
+          if (id.includes('heic-to') || id.includes('libheif')) return 'vendor-heic';
           if (id.includes('apexcharts')) return 'vendor-charts';
           if (id.includes('@dnd-kit')) return 'vendor-dnd';
           if (id.includes('signature')) return 'vendor-signature';

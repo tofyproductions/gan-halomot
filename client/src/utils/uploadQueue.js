@@ -96,8 +96,31 @@ export function subscribe(fn) {
  * והתור חייב להתרוקן ולא להיתקע על פריט אחד לנצח.
  */
 async function sendOne(item) {
+  /**
+   * ההמרה קורית כאן, לא ברגע הלחיצה.
+   *
+   * על ספארי היא 221ms ולא הייתה מורגשת בשום מקרה. על כרום, שבו HEIC עובר
+   * דרך WASM, היא 2.1 שניות לתמונה — ו-14 תמונות היו הופכות את "שלח" ל-30
+   * שניות של המתנה מול מסך, בדיוק מה שהתור הזה נבנה כדי למחוק.
+   *
+   * אז התור מקבל את הקובץ כמו שהוא, והעבודה נעשית אחת-אחת ברקע.
+   */
+  let { file } = item;
+  if (!item.prepared) {
+    const res = await compressImage(item.file);
+    if (res.error) {
+      await put({ ...item, attempts: MAX_ATTEMPTS, last_error: res.error });
+      return false;
+    }
+    file = res.file;
+    // נשמר מוכן, כך שניסיון חוזר אחרי כישלון רשת לא ימיר שוב.
+    await put({
+      ...item, file, name: file.name, size: file.size, prepared: true,
+    });
+  }
+
   const form = new FormData();
-  form.append('photos', item.file, item.name);
+  form.append('photos', file, file.name);
   form.append('classroom_id', item.classroomId);
   if (item.date) form.append('date', item.date);
 
@@ -156,24 +179,13 @@ export async function enqueue(files, { classroomId, date }) {
   const rejected = [];
 
   for (const raw of files) {
-    const { file, error } = await compressImage(raw);
-
-    /**
-     * קובץ שחייב המרה ולא הומר לא נכנס לתור.
-     *
-     * להעלות אותו בכל זאת היה מייצר שלוש נסיעות רשת שנגמרות ב"לא הצלחנו
-     * לעבד את הקובץ" — הודעה שלא אומרת לגננת שהבעיה היא HEIC ושיש לה פתרון
-     * בהגדרות המצלמה. עדיף להגיד לה עכשיו, לפני שהיא מחכה.
-     */
-    if (error) {
-      rejected.push({ name: raw.name, error });
-      continue;
-    }
-
+    // הקובץ נכנס כמו שהוא. הכיווץ וההמרה קורים ב-sendOne, ברקע — אחרת
+    // 14 תמונות HEIC בכרום היו 30 שניות של המתנה על הלחיצה עצמה.
     const id = await put({
-      file,
-      name: file.name,
-      size: file.size,
+      file: raw,
+      name: raw.name,
+      size: raw.size,
+      prepared: false,
       classroomId,
       date,
       attempts: 0,

@@ -109,7 +109,11 @@ function main() {
    * vendor-pdfjs — so a preloaded pdfjs would have been reported against the
    * wrong name, sending the next person to look at the wrong import.
    */
-  for (const heavy of ['vendor-xlsx', 'vendor-pdf', 'vendor-charts', 'vendor-pdfjs']) {
+  // vendor-heic הוא libheif ב-WASM, שלושה מגה, ונטען רק כשגננת בוחרת תמונת
+// HEIC בדפדפן שלא יודע לפענח אותה לבד. זו בדיוק הספרייה שהבדיקה הזו קיימת
+// בשבילה: אם היא אי פעם תיכנס למסלול הקריטי, כל הורה שפותח את האפליקציה
+// יוריד אותה כדי לראות תשלום.
+  for (const heavy of ['vendor-xlsx', 'vendor-pdf', 'vendor-charts', 'vendor-pdfjs', 'vendor-heic']) {
     ok(!files.some((f) => f.startsWith(`${heavy}-`)),
       `${heavy} לא נטען מראש`,
       'מישהו ייבא אותו סטטית בקובץ שנמצא במסלול הקריטי');

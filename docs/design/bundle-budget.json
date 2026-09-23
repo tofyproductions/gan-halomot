@@ -1,6 +1,6 @@
 {
-  "firstLoadGzipKB": 249,
-  "recorded": "2026-09-10",
+  "firstLoadGzipKB": 252,
+  "recorded": "2026-09-23",
   "was": "1168 KB gzip / 3.99 MB raw, in one chunk, before routes and vendors were split",
   "note": "What index.html pulls in before first paint: the entry chunk plus every modulepreload. Lazily-imported screens are deliberately not counted — that is the point. Enforced by server/scripts/bundle-budget.test.js, which must run after a build.",
   "history": [
@@ -30,6 +30,12 @@
       "from": 259,
       "to": 249,
       "why": "Two complete interfaces now ship (classic + new), and BOTH shells became lazy — a person uses exactly one, so neither belongs in the first download. Net 259 -> 249 despite the addition."
+    },
+    {
+      "date": "2026-09-23",
+      "from": 249,
+      "to": 252,
+      "why": "זיהוי פנים בתמונות: מסך התיוג לגננת, תיבת ההסכמה להורה, ותור העלאה שממשיך ברקע. אין כאן ספרייה — libheif ב-WASM, שלושה מגה, יושב ב-vendor-heic בייבוא עצל ונבדק להלן שאינו נטען מראש. התור עצמו הועבר לייבוא עצל ב-main.jsx והחזיר 2KB מתוך 6."
     }
   ]
 }
