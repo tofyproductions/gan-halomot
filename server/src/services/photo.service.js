@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const sharp = require('sharp');
 const storage = require('./storage.service');
 
@@ -95,6 +96,17 @@ async function renderVariants(buffer) {
  * a corrupt file, or a PDF renamed to .jpg — rather than storing a broken
  * object that a gallery will later fail to display with no explanation.
  */
+/**
+ * חתימת התוכן של התמונה, כפי שהיא תישמר.
+ *
+ * על ה-full שאחרי הכיווץ ולא על מה שהגיע: אותה תמונה יכולה להגיע פעם מטלפון
+ * שכיווץ אותה ופעם מטלפון ישן ששלח את המקור, וזו עדיין אותה תמונה. הצינור
+ * מביא את שתיהן לאותם 1600 פיקסל באותה איכות, ולכן אחרי הכיווץ הן מסכימות.
+ */
+function contentHash(full) {
+  return crypto.createHash('sha256').update(full).digest('hex');
+}
+
 async function storeUpload({ buffer, prefix }) {
   const { full, thumb, width, height } = await renderVariants(buffer);
 
@@ -104,7 +116,14 @@ async function storeUpload({ buffer, prefix }) {
   await storage.putObject({ key, body: full, contentType: 'image/jpeg' });
   await storage.putObject({ key: thumbKey, body: thumb, contentType: 'image/jpeg' });
 
-  return { key, thumb_key: thumbKey, width: width || 0, height: height || 0, bytes: full.length };
+  return {
+    key,
+    thumb_key: thumbKey,
+    width: width || 0,
+    height: height || 0,
+    bytes: full.length,
+    sha256: contentHash(full),
+  };
 }
 
 /**
@@ -123,6 +142,7 @@ async function withUrls(rows) {
 }
 
 module.exports = {
+  contentHash,
   isAcceptable, renderVariants, storeUpload, withUrls,
   MAX_UPLOAD_BYTES, FULL_MAX, THUMB_MAX,
 };

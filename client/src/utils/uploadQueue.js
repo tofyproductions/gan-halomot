@@ -27,6 +27,8 @@ const MAX_ATTEMPTS = 5;
 let db = null;
 const listeners = new Set();
 let pumping = false;
+// כמה נחסכו בגלל שכבר היו שם, מאז הפעם האחרונה שהמסך שאל.
+let duplicateCount = 0;
 
 function open() {
   if (db) return Promise.resolve(db);
@@ -70,6 +72,7 @@ async function snapshot() {
   return {
     pending: rows.filter((r) => r.attempts < MAX_ATTEMPTS).length,
     failed: rows.filter((r) => r.attempts >= MAX_ATTEMPTS).length,
+    duplicates: duplicateCount,
     busy: pumping,
     rows,
   };
@@ -99,8 +102,11 @@ async function sendOne(item) {
   if (item.date) form.append('date', item.date);
 
   try {
-    await api.post('/photos/upload', form, { timeout: UPLOAD_TIMEOUT_MS });
+    const { data } = await api.post('/photos/upload', form, { timeout: UPLOAD_TIMEOUT_MS });
     await remove(item.id);
+    // אותה תמונה שכבר קיימת בכיתה אינה שגיאה — היא פשוט לא נשמרת שוב.
+    // הספירה חוזרת למסך כדי שהגננת תדע למה 50 תמונות הפכו ל-47.
+    if (data && data.duplicates && data.duplicates.length) duplicateCount += 1;
     return true;
   } catch (err) {
     const status = err?.response?.status;
@@ -145,6 +151,7 @@ export async function pump() {
  * 46 מגה ל-15, והוא רץ לפני השמירה כדי שגם מה שיושב בתור יהיה כבר קטן.
  */
 export async function enqueue(files, { classroomId, date }) {
+  duplicateCount = 0;
   const accepted = [];
   for (const raw of files) {
     const file = await compressImage(raw);

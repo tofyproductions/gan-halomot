@@ -32,6 +32,19 @@ const photoSchema = new mongoose.Schema({
   height: { type: Number, default: 0 },
   bytes: { type: Number, default: 0 },
 
+  /**
+   * טביעת התוכן — איך יודעים שזו אותה תמונה.
+   *
+   * לא EXIF, ולא במקרה: הצינור הזה מוחק מטא-דאטה בכוונה בשני מקומות — הקנבס
+   * בטלפון ו-`rotate()` בשרת — כי תמונה מטלפון נושאת קואורדינטות GPS, ואלה
+   * תמונות של ילדים בכתובת שהגן לא מפרסם. עד שהיא מגיעה לכאן אין מה לקרוא.
+   *
+   * מה שכן נשאר זה הבייטים. sha256 עליהם הוא הדבר היחיד ששתי העלאות של אותה
+   * תמונה מסכימות עליו, וזו אותה גישה שכבר נהוגה בסריקות: לזכור לפי חתימה,
+   * כדי לא לעשות פעמיים את אותה עבודה.
+   */
+  sha256: { type: String, default: null, index: true },
+
   source: { type: String, enum: ['staff', 'parent'], required: true, index: true },
 
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null, index: true },
@@ -139,5 +152,9 @@ photoSchema.index({ face_scan_status: 1, created_at: 1 });
 // The back-fill sweep: scanned photographs whose unnamed faces are worth
 // trying again, least-recently-tried first.
 photoSchema.index({ face_scan_status: 1, face_rematched_at: 1 });
+// אותה תמונה פעמיים באותה כיתה. `sparse` כי לשורות ישנות אין חתימה, ובלעדיו
+// כולן היו מתנגשות על null. לא גלובלי בכוונה: אותה תמונה בשתי כיתות היא
+// לגיטימית — אחים בשני חדרים — ולחסום אותה זה להפתיע גננת בלי סיבה.
+photoSchema.index({ classroom_id: 1, sha256: 1 }, { sparse: true });
 
 module.exports = mongoose.model('Photo', photoSchema);

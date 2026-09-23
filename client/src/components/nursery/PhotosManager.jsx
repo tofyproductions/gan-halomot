@@ -43,7 +43,7 @@ export default function PhotosManager() {
   // ההעלאה, והגננת כבר על המסך הזה. המונה הוא מה שמזמין אותה פנימה.
   const [mode, setMode] = useState('gallery');
   const [waiting, setWaiting] = useState(0);
-  const [queue, setQueue] = useState({ pending: 0, failed: 0, busy: false });
+  const [queue, setQueue] = useState({ pending: 0, failed: 0, duplicates: 0, busy: false });
 
   // The photos feature's OWN room list — every category, this year only.
   // It used to borrow the nursery board's list, which is infant-rooms-only by

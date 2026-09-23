@@ -1,5 +1,7 @@
 const { Photo, Child, Classroom } = require('../models');
-const { CLASSROOM_BOARD } = require('../constants/roles');
+const {
+  CLASSROOM_BOARD, CLASSROOM_SCOPED_ROLES, BRANCH_MANAGING_ROLES,
+} = require('../constants/roles');
 const storage = require('../services/storage.service');
 const photos = require('../services/photo.service');
 const nursery = require('../services/nursery.service');
@@ -35,7 +37,31 @@ async function visibleClassrooms(user) {
 
   if (user.role === 'system_admin' || user.role === 'accountant') return rooms;
 
-  const managed = (user.managed_branch_ids || []).map(String);
+  /**
+   * גננת רואה את הכיתה שלה — לא את כל הסניף.
+   *
+   * כל הצוות של אותה כיתה מעלה ורואה את אותן תמונות, וזה בדיוק מה שצריך:
+   * מי שהיה בחדר הוא מי שיודע מה קרה בו. אבל סייעת בתינוקייה לא צריכה לראות
+   * את גלריית הבוגרים, ובמסך שמציע לה חמש כיתות לבחור מהן היא גם תעלה
+   * לכיתה הלא נכונה מתישהו.
+   *
+   * כשאין לה `classroom_id` היא רואה את הסניף כמו קודם — עדיף גננת שרואה
+   * יותר מדי מגננת שננעלה בגלל שדה שאיש לא מילא.
+   */
+  if (CLASSROOM_SCOPED_ROLES.includes(user.role) && user.classroom_id) {
+    const mine = String(user.classroom_id);
+    const hit = rooms.filter(r => String(r._id) === mine);
+    if (hit.length) return hit;
+  }
+
+  /**
+   * `managed_branch_ids` הוא שדה של הנהלה. על שורה של גננת הוא רעש שנשאר
+   * שם, ולצרף אותו היה נותן לה לראות כיתות בסניף שהיא לא עובדת בו — בדיוק
+   * ההפך מהכוונה. אצל מי שלא מנהל סניפים, השיוך הוא הסניף שלו.
+   */
+  const managed = BRANCH_MANAGING_ROLES.includes(user.role)
+    ? (user.managed_branch_ids || []).map(String)
+    : [];
   const own = user.branch_id ? [String(user.branch_id)] : [];
   const allowed = new Set([...managed, ...own].filter(Boolean));
   // No branches at all = sees nothing, not everything. The old fallback
@@ -96,6 +122,7 @@ async function upload(req, res) {
 
   const saved = [];
   const failed = [];
+  const duplicates = [];
 
   for (const file of files) {
     if (!photos.isAcceptable(file)) {
@@ -104,6 +131,34 @@ async function upload(req, res) {
     }
     try {
       const stored = await photos.storeUpload({ buffer: file.buffer, prefix });
+
+      /**
+       * אותה תמונה פעמיים — לא שגיאה, וגם לא סיבה לשמור אותה שוב.
+       *
+       * קורה כל הזמן: הגננת בוחרת שוב את כל הגליל כי היא לא זוכרת מה כבר
+       * העלתה, או לוחצת שלח פעמיים כשהרשת איטית. פעם שעברה זה היה מייצר עוד
+       * שורה, עוד שני אובייקטים בדלי, ועוד סריקת פנים — ושתי תמונות זהות
+       * בגלריה של ההורה.
+       *
+       * הבדיקה היא על התוכן אחרי הכיווץ, ולא על שם הקובץ או על EXIF: את
+       * המטא-דאטה הצינור הזה מוחק בכוונה (קואורדינטות GPS), ושם קובץ מטלפון
+       * לא אומר כלום.
+       *
+       * ההעלאה עצמה כבר קרתה — היא זו שמייצרת את החתימה — אז מה שנשאר הוא
+       * לנקות את מה שהרגע כתבנו ולדווח. אובייקט יתום בדלי הוא בדיוק סוג
+       * הזבל שאף אחד לא ימצא אחר כך.
+       */
+      const twin = await Photo.findOne({
+        classroom_id: room._id, sha256: stored.sha256,
+      }).select('_id').lean();
+
+      if (twin) {
+        await storage.deleteObject(stored.key).catch(() => {});
+        if (stored.thumb_key) await storage.deleteObject(stored.thumb_key).catch(() => {});
+        duplicates.push({ name: file.originalname, existing_id: String(twin._id) });
+        continue;
+      }
+
       const row = await Photo.create({
         ...stored,
         source: 'staff',
@@ -124,6 +179,7 @@ async function upload(req, res) {
     ok: true,
     saved: saved.length,
     failed,
+    duplicates,
     photos: await photos.withUrls(saved.map(r => r.toObject())),
   });
 }

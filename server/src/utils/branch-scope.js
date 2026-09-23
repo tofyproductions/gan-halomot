@@ -1,6 +1,6 @@
 const { User, Registration } = require('../models');
 const { isRead } = require('./viewer');
-const { ADMIN_VIEWER } = require('../constants/roles');
+const { ADMIN_VIEWER, BRANCH_MANAGING_ROLES } = require('../constants/roles');
 const { getBranchFilter } = require('./branch-filter');
 
 /**
@@ -55,6 +55,17 @@ async function resolveBranchScope(req) {
   // viewer with no managed branches writes nowhere — her own branch_id is
   // where she is listed, not what she runs.
   if (role === ADMIN_VIEWER) return isRead(req) ? null : managed;
+  /**
+   * `managed_branch_ids` הוא שדה של הנהלה, ועל שורה של גננת הוא רעש.
+   *
+   * עד עכשיו הוא **החליף** את הסניף שלה: מובילת כיתה בקפלן שעל השורה שלה
+   * נשאר בטעות משה דיין קיבלה 403 על הסניף שבו היא עובדת — המסך אמר "אין לך
+   * הרשאה לצפות בסניף המבוקש" והיא לא יכלה לעשות דבר. אצל מי שלא מנהל
+   * סניפים, השיוך שלו הוא הסניף שלו, נקודה.
+   */
+  if (!BRANCH_MANAGING_ROLES.includes(role)) {
+    return ownBranch ? [ownBranch] : [];
+  }
   if (managed.length) return managed;
   return ownBranch ? [ownBranch] : [];
 }

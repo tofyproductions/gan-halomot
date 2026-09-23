@@ -23,6 +23,25 @@ const ADMIN_VIEWER = 'admin_viewer';
  */
 const CLASSROOM_BOARD = 'classroom_board';
 
+/**
+ * מי ש-`managed_branch_ids` בכלל אומר עליו משהו.
+ *
+ * זה שדה של הנהלה. על שורה של גננת או סייעת הוא סתם ערך שנשאר שם — ועד
+ * עכשיו הוא היה **מחליף** את הסניף שלה במקום להוסיף אליו: מובילת כיתה בקפלן
+ * שעל השורה שלה נשאר משה דיין קיבלה 403 על הסניף שבו היא עובדת בפועל, בלי
+ * שום דרך להבין למה. הרשימה הזו היא מה שמונע את זה.
+ */
+const BRANCH_MANAGING_ROLES = ['branch_manager', 'accountant', 'system_admin', ADMIN_VIEWER];
+
+/**
+ * מי שהשיוך שלו הוא כיתה ולא סניף.
+ *
+ * גננת רואה את הכיתה שלה, לא את כל הסניף. כשיש לה `classroom_id` המערכת
+ * מצמצמת אליה; כשאין — היא רואה את הסניף כמו קודם, כדי שלא ננעל אף אחת
+ * בגלל שדה שלא מולא.
+ */
+const CLASSROOM_SCOPED_ROLES = ['class_leader', 'teacher', 'assistant'];
+
 const ROLES = [
   'system_admin', 'branch_manager', 'accountant',
   'class_leader', 'teacher', 'assistant', 'cook',
@@ -41,4 +60,6 @@ const ROLE_LABELS = {
   [CLASSROOM_BOARD]: 'לוח כיתה',
 };
 
-module.exports = { ROLES, ADMIN_VIEWER, CLASSROOM_BOARD, ROLE_LABELS };
+module.exports = {
+  BRANCH_MANAGING_ROLES,
+  CLASSROOM_SCOPED_ROLES, ROLES, ADMIN_VIEWER, CLASSROOM_BOARD, ROLE_LABELS };
