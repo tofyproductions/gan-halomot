@@ -98,7 +98,7 @@ export default function OrderList() {
                     <TableCell>
                       <Stack direction="row" spacing={0.5} alignItems="center">
                         <Chip label={status.label} color={status.color} size="small" variant="outlined" />
-                        {order.group_id && <Chip icon={<GroupsIcon />} label="משותפת" size="small" color="primary" variant="outlined" />}
+                        {order.group_id && <Chip icon={<GroupsIcon />} label={order.group_size ? `משותפת · ${order.group_size}` : 'משותפת'} size="small" color="primary" variant="outlined" />}
                       </Stack>
                     </TableCell>
                     <TableCell>{new Date(order.created_at).toLocaleDateString('he-IL')}</TableCell>

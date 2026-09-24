@@ -29,21 +29,25 @@ export default function OrderGroupPanel({ orderId, refreshKey = 0, onLoaded }) {
   const total = data.total_with_items || 0;
   const short = min > 0 && total < min;
   const pct = min > 0 ? Math.min(100, Math.round((total / min) * 100)) : 100;
+  const activeCount = data.members.filter(m => m.status !== 'cancelled').length;
+  // The row this page is about. `is_mine` marks every row for the office, so it
+  // is only the fallback for a server that does not send `is_this` yet.
+  const isThis = (m) => (m.is_this !== undefined ? m.is_this : m.is_mine);
 
   return (
     <Box sx={{ mb: 2, p: 1.5, borderRadius: 2, bgcolor: 'background.sunken' }}>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
         <GroupsIcon fontSize="small" color="primary" />
         <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-          הזמנה משותפת · {data.members.length} סניפים
+          הזמנה משותפת · {activeCount} סניפים
         </Typography>
       </Stack>
       <Stack spacing={0.5}>
         {data.members.map(m => (
           <Stack key={m.id} direction="row" justifyContent="space-between" alignItems="center">
             <Stack direction="row" spacing={0.75} alignItems="center">
-              <Typography variant="body2" sx={{ fontWeight: m.is_mine ? 800 : 500 }}>{m.branch_name}</Typography>
-              {m.is_mine && <Chip label="שלי" size="small" color="primary" variant="outlined" />}
+              <Typography variant="body2" sx={{ fontWeight: isThis(m) ? 800 : 500 }}>{m.branch_name}</Typography>
+              {isThis(m) && <Chip label="שלי" size="small" color="primary" variant="outlined" />}
               {m.status === 'cancelled' && <Chip label="בוטל" size="small" color="error" variant="outlined" />}
               {m.status === 'draft' && m.items_count === 0 && <Chip label="עדיין לא הוסיף" size="small" variant="outlined" />}
             </Stack>

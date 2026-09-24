@@ -35,7 +35,7 @@ export default function OrderForm() {
   const [notes, setNotes] = useState(prefill?.source === 'stock-shortages' ? 'הזמנה אוטומטית מחוסרי מלאי' : '');
   const [saving, setSaving] = useState(false);
   const [editSourceItems, setEditSourceItems] = useState(null);
-  const [editOrder, setEditOrder] = useState(null); // { status, group_id, group_invited_by } of the order being edited
+  const [editOrder, setEditOrder] = useState(null); // { status, group_id, group_invited_by, group_invited_from } of the order being edited
   const [groupInfo, setGroupInfo] = useState(null);
 
   // Load suppliers
@@ -58,7 +58,10 @@ export default function OrderForm() {
         setSelectedSupplier(order.supplier_id?._id || order.supplier_id);
         setNotes(order.notes || '');
         setEditSourceItems(order.items || []);
-        setEditOrder({ status: order.status, group_id: order.group_id || null, group_invited_by: order.group_invited_by || '' });
+        setEditOrder({
+          status: order.status, group_id: order.group_id || null,
+          group_invited_by: order.group_invited_by || '', group_invited_from: order.group_invited_from || '',
+        });
         editLoaded.current = true;
       })
       .catch(() => toast.error('שגיאה בטעינת הזמנה'));
@@ -188,7 +191,9 @@ export default function OrderForm() {
 
     const isGroup = Boolean(editOrder?.group_id);
     const effectiveTotal = isGroup && groupInfo
-      ? (groupInfo.members || []).filter(m => !m.is_mine && m.status !== 'cancelled').reduce((s, m) => s + m.total_amount, 0) + total
+      // Every OTHER order in the group, by id: for the office every member
+      // is "mine", so filtering on is_mine would leave only this cart.
+      ? (groupInfo.members || []).filter(m => String(m.id) !== String(editId) && m.status !== 'cancelled').reduce((s, m) => s + m.total_amount, 0) + total
       : total;
     if (mode === 'send' && minOrder > 0 && effectiveTotal < minOrder) {
       return toast.error(`מינימום הזמנה: ${formatCurrency(minOrder)}${isGroup ? ' (על הסכום המשותף)' : ''}`);
@@ -348,7 +353,7 @@ export default function OrderForm() {
                 )}
                 {isEdit && editOrder?.group_invited_by && editOrder?.status === 'draft' && (
                   <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
-                    הוזמנת להצטרף על ידי {editOrder.group_invited_by}. הוסיפו את הפריטים שלכם ושמרו.
+                    הוזמנת להצטרף על ידי {editOrder.group_invited_by}{editOrder.group_invited_from ? ` מסניף ${editOrder.group_invited_from}` : ''}. הוסיפו את הפריטים שלכם ושמרו.
                   </Alert>
                 )}
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>

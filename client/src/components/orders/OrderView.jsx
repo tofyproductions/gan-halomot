@@ -61,8 +61,10 @@ export default function OrderView() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [groupKey, setGroupKey] = useState(0);
   const [sending, setSending] = useState(false);
+  const [groupInfo, setGroupInfo] = useState(null);
 
   useEffect(() => {
+    setGroupInfo(null);
     api.get(`/orders/${id}`)
       .then(res => setOrder(res.data.order))
       .catch(() => toast.error('שגיאה בטעינת הזמנה'))
@@ -222,6 +224,10 @@ export default function OrderView() {
   const status = STATUS_MAP[order.status] || STATUS_MAP.draft;
   const supplier = order.supplier_id || {};
   const branch = order.branch_id || {};
+  // A joint order goes out when ANY branch in it has items — the one on screen
+  // may be the invited branch that has not added anything yet.
+  const canSend = (order.items || []).length > 0
+    || (order.group_id ? (groupInfo?.members || []) : []).some(m => m.status !== 'cancelled' && m.items_count > 0);
 
   return (
     <Box dir="rtl" sx={{ maxWidth: 800, mx: 'auto' }}>
@@ -263,10 +269,10 @@ export default function OrderView() {
 
       {order.group_invited_by && order.status === 'draft' && (
         <Alert severity="info" sx={{ borderRadius: 2, mb: 2 }}>
-          הוזמנת להצטרף על ידי {order.group_invited_by}. הוסיפו פריטים דרך "ערוך" ואז שלחו.
+          הוזמנת להצטרף על ידי {order.group_invited_by}{order.group_invited_from ? ` מסניף ${order.group_invited_from}` : ''}. הוסיפו פריטים דרך "ערוך" ואז שלחו.
         </Alert>
       )}
-      {order.group_id && <OrderGroupPanel orderId={id} refreshKey={groupKey} />}
+      {order.group_id && <OrderGroupPanel orderId={id} refreshKey={groupKey} onLoaded={setGroupInfo} />}
 
       {/* Details */}
       <Card sx={{ mb: 3 }}>
@@ -364,7 +370,7 @@ export default function OrderView() {
             variant="contained" color="success" size="large"
             startIcon={<SendIcon />}
             onClick={() => setConfirm({ open: true, action: 'send' })}
-            disabled={sending || !(order.items || []).length}
+            disabled={sending || !canSend}
           >
             {order.group_id ? 'שלח לספק — כל הסניפים' : 'שלח לספק'}
           </Button>
