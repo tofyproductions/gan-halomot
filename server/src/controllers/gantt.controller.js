@@ -4,6 +4,7 @@ const shabbat = require('../services/shabbatParents');
 const pv = require('../services/parentVisibility');
 const { htmlToPng } = require('../services/htmlPdf');
 const { getAcademicYears } = require('../services/academic-year.service');
+const { getBranchFilter } = require('../utils/branch-filter');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
 //
@@ -271,10 +272,13 @@ async function approve(req, res, next) {
 
 async function getArchive(req, res, next) {
   try {
-    const { classroom, branch } = req.query;
-    const filter = {};
+    const { classroom } = req.query;
+    // The branch comes through the scope, not straight off the query. The
+    // cross-branch view sends ?branch=all, which used to be cast as an id and
+    // 500 the whole archive — and a bare ?branch was never clamped to the
+    // branches the caller may see.
+    const filter = { ...getBranchFilter(req) };
     if (classroom) filter.classroom_id = classroom;
-    if (branch) filter.branch_id = branch;
 
     const gantts = await GanttMonth.find(filter)
       .select('classroom_id month year status approved_at')

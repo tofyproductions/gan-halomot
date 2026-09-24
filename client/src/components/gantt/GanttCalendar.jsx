@@ -2,13 +2,15 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, CardContent, Stack, MenuItem, TextField,
-  Chip, Grid,
+  Chip, Grid, Button,
 } from '@mui/material';
+import PrintIcon from '@mui/icons-material/Print';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear, getHebrewYearFromStart } from '../../hooks/useAcademicYear';
 import { COLOR } from '../../theme/tokens';
+import GanttMultiPrintDialog from './GanttMultiPrintDialog';
 
 const MONTH_NAMES = {
   9: 'ספטמבר', 10: 'אוקטובר', 11: 'נובמבר', 12: 'דצמבר',
@@ -32,6 +34,7 @@ export default function GanttCalendar() {
   const [classrooms, setClassrooms] = useState([]);
   const [selectedClassroom, setSelectedClassroom] = useState('');
   const [archive, setArchive] = useState([]);
+  const [multiPrintOpen, setMultiPrintOpen] = useState(false);
 
   // The plan is written for the year the gan is in, and only that one. There
   // used to be a picker here offering four years back and two ahead; a month
@@ -87,8 +90,14 @@ export default function GanttCalendar() {
               <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
             ))}
           </TextField>
+          <Button variant="outlined" startIcon={<PrintIcon />} onClick={() => setMultiPrintOpen(true)}>
+            הדפסת חודש לכל הכיתות
+          </Button>
         </Stack>
       </Stack>
+
+      <GanttMultiPrintDialog open={multiPrintOpen} onClose={() => setMultiPrintOpen(false)}
+        y1={y1} yearRange={years.current.range} />
 
       {/* Legend */}
       <Stack direction="row" spacing={2} sx={{ mb: 3 }}>

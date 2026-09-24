@@ -59,25 +59,21 @@ const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
 const dm = (d) => `${d.getDate()}.${d.getMonth() + 1}`;
 
 /**
- * The plan as a standalone printable document.
+ * One classroom-month as a sheet: the heading, the grid and the footer.
  *
  * Mirrors the editor's own day arithmetic deliberately rather than sharing it:
  * a print sheet that disagrees with the screen about which box is Tuesday is
  * worse than no print sheet, so the rules are written out here in full and the
  * weekday test covers the shape both of them read.
+ *
+ * The sheet is a <section> of its own so that one document can hold many —
+ * a month for every room in the branch — and each can be fitted to its own
+ * page. The type scale lives on the section for the same reason.
  */
-export function buildGanttPrintHtml({
+export function ganttSheetHtml({
   weeks = [], rows = [], holidays = [], month, year,
   classroomName = '', branchName = '', status = 'draft',
-  // 'print' → A4 landscape, fitted to `pages` sheets.
-  // 'image' → one continuous picture for WhatsApp. No paper, so no page to fit
-  //   into and nothing to shrink: the canvas grows to the month instead, and
-  //   the type is set once at a size that survives a phone screen.
-  mode = 'print',
-  pages = 1,
 }) {
-  const image = mode === 'image';
-
   const isHoliday = (d) => holidays.find(h => (
     ymd(d) >= holidayYmd(h.start_date) && ymd(d) <= holidayYmd(h.end_date)
   ));
@@ -256,12 +252,33 @@ export function buildGanttPrintHtml({
     + `<span><i style="background:${G.cell.holiday}"></i>חג / יום קצר</span>`
     + `<span><i style="background:${G.cell.friday}"></i>שישי</span>`;
 
-  return `<!doctype html>
-<html dir="rtl" lang="he">
-<head>
-<meta charset="utf-8">
-<title>תוכנית עבודה - ${esc(classroomName)} - ${MONTH_NAMES[month]} ${year}</title>
-<style>
+  return `<section class="sheet">
+  <div class="head">
+    <div class="t">תוכנית עבודה <small>${MONTH_NAMES[month]} ${year}</small></div>
+    <div class="s">${esc(classroomName)}${branchName ? ` · ${esc(branchName)}` : ''}<span class="st">${statusLabel}</span></div>
+  </div>
+  <table class="g">
+    <colgroup><col class="cwk"><col class="crl">${'<col>'.repeat(6)}</colgroup>
+    <thead><tr><th class="blank" colspan="2"></th>${DAY_NAMES.map((n, i) => `<th class="d${i === 5 ? ' fri' : ''}">יום ${esc(n)}</th>`).join('')}</tr></thead>
+    <tbody>${weeks.map(weekHtml).join('')}</tbody>
+  </table>
+  <div class="foot">
+    <div class="legend">${legend}</div>
+    <div>גן החלומות · הופק ${new Date().toLocaleDateString('he-IL')}</div>
+  </div>
+</section>`;
+}
+
+/**
+ * The sheet's stylesheet — the contents of its <style>, not the tag.
+ *
+ * Shared by the one-room document and the many-room one, so a room printed on
+ * its own and the same room printed with the rest of the branch are the same
+ * page.
+ */
+export function ganttPrintCss({ image = false } = {}) {
+  const G = COLOR.gantt;
+  return `
   /* Landscape, because six day-columns across a portrait page leaves a column
      the width of a thumb. */
   @page { size: A4 landscape; margin: 7mm; }
@@ -285,7 +302,7 @@ export function buildGanttPrintHtml({
   body { width: 283mm; margin: 0 auto; background: #fff; padding: 0;
          box-shadow: 0 0 0 1px ${COLOR.dividerStrong}, 0 6px 24px rgba(15,23,42,.12); }
   @media print { html { background: #fff; } body { box-shadow: none; margin: 0; } }
-  :root { --k: 1; --pad: 0mm; --cell: 10pt; --head: 10.5pt; --small: 8pt; }
+  .sheet { --k: 1; --pad: 0mm; --cell: 10pt; --head: 10.5pt; --small: 8pt; }
   body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: ${COLOR.text.primary}; }
 
   .head { display: flex; align-items: baseline; justify-content: space-between;
@@ -359,9 +376,9 @@ export function buildGanttPrintHtml({
   th.rl.min ~ td.c { padding: calc(0.3mm + var(--pad) * 0.4) 1mm; font-size: calc(var(--cell) * var(--k) * 0.9); line-height: 1.15; }
 
   /* The last lever before giving up: take the air out rather than the type. */
-  body.tight td.c { padding: calc(0.4mm + var(--pad)) 0.8mm; line-height: 1.1; }
-  body.tight th.rl { padding: 0.3mm; }
-  body.tight td.wk { padding: 0.5mm 1mm; }
+  section.tight td.c { padding: calc(0.4mm + var(--pad)) 0.8mm; line-height: 1.1; }
+  section.tight th.rl { padding: 0.3mm; }
+  section.tight td.wk { padding: 0.5mm 1mm; }
 
   .foot { margin-top: 1.5mm; font-size: calc(var(--small) * var(--k)); color: ${COLOR.text.disabled};
           display: flex; justify-content: space-between; align-items: center; }
@@ -375,28 +392,20 @@ export function buildGanttPrintHtml({
   .toolbar.alt { background: #25D366; color: #fff; }
   .toolbar.ghost { background: #fff; color: ${COLOR.text.primary}; border: 1px solid ${COLOR.dividerStrong}; }
   @media print { .bar { display: none !important; } }
-</style>
-</head>
-<body${image ? ' class="img"' : ''}>
-  ${image ? '' : `<div class="bar">
+`;
+}
+
+/** The window's buttons. Not part of the sheet: they are never printed. */
+function toolbarHtml({ pages = 1, whatsapp = true }) {
+  return `<div class="bar">
     <button class="toolbar" onclick="window.print()">🖨️ הדפס / שמור כ-PDF</button>
-    <button class="toolbar ghost" onclick="window.__ganttPages()">${pages === 1 ? 'כתב גדול · 2 עמודים' : 'לדחוס לעמוד אחד'}</button>
-    <button class="toolbar alt" onclick="window.__ganttImage()">📷 תמונה לוואטסאפ</button>
-  </div>`}
-  <div class="head">
-    <div class="t">תוכנית עבודה <small>${MONTH_NAMES[month]} ${year}</small></div>
-    <div class="s">${esc(classroomName)}${branchName ? ` · ${esc(branchName)}` : ''}<span class="st">${statusLabel}</span></div>
-  </div>
-  <table class="g">
-    <colgroup><col class="cwk"><col class="crl">${'<col>'.repeat(6)}</colgroup>
-    <thead><tr><th class="blank" colspan="2"></th>${DAY_NAMES.map((n, i) => `<th class="d${i === 5 ? ' fri' : ''}">יום ${esc(n)}</th>`).join('')}</tr></thead>
-    <tbody>${weeks.map(weekHtml).join('')}</tbody>
-  </table>
-  <div class="foot">
-    <div class="legend">${legend}</div>
-    <div>גן החלומות · הופק ${new Date().toLocaleDateString('he-IL')}</div>
-  </div>
-<script>
+    <button class="toolbar ghost" onclick="window.__ganttPages()">${pages === 1 ? 'כתב גדול · 2 עמודים' : 'לדחוס לעמוד אחד'}</button>${whatsapp ? `
+    <button class="toolbar alt" onclick="window.__ganttImage()">📷 תמונה לוואטסאפ</button>` : ''}
+  </div>`;
+}
+
+function fitScript({ image = false, pages = 1 }) {
+  return `<script>
   /**
    * Fit the month to the page, then spend what is left on readability.
    *
@@ -406,43 +415,114 @@ export function buildGanttPrintHtml({
    * (8pt in a cell): below that the air is taken out of the cells before the
    * type is touched again, and the hard floor is 0.7. Then, if there is room,
    * it grows the type back up, and whatever is still left becomes row height.
+   *
+   * Every sheet in the document is fitted on its own. A month printed for
+   * every room puts a quiet plan beside a crowded one, and one scale for all
+   * of them would print the quiet room in the crowded room's smallest type.
    */
-  (function fit() {
+  (function () {
     if (${image ? 'true' : 'false'}) { document.body.classList.add('img'); return; }
 
     var MM = 96 / 25.4;
     var oneP = (210 - 14) * MM;    // A4 landscape less the 7mm @page margins
     var BUDGET = ${Math.max(1, Math.min(2, Number(pages) || 1))};
     var pageH = oneP * BUDGET;
-    var root = document.documentElement;
     var body = document.body;
-    var over = function () { return body.scrollHeight > pageH; };
-    var set = function (name, v) { root.style.setProperty(name, v); void body.offsetHeight; };
 
-    var k = 1;
-    for (var i = 0; i < 40 && over() && k > 0.8; i += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
-    if (over()) { body.classList.add('tight'); void body.offsetHeight; }
-    for (var i2 = 0; i2 < 40 && over() && k > 0.7; i2 += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
+    function fit(sheet) {
+      var over = function () { return sheet.scrollHeight > pageH; };
+      var set = function (name, v) { sheet.style.setProperty(name, v); void sheet.offsetHeight; };
 
-    if (!over() && !body.classList.contains('tight')) {
-      for (var j = 0; j < 40 && k < 1.6; j += 1) {
-        k += 0.03;
-        set('--k', k.toFixed(2));
-        if (over()) { k -= 0.03; set('--k', k.toFixed(2)); break; }
+      var k = 1;
+      for (var i = 0; i < 40 && over() && k > 0.8; i += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
+      if (over()) { sheet.classList.add('tight'); void sheet.offsetHeight; }
+      for (var i2 = 0; i2 < 40 && over() && k > 0.7; i2 += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
+
+      if (!over() && !sheet.classList.contains('tight')) {
+        for (var j = 0; j < 40 && k < 1.6; j += 1) {
+          k += 0.03;
+          set('--k', k.toFixed(2));
+          if (over()) { k -= 0.03; set('--k', k.toFixed(2)); break; }
+        }
       }
+
+      for (var p = 0; p < 90 && !over(); p += 1) {
+        set('--pad', ((p + 1) * 0.2).toFixed(2) + 'mm');
+        if (over()) { set('--pad', (p * 0.2).toFixed(2) + 'mm'); break; }
+      }
+
+      sheet.dataset.fitK = k.toFixed(2);
+      sheet.dataset.fitPad = sheet.style.getPropertyValue('--pad') || '0mm';
+      sheet.dataset.fitTight = sheet.classList.contains('tight') ? '1' : '0';
+      sheet.dataset.fitPages = (sheet.scrollHeight / pageH).toFixed(2);
     }
 
-    for (var p = 0; p < 90 && !over(); p += 1) {
-      set('--pad', ((p + 1) * 0.2).toFixed(2) + 'mm');
-      if (over()) { set('--pad', (p * 0.2).toFixed(2) + 'mm'); break; }
+    var sheets = document.querySelectorAll('section.sheet');
+    for (var s = 0; s < sheets.length; s += 1) fit(sheets[s]);
+    // A one-room document keeps its numbers where they always were.
+    if (sheets.length === 1) {
+      var d = sheets[0].dataset;
+      body.dataset.fitK = d.fitK;
+      body.dataset.fitPad = d.fitPad;
+      body.dataset.fitTight = d.fitTight;
+      body.dataset.fitPages = d.fitPages;
     }
-
-    body.dataset.fitK = k.toFixed(2);
-    body.dataset.fitPad = root.style.getPropertyValue('--pad') || '0mm';
-    body.dataset.fitTight = body.classList.contains('tight') ? '1' : '0';
-    body.dataset.fitPages = (body.scrollHeight / pageH).toFixed(2);
   }());
-</script>
+</script>`;
+}
+
+/**
+ * The plan as a standalone printable document: one room, one month.
+ *
+ * `mode`:
+ *   'print' → A4 landscape, fitted to `pages` sheets.
+ *   'image' → one continuous picture for WhatsApp. No paper, so no page to fit
+ *     into and nothing to shrink: the canvas grows to the month instead, and
+ *     the type is set once at a size that survives a phone screen.
+ */
+export function buildGanttPrintHtml(opts) {
+  const { month, year, classroomName = '', mode = 'print', pages = 1 } = opts;
+  const image = mode === 'image';
+
+  return `<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<title>תוכנית עבודה - ${esc(classroomName)} - ${MONTH_NAMES[month]} ${year}</title>
+<style>${ganttPrintCss({ image })}</style>
+</head>
+<body${image ? ' class="img"' : ''}>
+  ${image ? '' : toolbarHtml({ pages, whatsapp: true })}
+  ${ganttSheetHtml(opts)}
+${fitScript({ image, pages })}
+</body>
+</html>`;
+}
+
+/**
+ * One month for many rooms, as one document to print or save as one PDF.
+ *
+ * Each room is a sheet of its own: it starts on a fresh page and is fitted to
+ * `pages` pages by itself. No WhatsApp button — a picture of eight rooms is
+ * not something to send to one room's parents.
+ */
+export function buildMultiGanttPrintHtml({ sheets = [], pages = 1 }) {
+  const first = sheets[0] || {};
+  return `<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<title>תוכניות עבודה - ${MONTH_NAMES[first.month] || ''} ${first.year ?? ''} - ${sheets.length} כיתות</title>
+<style>${ganttPrintCss({ image: false })}
+  /* A room starts on a page of its own. On screen, a rule marks where. */
+  section.sheet:not(:last-of-type) { break-after: page; page-break-after: always; }
+  @media screen { section.sheet + section.sheet { margin-top: 8mm; border-top: 0.8mm dashed ${COLOR.dividerStrong}; } }
+</style>
+</head>
+<body>
+  ${toolbarHtml({ pages, whatsapp: false })}
+  ${sheets.map(s => ganttSheetHtml(s)).join('\n  ')}
+${fitScript({ image: false, pages })}
 </body>
 </html>`;
 }
@@ -569,6 +649,32 @@ export function printGantt(opts, { onImage } = {}) {
     // every time rather than once.
     win.__ganttPages = () => { pages = pages === 1 ? 2 : 1; draw(); };
     win.__ganttImage = () => onImage && onImage();
+  };
+
+  draw();
+  return true;
+}
+
+/**
+ * Open one month for many rooms in its own window.
+ *
+ * The rooms are fetched one by one before there is anything to show, and a
+ * window opened after an await is a window the popup blocker eats — so the
+ * caller opens it inside the click and hands it over as `win`. Without one,
+ * this opens its own, which only works when called straight from a click.
+ */
+export function printGanttMulti(sheets, { win: given = null } = {}) {
+  let pages = 1;
+  const win = given || window.open('', '_blank', 'width=1200,height=850');
+  if (!win) return false;
+
+  const draw = () => {
+    win.document.open();
+    win.document.write(buildMultiGanttPrintHtml({ sheets, pages }));
+    win.document.close();
+    // Rewritten on every toggle, so every sheet is fitted again to the new
+    // page budget — and the handler is re-attached with it.
+    win.__ganttPages = () => { pages = pages === 1 ? 2 : 1; draw(); };
   };
 
   draw();
