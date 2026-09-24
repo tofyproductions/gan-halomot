@@ -97,6 +97,107 @@ async function main() {
     eq(mark.validateSync(), undefined, '1f סימן הסריקה תקין');
   }
 
+  // ---------------------------------------------------------------- 2 ------
+  head('2 — הסריקה מציעה זוגות; מתחת ל-0.6 לא נשמר');
+  {
+    const client = fakeClient([
+      { matches: [
+        { a_id: String(wipesShabi._id), b_id: String(wipesDalas._id), confidence: 0.92, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים לחים', reason: 'אותו מוצר, אריזה שונה' },
+        { a_id: String(dates._id), b_id: String(towels._id), confidence: 0.2, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: '', reason: 'לא דומה' },
+      ] },
+      { matches: [] },
+    ]);
+    const r = await svc.runScan({ trigger: 'test', client });
+    eq(r.scanned, 4, '2a ארבעה מוצרים נסרקו');
+    eq(r.proposed, 1, '2b הצעה אחת נשמרה');
+    const all = await ProductMatch.find().lean();
+    eq(all.length, 1, '2c ורק אחת במסד — ההצעה החלשה לא נשמרה');
+    eq(all[0].status, 'proposed', '2d במצב proposed');
+    eq(all[0].pair_key, ProductMatch.pairKey(wipesShabi._id, wipesDalas._id), '2e עם pair_key ממוין');
+    eq(all[0].products.map(p => p.pack_qty).sort((a, b) => a - b), [80, 400], '2f כמויות האריזה נשמרו');
+    ok(client.calls.length >= 1, '2g המודל נקרא');
+    const askedText = JSON.stringify(client.calls[0].messages);
+    ok(askedText.includes('S1') && askedText.includes('2995'), '2h המוצרים נשלחו למודל');
+    const marks = await ProductScanMark.countDocuments();
+    eq(marks, 4, '2i כל הארבעה סומנו כנסרקו');
+    const last = await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean();
+    eq(last?.value?.proposed, 1, '2j מועד הסריקה האחרונה נרשם');
+    ok(r.cost_usd > 0, '2k העלות חושבה');
+  }
+
+  // ---------------------------------------------------------------- 3 ------
+  head('3 — אותו זוג שוב: לא כפול; זוג שנדחה לא חוזר');
+  {
+    const first = await ProductMatch.findOne({ status: 'proposed' });
+    await ProductMatch.updateOne({ _id: first._id }, { $set: { status: 'rejected', decided_by: 'בדיקה', decided_at: new Date() } });
+    // Force a rescan of everything by wiping the marks — the memory of the PAIR must hold on its own.
+    await ProductScanMark.deleteMany({});
+    const client = fakeClient([
+      { matches: [{ a_id: String(wipesShabi._id), b_id: String(wipesDalas._id), confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים', reason: 'שוב' }] },
+      { matches: [{ a_id: String(wipesDalas._id), b_id: String(wipesShabi._id), confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 400, b_pack_qty: 80, label: 'מגבונים', reason: 'הפוך' }] },
+    ]);
+    const r = await svc.runScan({ trigger: 'test', client });
+    eq(r.proposed, 0, '3a שום הצעה חדשה');
+    const all = await ProductMatch.find().lean();
+    eq(all.length, 1, '3b עדיין רשומה אחת');
+    eq(all[0].status, 'rejected', '3c ונשארה דחויה');
+  }
+
+  // ---------------------------------------------------------------- 4 ------
+  head('4 — מוצר שנסרק לא נשלח שוב; מוצר ששמו השתנה נשלח');
+  {
+    const client = fakeClient([{ matches: [] }, { matches: [] }]);
+    const r = await svc.runScan({ trigger: 'test', client });
+    eq(r.scanned, 0, '4a אין מוצרים חדשים — לא נסרק כלום');
+    eq(client.calls.length, 0, '4b והמודל לא נקרא');
+
+    await Product.updateOne({ _id: dates._id }, { $set: { name: 'ממרח תמרים 500 גרם' } });
+    const client2 = fakeClient([{ matches: [] }]);
+    const r2 = await svc.runScan({ trigger: 'test', client: client2 });
+    eq(r2.scanned, 1, '4c המוצר ששמו השתנה נסרק');
+    eq(client2.calls.length, 1, '4d קריאה אחת למודל');
+    const askedText = JSON.stringify(client2.calls[0].messages);
+    ok(askedText.includes('500 גרם'), '4e עם השם החדש');
+    ok(askedText.includes('2995') && askedText.includes('1402'), '4f מול כל המוצרים של הספק האחר');
+    ok(!askedText.includes('"S1"'), '4g ולא מול מוצרי הספק שלו');
+  }
+
+  // ---------------------------------------------------------------- 5 ------
+  head('5 — השהיה: פעמיים תוך דקה = ריצה אחת; כשל לא מסמן');
+  {
+    svc._resetThrottle();
+    await Product.updateOne({ _id: towels._id }, { $set: { name: 'מגבת נייר צץ-רץ 2 שכבות' } });
+    const client = fakeClient([{ matches: [] }, { matches: [] }]);
+    const t0 = Date.now();
+    const started1 = svc.throttledScan('import', { client, now: t0 });
+    const started2 = svc.throttledScan('import', { client, now: t0 + 1000 });
+    eq(started1, true, '5a הראשונה רצה');
+    eq(started2, false, '5b השנייה נדחתה');
+    await new Promise(r => setTimeout(r, 200));
+    eq(client.calls.length, 1, '5c קריאה אחת בלבד');
+    const started3 = svc.throttledScan('import', { client, now: t0 + svc.SCAN_COOLDOWN_MS + 1 });
+    eq(started3, true, '5d אחרי ההשהיה — רצה שוב');
+    await new Promise(r => setTimeout(r, 200));
+
+    // A failed call leaves no mark, so the next trigger asks again.
+    await Product.updateOne({ _id: towels._id }, { $set: { name: 'מגבת נייר צץ-רץ 3 שכבות' } });
+    const failing = fakeClient([new Error('boom')]);
+    const r = await svc.runScan({ trigger: 'test', client: failing });
+    eq(r.scanned, 0, '5e כשל — לא נסרק');
+    ok(r.error, '5f והשגיאה מדווחת');
+    const fp = svc.fingerprintOf(await Product.findById(towels._id).lean());
+    eq(await ProductScanMark.exists({ fingerprint: fp }), null, '5g בלי סימן — יישלח שוב בטריגר הבא');
+    const last = await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean();
+    ok(/boom/.test(last?.value?.error || ''), '5h השגיאה נרשמה בהגדרה');
+
+    // No key: quiet exit.
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    const r2 = await svc.runScan({ trigger: 'test' });
+    ok(r2.skipped, '5i בלי מפתח — יוצא בשקט');
+    process.env.ANTHROPIC_API_KEY = saved;
+  }
+
   // __TASKS_APPEND_HERE__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
