@@ -275,7 +275,53 @@ async function main() {
     eq(cmp2[String(wipesShabi._id)][0].diff_pct, null, '7i ובלי אחוז');
   }
 
-  // __TASKS_APPEND_HERE_2__
+  // ---------------------------------------------------------------- 8 ------
+  head('8 — נתיבים: מאושרות לכולם, סקירה וסריקה למנהל מערכת בלבד');
+  {
+    // Put this at the top of section 8, before requiring the controller:
+    const sdkPath = require.resolve('@anthropic-ai/sdk');
+    const fake = fakeClient([{ matches: [] }, { matches: [] }, { matches: [] }]);
+    require.cache[sdkPath] = { id: sdkPath, filename: sdkPath, loaded: true, children: [], paths: [], exports: function Anthropic() { return fake; } };
+
+    const c = require('../src/controllers/productMatch.controller');
+    function invoke(fn, { body = {}, params = {}, query = {}, user = { id: 'u1', role: 'system_admin', full_name: 'אורי' } } = {}) {
+      return new Promise((resolve, reject) => {
+        const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(p) { resolve({ status: this.statusCode, body: p }); } };
+        fn({ body, params, query, user }, res, (err) => (err ? reject(err) : resolve({ status: 500, body: null })));
+      });
+    }
+    const cook = { id: 'u2', role: 'cook', full_name: 'טבחית' };
+    const r = await invoke(c.matches, { query: { supplier: String(shabi._id) }, user: cook });
+    eq(r.status, 200, '8a טבחית קוראת השוואות');
+    ok(r.body.matches && r.body.matches[String(wipesShabi._id)], '8b ומקבלת את המגבונים');
+
+    const rv = await invoke(c.review, {});
+    eq(rv.status, 200, '8c סקירה למנהל');
+    ok(Array.isArray(rv.body.proposed) && Array.isArray(rv.body.confirmed), '8d שתי רשימות');
+    ok(rv.body.confirmed[0].products[0].name, '8e עם המוצרים מלאים (שם)');
+    ok('last_scan' in rv.body, '8f ומועד הסריקה האחרונה');
+
+    // The review controller's role gate lives in the ROUTES (requireRole) — assert the route file wires it.
+    const routesSrc = require('fs').readFileSync(require.resolve('../src/routes/product.routes'), 'utf8');
+    ok(/matches\/review'[^\n]*system_admin|adminOnly[^\n]*review/.test(routesSrc), '8g הנתיב review מוגן ל-system_admin');
+    ok(/matches\/scan'[^\n]*(system_admin|adminOnly)/.test(routesSrc), '8h וגם scan');
+    ok(routesSrc.indexOf("'/matches'") < routesSrc.indexOf("'/:id/image'"), '8i נתיבי matches לפני /:id/image');
+
+    const scan = await invoke(c.scan, {});
+    eq(scan.status, 200, '8j סריקה ידנית עונה');
+    ok('scanned' in scan.body && 'proposed' in scan.body, '8k עם מספרים');
+
+    // Import triggers a throttled scan (observed through the throttle state, not the network).
+    svc._resetThrottle();
+    const pc = require('../src/controllers/product.controller');
+    const imp = await invoke(pc.bulkImport, { body: { supplier_id: String(dalas._id), products: [{ sku: '9', name: 'סבון ידיים 5 ליטר', unit: 'מיכל', price_before_vat: 30 }] } });
+    eq(imp.status, 201, '8l ייבוא הצליח');
+    const second = svc.throttledScan('test');
+    eq(second, false, '8m הייבוא כבר הפעיל סריקה — השנייה נדחתה');
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // __TASKS_APPEND_HERE_3__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
   await mongoose.disconnect();
