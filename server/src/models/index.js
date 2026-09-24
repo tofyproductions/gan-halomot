@@ -92,6 +92,8 @@ const ExternalEnrollment = require('./ExternalEnrollment');
 const TmtApproval = require('./TmtApproval');
 const EnrollmentImport = require('./EnrollmentImport');
 const ScannedAttachment = require('./ScannedAttachment');
+const ProductMatch = require('./ProductMatch');
+const ProductScanMark = require('./ProductScanMark');
 const ParentAccount = require('./ParentAccount');
 const ParentPortalChange = require('./ParentPortalChange');
 const DailyLog = require('./DailyLog');
@@ -195,6 +197,8 @@ const real = {
   TmtApproval,
   EnrollmentImport,
   ScannedAttachment,
+  ProductMatch,
+  ProductScanMark,
   ParentAccount,
   ParentPortalChange,
   DailyLog,

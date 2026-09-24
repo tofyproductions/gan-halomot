@@ -33,6 +33,9 @@ async function create(req, res, next) {
       name, standing_note: standing_note || '', price_before_vat: price_before_vat || 0,
       price_with_vat: Number(((price_before_vat || 0) * vatRate).toFixed(2)),
     });
+    // A new price list is the moment to ask which of its lines exist at the
+    // other suppliers. Background, throttled, never awaited.
+    require('../services/productMatch.service').throttledScan('import');
     res.status(201).json({ product: { ...product.toObject(), id: product._id } });
   } catch (error) { next(error); }
 }
@@ -115,6 +118,9 @@ async function bulkImport(req, res, next) {
     const parts = [];
     if (inserted.length) parts.push(`${inserted.length} מוצרים נוספו`);
     if (updates.length) parts.push(`${updates.length} עודכנו`);
+    // A new price list is the moment to ask which of its lines exist at the
+    // other suppliers. Background, throttled, never awaited.
+    require('../services/productMatch.service').throttledScan('import');
     res.status(201).json({
       message: parts.join(' · ') || 'לא היה מה לייבא',
       count: inserted.length, updated: updates.length,

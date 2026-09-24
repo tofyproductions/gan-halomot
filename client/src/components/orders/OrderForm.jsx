@@ -17,6 +17,33 @@ import OrderGroupPanel from './OrderGroupPanel';
 import { useBranch } from '../../hooks/useBranch';
 import { formatCurrency, formatCurrencyExact } from '../../utils/hebrewYear';
 
+/**
+ * "אצל דאלאס: 0.24 ₪ ל-מגבון (96.78 ₪ לקרטון 400) · זול ב-12%".
+ * Green when the other supplier is cheaper per unit — that is the fact worth
+ * knowing while the finger is on this row. Grey when it is dearer. Per pack
+ * only, with a note, when a pack size is unknown.
+ */
+function OtherSupplierPrice({ rows }) {
+  if (!rows || !rows.length) return null;
+  return (
+    <Box sx={{ mt: 0.25 }}>
+      {rows.map((r, i) => {
+        const cheaper = r.diff_pct !== null && r.diff_pct < 0;
+        const pct = r.diff_pct === null ? null : Math.abs(r.diff_pct);
+        const perPack = `${formatCurrencyExact(r.price_with_vat)} ל${r.unit || 'אריזה'}${r.pack_qty ? ` ${r.pack_qty}` : ''}`;
+        const text = r.per_unit_price !== null
+          ? `אצל ${r.supplier_name}: ${formatCurrencyExact(r.per_unit_price)} ל-${r.base_unit || 'יחידה'} (${perPack})${pct !== null && pct !== 0 ? ` · ${cheaper ? 'זול' : 'יקר'} ב-${pct}%` : ''}`
+          : `אצל ${r.supplier_name}: ${perPack} · לפי אריזה`;
+        return (
+          <Typography key={i} variant="caption" sx={{ display: 'block', fontWeight: cheaper ? 700 : 400 }} color={cheaper ? 'success.main' : 'text.secondary'}>
+            {text}
+          </Typography>
+        );
+      })}
+    </Box>
+  );
+}
+
 export default function OrderForm() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,6 +64,7 @@ export default function OrderForm() {
   const [editSourceItems, setEditSourceItems] = useState(null);
   const [editOrder, setEditOrder] = useState(null); // { status, group_id, group_invited_by, group_invited_from } of the order being edited
   const [groupInfo, setGroupInfo] = useState(null);
+  const [matchMap, setMatchMap] = useState({});
 
   // Load suppliers
   useEffect(() => {
@@ -73,6 +101,16 @@ export default function OrderForm() {
     api.get('/products', { params: { supplier: selectedSupplier } })
       .then(res => setProducts(res.data.products || []))
       .catch(() => toast.error('שגיאה בטעינת מוצרים'));
+  }, [selectedSupplier]);
+
+  // What the same product costs at the other supplier — confirmed matches only.
+  useEffect(() => {
+    if (!selectedSupplier) { setMatchMap({}); return; }
+    let alive = true;
+    api.get('/products/matches', { params: { supplier: selectedSupplier } })
+      .then(res => { if (alive) setMatchMap(res.data.matches || {}); })
+      .catch(() => { if (alive) setMatchMap({}); });
+    return () => { alive = false; };
   }, [selectedSupplier]);
 
   // Apply prefill once products for the prefilled supplier load.
@@ -315,6 +353,7 @@ export default function OrderForm() {
                                   ⚠️ {p.standing_note}
                                 </Typography>
                               )}
+                              <OtherSupplierPrice rows={matchMap[String(p._id || p.id)]} />
                             </Box>
                             <Box sx={{ textAlign: 'left' }}>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
