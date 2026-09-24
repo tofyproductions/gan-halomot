@@ -111,7 +111,7 @@ async function main() {
     sentMail.length = 0;
     const r = await invoke(c.create, {
       user: userA, branchScope: scopeA,
-      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('ממרח תמרים', 24, 4.13)] },
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('ממרח תמרים', 400, 4.13)] },
     });
     eq(r.status, 201, '1a נוצרה');
     eq(r.body.order.status, 'draft', '1b במצב draft');
@@ -126,7 +126,7 @@ async function main() {
     sentMail.length = 0;
     const r = await invoke(c.create, {
       user: userA, branchScope: scopeA,
-      body: { branch_id: String(branchA._id), supplier_id: sid, items: [item('לחם', 10, 8)] },
+      body: { branch_id: String(branchA._id), supplier_id: sid, items: [item('לחם', 200, 8)] },
     });
     eq(r.status, 201, '1f נוצרה');
     eq(r.body.order.status, 'pending', '1g pending');
@@ -135,6 +135,17 @@ async function main() {
     eq(sentMail[0].kind, 'single', '1j הזמנה בודדת — המייל הרגיל');
     ok(r.body.order.sent_at, '1k sent_at נרשם');
     eq(r.body.order.sent_by, 'מנהלת א', '1l sent_by הוא מי שלחץ');
+  }
+
+  head('1m — מתחת למינימום בלי hold — נדחה');
+  {
+    sentMail.length = 0;
+    const r = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, items: [item('לחם', 10, 8)] },
+    });
+    eq(r.status, 400, '1m מתחת למינימום בלי hold — נדחה');
+    eq(sentMail.length, 0, '1n ובלי מייל');
   }
 
   // ---------------------------------------------------------------- 2 ------

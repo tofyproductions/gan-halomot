@@ -109,12 +109,17 @@ async function create(req, res, next) {
 
     const total_amount = processedItems.reduce((sum, i) => sum + i.total, 0);
 
-    // The minimum used to be enforced right here, before the order could even
-    // be saved — which is exactly what a hold needs to get past: the point of
-    // saving a draft under the minimum is to reach it later, together with
-    // another branch's draft. The check still happens, on the amount that
-    // will actually be mailed, in `send` (and, for a group, on the combined
-    // total there).
+    // The minimum applies whenever the order is actually going to be sent —
+    // which a hold, by definition, is not (yet). A hold needs to get past
+    // exactly this: the point of saving a draft under the minimum is to reach
+    // it later, together with another branch's draft, and `send` checks it
+    // again — unconditionally, since a single draft there is a group of one.
+    if (!req.body.hold && supplier.min_order_amount > 0 && total_amount < supplier.min_order_amount) {
+      return res.status(400).json({
+        error: `מינימום הזמנה: ${supplier.min_order_amount} ₪. סכום נוכחי: ${total_amount.toFixed(2)} ₪`,
+      });
+    }
+
     const order_number = 'ORD-' + Date.now();
 
     const order = await Order.create({
@@ -178,19 +183,16 @@ async function send(req, res, next) {
 
     if (!withItems.length) return res.status(400).json({ error: 'אין פריטים לשליחה' });
 
-    // The minimum is checked here as a group concept — several branches
-    // reaching it together — so it only applies when this draft actually
-    // belongs to one. A lone draft has no one to combine with; the minimum
-    // simply doesn't apply to it once sending has moved out of `create`.
-    if (order.group_id) {
-      const groupTotal = withItems.reduce((s, m) => s + (m.total_amount || 0), 0);
-      const minOrder = supplier.min_order_amount || 0;
-      if (minOrder > 0 && groupTotal < minOrder) {
-        return res.status(400).json({
-          error: `מינימום הזמנה ${minOrder} ₪ — חסרים ${Number((minOrder - groupTotal).toFixed(2))} ₪`,
-          group_total: groupTotal, min_order_amount: minOrder,
-        });
-      }
+    // The minimum applies here unconditionally — a single draft with no
+    // group is a group of one, and it is being sent right now, which is
+    // exactly the moment the minimum is checked at.
+    const groupTotal = withItems.reduce((s, m) => s + (m.total_amount || 0), 0);
+    const minOrder = supplier.min_order_amount || 0;
+    if (minOrder > 0 && groupTotal < minOrder) {
+      return res.status(400).json({
+        error: `מינימום הזמנה ${minOrder} ₪ — חסרים ${Number((minOrder - groupTotal).toFixed(2))} ₪`,
+        group_total: groupTotal, min_order_amount: minOrder,
+      });
     }
 
     if (empty.length) {
