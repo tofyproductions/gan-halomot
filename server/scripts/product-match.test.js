@@ -198,7 +198,84 @@ async function main() {
     process.env.ANTHROPIC_API_KEY = saved;
   }
 
-  // __TASKS_APPEND_HERE__
+  // ---------------------------------------------------------------- 6 ------
+  head('6 — אישור, מיזוג לקבוצה, דחייה, ביטול');
+  let confirmedGroupId;
+  {
+    // Fresh proposal between the wipes (the earlier one was rejected — use a new pair via a third supplier).
+    const third = await Supplier.create({ name: 'ספק ג', vat_rate: 1.18 });
+    const wipesThird = await mk(third._id, 'T1', 'מגבונים לחים 60 יח׳', 'חבילה', 6);
+    const p1 = await ProductMatch.create({
+      products: [{ product_id: wipesShabi._id, supplier_id: shabi._id, pack_qty: 80 }, { product_id: wipesThird._id, supplier_id: third._id, pack_qty: 60 }],
+      base_unit: 'מגבון', label: 'מגבונים', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(wipesShabi._id, wipesThird._id),
+    });
+    const g = await svc.confirmMatch(p1._id, { pack_qty: { [String(wipesShabi._id)]: 80, [String(wipesThird._id)]: 60 }, base_unit: 'מגבון', decided_by: 'אורי' });
+    eq(g.status, 'confirmed', '6a אושר');
+    eq(g.decided_by, 'אורי', '6b מי אישר');
+    confirmedGroupId = String(g._id);
+
+    // A second proposal whose one side is already in the confirmed group → merged.
+    const p2 = await ProductMatch.create({
+      products: [{ product_id: wipesThird._id, supplier_id: third._id, pack_qty: 60 }, { product_id: wipesDalas._id, supplier_id: dalas._id, pack_qty: 400 }],
+      base_unit: 'מגבון', label: 'מגבונים', status: 'proposed', confidence: 0.8, pair_key: ProductMatch.pairKey(wipesThird._id, wipesDalas._id),
+    });
+    const g2 = await svc.confirmMatch(p2._id, { pack_qty: { [String(wipesDalas._id)]: 400 }, base_unit: 'מגבון', decided_by: 'אורי' });
+    eq(String(g2._id), confirmedGroupId, '6c מוזג לקבוצה הקיימת');
+    eq(g2.products.length, 3, '6d שלושה חברים');
+    const p2db = await ProductMatch.findById(p2._id).lean();
+    eq([p2db.status, String(p2db.merged_into)], ['confirmed', confirmedGroupId], '6e ההצעה נשמרה עם merged_into — ה-pair_key ממשיך לשמור');
+
+    // Reject and unlink.
+    const p3 = await ProductMatch.create({
+      products: [{ product_id: dates._id, supplier_id: shabi._id, pack_qty: 1 }, { product_id: towels._id, supplier_id: dalas._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.7, pair_key: ProductMatch.pairKey(dates._id, towels._id),
+    });
+    const rj = await svc.rejectMatch(p3._id, 'אורי');
+    eq(rj.status, 'rejected', '6f נדחה');
+    const un = await svc.unlinkMatch(confirmedGroupId, 'אורי');
+    eq(un.status, 'rejected', '6g ביטול התאמה = rejected');
+    // Manual match re-creates a confirmed group between two of them.
+    const man = await svc.manualMatch([String(wipesShabi._id), String(wipesDalas._id)], 'אורי');
+    eq([man.status, man.proposed_by], ['confirmed', 'user'], '6h התאמה ידנית מאושרת מיד');
+    ok(await ProductMatch.findOne({ pair_key: ProductMatch.pairKey(wipesShabi._id, wipesDalas._id) }), '6i עם pair_key');
+    confirmedGroupId = String(man._id);
+    await ProductMatch.updateOne({ _id: man._id }, { $set: { base_unit: 'מגבון', 'products.$[a].pack_qty': 80, 'products.$[b].pack_qty': 400 } },
+      { arrayFilters: [{ 'a.product_id': wipesShabi._id }, { 'b.product_id': wipesDalas._id }] });
+
+    // Two documents with no pair_key at all must both save — a sparse unique index skips ABSENT fields, not null.
+    const noKey1 = await ProductMatch.create({
+      products: [{ product_id: dates._id, supplier_id: shabi._id, pack_qty: 1 }, { product_id: towels._id, supplier_id: dalas._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.5,
+    });
+    const noKey2 = await ProductMatch.create({
+      products: [{ product_id: wipesThird._id, supplier_id: third._id, pack_qty: 60 }, { product_id: towels._id, supplier_id: dalas._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.5,
+    });
+    ok(noKey1._id && noKey2._id, '6j שתי התאמות בלי pair_key כלל — שתיהן נשמרות');
+  }
+
+  // ---------------------------------------------------------------- 7 ------
+  head('7 — ההשוואה: מחיר ליחידה ואחוז ההפרש');
+  {
+    const cmp = await svc.comparisonFor(String(shabi._id));
+    const rows = cmp[String(wipesShabi._id)];
+    ok(Array.isArray(rows) && rows.length === 1, '7a למגבונים של שאבי יש השוואה אחת');
+    const r = rows[0];
+    eq(r.supplier_name, 'דאלאס', '7b מול דאלאס');
+    eq(r.per_unit_price, Number((96.78 / 400).toFixed(4)), '7c מחיר למגבון אצל דאלאס');
+    eq(r.my_per_unit_price, Number((9.44 / 80).toFixed(4)), '7d ומחיר למגבון אצלי');
+    eq(r.diff_pct, Math.round(((96.78 / 400) / (9.44 / 80) - 1) * 100), '7e אחוז ההפרש (חיובי = הספק האחר יקר יותר)');
+    eq(cmp[String(dates._id)], undefined, '7f למוצר בלי התאמה — כלום');
+
+    // Unknown pack → per-unit null, pack price still there.
+    await ProductMatch.updateOne({ _id: confirmedGroupId }, { $set: { 'products.$[b].pack_qty': null } }, { arrayFilters: [{ 'b.product_id': wipesDalas._id }] });
+    const cmp2 = await svc.comparisonFor(String(shabi._id));
+    eq(cmp2[String(wipesShabi._id)][0].per_unit_price, null, '7g כמות לא ידועה → אין מחיר ליחידה');
+    eq(cmp2[String(wipesShabi._id)][0].price_with_vat, 96.78, '7h אבל מחיר האריזה כן');
+    eq(cmp2[String(wipesShabi._id)][0].diff_pct, null, '7i ובלי אחוז');
+  }
+
+  // __TASKS_APPEND_HERE_2__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
   await mongoose.disconnect();

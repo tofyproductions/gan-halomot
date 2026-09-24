@@ -31,7 +31,7 @@ const productMatchSchema = new mongoose.Schema({
   proposed_by: { type: String, enum: ['ai', 'user'], default: 'ai' },
   decided_by: { type: String, default: '' },
   decided_at: { type: Date, default: null },
-  pair_key: { type: String, default: null, unique: true, sparse: true },
+  pair_key: { type: String, unique: true, sparse: true },
   merged_into: { type: mongoose.Schema.Types.ObjectId, ref: 'ProductMatch', default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

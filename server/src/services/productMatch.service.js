@@ -208,7 +208,137 @@ function throttledScan(trigger = 'import', { client: injected = null, now = Date
 }
 function _resetThrottle() { lastStartedAt = 0; running = false; }
 
+function notFound() { const e = new Error('התאמה לא נמצאה'); e.status = 404; return e; }
+
+/** The confirmed, un-merged group holding this product, if any. */
+async function confirmedGroupOf(productId) {
+  return ProductMatch.findOne({ status: 'confirmed', merged_into: null, 'products.product_id': productId });
+}
+
+/**
+ * proposed → confirmed. If one side already sits in a confirmed group, the
+ * other side joins that group and the proposal is kept with `merged_into`
+ * (its pair_key keeps the pair from being proposed again).
+ */
+async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = {}) {
+  const m = await ProductMatch.findById(id);
+  if (!m) throw notFound();
+  if (m.status === 'confirmed' && !m.merged_into) return m;
+  const now = new Date();
+  for (const p of m.products) {
+    const v = pack_qty[String(p.product_id)];
+    if (v !== undefined) p.pack_qty = v === null || v === '' ? null : Number(v);
+  }
+  if (base_unit !== undefined) m.base_unit = base_unit;
+
+  let target = null;
+  for (const p of m.products) {
+    target = await confirmedGroupOf(p.product_id);
+    if (target) break;
+  }
+  if (target && String(target._id) !== String(m._id)) {
+    for (const p of m.products) {
+      const existing = target.products.find(t => String(t.product_id) === String(p.product_id));
+      if (existing) { if (p.pack_qty !== null) existing.pack_qty = p.pack_qty; }
+      else target.products.push({ product_id: p.product_id, supplier_id: p.supplier_id, pack_qty: p.pack_qty });
+    }
+    if (m.base_unit && !target.base_unit) target.base_unit = m.base_unit;
+    target.decided_by = decided_by; target.decided_at = now;
+    await target.save();
+    m.status = 'confirmed'; m.merged_into = target._id; m.decided_by = decided_by; m.decided_at = now;
+    await m.save();
+    return target;
+  }
+  m.status = 'confirmed'; m.decided_by = decided_by; m.decided_at = now;
+  await m.save();
+  return m;
+}
+
+async function rejectMatch(id, decided_by = '') {
+  const m = await ProductMatch.findById(id);
+  if (!m) throw notFound();
+  m.status = 'rejected'; m.decided_by = decided_by; m.decided_at = new Date();
+  await m.save();
+  return m;
+}
+
+/** confirmed → rejected. The pair is remembered and never proposed again. */
+async function unlinkMatch(id, decided_by = '') {
+  return rejectMatch(id, decided_by);
+}
+
+/** Two (or more) products the admin says are the same. Confirmed at once. */
+async function manualMatch(productIds, decided_by = '') {
+  const ids = [...new Set((productIds || []).map(String))];
+  if (ids.length < 2) { const e = new Error('נדרשים לפחות שני מוצרים'); e.status = 400; throw e; }
+  const products = await Product.find({ _id: { $in: ids } }).select('supplier_id').lean();
+  if (products.length !== ids.length) { const e = new Error('מוצר לא נמצא'); e.status = 404; throw e; }
+  const suppliers = new Set(products.map(p => String(p.supplier_id)));
+  if (suppliers.size !== products.length) { const e = new Error('התאמה היא בין ספקים שונים — מוצר אחד לכל ספק'); e.status = 400; throw e; }
+  const pair_key = ids.length === 2 ? ProductMatch.pairKey(ids[0], ids[1]) : null;
+  const existing = pair_key ? await ProductMatch.findOne({ pair_key }) : null;
+  if (existing) {
+    existing.status = 'confirmed'; existing.merged_into = null; existing.proposed_by = 'user';
+    existing.decided_by = decided_by; existing.decided_at = new Date();
+    await existing.save();
+    return existing;
+  }
+  return ProductMatch.create({
+    products: products.map(p => ({ product_id: p._id, supplier_id: p.supplier_id, pack_qty: null })),
+    status: 'confirmed', proposed_by: 'user', confidence: 1, decided_by, decided_at: new Date(),
+    ...(pair_key ? { pair_key } : {}),
+  });
+}
+
+function perUnit(price, packQty) {
+  if (!packQty || packQty <= 0) return null;
+  return Number((price / packQty).toFixed(4));
+}
+
+/**
+ * For every product of `supplierId` in a confirmed group: the other members
+ * with their prices — per pack, and per base unit when both packs are known.
+ * diff_pct > 0 means the OTHER supplier is dearer per unit.
+ */
+async function comparisonFor(supplierId) {
+  const groups = await ProductMatch.find({ status: 'confirmed', merged_into: null, 'products.supplier_id': supplierId }).lean();
+  if (!groups.length) return {};
+  const productIds = [...new Set(groups.flatMap(g => g.products.map(p => String(p.product_id))))];
+  const products = await Product.find({ _id: { $in: productIds }, is_active: true }).select('supplier_id name unit price_with_vat').lean();
+  const byId = new Map(products.map(p => [String(p._id), p]));
+  const supplierIds = [...new Set(products.map(p => String(p.supplier_id)))];
+  const suppliers = await Supplier.find({ _id: { $in: supplierIds } }).select('name').lean();
+  const supplierName = new Map(suppliers.map(s => [String(s._id), s.name]));
+
+  const out = {};
+  for (const g of groups) {
+    const mine = g.products.filter(p => String(p.supplier_id) === String(supplierId));
+    const others = g.products.filter(p => String(p.supplier_id) !== String(supplierId));
+    for (const me of mine) {
+      const myProduct = byId.get(String(me.product_id));
+      if (!myProduct) continue;
+      const myPer = perUnit(myProduct.price_with_vat, me.pack_qty);
+      const rows = [];
+      for (const o of others) {
+        const op = byId.get(String(o.product_id));
+        if (!op) continue;
+        const per = perUnit(op.price_with_vat, o.pack_qty);
+        rows.push({
+          match_id: g._id, supplier_name: supplierName.get(String(o.supplier_id)) || '',
+          product_id: op._id, product_name: op.name, unit: op.unit || '',
+          price_with_vat: op.price_with_vat, pack_qty: o.pack_qty, per_unit_price: per,
+          my_pack_qty: me.pack_qty, my_per_unit_price: myPer, base_unit: g.base_unit || '',
+          diff_pct: per !== null && myPer ? Math.round((per / myPer - 1) * 100) : null,
+        });
+      }
+      if (rows.length) out[String(me.product_id)] = rows;
+    }
+  }
+  return out;
+}
+
 module.exports = {
   fingerprintOf, runScan, throttledScan, _resetThrottle,
+  confirmMatch, rejectMatch, unlinkMatch, manualMatch, comparisonFor,
   MODEL, MIN_CONFIDENCE, SCAN_COOLDOWN_MS, LAST_SCAN_KEY,
 };
