@@ -9,9 +9,11 @@ import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SearchIcon from '@mui/icons-material/Search';
 import SendIcon from '@mui/icons-material/Send';
+import SaveIcon from '@mui/icons-material/Save';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ProductThumb from './ProductThumb';
+import OrderGroupPanel from './OrderGroupPanel';
 import { useBranch } from '../../hooks/useBranch';
 import { formatCurrency, formatCurrencyExact } from '../../utils/hebrewYear';
 
@@ -33,6 +35,8 @@ export default function OrderForm() {
   const [notes, setNotes] = useState(prefill?.source === 'stock-shortages' ? 'הזמנה אוטומטית מחוסרי מלאי' : '');
   const [saving, setSaving] = useState(false);
   const [editSourceItems, setEditSourceItems] = useState(null);
+  const [editOrder, setEditOrder] = useState(null); // { status, group_id, group_invited_by } of the order being edited
+  const [groupInfo, setGroupInfo] = useState(null);
 
   // Load suppliers
   useEffect(() => {
@@ -54,6 +58,7 @@ export default function OrderForm() {
         setSelectedSupplier(order.supplier_id?._id || order.supplier_id);
         setNotes(order.notes || '');
         setEditSourceItems(order.items || []);
+        setEditOrder({ status: order.status, group_id: order.group_id || null, group_invited_by: order.group_invited_by || '' });
         editLoaded.current = true;
       })
       .catch(() => toast.error('שגיאה בטעינת הזמנה'));
@@ -172,10 +177,22 @@ export default function OrderForm() {
   const total = cart.reduce((sum, c) => sum + c.qty * c.product.price_with_vat, 0);
   const totalBeforeVat = cart.reduce((sum, c) => sum + c.qty * (c.product.price_before_vat || 0), 0);
 
-  const handleSubmit = async () => {
+  /**
+   * mode: 'hold'  — new order, saved as a draft, no email
+   *       'send'  — send to the supplier (new: create+send; draft: save then send)
+   *       'save'  — edit only (draft or pending)
+   */
+  const handleSubmit = async (mode) => {
     if (!selectedSupplier) return toast.error('בחר ספק');
     if (cart.length === 0) return toast.error('הוסף מוצרים להזמנה');
-    if (minOrder > 0 && total < minOrder) return toast.error(`מינימום הזמנה: ${formatCurrency(minOrder)}`);
+
+    const isGroup = Boolean(editOrder?.group_id);
+    const effectiveTotal = isGroup && groupInfo
+      ? (groupInfo.members || []).filter(m => !m.is_mine && m.status !== 'cancelled').reduce((s, m) => s + m.total_amount, 0) + total
+      : total;
+    if (mode === 'send' && minOrder > 0 && effectiveTotal < minOrder) {
+      return toast.error(`מינימום הזמנה: ${formatCurrency(minOrder)}${isGroup ? ' (על הסכום המשותף)' : ''}`);
+    }
 
     setSaving(true);
     try {
@@ -189,17 +206,29 @@ export default function OrderForm() {
 
       if (isEdit) {
         await api.put(`/orders/${editId}`, { items, notes });
-        toast.success('ההזמנה עודכנה');
+        if (mode === 'send') {
+          const res = await api.post(`/orders/${editId}/send`);
+          const n = res.data.sent_count || 1;
+          toast.success(n > 1 ? `ההזמנה נשלחה לספק — ${n} סניפים` : 'ההזמנה נשלחה לספק');
+        } else {
+          toast.success('ההזמנה עודכנה');
+        }
         navigate(`/orders/${editId}`);
       } else {
-        await api.post('/orders', {
+        const res = await api.post('/orders', {
           branch_id: selectedBranch,
           supplier_id: selectedSupplier,
           items,
           notes,
+          hold: mode === 'hold',
         });
-        toast.success('ההזמנה נשלחה לאישור');
-        navigate('/orders');
+        if (mode === 'hold') {
+          toast.success('ההזמנה נשמרה בהמתנה');
+          navigate(`/orders/${res.data.order.id || res.data.order._id}`);
+        } else {
+          toast.success('ההזמנה נשלחה לספק');
+          navigate('/orders');
+        }
       }
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה בשמירה');
@@ -310,6 +339,14 @@ export default function OrderForm() {
           <Box sx={{ flex: 1 }}>
             <Card sx={{ position: 'sticky', top: 80 }}>
               <CardContent>
+                {isEdit && editOrder?.group_id && (
+                  <OrderGroupPanel orderId={editId} onLoaded={setGroupInfo} />
+                )}
+                {isEdit && editOrder?.group_invited_by && editOrder?.status === 'draft' && (
+                  <Alert severity="info" sx={{ mb: 2, borderRadius: 2 }}>
+                    הוזמנת להצטרף על ידי {editOrder.group_invited_by}. הוסיפו את הפריטים שלכם ושמרו.
+                  </Alert>
+                )}
                 <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
                   סל הזמנה ({cart.length} פריטים)
                 </Typography>
@@ -362,7 +399,7 @@ export default function OrderForm() {
                       <Typography variant="body2" color="text.secondary">{formatCurrencyExact(totalBeforeVat)}</Typography>
                     </Stack>
 
-                    {minOrder > 0 && total < minOrder && (
+                    {minOrder > 0 && total < minOrder && !editOrder?.group_id && (
                       <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
                         מינימום הזמנה: {formatCurrency(minOrder)}
                       </Alert>
@@ -374,14 +411,46 @@ export default function OrderForm() {
                       sx={{ mb: 2 }}
                     />
 
-                    <Button
-                      fullWidth variant="contained" size="large"
-                      startIcon={<SendIcon />}
-                      onClick={handleSubmit}
-                      disabled={saving || (minOrder > 0 && total < minOrder)}
-                    >
-                      {saving ? 'שולח...' : 'שלח לאישור'}
-                    </Button>
+                    {(() => {
+                      const isDraft = !isEdit || editOrder?.status === 'draft';
+                      const isGroup = Boolean(editOrder?.group_id);
+                      const memberCount = groupInfo?.members?.filter(m => m.status !== 'cancelled').length || 0;
+                      const sendLabel = isGroup && memberCount > 1 ? `שלח לספק — כל הסניפים (${memberCount})` : 'שלח לספק';
+                      const below = minOrder > 0 && total < minOrder && !isGroup;
+                      return (
+                        <Stack spacing={1}>
+                          {isDraft && (
+                            <Button
+                              fullWidth variant="outlined" size="large"
+                              startIcon={<SaveIcon />}
+                              onClick={() => handleSubmit(isEdit ? 'save' : 'hold')}
+                              disabled={saving}
+                            >
+                              {isEdit ? 'שמור' : 'שמור בהמתנה'}
+                            </Button>
+                          )}
+                          {isDraft ? (
+                            <Button
+                              fullWidth variant="contained" size="large"
+                              startIcon={<SendIcon />}
+                              onClick={() => handleSubmit('send')}
+                              disabled={saving || below}
+                            >
+                              {saving ? 'שולח...' : sendLabel}
+                            </Button>
+                          ) : (
+                            <Button
+                              fullWidth variant="contained" size="large"
+                              startIcon={<SaveIcon />}
+                              onClick={() => handleSubmit('save')}
+                              disabled={saving}
+                            >
+                              {saving ? 'שומר...' : 'שמור שינויים'}
+                            </Button>
+                          )}
+                        </Stack>
+                      );
+                    })()}
                   </>
                 )}
               </CardContent>
