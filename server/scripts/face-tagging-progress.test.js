@@ -1,20 +1,25 @@
 #!/usr/bin/env node
 /**
- * "ממתינים" מול "בלי הסכמה" — ההבדל שהמונה הישן טישטש.
+ * "ממתינים" מול "בלי הסכמה" מול "פג תוקף" — ההבדל שהמונה הישן טישטש.
  *
  * WHY THIS EXISTS. `progress()` used to count every unnamed, non-"not a
  * child" face as "waiting" — but a face scanned in a room where no parent has
  * ticked face-recognition consent never gets an embedding
- * (services/face/scanner.js), and `queue()` requires `faces.embedding` to
- * exist before it will offer a face at all. The result was a badge saying
- * "7 ממתינים" next to a tagging screen saying "אין פרצופים שממתינים" — not a
- * counting bug so much as two different definitions of "waiting" living in
- * the same feature.
+ * (services/face/scanner.js), and `queue()` requires one before it will offer
+ * a face at all. The result was a badge saying "7 ממתינים" next to a tagging
+ * screen saying "אין פרצופים שממתינים" — not a counting bug so much as two
+ * different definitions of "waiting" living in the same feature.
  *
- * This asserts the fix directly: one photo with two faces that DO carry an
- * embedding (one already named, one not), and one photo with a face that does
- * NOT — and checks that `progress()` puts the un-embedded face in
- * `no_consent`, not `waiting`, while `queue()` never offers it.
+ * And a missing embedding is not always a consent problem: `facePurgeJob`
+ * unsets it EMBEDDING_TTL_DAYS after `face_scanned_at`, same as it does for a
+ * face that DID have permission. Lumping that into "no_consent" would send a
+ * teacher to chase a family who already agreed.
+ *
+ * This asserts both splits directly: one photo with two embedded faces (one
+ * named, one not), one recently-scanned photo with a face that never got an
+ * embedding (no consent), and one photo scanned 40 days ago whose face also
+ * has none (the purge job already ran) — and checks that `progress()` puts
+ * each in the right bucket while `queue()` only ever offers the embedded one.
  *
  * It also stands in for the schema question the brief calls out: `embedding`
  * is `select: false` on Photo.faces, so an ordinary `.find()` would hide it —
@@ -51,7 +56,7 @@ function head(t) { console.log(`\n${t}`); }
 let mongod;
 
 async function main() {
-  console.log('=== התקדמות תיוג פנים — waiting מול no_consent ===');
+  console.log('=== התקדמות תיוג פנים — waiting מול no_consent מול expired ===');
 
   mongod = await MongoMemoryServer.create({ instance: { dbName: 'face_progress_test' } });
   const uri = mongod.getUri();
@@ -62,14 +67,17 @@ async function main() {
   const { Photo } = require('../src/models');
   const tagging = require('../src/services/faceTagging.service');
 
-  head('פרצוף בלי הסכמת הורים אינו "ממתין"');
+  head('פרצוף בלי הסכמת הורים אינו "ממתין", ופרצוף שפג תוקפו אינו "בלי הסכמה"');
 
   const classroomId = new mongoose.Types.ObjectId();
   const branchId = new mongoose.Types.ObjectId();
   const namedChildId = new mongoose.Types.ObjectId();
   const embedding = new Array(8).fill(0.125);
+  const now = new Date();
+  const fortyDaysAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
 
-  // תמונה א: שני פרצופים עם embedding — אחד כבר מתויג, אחד לא.
+  // תמונה א: שני פרצופים עם embedding — אחד כבר מתויג, אחד לא. נסרקה
+  // עכשיו, כדי שלא תיכנס בטעות ל"פג תוקף".
   await Photo.create({
     key: 'a.jpg',
     source: 'staff',
@@ -77,6 +85,7 @@ async function main() {
     classroom_id: classroomId,
     date: '2026-09-01',
     face_scan_status: 'done',
+    face_scanned_at: now,
     faces: [
       {
         bbox: [0, 0, 10, 10], det_score: 0.95, child_id: namedChildId, embedding,
@@ -85,7 +94,8 @@ async function main() {
     ],
   });
 
-  // תמונה ב: פרצוף אחד בלי embedding — כיתה/יום בלי הסכמת הורים.
+  // תמונה ב: פרצוף אחד בלי embedding, נסרקה עכשיו — כיתה/יום בלי הסכמת
+  // הורים (facePurgeJob לא הספיק לגעת בה).
   await Photo.create({
     key: 'b.jpg',
     source: 'staff',
@@ -93,16 +103,34 @@ async function main() {
     classroom_id: classroomId,
     date: '2026-09-02',
     face_scan_status: 'done',
+    face_scanned_at: now,
     faces: [
       { bbox: [0, 0, 10, 10], det_score: 0.7 }, // unnamed, NO embedding
     ],
   });
 
+  // תמונה ג: פרצוף אחד בלי embedding, נסרקה לפני 40 יום — מעבר ל-
+  // EMBEDDING_TTL_DAYS (30), כלומר facePurgeJob כבר מחק את המספרים. זו לא
+  // בעיית הסכמה: אולי כן הייתה הסכמה, והתמונה פשוט ישנה מדי.
+  await Photo.create({
+    key: 'c.jpg',
+    source: 'staff',
+    branch_id: branchId,
+    classroom_id: classroomId,
+    date: '2026-08-01',
+    face_scan_status: 'done',
+    face_scanned_at: fortyDaysAgo,
+    faces: [
+      { bbox: [0, 0, 10, 10], det_score: 0.6 }, // unnamed, NO embedding, ישן
+    ],
+  });
+
   const progress = await tagging.progress({ classroomIds: [classroomId] });
-  eq(progress.faces, 3, 'faces = 3');
+  eq(progress.faces, 4, 'faces = 4');
   eq(progress.named, 1, 'named = 1');
   eq(progress.waiting, 1, 'waiting = 1 (רק הפרצוף הלא-מתויג עם embedding)');
-  eq(progress.no_consent, 1, 'no_consent = 1 (הפרצוף בלי embedding)');
+  eq(progress.no_consent, 1, 'no_consent = 1 (הפרצוף הטרי בלי embedding)');
+  eq(progress.expired, 1, 'expired = 1 (הפרצוף הישן בלי embedding)');
   eq(progress.not_a_child, 0, 'not_a_child = 0');
 
   const q = await tagging.queue({ classroomIds: [classroomId], limit: 12 });

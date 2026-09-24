@@ -4,7 +4,7 @@ const {
 } = require('../models');
 const storage = require('./storage.service');
 const { candidateChildIds, expandTwins } = require('./face/matcher');
-const { REFERENCES_PER_CHILD } = require('./face/constants');
+const { REFERENCES_PER_CHILD, EMBEDDING_TTL_DAYS } = require('./face/constants');
 const consent = require('./faceConsent.service');
 
 /**
@@ -56,10 +56,13 @@ async function queue({ classroomIds, limit = 12 }) {
       $match: {
         'faces.child_id': null,
         'faces.not_a_child': { $ne: true },
-        // A face whose numbers have been purged cannot become a reference, so
-        // naming it would teach the system nothing. It stays in the gallery,
-        // it simply leaves this queue.
-        'faces.embedding': { $exists: true },
+        // A face whose numbers have been purged — or never stored, because no
+        // parent in the room consented — cannot become a reference, so naming
+        // it would teach the system nothing. It stays in the gallery, it
+        // simply leaves this queue. `.0` rather than the array field itself:
+        // `embedding` can exist as `[]` (never observed today, but nothing
+        // guarantees it never will), and an empty array is not a usable one.
+        'faces.embedding.0': { $exists: true },
       },
     },
     { $sort: { 'faces.det_score': -1 } },
@@ -393,12 +396,22 @@ async function resolveParentClaim({ photoId, faceIndex, agree }) {
  * "waiting" used to mean every unnamed, non-"not a child" face — but a face
  * scanned in a room where no parent has consented to face recognition never
  * gets an embedding (services/face/scanner.js), and without one `queue()`
- * (which requires `faces.embedding` to exist) can never offer it. Counting it
- * as "waiting" produced a badge that promised work the tagging screen could
- * never show: "7 ממתינים" next to "אין פרצופים שממתינים". So `waiting` here
- * counts only faces `queue()` can actually hand to a teacher — unnamed, not
- * "not a child", AND with an embedding — and `no_consent` is the honest name
- * for the rest of them.
+ * (which requires an embedding) can never offer it. Counting it as "waiting"
+ * produced a badge that promised work the tagging screen could never show:
+ * "7 ממתינים" next to "אין פרצופים שממתינים". So `waiting` here counts only
+ * faces `queue()` can actually hand to a teacher — unnamed, not "not a
+ * child", AND with an embedding.
+ *
+ * The rest of them are missing an embedding for one of two DIFFERENT reasons,
+ * and a teacher needs to know which: `no_consent` — nobody in the room agreed
+ * to face recognition, so the scanner never stored one (services/face/
+ * scanner.js). `expired` — somebody DID agree, and the scanner DID store one,
+ * but `facePurgeJob` unsets it EMBEDDING_TTL_DAYS after the photograph was
+ * scanned, same as it does for any face that got named in time. Both are
+ * equally impossible to auto-recognise now, but "no consent" is a policy fact
+ * about a family and "expired" is a fact about how long ago the photo was
+ * taken — conflating them would tell a teacher to go chase a permission that
+ * was never the problem, or shrug at a family who actually said yes.
  *
  * `faces.embedding` is `select: false` on the schema, which hides it from an
  * ordinary `.find()` — but an aggregation pipeline reads the raw document and
@@ -406,6 +419,7 @@ async function resolveParentClaim({ photoId, faceIndex, agree }) {
  * scripts/face-tagging-progress.test.js.
  */
 async function progress({ classroomIds }) {
+  const cutoff = new Date(Date.now() - EMBEDDING_TTL_DAYS * 24 * 60 * 60 * 1000);
   const hasEmbedding = { $gt: [{ $size: { $ifNull: ['$faces.embedding', []] } }, 0] };
   const isUnnamed = {
     $and: [
@@ -413,6 +427,12 @@ async function progress({ classroomIds }) {
       { $ne: ['$faces.not_a_child', true] },
     ],
   };
+  // `face_scanned_at` lives on the photograph, not the face — every scan of a
+  // photograph stamps it once, at the same moment every face in it gets (or
+  // doesn't get) an embedding, so one cutoff comparison covers the whole
+  // photograph's faces correctly even after $unwind.
+  const isExpired = { $lt: ['$face_scanned_at', cutoff] };
+  const missingEmbedding = { $not: [hasEmbedding] };
 
   const [row] = await Photo.aggregate([
     {
@@ -430,7 +450,16 @@ async function progress({ classroomIds }) {
         named: { $sum: { $cond: [{ $ne: ['$faces.child_id', null] }, 1, 0] } },
         not_a_child: { $sum: { $cond: ['$faces.not_a_child', 1, 0] } },
         waiting: { $sum: { $cond: [{ $and: [isUnnamed, hasEmbedding] }, 1, 0] } },
-        no_consent: { $sum: { $cond: [{ $and: [isUnnamed, { $not: [hasEmbedding] }] }, 1, 0] } },
+        no_consent: {
+          $sum: {
+            $cond: [{ $and: [isUnnamed, missingEmbedding, { $not: [isExpired] }] }, 1, 0],
+          },
+        },
+        expired: {
+          $sum: {
+            $cond: [{ $and: [isUnnamed, missingEmbedding, isExpired] }, 1, 0],
+          },
+        },
       },
     },
   ]);
@@ -440,10 +469,11 @@ async function progress({ classroomIds }) {
       named: row.named,
       waiting: row.waiting,
       no_consent: row.no_consent,
+      expired: row.expired,
       not_a_child: row.not_a_child,
     }
     : {
-      faces: 0, named: 0, waiting: 0, no_consent: 0, not_a_child: 0,
+      faces: 0, named: 0, waiting: 0, no_consent: 0, expired: 0, not_a_child: 0,
     };
 }
 

@@ -297,6 +297,22 @@ async function main() {
   );
 
   /* ---------------------------------------------------------------- */
+  head('1ב. classroom_ids לא מרחיב הרשאה — חדר זר בבקשה נבלע בשקט');
+  // "כל הכיתות של הסניף" בלקוח שולח classroom_ids עם כל חדרי הסניף. אם
+  // הבקשה מגיעה עם חדר שהמשתמשת לא רואה בכלל (מעורבב, בטעות או בכוונה,
+  // עם חדר שהיא כן רואה) — היא לא אמורה להרחיב את מה ששירה יכולה לראות.
+  const qMixed = await request({
+    path: `/api/face-tagging/queue?classroom_ids=${otherRoom._id},${room._id}`,
+    token: shira,
+  });
+  eq(qMixed.status, 200, 'הבקשה עם classroom_ids נענית');
+  eq((qMixed.body.faces || []).length, 2, 'רק הפרצופים של החדר המותר חוזרים');
+  ok(
+    (qMixed.body.faces || []).every((f) => f.classroom_id === String(room._id)),
+    'אף פרצוף מהחדר הזר לא נכנס',
+  );
+
+  /* ---------------------------------------------------------------- */
   head('2. הכפתורים הם מי שנכח, לא כל הגן');
   const cand = await request({
     path: `/api/face-tagging/candidates?classroom_id=${room._id}&date=${DATE}`, token: shira,

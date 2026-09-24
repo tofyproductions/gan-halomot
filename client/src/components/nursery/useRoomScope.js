@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useBranch } from '../../hooks/useBranch';
 
 /**
@@ -8,14 +8,23 @@ import { useBranch } from '../../hooks/useBranch';
  * ("תל אביב — תינוקיה", כפילויות בין סניפים), גם כששורת העליון כבר נעולה על
  * סניף מסוים. הכלל הוא פשוט אבל צריך להיות זהה בשני המקומות:
  *
- * - כששורת העליון על סניף (`!isAllBranches`): הבחירה נעולה לאותו סניף.
- *   `branchId` עוקב אחרי `selectedBranch` ואי אפשר לשנות אותו מכאן.
- * - כששורת העליון על 'כל הסניפים': יש לבחור סניף במפורש, מתוך הסניפים
- *   שבאמת מופיעים ברשימת הכיתות (לא כל סניף שקיים במערכת — רק כאלה שיש
- *   להם כיתות שהמשתמש רואה).
+ * - כששורת העליון על סניף שבאמת יש בו כיתות למשתמש הזה: הבחירה נעולה
+ *   לאותו סניף. `branchId` עוקב אחרי `selectedBranch` ואי אפשר לשנות אותו
+ *   מכאן.
+ * - אחרת — גם כששורת העליון על 'כל הסניפים', וגם כשהיא על סניף שהמשתמש
+ *   הזה בכלל לא רואה בו כיתות (בדיוק התקלה עם `managed_branch_ids` שכבר
+ *   קרתה: `branch_id` של גננת לא תואם לכיתה שהיא משוייכת אליה, ונעילה
+ *   עיוורת הייתה מראה לה מסך ריק בלי דרך לצאת ממנו) — יש בורר סניף מפורש,
+ *   מתוך הסניפים שבאמת יש להם כיתות ברשימה הזאת. גננת שהכיתות שלה פרוסות
+ *   על שני סניפים רואה את שניהם.
  *
  * מעבר סניף — משורת העליון או מהבורר עצמו — מאפס את הכיתה לראשונה ברשימה
  * של הסניף החדש: כיתה מסניף קודם היא בחירה שכבר לא שייכת לכלום.
+ *
+ * `ready` הוא התנאי לשליחת בקשה: נטענה רשימת החדרים, ונבחרה עבורה ברירת
+ * מחדל (סניף+כיתה) — לא לפני. בלעדיו מסך שמזמין תור ברגע הראשון, לפני
+ * שידוע איזה סניף בכלל רלוונטי, שולח בקשה ל"כל הכיתות שהמשתמש רואה בכל
+ * סניף" ומקבל תשובה שלא שייכת לכלום.
  */
 export default function useRoomScope(rooms) {
   const { selectedBranch, isAllBranches, branches } = useBranch();
@@ -30,22 +39,27 @@ export default function useRoomScope(rooms) {
     return [...seen.values()];
   }, [list]);
 
-  const branchLocked = !isAllBranches;
-  const lockedBranchId = branchLocked ? String(selectedBranch || '') : '';
+  const selectedBranchStr = String(selectedBranch || '');
+  const branchLocked = !isAllBranches
+    && branchOptions.some((b) => b.id === selectedBranchStr);
+  const lockedBranchId = branchLocked ? selectedBranchStr : '';
 
   const [freeBranchId, setFreeBranchId] = useState('');
   const branchId = branchLocked ? lockedBranchId : freeBranchId;
 
-  // ב'כל הסניפים' צריך ברירת מחדל: הסניף הראשון שיש לו כיתות ברשימה. גם אם
-  // הבחירה הקודמת נעלמה (כיתה שהתבטלה, מעבר משתמש) — לא נשארים תקועים על
-  // סניף ריק.
+  // ברירת מחדל כשלא נעולים: הסניף של שורת העליון אם הוא בכלל אחת
+  // האפשרויות (מקרה שממילא היה ננעל, אלא אם isAllBranches), אחרת הראשון
+  // ברשימה. גם אם הבחירה הקודמת נעלמה (כיתה שהתבטלה, מעבר משתמש) — לא
+  // נשארים תקועים על סניף שכבר לא קיים.
   useEffect(() => {
     if (branchLocked) return;
-    if (!freeBranchId || !branchOptions.some((b) => b.id === freeBranchId)) {
-      setFreeBranchId(branchOptions[0]?.id || '');
-    }
+    if (freeBranchId && branchOptions.some((b) => b.id === freeBranchId)) return;
+    const fallback = branchOptions.some((b) => b.id === selectedBranchStr)
+      ? selectedBranchStr
+      : (branchOptions[0]?.id || '');
+    setFreeBranchId(fallback);
     /* eslint-disable-next-line */
-  }, [branchLocked, branchOptions]);
+  }, [branchLocked, branchOptions, selectedBranchStr]);
 
   const roomsOfBranch = useMemo(
     () => list.filter((r) => String(r.branch_id || '') === branchId),
@@ -53,20 +67,23 @@ export default function useRoomScope(rooms) {
   );
 
   const [classroomId, setClassroomId] = useState('');
-  // איזה branchId כבר קיבל בחירת-ברירת-מחדל לכיתה. בלי זה, כל טעינה מחדש של
-  // רשימת החדרים הייתה דורסת בחירה מפורשת של "כל הכיתות של הסניף" (ערך '')
-  // בטאב "מי זה?" בחזרה לחדר הראשון.
-  const initializedBranch = useRef(null);
+  // איזה branchId כבר קיבל בחירת-ברירת-מחדל לכיתה (state ולא ref: `ready`
+  // למטה חייב להגיב לזה). בלי זה, כל טעינה מחדש של רשימת החדרים הייתה
+  // דורסת בחירה מפורשת של "כל הכיתות של הסניף" (ערך '') בטאב "מי זה?"
+  // בחזרה לחדר הראשון.
+  const [readyBranch, setReadyBranch] = useState(null);
 
   useEffect(() => {
     if (!branchId) return;
-    if (initializedBranch.current === branchId) return;
+    if (readyBranch === branchId) return;
     // עוד לא נטענה אף כיתה בכלל — עדיף לחכות לריצה הבאה מאשר לנעול '' כברירת
     // מחדל לפני שידוע אם יש לסניף הזה כיתות.
     if (!list.length) return;
-    initializedBranch.current = branchId;
+    setReadyBranch(branchId);
     setClassroomId(roomsOfBranch.length ? String(roomsOfBranch[0].id) : '');
-  }, [branchId, roomsOfBranch, list.length]);
+  }, [branchId, roomsOfBranch, list.length, readyBranch]);
+
+  const ready = Boolean(branchId) && readyBranch === branchId;
 
   const branchName = (branchLocked
     ? branches.find((b) => String(b._id || b.id) === lockedBranchId)?.name
@@ -83,5 +100,6 @@ export default function useRoomScope(rooms) {
     roomsOfBranch,
     branchLocked,
     branchName,
+    ready,
   };
 }

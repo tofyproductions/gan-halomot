@@ -43,7 +43,7 @@ export default function FaceTagging({ onWaitingChange }) {
   const [classrooms, setClassrooms] = useState([]);
   const {
     branchOptions, branchId, setBranchId, classroomId, setClassroomId, roomsOfBranch, branchLocked,
-    branchName,
+    branchName, ready,
   } = useRoomScope(classrooms);
   const [queue, setQueue] = useState([]);
   const [progress, setProgress] = useState(null);
@@ -68,6 +68,9 @@ export default function FaceTagging({ onWaitingChange }) {
   const rosterCache = useRef(new Map());
   // מטמון לרשימות השמות: אותה כיתה באותו יום נשאלת שוב ושוב.
   const candidateCache = useRef(new Map());
+  // מספר סידורי לכל בקשת תור. סניף/כיתה שהוחלפו פעמיים במהירות עלולים
+  // להחזיר תשובה ישנה אחרי החדשה — התשובה הזאת נזרקת.
+  const loadSeq = useRef(0);
 
   const current = queue[0];
 
@@ -82,6 +85,27 @@ export default function FaceTagging({ onWaitingChange }) {
   }, []);
 
   const loadQueue = useCallback(async () => {
+    // עוד לא ידוע איזה סניף/כיתה ברירת המחדל — לפני זה כל בקשה הייתה
+    // נשלחת בלי scope ומחזירה תשובה ש"כל הכיתות שהמשתמש רואה" שלא שייכת
+    // בכלל לסניף שעל המסך.
+    if (!ready) {
+      loadSeq.current += 1;
+      setQueue([]);
+      setProgress(null);
+      if (onWaitingChange) onWaitingChange(0);
+      return;
+    }
+    // סניף בלי אף כיתה: אין למי לשלוח את הבקשה.
+    if (!classroomId && !roomsOfBranch.length) {
+      loadSeq.current += 1;
+      setQueue([]);
+      setProgress(null);
+      setLoading(false);
+      if (onWaitingChange) onWaitingChange(0);
+      return;
+    }
+
+    const mySeq = ++loadSeq.current;
     setLoading(true);
     try {
       const params = { limit: 12 };
@@ -95,16 +119,19 @@ export default function FaceTagging({ onWaitingChange }) {
         if (ids.length) params.classroom_ids = ids.join(',');
       }
       const { data } = await api.get('/face-tagging/queue', { params });
+      // תשובה ישנה — סניף או כיתה כבר הוחלפו פעם נוספת מאז שהיא נשלחה.
+      if (loadSeq.current !== mySeq) return;
       setQueue(data.faces || []);
       setProgress(data.progress);
       if (onWaitingChange) onWaitingChange(data.progress ? data.progress.waiting : 0);
       setError('');
     } catch (e) {
+      if (loadSeq.current !== mySeq) return;
       setError(apiError(e));
     } finally {
-      setLoading(false);
+      if (loadSeq.current === mySeq) setLoading(false);
     }
-  }, [classroomId, roomsOfBranch, onWaitingChange]);
+  }, [ready, classroomId, roomsOfBranch, onWaitingChange]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
@@ -200,9 +227,13 @@ export default function FaceTagging({ onWaitingChange }) {
   const named = progress ? progress.named : 0;
   const total = progress ? progress.faces : 0;
   const noConsent = progress ? (progress.no_consent || 0) : 0;
-  // המכנה של "כמה כבר זוהו" הוא רק פרצופים שבכלל אפשר לזהות אוטומטית —
-  // פרצוף בלי הסכמת הורים לא נכנס למכנה, כי הוא לעולם לא יזוהה ככה.
-  const taggable = total - noConsent;
+  // פרצוף בלי embedding יכול להיות משתי סיבות שונות — אף הורה בכיתה לא
+  // הסכים, או שההסכמה הייתה קיימת אבל 30 היום חלפו ו-facePurgeJob כבר מחק
+  // את המספרים. שתיהן לא ניתנות לזיהוי אוטומטי יותר, ושתיהן לא נכנסות
+  // למכנה של "כמה כבר זוהו".
+  const expired = progress ? (progress.expired || 0) : 0;
+  const notAChild = progress ? (progress.not_a_child || 0) : 0;
+  const taggable = Math.max(0, total - noConsent - expired - notAChild);
   const classroomName = roomsOfBranch.find((r) => String(r.id) === String(classroomId))?.name || '';
 
   return (
@@ -237,9 +268,13 @@ export default function FaceTagging({ onWaitingChange }) {
         </TextField>
       </Stack>
 
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {`סניף ${branchName} · ${classroomName || 'כל הכיתות'}`}
-      </Typography>
+      {/* לפני שידוע איזה סניף — אין מה להציג; שורה עם "סניף " ריק היא רק
+          רעש לחצי שנייה בזמן הטעינה הראשונה. */}
+      {branchName && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {`סניף ${branchName} · ${classroomName || 'כל הכיתות'}`}
+        </Typography>
+      )}
 
       {progress && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -255,9 +290,20 @@ export default function FaceTagging({ onWaitingChange }) {
         />
       )}
 
-      {noConsent > 0 && (
+      {(noConsent > 0 || expired > 0) && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          {`${noConsent} פרצופים בתמונות של ילדים ללא הסכמת הורים לזיהוי פנים — לא ניתן לזהות אותם אוטומטית. אפשר לתייג אותם בגלריה.`}
+          <Stack spacing={0.5}>
+            {noConsent > 0 && (
+              <Typography variant="body2">
+                {`${noConsent} פרצופים בתמונות של ילדים ללא הסכמת הורים לזיהוי פנים. אפשר לתייג בגלריה.`}
+              </Typography>
+            )}
+            {expired > 0 && (
+              <Typography variant="body2">
+                {`${expired} פרצופים בתמונות ישנות (מעל 30 יום) שכבר לא ניתן לזהות. אפשר לתייג בגלריה.`}
+              </Typography>
+            )}
+          </Stack>
         </Alert>
       )}
 
@@ -272,9 +318,14 @@ export default function FaceTagging({ onWaitingChange }) {
           <CardContent>
             <Stack spacing={1} alignItems="center" sx={{ py: 5 }}>
               <Typography variant="h6">
-                {noConsent > 0
-                  ? `אין פרצופים שממתינים לזיהוי. ${noConsent} פרצופים ממתינים להסכמת הורים.`
-                  : 'אין פרצופים שממתינים'}
+                {(() => {
+                  const extra = [];
+                  if (noConsent > 0) extra.push(`${noConsent} ממתינים להסכמת הורים`);
+                  if (expired > 0) extra.push(`${expired} בתמונות ישנות`);
+                  return extra.length
+                    ? `אין פרצופים שממתינים לזיהוי. ${extra.join(' · ')}.`
+                    : 'אין פרצופים שממתינים';
+                })()}
               </Typography>
               <Typography variant="body2" color="text.secondary" textAlign="center">
                 כל מה שהמערכת לא הצליחה לזהות כבר קיבל שם.

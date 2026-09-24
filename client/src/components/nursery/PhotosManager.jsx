@@ -77,19 +77,26 @@ export default function PhotosManager() {
     })();
   }, []);
 
+  // בקשות ישנות מוסיפות תוצאה — כיתה הוחלפה פעמיים במהירות, והתשובה
+  // הראשונה חוזרת אחרי השנייה ומציגה תמונות מהכיתה הלא נכונה. מספר סידורי
+  // שגדל בכל קריאה נותן לתשובה דרך לדעת שהיא כבר לא הראשונה.
+  const loadSeq = useRef(0);
   const load = useCallback(async (room = classroomId, f = filter) => {
     if (!room) return;
+    const mySeq = ++loadSeq.current;
     setLoading(true);
     setError('');
     try {
       const params = { classroom: room };
       if (f === 'untagged') params.untagged = '1';
       const res = await api.get('/photos', { params });
+      if (loadSeq.current !== mySeq) return; // תשובה ישנה — כבר יצאה בקשה חדשה יותר
       setData(res.data);
     } catch (err) {
+      if (loadSeq.current !== mySeq) return;
       setError(apiError(err, 'לא הצלחנו לטעון את התמונות'));
     } finally {
-      setLoading(false);
+      if (loadSeq.current === mySeq) setLoading(false);
     }
   }, [classroomId, filter]);
 
@@ -99,7 +106,13 @@ export default function PhotosManager() {
     // השני — המסך כבר לא מציג אותן, והמספר בסרגל נראה כאילו הוא מדבר על מה
     // שמולה.
     clearSelection();
-    if (classroomId) load(classroomId, filter);
+    if (classroomId) {
+      load(classroomId, filter);
+    } else {
+      // סניף בלי אף כיתה: אין מה לבקש, ואסור להשאיר על המסך תמונות מכיתה
+      // של סניף קודם שכבר לא נבחרת.
+      setData(null);
+    }
     /* eslint-disable-next-line */
   }, [classroomId]);
 
