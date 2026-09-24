@@ -49,6 +49,7 @@ export default function FaceTagging({ onWaitingChange }) {
   const [progress, setProgress] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [done, setDone] = useState(0);
@@ -81,7 +82,8 @@ export default function FaceTagging({ onWaitingChange }) {
   useEffect(() => {
     api.get('/photos/classrooms')
       .then(({ data }) => setClassrooms(data.classrooms || []))
-      .catch((e) => setError(apiError(e)));
+      .catch((e) => setError(apiError(e)))
+      .finally(() => setRoomsLoaded(true));
   }, []);
 
   const loadQueue = useCallback(async () => {
@@ -92,6 +94,9 @@ export default function FaceTagging({ onWaitingChange }) {
       loadSeq.current += 1;
       setQueue([]);
       setProgress(null);
+      // רשימת החדרים כבר הגיעה ואין בה כלום (או אין סניף לאף חדר) — `ready`
+      // לא יגיע לעולם, ואסור להשאיר גלגל שמסתובב לנצח.
+      if (roomsLoaded && !branchOptions.length) setLoading(false);
       if (onWaitingChange) onWaitingChange(0);
       return;
     }
@@ -131,7 +136,7 @@ export default function FaceTagging({ onWaitingChange }) {
     } finally {
       if (loadSeq.current === mySeq) setLoading(false);
     }
-  }, [ready, classroomId, roomsOfBranch, onWaitingChange]);
+  }, [ready, classroomId, roomsOfBranch, roomsLoaded, branchOptions.length, onWaitingChange]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 

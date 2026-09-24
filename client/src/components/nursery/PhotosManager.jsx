@@ -110,8 +110,10 @@ export default function PhotosManager() {
       load(classroomId, filter);
     } else {
       // סניף בלי אף כיתה: אין מה לבקש, ואסור להשאיר על המסך תמונות מכיתה
-      // של סניף קודם שכבר לא נבחרת.
+      // של סניף קודם שכבר לא נבחרת — גם לא כאלה שהבקשה שלהן עוד בדרך.
+      loadSeq.current += 1;
       setData(null);
+      setLoading(false);
     }
     /* eslint-disable-next-line */
   }, [classroomId]);
