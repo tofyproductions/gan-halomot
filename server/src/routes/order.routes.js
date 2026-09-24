@@ -13,6 +13,7 @@ router.get('/', c.getAll);
 router.get('/:id', c.getById);
 router.post('/', canOrder, c.create);
 router.put('/:id', canOrder, c.update);
+router.post('/:id/send', canOrder, c.send);
 router.post('/:id/approve', canOrder, c.approve);
 router.post('/:id/resend-email', authMiddleware, canOrder, c.resendEmail);
 router.post('/:id/mark-arrived', authMiddleware, requireRole(...RECEIVE_ROLES), c.markArrived);

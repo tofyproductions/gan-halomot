@@ -1,7 +1,8 @@
-const { Order, Supplier, Branch, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
+const { Order, Supplier, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 const { sendOrderEmail } = require('../services/email.service');
 const { deliveryFromResult, deliveryFromError } = require('../services/order-delivery.service');
+const { dispatchOrders } = require('../services/order-dispatch.service');
 const env = require('../config/env');
 
 async function findOrCreateStockItem({ branch_id, product_id, name, supplier_id }) {
@@ -108,55 +109,30 @@ async function create(req, res, next) {
 
     const total_amount = processedItems.reduce((sum, i) => sum + i.total, 0);
 
-    // Check minimum
-    if (supplier.min_order_amount > 0 && total_amount < supplier.min_order_amount) {
-      return res.status(400).json({
-        error: `מינימום הזמנה: ${supplier.min_order_amount} ₪. סכום נוכחי: ${total_amount.toFixed(2)} ₪`,
-      });
-    }
-
+    // The minimum used to be enforced right here, before the order could even
+    // be saved — which is exactly what a hold needs to get past: the point of
+    // saving a draft under the minimum is to reach it later, together with
+    // another branch's draft. The check still happens, on the amount that
+    // will actually be mailed, in `send` (and, for a group, on the combined
+    // total there).
     const order_number = 'ORD-' + Date.now();
 
     const order = await Order.create({
       order_number, branch_id, supplier_id,
       items: processedItems, total_amount,
       notes: notes || '', created_by: created_by || req.user?.full_name || '',
-      status: 'pending',
+      // Every order is born a draft. Without `hold` it is sent in the same
+      // breath — which is what "create" always did, now through the one
+      // function that sending later and sending together also use.
+      status: 'draft',
     });
 
-    // Send the order to the supplier and CC the creator. Wrapped in a
-    // try/catch so a flaky SMTP server can't break the create itself —
-    // the order is in the DB regardless.
-    //
-    // What the catch used to do was log and move on, which left the order
-    // looking exactly like one that went out. The outcome is recorded on the
-    // order now, whichever way it goes: the order still saves, and it no
-    // longer claims something that did not happen.
-    let delivery;
-    try {
-      const branch = await Branch.findById(branch_id).select('name address').lean();
-      const creatorEmail = req.user?.email && !String(req.user.email).endsWith('@gan-halomot.local') ? req.user.email : null;
-      const result = await sendOrderEmail({
-        order: order.toObject(),
-        supplier: supplier.toObject(),
-        branch,
-        creatorEmail,
-        creatorName: req.user?.full_name || created_by || '',
-      });
-      delivery = deliveryFromResult(result);
-    } catch (mailErr) {
-      console.error('Order email failed:', mailErr.message);
-      delivery = deliveryFromError(mailErr);
-    }
-    // Recording the outcome must not be able to undo the order either.
-    try {
-      await Order.updateOne({ _id: order._id }, { $set: delivery });
-      Object.assign(order, delivery);
-    } catch (writeErr) {
-      console.error('Order email status write failed:', writeErr.message);
+    if (req.body.hold) {
+      return res.status(201).json({ order: { ...order.toObject(), id: order._id } });
     }
 
-    res.status(201).json({ order: { ...order.toObject(), id: order._id } });
+    const [sent] = await dispatchOrders([order._id], { supplier, user: req.user });
+    res.status(201).json({ order: sent });
   } catch (error) { next(error); }
 }
 
@@ -177,6 +153,63 @@ async function update(req, res, next) {
 
     await order.save();
     res.json({ order: { ...order.toObject(), id: order._id } });
+  } catch (error) { next(error); }
+}
+
+/**
+ * Send a draft to the supplier. If the draft belongs to a group, every draft
+ * in the group with items goes out in one email; a member that never added
+ * anything is cancelled rather than sent empty.
+ */
+async function send(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (order.status !== 'draft') return res.status(400).json({ error: 'ההזמנה כבר נשלחה' });
+
+    const supplier = await Supplier.findById(order.supplier_id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+
+    const members = order.group_id
+      ? await Order.find({ group_id: order.group_id, status: 'draft' })
+      : [order];
+    const withItems = members.filter(m => (m.items || []).length > 0);
+    const empty = members.filter(m => !(m.items || []).length);
+
+    if (!withItems.length) return res.status(400).json({ error: 'אין פריטים לשליחה' });
+
+    // The minimum is checked here as a group concept — several branches
+    // reaching it together — so it only applies when this draft actually
+    // belongs to one. A lone draft has no one to combine with; the minimum
+    // simply doesn't apply to it once sending has moved out of `create`.
+    if (order.group_id) {
+      const groupTotal = withItems.reduce((s, m) => s + (m.total_amount || 0), 0);
+      const minOrder = supplier.min_order_amount || 0;
+      if (minOrder > 0 && groupTotal < minOrder) {
+        return res.status(400).json({
+          error: `מינימום הזמנה ${minOrder} ₪ — חסרים ${Number((minOrder - groupTotal).toFixed(2))} ₪`,
+          group_total: groupTotal, min_order_amount: minOrder,
+        });
+      }
+    }
+
+    if (empty.length) {
+      await Order.updateMany(
+        { _id: { $in: empty.map(m => m._id) }, status: 'draft' },
+        { $set: { status: 'cancelled', notes: 'לא הוסיף פריטים — בוטל בשליחת ההזמנה המשותפת' } }
+      );
+    }
+
+    let sent;
+    try {
+      sent = await dispatchOrders(withItems.map(m => m._id), { supplier, user: req.user });
+    } catch (err) {
+      if (err.status) return res.status(err.status).json({ error: err.message });
+      throw err;
+    }
+
+    const mine = sent.find(o => String(o._id) === String(order._id)) || sent[0];
+    res.json({ order: mine, sent_count: sent.length });
   } catch (error) { next(error); }
 }
 
@@ -369,4 +402,4 @@ async function remove(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getById, create, update, approve, markArrived, receive, resendEmail, remove };
+module.exports = { getAll, getById, create, update, send, approve, markArrived, receive, resendEmail, remove };

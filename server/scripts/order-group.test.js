@@ -104,7 +104,62 @@ async function main() {
     eq(ev.validateSync(), undefined, '0e order_shared הוא סוג התראה חוקי');
   }
 
-  // Later tasks append their sections here, before the summary.
+  // ---------------------------------------------------------------- 1 ------
+  head('1 — שמירה בהמתנה: טיוטה, בלי מייל');
+  let heldId;
+  {
+    sentMail.length = 0;
+    const r = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('ממרח תמרים', 24, 4.13)] },
+    });
+    eq(r.status, 201, '1a נוצרה');
+    eq(r.body.order.status, 'draft', '1b במצב draft');
+    eq(r.body.order.email_status, 'never', '1c לא נשלח מייל — email_status נשאר never');
+    eq(sentMail.length, 0, '1d השולח לא נקרא');
+    eq(r.body.order.sent_at, null, '1e sent_at ריק');
+    heldId = String(r.body.order.id);
+  }
+
+  head('1x — בלי hold: כמו היום, pending + מייל');
+  {
+    sentMail.length = 0;
+    const r = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, items: [item('לחם', 10, 8)] },
+    });
+    eq(r.status, 201, '1f נוצרה');
+    eq(r.body.order.status, 'pending', '1g pending');
+    eq(r.body.order.email_status, 'sent', '1h המייל נשלח');
+    eq(sentMail.length, 1, '1i בדיוק שולח אחד');
+    eq(sentMail[0].kind, 'single', '1j הזמנה בודדת — המייל הרגיל');
+    ok(r.body.order.sent_at, '1k sent_at נרשם');
+    eq(r.body.order.sent_by, 'מנהלת א', '1l sent_by הוא מי שלחץ');
+  }
+
+  // ---------------------------------------------------------------- 2 ------
+  head('2 — שליחת טיוטה בודדת');
+  {
+    sentMail.length = 0;
+    const r = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: heldId } });
+    eq(r.status, 200, '2a נשלחה');
+    eq(r.body.order.status, 'pending', '2b עכשיו pending');
+    eq(r.body.order.email_status, 'sent', '2c המייל נשלח');
+    eq(sentMail.length, 1, '2d מייל אחד');
+    ok(r.body.order.sent_at, '2e sent_at נרשם');
+    const inDb = await Order.findById(heldId).lean();
+    eq(inDb.status, 'pending', '2f וגם במסד');
+  }
+
+  // ---------------------------------------------------------------- 7 ------
+  head('7 — שליחה פעמיים');
+  {
+    sentMail.length = 0;
+    const r = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: heldId } });
+    eq(r.status, 400, '7a השנייה נדחית');
+    eq(sentMail.length, 0, '7b ובלי מייל נוסף');
+  }
+
   // __TASKS_APPEND_HERE__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
