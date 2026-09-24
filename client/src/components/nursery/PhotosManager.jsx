@@ -13,6 +13,7 @@ import RadioButtonUncheckedIcon from '@mui/icons-material/RadioButtonUnchecked';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import FaceTagging from './FaceTagging';
+import useRoomScope from './useRoomScope';
 import {
   enqueue, subscribe, pump, retryFailed, discardFailed,
 } from '../../utils/uploadQueue';
@@ -34,7 +35,9 @@ import {
 export default function PhotosManager() {
   const [data, setData] = useState(null);
   const [classrooms, setClassrooms] = useState([]);
-  const [classroomId, setClassroomId] = useState('');
+  const {
+    branchOptions, branchId, setBranchId, classroomId, setClassroomId, roomsOfBranch, branchLocked,
+  } = useRoomScope(classrooms);
   const [filter, setFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -67,7 +70,6 @@ export default function PhotosManager() {
         const res = await api.get('/photos/classrooms');
         const rooms = res.data.classrooms || [];
         setClassrooms(rooms);
-        setClassroomId(String(rooms[0]?.id || ''));
       } catch (err) {
         setError(apiError(err, 'לא הצלחנו לטעון את הכיתות'));
         setLoading(false);
@@ -75,19 +77,26 @@ export default function PhotosManager() {
     })();
   }, []);
 
+  // בקשות ישנות מוסיפות תוצאה — כיתה הוחלפה פעמיים במהירות, והתשובה
+  // הראשונה חוזרת אחרי השנייה ומציגה תמונות מהכיתה הלא נכונה. מספר סידורי
+  // שגדל בכל קריאה נותן לתשובה דרך לדעת שהיא כבר לא הראשונה.
+  const loadSeq = useRef(0);
   const load = useCallback(async (room = classroomId, f = filter) => {
     if (!room) return;
+    const mySeq = ++loadSeq.current;
     setLoading(true);
     setError('');
     try {
       const params = { classroom: room };
       if (f === 'untagged') params.untagged = '1';
       const res = await api.get('/photos', { params });
+      if (loadSeq.current !== mySeq) return; // תשובה ישנה — כבר יצאה בקשה חדשה יותר
       setData(res.data);
     } catch (err) {
+      if (loadSeq.current !== mySeq) return;
       setError(apiError(err, 'לא הצלחנו לטעון את התמונות'));
     } finally {
-      setLoading(false);
+      if (loadSeq.current === mySeq) setLoading(false);
     }
   }, [classroomId, filter]);
 
@@ -97,7 +106,15 @@ export default function PhotosManager() {
     // השני — המסך כבר לא מציג אותן, והמספר בסרגל נראה כאילו הוא מדבר על מה
     // שמולה.
     clearSelection();
-    if (classroomId) load(classroomId, filter);
+    if (classroomId) {
+      load(classroomId, filter);
+    } else {
+      // סניף בלי אף כיתה: אין מה לבקש, ואסור להשאיר על המסך תמונות מכיתה
+      // של סניף קודם שכבר לא נבחרת — גם לא כאלה שהבקשה שלהן עוד בדרך.
+      loadSeq.current += 1;
+      setData(null);
+      setLoading(false);
+    }
     /* eslint-disable-next-line */
   }, [classroomId]);
 
@@ -258,12 +275,23 @@ export default function PhotosManager() {
       <>
 
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 2 }}>
+        {!branchLocked && (
+          <TextField
+            select label="סניף" size="small" value={branchId} fullWidth
+            onChange={(e) => setBranchId(e.target.value)}
+          >
+            {branchOptions.map((b) => (
+              <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>
+            ))}
+          </TextField>
+        )}
+
         <TextField
           select label="כיתה" size="small" value={classroomId} fullWidth
           onChange={(e) => { setClassroomId(e.target.value); }}
         >
-          {classrooms.map(c => (
-            <MenuItem key={c.id} value={String(c.id)}>{c.branch} — {c.name}</MenuItem>
+          {roomsOfBranch.map(c => (
+            <MenuItem key={c.id} value={String(c.id)}>{c.name}</MenuItem>
           ))}
         </TextField>
 

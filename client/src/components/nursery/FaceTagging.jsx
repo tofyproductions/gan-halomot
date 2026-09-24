@@ -10,6 +10,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import BlockIcon from '@mui/icons-material/Block';
 import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import api, { apiError } from '../../api/client';
+import useRoomScope from './useRoomScope';
 
 /**
  * "מי זה?" — מסך אחד, פרצוף אחד, הקשה אחת.
@@ -40,11 +41,15 @@ const PREFETCH = 4;
 
 export default function FaceTagging({ onWaitingChange }) {
   const [classrooms, setClassrooms] = useState([]);
-  const [classroomId, setClassroomId] = useState('');
+  const {
+    branchOptions, branchId, setBranchId, classroomId, setClassroomId, roomsOfBranch, branchLocked,
+    branchName, ready,
+  } = useRoomScope(classrooms);
   const [queue, setQueue] = useState([]);
   const [progress, setProgress] = useState(null);
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [roomsLoaded, setRoomsLoaded] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [done, setDone] = useState(0);
@@ -64,6 +69,9 @@ export default function FaceTagging({ onWaitingChange }) {
   const rosterCache = useRef(new Map());
   // מטמון לרשימות השמות: אותה כיתה באותו יום נשאלת שוב ושוב.
   const candidateCache = useRef(new Map());
+  // מספר סידורי לכל בקשת תור. סניף/כיתה שהוחלפו פעמיים במהירות עלולים
+  // להחזיר תשובה ישנה אחרי החדשה — התשובה הזאת נזרקת.
+  const loadSeq = useRef(0);
 
   const current = queue[0];
 
@@ -74,25 +82,61 @@ export default function FaceTagging({ onWaitingChange }) {
   useEffect(() => {
     api.get('/photos/classrooms')
       .then(({ data }) => setClassrooms(data.classrooms || []))
-      .catch((e) => setError(apiError(e)));
+      .catch((e) => setError(apiError(e)))
+      .finally(() => setRoomsLoaded(true));
   }, []);
 
   const loadQueue = useCallback(async () => {
+    // עוד לא ידוע איזה סניף/כיתה ברירת המחדל — לפני זה כל בקשה הייתה
+    // נשלחת בלי scope ומחזירה תשובה ש"כל הכיתות שהמשתמש רואה" שלא שייכת
+    // בכלל לסניף שעל המסך.
+    if (!ready) {
+      loadSeq.current += 1;
+      setQueue([]);
+      setProgress(null);
+      // רשימת החדרים כבר הגיעה ואין בה כלום (או אין סניף לאף חדר) — `ready`
+      // לא יגיע לעולם, ואסור להשאיר גלגל שמסתובב לנצח.
+      if (roomsLoaded && !branchOptions.length) setLoading(false);
+      if (onWaitingChange) onWaitingChange(0);
+      return;
+    }
+    // סניף בלי אף כיתה: אין למי לשלוח את הבקשה.
+    if (!classroomId && !roomsOfBranch.length) {
+      loadSeq.current += 1;
+      setQueue([]);
+      setProgress(null);
+      setLoading(false);
+      if (onWaitingChange) onWaitingChange(0);
+      return;
+    }
+
+    const mySeq = ++loadSeq.current;
     setLoading(true);
     try {
-      const { data } = await api.get('/face-tagging/queue', {
-        params: { classroom_id: classroomId || undefined, limit: 12 },
-      });
+      const params = { limit: 12 };
+      if (classroomId) {
+        params.classroom_id = classroomId;
+      } else {
+        // "כל הכיתות של הסניף": השרת מקבל classroom_id יחיד או כלום (= כל
+        // הכיתות שמותרות למשתמש, בכל סניף) — classroom_ids מצמצם את זה
+        // לחדרים של הסניף הנבחר בלבד, כדי שהתור לא יחצה סניפים.
+        const ids = roomsOfBranch.map((r) => String(r.id));
+        if (ids.length) params.classroom_ids = ids.join(',');
+      }
+      const { data } = await api.get('/face-tagging/queue', { params });
+      // תשובה ישנה — סניף או כיתה כבר הוחלפו פעם נוספת מאז שהיא נשלחה.
+      if (loadSeq.current !== mySeq) return;
       setQueue(data.faces || []);
       setProgress(data.progress);
       if (onWaitingChange) onWaitingChange(data.progress ? data.progress.waiting : 0);
       setError('');
     } catch (e) {
+      if (loadSeq.current !== mySeq) return;
       setError(apiError(e));
     } finally {
-      setLoading(false);
+      if (loadSeq.current === mySeq) setLoading(false);
     }
-  }, [classroomId, onWaitingChange]);
+  }, [ready, classroomId, roomsOfBranch, roomsLoaded, branchOptions.length, onWaitingChange]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
@@ -187,10 +231,33 @@ export default function FaceTagging({ onWaitingChange }) {
   const waiting = progress ? progress.waiting : 0;
   const named = progress ? progress.named : 0;
   const total = progress ? progress.faces : 0;
+  const noConsent = progress ? (progress.no_consent || 0) : 0;
+  // פרצוף בלי embedding יכול להיות משתי סיבות שונות — אף הורה בכיתה לא
+  // הסכים, או שההסכמה הייתה קיימת אבל 30 היום חלפו ו-facePurgeJob כבר מחק
+  // את המספרים. שתיהן לא ניתנות לזיהוי אוטומטי יותר, ושתיהן לא נכנסות
+  // למכנה של "כמה כבר זוהו".
+  const expired = progress ? (progress.expired || 0) : 0;
+  const notAChild = progress ? (progress.not_a_child || 0) : 0;
+  const taggable = Math.max(0, total - noConsent - expired - notAChild);
+  const classroomName = roomsOfBranch.find((r) => String(r.id) === String(classroomId))?.name || '';
 
   return (
     <Box sx={{ maxWidth: 760, mx: 'auto' }}>
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 1 }}>
+        {!branchLocked && (
+          <TextField
+            select
+            size="small"
+            label="סניף"
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            sx={{ minWidth: 180 }}
+          >
+            {branchOptions.map((b) => (
+              <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>
+            ))}
+          </TextField>
+        )}
         <TextField
           select
           size="small"
@@ -199,24 +266,50 @@ export default function FaceTagging({ onWaitingChange }) {
           onChange={(e) => setClassroomId(e.target.value)}
           sx={{ minWidth: 220 }}
         >
-          <MenuItem value="">כל הכיתות שלי</MenuItem>
-          {classrooms.map((c) => (
+          <MenuItem value="">כל הכיתות של הסניף</MenuItem>
+          {roomsOfBranch.map((c) => (
             <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
           ))}
         </TextField>
-        {progress && (
-          <Typography variant="body2" color="text.secondary">
-            {`זוהו ${named} מתוך ${total} · ממתינים ${waiting}`}
-          </Typography>
-        )}
       </Stack>
+
+      {/* לפני שידוע איזה סניף — אין מה להציג; שורה עם "סניף " ריק היא רק
+          רעש לחצי שנייה בזמן הטעינה הראשונה. */}
+      {branchName && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {`סניף ${branchName} · ${classroomName || 'כל הכיתות'}`}
+        </Typography>
+      )}
+
+      {progress && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          {`זוהו ${named} מתוך ${taggable} · ממתינים ${waiting}`}
+        </Typography>
+      )}
 
       {total > 0 && (
         <LinearProgress
           variant="determinate"
-          value={Math.round((100 * named) / total)}
+          value={taggable > 0 ? Math.round((100 * named) / taggable) : 0}
           sx={{ mb: 2, height: 8, borderRadius: 4 }}
         />
+      )}
+
+      {(noConsent > 0 || expired > 0) && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          <Stack spacing={0.5}>
+            {noConsent > 0 && (
+              <Typography variant="body2">
+                {`${noConsent} פרצופים בתמונות של ילדים ללא הסכמת הורים לזיהוי פנים. אפשר לתייג בגלריה.`}
+              </Typography>
+            )}
+            {expired > 0 && (
+              <Typography variant="body2">
+                {`${expired} פרצופים בתמונות ישנות (מעל 30 יום) שכבר לא ניתן לזהות. אפשר לתייג בגלריה.`}
+              </Typography>
+            )}
+          </Stack>
+        </Alert>
       )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -229,7 +322,16 @@ export default function FaceTagging({ onWaitingChange }) {
         <Card>
           <CardContent>
             <Stack spacing={1} alignItems="center" sx={{ py: 5 }}>
-              <Typography variant="h6">אין פרצופים שממתינים</Typography>
+              <Typography variant="h6">
+                {(() => {
+                  const extra = [];
+                  if (noConsent > 0) extra.push(`${noConsent} ממתינים להסכמת הורים`);
+                  if (expired > 0) extra.push(`${expired} בתמונות ישנות`);
+                  return extra.length
+                    ? `אין פרצופים שממתינים לזיהוי. ${extra.join(' · ')}.`
+                    : 'אין פרצופים שממתינים';
+                })()}
+              </Typography>
               <Typography variant="body2" color="text.secondary" textAlign="center">
                 כל מה שהמערכת לא הצליחה לזהות כבר קיבל שם.
                 {done > 0 && ` תייגת ${done} בפעם הזו.`}
