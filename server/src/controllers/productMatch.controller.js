@@ -45,13 +45,17 @@ async function review(req, res, next) {
   } catch (error) { next(error); }
 }
 
-/** POST /products/matches/scan — run now, ignoring the cooldown. */
+/**
+ * POST /products/matches/scan — start now, ignoring the cooldown, in the
+ * background: a whole catalogue takes minutes, far past an HTTP request. The
+ * screen polls /review until last_scan.at moves.
+ */
 async function scan(req, res, next) {
   try {
-    const r = await svc.runScan({ trigger: 'manual' });
-    if (r.skipped) return res.status(400).json({ error: r.skipped, ...r });
-    if (r.error) return res.status(502).json({ error: `הסריקה נכשלה: ${r.error}`, ...r });
-    res.json(r);
+    if (!svc.isConfigured()) return res.status(400).json({ error: svc.NOT_CONFIGURED });
+    const r = svc.startScan('manual');
+    if (!r.started) return res.status(409).json({ error: svc.BUSY });
+    res.status(202).json({ started: true });
   } catch (error) { next(error); }
 }
 

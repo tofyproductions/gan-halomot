@@ -32,10 +32,17 @@ function getClient() {
 }
 
 const SYSTEM = `אתה מתאים מוצרים בין קטלוגים של ספקים לגן ילדים בישראל.
-מוצר "זהה" = אותו דבר לשימוש (למשל מגבונים לחים, שמן קנולה, מגבת נייר), גם אם המותג שונה וגם אם האריזה שונה.
-לא זהה: סוג שונה (מגבונים לחים מול מגבוני רצפה), גודל תכולה שונה מהותית (שמן 1 ליטר מול 5 ליטר הם אותו מוצר — ציין כמות; ממרח תמרים מול ממרח שוקולד לא).
-לכל זוג קבע יחידת בסיס (מגבון, ק"ג, ליטר, יחידה, גליל, מטר) וכמה יחידות בסיס יש באריזת המכירה של כל צד, לפי השם. אם לא ניתן לדעת — null.
-החזר רק זוגות שבהם אתה בטוח לפחות במידה סבירה; confidence בין 0 ל-1.`;
+זהה = אותו מוצר לשימוש, גם במותג אחר, גם באריזה אחרת (כמות שונה באריזה = אותו מוצר; ציין את הכמות).
+לא זהה = גודל/וריאנט של הפריט עצמו: כוס 180 מ"ל מול 250 מ"ל, חיתול מידה 3 מול 5, טעם, אחוז שומן, סוג (מגבונים לחים מול מגבוני רצפה).
+לכל מוצר לכל היותר התאמה אחת לכל ספק אחר — הקרובה ביותר באריזה.
+יחידת בסיס זהה לשני הצדדים; העדף ק"ג/ליטר על גרם/מ"ל; דוגמאות: "12*80 מגבונים" → 960 מגבון; "ארגז 12 × 1 ליטר" → 12 ליטר; "5 ק"ג" → 5 ק"ג; "חבילה 2 גלילים" → 2 גליל.
+אם הכמות לא ניתנת לקריאה מהשם — null.
+העתק את המפתחות (A1, B7) בדיוק.
+confidence 0–1; החזר רק זוגות בביטחון סביר.`;
+
+/** Fresh products per model call. 40 rows answer in well under max_tokens. */
+const CHUNK = 40;
+const MAX_TOKENS = 16384;
 
 const SCHEMA = {
   type: 'object',
@@ -63,150 +70,261 @@ const SCHEMA = {
   additionalProperties: false,
 };
 
-function line(p, supplierName) {
-  return `${p._id} | ${supplierName} | ${p.sku || '-'} | ${p.name} | ${p.unit || '-'} | ${p.price_with_vat} ₪`;
+/** A catalogue value can hold the column separator or a line break — neither may reach the table. */
+function cell(v) {
+  return String(v ?? '').replace(/[|\r\n]+/g, ' ').trim();
 }
 
+function line(key, p, supplierName) {
+  return `${key} | ${cell(supplierName)} | ${cell(p.sku) || '-'} | ${cell(p.name)} | ${cell(p.unit) || '-'} | ${p.price_with_vat} ₪`;
+}
+
+function scanError(message) { return new Error(message); }
+
 /**
- * Ask the model which of `fresh` (all from one supplier) match any of `others`.
- * Returns the parsed `matches` array (may be empty).
+ * Ask the model which of `fresh` (one chunk, all from one supplier) match any
+ * of `others`. Rows are keyed A1…An / B1…Bm, never by database id — the keys
+ * are short, cannot be half-copied, and a key from the wrong list is simply
+ * not found. Returns `[{ a, b, m }]` with the products resolved.
+ *
+ * Anything but a complete, parseable answer THROWS: the caller must not mark
+ * a chunk as scanned on the strength of a cut-off or refused reply.
  */
 async function proposeFor({ fresh, others, supplierNames, apiClient, ledger }) {
-  const text = [
-    `רשימה א — מוצרים חדשים של הספק "${supplierNames.get(String(fresh[0].supplier_id))}":`,
-    'id | ספק | מק"ט | שם | יחידת מכירה | מחיר',
-    ...fresh.map(p => line(p, supplierNames.get(String(p.supplier_id)))),
+  const aByKey = new Map(fresh.map((p, i) => [`A${i + 1}`, p]));
+  const bByKey = new Map(others.map((p, i) => [`B${i + 1}`, p]));
+  const header = 'מפתח | ספק | מק"ט | שם | יחידת מכירה | מחיר';
+  const othersText = [
+    'רשימה ב — המוצרים של הספקים האחרים:',
+    header,
+    ...[...bByKey].map(([k, p]) => line(k, p, supplierNames.get(String(p.supplier_id)))),
+  ].join('\n');
+  const freshText = [
+    `רשימה א — מוצרים חדשים של הספק "${cell(supplierNames.get(String(fresh[0].supplier_id)))}":`,
+    header,
+    ...[...aByKey].map(([k, p]) => line(k, p, supplierNames.get(String(p.supplier_id)))),
     '',
-    'רשימה ב — כל המוצרים של הספקים האחרים:',
-    'id | ספק | מק"ט | שם | יחידת מכירה | מחיר',
-    ...others.map(p => line(p, supplierNames.get(String(p.supplier_id)))),
-    '',
-    'החזר את הזוגות (a_id מרשימה א, b_id מרשימה ב) שהם אותו מוצר.',
+    'החזר את הזוגות (a_id = מפתח מרשימה א, b_id = מפתח מרשימה ב) שהם אותו מוצר.',
   ].join('\n');
 
   const response = await apiClient.messages.create({
     model: MODEL,
-    max_tokens: 4096,
+    max_tokens: MAX_TOKENS,
+    thinking: { type: 'disabled' },
     system: SYSTEM,
     output_config: { format: { type: 'json_schema', schema: SCHEMA } },
-    messages: [{ role: 'user', content: [{ type: 'text', text }] }],
+    messages: [{
+      role: 'user',
+      content: [
+        // The other suppliers' list is the same for every chunk of a supplier — cache it.
+        { type: 'text', text: othersText, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: freshText },
+      ],
+    }],
   });
   ledger.add(MODEL, response.usage);
-  if (response.stop_reason === 'refusal') return [];
+  if (response.stop_reason === 'max_tokens') throw scanError('התשובה נחתכה');
+  if (response.stop_reason === 'refusal') throw scanError('המודל סירב לענות');
   const textBlock = (response.content || []).find(b => b.type === 'text');
-  if (!textBlock?.text) return [];
+  if (!textBlock?.text) throw scanError('אין טקסט בתשובה');
   let parsed;
-  try { parsed = JSON.parse(textBlock.text); } catch { return []; }
-  return Array.isArray(parsed?.matches) ? parsed.matches : [];
+  try { parsed = JSON.parse(textBlock.text); } catch {
+    throw scanError(`תשובה שאינה JSON: ${textBlock.text.slice(0, 120)}`);
+  }
+  if (!Array.isArray(parsed?.matches)) throw scanError(`תשובה בלי matches: ${textBlock.text.slice(0, 120)}`);
+  const out = [];
+  for (const m of parsed.matches) {
+    const a = aByKey.get(String(m?.a_id ?? '').trim());
+    const b = bByKey.get(String(m?.b_id ?? '').trim());
+    if (a && b) out.push({ a, b, m });
+  }
+  return out;
 }
 
 async function writeLastScan(value) {
   await Setting.findOneAndUpdate({ key: LAST_SCAN_KEY }, { $set: { value } }, { upsert: true });
 }
 
+async function markScanned(chunk, fps, now) {
+  if (!chunk.length) return;
+  await ProductScanMark.bulkWrite(chunk.map(p => ({ updateOne: {
+    filter: { fingerprint: fps.get(String(p._id)) },
+    update: { $set: { fingerprint: fps.get(String(p._id)), product_id: p._id, scanned_at: new Date(now) } },
+    upsert: true,
+  } })));
+}
+
+const NOT_CONFIGURED = 'סריקת התאמות אינה מוגדרת (חסר ANTHROPIC_API_KEY)';
+function isConfigured() { return !!process.env.ANTHROPIC_API_KEY; }
+
 /**
- * One scan: every product without a mark, against every product of the other
- * suppliers. Proposals are written only above MIN_CONFIDENCE and only for a
- * pair never seen before. Marks are written only when the model answered —
- * a failed call leaves the products "new" for the next trigger.
+ * One scan: every product without a mark, in chunks of CHUNK, against the
+ * products of the other suppliers. Proposals are written only above
+ * MIN_CONFIDENCE and only for a pair never seen before. A chunk's marks are
+ * written the moment that chunk's answer is in; a failed chunk is logged,
+ * left unmarked for the next trigger, and the scan moves on.
+ *
+ * Within one scan a supplier is not compared against the fresh products of a
+ * supplier processed earlier in the same scan — that pair was already asked
+ * from the other side.
  */
-async function runScan({ trigger = 'manual', client: injected = null, now = Date.now() } = {}) {
+async function scanOnce({ trigger = 'manual', client: injected = null, now = Date.now() } = {}) {
   const apiClient = injected || getClient();
   if (!apiClient) {
-    const value = { at: new Date(now), trigger, scanned: 0, proposed: 0, cost_usd: 0, error: 'סריקת התאמות אינה מוגדרת (חסר ANTHROPIC_API_KEY)' };
+    const value = { at: new Date(now), trigger, scanned: 0, proposed: 0, cost_usd: 0, error: NOT_CONFIGURED };
     await writeLastScan(value);
-    return { scanned: 0, proposed: 0, cost_usd: 0, skipped: value.error, error: null };
-  }
-
-  const products = await Product.find({ is_active: true }).select('supplier_id sku name unit price_with_vat').lean();
-  const suppliers = await Supplier.find({ _id: { $in: [...new Set(products.map(p => String(p.supplier_id)))] } }).select('name').lean();
-  const supplierNames = new Map(suppliers.map(s => [String(s._id), s.name]));
-
-  const fps = new Map(products.map(p => [String(p._id), fingerprintOf(p)]));
-  const marked = new Set((await ProductScanMark.find({ fingerprint: { $in: [...fps.values()] } }).select('fingerprint').lean()).map(m => m.fingerprint));
-  const fresh = products.filter(p => !marked.has(fps.get(String(p._id))));
-  if (!fresh.length) {
-    await writeLastScan({ at: new Date(now), trigger, scanned: 0, proposed: 0, cost_usd: 0, error: '' });
-    return { scanned: 0, proposed: 0, cost_usd: 0, skipped: null, error: null };
+    return { scanned: 0, proposed: 0, cost_usd: 0, skipped: value.error, error: null, failed_chunks: 0 };
   }
 
   const ledger = newLedger();
-  const bySupplier = new Map();
-  fresh.forEach(p => {
-    const k = String(p.supplier_id);
-    if (!bySupplier.has(k)) bySupplier.set(k, []);
-    bySupplier.get(k).push(p);
-  });
-
   let proposed = 0;
-  const scannedIds = [];
+  let scanned = 0;
+  let failed_chunks = 0;
+  const errors = [];
+  const errorText = () => (errors.length ? errors.join(' · ').slice(0, 300) : null);
+
   try {
+    const products = await Product.find({ is_active: true }).select('supplier_id sku name unit price_with_vat').lean();
+    const suppliers = await Supplier.find({ _id: { $in: [...new Set(products.map(p => String(p.supplier_id)))] } }).select('name').lean();
+    const supplierNames = new Map(suppliers.map(s => [String(s._id), s.name]));
+
+    const fps = new Map(products.map(p => [String(p._id), fingerprintOf(p)]));
+    const marked = new Set((await ProductScanMark.find({ fingerprint: { $in: [...fps.values()] } }).select('fingerprint').lean()).map(m => m.fingerprint));
+    const fresh = products.filter(p => !marked.has(fps.get(String(p._id))));
+    if (!fresh.length) {
+      await writeLastScan({ at: new Date(now), trigger, scanned: 0, proposed: 0, cost_usd: 0, error: '', failed_chunks: 0 });
+      return { scanned: 0, proposed: 0, cost_usd: 0, skipped: null, error: null, failed_chunks: 0 };
+    }
+
+    const bySupplier = new Map();
+    fresh.forEach(p => {
+      const k = String(p.supplier_id);
+      if (!bySupplier.has(k)) bySupplier.set(k, []);
+      bySupplier.get(k).push(p);
+    });
+
+    const alreadyCompared = new Set(); // fresh products of suppliers processed earlier in this scan
     for (const [supplierId, freshOfSupplier] of bySupplier) {
-      const others = products.filter(p => String(p.supplier_id) !== supplierId);
-      const matches = others.length
-        ? await proposeFor({ fresh: freshOfSupplier, others, supplierNames, apiClient, ledger })
-        : [];
-      const byId = new Map(products.map(p => [String(p._id), p]));
-      for (const m of matches) {
-        if (!(Number(m.confidence) >= MIN_CONFIDENCE)) continue;
-        const a = byId.get(String(m.a_id));
-        const b = byId.get(String(m.b_id));
-        if (!a || !b || String(a.supplier_id) === String(b.supplier_id)) continue;
-        const pair_key = ProductMatch.pairKey(a._id, b._id);
-        if (await ProductMatch.exists({ pair_key })) continue;
+      const supplierName = supplierNames.get(supplierId) || supplierId;
+      const others = products.filter(p => String(p.supplier_id) !== supplierId && !alreadyCompared.has(String(p._id)));
+      for (let i = 0; i < freshOfSupplier.length; i += CHUNK) {
+        const chunk = freshOfSupplier.slice(i, i + CHUNK);
         try {
-          await ProductMatch.create({
-            products: [
-              { product_id: a._id, supplier_id: a.supplier_id, pack_qty: m.a_pack_qty ?? null },
-              { product_id: b._id, supplier_id: b.supplier_id, pack_qty: m.b_pack_qty ?? null },
-            ],
-            base_unit: m.base_unit || '', label: m.label || '', status: 'proposed',
-            confidence: Number(m.confidence) || 0, reason: m.reason || '', proposed_by: 'ai', pair_key,
-          });
-          proposed++;
-        } catch (e) {
-          if (e.code !== 11000) throw e; // a concurrent scan wrote the same pair — fine
+          const pairs = others.length
+            ? await proposeFor({ fresh: chunk, others, supplierNames, apiClient, ledger })
+            : [];
+          for (const { a, b, m } of pairs) {
+            if (!(Number(m.confidence) >= MIN_CONFIDENCE)) continue;
+            const pair_key = ProductMatch.pairKey(a._id, b._id);
+            if (await ProductMatch.exists({ pair_key })) continue;
+            try {
+              await ProductMatch.create({
+                products: [
+                  { product_id: a._id, supplier_id: a.supplier_id, pack_qty: m.a_pack_qty ?? null },
+                  { product_id: b._id, supplier_id: b.supplier_id, pack_qty: m.b_pack_qty ?? null },
+                ],
+                base_unit: m.base_unit || '', label: m.label || '', status: 'proposed',
+                confidence: Number(m.confidence) || 0, reason: m.reason || '', proposed_by: 'ai', pair_key,
+              });
+              proposed++;
+            } catch (e) {
+              if (e.code !== 11000) throw e; // a concurrent scan wrote the same pair — fine
+            }
+          }
+          await markScanned(chunk, fps, now);
+          scanned += chunk.length;
+        } catch (err) {
+          failed_chunks++;
+          console.warn('[product-match] chunk failed', supplierName, err.message);
+          errors.push(`${supplierName}: ${err.message}`);
         }
       }
-      scannedIds.push(...freshOfSupplier.map(p => p._id));
+      freshOfSupplier.forEach(p => alreadyCompared.add(String(p._id)));
     }
   } catch (err) {
     console.error('[product-match] scan failed:', err.message);
-    await writeLastScan({ at: new Date(now), trigger, scanned: scannedIds.length, proposed, cost_usd: ledger.total, error: err.message });
-    return { scanned: 0, proposed, cost_usd: ledger.total, skipped: null, error: err.message };
+    errors.push(err.message);
+    const error = errorText();
+    await writeLastScan({ at: new Date(now), trigger, scanned, proposed, cost_usd: ledger.total, error, failed_chunks });
+    return { scanned, proposed, cost_usd: ledger.total, skipped: null, error, failed_chunks };
   }
 
-  if (scannedIds.length) {
-    const marks = scannedIds.map(id => ({ updateOne: {
-      filter: { fingerprint: fps.get(String(id)) },
-      update: { $set: { fingerprint: fps.get(String(id)), product_id: id, scanned_at: new Date(now) } },
-      upsert: true,
-    } }));
-    await ProductScanMark.bulkWrite(marks);
-  }
-  await writeLastScan({ at: new Date(now), trigger, scanned: scannedIds.length, proposed, cost_usd: ledger.total, error: '' });
-  console.log(`[product-match] ${trigger}: scanned ${scannedIds.length}, proposed ${proposed}, $${ledger.total.toFixed(4)}`);
-  return { scanned: scannedIds.length, proposed, cost_usd: ledger.total, skipped: null, error: null };
+  const error = errorText();
+  await writeLastScan({ at: new Date(now), trigger, scanned, proposed, cost_usd: ledger.total, error: error || '', failed_chunks });
+  console.log(`[product-match] ${trigger}: scanned ${scanned}, proposed ${proposed}, failed chunks ${failed_chunks}, $${ledger.total.toFixed(4)}`);
+  return { scanned, proposed, cost_usd: ledger.total, skipped: null, error, failed_chunks };
 }
 
 let lastStartedAt = 0;
 let running = false;
-/**
- * Fire-and-forget with a cooldown. A catalogue import calls this; ten imports
- * in a minute are one scan. Never called at boot.
- */
-function throttledScan(trigger = 'import', { client: injected = null, now = Date.now() } = {}) {
-  if (running || now - lastStartedAt < SCAN_COOLDOWN_MS) return false;
+let cooldownMs = SCAN_COOLDOWN_MS;
+let pendingTimer = null;
+let pendingTrigger = null;
+let pendingOpts = {};
+const BUSY = 'סריקה כבר רצה';
+
+/** Run a scan now and wait for it. Never two at once: a scan already running is reported, not joined. */
+async function runScan(opts = {}) {
+  if (running) return { scanned: 0, proposed: 0, cost_usd: 0, skipped: null, error: BUSY, failed_chunks: 0 };
+  running = true;
+  try { return await scanOnce(opts); } finally { running = false; }
+}
+
+/** Start a scan in the background. The caller has checked `running`. */
+function launch(trigger, { client: injected = null, now = Date.now() } = {}) {
   lastStartedAt = now;
   running = true;
+  if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; pendingTrigger = null; }
   setImmediate(() => {
-    runScan({ trigger, client: injected, now })
+    scanOnce({ trigger, client: injected, now })
       .catch(err => console.error('[product-match] background scan failed:', err.message))
       .finally(() => { running = false; });
   });
+}
+
+/**
+ * The "scan now" button: starts in the background, ignores the cooldown,
+ * never runs beside another scan.
+ */
+function startScan(trigger = 'manual', opts = {}) {
+  if (running) return { started: false, reason: 'running' };
+  launch(trigger, opts);
+  return { started: true };
+}
+
+/**
+ * Fire-and-forget with a cooldown. A catalogue import calls this; ten imports
+ * in a minute are one scan — plus one more at the end of the cooldown, so the
+ * last import of a burst is never left unscanned. Never called at boot.
+ */
+function throttledScan(trigger = 'import', opts = {}) {
+  const { client: injected = null, now = Date.now() } = opts;
+  if (running || now - lastStartedAt < cooldownMs) {
+    pendingTrigger = trigger;
+    pendingOpts = { client: injected };
+    if (!pendingTimer) {
+      // Still inside the cooldown → at its end. Past it but a scan still runs → look again in a second.
+      const remaining = lastStartedAt + cooldownMs - now;
+      const wait = remaining > 0 ? remaining : (running ? 1000 : 0);
+      pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        const t = pendingTrigger;
+        pendingTrigger = null;
+        if (t) throttledScan(t, { ...pendingOpts, now: Math.max(Date.now(), lastStartedAt + cooldownMs) });
+      }, wait);
+      if (pendingTimer.unref) pendingTimer.unref();
+    }
+    return false;
+  }
+  launch(trigger, { client: injected, now });
   return true;
 }
-function _resetThrottle() { lastStartedAt = 0; running = false; }
+function _resetThrottle() {
+  lastStartedAt = 0; running = false; cooldownMs = SCAN_COOLDOWN_MS;
+  if (pendingTimer) clearTimeout(pendingTimer);
+  pendingTimer = null; pendingTrigger = null; pendingOpts = {};
+}
+function _setCooldownForTests(ms) { cooldownMs = ms; }
 
 function notFound() { const e = new Error('התאמה לא נמצאה'); e.status = 404; return e; }
 function supplierConflict() { const e = new Error('בקבוצה כבר יש מוצר של הספק הזה'); e.status = 400; return e; }
@@ -386,7 +504,7 @@ async function comparisonFor(supplierId) {
 }
 
 module.exports = {
-  fingerprintOf, runScan, throttledScan, _resetThrottle,
+  fingerprintOf, runScan, startScan, throttledScan, isConfigured, _resetThrottle, _setCooldownForTests,
   confirmMatch, rejectMatch, unlinkMatch, manualMatch, comparisonFor,
-  MODEL, MIN_CONFIDENCE, SCAN_COOLDOWN_MS, LAST_SCAN_KEY,
+  MODEL, MIN_CONFIDENCE, SCAN_COOLDOWN_MS, LAST_SCAN_KEY, CHUNK, NOT_CONFIGURED, BUSY,
 };

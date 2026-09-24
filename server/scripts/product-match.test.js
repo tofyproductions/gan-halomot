@@ -33,7 +33,10 @@ function head(t) { console.log(`\n${t}`); }
 
 /**
  * A stand-in for the Anthropic client. `script` is a queue of responses; each
- * call shifts one. `calls` records what the model was asked, so a test can
+ * call shifts one. An entry may be an Error (the call throws), a function of
+ * the request (so it can answer with the row keys the request carried), an
+ * object with `__response` (a raw response — a cut-off or a refusal), or the
+ * JSON body itself. `calls` records what the model was asked, so a test can
  * assert which products were sent.
  */
 function fakeClient(script) {
@@ -43,8 +46,10 @@ function fakeClient(script) {
     messages: {
       async create(req) {
         calls.push(req);
-        const next = script.shift();
+        let next = script.shift();
         if (next instanceof Error) throw next;
+        if (typeof next === 'function') next = next(req);
+        if (next && next.__response) return { usage: { input_tokens: 1000, output_tokens: 100 }, ...next.__response };
         return {
           stop_reason: 'end_turn',
           usage: { input_tokens: 1000, output_tokens: 100 },
@@ -53,6 +58,21 @@ function fakeClient(script) {
       },
     },
   };
+}
+
+/** All the text the model was sent. */
+function promptOf(req) {
+  return req.messages[0].content.map(b => b.text).join('\n');
+}
+
+/** sku → row key (A1…, B1…) as the request laid them out: `A1 | ספק | מק"ט | …`. */
+function keysBySku(req) {
+  const out = {};
+  for (const l of promptOf(req).split('\n')) {
+    const m = l.match(/^([AB]\d+) \| [^|]* \| ([^|]*) \|/);
+    if (m) out[m[2].trim()] = m[1];
+  }
+  return out;
 }
 
 let mongod;
@@ -101,10 +121,10 @@ async function main() {
   head('2 — הסריקה מציעה זוגות; מתחת ל-0.6 לא נשמר');
   {
     const client = fakeClient([
-      { matches: [
-        { a_id: String(wipesShabi._id), b_id: String(wipesDalas._id), confidence: 0.92, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים לחים', reason: 'אותו מוצר, אריזה שונה' },
-        { a_id: String(dates._id), b_id: String(towels._id), confidence: 0.2, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: '', reason: 'לא דומה' },
-      ] },
+      req => { const k = keysBySku(req); return { matches: [
+        { a_id: k.S1, b_id: k['2995'], confidence: 0.92, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים לחים', reason: 'אותו מוצר, אריזה שונה' },
+        { a_id: k.S2, b_id: k['1402'], confidence: 0.2, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: '', reason: 'לא דומה' },
+      ] }; },
       { matches: [] },
     ]);
     const r = await svc.runScan({ trigger: 'test', client });
@@ -123,6 +143,16 @@ async function main() {
     const last = await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean();
     eq(last?.value?.proposed, 1, '2j מועד הסריקה האחרונה נרשם');
     ok(r.cost_usd > 0, '2k העלות חושבה');
+    const prompt = promptOf(client.calls[0]);
+    ok(!/[0-9a-f]{24}/.test(prompt), '2l אין מזהה מסד (24 הקסה) בבקשה');
+    ok(/^A1 \|/m.test(prompt) && /^B1 \|/m.test(prompt), '2m השורות ממופתחות A1…/B1…');
+    eq(client.calls.length, 1, '2n הספק השני לא נשאל שוב מול מוצרים חדשים שכבר הושוו מהצד השני');
+    const req = client.calls[0];
+    eq([req.max_tokens, req.thinking], [16384, { type: 'disabled' }], '2o max_tokens 16384 ובלי thinking');
+    const blocks = req.messages[0].content;
+    ok(blocks.length === 2 && blocks[0].cache_control?.type === 'ephemeral' && !blocks[1].cache_control
+      && /^B1 \|/m.test(blocks[0].text) && /^A1 \|/m.test(blocks[1].text), '2p רשימה ב בבלוק שמור במטמון, השורות החדשות בבלוק שאחריו');
+    eq(r.failed_chunks, 0, '2q אין מקטעים שנכשלו');
   }
 
   // ---------------------------------------------------------------- 3 ------
@@ -133,14 +163,20 @@ async function main() {
     // Force a rescan of everything by wiping the marks — the memory of the PAIR must hold on its own.
     await ProductScanMark.deleteMany({});
     const client = fakeClient([
-      { matches: [{ a_id: String(wipesShabi._id), b_id: String(wipesDalas._id), confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים', reason: 'שוב' }] },
-      { matches: [{ a_id: String(wipesDalas._id), b_id: String(wipesShabi._id), confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 400, b_pack_qty: 80, label: 'מגבונים', reason: 'הפוך' }] },
+      req => { const k = keysBySku(req); return { matches: [
+        { a_id: k.S1, b_id: k['2995'], confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 80, b_pack_qty: 400, label: 'מגבונים', reason: 'שוב' },
+        // Keys from the wrong list: an A-key as b_id, a B-key as a_id — ignored.
+        { a_id: k['1402'], b_id: k.S2, confidence: 0.95, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: '', reason: 'הפוך' },
+        { a_id: k.S2, b_id: k.S1, confidence: 0.95, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: '', reason: 'שניהם מרשימה א' },
+      ] }; },
+      req => { const k = keysBySku(req); return { matches: [{ a_id: k['2995'], b_id: k.S1, confidence: 0.95, base_unit: 'מגבון', a_pack_qty: 400, b_pack_qty: 80, label: 'מגבונים', reason: 'הפוך' }] }; },
     ]);
     const r = await svc.runScan({ trigger: 'test', client });
     eq(r.proposed, 0, '3a שום הצעה חדשה');
     const all = await ProductMatch.find().lean();
     eq(all.length, 1, '3b עדיין רשומה אחת');
     eq(all[0].status, 'rejected', '3c ונשארה דחויה');
+    eq(r.scanned, 4, '3d מפתח מהרשימה הלא נכונה לא הפיל את המקטע — כולם נסרקו');
   }
 
   // ---------------------------------------------------------------- 4 ------
@@ -159,7 +195,7 @@ async function main() {
     const askedText = JSON.stringify(client2.calls[0].messages);
     ok(askedText.includes('500 גרם'), '4e עם השם החדש');
     ok(askedText.includes('2995') && askedText.includes('1402'), '4f מול כל המוצרים של הספק האחר');
-    ok(!askedText.includes('"S1"'), '4g ולא מול מוצרי הספק שלו');
+    ok(!askedText.includes('| S1 |'), '4g ולא מול מוצרי הספק שלו');
   }
 
   // ---------------------------------------------------------------- 5 ------
@@ -184,7 +220,7 @@ async function main() {
     const failing = fakeClient([new Error('boom')]);
     const r = await svc.runScan({ trigger: 'test', client: failing });
     eq(r.scanned, 0, '5e כשל — לא נסרק');
-    ok(r.error, '5f והשגיאה מדווחת');
+    ok(r.error && r.failed_chunks === 1, '5f והשגיאה מדווחת, מקטע אחד נכשל');
     const fp = svc.fingerprintOf(await Product.findById(towels._id).lean());
     eq(await ProductScanMark.exists({ fingerprint: fp }), null, '5g בלי סימן — יישלח שוב בטריגר הבא');
     const last = await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean();
@@ -196,6 +232,27 @@ async function main() {
     const r2 = await svc.runScan({ trigger: 'test' });
     ok(r2.skipped, '5i בלי מפתח — יוצא בשקט');
     process.env.ANTHROPIC_API_KEY = saved;
+
+    // Trailing edge: a trigger dropped inside the cooldown runs once when the cooldown ends.
+    svc._resetThrottle();
+    svc._setCooldownForTests(150);
+    let lastScanWrites = 0;
+    const origFOU = Setting.findOneAndUpdate.bind(Setting);
+    Setting.findOneAndUpdate = (filter, ...rest) => { if (filter?.key === svc.LAST_SCAN_KEY) lastScanWrites++; return origFOU(filter, ...rest); };
+    try {
+      const trailing = fakeClient([]);
+      const t1 = Date.now();
+      eq(svc.throttledScan('import', { client: trailing, now: t1 }), true, '5j ריצה ראשונה');
+      eq(svc.throttledScan('import', { client: trailing, now: t1 + 10 }), false, '5k טריגר בתוך ההשהיה נדחה');
+      eq(svc.throttledScan('import', { client: trailing, now: t1 + 20 }), false, '5l ועוד אחד');
+      await new Promise(r => setTimeout(r, 60));
+      eq(lastScanWrites, 1, '5m בינתיים ריצה אחת');
+      await new Promise(r => setTimeout(r, 400));
+      eq(lastScanWrites, 2, '5n בסוף ההשהיה — ריצה נוספת אחת בדיוק');
+    } finally {
+      Setting.findOneAndUpdate = origFOU;
+      svc._resetThrottle();
+    }
   }
 
   // ---------------------------------------------------------------- 6 ------
@@ -373,9 +430,18 @@ async function main() {
     ok(/matches\/scan'[^\n]*(system_admin|adminOnly)/.test(routesSrc), '8h וגם scan');
     ok(routesSrc.indexOf("'/matches'") < routesSrc.indexOf("'/:id/image'"), '8i נתיבי matches לפני /:id/image');
 
+    svc._resetThrottle();
+    const lastBefore = (await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean())?.value?.at;
+    await new Promise(r => setTimeout(r, 5));
     const scan = await invoke(c.scan, {});
-    eq(scan.status, 200, '8j סריקה ידנית עונה');
-    ok('scanned' in scan.body && 'proposed' in scan.body, '8k עם מספרים');
+    eq([scan.status, scan.body], [202, { started: true }], '8j סריקה ידנית מתחילה ברקע — 202');
+    const scanAgain = await invoke(c.scan, {});
+    eq([scanAgain.status, scanAgain.body.error], [409, 'סריקה כבר רצה'], '8k שנייה מיד — 409');
+    await new Promise(r => setTimeout(r, 300));
+    const lastAfter = (await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean())?.value;
+    ok(lastAfter && lastAfter.trigger === 'manual' && new Date(lastAfter.at) > new Date(lastBefore), '8k2 הריצה ברקע הסתיימה ונרשמה');
+    eq(svc.startScan('manual').started, true, '8k3 אחרי שסיימה — אפשר שוב (בלי השהיה)');
+    await new Promise(r => setTimeout(r, 200));
 
     // Import triggers a throttled scan (observed through the throttle state, not the network).
     svc._resetThrottle();
@@ -385,6 +451,65 @@ async function main() {
     const second = svc.throttledScan('test');
     eq(second, false, '8m הייבוא כבר הפעיל סריקה — השנייה נדחתה');
     await new Promise(r => setTimeout(r, 300));
+  }
+
+  // ---------------------------------------------------------------- 9 ------
+  head('9 — קטלוג שלם: מקטעים של 40, סימון לכל מקטע, מקטע שנכשל לא עוצר את השאר');
+  {
+    svc._resetThrottle();
+    await svc.runScan({ trigger: 'test', client: fakeClient([]) }); // everything that exists so far is marked
+    eq(svc.CHUNK, 40, '9-0 גודל מקטע 40');
+    const big = await Supplier.create({ name: 'ספק גדול', vat_rate: 1.18 });
+    const bigProducts = [];
+    for (let i = 1; i <= 90; i++) {
+      const name = i === 5 ? 'סבון | נוזלי\nגדול\r\nמאוד' : `פריט ${i}`;
+      bigProducts.push(await mk(big._id, `X${i}`, name, 'יחידה', 1 + i));
+    }
+    const proposeFirst = sku => req => { const k = keysBySku(req); return { matches: [
+      { a_id: k[sku], b_id: k['1402'], confidence: 0.9, base_unit: 'יחידה', a_pack_qty: 1, b_pack_qty: 1, label: 'בדיקה', reason: 'מקטע' },
+    ] }; };
+    const client = fakeClient([proposeFirst('X1'), new Error('chunk-2-boom'), proposeFirst('X81')]);
+    const before = await ProductMatch.countDocuments();
+    const r = await svc.runScan({ trigger: 'test', client });
+    eq(client.calls.length, 3, '9a 90 מוצרים = שלוש קריאות');
+    const aRows = client.calls.map(c => (c.messages[0].content[1].text.match(/^A\d+ \|/gm) || []).length);
+    eq(aRows, [40, 40, 10], '9b 40 + 40 + 10 שורות');
+    eq([r.scanned, r.proposed, r.failed_chunks], [50, 2, 1], '9c מקטעים 1 ו-3 נסרקו והציעו, מקטע 2 נכשל');
+    ok(/chunk-2-boom/.test(r.error || '') && /ספק גדול/.test(r.error || ''), '9d השגיאה מדווחת עם שם הספק');
+    eq(await ProductMatch.countDocuments(), before + 2, '9e שתי הצעות במסד');
+    const isMarked = async p => !!(await ProductScanMark.exists({ fingerprint: svc.fingerprintOf(p) }));
+    eq([await isMarked(bigProducts[0]), await isMarked(bigProducts[40]), await isMarked(bigProducts[79]), await isMarked(bigProducts[80])],
+      [true, false, false, true], '9f מקטעים 1 ו-3 סומנו, מקטע 2 לא');
+    const markedBig = await ProductScanMark.countDocuments({ product_id: { $in: bigProducts.map(p => p._id) } });
+    eq(markedBig, 50, '9g בדיוק 50 סימנים');
+    const last = (await Setting.findOne({ key: svc.LAST_SCAN_KEY }).lean()).value;
+    ok(/chunk-2-boom/.test(last.error) && last.failed_chunks === 1 && last.scanned === 50, '9h הסריקה האחרונה רושמת את הכשל');
+    const row5 = client.calls[0].messages[0].content[1].text.split('\n').find(l => l.startsWith('A5 |'));
+    eq(row5 && row5.split('|').length, 6, '9i שם עם | ושורה חדשה נשאר שורה אחת של שש עמודות');
+    const othersBlocks = client.calls.map(c => c.messages[0].content[0].text);
+    ok(othersBlocks[0] === othersBlocks[1] && othersBlocks[1] === othersBlocks[2], '9j רשימה ב זהה בכל המקטעים — נשמרת במטמון');
+
+    // A cut-off answer: counts as a failed chunk, nothing of it is marked, the cost is still counted.
+    const cut = fakeClient([{ __response: { stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"matches":[{"a_id":"A1","b_id":"B' }] } }]);
+    const beforeCut = await ProductMatch.countDocuments();
+    const r2 = await svc.runScan({ trigger: 'test', client: cut });
+    eq([r2.scanned, r2.failed_chunks], [0, 1], '9k תשובה שנחתכה = מקטע שנכשל');
+    ok(/התשובה נחתכה/.test(r2.error || ''), '9l עם "התשובה נחתכה"');
+    eq(await ProductScanMark.countDocuments({ product_id: { $in: bigProducts.map(p => p._id) } }), 50, '9m ושום דבר ממנו לא סומן');
+    eq(await ProductMatch.countDocuments(), beforeCut, '9n ולא נשמרה הצעה');
+    ok(r2.cost_usd > 0, '9o העלות נספרה בכל זאת');
+
+    // Not JSON, a refusal, no text: each a failed chunk.
+    const bad = await svc.runScan({ trigger: 'test', client: fakeClient([{ __response: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'זו לא תשובת JSON בכלל' }] } }]) });
+    ok(bad.failed_chunks === 1 && /זו לא תשובת JSON בכלל/.test(bad.error || ''), '9p JSON שבור = כשל, עם תחילת הטקסט');
+    const refused = await svc.runScan({ trigger: 'test', client: fakeClient([{ __response: { stop_reason: 'refusal', content: [] } }]) });
+    eq([refused.scanned, refused.failed_chunks], [0, 1], '9q סירוב = כשל');
+    const empty = await svc.runScan({ trigger: 'test', client: fakeClient([{ __response: { stop_reason: 'end_turn', content: [] } }]) });
+    eq([empty.scanned, empty.failed_chunks], [0, 1], '9r בלי טקסט = כשל');
+
+    // The next good run picks up exactly the failed chunk.
+    const good = await svc.runScan({ trigger: 'test', client: fakeClient([]) });
+    eq([good.scanned, good.failed_chunks, good.error], [40, 0, null], '9s הריצה הבאה סורקת רק את המקטע שנכשל');
   }
 
   // __TASKS_APPEND_HERE_3__
