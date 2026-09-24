@@ -1,8 +1,10 @@
-const { Order, Supplier, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
+const mongoose = require('mongoose');
+const { Order, Supplier, Branch, StockCategory, StockItem, StockBatch, StockMovement, Product } = require('../models');
 const { getBranchFilter } = require('../utils/branch-filter');
 const { sendOrderEmail } = require('../services/email.service');
 const { deliveryFromResult, deliveryFromError } = require('../services/order-delivery.service');
 const { dispatchOrders } = require('../services/order-dispatch.service');
+const { createEvent, resolveEvents, branchManagerIds } = require('../services/notification.service');
 const env = require('../config/env');
 
 async function findOrCreateStockItem({ branch_id, product_id, name, supplier_id }) {
@@ -94,6 +96,14 @@ async function withStandingNotes(items) {
   }));
 }
 
+/** Which of these branch ids the caller may see. null scope = all of them. */
+function branchesInScope(req, branchIds) {
+  const scope = req.branchScope;
+  if (scope === null || (scope === undefined && ['system_admin', 'accountant'].includes(req.user?.role))) return branchIds.map(String);
+  const allowed = new Set((Array.isArray(scope) ? scope : []).map(String));
+  return branchIds.map(String).filter(id => allowed.has(id));
+}
+
 async function create(req, res, next) {
   try {
     const { branch_id, supplier_id, items, notes, created_by } = req.body;
@@ -157,6 +167,12 @@ async function update(req, res, next) {
     if (notes !== undefined) order.notes = notes;
 
     await order.save();
+
+    // An invited branch that has now added items has answered the invitation.
+    if (order.status === 'draft' && order.group_invited_by && (order.items || []).length) {
+      await resolveEvents({ ref_collection: 'Order', ref_id: order._id });
+    }
+
     res.json({ order: { ...order.toObject(), id: order._id } });
   } catch (error) { next(error); }
 }
@@ -210,8 +226,121 @@ async function send(req, res, next) {
       throw err;
     }
 
-    const mine = sent.find(o => String(o._id) === String(order._id)) || sent[0];
+    await Promise.all(members.map(m => resolveEvents({ ref_collection: 'Order', ref_id: m._id })));
+
+    // The caller's own order may not be among `sent` — it could have been the
+    // one with no items, cancelled rather than dispatched. Falling back to
+    // `sent[0]` in that case would hand the caller ANOTHER branch's order.
+    let mine = sent.find(o => String(o._id) === String(order._id));
+    if (!mine) {
+      const refetched = await Order.findById(order._id).lean();
+      mine = { ...refetched, id: refetched._id };
+    }
     res.json({ order: mine, sent_count: sent.length });
+  } catch (error) { next(error); }
+}
+
+/**
+ * Invite another branch into this draft. The branch gets an empty draft of its
+ * own with the same supplier, both drafts share a group_id, and the branch's
+ * managers are told.
+ */
+async function invite(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (order.status !== 'draft') return res.status(400).json({ error: 'אפשר להזמין סניף רק להזמנה בהמתנה' });
+
+    const { branch_id } = req.body;
+    if (!branch_id) return res.status(400).json({ error: 'branch_id is required' });
+    if (String(branch_id) === String(order.branch_id)) return res.status(400).json({ error: 'הסניף כבר בהזמנה' });
+
+    const branch = await Branch.findOne({ _id: branch_id, is_active: true }).select('name').lean();
+    if (!branch) return res.status(400).json({ error: 'סניף לא פעיל או לא קיים' });
+
+    const groupId = order.group_id || new mongoose.Types.ObjectId();
+    const already = await Order.exists({ group_id: groupId, branch_id, status: { $ne: 'cancelled' } });
+    if (already) return res.status(400).json({ error: 'הסניף כבר בהזמנה המשותפת' });
+
+    if (!order.group_id) {
+      order.group_id = groupId;
+      await order.save();
+    }
+
+    const supplier = await Supplier.findById(order.supplier_id).select('name').lean();
+    const inviterBranch = await Branch.findById(order.branch_id).select('name').lean();
+    const inviterName = req.user?.full_name || '';
+
+    const created = await Order.create({
+      order_number: 'ORD-' + Date.now(),
+      branch_id, supplier_id: order.supplier_id,
+      items: [], total_amount: 0, notes: '',
+      created_by: '', status: 'draft',
+      group_id: groupId, group_invited_by: inviterName,
+    });
+
+    const recipients = await branchManagerIds(branch_id);
+    await Promise.all(recipients.map(recipient_id => createEvent({
+      type: 'order_shared', ref_collection: 'Order', ref_id: created._id, recipient_id,
+      title: `הזמנה משותפת מ${supplier?.name || 'ספק'}`,
+      body: `${inviterName || 'מנהל/ת'} מסניף ${inviterBranch?.name || ''} מזמין/ה אתכם להצטרף להזמנה. הוסיפו פריטים ושלחו יחד.`,
+      url: `/orders/${created._id}/edit`,
+    })));
+
+    res.status(201).json({ order: { ...created.toObject(), id: created._id } });
+  } catch (error) { next(error); }
+}
+
+/** Every member of the group, as numbers — never as items. */
+async function group(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id).select('group_id supplier_id branch_id').lean();
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+
+    const members = order.group_id
+      ? await Order.find({ group_id: order.group_id }).populate('branch_id', 'name').sort({ created_at: 1 }).lean()
+      : await Order.find({ _id: order._id }).populate('branch_id', 'name').lean();
+
+    const memberBranchIds = members.map(m => String(m.branch_id?._id || m.branch_id));
+    const mine = new Set(branchesInScope(req, memberBranchIds));
+    if (!mine.size) return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
+
+    const supplier = await Supplier.findById(order.supplier_id).select('name min_order_amount').lean();
+    const rows = members.map(m => ({
+      id: m._id,
+      branch_id: m.branch_id?._id || m.branch_id,
+      branch_name: m.branch_id?.name || '',
+      items_count: (m.items || []).length,
+      total_amount: m.total_amount || 0,
+      status: m.status,
+      invited_by: m.group_invited_by || '',
+      is_mine: mine.has(String(m.branch_id?._id || m.branch_id)),
+    }));
+    const total_with_items = rows
+      .filter(r => r.items_count > 0 && r.status !== 'cancelled')
+      .reduce((s, r) => s + r.total_amount, 0);
+
+    res.json({
+      group_id: order.group_id || null,
+      supplier: { name: supplier?.name || '', min_order_amount: supplier?.min_order_amount || 0 },
+      members: rows,
+      total_with_items,
+    });
+  } catch (error) { next(error); }
+}
+
+/** Active branches not yet in this order's group — what the invite dialog lists. */
+async function invitableBranches(req, res, next) {
+  try {
+    const order = await Order.findById(req.params.id).select('group_id branch_id').lean();
+    if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    const taken = new Set([String(order.branch_id)]);
+    if (order.group_id) {
+      const members = await Order.find({ group_id: order.group_id, status: { $ne: 'cancelled' } }).select('branch_id').lean();
+      members.forEach(m => taken.add(String(m.branch_id)));
+    }
+    const branches = await Branch.find({ is_active: true }).select('name').sort({ name: 1 }).lean();
+    res.json({ branches: branches.filter(b => !taken.has(String(b._id))).map(b => ({ id: b._id, name: b.name })) });
   } catch (error) { next(error); }
 }
 
@@ -400,8 +529,9 @@ async function remove(req, res, next) {
 
     order.status = 'cancelled';
     await order.save();
+    await resolveEvents({ ref_collection: 'Order', ref_id: order._id });
     res.json({ message: 'ההזמנה בוטלה', id: req.params.id });
   } catch (error) { next(error); }
 }
 
-module.exports = { getAll, getById, create, update, send, approve, markArrived, receive, resendEmail, remove };
+module.exports = { getAll, getById, create, update, send, invite, group, invitableBranches, approve, markArrived, receive, resendEmail, remove };

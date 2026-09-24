@@ -10,6 +10,9 @@ const ORDER_ROLES = ['system_admin', 'branch_manager', 'accountant', 'class_lead
 const canOrder = requireRole(...ORDER_ROLES);
 
 router.get('/', c.getAll);
+router.get('/:id/group', c.group);
+router.get('/:id/invitable-branches', canOrder, c.invitableBranches);
+router.post('/:id/invite', canOrder, c.invite);
 router.get('/:id', c.getById);
 router.post('/', canOrder, c.create);
 router.put('/:id', canOrder, c.update);

@@ -171,6 +171,90 @@ async function main() {
     eq(sentMail.length, 0, '7b ובלי מייל נוסף');
   }
 
+  // ---------------------------------------------------------------- 3 ------
+  head('3 — הזמנת סניף להצטרף');
+  let groupSeedId, invitedId, groupId;
+  {
+    const seed = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 10, 30)] },
+    });
+    groupSeedId = String(seed.body.order.id);
+
+    const r = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: groupSeedId }, body: { branch_id: String(branchB._id) } });
+    eq(r.status, 201, '3a נוצרה טיוטה לסניף ב');
+    eq(r.body.order.status, 'draft', '3b במצב draft');
+    eq(String(r.body.order.branch_id), String(branchB._id), '3c של סניף ב');
+    eq(r.body.order.items.length, 0, '3d ריקה');
+    eq(r.body.order.group_invited_by, 'מנהלת א', '3e יודעת מי הזמין');
+    invitedId = String(r.body.order.id);
+    groupId = String(r.body.order.group_id);
+    const seedDb = await Order.findById(groupSeedId).lean();
+    eq(String(seedDb.group_id), groupId, '3f המקור קיבל את אותו group_id');
+
+    const events = await NotificationEvent.find({ type: 'order_shared', ref_id: invitedId }).lean();
+    eq(events.length, 1, '3g התראה אחת למנהלת סניף ב');
+    eq(String(events[0].recipient_id), String(managerB._id), '3h לנמענת הנכונה');
+    eq(events[0].url, `/orders/${invitedId}/edit`, '3i הקישור פותח את הטיוטה לעריכה');
+  }
+
+  // ---------------------------------------------------------------- 4 ------
+  head('4 — אותו סניף פעמיים');
+  {
+    const r = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: groupSeedId }, body: { branch_id: String(branchB._id) } });
+    eq(r.status, 400, '4a נדחה');
+    const r2 = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: groupSeedId }, body: { branch_id: String(branchA._id) } });
+    eq(r2.status, 400, '4b וגם את הסניף של עצמו אי אפשר');
+    const inv = await invoke(c.invitableBranches, { user: userA, branchScope: scopeA, params: { id: groupSeedId } });
+    eq(inv.body.branches.map(b => b.name), ['סניף ג'], '4c רק סניף ג נותר להזמנה');
+  }
+
+  // ---------------------------------------------------------------- 3z -----
+  head('3z — שליחה מטיוטה ריקה של סניף שהצטרף לא מחזירה הזמנה של סניף אחר');
+  {
+    const seed2 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const group2SeedId = String(seed2.body.order.id);
+
+    const inv2 = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: group2SeedId }, body: { branch_id: String(branchC._id) } });
+    const group2InvitedId = String(inv2.body.order.id);
+
+    const r = await invoke(c.send, { user: adminUser, branchScope: null, params: { id: group2InvitedId } });
+    eq(r.status, 200, '3z-a נשלחה בהצלחה');
+    eq(r.body.sent_count, 1, '3z-b נשלחה רק ההזמנה עם הפריטים');
+    eq(r.body.order.status, 'cancelled', '3z-c ההזמנה המוחזרת היא של הקוראת — בוטלה');
+    eq(String(r.body.order.id), group2InvitedId, '3z-d ולא הזמנה של סניף אחר');
+  }
+
+  // ---------------------------------------------------------------- 8 ------
+  head('8 — סיכום הקבוצה: רואים סכומים, לא פריטים');
+  {
+    const r = await invoke(c.group, { user: userB, branchScope: scopeB, params: { id: invitedId } });
+    eq(r.status, 200, '8a סניף ב רואה את הקבוצה');
+    eq(r.body.members.length, 2, '8b שני חברים');
+    const a = r.body.members.find(m => m.branch_name === 'סניף א');
+    eq(a.items_count, 1, '8c מספר הפריטים של סניף א');
+    eq(a.total_amount, 300, '8d והסכום');
+    eq(a.is_mine, false, '8e אבל לא שלו');
+    eq(a.items, undefined, '8f ובלי הפריטים עצמם');
+    eq(r.body.supplier.min_order_amount, 1200, '8g המינימום של הספק');
+    eq(r.body.total_with_items, 300, '8h הסכום המשותף');
+
+    const stranger = await invoke(c.group, { user: userA, branchScope: [String(branchC._id)], params: { id: invitedId } });
+    eq(stranger.status, 403, '8i מי שאינו בשום חברה — 403');
+  }
+
+  // ---------------------------------------------------------------- 9 ------
+  head('9 — ההתראה נסגרת כשהסניף שמר פריטים');
+  {
+    const r = await invoke(c.update, { user: userB, branchScope: scopeB, params: { id: invitedId }, body: { items: [item('קמח', 50, 20)] } });
+    eq(r.status, 200, '9a נשמר');
+    const ev = await NotificationEvent.findOne({ type: 'order_shared', ref_id: invitedId }).lean();
+    eq(ev.status, 'resolved', '9b ההתראה נסגרה');
+  }
+
   // __TASKS_APPEND_HERE__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
