@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box, Typography, Card, CardContent, Button, Stack, Chip, Tabs, Tab, TextField, MenuItem,
   Alert, Divider, Dialog, DialogTitle, DialogContent, DialogActions,
@@ -8,6 +8,7 @@ import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 import LinkOffIcon from '@mui/icons-material/LinkOff';
 import AddLinkIcon from '@mui/icons-material/AddLink';
+import SaveIcon from '@mui/icons-material/Save';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ProductThumb from './ProductThumb';
@@ -28,6 +29,12 @@ function Side({ product, packQty, onPackQty, baseUnit, editable }) {
           <Typography variant="body2" sx={{ fontWeight: 700 }}>{product.name}</Typography>
           <Typography variant="caption" color="text.secondary">{product.sku}{product.unit ? ` · ${product.unit}` : ''}</Typography>
           <Typography variant="body2" sx={{ mt: 0.5 }}>{formatCurrencyExact(product.price_with_vat)} ל{product.unit || 'אריזה'}</Typography>
+          {product.existing_group && (
+            <Chip
+              size="small" color="warning" variant="outlined" sx={{ mt: 0.5 }}
+              label={`כבר בקבוצה${product.existing_group.base_unit ? ` (${product.existing_group.base_unit})` : ''}`}
+            />
+          )}
         </Box>
       </Stack>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
@@ -55,10 +62,13 @@ function MatchCard({ match, mode, onDecided }) {
   const act = async (action) => {
     setBusy(true);
     try {
+      const pq = Object.fromEntries(Object.entries(packQty).map(([k, v]) => [k, v === '' || v === null ? null : Number(v)]));
       if (action === 'confirm') {
-        const pq = Object.fromEntries(Object.entries(packQty).map(([k, v]) => [k, v === '' ? null : Number(v)]));
         await api.post(`/products/matches/${match.id}/confirm`, { pack_qty: pq, base_unit: baseUnit });
         toast.success('ההתאמה אושרה');
+      } else if (action === 'save') {
+        await api.post(`/products/matches/${match.id}/packs`, { pack_qty: pq, base_unit: baseUnit });
+        toast.success('הכמויות נשמרו');
       } else if (action === 'reject') {
         await api.post(`/products/matches/${match.id}/reject`);
         toast.info('נרשם — לא יוצע שוב');
@@ -74,7 +84,8 @@ function MatchCard({ match, mode, onDecided }) {
     }
   };
 
-  const editable = mode === 'proposed';
+  // Pack sizes and the base unit stay editable after confirmation — a misread pack is fixed here.
+  const editable = true;
   const pers = match.products.map(p => perUnit(p.price_with_vat, Number(packQty[String(p.id)])));
   const cheapest = pers.every(v => v !== null) ? Math.min(...pers) : null;
 
@@ -114,7 +125,10 @@ function MatchCard({ match, mode, onDecided }) {
               <Button variant="outlined" color="error" startIcon={<CloseIcon />} onClick={() => act('reject')} disabled={busy}>לא אותו דבר</Button>
             </>
           ) : (
-            <Button variant="outlined" color="error" startIcon={<LinkOffIcon />} onClick={() => act('unlink')} disabled={busy}>בטל התאמה</Button>
+            <>
+              <Button variant="contained" startIcon={<SaveIcon />} onClick={() => act('save')} disabled={busy}>שמור</Button>
+              <Button variant="outlined" color="error" startIcon={<LinkOffIcon />} onClick={() => act('unlink')} disabled={busy}>בטל התאמה</Button>
+            </>
           )}
         </Stack>
       </CardContent>
@@ -176,7 +190,7 @@ function ManualMatchDialog({ open, onClose, onCreated }) {
           {sideFields(b, setB, 'ב')}
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          את כמות היחידות באריזה תוכל/י להשלים אחר כך בלשונית "מאושרות" — עד אז ההשוואה תוצג לפי אריזה.
+          את כמות היחידות באריזה ואת יחידת הבסיס אפשר לערוך בלשונית "מאושרות". עד שימולאו — ההשוואה לפי אריזה.
         </Typography>
       </DialogContent>
       <DialogActions>
@@ -200,16 +214,46 @@ export default function ProductMatches() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // The scan runs on the server in the background; poll the review until the last-scan time moves.
+  const pollRef = useRef(null);
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; clearTimeout(pollRef.current); }, []);
+
   const runScan = async () => {
+    const before = data?.last_scan?.at ? new Date(data.last_scan.at).getTime() : 0;
     setScanning(true);
     try {
-      const res = await api.post('/products/matches/scan');
-      const { scanned, proposed } = res.data;
-      toast.success(scanned === 0 ? 'אין מוצרים חדשים לסרוק' : `נסרקו ${scanned} מוצרים · ${proposed} הצעות חדשות`);
-      load();
+      await api.post('/products/matches/scan');
     } catch (err) {
-      toast.error(err.response?.data?.error || 'הסריקה נכשלה');
-    } finally { setScanning(false); }
+      setScanning(false);
+      if (err.response?.status === 409) toast.info('סריקה כבר רצה');
+      else toast.error(err.response?.data?.error || 'הסריקה נכשלה');
+      return;
+    }
+    const deadline = Date.now() + 10 * 60 * 1000;
+    const tick = async () => {
+      if (!aliveRef.current) return;
+      try {
+        const res = await api.get('/products/matches/review');
+        if (!aliveRef.current) return;
+        const last = res.data.last_scan;
+        if (last?.at && new Date(last.at).getTime() > before) {
+          setData(res.data);
+          setScanning(false);
+          if (last.error) toast.error(last.error);
+          else toast.success(`נסרקו ${last.scanned} · ${last.proposed} הצעות`);
+          return;
+        }
+      } catch { /* try again next tick */ }
+      if (Date.now() > deadline) {
+        setScanning(false);
+        toast.info('הסריקה עדיין רצה — התוצאה תופיע כאן כשתסתיים');
+        load();
+        return;
+      }
+      pollRef.current = setTimeout(tick, 3000);
+    };
+    pollRef.current = setTimeout(tick, 3000);
   };
 
   if (!data) return <LoadingSpinner />;
@@ -228,7 +272,7 @@ export default function ProductMatches() {
         </Box>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<AddLinkIcon />} onClick={() => setManualOpen(true)}>התאמה ידנית</Button>
-          <Button variant="contained" startIcon={<RefreshIcon />} onClick={runScan} disabled={scanning}>{scanning ? 'סורק...' : 'סרוק עכשיו'}</Button>
+          <Button variant="contained" startIcon={<RefreshIcon />} onClick={runScan} disabled={scanning}>{scanning ? 'סורק…' : 'סרוק עכשיו'}</Button>
         </Stack>
       </Stack>
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
