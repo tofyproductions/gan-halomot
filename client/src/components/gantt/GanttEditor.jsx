@@ -27,7 +27,7 @@ import ContentBankPanel, { BANK_ROWS } from './ContentBankPanel';
 import GanttCopyDialog from './GanttCopyDialog';
 import GanttEditorsDialog from './GanttEditorsDialog';
 import ShabbatParentPicker from './ShabbatParentPicker';
-import { printGantt, renderGanttImage, shareGanttImage } from './ganttPrint';
+import { printGantt, renderGanttImage, shareGanttImage, canShareFiles } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear } from '../../hooks/useAcademicYear';
 import { useAuth } from '../../hooks/useAuth';
@@ -476,15 +476,27 @@ export default function GanttEditor() {
    */
   const sendToWhatsapp = async () => {
     setMakingImage(true);
+    // On a desktop the WhatsApp tab has to be opened inside this click, or the
+    // popup blocker eats it once the server has spent a few seconds drawing.
+    let waWindow = null;
+    if (!canShareFiles()) {
+      waWindow = window.open('', '_blank');
+      if (waWindow) {
+        waWindow.document.write('<p dir="rtl" style="font-family:sans-serif;padding:24px">מכין את התמונה לוואטסאפ…</p>');
+      }
+    }
     try {
       const blob = await renderGanttImage(printOpts(), api);
       const where = await shareGanttImage(blob, {
         fileName: `תוכנית עבודה - ${classroomName || ''} - ${MONTH_NAMES[month]} ${year}.png`,
         caption: `תוכנית העבודה של ${classroomName || 'הכיתה'} · ${MONTH_NAMES[month]} ${year}`,
+        waWindow,
       });
       if (where === 'shared') toast.success('התמונה נשלחה');
+      else if (where === 'copied') toast.success('התמונה הועתקה. בוואטסאפ: בחרו את קבוצת ההורים והדביקו (⌘V / Ctrl+V)', { autoClose: 12000 });
       else if (where === 'downloaded') toast.success('התמונה נשמרה במחשב — אפשר לגרור אותה לקבוצת ההורים בוואטסאפ');
     } catch (err) {
+      if (waWindow) waWindow.close();
       toast.error(apiError(err, 'הפקת התמונה נכשלה'));
     } finally { setMakingImage(false); }
   };

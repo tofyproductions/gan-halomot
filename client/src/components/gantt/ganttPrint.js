@@ -154,9 +154,11 @@ export function buildGanttPrintHtml({
     const printed = rows.filter(r => r.key !== 'misc' || days.some(x => contentAt(r.key, x.di)));
     const nRows = printed.length;
 
-    // The date strip: the date under each day, and what the day is.
-    const strip = days.map(({ di, d, hol, shut, own: isOwn }) => {
-      const cls = ['ds', shut ? 'shut' : hol ? 'short' : '', isOwn ? '' : 'borrowed'].filter(Boolean).join(' ');
+    // The date strip: the date under each day, and what the day is. One
+    // colour for every date, so the strip reads as the week's ruler; a holiday
+    // is named inside it, not painted over it.
+    const strip = days.map(({ d, hol, shut, own: isOwn }) => {
+      const cls = ['ds', isOwn ? '' : 'borrowed'].filter(Boolean).join(' ');
       const note = hol
         ? `<span class="hn">${esc(hol.emoji || '')} ${esc(hol.name)}${!shut && hol.end_time ? ` · עד ${esc(hol.end_time)}` : ''}</span>`
         : '';
@@ -208,8 +210,8 @@ export function buildGanttPrintHtml({
         const cs = Math.min(spanAt(row.key, di, 'col_span'), 6 - di);
         const rs = Math.min(spanAt(row.key, di, 'row_span'), nRows - printedIdx);
         const span = `${cs > 1 ? ` colspan="${cs}"` : ''}${rs > 1 ? ` rowspan="${rs}"` : ''}`;
-        const cls = ['c', di === 5 ? 'fri' : '', isOwn ? '' : 'borrowed', cs > 1 || rs > 1 ? 'merged' : '']
-          .filter(Boolean).join(' ');
+        const cls = ['c', row.key === 'meeting' ? 'lead' : '', di === 5 ? 'fri' : '', isOwn ? '' : 'borrowed',
+          cs > 1 || rs > 1 ? 'merged' : ''].filter(Boolean).join(' ');
         // A colour the gananet set by hand on that one box wins over the row's.
         const bg = cell?.color || t.bg;
         return `<td class="${cls}"${span} style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
@@ -287,30 +289,30 @@ export function buildGanttPrintHtml({
   td.wk .wr { font-size: calc(var(--small) * var(--k)); opacity: .85; }
 
   /* The date strip. */
-  tr.strip td.ds { background: ${COLOR.background.sunken} !important; text-align: center; padding: 0.3mm 1mm;
-                   font-size: calc(var(--small) * var(--k)); line-height: 1.2; color: ${COLOR.text.primary}; }
-  tr.strip td.ds .hn { display: block; font-weight: 800; color: ${G.note.on}; }
-  tr.strip td.ds.short { background: ${G.cell.holiday} !important; }
-  tr.strip td.ds.shut { background: ${G.day.closed.bg} !important; color: ${G.day.closed.on}; }
-  tr.strip td.ds.shut .hn { color: ${G.day.closed.on}; }
-  tr.strip td.ds.borrowed:not(.shut):not(.short) { color: ${COLOR.text.disabled}; }
-  tr.strip th.corner { background: ${COLOR.background.sunken} !important; }
+  tr.strip td.ds { background: #DCE6F0 !important; text-align: center; padding: 0.4mm 1mm;
+                   font-size: calc(var(--small) * var(--k) * 1.15); line-height: 1.2; color: #1B3556; font-weight: 800; }
+  tr.strip td.ds .hn { display: block; font-size: calc(var(--small) * var(--k)); color: ${G.note.on}; }
+  tr.strip td.ds.borrowed { color: #7F94AB; }
+  tr.strip th.corner { background: #DCE6F0 !important; }
 
   th.rl { font-weight: 800; text-align: center; font-size: calc(var(--head) * var(--k)); padding: 0.5mm;
           line-height: 1.1; border-right-width: 1.2mm !important; border-right-style: solid !important; }
+  /* מפגש is the row read first, and the only one set bold; the rest are plain. */
   td.c { padding: calc(0.9mm + var(--pad)) 1.2mm; text-align: center; font-size: calc(var(--cell) * var(--k));
-         line-height: 1.22; font-weight: 600; overflow-wrap: anywhere; }
+         line-height: 1.22; font-weight: 400; overflow-wrap: anywhere; }
+  td.c.lead { font-weight: 700; }
   /* A day borrowed from the month next door is written in like any other, just
      quieter, so a reader knows which month they are in. */
   td.c.borrowed { color: ${COLOR.text.disabled}; }
   /* A merged box carries the week's one big idea across several days. It gets
      the weight to match, or a wide box of ordinary text just looks like a cell
      somebody forgot to fill in. */
-  td.c.merged { font-weight: 800; font-size: calc(var(--cell) * var(--k) * 1.2); }
+  td.c.merged { font-size: calc(var(--cell) * var(--k) * 1.2); }
+  td.c.lead.merged { font-weight: 800; }
   td.c.strong { font-weight: 800; color: ${G.span.on}; font-size: calc(var(--head) * var(--k) * 1.1);
                 background: ${G.cell.friday} !important; }
   td.c.strong .fp { font-size: calc(var(--cell) * var(--k) * 0.95); font-weight: 700; line-height: 1.3; margin-top: 0.4mm; }
-  td.c.shutc { background: ${G.cell.holiday} !important; color: ${G.note.on}; font-weight: 700; }
+  td.c.shutc { background: ${G.cell.holiday} !important; color: ${G.note.on}; }
   td.closedcol { background: ${G.cell.holiday} !important; text-align: center; }
   td.closedcol .ce { font-size: calc(var(--head) * var(--k) * 1.6); line-height: 1.2; }
   td.closedcol .cn { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: ${G.note.on}; line-height: 1.2; }
@@ -431,18 +433,41 @@ export async function renderGanttImage(opts, api) {
 }
 
 /**
+ * Whether this browser can hand a FILE to another app. Asked before the
+ * picture exists, so the caller can open the WhatsApp tab inside the click
+ * that the popup blocker trusts — by the time the server has drawn the
+ * picture, that click is long over.
+ */
+export function canShareFiles() {
+  try {
+    return !!navigator.canShare
+      && navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Hand the picture to whatever can send it.
  *
  * On a phone the Web Share sheet passes the actual FILE to WhatsApp, which is
- * the whole point — the manager picks the parents' group and sends. Desktop
- * browsers cannot share files, so there it saves the image and opens WhatsApp
- * Web with the caption ready; the picture is then dragged into the chat. Saying
- * which of the two just happened matters: a download that appears with no
- * explanation looks like the share failed.
+ * the whole point — the manager picks the parents' group and sends.
+ *
+ * A desktop browser cannot hand a file to WhatsApp at all. What it can do is
+ * put the picture on the clipboard and open WhatsApp; the manager picks the
+ * group and pastes, and WhatsApp sends it as a photo. That is two gestures
+ * instead of a download, a Finder window and a drag. Only if the clipboard
+ * refuses does it fall back to saving the file. Saying which of the three
+ * just happened matters: a download that appears with no explanation looks
+ * like the share failed.
+ *
+ * `waWindow` is a tab the caller opened during the click, so the popup
+ * blocker lets it through; it is pointed at WhatsApp here, or closed.
  */
-export async function shareGanttImage(blob, { fileName, caption }) {
+export async function shareGanttImage(blob, { fileName, caption, waWindow = null }) {
   const file = new File([blob], fileName, { type: 'image/png' });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (waWindow) waWindow.close();
     try {
       await navigator.share({ files: [file], text: caption });
       return 'shared';
@@ -451,6 +476,20 @@ export async function shareGanttImage(blob, { fileName, caption }) {
       if (e && e.name === 'AbortError') return 'cancelled';
     }
   }
+
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(caption || '')}`;
+  try {
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      await navigator.clipboard.write([new window.ClipboardItem({ 'image/png': blob })]);
+      if (waWindow && !waWindow.closed) waWindow.location = waUrl;
+      else window.open(waUrl, '_blank');
+      return 'copied';
+    }
+  } catch {
+    // Clipboard refused (unfocused tab, old browser). The file it is.
+  }
+
+  if (waWindow) waWindow.close();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
