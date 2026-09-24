@@ -50,6 +50,8 @@ const orderSchema = new mongoose.Schema({
   group_id: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
   /** Who invited this branch into the group (empty when the branch started it). */
   group_invited_by: { type: String, default: '' },
+  /** The inviting branch's name, for "הוזמנת על ידי … מסניף …". */
+  group_invited_from: { type: String, default: '' },
   /**
    * When the supplier was written to. Orders from before this field carry null
    * and their created_at IS the send time — creation used to send on the spot.

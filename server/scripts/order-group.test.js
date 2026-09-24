@@ -244,6 +244,12 @@ async function main() {
 
     const stranger = await invoke(c.group, { user: userA, branchScope: [String(branchC._id)], params: { id: invitedId } });
     eq(stranger.status, 403, '8i מי שאינו בשום חברה — 403');
+
+    // The office sees every branch, so every row is "mine" — is_this is what
+    // tells the form which row is the cart on screen.
+    const asAdmin = await invoke(c.group, { user: adminUser, branchScope: null, params: { id: invitedId } });
+    eq(asAdmin.body.members.every(m => m.is_mine), true, '8j למשרד כל השורות is_mine');
+    eq(asAdmin.body.members.filter(m => m.is_this).map(m => String(m.id)), [invitedId], '8k is_this רק על ההזמנה שנשאלה');
   }
 
   // ---------------------------------------------------------------- 9 ------
@@ -335,7 +341,170 @@ async function main() {
     realEmail.dispatchEmail = origDispatch;
   }
 
-  // __TASKS_APPEND_HERE__
+  // ---------------------------------------------------------------- 10 -----
+  head('10 — הרשאות לפי סניף');
+  {
+    const r0 = await invoke(c.create, {
+      user: adminUser, branchScope: null,
+      body: { branch_id: String(branchB._id), supplier_id: sid, hold: true, items: [item('קמח', 10, 20)] },
+    });
+    const bDraft = String(r0.body.order.id);
+
+    sentMail.length = 0;
+    const s1 = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: bDraft } });
+    eq(s1.status, 403, '10a מנהלת א לא שולחת טיוטה של סניף ב');
+    eq(sentMail.length, 0, '10b ובלי מייל');
+    const s2 = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: bDraft }, body: { branch_id: String(branchC._id) } });
+    eq(s2.status, 403, '10c לא מזמינה סניף להזמנה של סניף ב');
+    const s3 = await invoke(c.invitableBranches, { user: userA, branchScope: scopeA, params: { id: bDraft } });
+    eq(s3.status, 403, '10d לא רואה את רשימת הסניפים להזמנה');
+    const s4 = await invoke(c.update, { user: userA, branchScope: scopeA, params: { id: bDraft }, body: { items: [item('סוכר', 1, 1)] } });
+    eq(s4.status, 403, '10e לא עורכת את הטיוטה של סניף ב');
+    const still = await Order.findById(bDraft).lean();
+    eq([still.status, still.items.length, still.group_id], ['draft', 1, null], '10f הטיוטה לא השתנתה');
+    const s5 = await invoke(c.update, { user: adminUser, branchScope: null, params: { id: bDraft }, body: { items: [item('סוכר', 2, 5)] } });
+    eq(s5.status, 200, '10g המשרד כן עורך');
+  }
+
+  // ---------------------------------------------------------------- 11 -----
+  head('11 — שליחה של הזמנה שבוטלה');
+  {
+    const r0 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const id = String(r0.body.order.id);
+    await invoke(c.remove, { user: userA, branchScope: scopeA, params: { id } });
+    const r = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id } });
+    eq(r.status, 400, '11a נדחה');
+    eq(r.body.error, 'ההזמנה בוטלה', '11b ואומר שבוטלה — לא "כבר נשלחה"');
+  }
+
+  head('12 — שליחה שנכשלה לא מבטלת את הריקים');
+  {
+    const r0 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const seedId = String(r0.body.order.id);
+    const inv = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: seedId }, body: { branch_id: String(branchB._id) } });
+    const emptyId = String(inv.body.order.id);
+
+    const origUpdateMany = Order.updateMany;
+    // Only the claim (draft → pending) fails; every other write goes through,
+    // so a cancel that ran BEFORE the send would still land and be caught.
+    Order.updateMany = function claimFails(filter, update, ...rest) {
+      if (update?.$set?.status === 'pending') throw new Error('מסד הנתונים נפל');
+      return origUpdateMany.call(this, filter, update, ...rest);
+    };
+    let threw = false;
+    try {
+      await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: seedId } });
+    } catch { threw = true; } finally { Order.updateMany = origUpdateMany; }
+    ok(threw, '12a השליחה נכשלה');
+    const e = await Order.findById(emptyId).lean();
+    eq(e.status, 'draft', '12b הסניף שעוד לא הוסיף נשאר בטיוטה');
+    const a = await Order.findById(seedId).lean();
+    eq(a.status, 'draft', '12c וגם ההזמנה עצמה');
+  }
+
+  head('13 — שתי הזמנות בו-זמנית מטיוטה חדשה נכנסות לאותה קבוצה');
+  {
+    const r0 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const seedId = String(r0.body.order.id);
+    const [ib, ic] = await Promise.all([
+      invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: seedId }, body: { branch_id: String(branchB._id) } }),
+      invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: seedId }, body: { branch_id: String(branchC._id) } }),
+    ]);
+    eq([ib.status, ic.status], [201, 201], '13a שתיהן נוצרו');
+    const seed = await Order.findById(seedId).lean();
+    eq([String(ib.body.order.group_id), String(ic.body.order.group_id)], [String(seed.group_id), String(seed.group_id)], '13b שלושתן באותו group_id');
+    eq(ib.body.order.group_invited_from, 'סניף א', '13c הטיוטה יודעת מאיזה סניף הוזמנה');
+  }
+
+  head('14 — מחיקת הזמנה משותפת שנשארה בלי פריטים');
+  {
+    const r0 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const aId = String(r0.body.order.id);
+    const inv = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: aId }, body: { branch_id: String(branchB._id) } });
+    const bId = String(inv.body.order.id);
+
+    const del = await invoke(c.remove, { user: adminUser, branchScope: null, params: { id: aId } });
+    eq(del.status, 200, '14a נמחקה');
+    const b = await Order.findById(bId).lean();
+    eq(b.status, 'cancelled', '14b הטיוטה הריקה של סניף ב בוטלה');
+    eq(b.notes, 'ההזמנה המשותפת נמחקה', '14c עם הסיבה');
+    const ev = await NotificationEvent.findOne({ type: 'order_shared', ref_id: bId }).lean();
+    eq(ev.status, 'resolved', '14d וההזמנה שקיבלה נסגרה');
+
+    // But a group where somebody else still has items stays alive.
+    const r1 = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('שמן', 50, 30)] },
+    });
+    const a2 = String(r1.body.order.id);
+    const invB = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: a2 }, body: { branch_id: String(branchB._id) } });
+    const invC = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: a2 }, body: { branch_id: String(branchC._id) } });
+    await invoke(c.update, { user: userB, branchScope: scopeB, params: { id: String(invB.body.order.id) }, body: { items: [item('קמח', 5, 20)] } });
+    await invoke(c.remove, { user: adminUser, branchScope: null, params: { id: a2 } });
+    const cDraft = await Order.findById(String(invC.body.order.id)).lean();
+    eq(cDraft.status, 'draft', '14e כשלסניף אחר יש פריטים — הטיוטה הריקה נשארת');
+  }
+
+  head('15 — ברשימה: כמה סניפים בהזמנה המשותפת');
+  {
+    const r = await invoke(c.getAll, { user: adminUser, branchScope: null });
+    const row = r.body.orders.find(o => String(o.id) === groupSeedId);
+    eq(row.group_size, 2, '15a שתי הזמנות שנשלחו — הריקה שבוטלה לא נספרת');
+    const lone = r.body.orders.find(o => !o.group_id);
+    eq(lone.group_size, undefined, '15b להזמנה רגילה אין group_size');
+  }
+
+  head('16 — שם היוצר כשלמשתמש אין שם');
+  {
+    sentMail.length = 0;
+    await invoke(c.create, {
+      user: { id: 'nameless', role: 'system_admin', full_name: '', email: 'n@gan.co.il' }, branchScope: null,
+      body: { branch_id: String(branchA._id), supplier_id: sid, created_by: 'יוצרת ההזמנה', items: [item('לחם', 200, 8)] },
+    });
+    eq(sentMail[0]?.creatorName, 'יוצרת ההזמנה', '16a המייל חתום בשם מי שיצרה את ההזמנה');
+  }
+
+  head('17 — טקסט חופשי במייל עובר כטקסט, לא כ-HTML');
+  {
+    const realEmail = require('../src/services/email.service');
+    const dispatched = [];
+    const origDispatch = realEmail.dispatchEmail;
+    realEmail.dispatchEmail = async (m) => { dispatched.push(m); return { messageId: '<e@test>', provider: 'test' }; };
+    const nasty = '<img src=x onerror=alert(1)> & "ציטוט"';
+    const order = { order_number: 'ORD-<1>', items: [{ name: 'שמן <זית>', qty: 1, unit_price: 30, total: 30 }], total_amount: 30, notes: nasty };
+    const branch = { name: 'סניף <א>', address: 'רחוב "א" & 1', delivery_contact_name: '<b>דנה</b>' };
+    const supplierX = { name: 'ספק & בנו', contact_email: 's@x.co.il' };
+
+    await realEmail.sendOrderEmail({ order, supplier: supplierX, branch, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת <א>' });
+    const single = dispatched[0]?.html || '';
+    ok(!single.includes('<img src=x'), '17a במייל הבודד — ההערה לא הופכת לתגית');
+    ok(single.includes('&lt;img src=x onerror=alert(1)&gt; &amp; &quot;ציטוט&quot;'), '17b אלא מוצגת כמו שנכתבה');
+    ok(single.includes('סניף &lt;א&gt;') && single.includes('ספק &amp; בנו') && single.includes('שמן &lt;זית&gt;'), '17c שם הסניף, הספק והמוצר מוצפנים');
+    eq(dispatched[0]?.cc, ['a@gan.co.il', 'dreamgan10@gmail.com'], '17d העתק ליוצרת ולמשרד — אותם נמענים כמו קודם');
+
+    await realEmail.sendGroupOrderEmail({
+      orders: [{ order, branch }, { order: { ...order, order_number: 'ORD-2' }, branch: { name: 'סניף ב', address: 'רחוב ב 2' } }],
+      supplier: supplierX, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת א',
+    });
+    const group = dispatched[1]?.html || '';
+    ok(!group.includes('<img src=x') && !group.includes('<b>דנה</b>'), '17e במייל המשותף — שום טקסט חופשי לא הופך לתגית');
+    ok(group.includes('רחוב &quot;א&quot; &amp; 1') && group.includes('&lt;b&gt;דנה&lt;/b&gt;'), '17f הכתובת ואיש הקשר מוצגים כמו שנכתבו');
+    eq(dispatched[1]?.cc, ['a@gan.co.il', 'dreamgan10@gmail.com'], '17g ואותם נמענים');
+    realEmail.dispatchEmail = origDispatch;
+  }
+
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);
   await mongoose.disconnect();

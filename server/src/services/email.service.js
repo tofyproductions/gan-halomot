@@ -259,19 +259,43 @@ async function sendRegistrationLink({ parentName, parentEmail, childName, link }
  * "הדפס/שמור PDF" button renders, so what the supplier sees and what the
  * user prints stay aligned.
  */
+/**
+ * HTML-escape a free-text value before it goes into an email body. Notes,
+ * branch names, addresses and contact names are typed by people, and a "<" in
+ * a note must reach the supplier as a "<", not as the start of a tag.
+ */
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Who an order email goes to — shared by the single and the joint send, so the
+ * two can never disagree about the office copy or the provider guard.
+ * Returns `{ skipped, reason }` when nothing can be sent.
+ */
+function orderMailRecipients(supplier, creatorEmail) {
+  if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
+    return { skipped: true, reason: 'provider-not-configured' };
+  }
+  const supplierEmail = supplier?.contact_email;
+  const officeEmail = 'dreamgan10@gmail.com';
+  const recipients = [supplierEmail, creatorEmail, officeEmail].filter(Boolean);
+  if (recipients.length === 0) return { skipped: true, reason: 'no-recipients' };
+  const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
+  return { supplierEmail, officeEmail, recipients, cc };
+}
+
 function buildOrderHTML({ order, supplier, branch, creatorName }) {
   const fmtCurrency = (n) => `₪${Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const today = new Date(order.created_at || Date.now()).toLocaleDateString('he-IL');
 
-  const escNote = (s) => String(s || '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const itemsHTML = (order.items || []).map(it => `
     <tr>
-      <td style="padding:8px;border:1px solid #e2e8f0;">${it.sku || ''}</td>
-      <td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;">${it.name || ''}
-        ${it.note ? `<div style="font-weight:700;color:#b45309;font-size:12px;">⚠️ ${escNote(it.note)}</div>` : ''}
+      <td style="padding:8px;border:1px solid #e2e8f0;">${esc(it.sku)}</td>
+      <td style="padding:8px;border:1px solid #e2e8f0;font-weight:600;">${esc(it.name)}
+        ${it.note ? `<div style="font-weight:700;color:#b45309;font-size:12px;">⚠️ ${esc(it.note)}</div>` : ''}
       </td>
-      <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:700;">${it.qty || 0}${it.unit ? `<span style="font-weight:400;font-size:12px;color:#555;"> ${it.unit}</span>` : ''}</td>
+      <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:700;">${it.qty || 0}${it.unit ? `<span style="font-weight:400;font-size:12px;color:#555;"> ${esc(it.unit)}</span>` : ''}</td>
       <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;">${fmtCurrency(it.unit_price)}</td>
       <td style="padding:8px;border:1px solid #e2e8f0;text-align:center;font-weight:700;">${fmtCurrency(it.total)}</td>
     </tr>
@@ -280,7 +304,7 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
   return `
     <div dir="rtl" style="font-family: 'Assistant', Arial, sans-serif; color:#1e293b; max-width:800px; margin:0 auto; padding:20px;">
       <div style="border-bottom:3px solid #f59e0b; padding-bottom:16px; margin-bottom:24px;">
-        <h1 style="margin:0;color:#d97706;font-size:28px;">הזמנה ${order.order_number}</h1>
+        <h1 style="margin:0;color:#d97706;font-size:28px;">הזמנה ${esc(order.order_number)}</h1>
         <p style="margin:8px 0 0;color:#64748b;">${today}</p>
       </div>
 
@@ -288,20 +312,20 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
         <tr>
           <td style="padding:12px;background:#f8fafc;border-radius:8px;width:50%;vertical-align:top;">
             <div style="color:#64748b;font-size:13px;">ספק</div>
-            <div style="font-weight:700;font-size:16px;">${supplier?.name || ''}</div>
-            ${supplier?.contact_name ? `<div style="color:#475569;">${supplier.contact_name}${supplier.contact_phone ? ' · ' + supplier.contact_phone : ''}</div>` : ''}
-            ${supplier?.contact_email ? `<div style="color:#475569;">${supplier.contact_email}</div>` : ''}
+            <div style="font-weight:700;font-size:16px;">${esc(supplier?.name)}</div>
+            ${supplier?.contact_name ? `<div style="color:#475569;">${esc(supplier.contact_name)}${supplier.contact_phone ? ' · ' + esc(supplier.contact_phone) : ''}</div>` : ''}
+            ${supplier?.contact_email ? `<div style="color:#475569;">${esc(supplier.contact_email)}</div>` : ''}
           </td>
           <td style="padding:12px;background:#fffbeb;border-radius:8px;width:50%;vertical-align:top;">
             <div style="color:#64748b;font-size:13px;">סניף מזמין</div>
-            <div style="font-weight:700;font-size:16px;">${branch?.name || ''}</div>
-            ${branch?.address ? `<div style="color:#475569;">${branch.address}</div>` : ''}
-            ${creatorName ? `<div style="color:#475569;">הזמין: ${creatorName}</div>` : ''}
+            <div style="font-weight:700;font-size:16px;">${esc(branch?.name)}</div>
+            ${branch?.address ? `<div style="color:#475569;">${esc(branch.address)}</div>` : ''}
+            ${creatorName ? `<div style="color:#475569;">הזמין: ${esc(creatorName)}</div>` : ''}
           </td>
         </tr>
       </table>
 
-      ${order.notes ? `<div style="padding:12px;background:#dbeafe;border-radius:8px;margin-bottom:16px;"><b>הערות:</b> ${order.notes}</div>` : ''}
+      ${order.notes ? `<div style="padding:12px;background:#dbeafe;border-radius:8px;margin-bottom:16px;"><b>הערות:</b> ${esc(order.notes)}</div>` : ''}
 
       <table style="width:100%; border-collapse:collapse; font-size:14px;">
         <thead>
@@ -336,17 +360,12 @@ function buildOrderHTML({ order, supplier, branch, creatorName }) {
  * their inbox.
  */
 async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorName }) {
-  if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
-    console.warn('No email provider configured — skipping order email');
-    return { skipped: true, reason: 'provider-not-configured' };
+  const who = orderMailRecipients(supplier, creatorEmail);
+  if (who.skipped) {
+    if (who.reason === 'provider-not-configured') console.warn('No email provider configured — skipping order email');
+    return who;
   }
-
-  const supplierEmail = supplier?.contact_email;
-  const officeEmail = 'dreamgan10@gmail.com';
-  const recipients = [supplierEmail, creatorEmail, officeEmail].filter(Boolean);
-  if (recipients.length === 0) {
-    return { skipped: true, reason: 'no-recipients' };
-  }
+  const { supplierEmail, officeEmail, recipients, cc } = who;
 
   const { buildSupplierHTML, buildInternalHTML, buildFilename } = require('./order-pdf.service');
 
@@ -354,21 +373,20 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
   const html = `
     <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
       <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה סופית ומאושרת</h2>
-      <p><b>סניף:</b> ${branch?.name || ''}</p>
+      <p><b>סניף:</b> ${esc(branch?.name)}</p>
       <p style="color:#475569;">מצורפים 2 קבצים (למשרד ולספק).</p>
       <h3>פירוט ההזמנה:</h3>
       ${buildOrderHTML({ order, supplier, branch, creatorName })}
     </div>
   `;
 
-  const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
-
   const supplierHTML = buildSupplierHTML({ order, supplier, branch });
   const internalHTML = buildInternalHTML({ order, supplier, branch });
   const supplierFile = buildFilename({ variant: 'supplier', branch, order });
   const internalFile = buildFilename({ variant: 'internal', branch, order });
 
-  const info = await dispatchEmail({
+  // Through module.exports so a test can observe the message.
+  const info = await module.exports.dispatchEmail({
     to: supplierEmail || creatorEmail || officeEmail,
     cc,
     subject: `הזמנה מאושרת: ${branch?.name || ''} (הזמנה #${order.order_number})`,
@@ -395,14 +413,12 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
  * it the same way and the delivery patch is written on every member.
  */
 async function sendGroupOrderEmail({ orders, supplier, creatorEmail, creatorName }) {
-  if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
-    console.warn('No email provider configured — skipping group order email');
-    return { skipped: true, reason: 'provider-not-configured' };
+  const who = orderMailRecipients(supplier, creatorEmail);
+  if (who.skipped) {
+    if (who.reason === 'provider-not-configured') console.warn('No email provider configured — skipping group order email');
+    return who;
   }
-  const supplierEmail = supplier?.contact_email;
-  const officeEmail = 'dreamgan10@gmail.com';
-  const recipients = [supplierEmail, creatorEmail, officeEmail].filter(Boolean);
-  if (recipients.length === 0) return { skipped: true, reason: 'no-recipients' };
+  const { supplierEmail, officeEmail, recipients, cc } = who;
 
   const { buildSupplierHTML, buildInternalHTML, buildFilename } = require('./order-pdf.service');
 
@@ -413,25 +429,24 @@ async function sendGroupOrderEmail({ orders, supplier, creatorEmail, creatorName
 
   const perBranch = orders.map(({ order, branch }) => `
       <div style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; margin-bottom:12px;">
-        <div style="font-weight:800; font-size:15px;">${branch?.name || ''} — הזמנה #${order.order_number}</div>
-        ${branch?.address ? `<div><b>כתובת למשלוח:</b> ${branch.address}</div>` : ''}
-        ${branch?.delivery_contact_name ? `<div><b>איש קשר:</b> ${branch.delivery_contact_name} ${branch.delivery_contact_phone || ''}</div>` : ''}
+        <div style="font-weight:800; font-size:15px;">${esc(branch?.name)} — הזמנה #${esc(order.order_number)}</div>
+        ${branch?.address ? `<div><b>כתובת למשלוח:</b> ${esc(branch.address)}</div>` : ''}
+        ${branch?.delivery_contact_name ? `<div><b>איש קשר:</b> ${esc(branch.delivery_contact_name)} ${esc(branch.delivery_contact_phone)}</div>` : ''}
         <div><b>פריטים:</b> ${(order.items || []).length} · <b>סה"כ:</b> ${fmt(order.total_amount)} ₪</div>
-        ${order.notes ? `<div style="margin-top:6px;"><b>הערות:</b> ${order.notes}</div>` : ''}
+        ${order.notes ? `<div style="margin-top:6px;"><b>הערות:</b> ${esc(order.notes)}</div>` : ''}
       </div>`).join('');
 
   const html = `
     <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
       <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה משותפת — ${branchNames.length} סניפים</h2>
-      <p><b>ספק:</b> ${supplier?.name || ''}</p>
+      <p><b>ספק:</b> ${esc(supplier?.name)}</p>
       <p><b>סה"כ משותף:</b> ${fmt(total)} ₪</p>
       <p style="color:#475569;">המשלוח לכל סניף בנפרד, לכתובת הרשומה לידו. לכל סניף מצורף קובץ הזמנה משלו.</p>
       ${perBranch}
-      <p style="color:#94a3b8; font-size:12px;">נשלח על ידי ${creatorName || ''} ממערכת ההזמנות</p>
+      <p style="color:#94a3b8; font-size:12px;">נשלח על ידי ${esc(creatorName)} ממערכת ההזמנות</p>
     </div>
   `;
 
-  const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
   const attachments = orders.flatMap(({ order, branch }) => ([
     { name: buildFilename({ variant: 'supplier', branch, order }), html: buildSupplierHTML({ order, supplier, branch }) },
     { name: buildFilename({ variant: 'internal', branch, order }), html: buildInternalHTML({ order, supplier, branch }) },

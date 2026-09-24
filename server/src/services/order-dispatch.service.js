@@ -51,7 +51,9 @@ async function dispatchOrders(orderIds, { supplier, user }) {
   const branchById = new Map(branches.map(b => [String(b._id), b]));
 
   const creatorEmail = creatorEmailOf(user);
-  const creatorName = sentBy;
+  // Whoever clicked, and if the session carries no name, whoever wrote the
+  // order — the supplier's copy should never say "הזמין:" with nothing after.
+  const creatorName = sentBy || orders[0]?.created_by || '';
   const supplierObj = supplier?.toObject ? supplier.toObject() : supplier;
 
   let delivery;

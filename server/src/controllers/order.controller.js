@@ -46,11 +46,24 @@ async function getAll(req, res, next) {
       .sort({ created_at: -1 })
       .lean();
 
+    // How many branches each joint order on this page holds — one aggregation
+    // over the page's group ids, not a query per row. Cancelled members (a
+    // branch that never added anything) are not counted.
+    const groupIds = [...new Set(orders.filter(o => o.group_id).map(o => String(o.group_id)))];
+    const sizes = groupIds.length
+      ? await Order.aggregate([
+        { $match: { group_id: { $in: groupIds.map(g => new mongoose.Types.ObjectId(g)) }, status: { $ne: 'cancelled' } } },
+        { $group: { _id: '$group_id', n: { $sum: 1 } } },
+      ])
+      : [];
+    const sizeByGroup = new Map(sizes.map(g => [String(g._id), g.n]));
+
     res.json({
       orders: orders.map(o => ({
         ...o, id: o._id,
         branch_name: o.branch_id?.name || '',
         supplier_name: o.supplier_id?.name || '',
+        ...(o.group_id ? { group_size: sizeByGroup.get(String(o.group_id)) || 0 } : {}),
       })),
     });
   } catch (error) { next(error); }
@@ -104,6 +117,14 @@ function branchesInScope(req, branchIds) {
   return branchIds.map(String).filter(id => allowed.has(id));
 }
 
+/**
+ * Whether the caller may act on an order that belongs to any of these
+ * branches. `canOrder` on the route is a ROLE check only — without this a
+ * manager of one branch could send, share or edit another branch's draft by
+ * its id, and the /group response hands every member's id to every member.
+ */
+function orderInScope(req, branchIds) { return branchesInScope(req, branchIds).length > 0; }
+
 async function create(req, res, next) {
   try {
     const { branch_id, supplier_id, items, notes, created_by } = req.body;
@@ -155,6 +176,8 @@ async function update(req, res, next) {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
+    // Each branch edits only its own order, even inside a joint one.
+    if (!orderInScope(req, [String(order.branch_id)])) return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
     if (order.status !== 'pending' && order.status !== 'draft') {
       return res.status(400).json({ error: 'ניתן לערוך רק הזמנות ממתינות' });
     }
@@ -186,14 +209,19 @@ async function send(req, res, next) {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (order.status === 'cancelled') return res.status(400).json({ error: 'ההזמנה בוטלה' });
     if (order.status !== 'draft') return res.status(400).json({ error: 'ההזמנה כבר נשלחה' });
-
-    const supplier = await Supplier.findById(order.supplier_id);
-    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
 
     const members = order.group_id
       ? await Order.find({ group_id: order.group_id, status: 'draft' })
       : [order];
+    // Any branch in the group may send it — the same rule group() reads by.
+    if (!orderInScope(req, members.map(m => String(m.branch_id)))) {
+      return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
+    }
+
+    const supplier = await Supplier.findById(order.supplier_id);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
     const withItems = members.filter(m => (m.items || []).length > 0);
     const empty = members.filter(m => !(m.items || []).length);
 
@@ -211,19 +239,21 @@ async function send(req, res, next) {
       });
     }
 
-    if (empty.length) {
-      await Order.updateMany(
-        { _id: { $in: empty.map(m => m._id) }, status: 'draft' },
-        { $set: { status: 'cancelled', notes: 'לא הוסיף פריטים — בוטל בשליחת ההזמנה המשותפת' } }
-      );
-    }
-
     let sent;
     try {
       sent = await dispatchOrders(withItems.map(m => m._id), { supplier, user: req.user });
     } catch (err) {
       if (err.status) return res.status(err.status).json({ error: err.message });
       throw err;
+    }
+
+    // Only once the send went through: a send that failed leaves every member
+    // exactly as it was, the empty ones included.
+    if (empty.length) {
+      await Order.updateMany(
+        { _id: { $in: empty.map(m => m._id) }, status: 'draft' },
+        { $set: { status: 'cancelled', notes: 'לא הוסיף פריטים — בוטל בשליחת ההזמנה המשותפת' } }
+      );
     }
 
     await Promise.all(members.map(m => resolveEvents({ ref_collection: 'Order', ref_id: m._id })));
@@ -249,6 +279,7 @@ async function invite(req, res, next) {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (!orderInScope(req, [String(order.branch_id)])) return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
     if (order.status !== 'draft') return res.status(400).json({ error: 'אפשר להזמין סניף רק להזמנה בהמתנה' });
 
     const { branch_id } = req.body;
@@ -258,14 +289,23 @@ async function invite(req, res, next) {
     const branch = await Branch.findOne({ _id: branch_id, is_active: true }).select('name').lean();
     if (!branch) return res.status(400).json({ error: 'סניף לא פעיל או לא קיים' });
 
-    const groupId = order.group_id || new mongoose.Types.ObjectId();
+    // The group id is written atomically: two invitations sent from the same
+    // fresh draft at the same moment would otherwise each mint an id, and the
+    // draft would end up in one group while one invited branch sat alone in
+    // another. Whoever loses the claim reads the id the winner wrote.
+    let groupId = order.group_id;
+    if (!groupId) {
+      const claimed = await Order.findOneAndUpdate(
+        { _id: order._id, group_id: null },
+        { $set: { group_id: new mongoose.Types.ObjectId() } },
+        { new: true }
+      );
+      groupId = claimed
+        ? claimed.group_id
+        : (await Order.findById(order._id).select('group_id').lean()).group_id;
+    }
     const already = await Order.exists({ group_id: groupId, branch_id, status: { $ne: 'cancelled' } });
     if (already) return res.status(400).json({ error: 'הסניף כבר בהזמנה המשותפת' });
-
-    if (!order.group_id) {
-      order.group_id = groupId;
-      await order.save();
-    }
 
     const supplier = await Supplier.findById(order.supplier_id).select('name').lean();
     const inviterBranch = await Branch.findById(order.branch_id).select('name').lean();
@@ -277,6 +317,7 @@ async function invite(req, res, next) {
       items: [], total_amount: 0, notes: '',
       created_by: '', status: 'draft',
       group_id: groupId, group_invited_by: inviterName,
+      group_invited_from: inviterBranch?.name || '',
     });
 
     const recipients = await branchManagerIds(branch_id);
@@ -315,6 +356,10 @@ async function group(req, res, next) {
       status: m.status,
       invited_by: m.group_invited_by || '',
       is_mine: mine.has(String(m.branch_id?._id || m.branch_id)),
+      // The order this request asked about. `is_mine` is true for EVERY row
+      // when the caller sees all branches (the office, a multi-branch
+      // manager), so it cannot tell the form which row is the cart on screen.
+      is_this: String(m._id) === String(order._id),
     }));
     const total_with_items = rows
       .filter(r => r.items_count > 0 && r.status !== 'cancelled')
@@ -334,6 +379,7 @@ async function invitableBranches(req, res, next) {
   try {
     const order = await Order.findById(req.params.id).select('group_id branch_id').lean();
     if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    if (!orderInScope(req, [String(order.branch_id)])) return res.status(403).json({ error: 'אין הרשאה להזמנה זו' });
     const taken = new Set([String(order.branch_id)]);
     if (order.group_id) {
       const members = await Order.find({ group_id: order.group_id, status: { $ne: 'cancelled' } }).select('branch_id').lean();
@@ -530,6 +576,26 @@ async function remove(req, res, next) {
     order.status = 'cancelled';
     await order.save();
     await resolveEvents({ ref_collection: 'Order', ref_id: order._id });
+
+    // A joint order whose last items just left is over: the branches still
+    // invited into it have nothing to join, so their empty drafts go too and
+    // their invitations close.
+    if (order.group_id) {
+      const rest = await Order.find({ group_id: order.group_id, status: { $ne: 'cancelled' } })
+        .select('items status').lean();
+      const anyItems = rest.some(m => (m.items || []).length > 0);
+      if (!anyItems) {
+        const emptyDrafts = rest.filter(m => m.status === 'draft');
+        if (emptyDrafts.length) {
+          await Order.updateMany(
+            { _id: { $in: emptyDrafts.map(m => m._id) }, status: 'draft' },
+            { $set: { status: 'cancelled', notes: 'ההזמנה המשותפת נמחקה' } }
+          );
+          await Promise.all(emptyDrafts.map(m => resolveEvents({ ref_collection: 'Order', ref_id: m._id })));
+        }
+      }
+    }
+
     res.json({ message: 'ההזמנה בוטלה', id: req.params.id });
   } catch (error) { next(error); }
 }
