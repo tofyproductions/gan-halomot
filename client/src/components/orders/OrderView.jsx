@@ -179,8 +179,9 @@ export default function OrderView() {
 
   const handleMarkArrived = async () => {
     try {
-      const res = await api.post(`/orders/${id}/mark-arrived`);
-      setOrder(res.data.order);
+      await api.post(`/orders/${id}/mark-arrived`);
+      const fresh = await api.get(`/orders/${id}`);
+      setOrder(fresh.data.order);
       toast.success('סומן כהגיע — אשר קבלה כשהפריטים בידיים');
       setConfirm({ open: false, action: '' });
     } catch (err) {
@@ -204,7 +205,8 @@ export default function OrderView() {
       const res = await api.post(`/orders/${id}/send`);
       const n = res.data.sent_count || 1;
       toast.success(n > 1 ? `נשלח לספק — ${n} סניפים` : 'נשלח לספק');
-      setOrder(res.data.order);
+      const fresh = await api.get(`/orders/${id}`);
+      setOrder(fresh.data.order);
       setGroupKey(k => k + 1);
       setConfirm({ open: false, action: '' });
     } catch (err) {
