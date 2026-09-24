@@ -173,7 +173,7 @@ export default function GanttMultiPrintDialog({ open, onClose, y1, yearRange }) 
                 <Link component="button" type="button" underline="hover"
                   onClick={() => setChecked(new Set())}>נקה</Link>
                 <Typography variant="body2" color="text.secondary" sx={{ marginInlineStart: 'auto !important' }}>
-                  {selected.length} כיתות ייודפסו
+                  {selected.length === 1 ? 'כיתה אחת תודפס' : `${selected.length} כיתות ייודפסו`}
                 </Typography>
               </Stack>
 

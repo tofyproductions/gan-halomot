@@ -512,7 +512,7 @@ export function buildMultiGanttPrintHtml({ sheets = [], pages = 1 }) {
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
-<title>תוכניות עבודה - ${MONTH_NAMES[first.month] || ''} ${first.year ?? ''} - ${sheets.length} כיתות</title>
+<title>תוכניות עבודה - ${MONTH_NAMES[first.month] || ''} ${first.year ?? ''} - ${sheets.length === 1 ? 'כיתה אחת' : sheets.length + ' כיתות'}</title>
 <style>${ganttPrintCss({ image: false })}
   /* A room starts on a page of its own. On screen, a rule marks where. */
   section.sheet:not(:last-of-type) { break-after: page; page-break-after: always; }
