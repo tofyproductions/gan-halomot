@@ -255,6 +255,86 @@ async function main() {
     eq(ev.status, 'resolved', '9b ההתראה נסגרה');
   }
 
+  // ---------------------------------------------------------------- 5 ------
+  head('5 — שליחה משותפת: מייל אחד, קובץ לכל סניף, הריק מבוטל');
+  {
+    // Third branch invited and never adds anything.
+    const inv = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: groupSeedId }, body: { branch_id: String(branchC._id) } });
+    const emptyId = String(inv.body.order.id);
+
+    // A (300) + B (1000) = 1300 ≥ 1200, though neither alone reaches it.
+    sentMail.length = 0;
+    const r = await invoke(c.send, { user: userB, branchScope: scopeB, params: { id: invitedId } });
+    eq(r.status, 200, '5a נשלחה');
+    eq(r.body.sent_count, 2, '5b שתי הזמנות נשלחו');
+    eq(sentMail.length, 1, '5c מייל אחד');
+    eq(sentMail[0].kind, 'group', '5d המייל הקבוצתי');
+    eq(sentMail[0].orders.length, 2, '5e עם שתי ההזמנות');
+    const names = sentMail[0].orders.map(o => o.branch.name).sort();
+    eq(names, ['סניף א', 'סניף ב'], '5f כל אחת עם הסניף שלה');
+
+    const a = await Order.findById(groupSeedId).lean();
+    const b = await Order.findById(invitedId).lean();
+    const e = await Order.findById(emptyId).lean();
+    eq([a.status, b.status], ['pending', 'pending'], '5g שתיהן pending');
+    eq([a.email_status, b.email_status], ['sent', 'sent'], '5h שתיהן רשמו שהמייל נשלח');
+    eq(a.email_message_id, b.email_message_id, '5i אותו מזהה הודעה');
+    eq(e.status, 'cancelled', '5j הריקה בוטלה');
+    ok(/לא הוסיף פריטים/.test(e.notes), '5k עם הסיבה בהערות');
+    const evB = await NotificationEvent.find({ ref_id: invitedId, status: 'pending' }).lean();
+    eq(evB.length, 0, '5l אין התראות פתוחות על הקבוצה');
+  }
+
+  // ---------------------------------------------------------------- 6 ------
+  head('6 — מינימום על הסכום המשותף');
+  {
+    const seed = await invoke(c.create, {
+      user: userA, branchScope: scopeA,
+      body: { branch_id: String(branchA._id), supplier_id: sid, hold: true, items: [item('אורז', 10, 50)] },
+    });
+    const sId = String(seed.body.order.id);
+    const inv = await invoke(c.invite, { user: userA, branchScope: scopeA, params: { id: sId }, body: { branch_id: String(branchB._id) } });
+    const bId = String(inv.body.order.id);
+    await invoke(c.update, { user: userB, branchScope: scopeB, params: { id: bId }, body: { items: [item('סוכר', 10, 40)] } });
+
+    sentMail.length = 0;
+    const r = await invoke(c.send, { user: userA, branchScope: scopeA, params: { id: sId } });
+    eq(r.status, 400, '6a 500 + 400 = 900 < 1200 — נדחה');
+    ok(/חסרים 300/.test(r.body.error), '6b ואומר כמה חסר');
+    eq(sentMail.length, 0, '6c בלי מייל');
+    const still = await Order.findById(sId).lean();
+    eq(still.status, 'draft', '6d ההזמנה נשארה בהמתנה');
+  }
+
+  // ---------------------------------------------------------------- 5x ----
+  head('5x — המייל הקבוצתי האמיתי בונה קובץ לכל סניף');
+  {
+    // The real function, with dispatchEmail stubbed.
+    delete require.cache[emailPath];
+    const realEmail = require('../src/services/email.service');
+    const dispatched = [];
+    const origDispatch = realEmail.dispatchEmail;
+    // sendGroupOrderEmail must call through module.exports.dispatchEmail so it can be observed.
+    realEmail.dispatchEmail = async (m) => { dispatched.push(m); return { messageId: '<g@test>', provider: 'test' }; };
+    process.env.RESEND_API_KEY = 'test';
+    const env = require('../src/config/env');
+    env.RESEND_API_KEY = 'test';
+
+    const oa = { order_number: 'ORD-A', items: [{ name: 'שמן', qty: 10, unit_price: 30, total: 300 }], total_amount: 300, notes: '' };
+    const ob = { order_number: 'ORD-B', items: [{ name: 'קמח', qty: 50, unit_price: 20, total: 1000 }], total_amount: 1000, notes: '' };
+    const result = await realEmail.sendGroupOrderEmail({
+      orders: [{ order: oa, branch: { name: 'סניף א', address: 'רחוב א 1' } }, { order: ob, branch: { name: 'סניף ב', address: 'רחוב ב 2' } }],
+      supplier: { name: 'שאבי', contact_email: 's@x.co.il' }, creatorEmail: 'a@gan.co.il', creatorName: 'מנהלת א',
+    });
+    eq(result.sent, true, '5x-a הוחזר sent');
+    eq(dispatched.length, 1, '5x-b מייל אחד');
+    eq(dispatched[0].attachments.length, 4, '5x-c ארבעה קבצים — ספק+פנימי לכל סניף');
+    ok(/הזמנה משותפת/.test(dispatched[0].subject), '5x-d הנושא אומר משותפת');
+    ok(/סניף א/.test(dispatched[0].subject) && /סניף ב/.test(dispatched[0].subject), '5x-e ושני הסניפים בנושא');
+    ok(/רחוב א 1/.test(dispatched[0].html) && /רחוב ב 2/.test(dispatched[0].html), '5x-f שתי הכתובות בגוף');
+    realEmail.dispatchEmail = origDispatch;
+  }
+
   // __TASKS_APPEND_HERE__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);

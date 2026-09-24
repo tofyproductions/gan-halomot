@@ -382,7 +382,73 @@ async function sendOrderEmail({ order, supplier, branch, creatorEmail, creatorNa
   return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
 }
 
+/**
+ * Several branches' orders to one supplier, in one email.
+ *
+ * The supplier delivers to each branch separately, so each branch keeps its
+ * own document — the same two files a single order sends, once per branch —
+ * and the body lists every branch with its address so the driver's sheet and
+ * the email agree. The joint total is what let the order pass the supplier's
+ * minimum; it is stated once at the top.
+ *
+ * Returns the same shapes as sendOrderEmail, so order-delivery.service reads
+ * it the same way and the delivery patch is written on every member.
+ */
+async function sendGroupOrderEmail({ orders, supplier, creatorEmail, creatorName }) {
+  if (!env.GAS_EMAIL_URL && !env.RESEND_API_KEY && !env.SMTP_USER) {
+    console.warn('No email provider configured — skipping group order email');
+    return { skipped: true, reason: 'provider-not-configured' };
+  }
+  const supplierEmail = supplier?.contact_email;
+  const officeEmail = 'dreamgan10@gmail.com';
+  const recipients = [supplierEmail, creatorEmail, officeEmail].filter(Boolean);
+  if (recipients.length === 0) return { skipped: true, reason: 'no-recipients' };
+
+  const { buildSupplierHTML, buildInternalHTML, buildFilename } = require('./order-pdf.service');
+
+  const branchNames = orders.map(({ branch }) => branch?.name || '').filter(Boolean);
+  const numbers = orders.map(({ order }) => order.order_number).join(', ');
+  const total = orders.reduce((s, { order }) => s + (order.total_amount || 0), 0);
+  const fmt = (n) => Number(n || 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const perBranch = orders.map(({ order, branch }) => `
+      <div style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; margin-bottom:12px;">
+        <div style="font-weight:800; font-size:15px;">${branch?.name || ''} — הזמנה #${order.order_number}</div>
+        ${branch?.address ? `<div><b>כתובת למשלוח:</b> ${branch.address}</div>` : ''}
+        ${branch?.delivery_contact_name ? `<div><b>איש קשר:</b> ${branch.delivery_contact_name} ${branch.delivery_contact_phone || ''}</div>` : ''}
+        <div><b>פריטים:</b> ${(order.items || []).length} · <b>סה"כ:</b> ${fmt(order.total_amount)} ₪</div>
+        ${order.notes ? `<div style="margin-top:6px;"><b>הערות:</b> ${order.notes}</div>` : ''}
+      </div>`).join('');
+
+  const html = `
+    <div dir="rtl" style="font-family: Arial, sans-serif; max-width:700px; margin:0 auto;">
+      <h2 style="color:#10b981; border-bottom:3px solid #10b981; padding-bottom:8px;">הזמנה משותפת — ${branchNames.length} סניפים</h2>
+      <p><b>ספק:</b> ${supplier?.name || ''}</p>
+      <p><b>סה"כ משותף:</b> ${fmt(total)} ₪</p>
+      <p style="color:#475569;">המשלוח לכל סניף בנפרד, לכתובת הרשומה לידו. לכל סניף מצורף קובץ הזמנה משלו.</p>
+      ${perBranch}
+      <p style="color:#94a3b8; font-size:12px;">נשלח על ידי ${creatorName || ''} ממערכת ההזמנות</p>
+    </div>
+  `;
+
+  const cc = [creatorEmail, officeEmail].filter(e => e && e !== supplierEmail);
+  const attachments = orders.flatMap(({ order, branch }) => ([
+    { name: buildFilename({ variant: 'supplier', branch, order }), html: buildSupplierHTML({ order, supplier, branch }) },
+    { name: buildFilename({ variant: 'internal', branch, order }), html: buildInternalHTML({ order, supplier, branch }) },
+  ]));
+
+  const info = await module.exports.dispatchEmail({
+    to: supplierEmail || creatorEmail || officeEmail,
+    cc,
+    subject: `הזמנה משותפת: ${branchNames.join(', ')} (הזמנות #${numbers})`,
+    html,
+    attachments,
+  });
+
+  return { sent: true, messageId: info.messageId, provider: info.provider, recipients };
+}
+
 module.exports = {
-  sendAgreementEmail, sendRegistrationLink, sendOrderEmail, buildOrderHTML, dispatchEmail,
+  sendAgreementEmail, sendRegistrationLink, sendOrderEmail, sendGroupOrderEmail, buildOrderHTML, dispatchEmail,
   withoutAstral,
 };
