@@ -35,6 +35,7 @@
     "test:classroom-board": "node scripts/classroom-board-e2e.test.js",
     "test:punch-scope": "node scripts/punch-out-of-scope.test.js",
     "test:gantt-merge": "node scripts/gantt-print-merge.test.js",
+    "test:gantt-multi": "node scripts/gantt-multi-print.test.js",
     "test:decisions": "node scripts/my-decisions.test.js",
     "test:august-bonus": "node scripts/august-bonus.test.js",
     "test:august-bonus-e2e": "node scripts/august-bonus-e2e.test.js",
