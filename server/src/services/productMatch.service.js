@@ -209,6 +209,7 @@ function throttledScan(trigger = 'import', { client: injected = null, now = Date
 function _resetThrottle() { lastStartedAt = 0; running = false; }
 
 function notFound() { const e = new Error('התאמה לא נמצאה'); e.status = 404; return e; }
+function supplierConflict() { const e = new Error('בקבוצה כבר יש מוצר של הספק הזה'); e.status = 400; return e; }
 
 /** The confirmed, un-merged group holding this product, if any. */
 async function confirmedGroupOf(productId) {
@@ -219,11 +220,21 @@ async function confirmedGroupOf(productId) {
  * proposed → confirmed. If one side already sits in a confirmed group, the
  * other side joins that group and the proposal is kept with `merged_into`
  * (its pair_key keeps the pair from being proposed again).
+ *
+ * A proposal can touch TWO different confirmed groups at once (each side
+ * already belongs to one). When that happens the older group is the target
+ * and the other group's members are absorbed into it — the absorbed group
+ * stays `confirmed` but gets its own `merged_into` set, so its pair_key keeps
+ * guarding too. A supplier may appear once per group: before any write, every
+ * pending addition (from an absorbed group or from the proposal itself) is
+ * checked against a product of the same supplier already destined for the
+ * target, under a different product id — if found, nothing is written.
  */
 async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = {}) {
   const m = await ProductMatch.findById(id);
   if (!m) throw notFound();
-  if (m.status === 'confirmed' && !m.merged_into) return m;
+  if (m.status === 'confirmed') return m.merged_into ? ProductMatch.findById(m.merged_into) : m;
+
   const now = new Date();
   for (const p of m.products) {
     const v = pack_qty[String(p.product_id)];
@@ -231,34 +242,71 @@ async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = 
   }
   if (base_unit !== undefined) m.base_unit = base_unit;
 
-  let target = null;
+  // Every DISTINCT confirmed group already holding one of this proposal's products.
+  const seen = new Map();
   for (const p of m.products) {
-    target = await confirmedGroupOf(p.product_id);
-    if (target) break;
+    const g = await confirmedGroupOf(p.product_id);
+    if (g && String(g._id) !== String(m._id)) seen.set(String(g._id), g);
   }
-  if (target && String(target._id) !== String(m._id)) {
-    for (const p of m.products) {
-      const existing = target.products.find(t => String(t.product_id) === String(p.product_id));
-      if (existing) { if (p.pack_qty !== null) existing.pack_qty = p.pack_qty; }
-      else target.products.push({ product_id: p.product_id, supplier_id: p.supplier_id, pack_qty: p.pack_qty });
-    }
-    if (m.base_unit && !target.base_unit) target.base_unit = m.base_unit;
-    target.decided_by = decided_by; target.decided_at = now;
-    await target.save();
-    m.status = 'confirmed'; m.merged_into = target._id; m.decided_by = decided_by; m.decided_at = now;
+  const groups = [...seen.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+  if (!groups.length) {
+    m.status = 'confirmed'; m.decided_by = decided_by; m.decided_at = now;
     await m.save();
-    return target;
+    return m;
   }
-  m.status = 'confirmed'; m.decided_by = decided_by; m.decided_at = now;
+
+  const target = groups[0];
+  const otherGroups = groups.slice(1);
+  const hasProduct = (list, productId) => list.some(t => String(t.product_id) === String(productId));
+
+  // Dry run first: validate every pending addition before touching anything.
+  const bySupplier = new Map(target.products.map(t => [String(t.supplier_id), String(t.product_id)]));
+  const absorbedAdditions = [];
+  for (const g of otherGroups) {
+    for (const src of g.products) {
+      if (hasProduct(target.products, src.product_id) || hasProduct(absorbedAdditions, src.product_id)) continue;
+      const holder = bySupplier.get(String(src.supplier_id));
+      if (holder && holder !== String(src.product_id)) throw supplierConflict();
+      bySupplier.set(String(src.supplier_id), String(src.product_id));
+      absorbedAdditions.push(src);
+    }
+  }
+  for (const p of m.products) {
+    if (hasProduct(target.products, p.product_id) || hasProduct(absorbedAdditions, p.product_id)) continue;
+    const holder = bySupplier.get(String(p.supplier_id));
+    if (holder && holder !== String(p.product_id)) throw supplierConflict();
+    bySupplier.set(String(p.supplier_id), String(p.product_id));
+  }
+
+  // Validated — now write. Absorb the other groups' members first (skip what's already there, keep their pack_qty).
+  for (const src of absorbedAdditions) {
+    target.products.push({ product_id: src.product_id, supplier_id: src.supplier_id, pack_qty: src.pack_qty });
+  }
+  for (const g of otherGroups) { g.merged_into = target._id; await g.save(); }
+
+  // Then the proposal's own products join the target, as before.
+  for (const p of m.products) {
+    const existing = target.products.find(t => String(t.product_id) === String(p.product_id));
+    if (existing) { if (p.pack_qty !== null) existing.pack_qty = p.pack_qty; }
+    else target.products.push({ product_id: p.product_id, supplier_id: p.supplier_id, pack_qty: p.pack_qty });
+  }
+  if (m.base_unit && !target.base_unit) target.base_unit = m.base_unit;
+  target.decided_by = decided_by; target.decided_at = now;
+  await target.save();
+  m.status = 'confirmed'; m.merged_into = target._id; m.decided_by = decided_by; m.decided_at = now;
   await m.save();
-  return m;
+  return target;
 }
 
+/** proposed/confirmed → rejected. Anything absorbed into this group (merged_into) is rejected too. */
 async function rejectMatch(id, decided_by = '') {
   const m = await ProductMatch.findById(id);
   if (!m) throw notFound();
-  m.status = 'rejected'; m.decided_by = decided_by; m.decided_at = new Date();
+  const now = new Date();
+  m.status = 'rejected'; m.decided_by = decided_by; m.decided_at = now;
   await m.save();
+  await ProductMatch.updateMany({ merged_into: m._id }, { $set: { status: 'rejected', decided_by, decided_at: now } });
   return m;
 }
 

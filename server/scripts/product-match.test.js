@@ -252,6 +252,72 @@ async function main() {
       base_unit: 'יחידה', status: 'proposed', confidence: 0.5,
     });
     ok(noKey1._id && noKey2._id, '6j שתי התאמות בלי pair_key כלל — שתיהן נשמרות');
+
+    // 6k — a proposal touching two DIFFERENT confirmed groups merges them into one (the older survives).
+    const sA = await Supplier.create({ name: 'ספק A', vat_rate: 1.18 });
+    const sB = await Supplier.create({ name: 'ספק B', vat_rate: 1.18 });
+    const sC = await Supplier.create({ name: 'ספק C', vat_rate: 1.18 });
+    const sD = await Supplier.create({ name: 'ספק D', vat_rate: 1.18 });
+    const pA = await mk(sA._id, 'A1', 'מוצר A', 'יחידה', 10);
+    const pB = await mk(sB._id, 'B1', 'מוצר B', 'יחידה', 10);
+    const pC = await mk(sC._id, 'C1', 'מוצר C', 'יחידה', 10);
+    const pD = await mk(sD._id, 'D1', 'מוצר D', 'יחידה', 10);
+    const grp1 = await svc.manualMatch([String(pA._id), String(pB._id)], 'אורי');
+    await new Promise(r => setTimeout(r, 5)); // distinct created_at — grp1 is the older group
+    const grp2 = await svc.manualMatch([String(pC._id), String(pD._id)], 'אורי');
+    const mergeProposal = await ProductMatch.create({
+      products: [{ product_id: pB._id, supplier_id: sB._id, pack_qty: 1 }, { product_id: pC._id, supplier_id: sC._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(pB._id, pC._id),
+    });
+    const merged = await svc.confirmMatch(mergeProposal._id, { decided_by: 'אורי' });
+    eq(String(merged._id), String(grp1._id), '6k1 המטרה היא הקבוצה הישנה יותר');
+    eq(merged.products.length, 4, '6k2 ארבעה חברים בקבוצה החיה');
+    const grp2After = await ProductMatch.findById(grp2._id).lean();
+    eq(String(grp2After.merged_into), String(grp1._id), '6k3 הקבוצה השנייה נספגה');
+    eq(grp2After.status, 'confirmed', '6k4 אבל נשארה confirmed');
+    const liveWithC = await ProductMatch.countDocuments({ status: 'confirmed', merged_into: null, 'products.product_id': pC._id });
+    eq(liveWithC, 1, '6k5 מוצר C מופיע בקבוצה חיה אחת בלבד');
+
+    // 6l — a proposal that would add a second product of a supplier already in the group is refused; the group is untouched.
+    const pA2 = await mk(sA._id, 'A2', 'מוצר A גרסה שנייה', 'יחידה', 12);
+    const beforeSnapshot = await ProductMatch.findById(grp1._id).lean();
+    const badProposal = await ProductMatch.create({
+      products: [{ product_id: pA2._id, supplier_id: sA._id, pack_qty: 1 }, { product_id: pD._id, supplier_id: sD._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(pA2._id, pD._id),
+    });
+    let threw = null;
+    try { await svc.confirmMatch(badProposal._id, { decided_by: 'אורי' }); } catch (e) { threw = e; }
+    eq(threw && threw.status, 400, '6l1 נדחה עם 400');
+    const afterSnapshot = await ProductMatch.findById(grp1._id).lean();
+    eq(afterSnapshot, beforeSnapshot, '6l2 הקבוצה לא השתנתה');
+
+    // 6m — unlinking the target rejects everything that was absorbed into it.
+    const unlinked = await svc.unlinkMatch(String(grp1._id), 'אורי');
+    eq(unlinked.status, 'rejected', '6m1 הקבוצה עצמה נדחית');
+    const grp2Final = await ProductMatch.findById(grp2._id).lean();
+    eq(grp2Final.status, 'rejected', '6m2 הקבוצה שנספגה נדחית גם היא');
+    const mergeProposalFinal = await ProductMatch.findById(mergeProposal._id).lean();
+    eq(mergeProposalFinal.status, 'rejected', '6m3 וגם ההצעה שמוזגה');
+
+    // 6n — confirming an already-merged proposal a second time is a no-op: returns the live group, decided_at untouched.
+    const sE = await Supplier.create({ name: 'ספק E', vat_rate: 1.18 });
+    const sF = await Supplier.create({ name: 'ספק F', vat_rate: 1.18 });
+    const sG = await Supplier.create({ name: 'ספק G', vat_rate: 1.18 });
+    const pE = await mk(sE._id, 'E1', 'מוצר E', 'יחידה', 10);
+    const pF = await mk(sF._id, 'F1', 'מוצר F', 'יחידה', 10);
+    const pG = await mk(sG._id, 'G1', 'מוצר G', 'יחידה', 10);
+    const grp3 = await svc.manualMatch([String(pE._id), String(pF._id)], 'אורי');
+    const mergeProposal2 = await ProductMatch.create({
+      products: [{ product_id: pF._id, supplier_id: sF._id, pack_qty: 1 }, { product_id: pG._id, supplier_id: sG._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(pF._id, pG._id),
+    });
+    const grp3Merged = await svc.confirmMatch(mergeProposal2._id, { decided_by: 'אורי' });
+    eq(String(grp3Merged._id), String(grp3._id), '6n0 ההצעה הראשונה מוזגת לקבוצה הקיימת');
+    const decidedAtBefore = (await ProductMatch.findById(mergeProposal2._id).lean()).decided_at;
+    const again = await svc.confirmMatch(mergeProposal2._id, { decided_by: 'מישהו אחר' });
+    eq(String(again._id), String(grp3._id), '6n1 אישור חוזר על הצעה שמוזגה מחזיר את הקבוצה החיה');
+    const decidedAtAfter = (await ProductMatch.findById(mergeProposal2._id).lean()).decided_at;
+    eq(new Date(decidedAtAfter).getTime(), new Date(decidedAtBefore).getTime(), '6n2 decided_at לא השתנה');
   }
 
   // ---------------------------------------------------------------- 7 ------
