@@ -387,8 +387,33 @@ async function resolveParentClaim({ photoId, faceIndex, agree }) {
   };
 }
 
-/** How much is left, for the teacher and for the branch manager. */
+/**
+ * How much is left, for the teacher and for the branch manager.
+ *
+ * "waiting" used to mean every unnamed, non-"not a child" face — but a face
+ * scanned in a room where no parent has consented to face recognition never
+ * gets an embedding (services/face/scanner.js), and without one `queue()`
+ * (which requires `faces.embedding` to exist) can never offer it. Counting it
+ * as "waiting" produced a badge that promised work the tagging screen could
+ * never show: "7 ממתינים" next to "אין פרצופים שממתינים". So `waiting` here
+ * counts only faces `queue()` can actually hand to a teacher — unnamed, not
+ * "not a child", AND with an embedding — and `no_consent` is the honest name
+ * for the rest of them.
+ *
+ * `faces.embedding` is `select: false` on the schema, which hides it from an
+ * ordinary `.find()` — but an aggregation pipeline reads the raw document and
+ * is not subject to that projection, so it IS present here. Proven by
+ * scripts/face-tagging-progress.test.js.
+ */
 async function progress({ classroomIds }) {
+  const hasEmbedding = { $gt: [{ $size: { $ifNull: ['$faces.embedding', []] } }, 0] };
+  const isUnnamed = {
+    $and: [
+      { $eq: ['$faces.child_id', null] },
+      { $ne: ['$faces.not_a_child', true] },
+    ],
+  };
+
   const [row] = await Photo.aggregate([
     {
       $match: {
@@ -404,25 +429,21 @@ async function progress({ classroomIds }) {
         faces: { $sum: 1 },
         named: { $sum: { $cond: [{ $ne: ['$faces.child_id', null] }, 1, 0] } },
         not_a_child: { $sum: { $cond: ['$faces.not_a_child', 1, 0] } },
-        waiting: {
-          $sum: {
-            $cond: [{
-              $and: [
-                { $eq: ['$faces.child_id', null] },
-                { $ne: ['$faces.not_a_child', true] },
-              ],
-            }, 1, 0],
-          },
-        },
+        waiting: { $sum: { $cond: [{ $and: [isUnnamed, hasEmbedding] }, 1, 0] } },
+        no_consent: { $sum: { $cond: [{ $and: [isUnnamed, { $not: [hasEmbedding] }] }, 1, 0] } },
       },
     },
   ]);
   return row
     ? {
-      faces: row.faces, named: row.named, waiting: row.waiting, not_a_child: row.not_a_child,
+      faces: row.faces,
+      named: row.named,
+      waiting: row.waiting,
+      no_consent: row.no_consent,
+      not_a_child: row.not_a_child,
     }
     : {
-      faces: 0, named: 0, waiting: 0, not_a_child: 0,
+      faces: 0, named: 0, waiting: 0, no_consent: 0, not_a_child: 0,
     };
 }
 

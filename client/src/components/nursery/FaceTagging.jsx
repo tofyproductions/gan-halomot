@@ -199,6 +199,10 @@ export default function FaceTagging({ onWaitingChange }) {
   const waiting = progress ? progress.waiting : 0;
   const named = progress ? progress.named : 0;
   const total = progress ? progress.faces : 0;
+  const noConsent = progress ? (progress.no_consent || 0) : 0;
+  // המכנה של "כמה כבר זוהו" הוא רק פרצופים שבכלל אפשר לזהות אוטומטית —
+  // פרצוף בלי הסכמת הורים לא נכנס למכנה, כי הוא לעולם לא יזוהה ככה.
+  const taggable = total - noConsent;
   const classroomName = roomsOfBranch.find((r) => String(r.id) === String(classroomId))?.name || '';
 
   return (
@@ -239,16 +243,22 @@ export default function FaceTagging({ onWaitingChange }) {
 
       {progress && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          {`זוהו ${named} מתוך ${total} · ממתינים ${waiting}`}
+          {`זוהו ${named} מתוך ${taggable} · ממתינים ${waiting}`}
         </Typography>
       )}
 
       {total > 0 && (
         <LinearProgress
           variant="determinate"
-          value={Math.round((100 * named) / total)}
+          value={taggable > 0 ? Math.round((100 * named) / taggable) : 0}
           sx={{ mb: 2, height: 8, borderRadius: 4 }}
         />
+      )}
+
+      {noConsent > 0 && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          {`${noConsent} פרצופים בתמונות של ילדים ללא הסכמת הורים לזיהוי פנים — לא ניתן לזהות אותם אוטומטית. אפשר לתייג אותם בגלריה.`}
+        </Alert>
       )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -261,7 +271,11 @@ export default function FaceTagging({ onWaitingChange }) {
         <Card>
           <CardContent>
             <Stack spacing={1} alignItems="center" sx={{ py: 5 }}>
-              <Typography variant="h6">אין פרצופים שממתינים</Typography>
+              <Typography variant="h6">
+                {noConsent > 0
+                  ? `אין פרצופים שממתינים לזיהוי. ${noConsent} פרצופים ממתינים להסכמת הורים.`
+                  : 'אין פרצופים שממתינים'}
+              </Typography>
               <Typography variant="body2" color="text.secondary" textAlign="center">
                 כל מה שהמערכת לא הצליחה לזהות כבר קיבל שם.
                 {done > 0 && ` תייגת ${done} בפעם הזו.`}
