@@ -12,12 +12,16 @@ import InventoryIcon from '@mui/icons-material/Inventory';
 import PrintIcon from '@mui/icons-material/Print';
 import EmailIcon from '@mui/icons-material/Email';
 import EditIcon from '@mui/icons-material/Edit';
+import SendIcon from '@mui/icons-material/Send';
+import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 import ConfirmDialog from '../shared/ConfirmDialog';
 import ReceiveOrderDialog from './ReceiveOrderDialog';
+import OrderGroupPanel from './OrderGroupPanel';
+import InviteBranchDialog from './InviteBranchDialog';
 
 /**
  * What the server knows about the mail to the supplier.
@@ -36,7 +40,7 @@ const EMAIL_MAP = {
 };
 
 const STATUS_MAP = {
-  draft: { label: 'טיוטה', color: 'default' },
+  draft: { label: 'בהמתנה', color: 'default' },
   pending: { label: 'ממתין לאישור', color: 'warning' },
   approved: { label: 'מאושר', color: 'success' },
   sent: { label: 'נשלח', color: 'info' },
@@ -54,6 +58,9 @@ export default function OrderView() {
   const [confirm, setConfirm] = useState({ open: false, action: '' });
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [groupKey, setGroupKey] = useState(0);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     api.get(`/orders/${id}`)
@@ -191,6 +198,22 @@ export default function OrderView() {
     }
   };
 
+  const handleSend = async () => {
+    setSending(true);
+    try {
+      const res = await api.post(`/orders/${id}/send`);
+      const n = res.data.sent_count || 1;
+      toast.success(n > 1 ? `נשלח לספק — ${n} סניפים` : 'נשלח לספק');
+      setOrder(res.data.order);
+      setGroupKey(k => k + 1);
+      setConfirm({ open: false, action: '' });
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשליחה');
+    } finally {
+      setSending(false);
+    }
+  };
+
   if (loading) return <LoadingSpinner />;
   if (!order) return <Typography>הזמנה לא נמצאה</Typography>;
 
@@ -223,16 +246,25 @@ export default function OrderView() {
           )}
         </Box>
         <Stack direction="row" spacing={1}>
-          <Button
-            startIcon={<EmailIcon />} variant="outlined" color="info"
-            onClick={handleResendEmail} disabled={sendingEmail}
-          >
-            {sendingEmail ? 'שולח...' : 'שלח מייל'}
-          </Button>
+          {order.status !== 'draft' && (
+            <Button
+              startIcon={<EmailIcon />} variant="outlined" color="info"
+              onClick={handleResendEmail} disabled={sendingEmail}
+            >
+              {sendingEmail ? 'שולח...' : 'שלח מייל'}
+            </Button>
+          )}
           <Button startIcon={<PrintIcon />} variant="outlined" onClick={handlePrint}>הדפס / PDF</Button>
           <Button startIcon={<ArrowBackIcon />} onClick={() => navigate('/orders')}>חזרה</Button>
         </Stack>
       </Stack>
+
+      {order.group_invited_by && order.status === 'draft' && (
+        <Alert severity="info" sx={{ borderRadius: 2, mb: 2 }}>
+          הוזמנת להצטרף על ידי {order.group_invited_by}. הוסיפו פריטים דרך "ערוך" ואז שלחו.
+        </Alert>
+      )}
+      {order.group_id && <OrderGroupPanel orderId={id} refreshKey={groupKey} />}
 
       {/* Details */}
       <Card sx={{ mb: 3 }}>
@@ -324,6 +356,40 @@ export default function OrderView() {
       </Card>
 
       {/* Actions */}
+      {order.status === 'draft' && (
+        <Stack direction="row" spacing={2} flexWrap="wrap" gap={1}>
+          <Button
+            variant="contained" color="success" size="large"
+            startIcon={<SendIcon />}
+            onClick={() => setConfirm({ open: true, action: 'send' })}
+            disabled={sending || !(order.items || []).length}
+          >
+            {order.group_id ? 'שלח לספק — כל הסניפים' : 'שלח לספק'}
+          </Button>
+          <Button
+            variant="contained" color="primary" size="large"
+            startIcon={<EditIcon />}
+            onClick={() => navigate(`/orders/${id}/edit`)}
+          >
+            ערוך
+          </Button>
+          <Button
+            variant="outlined" size="large"
+            startIcon={<GroupAddIcon />}
+            onClick={() => setInviteOpen(true)}
+          >
+            הזמן סניף להצטרף
+          </Button>
+          <Button
+            variant="outlined" color="error" size="large"
+            startIcon={<CancelIcon />}
+            onClick={() => setConfirm({ open: true, action: 'cancel' })}
+          >
+            מחק
+          </Button>
+        </Stack>
+      )}
+
       {order.status === 'pending' && (
         <Stack direction="row" spacing={2} flexWrap="wrap" gap={1}>
           <Button
@@ -404,22 +470,32 @@ export default function OrderView() {
         onReceived={(updated) => setOrder(updated)}
       />
 
+      <InviteBranchDialog
+        open={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        orderId={id}
+        onInvited={() => { setGroupKey(k => k + 1); api.get(`/orders/${id}`).then(r => setOrder(r.data.order)).catch(() => {}); }}
+      />
+
       <ConfirmDialog
         open={confirm.open}
         onClose={() => setConfirm({ open: false, action: '' })}
         onConfirm={
           confirm.action === 'approve' ? handleApprove
           : confirm.action === 'arrived' ? handleMarkArrived
+          : confirm.action === 'send' ? handleSend
           : handleCancel
         }
         title={
           confirm.action === 'approve' ? 'אישור הזמנה'
           : confirm.action === 'arrived' ? 'סימון כהגיע'
+          : confirm.action === 'send' ? 'שליחה לספק'
           : 'ביטול הזמנה'
         }
         message={
           confirm.action === 'approve' ? 'לאשר את ההזמנה?'
           : confirm.action === 'arrived' ? 'לסמן את ההזמנה כהגיעה? תוכל לאשר קבלה ולעדכן מלאי בשלב הבא.'
+          : confirm.action === 'send' ? (order.group_id ? 'לשלוח לספק את ההזמנות של כל הסניפים בקבוצה? סניף שלא הוסיף פריטים לא יישלח.' : 'לשלוח את ההזמנה לספק במייל?')
           : 'לבטל את ההזמנה?'
         }
       />

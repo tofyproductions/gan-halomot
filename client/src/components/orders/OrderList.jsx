@@ -5,13 +5,14 @@ import {
   TableCell, TableContainer, TableHead, TableRow, Paper, MenuItem, TextField,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
+import GroupsIcon from '@mui/icons-material/Groups';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import LoadingSpinner from '../shared/LoadingSpinner';
 import { formatCurrency } from '../../utils/hebrewYear';
 
 const STATUS_MAP = {
-  draft: { label: 'טיוטה', color: 'default' },
+  draft: { label: 'בהמתנה', color: 'default' },
   pending: { label: 'ממתין לאישור', color: 'warning' },
   approved: { label: 'מאושר', color: 'success' },
   sent: { label: 'נשלח', color: 'info' },
@@ -95,7 +96,10 @@ export default function OrderList() {
                     <TableCell>{order.branch_name || order.branch_id?.name || ''}</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>{formatCurrency(order.total_amount)}</TableCell>
                     <TableCell>
-                      <Chip label={status.label} color={status.color} size="small" variant="outlined" />
+                      <Stack direction="row" spacing={0.5} alignItems="center">
+                        <Chip label={status.label} color={status.color} size="small" variant="outlined" />
+                        {order.group_id && <Chip icon={<GroupsIcon />} label="משותפת" size="small" color="primary" variant="outlined" />}
+                      </Stack>
                     </TableCell>
                     <TableCell>{new Date(order.created_at).toLocaleDateString('he-IL')}</TableCell>
                   </TableRow>
