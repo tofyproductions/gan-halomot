@@ -207,9 +207,13 @@ export default function OrderForm() {
       if (isEdit) {
         await api.put(`/orders/${editId}`, { items, notes });
         if (mode === 'send') {
-          const res = await api.post(`/orders/${editId}/send`);
-          const n = res.data.sent_count || 1;
-          toast.success(n > 1 ? `ההזמנה נשלחה לספק — ${n} סניפים` : 'ההזמנה נשלחה לספק');
+          try {
+            const res = await api.post(`/orders/${editId}/send`);
+            const n = res.data.sent_count || 1;
+            toast.success(n > 1 ? `ההזמנה נשלחה לספק — ${n} סניפים` : 'ההזמנה נשלחה לספק');
+          } catch (sendErr) {
+            toast.error(`ההזמנה נשמרה אבל לא נשלחה: ${sendErr.response?.data?.error || 'שגיאה בשליחה'}`);
+          }
         } else {
           toast.success('ההזמנה עודכנה');
         }

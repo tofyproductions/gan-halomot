@@ -13,10 +13,14 @@ export default function OrderGroupPanel({ orderId, refreshKey = 0, onLoaded }) {
   const [data, setData] = useState(null);
 
   useEffect(() => {
-    if (!orderId) return;
+    if (!orderId) return undefined;
+    let alive = true;
     api.get(`/orders/${orderId}/group`)
-      .then(res => { setData(res.data); onLoaded?.(res.data); })
-      .catch(() => setData(null));
+      .then(res => { if (alive) { setData(res.data); onLoaded?.(res.data); } })
+      .catch(() => { if (alive) setData(null); });
+    return () => { alive = false; };
+    // onLoaded is deliberately left out: it's an unmemoised callback prop, and
+    // including it would refetch on every parent render.
   }, [orderId, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data || !data.group_id) return null;

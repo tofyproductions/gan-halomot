@@ -12,11 +12,13 @@ export default function InviteBranchDialog({ open, onClose, orderId, onInvited }
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open || !orderId) return;
+    if (!open || !orderId) return undefined;
+    let alive = true;
     setBranchId('');
     api.get(`/orders/${orderId}/invitable-branches`)
-      .then(res => setBranches(res.data.branches || []))
-      .catch(() => setBranches([]));
+      .then(res => { if (alive) setBranches(res.data.branches || []); })
+      .catch(() => { if (alive) setBranches([]); });
+    return () => { alive = false; };
   }, [open, orderId]);
 
   const submit = async () => {
