@@ -43,6 +43,21 @@ const orderSchema = new mongoose.Schema({
   received_by_name: { type: String, default: '' },
 
   /**
+   * Several branches ordering together from one supplier. A group is N draft
+   * orders sharing this id — one per branch, each with its own items, its own
+   * delivery address and its own stock receive. null = an order on its own.
+   */
+  group_id: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
+  /** Who invited this branch into the group (empty when the branch started it). */
+  group_invited_by: { type: String, default: '' },
+  /**
+   * When the supplier was written to. Orders from before this field carry null
+   * and their created_at IS the send time — creation used to send on the spot.
+   */
+  sent_at: { type: Date, default: null },
+  sent_by: { type: String, default: '' },
+
+  /**
    * What happened when this order was mailed to the supplier.
    *
    * Sending was wrapped in a try/catch that logged and moved on, so a failed

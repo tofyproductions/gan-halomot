@@ -26,10 +26,12 @@ const notificationEventSchema = new mongoose.Schema({
       'child_move_request',
       // A manager or admin moved a child directly (drag on the dashboard).
       'child_moved',
+      // A branch was invited into a joint supply order; its manager adds items.
+      'order_shared',
     ],
     required: true,
   },
-  ref_collection: { type: String, required: true }, // 'Lead' | 'Candidate' | 'Punch' | 'ClassroomMoveRequest' | 'Child'
+  ref_collection: { type: String, required: true }, // 'Lead' | 'Candidate' | 'Punch' | 'ClassroomMoveRequest' | 'Child' | 'Order'
   ref_id: { type: mongoose.Schema.Types.ObjectId, required: true },
   recipient_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
