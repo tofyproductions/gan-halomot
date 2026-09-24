@@ -86,6 +86,7 @@ console.log('\nאיחוד דו-ממדי');
 {
   const html = build([
     { row_key: 'activity', day_index: 1, content: 'טיול', col_span: 2, row_span: 3 },
+    { row_key: 'misc', day_index: 0, content: 'להביא כובע', col_span: 1, row_span: 1 },
   ]);
   ok(/colspan="2"/.test(html) && /rowspan="3"/.test(html), 'שתי הפריסות יוצאות');
   ok(rowCells(html, 'הנגשת חומרים').length === 4,
@@ -101,6 +102,7 @@ console.log('\nפריסה שחורגת מהטבלה');
   // clamped rather than emitted as written.
   const html = build([
     { row_key: 'story', day_index: 4, content: 'x', col_span: 4, row_span: 9 },
+    { row_key: 'misc', day_index: 0, content: 'להביא כובע', col_span: 1, row_span: 1 },
   ]);
   ok(!/colspan="4"/.test(html), 'colspan מוגבל לימים שנשארו בשבוע');
   ok(!/rowspan="9"/.test(html), 'ו-rowspan לשורות שנשארו בטבלה');
@@ -132,6 +134,43 @@ console.log('\nמצב תמונה');
   ok(/תמונה לוואטסאפ/.test(print), 'ובחלון ההדפסה יש כפתור לתמונה');
   const two = buildGanttPrintHtml({ ...opts, mode: 'print', pages: 2 });
   ok(/BUDGET = 2/.test(two), 'ושני עמודים מבקשים שניים');
+}
+
+
+console.log('\nשורת שונות');
+{
+  // Empty that week: not printed at all. Holding a note: printed, and short.
+  const empty = build([
+    { row_key: 'meeting', day_index: 0, content: 'מפגש בוקר', col_span: 1, row_span: 1 },
+  ]);
+  ok(!/>שונות<\/th>/.test(empty), 'שונות ריקה לא מודפסת');
+  ok(/>מפגש<\/th>/.test(empty) && />סיפור<\/th>/.test(empty), 'והשורות האחרות כן, גם כשהן ריקות');
+  const full = build([
+    { row_key: 'misc', day_index: 2, content: 'להביא כובע', col_span: 1, row_span: 1 },
+  ]);
+  ok(/class="rl min"[^>]*>שונות<\/th>/.test(full), 'שונות עם תוכן מודפסת, מסומנת כקצרה');
+  ok(rowCells(full, 'שונות').length === 6, 'עם ששת התאים שלה');
+}
+
+console.log('\nהורי שבת ושבוע סגור');
+{
+  const week = { ...weekWith([]), friday_parent_father: 'אבא של נועה', friday_parent_mother: 'אמא של אריאל' };
+  const html = buildGanttPrintHtml({ weeks: [week], rows: ROWS, holidays: [], month: 9, year: 2026 });
+  const meeting = html.split('<tr>').find(x => x.includes('>מפגש</th>')) || '';
+  const fri = meeting.split('קבלת שבת')[1] || '';
+  ok(/<div class="fp">אבא של נועה<\/div>/.test(fri) && /<div class="fp">אמא של אריאל<\/div>/.test(fri),
+    'ההורים מתחת לקבלת שבת, כל אחד בשורה משלו');
+  const strip = html.split('<tr class="strip">')[1].split('</tr>')[0];
+  ok(!/אבא של נועה/.test(strip), 'ולא בשורת התאריכים');
+  ok(!/אבא של שבת אבא/.test(html), 'בלי כפל "אבא של שבת אבא של"');
+
+  const closed = buildGanttPrintHtml({
+    weeks: [weekWith([])], rows: ROWS, month: 9, year: 2026,
+    holidays: [{ name: 'סוכות', kind: 'closure', emoji: '🌿',
+      start_date: '2026-08-30T00:00:00.000Z', end_date: '2026-09-06T00:00:00.000Z' }],
+  });
+  ok(/class="closedwk"/.test(closed) && /הגן סגור/.test(closed), 'שבוע שהגן סגור בו כולו יוצא כשורה אחת');
+  ok(!/>מפגש<\/th>/.test(closed), 'בלי שורות התוכן');
 }
 
 console.log(`\n${failures === 0 ? '✅ הכל עבר' : `❌ ${failures} נכשלו`}\n`);

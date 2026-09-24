@@ -1,32 +1,41 @@
 /**
- * A month's work plan, on one page, to go on the wall.
+ * A month's work plan, on one A4 landscape page, readable.
  *
  * Printing the live screen does not do this. The editor is a stack of MUI
  * cards full of text fields — it prints the app's header, the buttons, the
  * shadows, a text field's box around every idea, and it runs to four pages
- * that nobody can pin up. What the gan wants is the thing they used to print
- * out of Excel: one sheet, the whole month, readable across a room.
+ * that nobody can pin up. So this builds a standalone document and prints
+ * THAT, which is what the rest of the system already does for the hours
+ * report and the attendance monitor.
  *
- * So this builds a standalone document and prints THAT, which is what the rest
- * of the system already does for the hours report and the attendance monitor.
+ * Height is the whole design constraint, and the previous sheet spent it on
+ * chrome: every week paid for its own banner row and its own two-line
+ * day-header row — ten overhead rows on a five-week month, a third of the
+ * page — and a week the gan was closed for still cost a full block. The type
+ * shrank to 5.6pt to pay for that, which is a footnote, not a wall sheet.
  *
- * Fitting a month on one A4 landscape page is the whole design constraint.
- * A month is four, five or six weeks and each week is six columns by however
- * many rows the gan uses, so the type scale is chosen from the actual shape of
- * this month rather than fixed — six weeks of six rows gets smaller type than
- * four weeks of four, because the alternative is a second page.
+ * This layout is ONE calendar grid. The day header is paid for once. A week's
+ * number, topic and dates live in a band down the right edge, one slim date
+ * strip per week carries the dates, the holidays and the short days, the
+ * Shabbat parents stand under קבלת שבת, and a week the gan is closed for is a
+ * single line. A שונות
+ * row with nothing in it that week is not printed at all, and one with
+ * something in it is kept short. What all of that buys is type: the same
+ * month prints about 45% larger, and never below 8pt.
  */
 import { COLOR } from '../../theme/tokens';
 
-
 const DAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי'];
+const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
 /**
  * A colour per row, the same ones the bank and the editor use.
  *
- * On a wall this is not decoration. The sheet is read from two metres away by
- * somebody looking for one thing — "what is the story today" — and a coloured
- * band is findable at that distance where a row label is not.
+ * On paper this is not decoration. The sheet is read by somebody looking for
+ * one thing — "what is the story today" — and a coloured band is findable
+ * where a row label is not. Each row also gets a solid stripe of its `ink`
+ * beside the label, so the bands still read on a black-and-white printer.
  */
 const ROW_TINT = {
   meeting: COLOR.gantt.row.meeting,
@@ -37,8 +46,6 @@ const ROW_TINT = {
 };
 const tintOf = (key) => ROW_TINT[key]
   || { bg: COLOR.background.default, label: COLOR.background.sunken, ink: COLOR.text.primary };
-const MONTH_NAMES = ['', 'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
-  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'];
 
 const esc = (v) => String(v ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -49,60 +56,7 @@ const ymd = (d) => {
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
 };
 const holidayYmd = (v) => new Date(v).toISOString().slice(0, 10);
-
-/**
- * How small everything has to be for this month to fit.
- *
- * The page is 210mm tall less margins, the document header takes about 11mm,
- * and every week costs a banner, a day-header row and one row per gantt row.
- * Rather than guess, the budget is divided by what this month actually needs
- * and the result is clamped to something still readable across a room.
- */
-/**
- * `weekWeights` — one entry per week, in "row units" (banner + day-header +
- * however many content rows that week actually prints). A week the gan is
- * closed for entirely collapses on the page to a single banner cell (see
- * weekHtml's `collapsed` handling) — sizing every week as if it still needed
- * the full row count wastes exactly the space that week gave back, and the
- * type stays smaller than the page has room for. A five-week month with one
- * closed week (יום כיפור, סוכות, a whole חופשת קיץ week) is a real, common
- * case — not sizing for it is why those months print at a noticeably smaller
- * scale than a five-week month with no closures at all, despite the sheet
- * having genuinely more blank room.
- */
-function scaleFor(weekWeights, pages = 1) {
-  // Two pages buys human-sized type for a full five-week month; one page is
-  // what you ask for when the sheet has to be sent as a single picture. The
-  // caller decides, because it is a trade nobody can make on their behalf: a
-  // month that fits one page at 11pt and one that only fits at 5pt look the
-  // same from here.
-  const availableMm = (198 - 11) * pages;
-  const totalWeight = weekWeights.reduce((a, w) => a + w, 0) || 1;
-  const rowMm = availableMm / totalWeight;
-  const cell = Math.max(8, Math.min(12, rowMm * 1.05));
-  return {
-    cell: cell.toFixed(2),
-    head: Math.max(9, Math.min(13.5, cell * 1.15)).toFixed(2),
-    small: Math.max(6.5, cell - 1.5).toFixed(2),
-  };
-}
-
-/** Every in-month day of `week` is closed (holiday, not merely a short day) —
- * matches the `collapsed` test weekHtml uses to draw it as one banner cell. */
-function isWeekWhollyClosed(week, isClosed, inMonth) {
-  const offset = new Date(week.start_date).getDay();
-  const sunday = new Date(week.start_date);
-  sunday.setDate(sunday.getDate() - offset);
-  let hasOwnDay = false;
-  for (let di = 0; di < 6; di += 1) {
-    const d = new Date(sunday);
-    d.setDate(d.getDate() + di);
-    if (!inMonth(d)) continue; // a day borrowed from another month doesn't count
-    hasOwnDay = true;
-    if (!isClosed(d)) return false;
-  }
-  return hasOwnDay;
-}
+const dm = (d) => `${d.getDate()}.${d.getMonth() + 1}`;
 
 /**
  * The plan as a standalone printable document.
@@ -133,17 +87,6 @@ export function buildGanttPrintHtml({
   };
   const inMonth = (d) => d.getMonth() === month - 1 && d.getFullYear() === year;
 
-  const rowCount = rows.length || 5;
-  // A week costs its banner and its day-header row on top of the gantt rows;
-  // together those are worth about three rows of height. A wholly-closed week
-  // collapses to that overhead plus its one banner cell (see weekHtml).
-  const weekWeights = weeks.map(w => (
-    isWeekWhollyClosed(w, isClosed, inMonth) ? 4 : rowCount + 3
-  ));
-  const size = image
-    ? { cell: '15', head: '17', small: '12.5' }
-    : scaleFor(weekWeights, pages);
-
   const weekHtml = (week) => {
     // day_index is counted from start_date, which is the week's Sunday.
     const offset = new Date(week.start_date).getDay();
@@ -159,22 +102,13 @@ export function buildGanttPrintHtml({
     };
 
     /**
-     * A box the gananet merged across days or rows is one box, and it printed
-     * as six.
+     * A box the gananet merged across days or rows is one box.
      *
      * The editor stores a merge as col_span/row_span on the top-right cell and
-     * BLANKS the cells it swallowed. The print builder knew nothing about
-     * either, so it drew every one of them: the merged text appeared in a
-     * single narrow box and the rest of the span came out empty. A week whose
-     * first row reads הסתגלות across all five days printed the word once, under
-     * Tuesday, and four blanks — which reads as a plan nobody finished writing.
-     *
-     * Every span paints its whole rectangle, rather than each axis being tested
-     * on its own. Checking "is a colspan reaching me along my row, or a rowspan
-     * reaching me down my column" misses the corner: a 2×3 merge starting at
-     * Monday covers Tuesday two rows down, but nothing in Tuesday's column
-     * carries a rowspan — the cell that does is in Monday's. That box printed
-     * anyway and pushed the rest of the row sideways by one day.
+     * BLANKS the cells it swallowed. Every span paints its whole rectangle
+     * here, rather than each axis being tested on its own: a 2×3 merge
+     * starting at Monday covers Tuesday two rows down, but nothing in
+     * Tuesday's column carries a rowspan — the cell that does is in Monday's.
      */
     const covered = new Set();
     rows.forEach((r, rowIdx) => {
@@ -190,113 +124,109 @@ export function buildGanttPrintHtml({
         }
       }
     });
-    const coveredAt = (rowKey, di) => covered.has(`${rows.findIndex(r => r.key === rowKey)}|${di}`);
 
-    const closedCols = new Set();
-    const borrowedCols = new Set();
-    for (let di = 0; di < 6; di += 1) {
+    const days = [0, 1, 2, 3, 4, 5].map((di) => {
       const d = dateOf(di);
-      if (!inMonth(d)) borrowedCols.add(di);
-      if (isClosed(d)) closedCols.add(di);
+      return { di, d, hol: isHoliday(d), shut: isClosed(d), own: inMonth(d) };
+    });
+    const own = days.filter(x => x.own);
+    const range = own.length ? `${dm(own[0].d)} – ${dm(own[own.length - 1].d)}` : '';
+
+    // The week's band: number, topic, dates. One cell down the right edge.
+    const band = (span) => `<td class="wk" rowspan="${span}">
+      <div class="wn">שבוע ${week.week_number}</div>
+      <div class="wt">${esc(week.topic || '')}</div>
+      <div class="wr">${esc(range)}</div>
+    </td>`;
+
+    // A week the gan is closed for every day of: one line, and the page gets
+    // the rest of the block back. A closed day that already has work written
+    // in it must stay visible, so that week is not collapsed.
+    const hasWork = (di) => rows.some(r => contentAt(r.key, di));
+    if (own.length && own.every(x => x.shut && !hasWork(x.di))) {
+      const h = own[0].shut;
+      return `<tr class="closedwk">${band(1)}<td class="rl"></td>
+        <td class="shutwk" colspan="6">${esc(h.emoji || '')} ${esc(h.name)} — הגן סגור · ${esc(range)}</td></tr>`;
     }
-    // A closed column collapses to one cell — unless work is already written
-    // in it, which must stay visible.
-    const collapsed = new Set([...closedCols].filter(di => (
-      !rows.some(r => contentAt(r.key, di))
-    )));
 
-    const head = DAY_NAMES.map((name, di) => {
-      const d = dateOf(di);
-      const hol = isHoliday(d);
-      const shut = isClosed(d);
-      const cls = ['d', shut ? 'shut' : hol ? 'short' : '', borrowedCols.has(di) ? 'borrowed' : '']
-        .filter(Boolean).join(' ');
-      return `<th class="${cls}">
-        <div class="dn">${esc(name)}</div>
-        <div class="dd">${d.getDate()}.${d.getMonth() + 1}</div>
-        ${hol ? `<div class="hol">${esc(hol.emoji || '')}${esc(hol.name)}${!shut && hol.end_time ? ` · עד ${esc(hol.end_time)}` : ''}</div>` : ''}
-      </th>`;
+    // A שונות row with nothing in it this week is not printed. One with
+    // something in it is printed short — it holds a note, not a plan.
+    const printed = rows.filter(r => r.key !== 'misc' || days.some(x => contentAt(r.key, x.di)));
+    const nRows = printed.length;
+
+    // The date strip: the date under each day, and what the day is.
+    const strip = days.map(({ di, d, hol, shut, own: isOwn }) => {
+      const cls = ['ds', shut ? 'shut' : hol ? 'short' : '', isOwn ? '' : 'borrowed'].filter(Boolean).join(' ');
+      const note = hol
+        ? `<span class="hn">${esc(hol.emoji || '')} ${esc(hol.name)}${!shut && hol.end_time ? ` · עד ${esc(hol.end_time)}` : ''}</span>`
+        : '';
+      return `<td class="${cls}"><b>${dm(d)}</b>${note}</td>`;
     }).join('');
 
-    const body = rows.map((row, rowIdx) => {
-      const tds = DAY_NAMES.map((_, di) => {
+    // A closed column collapses to one cell — unless work is already written
+    // in it, which must stay visible.
+    const collapsed = new Set(days.filter(x => x.shut && !hasWork(x.di)).map(x => x.di));
+
+    const body = printed.map((row, printedIdx) => {
+      const rowIdx = rows.indexOf(row);
+      const t = tintOf(row.key);
+      const tds = days.map(({ di, shut, own: isOwn }) => {
         // Swallowed by a merge that starts above or to the right of here.
-        if (!collapsed.has(di) && coveredAt(row.key, di)) return '';
+        if (!collapsed.has(di) && covered.has(`${rowIdx}|${di}`)) return '';
 
         if (collapsed.has(di)) {
-          if (rowIdx > 0) return '';
-          const shut = isClosed(dateOf(di));
-          return `<td class="closed" rowspan="${rows.length}">
-            <div class="cname">${esc(shut.emoji || '')}${esc(shut.name)}</div>
+          if (printedIdx > 0) return '';
+          return `<td class="closedcol" rowspan="${nRows}">
+            <div class="ce">${esc(shut.emoji || '')}</div>
+            <div class="cn">${esc(shut.name)}</div>
             <div class="cnote">הגן סגור</div>
           </td>`;
         }
 
-        // A closed day that already has work in some row keeps every cell of
-        // its column amber and named — the same as the screen. This check
-        // comes BEFORE the Friday specials: a closed Friday must not print
-        // "קבלת שבת" as if the gan were open.
-        if (closedCols.has(di)) {
-          const shut = isClosed(dateOf(di));
-          const content = contentAt(row.key, di);
-          return `<td class="c shutc">${esc(content) || `${esc(shut.emoji || '')}${esc(shut.name)}`}</td>`;
+        // A closed day that has work in some row keeps every cell of its
+        // column amber and named. This comes BEFORE the Friday special: a
+        // closed Friday must not print "קבלת שבת" as if the gan were open.
+        if (shut) {
+          return `<td class="c shutc">${esc(contentAt(row.key, di)) || esc(shut.name)}</td>`;
         }
-
-        const isFri = di === 5;
-        if (isFri && row.key === 'meeting') {
-          return '<td class="fri strong">קבלת שבת</td>';
-        }
-        if (isFri && row.key === 'activity') {
+        if (di === 5 && row.key === 'meeting') {
+          // The Shabbat parents, each on a line of their own under קבלת שבת.
+          // The names are written as "אבא של נועה" already; a label on top of
+          // that would read "אבא של שבת אבא של נועה". Only a bare name gets one.
+          const who = (name, label) => (/^(אבא|אמא|הורים?)(\s|$)/.test(name) ? esc(name) : `${label} ${esc(name)}`);
           const f = String(week.friday_parent_father || '').trim();
           const m = String(week.friday_parent_mother || '').trim();
-          return `<td class="fri">
-            <div class="fp"><b>אבא של שבת:</b> ${esc(f) || '&nbsp;'}</div>
-            <div class="fp"><b>אמא של שבת:</b> ${esc(m) || '&nbsp;'}</div>
-          </td>`;
+          const parents = [f && who(f, 'אבא של שבת:'), m && who(m, 'אמא של שבת:')]
+            .filter(Boolean).map(x => `<div class="fp">${x}</div>`).join('');
+          return `<td class="c fri strong">קבלת שבת${parents}</td>`;
         }
 
         const cell = cellAt(row.key, di);
-        const cls = ['c', borrowedCols.has(di) ? 'borrowed' : ''].filter(Boolean).join(' ');
-        // A colour the gananet set by hand on that one box wins over the row's.
-        const bg = cell?.color || tintOf(row.key).bg;
-
-        // A merge is clamped to what is actually on this sheet. The editor
-        // cannot produce a span past the week's six days, but a row that was
-        // deleted after the merge was made would leave one reaching past the
-        // last row — and a rowspan that overruns its table pulls the whole
-        // sheet's layout apart rather than failing where it was written.
+        // A merge is clamped to what is actually on this sheet: a row deleted
+        // after the merge was made would leave a rowspan reaching past the
+        // last row, and an overrunning rowspan pulls the whole table apart.
         const cs = Math.min(spanAt(row.key, di, 'col_span'), 6 - di);
-        const rs = Math.min(spanAt(row.key, di, 'row_span'), rows.length - rowIdx);
+        const rs = Math.min(spanAt(row.key, di, 'row_span'), nRows - printedIdx);
         const span = `${cs > 1 ? ` colspan="${cs}"` : ''}${rs > 1 ? ` rowspan="${rs}"` : ''}`;
-        const merged = cs > 1 || rs > 1 ? ' merged' : '';
-        return `<td class="${cls}${merged}"${span} style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
+        const cls = ['c', di === 5 ? 'fri' : '', isOwn ? '' : 'borrowed', cs > 1 || rs > 1 ? 'merged' : '']
+          .filter(Boolean).join(' ');
+        // A colour the gananet set by hand on that one box wins over the row's.
+        const bg = cell?.color || t.bg;
+        return `<td class="${cls}"${span} style="background:${esc(bg)} !important">${esc(contentAt(row.key, di))}</td>`;
       }).join('');
 
-      const t = tintOf(row.key);
-      return `<tr><th class="rl" style="background:${t.label} !important;color:${t.ink}">${esc(row.label)}</th>${tds}</tr>`;
+      const rl = `<th class="rl${row.key === 'misc' ? ' min' : ''}" style="background:${t.label} !important;color:${t.ink};border-right-color:${t.ink}">${esc(row.label)}</th>`;
+      return `<tr>${rl}${tds}</tr>`;
     }).join('');
 
-    const own = [0, 1, 2, 3, 4, 5].map(dateOf).filter(inMonth);
-    const range = own.length
-      ? `${own[0].toLocaleDateString('he-IL')} – ${own[own.length - 1].toLocaleDateString('he-IL')}`
-      : '';
-
-    return `<table class="wk">
-      <thead>
-        <tr class="banner">
-          <th class="wn">שבוע ${week.week_number}</th>
-          <th class="topic" colspan="6">
-            <span class="tp">${esc(week.topic || '')}</span>
-            <span class="rg">${esc(range)}</span>
-          </th>
-        </tr>
-        <tr><th class="rl corner"></th>${head}</tr>
-      </thead>
-      <tbody>${body}</tbody>
-    </table>`;
+    return `<tr class="strip">${band(nRows + 1)}<th class="rl corner"></th>${strip}</tr>${body}`;
   };
 
   const statusLabel = status === 'approved' ? 'מאושר' : status === 'pending' ? 'ממתין לאישור' : 'טיוטה';
+  const G = COLOR.gantt;
+  const legend = rows.map(r => `<span><i style="background:${tintOf(r.key).label}"></i>${esc(r.label)}</span>`).join('')
+    + `<span><i style="background:${G.cell.holiday}"></i>חג / יום קצר</span>`
+    + `<span><i style="background:${G.cell.friday}"></i>שישי</span>`;
 
   return `<!doctype html>
 <html dir="rtl" lang="he">
@@ -305,115 +235,108 @@ export function buildGanttPrintHtml({
 <title>תוכנית עבודה - ${esc(classroomName)} - ${MONTH_NAMES[month]} ${year}</title>
 <style>
   /* Landscape, because six day-columns across a portrait page leaves a column
-     the width of a thumb and the plan is read from across the room. */
-  @page { size: A4 landscape; margin: 6mm; }
+     the width of a thumb. */
+  @page { size: A4 landscape; margin: 7mm; }
   ${image ? `
   /* The picture is not a page. Nothing here is measured against paper: the
      sheet is as tall as the month needs, the type is fixed, and WhatsApp's
      viewer does the scrolling that a printer cannot. */
   @page { size: auto; margin: 0; }
   body.img { width: 1400px !important; padding: 22px 26px !important; }
-  body.img table.wk { margin-bottom: 14px; border-spacing: 3px; }
   body.img td.c { padding: 12px 8px !important; line-height: 1.3; }
   body.img .head { margin-bottom: 14px; }
   ` : ''}
   * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   html { background: ${COLOR.divider}; }
   /*
-   * The body is exactly the printable width of the page, always.
-   *
-   * Without this the sheet is laid out at the WINDOW's width and then scaled by
-   * the browser to fit the paper — so on a wide monitor the whole document is
-   * shrunk by a third and the "full page" it measured itself into prints as
-   * half a page of content and a lot of white. Which is exactly what happened.
-   *
-   * Pinning the width to the page makes the screen layout and the print layout
-   * the same layout, so the fit script below is measuring the thing that will
-   * actually be printed.
+   * The body is exactly the printable width of the page, always. Without this
+   * the sheet is laid out at the WINDOW's width and then scaled by the browser
+   * to fit the paper, so the fit script below would be measuring a different
+   * document from the one that prints.
    */
-  body { width: 285mm; margin: 0 auto; background: #fff; padding: 0;
+  body { width: 283mm; margin: 0 auto; background: #fff; padding: 0;
          box-shadow: 0 0 0 1px ${COLOR.dividerStrong}, 0 6px 24px rgba(15,23,42,.12); }
   @media print { html { background: #fff; } body { box-shadow: none; margin: 0; } }
-  :root { --k: 1; --pad: 0mm; --cell: ${size.cell}pt; --head: ${size.head}pt; --small: ${size.small}pt; }
+  :root { --k: 1; --pad: 0mm; --cell: 10pt; --head: 10.5pt; --small: 8pt; }
   body { font-family: "Assistant", Arial, "Arial Hebrew", sans-serif; color: ${COLOR.text.primary}; }
-  /* A4 landscape less the 6mm @page margins, stated once and used by the
-     fit script below so the two cannot drift apart. */
 
-  .head { display: flex; align-items: center; justify-content: space-between;
-          margin-bottom: 2mm; }
-  .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: ${COLOR.gantt.header}; }
-  .head .s { font-size: calc(var(--head) * var(--k)); color: ${COLOR.text.secondary}; font-weight: 700; }
+  .head { display: flex; align-items: baseline; justify-content: space-between;
+          margin: 0 0 2mm; padding-bottom: 1.2mm; border-bottom: 0.6mm solid ${G.header}; }
+  .head .t { font-size: calc(var(--head) * var(--k) * 1.9); font-weight: 800; color: ${G.header}; }
+  .head .t small { font-weight: 600; font-size: 70%; color: ${COLOR.text.secondary}; margin-right: 3mm; }
+  .head .s { font-size: calc(var(--head) * var(--k) * 1.05); color: ${COLOR.text.secondary}; font-weight: 700; }
+  .head .s .st { display: inline-block; border: 0.3mm solid ${COLOR.text.secondary}; border-radius: 1mm;
+                 padding: 0 1.5mm; margin-right: 2mm; font-size: 85%; }
 
-  /* Cells sit in their own rounded tiles with white between them, the way the
-     screen shows them. On paper it also stops five weeks of grid from reading
-     as one undifferentiated mesh from across a room. */
-  table.wk { width: 100%; border-collapse: separate; border-spacing: 0.5mm;
-             table-layout: fixed; margin-bottom: 1.4mm; page-break-inside: avoid; }
-  table.wk th, table.wk td { border: none; border-radius: 1.6mm; }
+  /* A real grid. Thin rules, no gaps, no rounded tiles: on a black-and-white
+     or a weak printer the tints go and the rules are what is left. */
+  table.g { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.g th, table.g td { border: 0.25mm solid #b9b2a9; vertical-align: middle; }
+  col.cwk { width: 26mm; } col.crl { width: 17mm; }
 
-  tr.banner th { background: ${COLOR.gantt.header} !important; color: #fff; padding: 0.9mm 2mm; }
-  tr.banner .wn { font-size: calc(var(--head) * var(--k)); font-weight: 800;
-                  width: 20mm; text-align: center; }
-  tr.banner .topic { text-align: center; }
-  tr.banner .tp { font-size: calc(var(--head) * var(--k) * 1.25); font-weight: 800; }
-  tr.banner .rg { font-size: calc(var(--small) * var(--k)); opacity: 0.75; margin-right: 4mm; }
+  /* One day header for the whole month. */
+  thead th.d { background: ${G.header} !important; color: ${G.headerOn};
+               font-size: calc(var(--head) * var(--k) * 1.15); font-weight: 800; padding: 1mm; text-align: center; }
+  thead th.d.fri { background: ${G.day.friday.bg} !important; }
+  thead th.blank { background: #fff !important; border: none; }
 
-  th.d { background: ${COLOR.background.sunken} !important; padding: calc(0.4mm + var(--pad) * 0.4) 0.5mm;
-         text-align: center; line-height: 1.15; }
-  th.d .dn { font-size: calc(var(--head) * var(--k)); font-weight: 800; color: ${COLOR.text.primary}; }
-  th.d .dd { font-size: calc(var(--small) * var(--k)); color: ${COLOR.text.secondary}; font-weight: 700; }
-  th.d .hol { font-size: calc(var(--small) * var(--k)); color: ${COLOR.warning.softOn}; font-weight: 800; }
-  th.d.shut { background: ${COLOR.gantt.day.closed.bg} !important; }
-  th.d.short { background: ${COLOR.gantt.cell.holiday} !important; }
-  /* Only a PLAIN borrowed day fades — a borrowed day that is also a closure
-     keeps its amber. The unqualified rule used to win the cascade and the
-     end of סוכות printed as two ordinary white columns. */
-  th.d.borrowed:not(.shut):not(.short) { background: ${COLOR.background.default} !important; }
-  th.d.borrowed:not(.shut):not(.short) .dn,
-  th.d.borrowed:not(.shut):not(.short) .dd { color: ${COLOR.text.disabled}; }
+  /* The week's band. */
+  td.wk { background: ${G.header} !important; color: ${G.headerOn}; text-align: center; padding: 1mm 1.5mm; }
+  td.wk .wn { font-size: calc(var(--small) * var(--k)); opacity: .8; font-weight: 700; }
+  td.wk .wt { font-size: calc(var(--head) * var(--k) * 1.1); font-weight: 800; line-height: 1.15; margin: 0.6mm 0; }
+  td.wk .wr { font-size: calc(var(--small) * var(--k)); opacity: .85; }
 
-  th.rl { width: 20mm; text-align: center; font-weight: 800; line-height: 1.15;
-          font-size: calc(var(--head) * var(--k)); padding: 0.5mm; }
-  th.corner { background: #fff !important; }
+  /* The date strip. */
+  tr.strip td.ds { background: ${COLOR.background.sunken} !important; text-align: center; padding: 0.3mm 1mm;
+                   font-size: calc(var(--small) * var(--k)); line-height: 1.2; color: ${COLOR.text.primary}; }
+  tr.strip td.ds .hn { display: block; font-weight: 800; color: ${G.note.on}; }
+  tr.strip td.ds.short { background: ${G.cell.holiday} !important; }
+  tr.strip td.ds.shut { background: ${G.day.closed.bg} !important; color: ${G.day.closed.on}; }
+  tr.strip td.ds.shut .hn { color: ${G.day.closed.on}; }
+  tr.strip td.ds.borrowed:not(.shut):not(.short) { color: ${COLOR.text.disabled}; }
+  tr.strip th.corner { background: ${COLOR.background.sunken} !important; }
 
-  td.c { padding: calc(0.8mm + var(--pad)) 1mm; text-align: center; vertical-align: middle;
-         font-size: calc(var(--cell) * var(--k)); line-height: 1.22; font-weight: 600;
-         color: ${COLOR.text.primary}; overflow-wrap: anywhere; }
+  th.rl { font-weight: 800; text-align: center; font-size: calc(var(--head) * var(--k)); padding: 0.5mm;
+          line-height: 1.1; border-right-width: 1.2mm !important; border-right-style: solid !important; }
+  td.c { padding: calc(0.9mm + var(--pad)) 1.2mm; text-align: center; font-size: calc(var(--cell) * var(--k));
+         line-height: 1.22; font-weight: 600; overflow-wrap: anywhere; }
   /* A day borrowed from the month next door is written in like any other, just
-     quieter, so a parent reading the sheet knows which month they are in. */
-  td.c.borrowed { opacity: 0.72; }
-  td.fri { background: ${COLOR.gantt.cell.friday} !important; }
-  td.strong { font-weight: 800; color: ${COLOR.gantt.span.on}; text-align: center;
-              font-size: calc(var(--head) * var(--k) * 1.1); }
-  td.fri .fp { font-size: calc(var(--small) * var(--k)); text-align: right;
-               color: ${COLOR.gantt.span.on}; line-height: 1.35; font-weight: 700; }
+     quieter, so a reader knows which month they are in. */
+  td.c.borrowed { color: ${COLOR.text.disabled}; }
+  /* A merged box carries the week's one big idea across several days. It gets
+     the weight to match, or a wide box of ordinary text just looks like a cell
+     somebody forgot to fill in. */
+  td.c.merged { font-weight: 800; font-size: calc(var(--cell) * var(--k) * 1.2); }
+  td.c.strong { font-weight: 800; color: ${G.span.on}; font-size: calc(var(--head) * var(--k) * 1.1);
+                background: ${G.cell.friday} !important; }
+  td.c.strong .fp { font-size: calc(var(--cell) * var(--k) * 0.95); font-weight: 700; line-height: 1.3; margin-top: 0.4mm; }
+  td.c.shutc { background: ${G.cell.holiday} !important; color: ${G.note.on}; font-weight: 700; }
+  td.closedcol { background: ${G.cell.holiday} !important; text-align: center; }
+  td.closedcol .ce { font-size: calc(var(--head) * var(--k) * 1.6); line-height: 1.2; }
+  td.closedcol .cn { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: ${G.note.on}; line-height: 1.2; }
+  td.closedcol .cnote { font-size: calc(var(--small) * var(--k)); color: ${G.note.on}; font-weight: 700; }
+  tr.closedwk td.shutwk { background: ${G.cell.holiday} !important; text-align: center; font-weight: 800;
+                          color: ${G.note.on}; font-size: calc(var(--head) * var(--k) * 1.2); padding: 1.5mm; }
+  tr.closedwk td.rl { background: ${COLOR.background.sunken} !important; }
 
-  /* A closed column that still has work in it: every cell amber, like the screen. */
-  td.c.shutc { background: ${COLOR.gantt.day.closed.bg} !important; color: ${COLOR.warning.softOn}; font-weight: 700; }
-  td.closed { background: ${COLOR.gantt.cell.holiday} !important; text-align: center; vertical-align: middle; }
-  td.closed .cname { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: ${COLOR.warning.softOn}; }
-  td.closed .cnote { font-size: calc(var(--small) * var(--k)); color: #b45309; font-weight: 700; }
+  /* שונות is a note, not a plan: it is printed short. */
+  th.rl.min { font-size: calc(var(--head) * var(--k) * 0.9); padding: 0.2mm; }
+  th.rl.min ~ td.c { padding: calc(0.3mm + var(--pad) * 0.4) 1mm; font-size: calc(var(--cell) * var(--k) * 0.9); line-height: 1.15; }
 
-  /* The last lever before giving up: take the air out rather than the type.
-     Padding and leading are worth a few percent and cost less readability
-     than another step down in font size. */
-  body.tight table.wk { margin-bottom: 0.7mm; border-spacing: 0.35mm; }
-  body.tight td.c { padding: calc(0.35mm + var(--pad)) 0.6mm; line-height: 1.1; }
-  body.tight th.rl, body.tight th.d { padding: 0.25mm; }
-  body.tight tr.banner th { padding: 0.4mm 1.5mm; }
+  /* The last lever before giving up: take the air out rather than the type. */
+  body.tight td.c { padding: calc(0.4mm + var(--pad)) 0.8mm; line-height: 1.1; }
+  body.tight th.rl { padding: 0.3mm; }
+  body.tight td.wk { padding: 0.5mm 1mm; }
 
-  /* A merged box carries the week's one big idea — הסתגלות, a trip, a holiday
-     theme — across several days. It gets the weight to match, or a wide box of
-     ordinary text just looks like a cell somebody forgot to fill in. */
-  td.c.merged { font-size: calc(var(--cell) * var(--k) * 1.25); font-weight: 800; }
+  .foot { margin-top: 1.5mm; font-size: calc(var(--small) * var(--k)); color: ${COLOR.text.disabled};
+          display: flex; justify-content: space-between; align-items: center; }
+  .foot .legend span { display: inline-block; margin-left: 3mm; }
+  .foot .legend i { display: inline-block; width: 3mm; height: 3mm; vertical-align: middle; margin-left: 1mm;
+                    border: 0.2mm solid #b9b2a9; }
 
-  .foot { margin-top: 1.5mm; font-size: calc(var(--small) * var(--k)); color: #b6c1cc; text-align: left; }
-
-  .bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center;
-         z-index: 9999; }
-  .toolbar { background: ${COLOR.primary.light}; color: #111;
-             padding: 8px 14px; border-radius: 6px; font-weight: 700; cursor: pointer;
-             border: none; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+  .bar { position: fixed; top: 8px; left: 8px; display: flex; gap: 6px; align-items: center; z-index: 9999; }
+  .toolbar { background: ${COLOR.primary.light}; color: #111; padding: 8px 14px; border-radius: 6px;
+             font-weight: 700; cursor: pointer; border: none; font-size: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
   .toolbar.alt { background: #25D366; color: #fff; }
   .toolbar.ghost { background: #fff; color: ${COLOR.text.primary}; border: 1px solid ${COLOR.dividerStrong}; }
   @media print { .bar { display: none !important; } }
@@ -426,87 +349,54 @@ export function buildGanttPrintHtml({
     <button class="toolbar alt" onclick="window.__ganttImage()">📷 תמונה לוואטסאפ</button>
   </div>`}
   <div class="head">
-    <div class="t">תוכנית עבודה · ${MONTH_NAMES[month]} ${year}</div>
-    <div class="s">${esc(classroomName)}${branchName ? ` · ${esc(branchName)}` : ''} · ${statusLabel}</div>
+    <div class="t">תוכנית עבודה <small>${MONTH_NAMES[month]} ${year}</small></div>
+    <div class="s">${esc(classroomName)}${branchName ? ` · ${esc(branchName)}` : ''}<span class="st">${statusLabel}</span></div>
   </div>
-  ${weeks.map(weekHtml).join('')}
-  <div class="foot">גן החלומות · הופק ${new Date().toLocaleDateString('he-IL')}</div>
+  <table class="g">
+    <colgroup><col class="cwk"><col class="crl">${'<col>'.repeat(6)}</colgroup>
+    <thead><tr><th class="blank" colspan="2"></th>${DAY_NAMES.map((n, i) => `<th class="d${i === 5 ? ' fri' : ''}">יום ${esc(n)}</th>`).join('')}</tr></thead>
+    <tbody>${weeks.map(weekHtml).join('')}</tbody>
+  </table>
+  <div class="foot">
+    <div class="legend">${legend}</div>
+    <div>גן החלומות · הופק ${new Date().toLocaleDateString('he-IL')}</div>
+  </div>
 <script>
   /**
-   * Shrink until it fits, then stop.
+   * Fit the month to the page, then spend what is left on readability.
    *
-   * The type scale can be estimated from the shape of the month — how many
-   * weeks, how many rows — but not from the amount of TEXT, and the text is
-   * what decides. "הכירות עם הצוות והחברים" wraps to three lines where "גואש"
-   * takes one, and a month where every box is full runs a page and a bit while
-   * the same month half-written fits easily.
-   *
-   * So the page measures itself and steps down until the whole month is on one
-   * sheet. The floor is 0.62 — below that it stops being readable across a
-   * room, which is the entire point of printing it — and if a month is so full
-   * that even that overflows, it is allowed to run to a second page rather
-   * than shrink into something nobody can use.
+   * The type scale cannot be estimated from the shape of the month alone —
+   * the text decides. So the page measures itself and steps down until the
+   * whole month is on the sheet the reader asked for. The first floor is 0.8
+   * (8pt in a cell): below that the air is taken out of the cells before the
+   * type is touched again, and the hard floor is 0.7. Then, if there is room,
+   * it grows the type back up, and whatever is still left becomes row height.
    */
   (function fit() {
-    // In image mode there is no page, so there is nothing to fit into and
-    // nothing to shrink. Returning here is the whole difference: every loop
-    // below exists to trade type size against a sheet of paper.
     if (${image ? 'true' : 'false'}) { document.body.classList.add('img'); return; }
 
     var MM = 96 / 25.4;
-    var oneP = (210 - 12) * MM;    // A4 landscape less the 6mm @page margins
+    var oneP = (210 - 14) * MM;    // A4 landscape less the 7mm @page margins
     var BUDGET = ${Math.max(1, Math.min(2, Number(pages) || 1))};
     var pageH = oneP * BUDGET;
     var root = document.documentElement;
     var body = document.body;
-    // The body is the page: its width is pinned to the printable width, so its
-    // scroll height is the number of pages this will take.
     var over = function () { return body.scrollHeight > pageH; };
     var set = function (name, v) { root.style.setProperty(name, v); void body.offsetHeight; };
 
     var k = 1;
-
-    /*
-     * Shrink into the budget the reader chose, and do not quietly overrun it.
-     *
-     * This used to try one page, and on failing widen its OWN budget to two —
-     * which is how a sheet asked for as one page came out as three. Two, from
-     * the growth loop below filling the doubled budget; three, because a week
-     * never splits across a break, so a document 2.1 pages tall lands on a
-     * third sheet with most of the second left white.
-     *
-     * The floor is much lower for a one-page request than it used to be: a
-     * person asking for one page has said which side of the trade they want,
-     * and answering with two is not honouring it. If the type ends up small,
-     * the toolbar's other button is the honest way out — a picture has no page
-     * to be small on.
-     */
-    var floor = BUDGET === 1 ? 0.55 : 0.85;
-    for (var i = 0; i < 40 && over() && k > floor; i += 1) {
-      k -= 0.03;
-      set('--k', k.toFixed(2));
-    }
-
-    // Still over at the floor: take the air out rather than the type.
+    for (var i = 0; i < 40 && over() && k > 0.8; i += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
     if (over()) { body.classList.add('tight'); void body.offsetHeight; }
+    for (var i2 = 0; i2 < 40 && over() && k > 0.7; i2 += 1) { k -= 0.02; set('--k', k.toFixed(2)); }
 
-    // And UP, while it still fits. A month that fits at full size used to stop
-    // there and leave the bottom half of the page white — which on a wall is
-    // just a smaller sheet with a margin, and the whole ask was a full page
-    // readable from across the room.
     if (!over() && !body.classList.contains('tight')) {
-      for (var j = 0; j < 40 && k < 2.4; j += 1) {
-        k += 0.04;
+      for (var j = 0; j < 40 && k < 1.6; j += 1) {
+        k += 0.03;
         set('--k', k.toFixed(2));
-        if (over()) { k -= 0.04; set('--k', k.toFixed(2)); break; }
+        if (over()) { k -= 0.03; set('--k', k.toFixed(2)); break; }
       }
     }
 
-    // Whatever vertical space is left over becomes row height rather than more
-    // type. Past a point bigger letters stop helping and taller rows — more
-    // white around each idea — are what makes it readable on a wall.
-    // The cap is generous on purpose: a sparse month, or a dense one that had
-    // to shrink, can have a lot of page left and the padding is what spends it.
     for (var p = 0; p < 90 && !over(); p += 1) {
       set('--pad', ((p + 1) * 0.2).toFixed(2) + 'mm');
       if (over()) { set('--pad', (p * 0.2).toFixed(2) + 'mm'); break; }
