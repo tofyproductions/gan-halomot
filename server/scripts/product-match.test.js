@@ -512,6 +512,149 @@ async function main() {
     eq([good.scanned, good.failed_chunks, good.error], [40, 0, null], '9s הריצה הבאה סורקת רק את המקטע שנכשל');
   }
 
+  // ---------------------------------------------------------------- 10 -----
+  head('10 — יחידת בסיס במיזוג, כמויות לעריכה, התאמה ידנית מצטרפת, דחוי נשאר דחוי');
+  {
+    const c = require('../src/controllers/productMatch.controller');
+    const invoke = (fn, { body = {}, params = {}, query = {} } = {}) => new Promise((resolve, reject) => {
+      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(p) { resolve({ status: this.statusCode, body: p }); } };
+      fn({ body, params, query, user: { id: 'u1', role: 'system_admin', full_name: 'אורי' } }, res, (err) => (err ? reject(err) : resolve({ status: 500, body: null })));
+    });
+    const caught = async fn => { try { await fn(); return null; } catch (e) { return e; } };
+    const sup = [];
+    for (const n of ['P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W']) sup.push(await Supplier.create({ name: `ספק ${n}`, vat_rate: 1.18 }));
+    const [sP, sQ, sR, sS, sT, sU, sV, sW] = sup;
+    const p1 = await mk(sP._id, 'P1', 'קמח 1 ק"ג', 'שקית', 10);
+    const p2 = await mk(sQ._id, 'Q1', 'קמח 25 ק"ג', 'שק', 150);
+    const p3 = await mk(sR._id, 'R1', 'קמח', 'שקית', 9);
+    const p4 = await mk(sS._id, 'S1x', 'קמח לבן', 'שקית', 11);
+    const p1b = await mk(sP._id, 'P2', 'קמח מלא 1 ק"ג', 'שקית', 12);
+
+    // I5 — pack sizes after confirmation.
+    const G = await svc.manualMatch([String(p1._id), String(p2._id)], 'אורי');
+    const Gid = String(G._id);
+    const set = await svc.setPacks(Gid, { pack_qty: { [String(p1._id)]: 1, [String(p2._id)]: '25' }, base_unit: 'ק"ג' });
+    eq([set.base_unit, set.products.map(p => p.pack_qty)], ['ק"ג', [1, 25]], '10a setPacks שומר כמויות ויחידה');
+    const cmp = (await svc.comparisonFor(String(sP._id)))[String(p1._id)][0];
+    eq([cmp.my_per_unit_price, cmp.per_unit_price], [Number((11.8 / 1).toFixed(4)), Number((177 / 25).toFixed(4))], '10b וההשוואה ליחידה משתנה בהתאם');
+    for (const [bad, label] of [[-1, 'שלילי'], ['abc', 'טקסט'], [NaN, 'NaN'], [Infinity, 'אינסוף'], [true, 'בוליאני']]) {
+      const e = await caught(() => svc.setPacks(Gid, { pack_qty: { [String(p1._id)]: bad } }));
+      eq(e && [e.status, e.message], [400, 'כמות באריזה חייבת להיות מספר אי-שלילי'], `10c ${label} → 400`);
+    }
+    eq((await ProductMatch.findById(Gid).lean()).products.map(p => p.pack_qty), [1, 25], '10d והקבוצה לא השתנתה');
+    const viaRoute = await invoke(c.packs, { params: { id: Gid }, body: { pack_qty: { [String(p1._id)]: -3 } } });
+    eq(viaRoute.status, 400, '10e גם דרך הנתיב — 400');
+    const okRoute = await invoke(c.packs, { params: { id: Gid }, body: { pack_qty: { [String(p1._id)]: null } } });
+    eq([okRoute.status, okRoute.body.match.products[0].pack_qty], [200, null], '10f null = לא ידוע, מותר');
+    await svc.setPacks(Gid, { pack_qty: { [String(p1._id)]: 1 } });
+    const routesSrc = require('fs').readFileSync(require.resolve('../src/routes/product.routes'), 'utf8');
+    ok(/matches\/:id\/packs'[^\n]*adminOnly/.test(routesSrc), '10g הנתיב packs למנהל מערכת בלבד');
+
+    // Confirm validates the same way.
+    const prNaN = await ProductMatch.create({
+      products: [{ product_id: p3._id, supplier_id: sR._id, pack_qty: 1 }, { product_id: p4._id, supplier_id: sS._id, pack_qty: 1 }],
+      base_unit: 'ק"ג', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(p3._id, p4._id),
+    });
+    const eNaN = await caught(() => svc.confirmMatch(prNaN._id, { pack_qty: { [String(p3._id)]: 'x' } }));
+    eq(eNaN && eNaN.status, 400, '10h אישור עם כמות לא מספרית — 400');
+    eq((await ProductMatch.findById(prNaN._id).lean()).status, 'proposed', '10i וההצעה נשארה ממתינה');
+    await ProductMatch.deleteOne({ _id: prNaN._id });
+
+    // I4 — a proposal in another unit cannot join a group.
+    const prLitre = await ProductMatch.create({
+      products: [{ product_id: p2._id, supplier_id: sQ._id, pack_qty: 25 }, { product_id: p3._id, supplier_id: sR._id, pack_qty: 1 }],
+      base_unit: 'ליטר', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(p2._id, p3._id),
+    });
+    const gBefore = await ProductMatch.findById(Gid).lean();
+    const eUnit = await caught(() => svc.confirmMatch(prLitre._id, { decided_by: 'אורי' }));
+    eq(eUnit && [eUnit.status, eUnit.message], [400, 'הקבוצה נמדדת ב-ק"ג'], '10j יחידה אחרת — 400 עם יחידת הקבוצה');
+    eq(await ProductMatch.findById(Gid).lean(), gBefore, '10k הקבוצה לא השתנתה');
+    eq((await ProductMatch.findById(prLitre._id).lean()).status, 'proposed', '10l וההצעה נשארה ממתינה');
+
+    // Review shows which product already sits in a group, and in which unit.
+    const rv = await invoke(c.review);
+    const shown = rv.body.proposed.find(m => String(m.id) === String(prLitre._id));
+    const p2Shown = shown.products.find(p => String(p.id) === String(p2._id));
+    const p3Shown = shown.products.find(p => String(p.id) === String(p3._id));
+    eq([String(p2Shown.existing_group?.id), p2Shown.existing_group?.base_unit, p3Shown.existing_group], [Gid, 'ק"ג', null], '10m בסקירה: "כבר בקבוצה (ק"ג)"');
+
+    // Overriding the unit to the group's own lets it join.
+    const joined = await svc.confirmMatch(prLitre._id, { base_unit: 'ק"ג', pack_qty: { [String(p3._id)]: 1 }, decided_by: 'אורי' });
+    eq([String(joined._id), joined.products.length], [Gid, 3], '10n עם היחידה של הקבוצה — מצטרף');
+
+    // A proposal with no unit joins, but never overwrites a member's pack size.
+    const prNoUnit = await ProductMatch.create({
+      products: [{ product_id: p1._id, supplier_id: sP._id, pack_qty: 999 }, { product_id: p4._id, supplier_id: sS._id, pack_qty: 1 }],
+      base_unit: '', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(p1._id, p4._id),
+    });
+    const joined2 = await svc.confirmMatch(prNoUnit._id, { decided_by: 'אורי' });
+    const p1Member = joined2.products.find(p => String(p.product_id) === String(p1._id));
+    eq([joined2.products.length, p1Member.pack_qty, joined2.base_unit], [4, 1, 'ק"ג'], '10o הצעה בלי יחידה מצטרפת בלי לדרוס כמות');
+
+    // I6 — a match by hand of a product already in a group joins that group.
+    const p5 = await mk(sT._id, 'T5', 'קמח 5 ק"ג', 'שק', 40);
+    const man = await svc.manualMatch([String(p1._id), String(p5._id)], 'אורי');
+    eq([String(man._id), man.products.length], [Gid, 5], '10p התאמה ידנית הצטרפה לקבוצה הקיימת');
+    eq(await ProductMatch.countDocuments({ status: 'confirmed', merged_into: null, 'products.product_id': p1._id }), 1, '10q קבוצה חיה אחת בלבד');
+    const eConflict = await caught(() => svc.manualMatch([String(p2._id), String(p1b._id)], 'אורי'));
+    eq(eConflict && eConflict.status, 400, '10r מוצר שני של אותו ספק לקבוצה — 400');
+    eq(await ProductMatch.countDocuments({ pair_key: ProductMatch.pairKey(p2._id, p1b._id) }), 0, '10s ושום מסמך לא נוצר');
+    const three = [await mk(sU._id, 'U1', 'סוכר', 'שק', 5), await mk(sV._id, 'V1', 'סוכר', 'שק', 5), await mk(sW._id, 'W1', 'סוכר', 'שק', 5)];
+    const man3 = await svc.manualMatch(three.map(p => String(p._id)), 'אורי');
+    eq(man3.products.length, 3, '10t שלושה מוצרים ביד — קבוצה אחת של שלושה');
+    eq(await ProductMatch.countDocuments({ status: 'confirmed', merged_into: null, 'products.product_id': three[2]._id }), 1, '10u ולא שתי קבוצות');
+
+    // I7 — a rejected proposal cannot be confirmed; a match by hand brings it back.
+    const r1 = await mk(sU._id, 'U2', 'מלח', 'שקית', 2);
+    const r2p = await mk(sV._id, 'V2', 'מלח', 'שקית', 2);
+    const prRej = await ProductMatch.create({
+      products: [{ product_id: r1._id, supplier_id: sU._id, pack_qty: 1 }, { product_id: r2p._id, supplier_id: sV._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(r1._id, r2p._id),
+    });
+    await svc.rejectMatch(prRej._id, 'אורי');
+    const eRej = await caught(() => svc.confirmMatch(prRej._id, { decided_by: 'אורי' }));
+    eq(eRej && [eRej.status, eRej.message], [409, 'ההתאמה נדחתה — צור התאמה ידנית כדי להחזיר אותה'], '10v אישור של דחוי — 409');
+    eq((await ProductMatch.findById(prRej._id).lean()).status, 'rejected', '10w ונשאר דחוי');
+    const back = await svc.manualMatch([String(r1._id), String(r2p._id)], 'אורי');
+    eq([String(back._id), back.status, back.proposed_by], [String(prRej._id), 'confirmed', 'user'], '10x התאמה ידנית מחזירה אותו');
+
+    // A proposal whose product was removed disappears from the review and is rejected.
+    const gone = await mk(sW._id, 'W9', 'שמן', 'בקבוק', 9);
+    const keep = await mk(sT._id, 'T9', 'שמן', 'בקבוק', 9);
+    const prGone = await ProductMatch.create({
+      products: [{ product_id: gone._id, supplier_id: sW._id, pack_qty: 1 }, { product_id: keep._id, supplier_id: sT._id, pack_qty: 1 }],
+      base_unit: 'ליטר', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(gone._id, keep._id),
+    });
+    await Product.updateOne({ _id: gone._id }, { $set: { is_active: false } });
+    const rv2 = await invoke(c.review);
+    ok(!rv2.body.proposed.some(m => String(m.id) === String(prGone._id)), '10y הצעה עם מוצר שהוסר לא מוצגת');
+    const goneDb = await ProductMatch.findById(prGone._id).lean();
+    eq([goneDb.status, goneDb.decided_by, goneDb.reason], ['rejected', 'system', 'מוצר הוסר'], '10z ונדחתה בידי המערכת');
+
+    // Rejection cascades two levels: H3 → H2 → H1.
+    const hs = [];
+    for (let i = 0; i < 6; i++) hs.push(await Supplier.create({ name: `ספק H${i}`, vat_rate: 1.18 }));
+    const hp = [];
+    for (let i = 0; i < 6; i++) hp.push(await mk(hs[i]._id, `H${i}`, `מוצר H${i}`, 'יחידה', 3));
+    const H1 = await svc.manualMatch([String(hp[0]._id), String(hp[1]._id)], 'אורי');
+    await new Promise(r => setTimeout(r, 5));
+    const H2 = await svc.manualMatch([String(hp[2]._id), String(hp[3]._id)], 'אורי');
+    await new Promise(r => setTimeout(r, 5));
+    const H3 = await svc.manualMatch([String(hp[4]._id), String(hp[5]._id)], 'אורי');
+    const link = (x, y) => ProductMatch.create({
+      products: [{ product_id: hp[x]._id, supplier_id: hs[x]._id, pack_qty: 1 }, { product_id: hp[y]._id, supplier_id: hs[y]._id, pack_qty: 1 }],
+      base_unit: 'יחידה', status: 'proposed', confidence: 0.9, pair_key: ProductMatch.pairKey(hp[x]._id, hp[y]._id),
+    });
+    const l23 = await link(3, 4);
+    await svc.confirmMatch(l23._id, { decided_by: 'אורי' }); // H3 → H2
+    const l12 = await link(1, 2);
+    await svc.confirmMatch(l12._id, { decided_by: 'אורי' }); // H2 → H1
+    eq(String((await ProductMatch.findById(H3._id).lean()).merged_into), String(H2._id), '10aa H3 נספגה ב-H2');
+    await svc.unlinkMatch(String(H1._id), 'אורי');
+    const statuses = await Promise.all([H2, H3, l23, l12].map(d => ProductMatch.findById(d._id).lean().then(x => x.status)));
+    eq(statuses, ['rejected', 'rejected', 'rejected', 'rejected'], '10ab ביטול H1 דוחה גם את מה שנספג בדרגה שנייה');
+  }
+
   // __TASKS_APPEND_HERE_3__
 
   console.log(`\n${failures === 0 ? '🎉' : '💥'} ${checks - failures}/${checks} עברו`);

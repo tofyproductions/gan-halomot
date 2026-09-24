@@ -326,8 +326,34 @@ function _resetThrottle() {
 }
 function _setCooldownForTests(ms) { cooldownMs = ms; }
 
-function notFound() { const e = new Error('התאמה לא נמצאה'); e.status = 404; return e; }
-function supplierConflict() { const e = new Error('בקבוצה כבר יש מוצר של הספק הזה'); e.status = 400; return e; }
+function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
+function notFound() { return httpError(404, 'התאמה לא נמצאה'); }
+function supplierConflict() { return httpError(400, 'בקבוצה כבר יש מוצר של הספק הזה'); }
+
+/**
+ * A pack size from a request: null (unknown) or a finite number ≥ 0. Anything
+ * else is refused — a NaN here would turn every per-unit price into nonsense.
+ */
+function packValue(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' && v.trim() === '') return null;
+  if (typeof v === 'boolean' || (typeof v !== 'number' && typeof v !== 'string')) throw httpError(400, 'כמות באריזה חייבת להיות מספר אי-שלילי');
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) throw httpError(400, 'כמות באריזה חייבת להיות מספר אי-שלילי');
+  return n;
+}
+
+/** `{ productId: value }` → a Map of validated values. Throws before anything is written. */
+function packMap(pack_qty) {
+  if (pack_qty === undefined || pack_qty === null) return new Map();
+  if (typeof pack_qty !== 'object' || Array.isArray(pack_qty)) throw httpError(400, 'כמות באריזה חייבת להיות מספר אי-שלילי');
+  const out = new Map();
+  for (const [k, v] of Object.entries(pack_qty)) {
+    if (v === undefined) continue;
+    out.set(String(k), packValue(v));
+  }
+  return out;
+}
 
 /** The confirmed, un-merged group holding this product, if any. */
 async function confirmedGroupOf(productId) {
@@ -347,18 +373,23 @@ async function confirmedGroupOf(productId) {
  * pending addition (from an absorbed group or from the proposal itself) is
  * checked against a product of the same supplier already destined for the
  * target, under a different product id — if found, nothing is written.
+ *
+ * A group is measured in ONE base unit. A proposal (or an absorbed group) in a
+ * different unit is refused before any write; a proposal with no unit at all
+ * joins, but never overwrites a member's pack size.
  */
 async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = {}) {
   const m = await ProductMatch.findById(id);
   if (!m) throw notFound();
   if (m.status === 'confirmed') return m.merged_into ? ProductMatch.findById(m.merged_into) : m;
+  if (m.status === 'rejected') throw httpError(409, 'ההתאמה נדחתה — צור התאמה ידנית כדי להחזיר אותה');
 
+  const packs = packMap(pack_qty);
   const now = new Date();
   for (const p of m.products) {
-    const v = pack_qty[String(p.product_id)];
-    if (v !== undefined) p.pack_qty = v === null || v === '' ? null : Number(v);
+    if (packs.has(String(p.product_id))) p.pack_qty = packs.get(String(p.product_id));
   }
-  if (base_unit !== undefined) m.base_unit = base_unit;
+  if (base_unit !== undefined && base_unit !== null) m.base_unit = String(base_unit).trim();
 
   // Every DISTINCT confirmed group already holding one of this proposal's products.
   const seen = new Map();
@@ -378,7 +409,15 @@ async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = 
   const otherGroups = groups.slice(1);
   const hasProduct = (list, productId) => list.some(t => String(t.product_id) === String(productId));
 
-  // Dry run first: validate every pending addition before touching anything.
+  // Dry run first: validate the unit and every pending addition before touching anything.
+  const groupUnit = target.base_unit || otherGroups.map(g => g.base_unit).find(Boolean) || '';
+  if (groupUnit) {
+    for (const u of [...otherGroups.map(g => g.base_unit), m.base_unit]) {
+      if (u && u !== groupUnit) throw httpError(400, `הקבוצה נמדדת ב-${groupUnit}`);
+    }
+  }
+  const sameUnit = !!m.base_unit; // after the check above, a non-empty unit is the group's unit
+
   const bySupplier = new Map(target.products.map(t => [String(t.supplier_id), String(t.product_id)]));
   const absorbedAdditions = [];
   for (const g of otherGroups) {
@@ -403,13 +442,14 @@ async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = 
   }
   for (const g of otherGroups) { g.merged_into = target._id; await g.save(); }
 
-  // Then the proposal's own products join the target, as before.
+  // Then the proposal's own products join the target. An existing member's pack
+  // size is only replaced by a proposal measured in the group's own unit.
   for (const p of m.products) {
     const existing = target.products.find(t => String(t.product_id) === String(p.product_id));
-    if (existing) { if (p.pack_qty !== null) existing.pack_qty = p.pack_qty; }
+    if (existing) { if (p.pack_qty !== null && sameUnit) existing.pack_qty = p.pack_qty; }
     else target.products.push({ product_id: p.product_id, supplier_id: p.supplier_id, pack_qty: p.pack_qty });
   }
-  if (m.base_unit && !target.base_unit) target.base_unit = m.base_unit;
+  if (!target.base_unit) target.base_unit = groupUnit || m.base_unit || '';
   target.decided_by = decided_by; target.decided_at = now;
   await target.save();
   m.status = 'confirmed'; m.merged_into = target._id; m.decided_by = decided_by; m.decided_at = now;
@@ -417,14 +457,40 @@ async function confirmMatch(id, { pack_qty = {}, base_unit, decided_by = '' } = 
   return target;
 }
 
-/** proposed/confirmed → rejected. Anything absorbed into this group (merged_into) is rejected too. */
+/**
+ * Pack sizes and base unit of a confirmed group, after the fact — a pack the
+ * model misread or a match made by hand is fixed here.
+ */
+async function setPacks(id, { pack_qty, base_unit } = {}) {
+  const m = await ProductMatch.findById(id);
+  if (!m) throw notFound();
+  if (m.status !== 'confirmed' || m.merged_into) throw httpError(400, 'אפשר לעדכן כמויות רק בהתאמה מאושרת');
+  const packs = packMap(pack_qty);
+  for (const p of m.products) {
+    if (packs.has(String(p.product_id))) p.pack_qty = packs.get(String(p.product_id));
+  }
+  if (base_unit !== undefined && base_unit !== null) m.base_unit = String(base_unit).trim();
+  await m.save();
+  return m;
+}
+
+/**
+ * proposed/confirmed → rejected. Anything absorbed into this group
+ * (merged_into) is rejected too, and what was absorbed into THOSE — a group
+ * that absorbed another before being absorbed itself.
+ */
 async function rejectMatch(id, decided_by = '') {
   const m = await ProductMatch.findById(id);
   if (!m) throw notFound();
   const now = new Date();
   m.status = 'rejected'; m.decided_by = decided_by; m.decided_at = now;
   await m.save();
-  await ProductMatch.updateMany({ merged_into: m._id }, { $set: { status: 'rejected', decided_by, decided_at: now } });
+  const set = { $set: { status: 'rejected', decided_by, decided_at: now } };
+  const level1 = (await ProductMatch.find({ merged_into: m._id, status: { $ne: 'rejected' } }).select('_id').lean()).map(d => d._id);
+  if (level1.length) {
+    await ProductMatch.updateMany({ _id: { $in: level1 } }, set);
+    await ProductMatch.updateMany({ merged_into: { $in: level1 }, status: { $ne: 'rejected' } }, set);
+  }
   return m;
 }
 
@@ -433,27 +499,60 @@ async function unlinkMatch(id, decided_by = '') {
   return rejectMatch(id, decided_by);
 }
 
-/** Two (or more) products the admin says are the same. Confirmed at once. */
+/**
+ * One pair by hand: a `proposed` doc (new, or the pair's old doc revived)
+ * confirmed through confirmMatch, so a product already in a group brings the
+ * other one into that group. On failure the new doc is deleted and a revived
+ * one gets its old state back.
+ */
+async function manualPair(aId, bId, decided_by) {
+  const pair_key = ProductMatch.pairKey(aId, bId);
+  let doc = await ProductMatch.findOne({ pair_key });
+  let restore = null;
+  if (doc) {
+    restore = { status: doc.status, merged_into: doc.merged_into, proposed_by: doc.proposed_by, confidence: doc.confidence };
+    doc.status = 'proposed'; doc.merged_into = null; doc.proposed_by = 'user'; doc.confidence = 1;
+    await doc.save();
+  } else {
+    const products = await Product.find({ _id: { $in: [aId, bId] } }).select('supplier_id').lean();
+    const byId = new Map(products.map(p => [String(p._id), p]));
+    doc = await ProductMatch.create({
+      products: [aId, bId].map(i => ({ product_id: byId.get(String(i))._id, supplier_id: byId.get(String(i)).supplier_id, pack_qty: null })),
+      status: 'proposed', proposed_by: 'user', confidence: 1, merged_into: null, pair_key,
+    });
+  }
+  try {
+    return await confirmMatch(doc._id, { decided_by });
+  } catch (err) {
+    if (restore) await ProductMatch.updateOne({ _id: doc._id }, { $set: restore });
+    else await ProductMatch.deleteOne({ _id: doc._id });
+    throw err;
+  }
+}
+
+/** Two (or more) products the admin says are the same. Confirmed at once, joining any group they are in. */
 async function manualMatch(productIds, decided_by = '') {
   const ids = [...new Set((productIds || []).map(String))];
-  if (ids.length < 2) { const e = new Error('נדרשים לפחות שני מוצרים'); e.status = 400; throw e; }
+  if (ids.length < 2) throw httpError(400, 'נדרשים לפחות שני מוצרים');
   const products = await Product.find({ _id: { $in: ids } }).select('supplier_id').lean();
-  if (products.length !== ids.length) { const e = new Error('מוצר לא נמצא'); e.status = 404; throw e; }
+  if (products.length !== ids.length) throw httpError(404, 'מוצר לא נמצא');
   const suppliers = new Set(products.map(p => String(p.supplier_id)));
-  if (suppliers.size !== products.length) { const e = new Error('התאמה היא בין ספקים שונים — מוצר אחד לכל ספק'); e.status = 400; throw e; }
-  const pair_key = ids.length === 2 ? ProductMatch.pairKey(ids[0], ids[1]) : null;
-  const existing = pair_key ? await ProductMatch.findOne({ pair_key }) : null;
-  if (existing) {
-    existing.status = 'confirmed'; existing.merged_into = null; existing.proposed_by = 'user';
-    existing.decided_by = decided_by; existing.decided_at = new Date();
-    await existing.save();
-    return existing;
+  if (suppliers.size !== products.length) throw httpError(400, 'התאמה היא בין ספקים שונים — מוצר אחד לכל ספק');
+
+  // Before creating anything: would the live groups of these products, joined, hold a supplier twice?
+  const live = await ProductMatch.find({ status: 'confirmed', merged_into: null, 'products.product_id': { $in: ids } }).lean();
+  const bySupplier = new Map(products.map(p => [String(p.supplier_id), String(p._id)]));
+  for (const g of live) {
+    for (const t of g.products) {
+      const holder = bySupplier.get(String(t.supplier_id));
+      if (holder && holder !== String(t.product_id)) throw supplierConflict();
+      bySupplier.set(String(t.supplier_id), String(t.product_id));
+    }
   }
-  return ProductMatch.create({
-    products: products.map(p => ({ product_id: p._id, supplier_id: p.supplier_id, pack_qty: null })),
-    status: 'confirmed', proposed_by: 'user', confidence: 1, decided_by, decided_at: new Date(),
-    ...(pair_key ? { pair_key } : {}),
-  });
+
+  let group = await manualPair(ids[0], ids[1], decided_by);
+  for (const next of ids.slice(2)) group = await manualPair(ids[0], next, decided_by);
+  return group;
 }
 
 function perUnit(price, packQty) {
@@ -505,6 +604,6 @@ async function comparisonFor(supplierId) {
 
 module.exports = {
   fingerprintOf, runScan, startScan, throttledScan, isConfigured, _resetThrottle, _setCooldownForTests,
-  confirmMatch, rejectMatch, unlinkMatch, manualMatch, comparisonFor,
+  confirmMatch, setPacks, rejectMatch, unlinkMatch, manualMatch, comparisonFor,
   MODEL, MIN_CONFIDENCE, SCAN_COOLDOWN_MS, LAST_SCAN_KEY, CHUNK, NOT_CONFIGURED, BUSY,
 };

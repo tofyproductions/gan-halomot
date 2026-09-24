@@ -16,6 +16,7 @@ router.get('/matches/review', adminOnly, m.review);
 router.post('/matches/scan', adminOnly, m.scan);
 router.post('/matches', adminOnly, m.create);
 router.post('/matches/:id/confirm', adminOnly, m.confirm);
+router.post('/matches/:id/packs', adminOnly, m.packs);
 router.post('/matches/:id/reject', adminOnly, m.reject);
 router.post('/matches/:id/unlink', adminOnly, m.unlink);
 
