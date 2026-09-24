@@ -1318,6 +1318,15 @@ async function childGantt(req, res) {
             color: c.color || '',
           }))
           .filter((c) => c.day_index >= 0 && c.day_index <= 5),
+        // A party, a trip, a dress code: the one thing a parent must not miss.
+        special_days: (w.special_days || [])
+          .map((s) => ({
+            day_index: s.day_index + offset,
+            title: s.title || '',
+            note: s.note || '',
+            color: s.color || '',
+          }))
+          .filter((s) => s.day_index >= 0 && s.day_index <= 5 && s.title),
       };
     }),
   });

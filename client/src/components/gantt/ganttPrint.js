@@ -110,10 +110,36 @@ export function buildGanttPrintHtml({
      * starting at Monday covers Tuesday two rows down, but nothing in
      * Tuesday's column carries a rowspan — the cell that does is in Monday's.
      */
+    const days = [0, 1, 2, 3, 4, 5].map((di) => {
+      const d = dateOf(di);
+      return { di, d, hol: isHoliday(d), shut: isClosed(d), own: inMonth(d) };
+    });
+    const hasWork = (di) => rows.some(r => contentAt(r.key, di));
+
+    // A closed column collapses to one cell — unless work is already written
+    // in it, which must stay visible.
+    const collapsed = new Set(days.filter(x => x.shut && !hasWork(x.di)).map(x => x.di));
+    // A special day — a party, a dress code — is one cell down the column
+    // too: a title and a line under it. A closure still wins over it.
+    const specialAt = (di) => (week.special_days || [])
+      .find(s => s.day_index === di - offset && String(s.title || '').trim()) || null;
+    const specialCols = new Set(days.filter(x => !x.shut && specialAt(x.di)).map(x => x.di));
+    // Columns no ordinary cell may be drawn in, or reach into.
+    const blocked = new Set([...collapsed, ...specialCols]);
+    // A merge stops short of a closed or special column: that column is one
+    // statement, and nothing reaches into it. Clamped here, once, so the
+    // cells it swallows and the colspan it prints are the same span.
+    const clampedCs = (rowKey, di) => {
+      let cs = Math.min(spanAt(rowKey, di, 'col_span'), 6 - di);
+      for (let dd = di + 1; dd < di + cs; dd += 1) { if (blocked.has(dd)) { cs = dd - di; break; } }
+      return cs;
+    };
+
     const covered = new Set();
     rows.forEach((r, rowIdx) => {
       for (let di = 0; di < 6; di += 1) {
-        const cs = spanAt(r.key, di, 'col_span');
+        if (blocked.has(di)) continue;
+        const cs = clampedCs(r.key, di);
         const rs = spanAt(r.key, di, 'row_span');
         if (cs === 1 && rs === 1) continue;
         for (let rr = rowIdx; rr < Math.min(rowIdx + rs, rows.length); rr += 1) {
@@ -125,10 +151,6 @@ export function buildGanttPrintHtml({
       }
     });
 
-    const days = [0, 1, 2, 3, 4, 5].map((di) => {
-      const d = dateOf(di);
-      return { di, d, hol: isHoliday(d), shut: isClosed(d), own: inMonth(d) };
-    });
     const own = days.filter(x => x.own);
     const range = own.length ? `${dm(own[0].d)} – ${dm(own[own.length - 1].d)}` : '';
 
@@ -142,7 +164,6 @@ export function buildGanttPrintHtml({
     // A week the gan is closed for every day of: one line, and the page gets
     // the rest of the block back. A closed day that already has work written
     // in it must stay visible, so that week is not collapsed.
-    const hasWork = (di) => rows.some(r => contentAt(r.key, di));
     if (own.length && own.every(x => x.shut && !hasWork(x.di))) {
       const h = own[0].shut;
       return `<tr class="closedwk">${band(1)}<td class="rl"></td>
@@ -155,26 +176,22 @@ export function buildGanttPrintHtml({
     const nRows = printed.length;
 
     // The date strip: the date under each day, and what the day is. One
-    // colour for every date, so the strip reads as the week's ruler; a holiday
-    // is named inside it, not painted over it.
+    // colour for every working day, so the strip reads as the week's ruler;
+    // a day the gan is closed is painted, so it is told apart at a glance.
     const strip = days.map(({ d, hol, shut, own: isOwn }) => {
-      const cls = ['ds', isOwn ? '' : 'borrowed'].filter(Boolean).join(' ');
+      const cls = ['ds', shut ? 'shut' : hol ? 'short' : '', isOwn ? '' : 'borrowed'].filter(Boolean).join(' ');
       const note = hol
         ? `<span class="hn">${esc(hol.emoji || '')} ${esc(hol.name)}${!shut && hol.end_time ? ` · עד ${esc(hol.end_time)}` : ''}</span>`
         : '';
       return `<td class="${cls}"><b>${dm(d)}</b>${note}</td>`;
     }).join('');
 
-    // A closed column collapses to one cell — unless work is already written
-    // in it, which must stay visible.
-    const collapsed = new Set(days.filter(x => x.shut && !hasWork(x.di)).map(x => x.di));
-
     const body = printed.map((row, printedIdx) => {
       const rowIdx = rows.indexOf(row);
       const t = tintOf(row.key);
       const tds = days.map(({ di, shut, own: isOwn }) => {
         // Swallowed by a merge that starts above or to the right of here.
-        if (!collapsed.has(di) && covered.has(`${rowIdx}|${di}`)) return '';
+        if (!blocked.has(di) && covered.has(`${rowIdx}|${di}`)) return '';
 
         if (collapsed.has(di)) {
           if (printedIdx > 0) return '';
@@ -182,6 +199,15 @@ export function buildGanttPrintHtml({
             <div class="ce">${esc(shut.emoji || '')}</div>
             <div class="cn">${esc(shut.name)}</div>
             <div class="cnote">הגן סגור</div>
+          </td>`;
+        }
+
+        if (specialCols.has(di)) {
+          if (printedIdx > 0) return '';
+          const sp = specialAt(di);
+          return `<td class="special" rowspan="${nRows}" style="background:${esc(sp.color || '#fef9c3')} !important">
+            <div class="st">${esc(sp.title)}</div>
+            ${String(sp.note || '').trim() ? `<div class="sn">${esc(sp.note)}</div>` : ''}
           </td>`;
         }
 
@@ -207,7 +233,7 @@ export function buildGanttPrintHtml({
         // A merge is clamped to what is actually on this sheet: a row deleted
         // after the merge was made would leave a rowspan reaching past the
         // last row, and an overrunning rowspan pulls the whole table apart.
-        const cs = Math.min(spanAt(row.key, di, 'col_span'), 6 - di);
+        const cs = clampedCs(row.key, di);
         const rs = Math.min(spanAt(row.key, di, 'row_span'), nRows - printedIdx);
         const span = `${cs > 1 ? ` colspan="${cs}"` : ''}${rs > 1 ? ` rowspan="${rs}"` : ''}`;
         const cls = ['c', row.key === 'meeting' ? 'lead' : '', di === 5 ? 'fri' : '', isOwn ? '' : 'borrowed',
@@ -292,7 +318,10 @@ export function buildGanttPrintHtml({
   tr.strip td.ds { background: #DCE6F0 !important; text-align: center; padding: 0.4mm 1mm;
                    font-size: calc(var(--small) * var(--k) * 1.15); line-height: 1.2; color: #1B3556; font-weight: 800; }
   tr.strip td.ds .hn { display: block; font-size: calc(var(--small) * var(--k)); color: ${G.note.on}; }
-  tr.strip td.ds.borrowed { color: #7F94AB; }
+  tr.strip td.ds.short { background: ${G.cell.holiday} !important; color: ${G.note.on}; }
+  tr.strip td.ds.shut { background: ${G.day.closed.bg} !important; color: ${G.day.closed.on}; }
+  tr.strip td.ds.shut .hn { color: ${G.day.closed.on}; }
+  tr.strip td.ds.borrowed:not(.shut):not(.short) { color: #7F94AB; }
   tr.strip th.corner { background: #DCE6F0 !important; }
 
   th.rl { font-weight: 800; text-align: center; font-size: calc(var(--head) * var(--k)); padding: 0.5mm;
@@ -313,6 +342,10 @@ export function buildGanttPrintHtml({
                 background: ${G.cell.friday} !important; }
   td.c.strong .fp { font-size: calc(var(--cell) * var(--k) * 0.95); font-weight: 700; line-height: 1.3; margin-top: 0.4mm; }
   td.c.shutc { background: ${G.cell.holiday} !important; color: ${G.note.on}; }
+  /* A special day: the title read first, the line under it read second. */
+  td.special { text-align: center; vertical-align: middle; padding: 1.5mm; }
+  td.special .st { font-weight: 800; font-size: calc(var(--head) * var(--k) * 1.3); line-height: 1.25; }
+  td.special .sn { font-weight: 400; font-size: calc(var(--cell) * var(--k)); margin-top: 1mm; line-height: 1.3; }
   td.closedcol { background: ${G.cell.holiday} !important; text-align: center; }
   td.closedcol .ce { font-size: calc(var(--head) * var(--k) * 1.6); line-height: 1.2; }
   td.closedcol .cn { font-size: calc(var(--head) * var(--k) * 1.3); font-weight: 800; color: ${G.note.on}; line-height: 1.2; }

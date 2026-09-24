@@ -367,6 +367,10 @@ function normalizeWeeks(weeks) {
         // A Saturday cell cannot exist on a ראשון–שישי grid. It was never drawn
         // and never writable, so there is nothing in it to lose.
         .filter((c) => c.day_index >= 0 && c.day_index <= 5),
+      // A special day is anchored the same way a cell is, and moves with it.
+      special_days: (w.special_days || [])
+        .map((s) => ({ ...(s.toObject ? s.toObject() : s), day_index: s.day_index + offset }))
+        .filter((s) => s.day_index >= 0 && s.day_index <= 5),
     };
   });
 }
@@ -482,9 +486,23 @@ async function copy(req, res, next) {
         copied += 1;
       }
 
+      // A special day travels with its week, by position like everything
+      // else — unless the target already has one on that day, or is closed.
+      const specials = [...(dst.special_days || [])];
+      for (const sp of (src.special_days || [])) {
+        const day = new Date(sunday);
+        day.setDate(day.getDate() + sp.day_index);
+        if (closedOn(day)) continue;
+        const at = specials.findIndex(x => x.day_index === sp.day_index);
+        if (at >= 0 && !overwrite) continue;
+        const next = { day_index: sp.day_index, title: sp.title, note: sp.note || '', color: sp.color || '' };
+        if (at >= 0) specials[at] = next; else specials.push(next);
+      }
+
       return {
         ...dst,
         cells,
+        special_days: specials,
         // The subject is the point of the week; carry it unless the target
         // already has one of its own.
         topic: (String(dst.topic || '').trim() && !overwrite) ? dst.topic : (src.topic || dst.topic || ''),

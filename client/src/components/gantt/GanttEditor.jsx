@@ -20,6 +20,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import GroupIcon from '@mui/icons-material/Group';
 import WhatsAppIcon from '@mui/icons-material/WhatsApp';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import StarIcon from '@mui/icons-material/Star';
 import { DndContext, useDraggable, useDroppable, DragOverlay } from '@dnd-kit/core';
 import { toast } from 'react-toastify';
 import api, { apiError } from '../../api/client';
@@ -149,6 +150,7 @@ export default function GanttEditor() {
   const [classroomCategory, setClassroomCategory] = useState('');
   const [classSessions, setClassSessions] = useState([]); // read-only reflection from מעקב חוגים
   const [colorMenu, setColorMenu] = useState({ anchor: null, weekIdx: null, rowKey: null, dayIdx: null });
+  const [specialDlg, setSpecialDlg] = useState(null);
   const [showBank, setShowBank] = useState(false);
   const [showContentBank, setShowContentBank] = useState(false);
   const [showCopy, setShowCopy] = useState(false);
@@ -280,6 +282,41 @@ export default function GanttEditor() {
       if (idx >= 0) cells[idx] = updated; else cells.push(updated);
       weeks[wk] = { ...weeks[wk], cells };
       return { ...prev, weeks };
+    });
+  };
+
+  /**
+   * A special day — a party, a trip, "come in a white shirt" — is one
+   * statement down the whole column: a title, and a line under it. It lives
+   * on the week beside the cells, anchored by the same day_index, so it moves
+   * with them. The boxes under it keep whatever was typed; they are hidden
+   * while the day is special and come back when it is made ordinary again.
+   */
+  const specialAt = (wk, di) => (
+    (gantt?.weeks?.[wk]?.special_days || []).find(s => s.day_index === di) || null
+  );
+  const setSpecialDay = (wk, di, value) => {
+    setGantt(prev => {
+      const weeks = [...(prev.weeks || [])];
+      if (!weeks[wk]) return prev;
+      const list = (weeks[wk].special_days || []).filter(s => s.day_index !== di);
+      if (value) list.push({ day_index: di, ...value });
+      weeks[wk] = { ...weeks[wk], special_days: list };
+      return { ...prev, weeks };
+    });
+  };
+  const openSpecialDlg = (wk, di) => {
+    const week = gantt?.weeks?.[wk];
+    if (!week) return;
+    const cur = specialAt(wk, di);
+    // day_index is counted from the week's start_date, so the date is one add.
+    const d = new Date(week.start_date);
+    d.setDate(d.getDate() + di);
+    setSpecialDlg({
+      weekIdx: wk, dayIdx: di, exists: Boolean(cur),
+      title: cur?.title || '', note: cur?.note || '',
+      color: cur?.color || COLOR.ganttCell[0].value,
+      dateLabel: `יום ${DAY_NAMES[d.getDay()] || ''} ${d.getDate()}.${d.getMonth() + 1}`,
     });
   };
 
@@ -992,6 +1029,39 @@ export default function GanttEditor() {
                           // week's start_date, which is not always the Sunday
                           // this column sits under.
                           const si = di - offset;
+                          // A special day: one statement down the whole
+                          // column. Checked before the merge test, so a merge
+                          // reaching across the day cannot swallow it; a
+                          // closure still wins over it. Whatever was typed in the boxes under it
+                          // is kept, not shown, and comes back when the day
+                          // is made ordinary again.
+                          const special = specialAt(weekIdx, si);
+                          if (special && !isClosed(dd)) {
+                            if (rowIdx > 0) return null;
+                            const hiddenWork = rows.some(r => String(cellContentAt(weekIdx, r.key, si) || '').trim());
+                            return (
+                              <TableCell key={di} rowSpan={rows.length}
+                                onClick={() => canEdit && openSpecialDlg(weekIdx, si)}
+                                sx={{
+                                  bgcolor: special.color || COLOR.ganttCell[0].value, border: `1px solid ${COLOR.divider}`,
+                                  textAlign: 'center', verticalAlign: 'middle', p: 1.5,
+                                  cursor: canEdit ? 'pointer' : 'default',
+                                }}>
+                                <Box sx={{ fontSize: '1.05rem', fontWeight: 800, lineHeight: 1.3 }}>
+                                  <StarIcon sx={{ fontSize: 14, verticalAlign: '-2px', ml: 0.5, color: '#b45309' }} />
+                                  {special.title}
+                                </Box>
+                                {special.note && <Box sx={{ fontSize: '0.85rem', mt: 0.5, lineHeight: 1.4 }}>{special.note}</Box>}
+                                {hiddenWork && (
+                                  <Box sx={{ fontSize: '0.68rem', color: COLOR.text.disabled, mt: 1 }}>
+                                    התיבות של היום נשמרו ומוסתרות
+                                  </Box>
+                                )}
+                                {canEdit && <Box sx={{ fontSize: '0.68rem', color: COLOR.text.disabled, mt: 0.5 }}>לחיצה לעריכה</Box>}
+                              </TableCell>
+                            );
+                          }
+
                           if (isCellHidden(weekIdx, row.key, si)) return null;
                           const hol = isHoliday(dd);
                           const shut = isClosed(dd);
@@ -1138,6 +1208,13 @@ export default function GanttEditor() {
                                   </IconButton>
                                 </Tooltip>
                                 {canEdit && (
+                                  <Tooltip title="יום מיוחד — כותרת על כל היום">
+                                    <IconButton size="small" sx={{ p: '2px' }} onClick={e => { e.stopPropagation(); openSpecialDlg(weekIdx, si); }}>
+                                      <StarIcon sx={{ fontSize: 13, color: COLOR.text.disabled }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                                {canEdit && (
                                   <Tooltip title={picked ? 'הסירי מהבחירה' : 'סימון לאיחוד — סמני עוד תאים ואז לחצי "אחדי"'}>
                                     <IconButton size="small" sx={{ p: '2px' }} onClick={e => {
                                       e.stopPropagation();
@@ -1198,6 +1275,46 @@ export default function GanttEditor() {
             </MenuItem>
           ))}
         </Menu>
+
+        {/* A special day: a title on the whole column, and a line under it. */}
+        <Dialog open={Boolean(specialDlg)} onClose={() => setSpecialDlg(null)} fullWidth maxWidth="xs" dir="rtl">
+          <DialogTitle sx={{ fontWeight: 800 }}>יום מיוחד · {specialDlg?.dateLabel}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <TextField label="כותרת" autoFocus fullWidth placeholder="חגיגות ראש השנה"
+                value={specialDlg?.title || ''}
+                onChange={e => setSpecialDlg(d => ({ ...d, title: e.target.value }))} />
+              <TextField label="שורה מתחת (לא חובה)" fullWidth multiline maxRows={3} placeholder="יש להגיע בחולצה לבנה"
+                value={specialDlg?.note || ''}
+                onChange={e => setSpecialDlg(d => ({ ...d, note: e.target.value }))} />
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="caption" sx={{ color: COLOR.text.secondary }}>צבע:</Typography>
+                {COLOR.ganttCell.map(c => (
+                  <Box key={c.value} title={c.label} onClick={() => setSpecialDlg(d => ({ ...d, color: c.value }))}
+                    sx={{ width: 26, height: 26, borderRadius: 1, bgcolor: c.value, cursor: 'pointer',
+                      border: specialDlg?.color === c.value ? `2px solid ${COLOR.primary.light}` : '1px solid #ddd' }} />
+                ))}
+              </Stack>
+              <Typography variant="caption" sx={{ color: COLOR.text.secondary }}>
+                הכותרת תופיע על כל העמודה של היום — במסך, בהדפסה ובפורטל ההורים. מה שכתוב בתיבות של היום נשמר ומוסתר.
+              </Typography>
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            {specialDlg?.exists && (
+              <Button color="error" onClick={() => { setSpecialDay(specialDlg.weekIdx, specialDlg.dayIdx, null); setSpecialDlg(null); }}>
+                הסרת היום המיוחד
+              </Button>
+            )}
+            <Button onClick={() => setSpecialDlg(null)}>ביטול</Button>
+            <Button variant="contained" disabled={!String(specialDlg?.title || '').trim()} onClick={() => {
+              setSpecialDay(specialDlg.weekIdx, specialDlg.dayIdx, {
+                title: specialDlg.title.trim(), note: String(specialDlg.note || '').trim(), color: specialDlg.color || '',
+              });
+              setSpecialDlg(null);
+            }}>שמירה</Button>
+          </DialogActions>
+        </Dialog>
 
         <ShabbatParentPicker
           open={Boolean(parentPick)}

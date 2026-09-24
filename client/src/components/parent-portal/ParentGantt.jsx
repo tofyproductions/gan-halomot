@@ -71,14 +71,23 @@ export default function ParentGantt({ childId }) {
       {/* A day per card rather than a grid: a five-column table on a phone is
           a table nobody reads, and the parent's question is about one day. */}
       {DAYS.map((day, i) => {
-        const filled = rows
+        const special = (week.special_days || []).find((s) => s.day_index === i);
+        // A special day says one thing and hides the boxes under it, on the
+        // parent's phone exactly as on the gan's wall.
+        const filled = special ? [] : rows
           .map((r) => ({ label: r.label, cell: cellFor(r.key, i) }))
           .filter((x) => x.cell?.content);
-        if (!filled.length) return null;
+        if (!filled.length && !special) return null;
         return (
-          <Card key={day} variant="outlined" sx={{ borderRadius: 3 }}>
+          <Card key={day} variant="outlined" sx={{ borderRadius: 3, bgcolor: special?.color || undefined }}>
             <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
               <Typography sx={{ fontWeight: 800, mb: 0.5 }}>יום {day}</Typography>
+              {special && (
+                <Box sx={{ mb: filled.length ? 1 : 0 }}>
+                  <Typography sx={{ fontWeight: 800, fontSize: '1.05rem' }}>{special.title}</Typography>
+                  {special.note && <Typography variant="body2">{special.note}</Typography>}
+                </Box>
+              )}
               <Stack spacing={0.5}>
                 {filled.map(({ label, cell }) => (
                   <Stack key={label} direction="row" spacing={1} alignItems="baseline">

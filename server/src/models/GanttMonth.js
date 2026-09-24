@@ -23,6 +23,15 @@ const ganttWeekSchema = new mongoose.Schema({
   // and a name typed by hand is still a valid thing to write here.
   friday_father_child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
   friday_mother_child_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Child', default: null },
+  // A day that is one thing — a party, a trip, a dress code — rather than
+  // five boxes. A title, a line under it, and the whole column is that.
+  // day_index is counted from start_date, exactly as a cell's is.
+  special_days: [{
+    day_index: { type: Number, required: true, min: 0, max: 5 },
+    title: { type: String, required: true },
+    note: { type: String, default: '' },
+    color: { type: String, default: '' },
+  }],
 }, { _id: true });
 
 const ganttMonthSchema = new mongoose.Schema({

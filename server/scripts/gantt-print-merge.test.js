@@ -173,5 +173,23 @@ console.log('\nהורי שבת ושבוע סגור');
   ok(!/>מפגש<\/th>/.test(closed), 'בלי שורות התוכן');
 }
 
+
+console.log('\nיום מיוחד');
+{
+  const week = { ...weekWith([
+    { row_key: 'story', day_index: 4, content: 'סיפור שלא יודפס', col_span: 1, row_span: 1 },
+    { row_key: 'activity', day_index: 3, content: 'רחב', col_span: 3, row_span: 1 },
+  ]), special_days: [{ day_index: 4, title: 'חגיגות ראש השנה', note: 'יש להגיע בחולצה לבנה', color: '#fef9c3' }] };
+  const html = buildGanttPrintHtml({ weeks: [week], rows: ROWS, holidays: [], month: 9, year: 2026 });
+  const specials = html.match(/<td class="special"[^>]*>/g) || [];
+  ok(specials.length === 1 && /rowspan="4"/.test(specials[0]), 'תא אחד על כל גובה השבוע');
+  ok(/<div class="st">חגיגות ראש השנה<\/div>/.test(html) && /<div class="sn">יש להגיע בחולצה לבנה<\/div>/.test(html),
+    'כותרת ושורה מתחתיה');
+  ok(!/סיפור שלא יודפס/.test(html), 'התיבות של היום מוסתרות');
+  ok(/colspan="1"/.test(html) === false && rowCells(html, 'פעילות').length === 5,
+    'איחוד שמגיע לעמודה המיוחדת נעצר לפניה');
+  ok(/rowspan="1"/.test(html) === false, 'בלי תכונות מיותרות');
+}
+
 console.log(`\n${failures === 0 ? '✅ הכל עבר' : `❌ ${failures} נכשלו`}\n`);
 process.exit(failures === 0 ? 0 : 1);
