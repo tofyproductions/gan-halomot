@@ -217,7 +217,12 @@ export default function ProductMatches() {
   // The scan runs on the server in the background; poll the review until the last-scan time moves.
   const pollRef = useRef(null);
   const aliveRef = useRef(true);
-  useEffect(() => () => { aliveRef.current = false; clearTimeout(pollRef.current); }, []);
+  // StrictMode mounts, unmounts and mounts again in development; the ref must
+  // come back to life with the second mount or every poll tick returns at once.
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => { aliveRef.current = false; clearTimeout(pollRef.current); };
+  }, []);
 
   const runScan = async () => {
     const before = data?.last_scan?.at ? new Date(data.last_scan.at).getTime() : 0;
