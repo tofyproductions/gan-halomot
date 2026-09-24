@@ -3,6 +3,7 @@ const { GanttMonth, Holiday, Classroom, User, Child, Registration } = require('.
 const shabbat = require('../services/shabbatParents');
 const pv = require('../services/parentVisibility');
 const { htmlToPng } = require('../services/htmlPdf');
+const { getAcademicYears } = require('../services/academic-year.service');
 
 // The five rows the gan actually writes, in the order the paper workbook uses.
 //
@@ -33,6 +34,23 @@ const DEFAULT_ROWS = [
 const academicYearFor = (month, year) => (
   `${month >= 9 ? year : year - 1}-${month >= 9 ? year + 1 : year}`
 );
+
+/**
+ * A plan is written for the year the gan is in, and only that one.
+ *
+ * The screen used to offer six years — four back, two ahead — and a month
+ * saved under last year's rooms simply disappeared when this year's rooms
+ * opened. Nobody plans September 2027 in 2026, and last year's plan is the
+ * archive's business. So a month outside the current academic year is
+ * refused here as well as hidden on the screen, because a link or an old tab
+ * can still carry one.
+ */
+const notThisYear = (month, year) => {
+  const current = getAcademicYears().current.range;
+  return academicYearFor(month, year) === current
+    ? null
+    : `אפשר לרשום תוכנית עבודה רק לשנת הלימודים הנוכחית (${current})`;
+};
 
 /** Managers see and write every room's plan. */
 const MANAGER_ROLES = ['system_admin', 'branch_manager', 'accountant'];
@@ -155,6 +173,8 @@ async function save(req, res, next) {
     if (!classroom_id || !month || !year) {
       return res.status(400).json({ error: 'classroom_id, month, year required' });
     }
+    const yearError = notThisYear(parseInt(month), parseInt(year));
+    if (yearError) return res.status(400).json({ error: yearError });
 
     if (!await mayEdit(req.user, classroom_id)) {
       return res.status(403).json({ error: 'אין לך הרשאה לערוך את תוכנית העבודה של הכיתה הזו' });
@@ -395,6 +415,8 @@ async function copy(req, res, next) {
 
     const targetMonth = parseInt(to.month);
     const targetYear = parseInt(to.year);
+    const yearError = notThisYear(targetMonth, targetYear);
+    if (yearError) return res.status(400).json({ error: yearError });
 
     let target = await GanttMonth.findOne({
       classroom_id: to.classroom, month: targetMonth, year: targetYear,

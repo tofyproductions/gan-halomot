@@ -29,6 +29,7 @@ import GanttEditorsDialog from './GanttEditorsDialog';
 import ShabbatParentPicker from './ShabbatParentPicker';
 import { printGantt, renderGanttImage, shareGanttImage } from './ganttPrint';
 import { useBranch } from '../../hooks/useBranch';
+import { useAcademicYear } from '../../hooks/useAcademicYear';
 import { useAuth } from '../../hooks/useAuth';
 import { COLOR } from '../../theme/tokens';
 
@@ -121,10 +122,23 @@ export default function GanttEditor() {
   const navigate = useNavigate();
   const { selectedBranch } = useBranch();
   const { isManager } = useAuth();
+  const { years } = useAcademicYear();
 
   const classroomId = searchParams.get('classroom');
   const month = parseInt(searchParams.get('month'));
   const year = parseInt(searchParams.get('year'));
+
+  // Only this academic year is planned here. An old bookmark or a tab left
+  // open from last August can still ask for another one; it is sent back to
+  // the calendar rather than shown a month the server will refuse to save.
+  const outsideYear = Number.isFinite(month) && Number.isFinite(year)
+    && (month >= 9 ? year : year - 1) !== years.current.value;
+  useEffect(() => {
+    if (outsideYear) {
+      toast.info('תוכנית עבודה נרשמת רק לשנת הלימודים הנוכחית');
+      navigate('/gantt', { replace: true });
+    }
+  }, [outsideYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [gantt, setGantt] = useState(null);
   const [holidays, setHolidays] = useState([]);

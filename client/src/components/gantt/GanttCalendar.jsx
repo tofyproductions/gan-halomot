@@ -33,21 +33,26 @@ export default function GanttCalendar() {
   const [selectedClassroom, setSelectedClassroom] = useState('');
   const [archive, setArchive] = useState([]);
 
-  // Academic-year picker: a few past years (history) through a couple ahead
-  // (future planning). Each option's value is the start calendar year.
-  const currentStart = years.current.value;
-  const yearOptions = [];
-  for (let s = currentStart + 2; s >= currentStart - 4; s--) {
-    yearOptions.push({ start: s, label: `${getHebrewYearFromStart(s)} (${s}-${s + 1})` });
-  }
-  const [y1, setY1] = useState(currentStart);
+  // The plan is written for the year the gan is in, and only that one. There
+  // used to be a picker here offering four years back and two ahead; a month
+  // saved under last year's rooms then vanished the day this year's rooms
+  // opened, and nobody could say where it went. The year is a fact now, not a
+  // choice, and the server refuses any other.
+  const y1 = years.current.value;
   const y2 = y1 + 1;
+  const yearLabel = `${getHebrewYearFromStart(y1)} (${y1}-${y2})`;
 
   useEffect(() => {
-    api.get('/classrooms').then(res => {
-      const cls = res.data.classrooms || [];
+    // This year's rooms. A branch that has not opened them yet falls back to
+    // its newest rooms, so the screen is never empty.
+    const pick = (cls) => {
       setClassrooms(cls);
       if (cls.length > 0 && !selectedClassroom) setSelectedClassroom(cls[0]._id || cls[0].id);
+    };
+    api.get('/classrooms', { params: { year: years.current.range } }).then(res => {
+      const cls = res.data.classrooms || [];
+      if (cls.length) return pick(cls);
+      return api.get('/classrooms').then(r2 => pick(r2.data.classrooms || []));
     }).catch(() => {});
   }, []);
 
@@ -74,13 +79,7 @@ export default function GanttCalendar() {
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 3 }}>
         <Typography variant="h5" sx={{ fontWeight: 800 }}>תוכנית עבודה שנתית</Typography>
         <Stack direction="row" spacing={2}>
-          <TextField select size="small" value={y1} label="שנת לימודים"
-            onChange={e => setY1(Number(e.target.value))} sx={{ minWidth: 200 }}
-          >
-            {yearOptions.map(o => (
-              <MenuItem key={o.start} value={o.start}>{o.label}</MenuItem>
-            ))}
-          </TextField>
+          <Chip label={`שנת לימודים ${yearLabel}`} sx={{ fontWeight: 700, alignSelf: 'center' }} />
           <TextField select size="small" value={selectedClassroom} label="כיתה"
             onChange={e => setSelectedClassroom(e.target.value)} sx={{ minWidth: 180 }}
           >
