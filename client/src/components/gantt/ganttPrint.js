@@ -433,14 +433,30 @@ export async function renderGanttImage(opts, api) {
 }
 
 /**
- * Whether this browser can hand a FILE to another app. Asked before the
+ * A phone or a tablet — where the share sheet actually lists WhatsApp.
+ *
+ * A Mac's Safari and Chrome also answer yes to canShare({files}), and then
+ * open the macOS share sheet: AirDrop, Messages, Notes, Reminders. No
+ * WhatsApp. So the sheet is only used on a device that has one worth
+ * opening; a desktop goes to the clipboard instead. iPadOS calls itself a Mac
+ * in the user agent and is told apart by its touch screen.
+ */
+export function isHandheld() {
+  const ua = navigator.userAgent || '';
+  if (window.Capacitor?.isNativePlatform?.()) return true;
+  if (/Android|iPhone|iPad|iPod/i.test(ua)) return true;
+  return /Mac/.test(ua) && navigator.maxTouchPoints > 1;
+}
+
+/**
+ * Whether the picture will go through the share sheet. Asked before the
  * picture exists, so the caller can open the WhatsApp tab inside the click
  * that the popup blocker trusts — by the time the server has drawn the
  * picture, that click is long over.
  */
 export function canShareFiles() {
   try {
-    return !!navigator.canShare
+    return isHandheld() && !!navigator.canShare
       && navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] });
   } catch {
     return false;
@@ -453,7 +469,8 @@ export function canShareFiles() {
  * On a phone the Web Share sheet passes the actual FILE to WhatsApp, which is
  * the whole point — the manager picks the parents' group and sends.
  *
- * A desktop browser cannot hand a file to WhatsApp at all. What it can do is
+ * A desktop browser cannot hand a file to WhatsApp at all — its share sheet,
+ * where it has one, lists AirDrop and Notes. What it can do is
  * put the picture on the clipboard and open WhatsApp; the manager picks the
  * group and pastes, and WhatsApp sends it as a photo. That is two gestures
  * instead of a download, a Finder window and a drag. Only if the clipboard
@@ -466,7 +483,7 @@ export function canShareFiles() {
  */
 export async function shareGanttImage(blob, { fileName, caption, waWindow = null }) {
   const file = new File([blob], fileName, { type: 'image/png' });
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+  if (isHandheld() && navigator.canShare && navigator.canShare({ files: [file] })) {
     if (waWindow) waWindow.close();
     try {
       await navigator.share({ files: [file], text: caption });
