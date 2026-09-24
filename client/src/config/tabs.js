@@ -148,6 +148,7 @@ export const TAB_GROUPS = [
       { id: 'orders',       label: 'הזמנות',     path: '/orders',       defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
       { id: 'stock',        label: 'מעקב מלאי',  path: '/stock',        defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader', 'cook'] },
       { id: 'suppliers',    label: 'ספקים',      path: '/suppliers',    defaultRoles: ['system_admin', 'admin_viewer', 'accountant'] },
+      { id: 'product-matches', label: 'התאמות מוצרים', path: '/products/matches', defaultRoles: ['system_admin'] },
       { id: 'maintenance',  label: 'אחזקה',      path: '/maintenance',  defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager', 'class_leader'] },
     ],
   },

@@ -110,6 +110,7 @@ const SalaryRequests = lazy(() => import('./components/employees/SalaryRequests'
 const SalaryTable = lazy(() => import('./components/payroll/SalaryTable'));
 const StockPage = lazy(() => import('./components/stock/StockPage'));
 const SupplierManager = lazy(() => import('./components/orders/SupplierManager'));
+const ProductMatches = lazy(() => import('./components/orders/ProductMatches'));
 const SuppliesBoard = lazy(() => import('./components/supplies/SuppliesBoard'));
 const SupplyListManager = lazy(() => import('./components/holidays/SupplyListManager'));
 const Updates = lazy(() => import('./components/employee-portal/Updates'));
@@ -246,6 +247,7 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="suppliers" element={<SupplierManager />} />
+        <Route path="products/matches" element={<ProductMatches />} />
         <Route path="employees" element={<EmployeeManager />} />
         <Route path="attendance" element={<AttendanceMonitor />} />
         <Route path="payroll" element={
