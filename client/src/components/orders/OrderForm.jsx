@@ -13,7 +13,7 @@ import { toast } from 'react-toastify';
 import api from '../../api/client';
 import ProductThumb from './ProductThumb';
 import { useBranch } from '../../hooks/useBranch';
-import { formatCurrency } from '../../utils/hebrewYear';
+import { formatCurrency, formatCurrencyExact } from '../../utils/hebrewYear';
 
 export default function OrderForm() {
   const navigate = useNavigate();
@@ -84,6 +84,8 @@ export default function OrderForm() {
     prefillApplied.current = true;
   }, [products, prefill, selectedSupplier]);
 
+  const supplierVatRate = suppliers.find(s => (s._id || s.id) === selectedSupplier)?.vat_rate || 1.18;
+
   // Edit mode: hydrate the cart from the source order items once the supplier's
   // products have loaded.
   useEffect(() => {
@@ -103,6 +105,9 @@ export default function OrderForm() {
             name: it.name,
             sku: it.sku || '',
             price_with_vat: it.unit_price || 0,
+            // The order line kept only the price with VAT; back it out at the
+            // supplier's rate so the row reads like every other.
+            price_before_vat: Number(((it.unit_price || 0) / (supplierVatRate || 1.18)).toFixed(2)),
           },
           qty: it.qty,
         });
@@ -110,7 +115,7 @@ export default function OrderForm() {
     }
     setCart(newCart);
     setEditSourceItems(null);
-  }, [products, editSourceItems]);
+  }, [products, editSourceItems, supplierVatRate]);
 
   const supplier = suppliers.find(s => (s._id || s.id) === selectedSupplier);
   const minOrder = supplier?.min_order_amount || 0;
@@ -165,6 +170,7 @@ export default function OrderForm() {
   };
 
   const total = cart.reduce((sum, c) => sum + c.qty * c.product.price_with_vat, 0);
+  const totalBeforeVat = cart.reduce((sum, c) => sum + c.qty * (c.product.price_before_vat || 0), 0);
 
   const handleSubmit = async () => {
     if (!selectedSupplier) return toast.error('בחר ספק');
@@ -274,7 +280,10 @@ export default function OrderForm() {
                             </Box>
                             <Box sx={{ textAlign: 'left' }}>
                               <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                                {formatCurrency(p.price_with_vat)}
+                                {formatCurrencyExact(p.price_with_vat)}
+                              </Typography>
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', whiteSpace: 'nowrap' }}>
+                                {formatCurrencyExact(p.price_before_vat)} לפני מע״מ
                               </Typography>
                               {inCart && (
                                 <Typography variant="caption" color="success.main" sx={{ fontWeight: 700 }}>
@@ -330,19 +339,27 @@ export default function OrderForm() {
                             onChange={e => updateQty(c.product._id || c.product.id, parseInt(e.target.value) || 0)}
                             inputProps={{ min: 0, style: { width: 50, textAlign: 'center', padding: '4px' } }}
                           />
-                          <Typography variant="body2" color="text.secondary">x {formatCurrency(c.product.price_with_vat)}</Typography>
+                          <Typography variant="body2" color="text.secondary">x {formatCurrencyExact(c.product.price_with_vat)}</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 700, ml: 'auto' }}>
-                            = {formatCurrency(c.qty * c.product.price_with_vat)}
+                            = {formatCurrencyExact(c.qty * c.product.price_with_vat)}
                           </Typography>
                         </Stack>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                          לפני מע״מ: {formatCurrencyExact(c.product.price_before_vat || 0)} ליחידה
+                          {' · '}{formatCurrencyExact(c.qty * (c.product.price_before_vat || 0))} לשורה
+                        </Typography>
                       </Box>
                     ))}
 
                     <Divider sx={{ my: 2 }} />
 
+                    <Stack direction="row" justifyContent="space-between" sx={{ mb: 0.5 }}>
+                      <Typography sx={{ fontWeight: 800, fontSize: '1.1rem' }}>סה״כ כולל מע״מ</Typography>
+                      <Typography sx={{ fontWeight: 800, fontSize: '1.1rem' }}>{formatCurrencyExact(total)}</Typography>
+                    </Stack>
                     <Stack direction="row" justifyContent="space-between" sx={{ mb: 1 }}>
-                      <Typography sx={{ fontWeight: 800, fontSize: '1.1rem' }}>סה״כ</Typography>
-                      <Typography sx={{ fontWeight: 800, fontSize: '1.1rem' }}>{formatCurrency(total)}</Typography>
+                      <Typography variant="body2" color="text.secondary">לפני מע״מ</Typography>
+                      <Typography variant="body2" color="text.secondary">{formatCurrencyExact(totalBeforeVat)}</Typography>
                     </Stack>
 
                     {minOrder > 0 && total < minOrder && (

@@ -95,3 +95,18 @@ export function formatCurrency(amount) {
     maximumFractionDigits: 0,
   }).format(amount);
 }
+
+/**
+ * The same, to the agora. For a supplier's price: ₪4.13 rounded to "₪4" and
+ * multiplied by 24 reads "₪99", and the manager sees 4 × 24 = 96 and a system
+ * that cannot multiply. Where a unit price is shown, it is shown whole.
+ */
+export function formatCurrencyExact(amount) {
+  if (amount == null || isNaN(amount)) return '₪0.00';
+  return new Intl.NumberFormat('he-IL', {
+    style: 'currency',
+    currency: 'ILS',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
