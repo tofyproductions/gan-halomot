@@ -98,6 +98,7 @@ async function listClassrooms(req, res, next) {
           id: String(r._id),
           name: r.name,
           branch: r.branch_id?.name || '',
+          branch_id: String(r.branch_id?._id || r.branch_id || ''),
         }))
         .sort((a, b) => a.branch.localeCompare(b.branch, 'he') || a.name.localeCompare(b.name, 'he')),
     });

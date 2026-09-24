@@ -10,6 +10,7 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import BlockIcon from '@mui/icons-material/Block';
 import PersonSearchIcon from '@mui/icons-material/PersonSearch';
 import api, { apiError } from '../../api/client';
+import useRoomScope from './useRoomScope';
 
 /**
  * "מי זה?" — מסך אחד, פרצוף אחד, הקשה אחת.
@@ -40,7 +41,10 @@ const PREFETCH = 4;
 
 export default function FaceTagging({ onWaitingChange }) {
   const [classrooms, setClassrooms] = useState([]);
-  const [classroomId, setClassroomId] = useState('');
+  const {
+    branchOptions, branchId, setBranchId, classroomId, setClassroomId, roomsOfBranch, branchLocked,
+    branchName,
+  } = useRoomScope(classrooms);
   const [queue, setQueue] = useState([]);
   const [progress, setProgress] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -80,9 +84,17 @@ export default function FaceTagging({ onWaitingChange }) {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const { data } = await api.get('/face-tagging/queue', {
-        params: { classroom_id: classroomId || undefined, limit: 12 },
-      });
+      const params = { limit: 12 };
+      if (classroomId) {
+        params.classroom_id = classroomId;
+      } else {
+        // "כל הכיתות של הסניף": השרת מקבל classroom_id יחיד או כלום (= כל
+        // הכיתות שמותרות למשתמש, בכל סניף) — classroom_ids מצמצם את זה
+        // לחדרים של הסניף הנבחר בלבד, כדי שהתור לא יחצה סניפים.
+        const ids = roomsOfBranch.map((r) => String(r.id));
+        if (ids.length) params.classroom_ids = ids.join(',');
+      }
+      const { data } = await api.get('/face-tagging/queue', { params });
       setQueue(data.faces || []);
       setProgress(data.progress);
       if (onWaitingChange) onWaitingChange(data.progress ? data.progress.waiting : 0);
@@ -92,7 +104,7 @@ export default function FaceTagging({ onWaitingChange }) {
     } finally {
       setLoading(false);
     }
-  }, [classroomId, onWaitingChange]);
+  }, [classroomId, roomsOfBranch, onWaitingChange]);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
@@ -187,10 +199,25 @@ export default function FaceTagging({ onWaitingChange }) {
   const waiting = progress ? progress.waiting : 0;
   const named = progress ? progress.named : 0;
   const total = progress ? progress.faces : 0;
+  const classroomName = roomsOfBranch.find((r) => String(r.id) === String(classroomId))?.name || '';
 
   return (
     <Box sx={{ maxWidth: 760, mx: 'auto' }}>
-      <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mb: 1 }}>
+        {!branchLocked && (
+          <TextField
+            select
+            size="small"
+            label="סניף"
+            value={branchId}
+            onChange={(e) => setBranchId(e.target.value)}
+            sx={{ minWidth: 180 }}
+          >
+            {branchOptions.map((b) => (
+              <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>
+            ))}
+          </TextField>
+        )}
         <TextField
           select
           size="small"
@@ -199,17 +226,22 @@ export default function FaceTagging({ onWaitingChange }) {
           onChange={(e) => setClassroomId(e.target.value)}
           sx={{ minWidth: 220 }}
         >
-          <MenuItem value="">כל הכיתות שלי</MenuItem>
-          {classrooms.map((c) => (
+          <MenuItem value="">כל הכיתות של הסניף</MenuItem>
+          {roomsOfBranch.map((c) => (
             <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
           ))}
         </TextField>
-        {progress && (
-          <Typography variant="body2" color="text.secondary">
-            {`זוהו ${named} מתוך ${total} · ממתינים ${waiting}`}
-          </Typography>
-        )}
       </Stack>
+
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        {`סניף ${branchName} · ${classroomName || 'כל הכיתות'}`}
+      </Typography>
+
+      {progress && (
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+          {`זוהו ${named} מתוך ${total} · ממתינים ${waiting}`}
+        </Typography>
+      )}
 
       {total > 0 && (
         <LinearProgress

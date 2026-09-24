@@ -20,9 +20,17 @@ const tagging = require('../services/faceTagging.service');
  * classroom_id given the string form of an id matches nothing at all: the
  * screen would answer "no faces waiting" forever, with a 200 and no error
  * anywhere. Caught by face-tagging-e2e.test.js.
+ *
+ * `requestedList`, when given, narrows to those specific rooms — it is how
+ * "כל הכיתות של הסניף" on the tagging screen stays inside the chosen branch
+ * instead of falling back to every room this person may act on at all.
  */
-async function scopeIds(user, requested) {
+async function scopeIds(user, requested, requestedList) {
   const rooms = await visibleClassrooms(user);
+  if (requestedList && requestedList.length) {
+    const wanted = new Set(requestedList.map(String));
+    return rooms.filter((r) => wanted.has(String(r._id))).map((r) => r._id);
+  }
   if (requested) {
     const hit = rooms.find((r) => String(r._id) === String(requested));
     return hit ? [hit._id] : [];
@@ -30,10 +38,12 @@ async function scopeIds(user, requested) {
   return rooms.map((r) => r._id);
 }
 
-/** GET /api/face-tagging/queue?classroom_id=&limit= */
+/** GET /api/face-tagging/queue?classroom_id=&classroom_ids=&limit= */
 async function getQueue(req, res, next) {
   try {
-    const ids = await scopeIds(req.user, req.query.classroom_id);
+    const classroomIds = String(req.query.classroom_ids || '')
+      .split(',').map((s) => s.trim()).filter(Boolean);
+    const ids = await scopeIds(req.user, req.query.classroom_id, classroomIds);
     if (!ids.length) return res.json({ faces: [], progress: null });
 
     const limit = Math.min(Number(req.query.limit) || 12, 30);
