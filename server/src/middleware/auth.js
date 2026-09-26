@@ -401,6 +401,19 @@ async function attachBranchScope(req, res, next) {
     const scope = await resolveBranchScope(req); // null (all) or [branchIds]
     req.branchScope = scope;
 
+    // A deactivated account's token is DEAD NOW — not in up-to-30 days when
+    // the JWT happens to expire. An employee dismissed after a dispute kept a
+    // month of read access to everything her role allowed. resolveBranchScope
+    // already read the user row for this request; this only reads its answer.
+    // Deliberately narrow: refuses only an EXPLICIT is_active:false — a
+    // missing row (platform operators, legacy tokens) keeps today's behavior.
+    if (req.userRecord && req.userRecord.is_active === false) {
+      return res.status(401).json({
+        error: 'החשבון הושבת. אם זו טעות — פנו למשרד.',
+        code: 'ACCOUNT_DEACTIVATED',
+      });
+    }
+
     const q = req.query.branch;
     if (q && q !== 'all' && scope !== null) {
       const allowed = scope.map(String).includes(String(q));

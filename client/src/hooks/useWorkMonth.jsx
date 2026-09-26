@@ -1,9 +1,12 @@
 import { createContext, useContext, useState, useCallback } from 'react';
+import { monthIL } from '../utils/ilDates';
 
 const WorkMonthContext = createContext(null);
 
 function currentYearMonth() {
-  return new Date().toISOString().slice(0, 7);
+  // Israel-local: toISOString is UTC, so on the 1st before 02:00 local the
+  // payroll screens opened on the PREVIOUS month.
+  return monthIL();
 }
 
 /**

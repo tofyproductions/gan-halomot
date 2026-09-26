@@ -70,6 +70,28 @@ app.use(cors({
   },
   credentials: true,
 }));
+// Anonymous callers don't get to make us parse 50MB. The big limit below
+// exists for base64 documents on AUTHENTICATED routes (contracts, medical
+// certificates, payslips — spread across half the API, so per-route parsers
+// would be a breakage lottery). The gate is surgical instead: a JSON-ish
+// body over 2MB with no Authorization header answers 413 BEFORE the parser
+// allocates, except the two public endpoints that genuinely upload JSON
+// (parent contract-pdf and its signature). Multipart passes through — every
+// public multer route already carries its own byte caps.
+const PUBLIC_BIG_JSON = [
+  /^\/api\/public\/register\/[^/]+\/contract-pdf$/,
+  /^\/api\/public\/register\/[^/]+\/sign$/,
+];
+app.use((req, res, next) => {
+  const len = Number(req.headers['content-length'] || 0);
+  if (len <= 2 * 1024 * 1024) return next();
+  const type = String(req.headers['content-type'] || '');
+  const jsonish = type.includes('application/json') || type.includes('urlencoded');
+  if (!jsonish) return next();
+  if (req.headers.authorization) return next();
+  if (PUBLIC_BIG_JSON.some(re => re.test(req.path))) return next();
+  return res.status(413).json({ error: 'בקשה גדולה מדי' });
+});
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

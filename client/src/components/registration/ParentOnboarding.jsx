@@ -51,6 +51,11 @@ export default function ParentOnboarding() {
   });
   const [files, setFiles] = useState({ parentIdFile: null, paymentProof: null });
   const [cardErrors, setCardErrors] = useState({});
+  // Draft persistence gate — only start saving after the server prefill and
+  // any stored draft were merged, or the empty initial state would overwrite
+  // a real draft on mount.
+  const [draftReady, setDraftReady] = useState(false);
+  const draftKey = `onboarding-card-${token}`;
 
   // Load registration data
   useEffect(() => {
@@ -59,21 +64,44 @@ export default function ParentOnboarding() {
         setRegData(res.data);
         // Pre-fill card from registration
         const d = res.data?.registration || {};
-        setCard((prev) => ({
-          ...prev,
-          childFullName: d.child_name || '',
-          childBirthDate: d.child_birth_date ? String(d.child_birth_date).slice(0, 10) : '',
-          parent1Name: d.parent_name || '',
-          parent1Id: d.parent_id_number || '',
-          parent1Phone: d.parent_phone || '',
-          parent1Email: d.parent_email || '',
-        }));
+        setCard((prev) => {
+          const prefilled = {
+            ...prev,
+            childFullName: d.child_name || '',
+            childBirthDate: d.child_birth_date ? String(d.child_birth_date).slice(0, 10) : '',
+            parent1Name: d.parent_name || '',
+            parent1Id: d.parent_id_number || '',
+            parent1Phone: d.parent_phone || '',
+            parent1Email: d.parent_email || '',
+          };
+          // A draft the parent already typed on THIS registration wins over
+          // the prefill — the prefill is what they started from.
+          try {
+            const draft = JSON.parse(localStorage.getItem(draftKey) || 'null');
+            if (draft && typeof draft === 'object') return { ...prefilled, ...draft };
+          } catch { /* corrupt draft — prefill stands */ }
+          return prefilled;
+        });
+        setDraftReady(true);
+        // RESUME. A reload used to restart at the welcome screen — the parent
+        // re-signed and re-typed everything a phone browser reclaiming the
+        // tab had thrown away. The server already knows how far they got.
+        if (d.card_completed) setStep(3);
+        else if (d.agreement_signed) setStep(2);
       })
       .catch((err) => {
         setError(err.response?.data?.message || err.response?.data?.error || 'קישור לא תקין או שפג תוקפו');
       })
       .finally(() => setLoading(false));
   }, [token]);
+
+  // Persist the card as the parent types, keyed by this registration's token
+  // (files can't be persisted — the browser forbids it — but retyping a form
+  // hurts far more than reattaching two photos).
+  useEffect(() => {
+    if (!draftReady) return;
+    try { localStorage.setItem(draftKey, JSON.stringify(card)); } catch { /* storage full — draft is best-effort */ }
+  }, [card, draftReady, draftKey]);
 
   const handleCardChange = (field) => (e) => {
     setCard((prev) => ({ ...prev, [field]: e.target.value }));
@@ -150,6 +178,7 @@ export default function ParentOnboarding() {
       });
       if (res.data.pdfUrl) setPdfUrl(res.data.pdfUrl);
       toast.success('הפרטים נשלחו בהצלחה');
+      try { localStorage.removeItem(draftKey); } catch { /* best-effort */ }
       setStep(3);
     } catch (err) {
       toast.error(err.response?.data?.message || 'שגיאה בשליחת הטופס');

@@ -18,6 +18,7 @@ import { toast } from 'react-toastify';
 import api, { openApiFile, apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import { FilePickButton, BusyButton } from '../shared/UploadControls';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { pluralDays } from '../../utils/ilDates';
 
 /**
  * קורסים והכשרות — the tracking sheet, alive.
@@ -253,7 +254,7 @@ export default function CoursesPage() {
     return (
       <Stack direction="row" spacing={0.5} alignItems="center" justifyContent="flex-end">
         <Tooltip title={[
-          c.status === 'expiring' && c.days_left != null ? `נדרש חידוש — בעוד ${c.days_left} ימים` : st.label,
+          c.status === 'expiring' && c.days_left != null ? `נדרש חידוש — בעוד ${pluralDays(c.days_left)}` : st.label,
           c.status_note,
           (c.has_file || c.external_url) ? 'לחיצה פותחת את התעודה' : 'אין תעודה מצורפת',
         ].filter(Boolean).join(' · ')}>

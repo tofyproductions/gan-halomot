@@ -22,6 +22,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { todayIL } from '../../utils/ilDates';
 import PageHeader from '../ui/PageHeader';
 import EmptyState from '../ui/EmptyState';
 import { useUrlState, useUrlFlag } from '../../hooks/useUrlState';
@@ -1364,7 +1365,7 @@ export default function EmployeeManager() {
                 <Button
                   variant="outlined" color="secondary" size="small" sx={{ alignSelf: 'flex-start' }}
                   onClick={() => {
-                    const today = new Date().toISOString().slice(0, 10);
+                    const today = todayIL(); // Israel-local — a birth after midnight is TODAY's
                     updateField('gave_birth_date', today);
                     updateField('is_pregnant', false);
                     updateField('on_pregnancy_bedrest', false);

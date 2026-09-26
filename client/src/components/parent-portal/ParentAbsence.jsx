@@ -6,6 +6,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import parentApi, { parentApiError } from '../../api/parentClient';
 import { DISPLAY } from '../../theme/parentTheme';
+import { pluralDays } from '../../utils/ilDates';
 
 /**
  * "היא לא מגיעה מחר."
@@ -199,7 +200,7 @@ export default function ParentAbsence({ childId, childName }) {
             disabled={busy || !picked.length}
             onClick={save}
           >
-            {busy ? 'שולח…' : picked.length ? `דיווח על ${picked.length} ימים` : 'בחרו ימים'}
+            {busy ? 'שולח…' : picked.length ? `דיווח על ${pluralDays(picked.length)}` : 'בחרו ימים'}
           </Button>
 
           {/* The assumption this line exists to stop is formed right here, at
