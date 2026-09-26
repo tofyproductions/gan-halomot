@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useMemo } from 'react';
 
 /**
  * Guard against a SLOW OLD response landing after a FAST NEW one.
@@ -26,5 +26,10 @@ export default function useFetchSeq() {
   const seqRef = useRef(0);
   const begin = useCallback(() => ++seqRef.current, []);
   const isCurrent = useCallback((seq) => seqRef.current === seq, []);
-  return { begin, isCurrent };
+  // MEMOIZED, and this is load-bearing: consumers put this object in their
+  // useCallback deps, and their fetch runs from useEffect([fetchData]). A
+  // fresh object every render gave fetchData a fresh identity every render —
+  // which re-fired the effect, which set state, which rendered… an infinite
+  // fetch loop that pinned the payroll table on its spinner in production.
+  return useMemo(() => ({ begin, isCurrent }), [begin, isCurrent]);
 }
