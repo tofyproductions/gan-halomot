@@ -53,8 +53,13 @@ function formatDate(yyyyMmDd) {
   return `${d}/${m}/${y}`;
 }
 
-export default function HoursReportDialog({ open, employee, onClose }) {
-  const [month, setMonth] = useState(currentYearMonth());
+export default function HoursReportDialog({ open, employee, onClose, initialMonth }) {
+  const [month, setMonth] = useState(initialMonth || currentYearMonth());
+  // Opened from a screen that lives on a specific month (the payroll table),
+  // the report should open on THAT month — not on the calendar's.
+  useEffect(() => {
+    if (open && initialMonth) setMonth(initialMonth);
+  }, [open, initialMonth]);
   // The range report is reached from here rather than from the employees list:
   // this is the screen somebody is already on when one month turns out not to
   // be the question they had.

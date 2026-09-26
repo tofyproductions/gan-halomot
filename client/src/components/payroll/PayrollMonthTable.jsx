@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import useFetchSeq from '../../hooks/useFetchSeq';
 import useUnsavedChangesWarning from '../../hooks/useUnsavedChangesWarning';
+import HoursReportDialog from '../employees/HoursReportDialog';
 import {
   Box, Paper, Stack, Typography, TextField, Select, MenuItem, IconButton, Button,
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
@@ -1005,6 +1006,7 @@ export default function PayrollMonthTable() {
   const [empNumDlg, setEmpNumDlg] = useState({ open: false, row: null });
   const [bankDlg, setBankDlg] = useState({ open: false, row: null });
   const [savedDlg, setSavedDlg] = useState({ open: false, row: null });
+  const [hoursDlg, setHoursDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
   // The grid is ~70 rows × ~27 tooltip-heavy cells; filtering on the RAW
   // keystroke re-reconciled all of it per character and typing visibly
@@ -2027,6 +2029,13 @@ export default function PayrollMonthTable() {
                                   onClick={(e) => { e.stopPropagation(); setSavedDlg({ open: true, row: r }); }}
                                   sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer', mr: 0.3 }} />
                               </Tooltip>
+                              {/* Quick hours report — the per-day punch breakdown, one tap from
+                                  the row instead of a detour through מעקב החתמות. */}
+                              <Tooltip title="דוח שעות מפורט לחודש המוצג">
+                                <Chip size="small" variant="outlined" color="info" label="שעות ⏱"
+                                  onClick={(e) => { e.stopPropagation(); setHoursDlg({ open: true, row: r }); }}
+                                  sx={{ height: 16, fontSize: '0.6rem', cursor: 'pointer', mr: 0.3 }} />
+                              </Tooltip>
                               {r.payslip_paid && (
                                 <Tooltip title={r.payslip_paid_at ? `אושר ושולם · ${new Date(r.payslip_paid_at).toLocaleDateString('he-IL')}` : 'אושר ושולם'}>
                                   <Chip size="small" color="success" label="✓ שולם" sx={{ height: 16, fontSize: '0.6rem', fontWeight: 700 }} />
@@ -2777,6 +2786,12 @@ export default function PayrollMonthTable() {
         onSave={(bank) => { if (bankDlg.row) setEmployeeBank(bankDlg.row.employee_id, bank); setBankDlg({ open: false, row: null }); }}
       />
       <SavedPayslipsDialog open={savedDlg.open} row={savedDlg.row} onClose={() => setSavedDlg({ open: false, row: null })} />
+      <HoursReportDialog
+        open={hoursDlg.open}
+        employee={hoursDlg.row ? { _id: hoursDlg.row.employee_id, full_name: hoursDlg.row.full_name } : null}
+        initialMonth={month}
+        onClose={() => setHoursDlg({ open: false, row: null })}
+      />
       <NotesDialog open={notes.open} row={notes.row} onClose={() => setNotes({ open: false, row: null })}
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
         onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />
