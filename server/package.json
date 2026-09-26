@@ -15,6 +15,7 @@
     "test:loans": "node scripts/loan-deduction.test.js",
     "test:sick-cross-month": "node scripts/sick-cross-month.test.js",
     "test:async-wrap": "node scripts/async-wrap.test.js",
+    "test:punch-digest": "node scripts/punch-digest.test.js",
     "test:employee-age": "node scripts/employee-age.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",

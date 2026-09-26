@@ -105,6 +105,11 @@ export default function AttendanceMonitor() {
   // screen the accountant uses is reachable from here — scoped server-side to
   // the branches this user manages.
   const [issuesOpen, setIssuesOpen] = useState(false);
+  // Arriving from the punch-issues banner or the morning push (?issues=1):
+  // open the fix dialog directly — "פתח לטיפול" should mean exactly that.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('issues') === '1') setIssuesOpen(true);
+  }, []);
   const [issuesCount, setIssuesCount] = useState(0);
   // "עובדים שלי בסניפים אחרים" — the count feeds the badge from
   // CrossBranchEdits' own load (it fetches regardless of whether the dialog

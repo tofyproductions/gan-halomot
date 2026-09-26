@@ -5410,6 +5410,10 @@ async function sendToAccountant(req, res, next) {
 }
 
 module.exports = {
+  // Exported for services/punchIssuesDigest.js — the digest must run on the
+  // SAME issue engine as the screen, never a second implementation.
+  punchIssues,
+  fixedScheduleConflicts,
   // Pure helpers, exported so they can be checked without a database.
   managerContact,
   punchFixLink,
