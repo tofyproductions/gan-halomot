@@ -172,15 +172,33 @@ async function upload(req, res) {
         continue;
       }
 
-      const row = await Photo.create({
-        ...stored,
-        source: 'staff',
-        branch_id: branchId,
-        classroom_id: room._id,
-        date,
-        uploaded_by_user: req.user.id,
-        uploaded_by_name: req.user.full_name || '',
-      });
+      let row;
+      try {
+        row = await Photo.create({
+          ...stored,
+          source: 'staff',
+          branch_id: branchId,
+          classroom_id: room._id,
+          date,
+          uploaded_by_user: req.user.id,
+          uploaded_by_name: req.user.full_name || '',
+        });
+      } catch (createErr) {
+        // The twin check above has a concurrent window (press send twice on
+        // slow Wi-Fi: both requests pass findOne, both create). The unique
+        // (classroom, sha256) index closes it — and E11000 here just means
+        // the OTHER request won: clean up our copy and report a duplicate,
+        // exactly like the twin path.
+        if (createErr && createErr.code === 11000) {
+          await storage.deleteObject(stored.key).catch(() => {});
+          if (stored.thumb_key) await storage.deleteObject(stored.thumb_key).catch(() => {});
+          const winner = await Photo.findOne({ classroom_id: room._id, sha256: stored.sha256 })
+            .select('_id').lean();
+          duplicates.push({ name: file.originalname, existing_id: winner ? String(winner._id) : null });
+          continue;
+        }
+        throw createErr;
+      }
       saved.push(row);
     } catch (err) {
       console.error('[photos] upload failed:', file.originalname, err.message);

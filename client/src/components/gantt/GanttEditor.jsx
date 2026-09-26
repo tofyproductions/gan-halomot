@@ -772,14 +772,19 @@ export default function GanttEditor() {
   };
 
   const addActivity = async () => {
-    const { name, color, fixed_day } = activityDialog;
+    const { name, color, fixed_day, busy } = activityDialog;
+    if (busy) return; // double-tap = duplicate activity
     if (!name) return toast.error('שם חובה');
+    setActivityDialog(d => ({ ...d, busy: true }));
     try {
       await api.post('/activities', { branch_id: selectedBranch, name, color, fixed_day: fixed_day !== '' ? parseInt(fixed_day) : null });
       toast.success('חוג נוסף');
       setActivityDialog({ open: false, name: '', color: COLOR.gantt.defaultActivity, fixed_day: '' });
       api.get('/activities').then(res => setActivities(res.data.activities || []));
-    } catch (err) { toast.error(err.response?.data?.error || 'שגיאה'); }
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה');
+      setActivityDialog(d => ({ ...d, busy: false }));
+    }
   };
 
   if (!classroomId || !month || !year) {

@@ -272,8 +272,8 @@ async function resetWithCode(req, res, next) {
     }
     // The same floor `setPassword` uses. Two different minimums on the same
     // password is a rule nobody can state.
-    if (!password || String(password).length < 4) {
-      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 4 תווים' });
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 8 תווים' });
     }
 
     const user = await findLoginUser(full_name, id_number);
@@ -408,8 +408,8 @@ async function loginWithPassword(req, res, next) {
 async function setPassword(req, res, next) {
   try {
     const { password } = req.body;
-    if (!password || String(password).length < 4) {
-      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 4 תווים' });
+    if (!password || String(password).length < 8) {
+      return res.status(400).json({ error: 'סיסמה חייבת להיות לפחות 8 תווים' });
     }
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ error: 'משתמש לא נמצא' });

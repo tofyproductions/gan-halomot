@@ -465,6 +465,14 @@ employeeSchema.index({ israeli_id: 1, is_active: 1 });
 // branch is first because the list is nearly always scoped to one.
 employeeSchema.index({ branch_id: 1, full_name: 1 });
 employeeSchema.index({ full_name: 1 });
+// One ת"ז = one card, enforced by the DATABASE, not by the check-then-create
+// races in createEmployee/onboarding (two concurrent creations both passed
+// the app-level clash check). Partial: cards without an id yet — common for
+// brand-new hires — must not collide with each other on ''.
+employeeSchema.index(
+  { israeli_id: 1 },
+  { unique: true, partialFilterExpression: { israeli_id: { $type: 'string', $gt: '' } } },
+);
 
 /**
  * Pre-save normalization: Israeli IDs are exactly 9 digits. Users (and the

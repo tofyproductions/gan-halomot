@@ -72,8 +72,9 @@ exports.list = async (req, res, next) => {
     const q = {};
     if (req.query.status) q.status = req.query.status;
     if (req.query.search) q.$or = [
-      { name: new RegExp(req.query.search, 'i') },
-      { slug: new RegExp(req.query.search, 'i') },
+      // Escaped: raw user text in RegExp both throws on '(' and invites ReDoS.
+      { name: new RegExp(String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
+      { slug: new RegExp(String(req.query.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') },
     ];
     const tenants = await Tenant.find(q).sort({ created_at: -1 }).limit(500);
     res.json(tenants);

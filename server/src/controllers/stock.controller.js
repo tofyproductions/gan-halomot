@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const { StockCategory, StockItem, StockMovement, StockBatch, Product, Supplier } = require('../models');
 
 const DEFAULT_CATEGORIES = [
@@ -10,7 +11,12 @@ const DEFAULT_CATEGORIES = [
 async function ensureDefaultCategories(branch_id) {
   const count = await StockCategory.countDocuments({ branch_id, is_active: true });
   if (count > 0) return;
-  await StockCategory.insertMany(DEFAULT_CATEGORIES.map(c => ({ ...c, branch_id })));
+  // Two concurrent first-visits both see count=0. The unique (branch, name)
+  // index makes the second insert bounce — losing that race IS success.
+  await StockCategory.insertMany(
+    DEFAULT_CATEGORIES.map(c => ({ ...c, branch_id })),
+    { ordered: false },
+  ).catch(err => { if (err?.code !== 11000) throw err; });
 }
 
 function userInfo(req) {
@@ -76,7 +82,7 @@ async function listItems(req, res, next) {
     const filter = { branch_id, is_active: true };
     if (category_id) filter.category_id = category_id;
     if (supplier_id) filter.supplier_id = supplier_id;
-    if (q) filter.name = { $regex: q.trim(), $options: 'i' };
+    if (q) filter.name = { $regex: escRe(q.trim()), $options: 'i' };
     const items = await StockItem.find(filter)
       .populate('product_id', 'name image_url price_with_vat')
       .populate('supplier_id', 'name')
@@ -300,7 +306,7 @@ async function searchProducts(req, res, next) {
     if (!q || q.trim().length < 1) return res.json({ products: [] });
     const products = await Product.find({
       is_active: true,
-      name: { $regex: q.trim(), $options: 'i' },
+      name: { $regex: escRe(q.trim()), $options: 'i' },
     })
       .populate('supplier_id', 'name')
       .limit(50);

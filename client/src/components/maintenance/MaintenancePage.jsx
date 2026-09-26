@@ -13,7 +13,7 @@ import VisibilityIcon from '@mui/icons-material/Visibility';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError } from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useConfirm } from '../shared/ConfirmProvider';
 import { BusyButton, FilePickButton } from '../shared/UploadControls';
@@ -109,8 +109,8 @@ function FaultsDialog({ open, item, onClose, onSaved }) {
       .catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
       .finally(() => setSaving(false));
   };
-  const resolve = (f, status) => api.put(`/maintenance/${item._id}/faults/${f._id}`, { status }).then(() => onSaved()).catch(() => {});
-  const del = async (f) => { if (!(await confirm({ title: 'מחיקת תקלה', message: 'למחוק?' }))) return; api.delete(`/maintenance/${item._id}/faults/${f._id}`).then(() => onSaved()).catch(() => {}); };
+  const resolve = (f, status) => api.put(`/maintenance/${item._id}/faults/${f._id}`, { status }).then(() => onSaved()).catch(err => toast.error(apiError(err, 'עדכון התקלה נכשל')));
+  const del = async (f) => { if (!(await confirm({ title: 'מחיקת תקלה', message: 'למחוק?' }))) return; api.delete(`/maintenance/${item._id}/faults/${f._id}`).then(() => onSaved()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה'))); };
   const viewPhoto = async (f) => {
     try {
       const res = await api.get(`/maintenance/${item._id}/faults/${f._id}/photo`);
@@ -190,7 +190,7 @@ export default function MaintenancePage() {
 
   const delItem = async (it) => {
     if (!(await confirm({ title: 'הסרת פריט', message: `להסיר את "${it.name}"?` }))) return;
-    api.delete(`/maintenance/${it._id}`).then(() => load()).catch(() => {});
+    api.delete(`/maintenance/${it._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
 
   if (isAllBranches) return <Alert severity="info" sx={{ m: 2 }}>בחר/י סניף ספציפי (למעלה) כדי לנהל אחזקה.</Alert>;

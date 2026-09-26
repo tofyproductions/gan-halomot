@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { authMiddleware, attachBranchScope } = require('../middleware/auth');
+const { authMiddleware, attachBranchScope, requireRole } = require('../middleware/auth');
 
 // GanFlow control plane — the customer registry, and the only place that knows
 // other customers exist. Mounted only when PLATFORM_MONGODB_URI is configured,
@@ -184,7 +184,9 @@ router.use('/stock', require('./stock.routes'));
 
 // Sync endpoint
 const syncController = require('../controllers/sync.controller');
-router.post('/sync', syncController.syncFromSheets);
+// Writes registrations/children/collections from the office spreadsheet —
+// an import trigger, not a read; not for every login to press.
+router.post('/sync', requireRole('system_admin', 'accountant'), syncController.syncFromSheets);
 router.post('/sync/check', syncController.syncCheck);
 
 module.exports = router;
