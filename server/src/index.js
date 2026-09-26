@@ -228,7 +228,7 @@ app.use(errorHandler);
 
 // Connect to MongoDB then start server
 connectDB().then(() => {
-  app.listen(env.PORT, () => {
+  const server = app.listen(env.PORT, () => {
     console.log(`🌟 Gan HaHalomot API running on port ${env.PORT} (${env.NODE_ENV})`);
 
     // Before anything else on a control plane: without a console account
@@ -279,19 +279,26 @@ connectDB().then(() => {
     each('stale-distribution', () =>
       require('./controllers/payslipAudit.controller').finalizeStaleDistributionLogs())();
 
+    // Jobs below run under a Mongo lease (withJobLock): a tick that outlasts
+    // its interval, or a second instance (every deploy runs old+new side by
+    // side for a window), must SKIP rather than run the same sync twice —
+    // twice-at-once is how duplicate children and double pushes happen.
+    const { withJobLock } = require('./services/jobLock');
+
     // Auto-sync from Google Sheets every hour
     const { syncFromSheets } = require('./controllers/sync.controller');
-    const runSync = () => {
+    const runSync = () => withJobLock('sheets-auto-sync', 30 * 60 * 1000, () => new Promise((resolve) => {
       console.log('🔄 Auto-sync started...');
       const fakeReq = { query: {}, user: null };
       const fakeRes = {
-        json: (data) => console.log('🔄 Auto-sync:', data.summary || 'done'),
+        json: (data) => { console.log('🔄 Auto-sync:', data.summary || 'done'); resolve(); },
         status: () => fakeRes,
       };
       syncFromSheets(fakeReq, fakeRes, (err) => {
         if (err) console.error('🔄 Auto-sync error:', err.message);
+        resolve();
       });
-    };
+    })).catch(e => console.error('🔄 Auto-sync lock error:', e.message));
 
     // First sync after 30 seconds, then every hour. Single-gan only — the
     // spreadsheet it reads is this office's, not a customer's.
@@ -426,9 +433,13 @@ connectDB().then(() => {
     // zero disagreements — and without it a working sync, a disabled one, a
     // misconfigured branch and an audit that compared nobody all look the
     // same from the log: empty.
-    const runSheetSync = () => sheetSync.tick()
+    // Leased: a pass slower than the 2-minute interval (Sheets latency is the
+    // whole risk) must not overlap the next one — two concurrent passes diff
+    // against the same shadow and can mark each other's un-landed writes as
+    // "agreed", which is the exact lost-edit the shadow exists to prevent.
+    const runSheetSync = () => withJobLock('sheet-sync', 10 * 60 * 1000, () => sheetSync.tick()
       .then(r => sheetSync.describeTick(r)
-        .forEach(l => (l.level === 'error' ? console.error(l.text) : console.log(l.text))))
+        .forEach(l => (l.level === 'error' ? console.error(l.text) : console.log(l.text)))))
       .catch((e) => console.error('[sheet-sync] tick failed:', e.message));
     if (!platformMode) {
       setTimeout(runSheetSync, 2 * 60 * 1000);
@@ -501,13 +512,46 @@ connectDB().then(() => {
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.
     const notificationService = require('./services/notification.service');
-    const runNotificationResend = () => notificationService.resendDue()
-      .then(n => { if (n) console.log(`[notifications] resent ${n} pending`); })
+    // Leased: resendDue marks an event only AFTER its pushes went out, so an
+    // overlapping run re-reads the same still-pending events and every parent
+    // gets the notification twice.
+    const runNotificationResend = () => withJobLock('notification-resend', 4 * 60 * 1000, () => notificationService.resendDue())
+      .then(({ ran, result: n }) => { if (ran && n) console.log(`[notifications] resent ${n} pending`); })
       .catch(e => console.error('[notifications] resend failed:', e.message));
     if (!platformMode) {
       setInterval(runNotificationResend, 5 * 60 * 1000);
     }
   });
+
+  // ── Graceful shutdown ──────────────────────────────────────────────────
+  // Render sends SIGTERM on EVERY deploy. Without a handler in the serving
+  // process the default kill severed every in-flight request mid-response —
+  // a parent mid-upload, an accountant mid-save, twice a day. Now: stop
+  // accepting new connections, let the in-flight ones finish, close Mongo,
+  // and only then exit. The 10s force-exit is the backstop for a request
+  // that will never finish (Render's own grace window is ~30s, so we are
+  // comfortably inside it). SIGINT gets the same treatment for local ctrl-C.
+  let shuttingDown = false;
+  const shutdown = (sig) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[shutdown] ${sig} — draining in-flight requests`);
+    const forceExit = setTimeout(() => {
+      console.error('[shutdown] drain timed out after 10s — exiting anyway');
+      process.exit(0);
+    }, 10_000);
+    forceExit.unref(); // the timer itself must not keep the process alive
+    server.close(() => {
+      require('mongoose').connection.close(false)
+        .catch(() => {})
+        .finally(() => {
+          console.log('[shutdown] clean exit');
+          process.exit(0);
+        });
+    });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 });
 
 module.exports = app;

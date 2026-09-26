@@ -1,7 +1,8 @@
 const router = require('express').Router();
 const { authMiddleware, requireRole } = require('../middleware/auth');
 const ctrl = require('../controllers/admin.controller');
-const dataDeletion = require('../controllers/dataDeletion.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const dataDeletion = wrapControllers(require('../controllers/dataDeletion.controller'));
 
 router.use(authMiddleware, requireRole('system_admin'));
 

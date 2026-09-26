@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import useUnsavedChangesWarning from '../../hooks/useUnsavedChangesWarning';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Card, TextField, Button, Stack,
@@ -142,6 +143,17 @@ export default function GanttEditor() {
   }, [outsideYear]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [gantt, setGantt] = useState(null);
+  // Everything typed lives ONLY in `gantt` state until "שמור" is pressed — a
+  // closed/refreshed tab was a month of planning gone with no warning. Dirty =
+  // the savable parts differ from the last loaded/saved snapshot.
+  const savedSnapRef = useRef(null);
+  const ganttRef = useRef(null);
+  useEffect(() => { ganttRef.current = gantt; }, [gantt]);
+  const ganttSnapshot = (g) => (g ? JSON.stringify({ r: g.row_definitions, w: g.weeks }) : null);
+  useUnsavedChangesWarning(() => {
+    const g = ganttRef.current;
+    return !!g && savedSnapRef.current != null && ganttSnapshot(g) !== savedSnapRef.current;
+  });
   const [holidays, setHolidays] = useState([]);
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -197,6 +209,7 @@ export default function GanttEditor() {
     api.get('/gantt', { params: { classroom: classroomId, month, year, branch: selectedBranch } })
       .then(res => {
         setGantt(res.data.gantt);
+        savedSnapRef.current = ganttSnapshot(res.data.gantt);
         setHolidays(res.data.holidays || []);
         setCanEdit(res.data.can_edit !== false);
         setLastSavedAt(res.data.gantt?.updated_at || null);
@@ -725,6 +738,7 @@ export default function GanttEditor() {
         force,
       });
       setLastSavedAt(res.data?.gantt?.updated_at || new Date().toISOString());
+      savedSnapRef.current = ganttSnapshot(gantt); // what was just saved IS the baseline
 
       const banked = await captureTypedContent();
       const bankNote = banked === 0 ? ''

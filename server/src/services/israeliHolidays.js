@@ -36,7 +36,50 @@ const HOLIDAYS = [
   { date: '2027-04-28', name: 'שביעי של פסח' },
   { date: '2027-05-12', name: 'יום העצמאות' },
   { date: '2027-06-11', name: 'שבועות' },
+
+  // תשפ"ח (2027-2028) — verified against hebcal.com (Israel calendar), 26.09.2026
+  { date: '2027-10-02', name: 'ראש השנה א\'' },     // Saturday → not eligible
+  { date: '2027-10-03', name: 'ראש השנה ב\'' },
+  { date: '2027-10-11', name: 'יום כיפור' },
+  { date: '2027-10-16', name: 'סוכות א\'' },        // Saturday → not eligible
+  { date: '2027-10-23', name: 'שמיני עצרת / שמחת תורה' }, // Saturday → not eligible
+  { date: '2028-04-11', name: 'פסח א\'' },
+  { date: '2028-04-17', name: 'שביעי של פסח' },
+  { date: '2028-05-02', name: 'יום העצמאות' },
+  { date: '2028-05-31', name: 'שבועות' },
+
+  // תשפ"ט (2028-2029) — verified against hebcal.com (Israel calendar), 26.09.2026
+  { date: '2028-09-21', name: 'ראש השנה א\'' },
+  { date: '2028-09-22', name: 'ראש השנה ב\'' },
+  { date: '2028-09-30', name: 'יום כיפור' },        // Saturday → not eligible
+  { date: '2028-10-05', name: 'סוכות א\'' },
+  { date: '2028-10-12', name: 'שמיני עצרת / שמחת תורה' },
+  { date: '2029-03-31', name: 'פסח א\'' },          // Saturday → not eligible
+  { date: '2029-04-06', name: 'שביעי של פסח' },
+  { date: '2029-04-19', name: 'יום העצמאות' },
+  { date: '2029-05-20', name: 'שבועות' },
+
+  // תש"ץ (2029-2030) — verified against hebcal.com (Israel calendar), 26.09.2026
+  { date: '2029-09-10', name: 'ראש השנה א\'' },
+  { date: '2029-09-11', name: 'ראש השנה ב\'' },
+  { date: '2029-09-19', name: 'יום כיפור' },
+  { date: '2029-09-24', name: 'סוכות א\'' },
+  { date: '2029-10-01', name: 'שמיני עצרת / שמחת תורה' },
+  { date: '2030-04-18', name: 'פסח א\'' },
+  { date: '2030-04-24', name: 'שביעי של פסח' },
+  { date: '2030-05-08', name: 'יום העצמאות' },
+  { date: '2030-06-07', name: 'שבועות' },
 ];
+
+// The last month the table knows about. When a payroll month falls beyond
+// this, holiday pay isn't "zero" — it is UNKNOWN, and the difference must be
+// shouted, not defaulted: the previous edition of this table ended quietly in
+// June 2027, and from the following September every hourly employee would
+// simply have lost her דמי חגים with no sign anything was missing.
+const COVERAGE_END_YM = HOLIDAYS[HOLIDAYS.length - 1].date.slice(0, 7);
+function tableCoversMonth(monthYM) {
+  return String(monthYM) <= COVERAGE_END_YM;
+}
 
 function ymdToDate(ymd) {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -89,7 +132,12 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
 
   const monthHolidays = getHolidaysInMonth(monthYM);
   if (monthHolidays.length === 0) {
-    result.blocking_reason = 'אין חגים בחודש זה';
+    // "No holidays" and "the table ran out" must not read the same — the
+    // second one is a bug about to underpay every hourly employee.
+    result.blocking_reason = tableCoversMonth(monthYM)
+      ? 'אין חגים בחודש זה'
+      : `לוח החגים במערכת מסתיים ב-${COVERAGE_END_YM} — יש לעדכן אותו (israeliHolidays.js) לפני חישוב דמי חגים לחודש זה`;
+    if (!tableCoversMonth(monthYM)) result.table_exhausted = true;
     return result;
   }
 
@@ -203,4 +251,6 @@ module.exports = {
   getHolidaysInMonth,
   computeHolidayPay,
   weekdayLocal,
+  tableCoversMonth,
+  COVERAGE_END_YM,
 };

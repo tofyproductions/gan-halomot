@@ -30,13 +30,19 @@ function fetchCSV(sheetName) {
   const encoded = encodeURIComponent(sheetName);
   const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encoded}`;
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    // 60s cap on each hop: a hung Sheets response used to hold the hourly
+    // sync's socket open forever, stacking sync upon sync.
+    const withTimeout = (req) => {
+      req.setTimeout(60_000, () => req.destroy(new Error('Google Sheets timeout (60s)')));
+      return req;
+    };
+    withTimeout(https.get(url, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        https.get(res.headers.location, r2 => readBody(r2).then(resolve, reject)).on('error', reject);
+        withTimeout(https.get(res.headers.location, r2 => readBody(r2).then(resolve, reject)).on('error', reject));
         return;
       }
       readBody(res).then(resolve, reject);
-    }).on('error', reject);
+    }).on('error', reject));
   });
 }
 

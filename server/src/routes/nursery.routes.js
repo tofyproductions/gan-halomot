@@ -1,5 +1,6 @@
 const router = require('express').Router();
-const ctrl = require('../controllers/nursery.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const ctrl = wrapControllers(require('../controllers/nursery.controller'));
 const { requireTab, requireRole } = require('../middleware/auth');
 
 /**

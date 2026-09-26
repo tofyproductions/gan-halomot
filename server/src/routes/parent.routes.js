@@ -1,5 +1,6 @@
 const router = require('express').Router();
-const auth = require('../controllers/parentAuth.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const auth = wrapControllers(require('../controllers/parentAuth.controller'));
 const multer = require('multer');
 const { parentAuthMiddleware } = require('../middleware/parentAuth');
 const { authLimiter, otpLimiter } = require('../middleware/rateLimit');
@@ -35,16 +36,16 @@ router.post('/auth/login', authLimiter, auth.login);
 router.use(parentAuthMiddleware);
 router.get('/me', auth.me);
 
-const push = require('../controllers/push.controller');
+const push = wrapControllers(require('../controllers/push.controller'));
 router.post('/push/register', push.registerParent);
 router.post('/push/unregister', push.unregister);
 
-const dataDeletion = require('../controllers/dataDeletion.controller');
+const dataDeletion = wrapControllers(require('../controllers/dataDeletion.controller'));
 router.post('/data-deletion/me', dataDeletion.requestParent);
 
 // Every one of these resolves the parent's children afresh and refuses an id
 // that is not among them — see parentPortal.controller.
-const portal = require('../controllers/parentPortal.controller');
+const portal = wrapControllers(require('../controllers/parentPortal.controller'));
 // ההסכמה לזיהוי פנים. לא חוסמת שום דבר — מי שלא מסמן רואה את כל הגלריה,
 // פשוט בלי הסינון האוטומטי. זו כל ההגנה: הסכמה שנכפתה כתנאי כניסה אינה
 // נחשבת חופשית כשמדובר במידע ביומטרי של קטין.
@@ -79,21 +80,21 @@ router.get('/children/:childId/gift', portal.childGift);
 router.put('/children/:childId/gift', portal.setChildGift);
 // What the gan has told this family. Published only, unexpired only, and
 // scoped to this child's classroom or to the whole branch.
-const announcements = require('../controllers/parentAnnouncements.controller');
+const announcements = wrapControllers(require('../controllers/parentAnnouncements.controller'));
 router.get('/children/:childId/announcements', announcements.childAnnouncements);
 // Who else may collect the child. Adding waits for the gan; removing does not.
-const pickup = require('../controllers/parentPickup.controller');
+const pickup = wrapControllers(require('../controllers/parentPickup.controller'));
 router.get('/children/:childId/pickup', pickup.list);
 router.post('/children/:childId/pickup', pickup.add);
 router.delete('/children/:childId/pickup/:id', pickup.revoke);
 // "לא מגיעה מחר". Today or later only — a report about a day that already
 // happened would be a family editing the gan's own record of it.
-const absence = require('../controllers/parentAbsence.controller');
+const absence = wrapControllers(require('../controllers/parentAbsence.controller'));
 router.get('/children/:childId/absences', absence.list);
 router.post('/children/:childId/absences', absence.create);
 router.delete('/children/:childId/absences/:date', absence.cancel);
 // What the family owes. Read-only — nothing in the parent portal moves money.
-const payments = require('../controllers/parentPayments.controller');
+const payments = wrapControllers(require('../controllers/parentPayments.controller'));
 // גאנט — only for a week the gan published, and only once approved.
 router.get('/children/:childId/gantt', portal.childGantt);
 

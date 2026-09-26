@@ -42,6 +42,8 @@ async function sendViaResend({ to, cc, subject, html, text, from, fileAttachment
 
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
+    // 30s — attachments ride along, but a dead API must not hold the caller.
+    signal: AbortSignal.timeout(30_000),
     headers: {
       'Authorization': `Bearer ${env.RESEND_API_KEY}`,
       'Content-Type': 'application/json',

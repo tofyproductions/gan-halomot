@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useUrlState } from '../../hooks/useUrlState';
+import useFetchSeq from '../../hooks/useFetchSeq';
 import {
   Box, Typography, Stack, TextField, Paper, Table, TableBody, TableCell,
   TableHead, TableRow, TableContainer, Chip, Alert, Button, Tooltip, IconButton,
@@ -137,8 +138,10 @@ export default function AttendanceMonitor() {
    * rows are the WRONG rows and leaving them up is a lie for as long as the
    * request takes.
    */
+  const attFetchSeq = useFetchSeq();
   const fetchAttendance = useCallback(({ quiet = false } = {}) => {
     if (!selectedBranch) return;
+    const seq = attFetchSeq.begin(); // race guard — see useFetchSeq
     if (!quiet) setLoading(true);
 
     // Belt and braces on top of keeping the rows mounted. React reuses the row
@@ -165,6 +168,7 @@ export default function AttendanceMonitor() {
           .catch(err => ({ branch: b, error: err.message || 'שגיאה', status: err.response?.status }));
       }))
         .then(results => {
+          if (!attFetchSeq.isCurrent(seq)) return; // stale — a newer fetch took over
           // Hide branches the user is not authorized to view — these come back
           // as 403 from the server-side managed-branch filter. The branch
           // dropdown should have excluded them upstream, but the JWT-based
@@ -174,18 +178,22 @@ export default function AttendanceMonitor() {
           setData(null);
           restore();
         })
-        .catch(err => { console.error(err); toast.error('שגיאה בטעינת מעקב החתמות'); })
-        .finally(() => setLoading(false));
+        .catch(err => { if (attFetchSeq.isCurrent(seq)) { console.error(err); toast.error('שגיאה בטעינת מעקב החתמות'); } })
+        .finally(() => { if (attFetchSeq.isCurrent(seq)) setLoading(false); });
       return;
     }
     api.get('/payroll/attendance', { params: { branch: selectedBranch, month } })
-      .then(res => { setData(res.data); setPerBranch(null); restore(); })
+      .then(res => {
+        if (!attFetchSeq.isCurrent(seq)) return; // stale — a newer fetch took over
+        setData(res.data); setPerBranch(null); restore();
+      })
       .catch(err => {
+        if (!attFetchSeq.isCurrent(seq)) return;
         console.error(err);
         toast.error('שגיאה בטעינת מעקב החתמות');
       })
-      .finally(() => setLoading(false));
-  }, [selectedBranch, isAllBranches, branches, month]);
+      .finally(() => { if (attFetchSeq.isCurrent(seq)) setLoading(false); });
+  }, [selectedBranch, isAllBranches, branches, month, attFetchSeq]);
 
   useEffect(() => { fetchAttendance(); }, [fetchAttendance]);
 

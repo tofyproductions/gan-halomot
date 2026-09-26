@@ -1,5 +1,6 @@
 const router = require('express').Router();
-const ctrl = require('../controllers/parentChanges.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const ctrl = wrapControllers(require('../controllers/parentChanges.controller'));
 const { requireTab } = require('../middleware/auth');
 
 /**
