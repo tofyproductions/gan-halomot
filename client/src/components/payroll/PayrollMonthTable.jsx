@@ -2788,7 +2788,14 @@ export default function PayrollMonthTable() {
       <SavedPayslipsDialog open={savedDlg.open} row={savedDlg.row} onClose={() => setSavedDlg({ open: false, row: null })} />
       <HoursReportDialog
         open={hoursDlg.open}
-        employee={hoursDlg.row ? { _id: hoursDlg.row.employee_id, full_name: hoursDlg.row.full_name } : null}
+        employee={hoursDlg.row ? {
+          _id: hoursDlg.row.employee_id,
+          full_name: hoursDlg.row.full_name,
+          // The dialog warns "no ת"ז — punches won't link" off this field;
+          // omitting it showed the warning for employees whose punches link
+          // perfectly well.
+          israeli_id: hoursDlg.row.israeli_id,
+        } : null}
         initialMonth={month}
         onClose={() => setHoursDlg({ open: false, row: null })}
       />

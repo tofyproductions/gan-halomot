@@ -536,6 +536,19 @@ connectDB().then(() => {
       setInterval(runFacePurge, facePurge.EVERY_MS);
     }
 
+    // דייג'סט בעיות החתמה של הבוקר: נבדק כל שעה, רץ בפועל פעם ביום אחרי
+    // 07:00 שעון ישראל (ההחלטה בתוך tick, עם סמן יומי — עלייה מחדש בצהריים
+    // לא דוחפת שוב). מנהל סניף מקבל פוש אחד על הסניף שלו; אדמין והנהלת
+    // חשבונות מקבלים סיכום רשת. פוש אחד, לא נדנוד — האירוע נסגר מיד אחרי
+    // המשלוח הראשון.
+    const punchDigest = require('./services/punchIssuesDigest');
+    const runPunchDigest = () => withJobLock('punch-issues-digest', 20 * 60 * 1000, () => punchDigest.tick())
+      .catch(e => console.error('[punch-digest] failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runPunchDigest, 60 * 1000);
+      setInterval(runPunchDigest, 60 * 60 * 1000);
+    }
+
     // התראות פוש: כל 5 דקות, כל מה שממתין ועבר עליו שעה מהשליחה הקודמת
     // נשלח שוב. יצירת אירוע חדש שולחת מיד בעצמה (notification.service.js);
     // ה-job הזה הוא רק החזרה החוזרת עד שמישהו מטפל.

@@ -11,6 +11,7 @@ import { useBranch } from '../../hooks/useBranch';
 import ClassPopupPoller from '../classes/ClassPopupPoller';
 import SetPasswordDialog from '../shared/SetPasswordDialog';
 import PunchEntryTaskGate from '../attendance/PunchEntryTaskGate';
+import PunchIssuesBanner from '../attendance/PunchIssuesBanner';
 import { MyDecisionsPopup } from '../payroll/MyDecisions';
 import HelpButton from '../shared/HelpButton';
 
@@ -58,6 +59,7 @@ export default function AppShell() {
         {/* A branch manager's open "complete your missing punches" assignment —
             pinned above whatever page they navigate to until the branch is clean. */}
         <PunchEntryTaskGate />
+      <PunchIssuesBanner />
         {/* What accounting decided on the requests THIS person sent. Shown once
             on entry, then reachable from the bell — the screen keeps the rest. */}
         <MyDecisionsPopup />
