@@ -2545,6 +2545,64 @@ async function createManualPunches(req, res, next, opts = {}) {
      * makes re-reporting it correctly the next step.
      */
     const wanted = pairs.map(p => ({ ...p, ts: ilDateTime(date, p.time) }));
+
+    /**
+     * THE CLOCK'S WORD STANDS — an employee cannot self-report a side of the
+     * day the clock already recorded (owner's rule, 26.09.2026).
+     *
+     * The same-minute dedup below catches an identical reading; it does NOT
+     * catch an employee "re-reporting" an entry the clock holds at a
+     * different time — which is either a needless duplicate (approve it and
+     * the day has two entries) or an attempt to move a recorded time by
+     * hand. If the clock punched her in at 07:19, the only thing left to
+     * report is the exit; changing 07:19 itself is the manager's call, made
+     * in the manager's flow. Manager/accounting entries are untouched —
+     * correcting the clock is exactly their job.
+     */
+    if (opts.selfReport) {
+      const dayStart = ilDateTime(date, '00:00');
+      const dayEnd = new Date(dayStart.getTime() + 24 * 3600 * 1000);
+      const clockPunches = await Punch.find({
+        employee_id: emp._id,
+        timestamp: { $gte: dayStart, $lt: dayEnd },
+        timestamp_source: { $in: ['device', 'agent_received_at'] },
+        approval_status: { $ne: 'rejected' },
+        ignored: { $ne: true },
+      }).select('state timestamp').lean();
+      const clockTimes = clockPunches
+        .map(p => new Date(p.timestamp).toLocaleTimeString('he-IL', {
+          hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jerusalem',
+        })).join(', ');
+      // COUNT-BASED, not direction-based: TIMEDOX often reports direction
+      // "unknown" (state 255 — the device genuinely doesn't know entry from
+      // exit; the day is paired by time order). So the honest question is not
+      // "did the clock record an entry" but "how many readings does the clock
+      // hold, and how many is she adding":
+      //   - clock holds an EVEN count (a complete day) → nothing to report;
+      //   - clock holds an ODD count (one side missing) → exactly ONE report
+      //     may be added — reporting BOTH sides re-reports the one the clock
+      //     already has (Aliya's 07:19: clock 07:19 + manual 07:19 + manual
+      //     16:45 = an entry twice);
+      //   - directional clock states (0/1) additionally refuse a report on
+      //     the side the clock explicitly holds.
+      if (clockPunches.length > 0) {
+        const refuse = (msg) => res.status(409).json({
+          error: `${msg} לתיקון שעה שנרשמה בשעון יש לפנות למנהל/ת הסניף.`,
+          code: 'CLOCK_ALREADY_PUNCHED',
+        });
+        if (clockPunches.length % 2 === 0) {
+          return refuse(`השעון כבר רשם יום שלם ב-${date} (${clockTimes}) — אין החתמה חסרה לדווח.`);
+        }
+        if (wanted.length > 1) {
+          return refuse(`השעון כבר רשם החתמה ב-${date} (${clockTimes}) — יש לדווח רק את ההחתמה החסרה (כניסה או יציאה), לא את שתיהן.`);
+        }
+        const directional = new Set(clockPunches.map(p => p.state).filter(s => s === 0 || s === 1));
+        if (directional.has(wanted[0].state)) {
+          return refuse(`השעון כבר רשם ${wanted[0].state === 0 ? 'כניסה' : 'יציאה'} ב-${date} (${clockTimes}).`);
+        }
+      }
+    }
+
     const existing = await Punch.find({
       employee_id: emp._id,
       timestamp: {
