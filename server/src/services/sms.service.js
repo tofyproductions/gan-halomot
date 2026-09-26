@@ -87,6 +87,9 @@ function readProviderReply(body) {
 async function sendViaSms4Free({ to, text }) {
   const res = await fetch(SMS4FREE_SEND_URL, {
     method: 'POST',
+    // In-request path (parent OTP): a hung provider must become a clean error,
+    // not a parent staring at a spinner until the proxy gives up.
+    signal: AbortSignal.timeout(15_000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       key: env.SMS_KEY,

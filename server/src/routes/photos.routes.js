@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const multer = require('multer');
-const ctrl = require('../controllers/photos.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const ctrl = wrapControllers(require('../controllers/photos.controller'));
 const { requireTab } = require('../middleware/auth');
 const { MAX_UPLOAD_BYTES } = require('../services/photo.service');
 

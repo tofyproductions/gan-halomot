@@ -78,6 +78,8 @@ async function sendPush({ token, title, body, data }) {
     `https://fcm.googleapis.com/v1/projects/${cachedProjectId}/messages:send`,
     {
       method: 'POST',
+      // Untimed, this stacked overlapping resend jobs when Google hung.
+      signal: AbortSignal.timeout(10_000),
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',

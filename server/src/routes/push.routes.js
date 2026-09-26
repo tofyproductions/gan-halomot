@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { authMiddleware, allowSelfWrite } = require('../middleware/auth');
-const c = require('../controllers/push.controller');
+const { wrapControllers } = require('../utils/asyncWrap');
+const c = wrapControllers(require('../controllers/push.controller'));
 
 router.use(authMiddleware);
 // Which device this person wants notifications on. Signed for the same reason

@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import useFetchSeq from '../../hooks/useFetchSeq';
+import useUnsavedChangesWarning from '../../hooks/useUnsavedChangesWarning';
 import {
   Box, Paper, Stack, Typography, TextField, Select, MenuItem, IconButton, Button,
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer, Tooltip,
@@ -1027,7 +1029,12 @@ export default function PayrollMonthTable() {
       .catch(() => {});
   }, []);
 
+  // Race guard: this is the slowest endpoint in the system, and a stale May
+  // response landing after June's would show May's salaries under June's
+  // header — see useFetchSeq.
+  const monthFetchSeq = useFetchSeq();
   const fetchData = useCallback(({ quiet = false } = {}) => {
+    const seq = monthFetchSeq.begin();
     if (!quiet) setLoading(true);
     const box = tableContainerRef.current;
     const keep = quiet && box ? { left: box.scrollLeft, top: box.scrollTop } : null;
@@ -1039,6 +1046,7 @@ export default function PayrollMonthTable() {
     }
     api.get('/payroll-month', { params })
       .then(res => {
+        if (!monthFetchSeq.isCurrent(seq)) return; // stale — a newer request took over
         setData(res.data);
         if (keep) {
           requestAnimationFrame(() => {
@@ -1048,11 +1056,17 @@ export default function PayrollMonthTable() {
           });
         }
       })
-      .catch(err => { console.error(err); toast.error('שגיאה בטעינת טבלת שכר'); })
-      .finally(() => { if (!quiet) setLoading(false); });
-  }, [month, viewMode, selectedBranch, isAllBranches, selectedAmuta]);
+      .catch(err => {
+        if (!monthFetchSeq.isCurrent(seq)) return;
+        console.error(err); toast.error('שגיאה בטעינת טבלת שכר');
+      })
+      .finally(() => { if (!quiet && monthFetchSeq.isCurrent(seq)) setLoading(false); });
+  }, [month, viewMode, selectedBranch, isAllBranches, selectedAmuta, monthFetchSeq]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Staged edits live only in this tab — a closed tab silently lost them.
+  useUnsavedChangesWarning(() => stagingMode && Object.keys(staged).length > 0);
 
   const patchManual = useCallback((employeeId, patch) => {
     if (stagingMode) {
@@ -1068,6 +1082,11 @@ export default function PayrollMonthTable() {
             field_label: FIELD_LABELS[field] || field,
             current_value: row?.manual?.[field] ?? null,
             requested_value: value,
+            // The month this edit was MADE IN. The work-month picker is shared
+            // by every payroll tab (useWorkMonth), so it can silently change
+            // under staged edits — and submitting then filed May's numbers
+            // into June's PayrollMonth. The stamp lets submit refuse that.
+            month,
           };
         }
         return next;
@@ -1285,6 +1304,15 @@ export default function PayrollMonthTable() {
   const submitChangeRequest = useCallback(async () => {
     const changes = Object.values(staged);
     if (changes.length === 0) return;
+    // Every staged edit must belong to the month on screen. The shared month
+    // picker can flip (another payroll tab changes it); filing May's values
+    // into June is corruption an accountant then approves without knowing.
+    const foreign = changes.filter(c => c.month && c.month !== month);
+    if (foreign.length) {
+      const months = [...new Set(foreign.map(c => c.month))].join(', ');
+      toast.error(`יש ${foreign.length} שינויים שנערכו על חודש ${months} — חזור לחודש הזה כדי לשלוח אותם, או בטל אותם.`);
+      return;
+    }
     if (!(await confirm({
       title: 'שליחת בקשת שינוי',
       message: `לשלוח ${changes.length} שינויים לאישור הנה״ח?`,
@@ -1862,6 +1890,15 @@ export default function PayrollMonthTable() {
         }}>
           <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }}>
             {Object.keys(staged).length} שינויים ממתינים לשליחה
+            {(() => {
+              // Edits carry the month they were made in — if the shared picker
+              // moved since, say so, or the manager submits into the wrong month.
+              const months = [...new Set(Object.values(staged).map(c => c.month).filter(Boolean))];
+              const foreign = months.filter(m => m !== month);
+              return foreign.length
+                ? ` — שים לב: השינויים נערכו על חודש ${foreign.join(', ')}`
+                : '';
+            })()}
           </Typography>
           <Button size="small" color="inherit" onClick={discardStaged}>בטל הכל</Button>
           <Button

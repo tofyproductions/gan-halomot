@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useUrlState } from '../../hooks/useUrlState';
+import useFetchSeq from '../../hooks/useFetchSeq';
 import {
   Box, Card, CardContent, Typography, TextField, Button, Stack,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
@@ -98,7 +99,11 @@ export default function CollectionsTable() {
     discount_type: 'percentage', value: '', month: '', reason: '',
   });
 
+  // Race guard — an old year/branch response must not overwrite a newer one
+  // (see useFetchSeq).
+  const fetchSeq = useFetchSeq();
   const fetchData = useCallback(() => {
+    const seq = fetchSeq.begin();
     setLoading(true);
     // The branch has to be on the request: the server filters by `?branch=`,
     // and without it this table showed every branch's children under whichever
@@ -107,12 +112,13 @@ export default function CollectionsTable() {
       params: { year: selectedYear, ...(selectedBranch ? { branch: selectedBranch } : {}) },
     })
       .then((res) => {
+        if (!fetchSeq.isCurrent(seq)) return; // stale response
         setRawData(res.data.collections || {});
         setCampInfo(res.data.summer_camp || null);
       })
-      .catch(() => toast.error('שגיאה בטעינת נתוני גבייה'))
-      .finally(() => setLoading(false));
-  }, [selectedYear, selectedBranch]);
+      .catch(() => { if (fetchSeq.isCurrent(seq)) toast.error('שגיאה בטעינת נתוני גבייה'); })
+      .finally(() => { if (fetchSeq.isCurrent(seq)) setLoading(false); });
+  }, [selectedYear, selectedBranch, fetchSeq]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
