@@ -123,7 +123,16 @@ export default function PendingPunchApprovals({ onChanged }) {
       });
   };
 
-  const DAY_SRC = { manual: 'ידני', fixed_schedule: 'שעות קבועות', closure_completion: 'בונוס אוגוסט' };
+  // Source of each punch, with an icon that survives a squint: ⌚ = the
+  // employee physically punched the clock; ✍️ = a human typed the time in;
+  // 📅 = generated from a fixed schedule; 🎁 = the August-closure marker.
+  const DAY_SRC = {
+    manual: '✍️ דיווח ידני',
+    fixed_schedule: '📅 שעות קבועות',
+    closure_completion: '🎁 בונוס אוגוסט',
+    device: '⌚ שעון',
+    agent_received_at: '⌚ שעון',
+  };
   const DAY_STATUS = {
     auto: { label: 'שעון', color: 'success' },
     approved: { label: 'מאושר', color: 'success' },
@@ -297,12 +306,15 @@ export default function PendingPunchApprovals({ onChanged }) {
                               <DeltaTag window={win} punch={p} />
                               {/* Who typed this in. An employee reporting her own day and a
                                   manager filling one in are different claims about the hours. */}
-                              <Tooltip title={src.key === 'unknown' ? 'נוצר לפני שהמערכת תיעדה מי מזין' : `הוזן ע״י ${src.label}`}>
+                              <Tooltip title={src.key === 'unknown' ? 'נוצר לפני שהמערכת תיעדה מי מזין'
+                                : src.key === 'self' ? 'העובד/ת דיווח/ה את השעה הזו בעצמו/ה — לא החתמה פיזית בשעון'
+                                : `הוזן ע״י ${src.label}`}>
                                 <Chip
                                   size="small"
-                                  label={src.label}
-                                  variant="outlined"
-                                  color={src.key === 'self' ? 'info' : 'default'}
+                                  label={src.key === 'self' ? '✍️ דיווח עצמי' : `✍️ ${src.label}`}
+                                  variant={src.key === 'self' ? 'filled' : 'outlined'}
+                                  color={src.key === 'self' ? 'warning' : 'default'}
+                                  sx={{ fontWeight: 700 }}
                                 />
                               </Tooltip>
                               {p.manual_note && (
@@ -310,13 +322,25 @@ export default function PendingPunchApprovals({ onChanged }) {
                                   <Chip size="small" label="הערה" variant="outlined" />
                                 </Tooltip>
                               )}
-                              <Tooltip title={stage === 'accountant'
-                                ? 'אשר סופית — ייכנס לשכר'
-                                : (isAdmin || isAccountant) ? 'אשר ישירות — עוקף את מנהל/ת הסניף' : 'אשר והעבר להנה״ח'}>
-                                <IconButton size="small" color="success" onClick={() => approve(p)}>
-                                  <CheckCircleIcon fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
+                              {/* The manager is the FIRST gate for a self-report: an accountant
+                                  can no longer cut through it (the server refuses too) — only an
+                                  admin keeps the escape hatch, and it says so. */}
+                              {(() => {
+                                const accountantBlocked = stage === 'manager' && isAccountant && !isAdmin;
+                                const title = stage === 'accountant'
+                                  ? 'אשר סופית — ייכנס לשכר'
+                                  : accountantBlocked ? 'ממתין קודם לאישור מנהל/ת הסניף — אישור ראשוני של דיווח עצמי עובר דרך המנהל'
+                                    : isAdmin ? 'אשר ישירות — עוקף את מנהל/ת הסניף' : 'אשר והעבר להנה״ח';
+                                return (
+                                  <Tooltip title={title}>
+                                    <span>
+                                      <IconButton size="small" color="success" disabled={accountantBlocked} onClick={() => approve(p)}>
+                                        <CheckCircleIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                );
+                              })()}
                               <Tooltip title="דחה">
                                 <IconButton size="small" color="error" onClick={() => setReject({ open: true, punch: p, note: '' })}>
                                   <CancelIcon fontSize="small" />
@@ -349,7 +373,7 @@ export default function PendingPunchApprovals({ onChanged }) {
                                       size="small"
                                       variant={isThisPending ? 'filled' : 'outlined'}
                                       color={st.color}
-                                      label={`${new Date(dp.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} · ${DAY_SRC[dp.timestamp_source] || 'שעון'} · ${st.label}`}
+                                      label={`${new Date(dp.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} · ${DAY_SRC[dp.timestamp_source] || '⌚ שעון'} · ${st.label}`}
                                       sx={{ height: 22, fontSize: '0.68rem', fontWeight: isThisPending ? 800 : 500 }}
                                     />
                                   );
