@@ -3,7 +3,28 @@ const multer = require('multer');
 const router = express.Router();
 const publicController = require('../controllers/public.controller');
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Parent-registration uploads: an ID photo and a payment proof from a phone.
+// memoryStorage buffers the WHOLE body in RAM before the controller ever sees
+// the token — on a public route that is a one-request outage (a single huge
+// POST, malicious or an innocent phone video, blows a 512MB instance). So two
+// fences, in order:
+//   1. the token is checked BEFORE multer, so a garbage link never gets its
+//      bytes buffered at all;
+//   2. multer itself is capped like every other public upload in this file
+//      (the careers comment below used to call this one "the unbounded one
+//      above" — no longer).
+const MAX_REGISTRATION_FILE_BYTES = 15 * 1024 * 1024; // phone photos, with margin
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_REGISTRATION_FILE_BYTES, files: 3 },
+});
+function registrationUploadErrors(err, _req, res, next) {
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'הקובץ גדול מדי — עד 15MB לקובץ' });
+  }
+  if (err) return res.status(400).json({ error: 'שגיאה בצירוף הקובץ' });
+  next();
+}
 
 // GET /api/public/register/:token
 router.get('/register/:token', publicController.getRegistrationForm);
@@ -18,11 +39,13 @@ router.post('/register/:token/contract-pdf', publicController.storeSignedContrac
 // POST /api/public/register/:token/upload
 router.post(
   '/register/:token/upload',
+  publicController.requireRegistrationToken, // 404 before a byte is buffered
   upload.fields([
     { name: 'parentIdFile', maxCount: 1 },
     { name: 'paymentProof', maxCount: 1 },
     { name: 'file', maxCount: 1 },
   ]),
+  registrationUploadErrors,
   publicController.uploadDocument
 );
 

@@ -4,6 +4,23 @@ const { sendAgreementEmail } = require('../services/email.service');
 const { academicYearOf, getAcademicYears } = require('../services/academic-year.service');
 const { attachSecondParent } = require('../services/household.service');
 
+/**
+ * Route-level gate that runs BEFORE multer on the registration upload.
+ *
+ * multer(memoryStorage) buffers the entire multipart body into RAM before the
+ * handler runs, so uploadDocument's own token check happens too late to
+ * protect the instance — a bogus link still costs the full body's memory.
+ * `exists` is one indexed read and buffers nothing. uploadDocument keeps its
+ * own full lookup; this gate only decides whether bytes get buffered at all.
+ */
+async function requireRegistrationToken(req, res, next) {
+  try {
+    const found = await Registration.exists({ access_token: req.params.token });
+    if (!found) return res.status(404).json({ error: 'Registration not found or link expired' });
+    next();
+  } catch (err) { next(err); }
+}
+
 async function getRegistrationForm(req, res, next) {
   try {
     const { token } = req.params;
@@ -458,5 +475,6 @@ async function releaseItem(req, res, next) {
 
 module.exports = {
   getRegistrationForm, submitSignature, storeSignedContract, uploadDocument,
+  requireRegistrationToken,
   getEvent, claimItem, releaseItem,
 };
