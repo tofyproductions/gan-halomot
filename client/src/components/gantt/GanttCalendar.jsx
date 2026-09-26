@@ -29,12 +29,21 @@ const STATUS_COLORS = {
 
 export default function GanttCalendar() {
   const navigate = useNavigate();
-  const { selectedBranch } = useBranch();
+  const { selectedBranch, branches, isAllBranches } = useBranch();
   const { years } = useAcademicYear();
   const [classrooms, setClassrooms] = useState([]);
   const [selectedClassroom, setSelectedClassroom] = useState('');
+  // Which gan's rooms to show when the GLOBAL scope is "all branches". Without
+  // this, the class picker mixed every branch's rooms into one list — three
+  // unlabelled "בוגרים" and no way to tell whose plan you are about to open.
+  const [ganttBranch, setGanttBranch] = useState('');
   const [archive, setArchive] = useState([]);
   const [multiPrintOpen, setMultiPrintOpen] = useState(false);
+
+  // Rooms visible under the current in-screen gan choice.
+  const visibleClassrooms = (isAllBranches && ganttBranch)
+    ? classrooms.filter(c => String(c.branch_id) === String(ganttBranch))
+    : classrooms;
 
   // The plan is written for the year the gan is in, and only that one. There
   // used to be a picker here offering four years back and two ahead; a month
@@ -58,6 +67,27 @@ export default function GanttCalendar() {
       return api.get('/classrooms').then(r2 => pick(r2.data.classrooms || []));
     }).catch(() => {});
   }, []);
+
+  // Keep the in-screen gan and the selected room coherent:
+  //   - leaving all-branches mode clears the in-screen choice (the global
+  //     picker is the scope again);
+  //   - entering it defaults to the gan owning the current room, so the
+  //     screen doesn't jump;
+  //   - choosing a different gan moves the room selection into that gan.
+  useEffect(() => {
+    if (!isAllBranches) { if (ganttBranch) setGanttBranch(''); return; }
+    if (!classrooms.length) return;
+    if (!ganttBranch) {
+      const current = classrooms.find(c => (c._id || c.id) === selectedClassroom);
+      const first = current?.branch_id || classrooms[0].branch_id;
+      if (first) setGanttBranch(String(first));
+      return;
+    }
+    const inScope = classrooms.filter(c => String(c.branch_id) === String(ganttBranch));
+    if (inScope.length && !inScope.some(c => (c._id || c.id) === selectedClassroom)) {
+      setSelectedClassroom(inScope[0]._id || inScope[0].id);
+    }
+  }, [isAllBranches, ganttBranch, classrooms, selectedClassroom]);
 
   useEffect(() => {
     if (!selectedClassroom) return;
@@ -83,10 +113,24 @@ export default function GanttCalendar() {
         <Typography variant="h5" sx={{ fontWeight: 800 }}>תוכנית עבודה שנתית</Typography>
         <Stack direction="row" spacing={2}>
           <Chip label={`שנת לימודים ${yearLabel}`} sx={{ fontWeight: 700, alignSelf: 'center' }} />
+          {isAllBranches && (
+            /* The global scope is "every branch", so the class list would mix
+               every gan's rooms — three unlabelled "בוגרים" and no way to know
+               whose plan opens. This picker narrows the screen to one gan. */
+            <TextField select size="small" value={ganttBranch} label="גן"
+              onChange={e => setGanttBranch(e.target.value)} sx={{ minWidth: 160 }}
+            >
+              {branches
+                .filter(b => (b._id || b.id) !== 'all')
+                .map(b => (
+                  <MenuItem key={b._id || b.id} value={String(b._id || b.id)}>{b.name}</MenuItem>
+                ))}
+            </TextField>
+          )}
           <TextField select size="small" value={selectedClassroom} label="כיתה"
             onChange={e => setSelectedClassroom(e.target.value)} sx={{ minWidth: 180 }}
           >
-            {classrooms.map(c => (
+            {visibleClassrooms.map(c => (
               <MenuItem key={c._id || c.id} value={c._id || c.id}>{c.name}</MenuItem>
             ))}
           </TextField>
