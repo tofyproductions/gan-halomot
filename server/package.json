@@ -17,6 +17,7 @@
     "test:async-wrap": "node scripts/async-wrap.test.js",
     "test:punch-digest": "node scripts/punch-digest.test.js",
     "test:manager-first": "node scripts/manager-first-gate.test.js",
+    "test:clock-stands": "node scripts/clock-word-stands.test.js",
     "test:employee-age": "node scripts/employee-age.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",
