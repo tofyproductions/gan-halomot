@@ -1452,7 +1452,9 @@ export default function PayrollMonthTable() {
     return list;
   }, [data, viewMode, selectedAmuta]);
 
-  const customColumns = data?.custom_columns || [];
+  // Stable identity: `|| []` minted a fresh array every render, which would
+  // defeat the tableBody memo below (a dep that always changes is no memo).
+  const customColumns = useMemo(() => data?.custom_columns || [], [data]);
 
   // Per-branch hours × rate breakdown for cross-branch hourly employees — so the
   // accountant can reconcile the estimated total with each branch's rate.
@@ -1488,7 +1490,7 @@ export default function PayrollMonthTable() {
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, allBranches]);
-  const perBranchBreakdown = (r) => branchBreakdownByEmp.get(r.employee_id) || [];
+  const perBranchBreakdown = useCallback((r) => branchBreakdownByEmp.get(r.employee_id) || [], [branchBreakdownByEmp]);
   // Show the breakdown only when it adds info: worked at >1 branch, or a single
   // branch whose rate differs from the employee's standard rate.
   const breakdownIsInformative = (r, lines) =>
@@ -1886,309 +1888,14 @@ export default function PayrollMonthTable() {
     return [...groups.values()];
   }, [data]);
 
-  return (
-    <Box dir="rtl">
-      {stagingMode && (
-        <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.soft', border: '1px solid', borderColor: 'info.light' }}>
-          <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.dark' }}>
-            ✏️ מצב עריכה לבקשת אישור — כל שינוי שתבצע יישלח להנה״ח לאישור
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            ערוך את התאים כרגיל. בסיום לחץ "שלח לאישור הנה״ח". השינויים ייכנסו לתוקף רק אחרי אישור.
-          </Typography>
-        </Box>
-      )}
-      {stagingMode && Object.keys(staged).length > 0 && (
-        <Box sx={{
-          position: 'sticky', top: 8, zIndex: 20, mb: 1.5, p: 1.5, borderRadius: 3,
-          bgcolor: 'warning.light', border: '2px solid', borderColor: 'warning.main',
-          display: 'flex', alignItems: 'center', gap: 2,
-        }}>
-          <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }}>
-            {Object.keys(staged).length} שינויים ממתינים לשליחה
-            {(() => {
-              // Edits carry the month they were made in — if the shared picker
-              // moved since, say so, or the manager submits into the wrong month.
-              const months = [...new Set(Object.values(staged).map(c => c.month).filter(Boolean))];
-              const foreign = months.filter(m => m !== month);
-              return foreign.length
-                ? ` — שים לב: השינויים נערכו על חודש ${foreign.join(', ')}`
-                : '';
-            })()}
-          </Typography>
-          <Button size="small" color="inherit" onClick={discardStaged}>בטל הכל</Button>
-          <Button
-            size="small" variant="contained" color="primary"
-            onClick={submitChangeRequest} disabled={submittingReq}
-          >
-            {submittingReq ? 'שולח…' : 'שלח לאישור הנה״ח'}
-          </Button>
-        </Box>
-      )}
-      <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
-        <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
-          <TextField type="month" size="small" label="חודש" value={month} onChange={e => setMonth(e.target.value)} sx={{ width: 160 }} InputLabelProps={{ shrink: true }} />
-          <TextField size="small" label="חיפוש עובד" placeholder="שם העובד" value={empSearch}
-            onChange={e => setEmpSearch(e.target.value)} sx={{ width: 200 }} />
-          {/* Scope is the global branch picker — show as a read-only chip so
-              the current view is obvious. Removed the amuta/branch toggle:
-              rows are always grouped by branch via section headers, so the
-              extra dimension was just confusing. */}
-          <Chip
-            size="small"
-            color={isAllBranches ? 'primary' : 'default'}
-            variant={isAllBranches ? 'filled' : 'outlined'}
-            label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
-            sx={{ fontWeight: 600 }}
-          />
-          {isAllBranches && rowsByBranch.length > 1 && (
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <Select
-                multiple
-                displayEmpty
-                value={ganFilter}
-                onChange={(e) => setGanFilter(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
-                renderValue={(sel) => {
-                  if (!sel.length) return <Typography variant="body2" color="text.secondary">סינון גנים: הכל</Typography>;
-                  return (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4 }}>
-                      {sel.map(id => {
-                        const g = rowsByBranch.find(x => x.branch_id === id);
-                        const mk = ganMarker(g?.branch_name);
-                        return <Chip key={id} size="small" label={g?.branch_name || id}
-                          sx={{ height: 20, fontSize: '0.7rem', bgcolor: mk?.strip, color: mk?.stripText, fontWeight: 700 }} />;
-                      })}
-                    </Box>
-                  );
-                }}
-              >
-                {rowsByBranch.map(g => {
-                  const mk = ganMarker(g.branch_name);
-                  return (
-                    <MenuItem key={g.branch_id} value={g.branch_id} sx={{ py: 0.5 }}>
-                      <Checkbox size="small" checked={ganFilter.includes(g.branch_id)} />
-                      <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: mk?.strip || 'dividerStrong', mr: 1, ml: 0.5, flexShrink: 0 }} />
-                      <Typography variant="body2">{g.branch_name} <Box component="span" sx={{ color: 'text.disabled', fontSize: '0.72rem' }}>• {g.rows.length}</Box></Typography>
-                    </MenuItem>
-                  );
-                })}
-              </Select>
-            </FormControl>
-          )}
-          <Box sx={{ flex: 1 }} />
-          <Typography variant="caption" color="text.secondary">
-            {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
-          </Typography>
-          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
-          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
-          <Button startIcon={<AutorenewIcon />} size="small" onClick={() => setCibusSyncOpen(true)} variant="outlined" sx={{ color: COLOR.payrollColumn.annual.head, borderColor: '#5eead4' }}>סיבוס אוטומטי</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
-          <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: COLOR.maternity.leave.on, borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
-          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
-          <Tooltip title="עובדים שמקבלים שעות קבועות ללא החתמה בשעון">
-            <Button startIcon={<ScheduleIcon />} size="small" onClick={() => setFixedSchedOpen(true)}
-              variant="outlined" color="secondary" disabled={stagingMode}>שעות קבועות</Button>
-          </Tooltip>
-          {(isAdmin || isAccountant) && mgrRequests.length > 0 && (
-            <Tooltip title="בקשות עדכון שכר ממתינות מהמנהלים לחודש זה — השוואה מול הטבלה">
-              <Badge badgeContent={mgrRequests.length} color="warning">
-                <Button size="small" variant="outlined" color="warning" startIcon={<NoteAltIcon />}
-                  onClick={() => setMgrReqDlg({ open: true, employeeId: null })}>
-                  בקשות מנהלים
-                </Button>
-              </Badge>
-            </Tooltip>
-          )}
-          <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
-          <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />}
-            onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
-          <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
-            onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
-          <Badge color="error" badgeContent={(punchGate.duplicates_count || 0) + (punchGate.missing_count || 0)} max={99}>
-            <Button size="small" variant={punchGate.blocked ? 'contained' : 'outlined'}
-              color={punchGate.blocked ? 'error' : 'warning'} startIcon={<ReportProblemIcon />}
-              onClick={() => setIssuesOpen(true)} disabled={!data}>
-              בעיות בהחתמה
-            </Button>
-          </Badge>
-          <Tooltip title={punchGate.blocked
-            ? `${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — התצוגה המקדימה פתוחה לצפייה, אבל השליחה עצמה חסומה עד לפתרון ב"בעיות בהחתמה"`
-            : 'שליחת טבלת השכר לרו״ח'}>
-            <span>
-              <Button size="small" variant="contained" color="primary"
-                startIcon={<SendIcon />}
-                onClick={() => setAcctPreviewOpen(true)}
-                disabled={!data || stagingMode}>
-                שלח לרו״ח{punchGate.blocked ? ` (שליחה חסומה — ${punchGate.count})` : ''}
-              </Button>
-            </span>
-          </Tooltip>
-          <Tooltip title="הגדרת נמעני רו״ח"><span>
-            <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
-          </span></Tooltip>
-          <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
-            <MenuItem disabled sx={{ opacity: 1 }}>
-              <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}
-                primary={exportMenu?.type === 'excel' ? 'הורדת אקסל' : 'הורדת PDF'} />
-            </MenuItem>
-            <Divider />
-            <MenuItem onClick={() => runExport(exportMenu.type, 'network')}>
-              <ListItemText primary="כל הרשת — קובץ אחד"
-                secondary={exportMenu?.type === 'excel' ? 'גיליון נפרד לכל סניף' : 'עמוד נפרד לכל סניף'} />
-            </MenuItem>
-            <MenuItem onClick={() => runExport(exportMenu.type, 'current')} disabled={isAllBranches}>
-              <ListItemText primary={`סניף נוכחי בלבד${!isAllBranches && selectedBranchName ? ` — ${selectedBranchName}` : ''}`}
-                secondary={isAllBranches ? 'בחר סניף מסוים כדי להפעיל' : null} />
-            </MenuItem>
-          </Menu>
-          <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
-          {isFinalized
-            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={stagingMode}>פתח לעריכה</Button>
-            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small" disabled={stagingMode}>נעל חודש</Button>}
-        </Stack>
-      </Paper>
-
-      {isAugustMonth && (
-        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: COLOR.payrollColumn.annual.head, border: '1px solid #67e8f9', color: COLOR.text.primary }}>
-          <b>אוגוסט — חודש תשלום דמי ההבראה השנתי.</b>{' '}
-          זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה: ימים לפי מדרגות הוותק שבצו ההרחבה × תעריף יום × היקף משרה.
-          מי שטרם השלימ/ה שנה — אינה זכאית השנה ותקבל תשלום מלא באוגוסט הבא.
-          הצעה מחושבת מופיעה בעמודת "הבראה" ליד כל עובד/ת — לחיצה עליה מזינה את הסכום.
-          {(data?.rows || []).find(r => r.recreation_auto)?.recreation_auto?.day_rate
-            ? ` תעריף יום נוכחי: ₪${(data.rows.find(r => r.recreation_auto).recreation_auto.day_rate).toLocaleString('he-IL')} — יש לוודא מול רו״ח שהוא מעודכן לשנה זו.`
-            : ''}
-        </Alert>
-      )}
-      <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: isNarrow ? 'none' : 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-        <Table size="small" stickyHeader sx={{
-          tableLayout: 'fixed',
-          minWidth: 1100,
-          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px', verticalAlign: 'middle' },
-          '& td.auto': { bgcolor: 'background.sunken', color: 'text.secondary' },
-          '& .ag-divider': { borderLeft: '2px solid', borderColor: 'divider' },
-          '& tbody tr:nth-of-type(even) td': { bgcolor: 'rgba(0,0,0,0.015)' },
-          '& tbody tr:nth-of-type(even) td.auto': { bgcolor: 'rgba(0,0,0,0.035)' },
-          '& tbody tr:hover td': { bgcolor: 'rgba(99,102,241,0.06) !important' },
-        }}>
-          <colgroup>
-            <col style={{ width: W.name }} />
-            {/* 6-col hours block: ימי עבודה + רגיל + שע"נ א' + שע"נ ב' + תעריף + שכר תקן */}
-            <col style={{ width: W.days }} />
-            <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            <col style={{ width: W.amutaCell }} />
-            {/* תקן breakdown — 4 columns: base / OT125 / OT150 / completion */}
-            <col style={{ width: W.tekenBase }} />
-            <col style={{ width: W.teken }} />
-            <col style={{ width: W.teken }} />
-            <col style={{ width: W.teken }} />
-            <col style={{ width: W.travel }} />
-            <col style={{ width: W.days }} />{/* מחלה */}
-            <col style={{ width: W.absence }} />{/* היעדרות */}
-            <col style={{ width: W.absence }} />{/* היעדרות שעות */}
-            <col style={{ width: W.days }} />{/* חופשה */}
-            <col style={{ width: W.days }} />{/* דמי חגים */}
-            <col style={{ width: W.advance }} />
-            <col style={{ width: W.money }} />{/* GIFT CARD */}
-            {showRecreation && <col style={{ width: W.money }} />}{/* הבראה — אוגוסט בלבד */}
-            <col style={{ width: W.money }} />{/* סיבוס */}
-            <col style={{ width: W.money }} />{/* מילואים */}
-            <col style={{ width: W.money }} />{/* הלוואות */}
-            <col style={{ width: W.money }} />{/* בונוס */}
-            {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
-            <col style={{ width: W.adjust }} />
-            <col style={{ width: W.notes }} />
-          </colgroup>
-
-          <TableHead>
-            <TableRow>
-              <TableCell rowSpan={2} sx={{
-                fontWeight: 800, bgcolor: 'background.paper',
-                // RTL: the stylis rtl plugin flips left<->right, so `left: 0`
-                // here renders as `right: 0` — freezing this column to the RTL
-                // start (visual right) so the name stays put on sideways scroll.
-                position: 'sticky', left: 0, zIndex: 4,
-                borderLeft: '2px solid', borderColor: 'divider',
-              }} className="ag-divider">שם העובד</TableCell>
-              <TableCell colSpan={6} align="center" sx={{
-                fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
-                letterSpacing: 0.2,
-              }}>שעות עבודה</TableCell>
-              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
-                נתונים חודשיים
-              </TableCell>
-            </TableRow>
-            <TableRow>
-              <SubHeaderGroup color={{ sub: COLOR.background.sunken, accent: COLOR.info.dark, border: COLOR.info.soft }} />
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.base.head }}>
-                <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
-                <Tooltip arrow title="תשלום בגין שעות נוספות ב-125% (שעתיים הראשונות מעל 8 ש׳ ביום). תקן: שעות 125% × ערך שעה × 1.25.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 125% ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
-                <Tooltip arrow title="תשלום בגין שעות נוספות ב-150% (מעל 10 ש׳ ביום). תקן: שעות 150% × ערך שעה × 1.5.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 150% ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.topUp.head }}>
-                <Tooltip arrow title="עובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים אוטומטית עד השכר המוסכם המלא: max(0, שכר מוסכם − שכר בסיס − שע״נ). שכר בסיס + השלמה = השכר המוסכם בדיוק (השע״נ כלול, לא נוסף מעליו). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.deduction.head }}>
-                <Tooltip arrow title="עובד תקן בלבד. ימים שבהם הגיע/ה אך עבד/ה מעל שעה פחות משעות ההתחייבות. שעה ראשונה חסרה = גרייס (לא מנוכה). מעל שעה — כל השעות החסרות מנוכות יחסית, לאחר אישור הנה״ח לכל יום.">
-                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>היעדרות (שעות) ⓘ</span>
-                </Tooltip>
-              </TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>חופשה</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>דמי חגים</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>קיזוז מקדמה</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>GIFT CARD</TableCell>
-              {showRecreation && (
-                <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.annual.head }}>
-                  <Tooltip arrow title="דמי הבראה שנתיים — משולמים באוגוסט. זכאות: השלמת שנת עבודה מלאה; ימים לפי מדרגות ותק בצו ההרחבה × תעריף יום × היקף משרה. ההצעה מחושבת אוטומטית — לחיצה עליה מזינה את הסכום">
-                    <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>הבראה 🌴</span>
-                  </Tooltip>
-                </TableCell>
-              )}
-              <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
-              {customColumns.map(c => (
-                <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
-                    <span>{c.label}</span>
-                    <Chip
-                      label={c.kind === 'number' ? '#' : c.kind === 'text' ? 'א' : '#/א'}
-                      size="small" sx={{ height: 14, fontSize: '0.6rem' }}
-                    />
-                  </Box>
-                  <IconButton
-                    size="small" className="col-del"
-                    sx={{ position: 'absolute', top: 0, left: 0, opacity: 0, padding: '2px' }}
-                    onClick={() => removeColumn(c.id)}
-                  ><DeleteOutlineIcon sx={{ fontSize: 14 }} /></IconButton>
-                </TableCell>
-              ))}
-              <TableCell align="center" sx={{ fontWeight: 700 }}>עדכוני שכר חודשי</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700 }}>הערות</TableCell>
-            </TableRow>
-          </TableHead>
-
-          <TableBody>
-            {(() => {
+  // ── THE TABLE BODY, BUILT ONLY WHEN ITS INPUTS CHANGE ──
+  // This used to be an IIFE inside the JSX: ~70 employees × ~27 tooltip-heavy
+  // cells re-reconciled on EVERY state change — opening a dialog, typing in
+  // it, hovering a menu — because the whole component re-renders and the IIFE
+  // re-ran unconditionally. As a useMemo it rebuilds only when a listed input
+  // changes; the dependency list below was generated and verified with
+  // eslint-plugin-react-hooks (exhaustive-deps), not by eye.
+  const tableBody = useMemo(() => {
               const totalCols = 1 + 6 + (showRecreation ? 19 : 18) + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
@@ -2726,7 +2433,314 @@ export default function PayrollMonthTable() {
                 }
               }
               return elements;
+  }, [createPresetAndUse, customColumns, data, empSearchDeferred, ganFilter,
+      highlightEmp, isAllBranches, loading, mgrReqByEmp, month,
+      patchCustomValue, patchManual, perBranchBreakdown, presets,
+      rowsByBranch, setEmployeeActive, setEmployeeFreelancer, showRecreation]);
+
+  return (
+    <Box dir="rtl">
+      {stagingMode && (
+        <Box sx={{ mb: 1.5, p: 1.5, borderRadius: 3, bgcolor: 'info.soft', border: '1px solid', borderColor: 'info.light' }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, color: 'info.dark' }}>
+            ✏️ מצב עריכה לבקשת אישור — כל שינוי שתבצע יישלח להנה״ח לאישור
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            ערוך את התאים כרגיל. בסיום לחץ "שלח לאישור הנה״ח". השינויים ייכנסו לתוקף רק אחרי אישור.
+          </Typography>
+        </Box>
+      )}
+      {stagingMode && Object.keys(staged).length > 0 && (
+        <Box sx={{
+          position: 'sticky', top: 8, zIndex: 20, mb: 1.5, p: 1.5, borderRadius: 3,
+          bgcolor: 'warning.light', border: '2px solid', borderColor: 'warning.main',
+          display: 'flex', alignItems: 'center', gap: 2,
+        }}>
+          <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }}>
+            {Object.keys(staged).length} שינויים ממתינים לשליחה
+            {(() => {
+              // Edits carry the month they were made in — if the shared picker
+              // moved since, say so, or the manager submits into the wrong month.
+              const months = [...new Set(Object.values(staged).map(c => c.month).filter(Boolean))];
+              const foreign = months.filter(m => m !== month);
+              return foreign.length
+                ? ` — שים לב: השינויים נערכו על חודש ${foreign.join(', ')}`
+                : '';
             })()}
+          </Typography>
+          <Button size="small" color="inherit" onClick={discardStaged}>בטל הכל</Button>
+          <Button
+            size="small" variant="contained" color="primary"
+            onClick={submitChangeRequest} disabled={submittingReq}
+          >
+            {submittingReq ? 'שולח…' : 'שלח לאישור הנה״ח'}
+          </Button>
+        </Box>
+      )}
+      <Paper variant="outlined" sx={{ borderRadius: 3, p: 1.5, mb: 1.5 }}>
+        <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+          <TextField type="month" size="small" label="חודש" value={month} onChange={e => setMonth(e.target.value)} sx={{ width: 160 }} InputLabelProps={{ shrink: true }} />
+          <TextField size="small" label="חיפוש עובד" placeholder="שם העובד" value={empSearch}
+            onChange={e => setEmpSearch(e.target.value)} sx={{ width: 200 }} />
+          {/* Scope is the global branch picker — show as a read-only chip so
+              the current view is obvious. Removed the amuta/branch toggle:
+              rows are always grouped by branch via section headers, so the
+              extra dimension was just confusing. */}
+          <Chip
+            size="small"
+            color={isAllBranches ? 'primary' : 'default'}
+            variant={isAllBranches ? 'filled' : 'outlined'}
+            label={isAllBranches ? 'כל הסניפים' : (selectedBranchName || 'סניף נבחר')}
+            sx={{ fontWeight: 600 }}
+          />
+          {isAllBranches && rowsByBranch.length > 1 && (
+            <FormControl size="small" sx={{ minWidth: 200 }}>
+              <Select
+                multiple
+                displayEmpty
+                value={ganFilter}
+                onChange={(e) => setGanFilter(typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value)}
+                renderValue={(sel) => {
+                  if (!sel.length) return <Typography variant="body2" color="text.secondary">סינון גנים: הכל</Typography>;
+                  return (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.4 }}>
+                      {sel.map(id => {
+                        const g = rowsByBranch.find(x => x.branch_id === id);
+                        const mk = ganMarker(g?.branch_name);
+                        return <Chip key={id} size="small" label={g?.branch_name || id}
+                          sx={{ height: 20, fontSize: '0.7rem', bgcolor: mk?.strip, color: mk?.stripText, fontWeight: 700 }} />;
+                      })}
+                    </Box>
+                  );
+                }}
+              >
+                {rowsByBranch.map(g => {
+                  const mk = ganMarker(g.branch_name);
+                  return (
+                    <MenuItem key={g.branch_id} value={g.branch_id} sx={{ py: 0.5 }}>
+                      <Checkbox size="small" checked={ganFilter.includes(g.branch_id)} />
+                      <Box sx={{ width: 12, height: 12, borderRadius: '3px', bgcolor: mk?.strip || 'dividerStrong', mr: 1, ml: 0.5, flexShrink: 0 }} />
+                      <Typography variant="body2">{g.branch_name} <Box component="span" sx={{ color: 'text.disabled', fontSize: '0.72rem' }}>• {g.rows.length}</Box></Typography>
+                    </MenuItem>
+                  );
+                })}
+              </Select>
+            </FormControl>
+          )}
+          <Box sx={{ flex: 1 }} />
+          <Typography variant="caption" color="text.secondary">
+            {data ? `${data.rows.length} עובדים • ${Math.round(data.totals.hours || 0)} שעות` : ''}
+          </Typography>
+          <Button startIcon={<AddCircleOutlineIcon />} size="small" onClick={() => setAddCol(true)} variant="outlined" disabled={stagingMode}>הוסף עמודה</Button>
+          <Button startIcon={<RestaurantMenuIcon />} size="small" onClick={() => setCibusDlg(true)} variant="outlined" color="success" disabled={stagingMode}>ייבוא סיבוס</Button>
+          <Button startIcon={<AutorenewIcon />} size="small" onClick={() => setCibusSyncOpen(true)} variant="outlined" sx={{ color: COLOR.payrollColumn.annual.head, borderColor: '#5eead4' }}>סיבוס אוטומטי</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyAutoHolidays} variant="outlined" color="warning" disabled={stagingMode}>החל דמי חגים</Button>
+          <Button startIcon={<CelebrationIcon />} size="small" onClick={() => setSpecialDaysOpen(true)} variant="outlined" sx={{ color: COLOR.maternity.leave.on, borderColor: '#c4b5fd' }}>ימים מיוחדים</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyKindergartenVacation} variant="outlined" color="primary" disabled={stagingMode}>חופשה מלוח</Button>
+          <Button startIcon={<AutoAwesomeIcon />} size="small" onClick={applyVacationRequests} variant="outlined" color="info" disabled={stagingMode}>סנכרן בקשות</Button>
+          <Tooltip title="עובדים שמקבלים שעות קבועות ללא החתמה בשעון">
+            <Button startIcon={<ScheduleIcon />} size="small" onClick={() => setFixedSchedOpen(true)}
+              variant="outlined" color="secondary" disabled={stagingMode}>שעות קבועות</Button>
+          </Tooltip>
+          {(isAdmin || isAccountant) && mgrRequests.length > 0 && (
+            <Tooltip title="בקשות עדכון שכר ממתינות מהמנהלים לחודש זה — השוואה מול הטבלה">
+              <Badge badgeContent={mgrRequests.length} color="warning">
+                <Button size="small" variant="outlined" color="warning" startIcon={<NoteAltIcon />}
+                  onClick={() => setMgrReqDlg({ open: true, employeeId: null })}>
+                  בקשות מנהלים
+                </Button>
+              </Badge>
+            </Tooltip>
+          )}
+          <Tooltip title="רענן"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
+          <Button size="small" variant="outlined" color="success" startIcon={<DownloadIcon />}
+            onClick={(e) => setExportMenu({ type: 'excel', anchor: e.currentTarget })} disabled={!data}>אקסל ▾</Button>
+          <Button size="small" variant="outlined" color="error" startIcon={<DownloadIcon />}
+            onClick={(e) => setExportMenu({ type: 'pdf', anchor: e.currentTarget })} disabled={!data}>PDF ▾</Button>
+          <Badge color="error" badgeContent={(punchGate.duplicates_count || 0) + (punchGate.missing_count || 0)} max={99}>
+            <Button size="small" variant={punchGate.blocked ? 'contained' : 'outlined'}
+              color={punchGate.blocked ? 'error' : 'warning'} startIcon={<ReportProblemIcon />}
+              onClick={() => setIssuesOpen(true)} disabled={!data}>
+              בעיות בהחתמה
+            </Button>
+          </Badge>
+          <Tooltip title={punchGate.blocked
+            ? `${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — התצוגה המקדימה פתוחה לצפייה, אבל השליחה עצמה חסומה עד לפתרון ב"בעיות בהחתמה"`
+            : 'שליחת טבלת השכר לרו״ח'}>
+            <span>
+              <Button size="small" variant="contained" color="primary"
+                startIcon={<SendIcon />}
+                onClick={() => setAcctPreviewOpen(true)}
+                disabled={!data || stagingMode}>
+                שלח לרו״ח{punchGate.blocked ? ` (שליחה חסומה — ${punchGate.count})` : ''}
+              </Button>
+            </span>
+          </Tooltip>
+          <Tooltip title="הגדרת נמעני רו״ח"><span>
+            <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
+          </span></Tooltip>
+          <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
+            <MenuItem disabled sx={{ opacity: 1 }}>
+              <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}
+                primary={exportMenu?.type === 'excel' ? 'הורדת אקסל' : 'הורדת PDF'} />
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={() => runExport(exportMenu.type, 'network')}>
+              <ListItemText primary="כל הרשת — קובץ אחד"
+                secondary={exportMenu?.type === 'excel' ? 'גיליון נפרד לכל סניף' : 'עמוד נפרד לכל סניף'} />
+            </MenuItem>
+            <MenuItem onClick={() => runExport(exportMenu.type, 'current')} disabled={isAllBranches}>
+              <ListItemText primary={`סניף נוכחי בלבד${!isAllBranches && selectedBranchName ? ` — ${selectedBranchName}` : ''}`}
+                secondary={isAllBranches ? 'בחר סניף מסוים כדי להפעיל' : null} />
+            </MenuItem>
+          </Menu>
+          <Tooltip title="ייצוא CSV"><IconButton onClick={exportCSV} disabled={!data}><DownloadIcon /></IconButton></Tooltip>
+          {isFinalized
+            ? <Button startIcon={<LockOpenIcon />} onClick={reopen} color="warning" variant="outlined" size="small" disabled={stagingMode}>פתח לעריכה</Button>
+            : <Button startIcon={<LockIcon />} onClick={finalize} color="primary" variant="outlined" size="small" disabled={stagingMode}>נעל חודש</Button>}
+        </Stack>
+      </Paper>
+
+      {isAugustMonth && (
+        <Alert severity="info" icon="🌴" sx={{ mb: 1.5, borderRadius: 2, bgcolor: COLOR.payrollColumn.annual.head, border: '1px solid #67e8f9', color: COLOR.text.primary }}>
+          <b>אוגוסט — חודש תשלום דמי ההבראה השנתי.</b>{' '}
+          זכאי/ת כל עובד/ת שהשלימ/ה שנת עבודה מלאה: ימים לפי מדרגות הוותק שבצו ההרחבה × תעריף יום × היקף משרה.
+          מי שטרם השלימ/ה שנה — אינה זכאית השנה ותקבל תשלום מלא באוגוסט הבא.
+          הצעה מחושבת מופיעה בעמודת "הבראה" ליד כל עובד/ת — לחיצה עליה מזינה את הסכום.
+          {(data?.rows || []).find(r => r.recreation_auto)?.recreation_auto?.day_rate
+            ? ` תעריף יום נוכחי: ₪${(data.rows.find(r => r.recreation_auto).recreation_auto.day_rate).toLocaleString('he-IL')} — יש לוודא מול רו״ח שהוא מעודכן לשנה זו.`
+            : ''}
+        </Alert>
+      )}
+      <TableContainer ref={tableContainerRef} component={Paper} sx={{ borderRadius: 3, maxHeight: isNarrow ? 'none' : 'calc(100vh - 240px)', overflowX: 'auto', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+        <Table size="small" stickyHeader sx={{
+          tableLayout: 'fixed',
+          minWidth: 1100,
+          '& td, & th': { fontSize: '0.78rem', borderBottom: '1px solid', borderColor: 'divider', boxSizing: 'border-box', padding: '4px 6px', verticalAlign: 'middle' },
+          '& td.auto': { bgcolor: 'background.sunken', color: 'text.secondary' },
+          '& .ag-divider': { borderLeft: '2px solid', borderColor: 'divider' },
+          '& tbody tr:nth-of-type(even) td': { bgcolor: 'rgba(0,0,0,0.015)' },
+          '& tbody tr:nth-of-type(even) td.auto': { bgcolor: 'rgba(0,0,0,0.035)' },
+          '& tbody tr:hover td': { bgcolor: 'rgba(99,102,241,0.06) !important' },
+        }}>
+          <colgroup>
+            <col style={{ width: W.name }} />
+            {/* 6-col hours block: ימי עבודה + רגיל + שע"נ א' + שע"נ ב' + תעריף + שכר תקן */}
+            <col style={{ width: W.days }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            <col style={{ width: W.amutaCell }} />
+            {/* תקן breakdown — 4 columns: base / OT125 / OT150 / completion */}
+            <col style={{ width: W.tekenBase }} />
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.teken }} />
+            <col style={{ width: W.travel }} />
+            <col style={{ width: W.days }} />{/* מחלה */}
+            <col style={{ width: W.absence }} />{/* היעדרות */}
+            <col style={{ width: W.absence }} />{/* היעדרות שעות */}
+            <col style={{ width: W.days }} />{/* חופשה */}
+            <col style={{ width: W.days }} />{/* דמי חגים */}
+            <col style={{ width: W.advance }} />
+            <col style={{ width: W.money }} />{/* GIFT CARD */}
+            {showRecreation && <col style={{ width: W.money }} />}{/* הבראה — אוגוסט בלבד */}
+            <col style={{ width: W.money }} />{/* סיבוס */}
+            <col style={{ width: W.money }} />{/* מילואים */}
+            <col style={{ width: W.money }} />{/* הלוואות */}
+            <col style={{ width: W.money }} />{/* בונוס */}
+            {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
+            <col style={{ width: W.adjust }} />
+            <col style={{ width: W.notes }} />
+          </colgroup>
+
+          <TableHead>
+            <TableRow>
+              <TableCell rowSpan={2} sx={{
+                fontWeight: 800, bgcolor: 'background.paper',
+                // RTL: the stylis rtl plugin flips left<->right, so `left: 0`
+                // here renders as `right: 0` — freezing this column to the RTL
+                // start (visual right) so the name stays put on sideways scroll.
+                position: 'sticky', left: 0, zIndex: 4,
+                borderLeft: '2px solid', borderColor: 'divider',
+              }} className="ag-divider">שם העובד</TableCell>
+              <TableCell colSpan={6} align="center" sx={{
+                fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
+                letterSpacing: 0.2,
+              }}>שעות עבודה</TableCell>
+              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
+                נתונים חודשיים
+              </TableCell>
+            </TableRow>
+            <TableRow>
+              <SubHeaderGroup color={{ sub: COLOR.background.sunken, accent: COLOR.info.dark, border: COLOR.info.soft }} />
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.base.head }}>
+                <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
+                <Tooltip arrow title="תשלום בגין שעות נוספות ב-125% (שעתיים הראשונות מעל 8 ש׳ ביום). תקן: שעות 125% × ערך שעה × 1.25.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 125% ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.overtime.head }}>
+                <Tooltip arrow title="תשלום בגין שעות נוספות ב-150% (מעל 10 ש׳ ביום). תקן: שעות 150% × ערך שעה × 1.5.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שע״נ 150% ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.topUp.head }}>
+                <Tooltip arrow title="עובד תקן בלבד. כשעבדה פחות משעות ההתחייבות — משלים אוטומטית עד השכר המוסכם המלא: max(0, שכר מוסכם − שכר בסיס − שע״נ). שכר בסיס + השלמה = השכר המוסכם בדיוק (השע״נ כלול, לא נוסף מעליו). ברירת מחדל דלוק; ניתן לכבות כדי לשלם רק לפי שעות בפועל.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" className="auto ag-divider" sx={{ fontWeight: 700 }}>נסיעות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>מחלה</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>היעדרות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.deduction.head }}>
+                <Tooltip arrow title="עובד תקן בלבד. ימים שבהם הגיע/ה אך עבד/ה מעל שעה פחות משעות ההתחייבות. שעה ראשונה חסרה = גרייס (לא מנוכה). מעל שעה — כל השעות החסרות מנוכות יחסית, לאחר אישור הנה״ח לכל יום.">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>היעדרות (שעות) ⓘ</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>חופשה</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>דמי חגים</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>קיזוז מקדמה</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>GIFT CARD</TableCell>
+              {showRecreation && (
+                <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.annual.head }}>
+                  <Tooltip arrow title="דמי הבראה שנתיים — משולמים באוגוסט. זכאות: השלמת שנת עבודה מלאה; ימים לפי מדרגות ותק בצו ההרחבה × תעריף יום × היקף משרה. ההצעה מחושבת אוטומטית — לחיצה עליה מזינה את הסכום">
+                    <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>הבראה 🌴</span>
+                  </Tooltip>
+                </TableCell>
+              )}
+              <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
+              {customColumns.map(c => (
+                <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
+                    <span>{c.label}</span>
+                    <Chip
+                      label={c.kind === 'number' ? '#' : c.kind === 'text' ? 'א' : '#/א'}
+                      size="small" sx={{ height: 14, fontSize: '0.6rem' }}
+                    />
+                  </Box>
+                  <IconButton
+                    size="small" className="col-del"
+                    sx={{ position: 'absolute', top: 0, left: 0, opacity: 0, padding: '2px' }}
+                    onClick={() => removeColumn(c.id)}
+                  ><DeleteOutlineIcon sx={{ fontSize: 14 }} /></IconButton>
+                </TableCell>
+              ))}
+              <TableCell align="center" sx={{ fontWeight: 700 }}>עדכוני שכר חודשי</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>הערות</TableCell>
+            </TableRow>
+          </TableHead>
+
+          <TableBody>
+            {tableBody}
           </TableBody>
         </Table>
       </TableContainer>

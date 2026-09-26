@@ -268,8 +268,22 @@ async function rematchOne() {
 async function tick() {
   if (!await isEnabled()) return false;
 
-  const photo = await Photo.findOne({ face_scan_status: 'pending' })
-    .sort({ created_at: 1 }).lean();
+  // Crashed claims first: a 'scanning' older than the window is a scan that
+  // died mid-flight (deploy, OOM) — back to the queue, nothing lost.
+  await Photo.updateMany(
+    { face_scan_status: 'scanning', face_scan_claimed_at: { $lt: new Date(Date.now() - 10 * 60 * 1000) } },
+    { $set: { face_scan_status: 'pending', face_scan_claimed_at: null } },
+  ).catch(() => {});
+
+  // ATOMIC CLAIM, not findOne-then-scan: two processes (the old+new instance
+  // a deploy runs side by side, or any future scale-up) used to pick the same
+  // oldest photo and both pay the models for it. Whoever's update lands owns
+  // the photo; the loser gets the next one.
+  const photo = await Photo.findOneAndUpdate(
+    { face_scan_status: 'pending' },
+    { $set: { face_scan_status: 'scanning', face_scan_claimed_at: new Date() } },
+    { sort: { created_at: 1 }, new: true },
+  ).lean();
   // Nothing new to scan is the moment to go back over what could not be named
   // before — never at the same time, because there is one CPU.
   if (!photo) return rematchOne();

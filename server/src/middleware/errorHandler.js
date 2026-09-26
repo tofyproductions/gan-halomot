@@ -51,19 +51,23 @@ function errorHandler(err, req, res, _next) {
     if (handleUnclaimedViewerWrite(err, req, res)) return;
   }
 
-  console.error('Error:', err.message);
+  const status = err.status || 500;
+  // A short id ties the browser's generic message to the server's full log
+  // line — "ספרו למשרד" without one is a report nobody can investigate.
+  const errorId = Math.random().toString(36).slice(2, 8).toUpperCase();
+  console.error(`Error [${errorId}]:`, err.message);
   if (process.env.NODE_ENV !== 'production') console.error(err.stack);
 
-  const status = err.status || 500;
   // 4xx messages are deliberate, user-facing Hebrew — pass them through.
   // A 5xx message is a driver/library internal (Mongo topology, cast paths,
   // stack fragments): in production it leaks schema details to the browser
-  // and helps nobody. Log it fully above; answer generically.
+  // and helps nobody. Log it fully above; answer generically, with the id.
   const clientMessage = (status >= 500 && process.env.NODE_ENV === 'production')
-    ? 'שגיאה פנימית — נסו שוב, ואם זה חוזר ספרו למשרד'
+    ? `שגיאה פנימית — נסו שוב, ואם זה חוזר ספרו למשרד (קוד ${errorId})`
     : (err.message || 'Internal server error');
   res.status(status).json({
     error: clientMessage,
+    error_id: errorId,
     ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
   });
 }

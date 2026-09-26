@@ -80,7 +80,10 @@ const photoSchema = new mongoose.Schema({
   // faces in it teaches nothing unless the system can say which face it meant.
   face_scan_status: {
     type: String,
-    enum: ['pending', 'done', 'failed', 'skipped'],
+    // 'scanning' is transient: the scanner's atomic claim, held while one
+    // process runs the models on the photo, so a second instance (deploy
+    // overlap, future scale-up) can't scan — and bill — the same photo twice.
+    enum: ['pending', 'scanning', 'done', 'failed', 'skipped'],
     default: 'pending',
     index: true,
   },
@@ -91,6 +94,9 @@ const photoSchema = new mongoose.Schema({
   face_rematched_at: { type: Date, default: () => new Date(0) },
   // Why a scan failed, kept so a stuck queue can be diagnosed from the data
   // rather than from logs that have already rotated away.
+  // When the scanner claimed it — a claim older than the reaper window is a
+  // crashed scan, returned to the queue.
+  face_scan_claimed_at: { type: Date, default: null },
   face_scan_error: { type: String, default: '' },
 
   faces: {
