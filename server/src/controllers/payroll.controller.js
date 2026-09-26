@@ -3299,17 +3299,21 @@ async function approvePunch(req, res, next) {
       return res.json({ ok: true, punch: p, pending: true });
     }
 
-    // Accounting/admin approving an employee self-report the branch manager
-    // hasn't reviewed at all. Accounting's yes is FINAL at every stage: the
-    // manager's stage exists so that accounting is not the only pair of eyes
-    // on a self-report, not so that accounting's decision can wait on her.
-    // This used to require an `override_manager` flag, and without it a
-    // system admin (who also counts as a manager below) fell through to the
-    // stage-1 branch and merely forwarded the punch to… accounting — himself
-    // — which read as "I approved it and it is still waiting". The bypass is
-    // still recorded on the punch and the manager is told after the fact;
-    // the flag is accepted and ignored so older clients keep working.
-    if ((st === 'pending_manager' || st === 'pending') && isFinal) {
+    // A self-report the branch manager hasn't reviewed yet. THE MANAGER IS
+    // THE FIRST GATE — by the owner's explicit rule (26.09.2026): the manager
+    // is the one who knows who was actually in the building, and accounting
+    // approving hours nobody on-site vouched for is exactly the blind spot
+    // the two-stage chain exists to close. So an accountant now gets a clear
+    // refusal here instead of a shortcut. system_admin keeps the bypass as
+    // the escape hatch (a branch between managers, a manager on leave) — it
+    // is still recorded on the punch and the manager is told after the fact.
+    if ((st === 'pending_manager' || st === 'pending') && role === 'accountant') {
+      return res.status(403).json({
+        error: 'הדיווח ממתין קודם לאישור מנהל/ת הסניף — אישור ראשוני של דיווח עצמי עובר דרך המנהל.',
+        code: 'MANAGER_STAGE_FIRST',
+      });
+    }
+    if ((st === 'pending_manager' || st === 'pending') && role === 'system_admin') {
       p.approval_status = 'approved';
       p.approval_decided_by = req.user.id;
       p.approval_decided_at = new Date();
