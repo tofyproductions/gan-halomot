@@ -13,11 +13,14 @@ const { MAX_UPLOAD_BYTES } = require('../services/photo.service');
  * nothing — and Render's disk is ephemeral, which makes a half-written temp
  * file a bug waiting for a deploy.
  *
- * Thirty at a time is a phone's camera roll after a morning in the garden.
+ * Ten at a time. The queue on the client sends ONE file per request anyway
+ * (utils/uploadQueue.js), so nobody legitimate ever hits this — but the old
+ * ceiling of 30×25MB let a single crafted request buffer 750MB into a 512MB
+ * instance. The cap is the worst case, and the worst case must fit in RAM.
  */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_UPLOAD_BYTES, files: 30 },
+  limits: { fileSize: MAX_UPLOAD_BYTES, files: 10 },
 });
 
 /**

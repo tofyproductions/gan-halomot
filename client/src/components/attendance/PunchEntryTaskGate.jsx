@@ -6,6 +6,7 @@ import {
 import AssignmentLateIcon from '@mui/icons-material/AssignmentLate';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { pluralDays } from '../../utils/ilDates';
 import { useAuth } from '../../hooks/useAuth';
 import { BusyButton } from '../shared/UploadControls';
 
@@ -114,7 +115,7 @@ export default function PunchEntryTaskGate() {
         <Typography sx={{ fontWeight: 800, color: '#b91c1c' }}>
           נדרשת ממך השלמת החתמות
         </Typography>
-        <Chip size="small" color="error" label={`${totalMissing} ימים`} />
+        <Chip size="small" color="error" label={pluralDays(totalMissing)} />
         {tasks.map(t => (
           <Chip key={t.id} size="small" variant="outlined" label={`${t.branch_name} · ${t.month}`} />
         ))}
@@ -138,7 +139,7 @@ export default function PunchEntryTaskGate() {
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }} flexWrap="wrap" useFlexGap>
                 <Typography sx={{ fontWeight: 800 }}>{task.branch_name}</Typography>
                 <Chip size="small" color="warning" label={task.month} />
-                <Chip size="small" label={`${task.missing.length} ימים להשלמה`} />
+                <Chip size="small" label={`${pluralDays(task.missing.length)} להשלמה`} />
                 {task.duplicates_count > 0 && (
                   <Chip size="small" color="error" variant="outlined"
                     label={`+${task.duplicates_count} ימים כפולים בטיפול הנה״ח`} />

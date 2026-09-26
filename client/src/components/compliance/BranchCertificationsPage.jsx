@@ -17,6 +17,7 @@ import api, { openApiFile, apiError, UPLOAD_TIMEOUT_MS } from '../../api/client'
 import { FilePickButton, BusyButton } from '../shared/UploadControls';
 import { useAuth } from '../../hooks/useAuth';
 import { useConfirm } from '../shared/ConfirmProvider';
+import { pluralDays } from '../../utils/ilDates';
 
 /**
  * אישורי מעון — the papers each branch operates under, and when they run out.
@@ -246,7 +247,7 @@ export default function BranchCertificationsPage() {
                               <Chip size="small" color={STATUS[row.status].color}
                                 variant={row.status === 'ok' ? 'outlined' : 'filled'}
                                 label={row.status === 'expiring' && row.days_left != null
-                                  ? `בעוד ${row.days_left} ימים`
+                                  ? `בעוד ${pluralDays(row.days_left)}`
                                   : STATUS[row.status].label} />
                             </TableCell>
                             <TableCell align="right" sx={{ maxWidth: 220 }}>

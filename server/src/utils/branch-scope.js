@@ -42,7 +42,10 @@ async function resolveBranchScope(req) {
   if (uid) {
     try {
       const dbUser = await User.findById(uid)
-        .select('role managed_branch_ids branch_id classroom_ids').lean();
+        .select('role managed_branch_ids branch_id classroom_ids is_active').lean();
+      // Stashed for attachBranchScope's is_active check — the read already
+      // happened, the middleware just needs its result.
+      if (req && dbUser) req.userRecord = dbUser;
       if (dbUser) {
         role = dbUser.role;
         managed = (dbUser.managed_branch_ids || []).map(String);

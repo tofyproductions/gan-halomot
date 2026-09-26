@@ -9,6 +9,7 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EditNoteIcon from '@mui/icons-material/EditNote';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { todayIL } from '../../utils/ilDates';
 
 /**
  * Employee self-service attendance view + "report a missing punch" form.
@@ -17,7 +18,7 @@ import api from '../../api/client';
  */
 
 function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClose, onSubmit }) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIL(); // Israel-local — after midnight toISOString still says yesterday
   const [form, setForm] = useState({ date: today, in_time: '', out_time: '', note: '', branch_id: '' });
   // Someone who works at more than one branch has to say WHERE the forgotten
   // shift happened — the hours are paid at that branch's rate.
@@ -148,7 +149,7 @@ export default function MyAttendance() {
       {incomplete.length > 0 && (
         <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
           <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
-            יש {incomplete.length} ימים שבהם חסרה החתמה
+            {incomplete.length === 1 ? 'יש יום אחד שבו חסרה החתמה' : `יש ${incomplete.length} ימים שבהם חסרה החתמה`}
           </Typography>
           <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
             השלימי את השעה החסרה — הדיווח יעבור לאישור מנהל/ת הסניף ומשם להנהלת החשבונות.

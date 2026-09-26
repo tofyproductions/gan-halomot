@@ -1462,7 +1462,7 @@ export default function PayrollMonthTable() {
       || (allBranches || []).find(b => String(b._id || b.id) === s)?.name
       || 'אחר';
   };
-  const perBranchBreakdown = (r) => {
+  const computeBranchBreakdown = (r) => {
     if (r.salary_type !== 'hourly') return [];
     const pb = r.breakdown?.per_branch || {};
     const r1 = (n) => Math.round((n || 0) * 10) / 10;
@@ -1478,6 +1478,17 @@ export default function PayrollMonthTable() {
     }
     return out;
   };
+  // Computed ONCE per data load, not three times per row per render: the
+  // breakdown is pure in (row, branch names), it feeds a tooltip, a cell and
+  // a dialog per row, and this grid re-renders on every keystroke/dialog —
+  // ~70 employees × 3 calls × per-branch loops added up to real typing lag.
+  const branchBreakdownByEmp = useMemo(() => {
+    const m = new Map();
+    for (const r of (data?.rows || [])) m.set(r.employee_id, computeBranchBreakdown(r));
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, allBranches]);
+  const perBranchBreakdown = (r) => branchBreakdownByEmp.get(r.employee_id) || [];
   // Show the breakdown only when it adds info: worked at >1 branch, or a single
   // branch whose rate differs from the employee's standard rate.
   const breakdownIsInformative = (r, lines) =>
