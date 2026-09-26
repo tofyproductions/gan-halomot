@@ -12,6 +12,8 @@
     "test:terms": "node scripts/employment-terms.test.js",
     "test:employee-scope": "node scripts/payroll-employee-scope.test.js",
     "test:user-guard": "node scripts/employee-user-guard.test.js",
+    "test:loans": "node scripts/loan-deduction.test.js",
+    "test:sick-cross-month": "node scripts/sick-cross-month.test.js",
     "test:employee-age": "node scripts/employee-age.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",

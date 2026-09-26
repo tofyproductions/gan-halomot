@@ -54,6 +54,14 @@ const payrollMonthSchema = new mongoose.Schema({
       override_amount: { type: Number, default: null },
       note:            { type: String, default: '' },
       disabled:        { type: Boolean, default: false },
+      // Approved money adjustments (reimbursements, deductions) land HERE and
+      // are ADDED to the effective bonus. They used to be written into
+      // override_amount — which REPLACES the auto hourly bonus, so approving
+      // a ₪500 reimbursement for someone with a ₪300/month personal rate
+      // silently paid 500 instead of 800. Separate field, separate meaning:
+      // override is a human's decision about the auto bonus; this is money
+      // that rides on top either way. $inc'd, so two approvals can't race.
+      adjustment_total: { type: Number, default: 0 },
     },
 
     // Optional per-month override of the employee's default travel allowance.

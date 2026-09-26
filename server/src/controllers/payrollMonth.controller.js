@@ -12,7 +12,7 @@ const {
 const { readEmployeeDocumentBase64 } = require('../services/employeeDocumentFile');
 const { ADMIN_VIEWER } = require('../constants/roles');
 const env = require('../config/env');
-const { calculateMonthlySalary } = require('../services/payrollCalc');
+const { calculateMonthlySalary, loanDeductionForMonth } = require('../services/payrollCalc');
 const {
   materializeMonth: materializeFixedSchedule,
   conflictsForMonth: fixedScheduleConflicts,
@@ -132,6 +132,24 @@ function parseMonthRange(monthYM) {
  * days inside that calendar month count. Mirrors the leave-day counting in
  * employeeRequests.controller so paid days reconcile with manual.sick_days.
  */
+/** Spell work-days that fell in months BEFORE `monthYM` — the bracket offset
+ *  and balance draw-down for a certificate that crosses a month boundary. */
+function countSickWorkDaysStrictlyBefore(fromYmd, toYmd, workDays, monthYM) {
+  const start = new Date(`${fromYmd}T12:00:00Z`);
+  const end = new Date(`${toYmd || fromYmd}T12:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
+  const allowed = Array.isArray(workDays) && workDays.length ? new Set(workDays.map(Number)) : null;
+  let count = 0;
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const wd = d.getUTCDay();
+    if (wd === 6) continue;
+    if (allowed && !allowed.has(wd)) continue;
+    if (d.toISOString().slice(0, 7) >= monthYM) continue;
+    count++;
+  }
+  return count;
+}
+
 function countSickWorkDays(fromYmd, toYmd, workDays, monthYM = null) {
   const start = new Date(`${fromYmd}T12:00:00Z`);
   const end = new Date(`${toYmd || fromYmd}T12:00:00Z`);
@@ -588,11 +606,22 @@ async function getMonth(req, res, next) {
       // nothing below ever reads — fetching it anyway turned a 20-document
       // query into tens of megabytes over the wire and hung the whole table load.
       EmployeeRequest.find({
-        employee_id: { $in: empIdList },
         status: 'approved',
         from_date: { $lte: `${month}-31` },
-        $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }],
-      }).select('employee_id from_date to_date').lean(),
+        $and: [
+          // Self-filed requests carry user_id only (employee_id null) until a
+          // decide pass backfills it — match both, exactly like the sick query
+          // below, or an approved leave reads as an unexplained absence and is
+          // deducted from pay it already excused.
+          {
+            $or: [
+              { employee_id: { $in: empIdList } },
+              ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+            ],
+          },
+          { $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }] },
+        ],
+      }).select('employee_id user_id from_date to_date').lean(),
       // Approved sick certificates — this month AND history (for sick-pay
       // brackets and the accrued-balance ceiling). Self-filed requests key on
       // user_id, so match by employee_id OR user_id and resolve back to the employee.
@@ -691,7 +720,10 @@ async function getMonth(req, res, next) {
 
     const leaveByEmp = new Map();
     for (const r of leaveRequests) {
-      const k = String(r.employee_id);
+      // A row matched by user_id has no employee_id — resolve it back to the
+      // employee, same as certificates below.
+      const k = r.employee_id ? String(r.employee_id) : empByUserId.get(String(r.user_id));
+      if (!k) continue;
       if (!leaveByEmp.has(k)) leaveByEmp.set(k, []);
       leaveByEmp.get(k).push(r);
     }
@@ -958,9 +990,14 @@ async function getMonth(req, res, next) {
         .join(' · ');
       const mBonus = manual.bonus || {};
       const bonusDisabled = !!mBonus.disabled;
+      // Effective = (manual override, else the auto personal bonus) PLUS any
+      // approved adjustments. Adjustments ride on top — they are other money
+      // (reimbursements, deductions) that happens to share the column, and
+      // must never replace the personal hourly bonus.
+      const bonusAdjustments = Number(mBonus.adjustment_total) || 0;
       const bonusEffective = bonusDisabled
         ? 0
-        : (mBonus.override_amount != null ? Number(mBonus.override_amount) : bonusAuto);
+        : (mBonus.override_amount != null ? Number(mBonus.override_amount) : bonusAuto) + bonusAdjustments;
       const bonusNote = mBonus.note || bonusAutoNote;
       // Fold the effective bonus into the estimated total so the salary reflects it.
       if (bonusEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + bonusEffective;
@@ -1030,21 +1067,32 @@ async function getMonth(req, res, next) {
       // falling back to work_days — so a day she works (e.g. Friday) isn't dropped.
       const sickWorkdays = workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days);
       const empSickReqs = sickReqByEmp.get(String(emp._id)) || [];
+      // Certificates OVERLAPPING the month — not only those that start in it.
+      // A spell of 27.08–03.09 used to belong to August alone: its September
+      // days were never paid, while the balance (counted below by the full
+      // range) was still drained for them. Each month now takes exactly its
+      // own days, with `prior_days` carrying the bracket position forward —
+      // September's first day of that spell is day 5 at 100%, not a fresh
+      // unpaid day 1.
       const sickCertsThisMonth = empSickReqs
-        .filter(r => String(r.from_date).slice(0, 7) === month)
+        .filter(r => String(r.from_date).slice(0, 10) <= `${month}-31`
+          && String(r.to_date || r.from_date).slice(0, 10) >= `${month}-01`)
         .sort((a, b) => String(a.from_date).localeCompare(String(b.from_date)))
         .map(r => ({
           id: String(r._id),
           from_date: r.from_date,
           to_date: r.to_date || r.from_date,
           work_days: countSickWorkDays(r.from_date, r.to_date || r.from_date, sickWorkdays, month),
+          prior_days: countSickWorkDaysStrictlyBefore(r.from_date, r.to_date || r.from_date, sickWorkdays, month),
           pay_from_first_day: !!r.pay_from_first_day,
         }));
       // Sick work-days consumed in months strictly before this one — drawn down
-      // from the accrued balance before this month's certificates.
+      // from the accrued balance before this month's certificates. Clamped to
+      // the pre-month days only: counting a cross-month cert's FULL range here
+      // double-drained the balance for days this month also covers.
       const sickUsedBefore = empSickReqs
         .filter(r => String(r.from_date).slice(0, 7) < month)
-        .reduce((s, r) => s + countSickWorkDays(r.from_date, r.to_date || r.from_date, sickWorkdays, null), 0);
+        .reduce((s, r) => s + countSickWorkDaysStrictlyBefore(r.from_date, r.to_date || r.from_date, sickWorkdays, month), 0);
       // Effective opening for the balance ceiling: an explicit opening wins;
       // otherwise accrue 1.5/month from the hire date (start_date). With neither,
       // leave the balance UNCAPPED (null) so sick pay isn't wrongly zeroed for
@@ -1443,6 +1491,7 @@ async function getMonth(req, res, next) {
           note: bonusNote,
           disabled: bonusDisabled,
           override_amount: mBonus.override_amount ?? null,
+          adjustment_total: bonusAdjustments,
           lines: bonusLines,
         },
         manual: {
@@ -1543,12 +1592,10 @@ async function getMonth(req, res, next) {
           // This month's scheduled deduction (per-month payments[] is the source of
           // truth; legacy loans fall back to the count-based rule).
           const merged = (l) => !!(l.merged_at_month && month >= l.merged_at_month);
-          const monthAmt = (l) => {
-            if (merged(l)) return 0;
-            if (hasSchedule(l)) { const p = l.payments.find(x => x.month === month); return p ? Math.max(0, Number(p.amount) || 0) : 0; }
-            if ((l.installments_paid || 0) >= (l.installments_total || 0)) return 0;
-            return Math.max(0, Number(l.installment_amount) || 0);
-          };
+          // The engine's own rule, not a hand-kept copy of it — the copy is
+          // how the screen and the deduction drift apart (and the copy here
+          // had already missed the calendar bound on legacy loans).
+          const monthAmt = (l) => loanDeductionForMonth(l, month);
           const deductedThrough = (l) => hasSchedule(l)
             ? l.payments.filter(p => p.month <= month).reduce((s, p) => s + (Number(p.amount) || 0), 0)
             : (Number(l.installments_paid) || 0) * (Number(l.installment_amount) || 0);
@@ -1772,6 +1819,19 @@ async function upsertEntry(req, res, next) {
 
     const emp = await Employee.findById(employeeId).select('branch_id').lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+
+    // A finalized month is CLOSED. The freeze only ever froze the engine's
+    // snapshot — manual fields kept flowing in and moving the total of a
+    // month that was already reviewed, sent, and paid. Reopen first (the
+    // reopen endpoint exists precisely for this), then edit.
+    const lockedRow = await PayrollMonth.findOne({ employee_id: employeeId, month })
+      .select('status').lean();
+    if (lockedRow?.status === 'finalized') {
+      return res.status(409).json({
+        error: 'החודש נסגר (finalized) — יש לפתוח אותו מחדש לפני עריכה',
+        code: 'MONTH_FINALIZED',
+      });
+    }
 
     const body = req.body?.manual || {};
     const role = req.user?.role;
@@ -2079,22 +2139,129 @@ async function finalizeMonth(req, res, next) {
     }).lean();
     const finCommitByEmp = new Map(finCommitments.map(c => [String(c.employee_id), c]));
 
+    // ── The live screen's inputs, loaded the same way getMonth loads them. ──
+    // Finalize used to recompute with LESS than the screen had — no punch
+    // resolutions, an opposite absence rule, no standing travel override — so
+    // the act of freezing a month CHANGED the numbers the accountant had just
+    // reviewed. Whatever getMonth feeds the engine, finalize must feed it too;
+    // anything else means two payrolls, and only one of them was approved.
+    const finEmpIds = employees.map(e => e._id);
+    const finUserIds = employees.filter(e => e.user_id).map(e => e.user_id);
+    const finBranchIds = [...new Set(employees.map(e => String(e.branch_id)).filter(Boolean))];
+    // Same month bounds getMonth uses for the Holiday overlap (plain UTC month
+    // edges — not the punch range, which is shifted for Israel wall-clock).
+    const finMonthStart = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1));
+    const finMonthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 0, 23, 59, 59));
+    const [finResolutions, finHolidays, finSpecialDays, finLeave] = await Promise.all([
+      // Approved punch resolutions — a resolved split day must freeze as the
+      // accountant resolved it, not as the raw first→last span.
+      PunchResolution.find({
+        employee_id: { $in: finEmpIds },
+        date: { $regex: `^${month}` },
+        status: 'approved',
+      }).lean(),
+      Holiday.find({
+        branch_id: { $in: finBranchIds },
+        start_date: { $lte: finMonthEnd },
+        end_date: { $gte: finMonthStart },
+      }).lean(),
+      SpecialDay.find({
+        date: { $regex: `^${month}` },
+        $or: [{ branch_id: null }, { branch_id: { $in: finBranchIds } }],
+      }).lean(),
+      // Approved leave — matched by employee_id OR user_id, like getMonth.
+      EmployeeRequest.find({
+        status: 'approved',
+        from_date: { $lte: `${month}-31` },
+        $and: [
+          {
+            $or: [
+              { employee_id: { $in: finEmpIds } },
+              ...(finUserIds.length ? [{ user_id: { $in: finUserIds } }] : []),
+            ],
+          },
+          { $or: [{ to_date: { $gte: `${month}-01` } }, { to_date: { $in: [null, ''] } }] },
+        ],
+      }).select('employee_id user_id from_date to_date').lean(),
+    ]);
+    const finResByEmp = new Map();
+    for (const r of finResolutions) {
+      const k = String(r.employee_id);
+      if (!finResByEmp.has(k)) finResByEmp.set(k, new Map());
+      finResByEmp.get(k).set(r.date, r);
+    }
+    const finHolidaysByBranch = new Map();
+    for (const h of finHolidays) {
+      const k = String(h.branch_id);
+      if (!finHolidaysByBranch.has(k)) finHolidaysByBranch.set(k, []);
+      finHolidaysByBranch.get(k).push(h);
+    }
+    const finEmpByUserId = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
+    const finLeaveByEmp = new Map();
+    for (const r of finLeave) {
+      const k = r.employee_id ? String(r.employee_id) : finEmpByUserId.get(String(r.user_id));
+      if (!k) continue;
+      if (!finLeaveByEmp.has(k)) finLeaveByEmp.set(k, []);
+      finLeaveByEmp.get(k).push(r);
+    }
+    const finAugWindow = augustBonusWindow(month);
+
     let updated = 0;
     for (const emp of employees) {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
       const m = manualByEmp.get(String(emp._id)) || {};
-      // Approved deductible absence days × uniform daily rate.
-      const ci = analyzeCommitment(finCommitByEmp.get(String(emp._id)), empPunches, month);
+      // The engine only counts approved/auto punches (billableDayPunches) —
+      // commitment analysis must see the same set the screen feeds it.
+      const countable = empPunches.filter(p => ['auto', 'approved'].includes(p.approval_status || 'auto'));
+      const ci = analyzeCommitment(finCommitByEmp.get(String(emp._id)), countable, month);
       const committedDays = ci.committed_dates.length;
+      const isTeken = emp.salary_type === 'global';
       const tekenSalary = Number(emp.amuta_distribution?.[0]?.global_salary) || 0;
-      const dailyRate = (emp.salary_type === 'global' && committedDays > 0 && tekenSalary > 0)
-        ? tekenSalary / committedDays : 0;
-      const deductibleDays = (Array.isArray(m.absence_entries) ? m.absence_entries : []).filter(e =>
-        DEDUCTIBLE_ABSENCE.has(e.category || 'unpaid')
-        && e.manager_approved === true && e.accounting_approved === true,
-      ).length;
+      // Rounded like the live rate — an unrounded divisor here left the frozen
+      // deduction a few agorot off the screen's.
+      const dailyRate = (isTeken && committedDays > 0 && tekenSalary > 0)
+        ? Math.round((tekenSalary / committedDays) * 100) / 100 : 0;
+
+      // THE LIVE ABSENCE RULE, not a stricter cousin of it. The screen deducts
+      // every unexplained missed committed day BY DEFAULT ("the reason itself
+      // is the decision") — excluding gan closures, pay_global special days,
+      // approved leave, august-bonus-window days, and approved offsets; a day
+      // is spared only by a non-deductible category. Finalize used to deduct
+      // only doubly-approved absence_entries — entries the live flow never
+      // creates for default-deducted days — so the freeze RESTORED pay the
+      // screen had already removed.
+      const holidayDates = new Set();
+      for (const h of (finHolidaysByBranch.get(String(emp.branch_id)) || [])) {
+        addRangeToSet(holidayDates, h.start_date, h.end_date, month);
+      }
+      for (const sd of finSpecialDays) {
+        const sdBranchOk = !sd.branch_id || String(sd.branch_id) === String(emp.branch_id);
+        if (isTeken && sdBranchOk && sd.pay_global) holidayDates.add(sd.date);
+      }
+      const leaveDates = new Set();
+      for (const r of (finLeaveByEmp.get(String(emp._id)) || [])) {
+        addRangeToSet(leaveDates, r.from_date, r.to_date, month);
+      }
+      const inAugustBonusWindow = (d) =>
+        !!finAugWindow && d >= finAugWindow.start && d <= finAugWindow.end;
+      const entryByDate = new Map((Array.isArray(m.absence_entries) ? m.absence_entries : []).map(e => [e.date, e]));
+      const offsetAbsenceDates = new Set(
+        (Array.isArray(m.absence_offset_entries) ? m.absence_offset_entries : [])
+          .filter(o => o.approved).map(o => o.absence_date));
+      const deductibleDays = !isTeken ? 0 : ci.absent_dates
+        .filter(d => !holidayDates.has(d) && !leaveDates.has(d) && !inAugustBonusWindow(d))
+        .filter(d => {
+          if (offsetAbsenceDates.has(d)) return false;
+          const e = entryByDate.get(d);
+          return DEDUCTIBLE_ABSENCE.has((e && e.category) || 'unpaid');
+        }).length;
+
       const snapshot = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
+        // A day the accountant resolved (which punches bill, what the day is
+        // worth) must freeze as resolved — omitting these re-billed the raw
+        // first→last span and overpaid every resolved split day.
+        resolutions: finResByEmp.get(String(emp._id)) || new Map(),
         include_salary_completion: m.include_salary_completion !== false,
         pay_excess_supplement: false, // RETIRED — see getMonth
         absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
@@ -2103,7 +2270,12 @@ async function finalizeMonth(req, res, next) {
         // committed hours for the base hourly value.
         required_hours_override: ci.has_commitment ? ci.committed_hours : null,
         committed_weighted_override: ci.has_commitment ? ci.committed_weighted_hours : null,
-        travel_override: m.travel_override,
+        // Month-specific override wins; else the STANDING per-employee amount —
+        // the same fallback the screen applies. Freezing without it swapped a
+        // hand-set travel figure for the auto per-day calc.
+        travel_override: (m.travel_override != null && m.travel_override !== '')
+          ? m.travel_override
+          : (emp.travel_override ?? null),
       });
       await PayrollMonth.findOneAndUpdate(
         { employee_id: emp._id, month },
@@ -2390,16 +2562,21 @@ async function applyApprovedAdjustment(adj, cache = {}) {
   if (BONUS_TYPES.has(adj.type) || adj.type === 'money_deduct') {
     // A deduction is a negative bonus: the column already adds its value to the
     // total, so a negative one subtracts. There is no deductions column to use.
+    //
+    // ADDED, never overridden. This used to write override_amount seeded from
+    // 0 — which both erased any prior manual override and, because override
+    // REPLACES the auto hourly bonus, silently deleted the employee's personal
+    // per-branch bonus the moment any reimbursement was approved. The amount
+    // is $inc'd so two adjustments approved concurrently both land.
     const delta = adj.type === 'money_deduct' ? -Math.abs(amount) : amount;
     const row = await PayrollMonth.findOne({ employee_id: employeeId, month }).select('manual.bonus').lean();
-    const prev = row?.manual?.bonus || {};
-    const base = prev.override_amount != null ? Number(prev.override_amount) : 0;
+    const prevNote = row?.manual?.bonus?.note || '';
     await PayrollMonth.findOneAndUpdate(
       { employee_id: employeeId, month },
       {
+        $inc: { 'manual.bonus.adjustment_total': Math.round(delta * 100) / 100 },
         $set: {
-          'manual.bonus.override_amount': Math.round((base + delta) * 100) / 100,
-          'manual.bonus.note': stamp(prev.note, reason || 'עדכון שכר מאושר'),
+          'manual.bonus.note': stamp(prevNote, reason || 'עדכון שכר מאושר'),
           'manual.bonus.disabled': false,
         },
       },
@@ -2478,21 +2655,38 @@ async function applyApprovedAdjustment(adj, cache = {}) {
  */
 async function decideAdjustment(req, res, next) {
   try {
-    const adj = await SalaryAdjustment.findById(req.params.id);
-    if (!adj) return res.status(404).json({ error: 'עדכון לא נמצא' });
-
     const approve = req.body?.approve !== false;
-    const wasPending = adj.status === 'pending';
-    adj.status = approve ? 'approved' : 'rejected';
-    adj.decided_by = req.user.id;
-    adj.decided_at = new Date();
-    adj.decided_note = String(req.body?.note || '').slice(0, 500);
-    await adj.save();
 
-    // Approving is what moves the money. Guarded on `wasPending` so approving
-    // an already-approved row twice cannot add the same bonus twice.
+    // CLAIM ATOMICALLY. The old `wasPending` was read off a loaded doc, so
+    // two concurrent approvals (a double-click) both saw 'pending' and both
+    // moved the money — the same bonus landed twice, a requested advance was
+    // deducted twice. Only the request whose conditional update matches owns
+    // the decision; a decided row answers 409 with its current state instead
+    // of being silently re-flipped (approved→rejected without reversing the
+    // money was never coherent anyway).
+    const adj = await SalaryAdjustment.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending' },
+      {
+        $set: {
+          status: approve ? 'approved' : 'rejected',
+          decided_by: req.user.id,
+          decided_at: new Date(),
+          decided_note: String(req.body?.note || '').slice(0, 500),
+        },
+      },
+      { new: true },
+    );
+    if (!adj) {
+      const existing = await SalaryAdjustment.findById(req.params.id).lean();
+      if (!existing) return res.status(404).json({ error: 'עדכון לא נמצא' });
+      return res.status(409).json({
+        error: existing.status === 'approved' ? 'העדכון כבר אושר' : 'העדכון כבר נדחה',
+        adjustment: { ...existing, id: String(existing._id) },
+      });
+    }
+
     let applied = null;
-    if (approve && wasPending) {
+    if (approve) {
       try { applied = await applyApprovedAdjustment(adj); }
       catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
     }
@@ -2510,35 +2704,39 @@ async function decideAdjustmentsBulk(req, res, next) {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
     if (ids.length === 0) return res.status(400).json({ error: 'לא נבחרו עדכונים' });
     const approve = req.body?.approve !== false;
-    // Read the rows BEFORE flipping them: only the ones that were actually
-    // pending may move money, and after updateMany that is no longer knowable.
-    const pending = await SalaryAdjustment.find({ _id: { $in: ids }, status: 'pending' }).lean();
 
-    const result = await SalaryAdjustment.updateMany(
-      { _id: { $in: ids }, status: 'pending' },
-      {
-        $set: {
-          status: approve ? 'approved' : 'rejected',
-          decided_by: req.user.id,
-          decided_at: new Date(),
-          decided_note: String(req.body?.note || '').slice(0, 500),
-        },
-      },
-    );
+    // Per-row atomic claims, NOT find-then-updateMany. The old shape read the
+    // pending list, flipped with updateMany, then moved money for everything
+    // in the earlier read — so a single-decide landing between the read and
+    // the updateMany got its money applied by BOTH paths. Here each row is
+    // claimed exactly once, and money moves only for rows THIS request won.
+    const decidedSet = {
+      status: approve ? 'approved' : 'rejected',
+      decided_by: req.user.id,
+      decided_at: new Date(),
+      decided_note: String(req.body?.note || '').slice(0, 500),
+    };
 
+    let decided = 0;
     let applied = 0;
-    if (approve) {
-      // One cache per employee+month, so a month's travel is computed once
-      // rather than once per row.
-      const caches = new Map();
-      for (const adj of pending) {
-        const key = `${adj.employee_id}|${adj.month}`;
-        if (!caches.has(key)) caches.set(key, {});
-        try { await applyApprovedAdjustment(adj, caches.get(key)); applied += 1; }
-        catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
-      }
+    // One cache per employee+month, so a month's travel is computed once
+    // rather than once per row.
+    const caches = new Map();
+    for (const id of ids) {
+      const adj = await SalaryAdjustment.findOneAndUpdate(
+        { _id: id, status: 'pending' },
+        { $set: decidedSet },
+        { new: true },
+      ).lean();
+      if (!adj) continue; // decided by someone else, or gone — not ours to apply
+      decided += 1;
+      if (!approve) continue;
+      const key = `${adj.employee_id}|${adj.month}`;
+      if (!caches.has(key)) caches.set(key, {});
+      try { await applyApprovedAdjustment(adj, caches.get(key)); applied += 1; }
+      catch (e) { console.error('applyApprovedAdjustment failed:', e.message); }
     }
-    res.json({ ok: true, decided: result.modifiedCount || 0, applied });
+    res.json({ ok: true, decided, applied });
   } catch (err) { next(err); }
 }
 

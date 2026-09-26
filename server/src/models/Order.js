@@ -28,7 +28,9 @@ const orderSchema = new mongoose.Schema({
   supplier_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', required: true },
   status: {
     type: String,
-    enum: ['draft', 'pending', 'approved', 'sent', 'pending_receive', 'received', 'received_partial', 'cancelled'],
+    // 'receiving' is transient: the receive endpoint's claim, held only while
+    // the stock is being booked in, so a double-click cannot book it twice.
+    enum: ['draft', 'pending', 'approved', 'sent', 'pending_receive', 'receiving', 'received', 'received_partial', 'cancelled'],
     default: 'pending',
   },
   items: [orderItemSchema],

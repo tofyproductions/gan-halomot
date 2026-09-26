@@ -38,7 +38,7 @@ async function attachCertFromDocuments(request) {
  * numbers 0=Sun … 6=Sat — the employee's working days), only those weekdays
  * count, so an employee's regular day off never counts as a sick/vacation day.
  */
-function countWorkDays(fromYmd, toYmd, workDays = null) {
+function countWorkDays(fromYmd, toYmd, workDays = null, monthYM = null) {
   const start = new Date(`${fromYmd}T12:00:00Z`);
   const end = new Date(`${toYmd}T12:00:00Z`);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 0;
@@ -50,9 +50,29 @@ function countWorkDays(fromYmd, toYmd, workDays = null) {
     const wd = d.getUTCDay(); // 0=Sun … 6=Sat
     if (wd === 6) continue;                       // Saturday always off
     if (allowed && !allowed.has(wd)) continue;    // employee's day off
+    // Month clamp — a request crossing a month boundary books each month ONLY
+    // its own days. Unclamped, a 25.09–10.10 vacation landed 14 days in
+    // September's row and October got nothing.
+    if (monthYM && d.toISOString().slice(0, 7) !== monthYM) continue;
     count++;
   }
   return count;
+}
+
+/** Every 'YYYY-MM' a from→to span touches, oldest first (capped for sanity). */
+function monthsOfSpan(fromYmd, toYmd) {
+  const from = String(fromYmd || '').slice(0, 7);
+  const to = String(toYmd || fromYmd || '').slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(from)) return [];
+  const out = [];
+  let [y, m] = from.split('-').map(Number);
+  for (let i = 0; i < 24; i++) { // a leave request longer than 2 years is bad data
+    const ym = `${y}-${String(m).padStart(2, '0')}`;
+    out.push(ym);
+    if (ym >= to) break;
+    m += 1; if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
 }
 
 /**
@@ -64,24 +84,33 @@ function countWorkDays(fromYmd, toYmd, workDays = null) {
 async function applyVacationToPayroll(request) {
   if (request.type !== 'vacation' || request.status !== 'approved') return;
   // The request stores user_id; the payroll model stores employee_id.
-  // Find the Employee linked to this user.
-  const emp = await Employee.findOne({ user_id: request.user_id }).select('_id branch_id').lean();
+  const emp = await resolveEmployeeForRequest(request);
   if (!emp) return;
-  const days = countWorkDays(request.from_date, request.to_date || request.from_date);
-  if (days <= 0) return;
-  const month = request.from_date.slice(0, 7); // YYYY-MM
-  const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
-  const alreadyApplied = (existing?.vacation_request_ids || []).map(String).includes(String(request._id));
-  if (alreadyApplied) return;
-  await PayrollMonth.findOneAndUpdate(
-    { employee_id: emp._id, month },
-    {
-      $inc: { 'manual.vacation_days': days },
-      $addToSet: { vacation_request_ids: request._id },
-      $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
-    },
-    { upsert: true, new: true },
-  );
+  // Count by the employee's REAL working days, like sick — the old count
+  // skipped Saturdays only, so a 4-day-week employee was billed vacation for
+  // days she never works.
+  const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
+  const wd = workingWeekdays(commitment, emp.work_days);
+  const to = request.to_date || request.from_date;
+  // MONTH BY MONTH. A request crossing the boundary (25.09–10.10) used to book
+  // its ENTIRE span into September — 14 days' vacation pay in the wrong month —
+  // and October's pass, which filters by from_date, then found nothing at all.
+  for (const month of monthsOfSpan(request.from_date, to)) {
+    const days = countWorkDays(request.from_date, to, wd, month);
+    if (days <= 0) continue;
+    const existing = await PayrollMonth.findOne({ employee_id: emp._id, month }).lean();
+    const alreadyApplied = (existing?.vacation_request_ids || []).map(String).includes(String(request._id));
+    if (alreadyApplied) continue;
+    await PayrollMonth.findOneAndUpdate(
+      { employee_id: emp._id, month },
+      {
+        $inc: { 'manual.vacation_days': days },
+        $addToSet: { vacation_request_ids: request._id },
+        $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+      },
+      { upsert: true, new: true },
+    );
+  }
 }
 
 /**
@@ -115,14 +144,22 @@ async function syncSickDaysForMonth(emp, month) {
     ...ownerMatch,
     type: 'sick',
     status: 'approved',
-    from_date: { $regex: `^${month}` },
+    // OVERLAPS the month — not "starts in it". A certificate running
+    // 27.08–03.09 belongs to September too; keying on from_date alone made
+    // its September days vanish from September's count entirely.
+    from_date: { $lte: `${month}-31` },
+    $or: [
+      { to_date: { $gte: `${month}-01` } },
+      { to_date: { $in: [null, ''] }, from_date: { $regex: `^${month}` } },
+    ],
   }).lean();
   // Count by the employee's REAL working days (commitment schedule), falling back
   // to work_days — so a day she actually works (e.g. Friday) isn't dropped.
   const commitment = await EmployeeCommitment.findOne({ employee_id: emp._id }).lean();
   const wd = workingWeekdays(commitment, emp.work_days);
+  // Clamped: each month is credited its OWN days of the spell, no more.
   const total = requests.reduce(
-    (s, r) => s + countWorkDays(r.from_date, r.to_date || r.from_date, wd), 0,
+    (s, r) => s + countWorkDays(r.from_date, r.to_date || r.from_date, wd, month), 0,
   );
   const ids = requests.map(r => r._id);
   await PayrollMonth.findOneAndUpdate(
@@ -140,12 +177,17 @@ async function syncSickDaysForMonth(emp, month) {
 async function applySickToPayroll(request) {
   if (request.type !== 'sick') return;
   const emp = await resolveEmployeeForRequest(request);
-  await syncSickDaysForMonth(emp, request.from_date.slice(0, 7));
+  // Every month the certificate touches — a cross-month spell updates both.
+  for (const m of monthsOfSpan(request.from_date, request.to_date || request.from_date)) {
+    await syncSickDaysForMonth(emp, m);
+  }
 }
 async function unapplySickFromPayroll(request) {
   if (request.type !== 'sick') return;
   const emp = await resolveEmployeeForRequest(request);
-  await syncSickDaysForMonth(emp, request.from_date.slice(0, 7));
+  for (const m of monthsOfSpan(request.from_date, request.to_date || request.from_date)) {
+    await syncSickDaysForMonth(emp, m);
+  }
 }
 
 async function getMyRequests(req, res, next) {
@@ -256,6 +298,16 @@ async function updateRequestStatus(req, res, next) {
       } else {
         return res.status(403).json({ error: 'אין הרשאה לאשר את הבקשה בשלב זה' });
       }
+    }
+    // Self-filed requests are created with user_id only (employee_id null) —
+    // and the payroll month's leave-exclusion query matches by employee_id.
+    // An approved sick spell the engine can't see is then ALSO deducted as an
+    // unexplained absence: paid as sick AND charged as missing. Stamp the
+    // resolved employee onto the request the moment a human touches it, so
+    // every downstream query keys on the same id.
+    if (!request.employee_id) {
+      const emp = await resolveEmployeeForRequest(request);
+      if (emp) request.employee_id = emp._id;
     }
     await request.save();
 

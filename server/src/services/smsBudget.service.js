@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Announcement, SmsBudget } = require('../models');
 const { branchChildCount } = require('./announcement-audience.service');
 
@@ -78,7 +79,11 @@ async function spentThisMonth(branchId, month = monthKey()) {
   const rows = await Announcement.aggregate([
     {
       $match: {
-        branch_id: branchId,
+        // Aggregation pipelines do NOT get Mongoose's casting: the budget
+        // screen passes branchId as a string, string !== ObjectId in $match,
+        // and "spent this month" read 0 forever — a manager planned against a
+        // full budget and the actual send was then refused. Cast explicitly.
+        branch_id: new mongoose.Types.ObjectId(String(branchId)),
         'delivery.sms_sent_at': { $gte: from, $lt: to },
       },
     },

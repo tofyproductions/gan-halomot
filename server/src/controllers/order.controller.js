@@ -486,12 +486,26 @@ async function markArrived(req, res, next) {
 }
 
 async function receive(req, res, next) {
+  // CLAIM FIRST. The old guard was a status read at the top and a status
+  // write at the very end — two concurrent receives (a double-click on gan
+  // Wi-Fi) both passed the read, and every quantity was booked into stock
+  // twice: duplicate batches, duplicate delivery movements, doubled qty.
+  // Whoever's conditional update lands owns the receive; the loser gets the
+  // same "not receivable" message a stale screen always got. On a thrown
+  // error the claim is released back to the prior status so a retry works.
+  const prior = await Order.findOneAndUpdate(
+    { _id: req.params.id, status: { $in: ['pending_receive', 'sent', 'approved'] } },
+    { $set: { status: 'receiving' } },
+    { new: false },
+  );
+  if (!prior) {
+    const exists = await Order.exists({ _id: req.params.id });
+    if (!exists) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
+    return res.status(400).json({ error: 'הזמנה לא במצב שמאפשר אישור קבלה' });
+  }
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'הזמנה לא נמצאה' });
-    if (!['pending_receive', 'sent', 'approved'].includes(order.status)) {
-      return res.status(400).json({ error: 'הזמנה לא במצב שמאפשר אישור קבלה' });
-    }
 
     // Body: { items: [{ index, qty_received, expiry_date, shelf_number, notes }] }
     const incoming = req.body.items || [];
@@ -527,10 +541,15 @@ async function receive(req, res, next) {
           received_at: new Date(),
         });
 
-        const before = stockItem.qty;
-        const after = before + qtyReceived;
-        stockItem.qty = after;
-        await stockItem.save();
+        // Atomic increment — a concurrent adjustment on the same item must
+        // not be swallowed (same lost-update fix as stock.controller).
+        const bumped = await StockItem.findOneAndUpdate(
+          { _id: stockItem._id },
+          { $inc: { qty: qtyReceived } },
+          { new: true },
+        );
+        const after = bumped.qty;
+        const before = after - qtyReceived;
 
         await StockMovement.create({
           branch_id: order.branch_id,
@@ -562,7 +581,15 @@ async function receive(req, res, next) {
     await order.save();
 
     res.json({ order: { ...order.toObject(), id: order._id } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // Release the claim so a retry is possible — but only if we still hold it
+    // (never clobber the final status a finished run already wrote).
+    await Order.updateOne(
+      { _id: req.params.id, status: 'receiving' },
+      { $set: { status: prior.status } },
+    ).catch(() => {});
+    next(err);
+  }
 }
 
 async function remove(req, res, next) {

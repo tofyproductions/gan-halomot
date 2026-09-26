@@ -339,6 +339,21 @@ async function sendUrgentSms(req, res, next) {
       });
     }
 
+    // CLAIM BEFORE SENDING. The already-sent guard above reads a field that
+    // used to be written only after the whole loop — so two concurrent clicks
+    // both passed it and every family was texted twice, off one shared
+    // prepaid balance. Whoever's conditional update lands is the sender; the
+    // loser gets the same "already sent" answer as any stale screen. Set
+    // after all the validations, so a refused send never marks the record.
+    const claimed = await Announcement.findOneAndUpdate(
+      { _id: doc._id, 'delivery.sms_sent_at': null },
+      { $set: { 'delivery.sms_sent_at': new Date(), 'delivery.sms_sent_by': req.user.id } },
+      { new: true },
+    );
+    if (!claimed) {
+      return res.status(409).json({ error: 'ההודעה כבר נשלחה ב-SMS' });
+    }
+
     let sent = 0;
     let failed = 0;
     for (const to of aud.phones) {
@@ -352,12 +367,20 @@ async function sendUrgentSms(req, res, next) {
       }
     }
 
-    doc.delivery.sms_sent_at = new Date();
+    // Charged for what left, in segments — not in families. Counts are
+    // written onto the claim, not via doc.save(): the in-memory doc predates
+    // the claim and a whole-doc save would race it.
+    await Announcement.updateOne(
+      { _id: doc._id },
+      { $set: {
+        'delivery.sms_recipients': sent * estimate.segments,
+        'delivery.sms_failed': failed,
+      } },
+    );
+    doc.delivery.sms_sent_at = claimed.delivery.sms_sent_at;
     doc.delivery.sms_sent_by = req.user.id;
-    // Charged for what left, in segments — not in families.
     doc.delivery.sms_recipients = sent * estimate.segments;
     doc.delivery.sms_failed = failed;
-    await doc.save();
 
     res.json({
       sent, failed,
