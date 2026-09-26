@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { StockCategory, StockItem, StockMovement, StockBatch, Product, Supplier } = require('../models');
 
 const DEFAULT_CATEGORIES = [
@@ -161,13 +162,19 @@ async function adjustItem(req, res, next) {
     const { delta, reason, notes } = req.body;
     const num = Number(delta);
     if (!num || isNaN(num)) return res.status(400).json({ error: 'delta חייב להיות מספר שונה מאפס' });
-    const item = await StockItem.findById(id);
+    // $inc, not read-modify-write: two concurrent adjustments both reading
+    // qty=10 (+5 and −3) used to land as 15-then-7 — one update swallowed,
+    // and both ledger rows claiming qty_before:10. The increment is atomic;
+    // before/after are derived from the doc the update actually produced.
+    const item = await StockItem.findOneAndUpdate(
+      { _id: id },
+      { $inc: { qty: num } },
+      { new: true },
+    );
     if (!item) return res.status(404).json({ error: 'פריט לא נמצא' });
 
-    const before = item.qty;
-    const after = before + num;
-    item.qty = after;
-    await item.save();
+    const after = item.qty;
+    const before = after - num;
 
     const movement = await StockMovement.create({
       branch_id: item.branch_id, item_id: item._id,
@@ -188,15 +195,19 @@ async function countItem(req, res, next) {
     const { qty, notes } = req.body;
     const target = Number(qty);
     if (isNaN(target) || target < 0) return res.status(400).json({ error: 'qty חייב להיות מספר חיובי' });
-    const item = await StockItem.findById(id);
-    if (!item) return res.status(404).json({ error: 'פריט לא נמצא' });
+    // Atomic set, returning the PRE-update doc so `before` is exactly the
+    // value this count replaced — not a value some concurrent adjustment
+    // already moved (the same lost-update family as adjustItem above).
+    const prev = await StockItem.findOneAndUpdate(
+      { _id: id },
+      { $set: { qty: target, last_counted_at: new Date(), last_counted_by: req.user?.id || null } },
+      { new: false },
+    );
+    if (!prev) return res.status(404).json({ error: 'פריט לא נמצא' });
 
-    const before = item.qty;
+    const before = prev.qty;
     const num = target - before;
-    item.qty = target;
-    item.last_counted_at = new Date();
-    item.last_counted_by = req.user?.id || null;
-    await item.save();
+    const item = await StockItem.findById(id);
 
     let movement = null;
     if (num !== 0) {
@@ -216,20 +227,45 @@ async function countItem(req, res, next) {
 async function undoMovement(req, res, next) {
   try {
     const { id } = req.params; // movement id
-    const original = await StockMovement.findById(id);
-    if (!original) return res.status(404).json({ error: 'תנועה לא נמצאה' });
-    if (original.reversed_by_id) return res.status(400).json({ error: 'תנועה זו כבר בוטלה' });
-    if (original.reason === 'undo') return res.status(400).json({ error: 'לא ניתן לבטל פעולת ביטול' });
 
-    const item = await StockItem.findById(original.item_id);
-    if (!item) return res.status(404).json({ error: 'פריט לא נמצא' });
+    // CLAIM FIRST. The old flow read `reversed_by_id`, did the work, and only
+    // then wrote it — so two concurrent undos of the same movement both
+    // passed the guard and the quantity was reversed twice. The reverse
+    // movement's id is generated up front so the claim can point at it before
+    // the row exists; whoever's conditional update matches is the one undo.
+    const reverseId = new mongoose.Types.ObjectId();
+    const original = await StockMovement.findOneAndUpdate(
+      { _id: id, reversed_by_id: null, reason: { $ne: 'undo' } },
+      { $set: { reversed_by_id: reverseId } },
+      { new: false },
+    );
+    if (!original) {
+      // Not found, already reversed, or an undo row — tell them which.
+      const doc = await StockMovement.findById(id).lean();
+      if (!doc) return res.status(404).json({ error: 'תנועה לא נמצאה' });
+      if (doc.reason === 'undo') return res.status(400).json({ error: 'לא ניתן לבטל פעולת ביטול' });
+      return res.status(400).json({ error: 'תנועה זו כבר בוטלה' });
+    }
 
-    const before = item.qty;
-    const after = before - original.delta;
-    item.qty = after;
-    await item.save();
+    // Atomic decrement (same lost-update fix as adjustItem).
+    const item = await StockItem.findOneAndUpdate(
+      { _id: original.item_id },
+      { $inc: { qty: -original.delta } },
+      { new: true },
+    );
+    if (!item) {
+      // Item vanished — release the claim so the movement isn't stuck
+      // pointing at a reverse row that was never created.
+      await StockMovement.updateOne({ _id: id, reversed_by_id: reverseId },
+        { $set: { reversed_by_id: null } });
+      return res.status(404).json({ error: 'פריט לא נמצא' });
+    }
+
+    const after = item.qty;
+    const before = after + original.delta;
 
     const reverse = await StockMovement.create({
+      _id: reverseId,
       branch_id: item.branch_id, item_id: item._id,
       delta: -original.delta, reason: 'undo',
       qty_before: before, qty_after: after,
@@ -237,9 +273,6 @@ async function undoMovement(req, res, next) {
       ...userInfo(req),
       notes: `ביטול תנועה ${original._id}`,
     });
-
-    original.reversed_by_id = reverse._id;
-    await original.save();
 
     res.json({ item, movement: reverse });
   } catch (err) { next(err); }

@@ -51,12 +51,19 @@ function paidFractionForSpell(workDays, { fullFromDay1 = false } = {}) {
  * order given (callers should pass them chronologically so the balance is
  * consumed oldest-first).
  *
- * @param {Array<{ id?, from_date?, to_date?, work_days:number, pay_from_first_day?:boolean }>} certs
+ * @param {Array<{ id?, from_date?, to_date?, work_days:number, prior_days?:number, pay_from_first_day?:boolean }>} certs
  * @param {Object} opts
  * @param {number} opts.dailyValue        ₪ value of one full sick day
  * @param {number} opts.balanceAvailable  remaining accrued sick-day balance (days)
  * @param {boolean} opts.policyFull        employee-level "pay full from day 1"
  * @returns {{ results:Array, total_paid_days:number, total_amount:number, total_days_used:number, total_days_uncovered:number }}
+ *
+ * `prior_days` — spell days already consumed in EARLIER months, for a
+ * certificate that crosses a month boundary. The statutory brackets follow the
+ * SPELL, not the calendar: if August already held days 1–4 of a spell, then
+ * September's first day is day 5 of the spell (100%), not a fresh unpaid day 1.
+ * This month's pay is the bracket total through (prior + covered) minus the
+ * bracket total through prior — exactly the increment these days add.
  */
 function computeSickPay(certs = [], opts = {}) {
   const dailyValue = Number(opts.dailyValue) || 0;
@@ -66,11 +73,14 @@ function computeSickPay(certs = [], opts = {}) {
 
   const results = (certs || []).map((c) => {
     const days = Math.max(0, Math.round(Number(c.work_days) || 0));
+    const priorDays = Math.max(0, Math.round(Number(c.prior_days) || 0));
     const fullFromDay1 = !!c.pay_from_first_day || policyFull;
     // Balance caps how many of this certificate's days are eligible for pay.
+    // Prior months' days already drew their own balance then.
     const coveredDays = Math.max(0, Math.min(days, remainingBalance));
     remainingBalance -= coveredDays;
-    const paidDays = paidFractionForSpell(coveredDays, { fullFromDay1 });
+    const paidDays = paidFractionForSpell(priorDays + coveredDays, { fullFromDay1 })
+      - paidFractionForSpell(priorDays, { fullFromDay1 });
     return {
       id: c.id != null ? c.id : null,
       from_date: c.from_date || null,

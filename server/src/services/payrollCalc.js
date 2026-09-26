@@ -131,7 +131,22 @@ function loanDeductionForMonth(loan, ym) {
     const p = loan.payments.find(x => x.month === ym);
     return p ? Math.max(0, Number(p.amount) || 0) : 0;
   }
+  // Legacy fallback — BOUNDED BY THE CALENDAR, because `installments_paid`
+  // is a hand-maintained counter that nothing in the system increments: a
+  // 10-installment loan left on the old rule deducted in month 11, 12, 13…
+  // until somebody noticed on a payslip. With a start_month the window is
+  // fully known — deduct only inside [start, start + total) — and months
+  // before the start (which the old rule also charged) pay nothing. Without
+  // a start_month the calendar can't help; the count rule remains, and the
+  // migration to payments[] is the real fix for those.
   if ((loan.installments_paid || 0) >= (loan.installments_total || 0)) return 0;
+  if (loan.start_month && /^\d{4}-\d{2}$/.test(loan.start_month)) {
+    if (ym < loan.start_month) return 0;
+    const [sy, sm] = loan.start_month.split('-').map(Number);
+    const [cy, cm] = ym.split('-').map(Number);
+    const elapsed = (cy - sy) * 12 + (cm - sm); // 0 on the first month
+    if (elapsed >= (loan.installments_total || 0)) return 0;
+  }
   return Math.max(0, Number(loan.installment_amount) || 0);
 }
 

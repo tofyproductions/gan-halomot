@@ -207,6 +207,27 @@ function missingFieldsFor(emp, formIds, taxYear) {
   return miss;
 }
 
+/**
+ * May this user read payroll data about this branch? Admin and accountant see
+ * every branch; everyone else only the branches they manage (or their own
+ * branch when no managed list is set). This is the exact rule listEmployees
+ * and salarySummary already enforce inline — extracted so the single-employee
+ * endpoints (employee card, salary, hours report) apply it too. Before this,
+ * any authenticated user could fetch any employee's bank details and pay by id.
+ *
+ * A missing user passes on purpose: internal callers (distribution jobs,
+ * self-tests) run without a request user and are not a browser to defend
+ * against.
+ */
+function branchInScope(user, branchId) {
+  const role = user?.role;
+  if (!role || role === 'system_admin' || role === 'accountant') return true;
+  const managed = (user.managed_branch_ids || []).map(String);
+  const fallback = user.branch_id ? [String(user.branch_id)] : [];
+  const allowed = managed.length > 0 ? managed : fallback;
+  return allowed.includes(String(branchId));
+}
+
 async function listEmployees(req, res, next) {
   try {
     const { branch, active } = req.query;
@@ -327,6 +348,11 @@ async function getEmployee(req, res, next) {
       .populate('amuta_distribution.amuta_id', 'name short_name')
       .lean();
     if (!employee) return res.status(404).json({ error: 'עובד לא נמצא' });
+    // The full card carries bank details, rates and loans — the same scope
+    // rule as the list applies to the single card.
+    if (!branchInScope(req.user, employee.branch_id?._id || employee.branch_id)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    }
     res.json({
       employee: {
         ...employee,
@@ -1027,6 +1053,11 @@ async function computeHoursReportData(employeeId, month, user, opts = {}) {
       .populate('branch_id', 'name')
       .lean();
     if (!emp) return null;
+    // Same scope rule as the employee card: a per-day attendance report is
+    // personal data. Out-of-scope reads as "not found" — the handlers already
+    // 404 on null, and existence itself is not for other branches to learn.
+    // Internal callers (distribution, self-test) pass no user and pass free.
+    if (!branchInScope(user, emp.branch_id?._id || emp.branch_id)) return null;
     const range = monthRange(month);
     if (!range) return null;
 
@@ -2077,6 +2108,10 @@ async function listClockUsers(req, res, next) {
   try {
     const { branch } = req.query;
     if (!branch) return res.status(400).json({ error: 'branch is required' });
+    // The clock roster is a list of national IDs — scoped like everything else.
+    if (!branchInScope(req.user, branch)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    }
 
     const branchDoc = await Branch.findById(branch).select('clock_users clock_users_updated_at name').lean();
     if (!branchDoc) return res.status(404).json({ error: 'branch not found' });
@@ -3594,6 +3629,10 @@ async function salaryForEmployee(req, res, next) {
     if (!month) return res.status(400).json({ error: 'month=YYYY-MM is required' });
     const emp = await Employee.findById(req.params.id).lean();
     if (!emp) return res.status(404).json({ error: 'עובד לא נמצא' });
+    // A full salary breakdown is as sensitive as the card itself.
+    if (!branchInScope(req.user, emp.branch_id)) {
+      return res.status(403).json({ error: 'אין לך הרשאה לסניף זה' });
+    }
 
     const [y, m] = month.split('-').map(Number);
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
@@ -4172,6 +4211,9 @@ module.exports = {
   // point of the guard, so it is asserted rather than eyeballed.
   findIdClash,
   duplicateIdMessage,
+  // Exported for scripts/payroll-employee-scope.test.js — the rule that keeps
+  // one branch's bank details away from another branch's login.
+  branchInScope,
 
   myPayslipFile,
   myHoursReportFile,

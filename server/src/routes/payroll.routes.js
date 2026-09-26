@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const router = express.Router();
-const { authMiddleware, requireRole } = require('../middleware/auth');
+const { authMiddleware, requireRole, requireBranchScope } = require('../middleware/auth');
 const c = require('../controllers/payroll.controller');
 const audit = require('../controllers/payslipAudit.controller');
 const direct = require('../controllers/directPayslips.controller');
@@ -16,17 +16,20 @@ const auditUpload = multer({
 router.use(authMiddleware);
 
 // Employees (payroll)
-router.get('/employees',            c.listEmployees);
-router.get('/employees/:id',        c.getEmployee);
+// requireBranchScope: management data — admin/accountant/branch managers (and
+// viewers via the gate), never a plain employee login. The controllers then
+// clamp branch managers to their own branches (branchInScope).
+router.get('/employees',            requireBranchScope, c.listEmployees);
+router.get('/employees/:id',        requireBranchScope, c.getEmployee);
 router.post('/employees',           requireRole('system_admin', 'branch_manager', 'accountant'), c.createEmployee);
 router.put('/employees/:id',        requireRole('system_admin', 'branch_manager', 'accountant'), c.updateEmployee);
 router.delete('/employees/:id',     requireRole('system_admin', 'branch_manager', 'accountant'), c.removeEmployee);
 
 // Attendance & hours
 router.get('/attendance',                      c.attendanceByMonth);
-router.get('/employees/:id/hours-report',      c.hoursReport);
+router.get('/employees/:id/hours-report',      requireBranchScope, c.hoursReport);
 // The same report summarised across a range of months, one row per month.
-router.get('/employees/:id/hours-range',       c.hoursRange);
+router.get('/employees/:id/hours-range',       requireBranchScope, c.hoursRange);
 // …and the same span for a whole gan, one row per employee.
 router.get('/hours-range-bulk',                c.hoursRangeBulk);
 router.get('/hours-report-bulk',               c.hoursReportBulk);
@@ -40,7 +43,7 @@ router.post('/hours-distribution/send-employees',   requireRole('system_admin', 
 router.post('/hours-distribution/send-managers',    requireRole('system_admin', 'accountant'), audit.sendHoursToManagers);
 
 // Clock users (matching UI)
-router.get('/clock-users',                     c.listClockUsers);
+router.get('/clock-users',                     requireBranchScope, c.listClockUsers);
 router.post('/clock-users/assign',             requireRole('system_admin', 'branch_manager'), c.assignIsraeliIds);
 router.post('/employees/:id/enroll-clock',     requireRole('system_admin', 'branch_manager'), c.enrollEmployeeToClock);
 // Cross-branch fingerprint copy — stage 1: READ-ONLY export from the source clock.
@@ -59,7 +62,7 @@ router.post('/employee-change-requests/:id/decide', requireRole('system_admin', 
 router.get('/clock-commands/:id',              requireRole('system_admin', 'branch_manager'), c.getClockCommand);
 
 // Salary calculation
-router.get('/employees/:id/salary',            c.salaryForEmployee);
+router.get('/employees/:id/salary',            requireBranchScope, c.salaryForEmployee);
 router.get('/salary-summary',                  c.salarySummary);
 
 // Manual punch entry / deletion (for corrections)
