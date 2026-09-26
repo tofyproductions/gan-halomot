@@ -5,6 +5,7 @@ const {
   academicYearOf, academicYearBounds, normalizeChildName,
 } = require('../services/academic-year.service');
 const { compareChildIdentity } = require('../services/child-identity.service');
+const { cleanupChildrenOfRegistration } = require('../services/childCleanup');
 const { attachSecondParent } = require('../services/household.service');
 const { getBranchFilter } = require('../utils/branch-filter');
 const env = require('../config/env');
@@ -943,11 +944,14 @@ async function remove(req, res, next) {
       academic_year: academicYear,
     });
 
+    // Referencing docs first (logs, pickups, supplies, face refs, photo tags)
+    // — a crash mid-way leaves the children present and a re-run heals.
+    const cleaned = await cleanupChildrenOfRegistration(id);
     await Child.deleteMany({ registration_id: id });
     await Collection.deleteMany({ registration_id: id });
     await Registration.findByIdAndDelete(id);
 
-    res.json({ message: 'Registration archived successfully', id });
+    res.json({ message: 'Registration archived successfully', id, cleaned });
   } catch (error) {
     next(error);
   }

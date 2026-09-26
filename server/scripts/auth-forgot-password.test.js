@@ -111,12 +111,12 @@ const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`);
   // ------------------------------------------------------------ wrong guesses
   const stale = (sent[sent.length - 1].msg.match(/\d{6}/) || [])[0];
   const wrong = stale === '000000' ? '111111' : '000000';
-  for (let i = 0; i < 4; i++) await post('/reset-with-code', { full_name: NAME, id_number: ID, code: wrong, password: 'abcd' });
+  for (let i = 0; i < 4; i++) await post('/reset-with-code', { full_name: NAME, id_number: ID, code: wrong, password: 'abcdefgh' });
   ok((await reload()).otp_attempts === 4, 'ניסיונות שגויים נספרים');
-  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: wrong, password: 'abcd' });
+  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: wrong, password: 'abcdefgh' });
   ok(r.status === 400, 'הניסיון החמישי נדחה');
   ok(!(await reload()).otp_hash, 'והקוד נהרג אחרי חמישה ניסיונות');
-  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: stale, password: 'abcd' });
+  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: stale, password: 'abcdefgh' });
   ok(r.status === 400, 'אפילו הקוד הנכון כבר לא עובד אחרי שנהרג');
 
   // ------------------------------------------------------------ throttling
@@ -130,7 +130,7 @@ const ok = (cond, label) => { console.log(`  ${cond ? '✅' : '❌'} ${label}`);
   await post('/forgot-password', { full_name: NAME, id_number: ID });
   const live = (sent[sent.length - 1].msg.match(/\d{6}/) || [])[0];
   await User.updateOne({ _id: user._id }, { otp_expires_at: new Date(Date.now() - 1000) });
-  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: live, password: 'abcd' });
+  r = await post('/reset-with-code', { full_name: NAME, id_number: ID, code: live, password: 'abcdefgh' });
   ok(r.status === 400 && /פג/.test(r.body.error || ''), 'קוד שפג נדחה, וההודעה אומרת שהוא פג');
 
   // ------------------------------------------------------------ the happy path

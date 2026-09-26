@@ -1,5 +1,6 @@
 const { Archive, Registration, Child, Collection, Classroom } = require('../models');
 const { normalizeYear, getAcademicYears, academicYearOf } = require('../services/academic-year.service');
+const { cleanupChildrenOfRegistration } = require('../services/childCleanup');
 
 async function getAll(req, res, next) {
   try {
@@ -52,9 +53,12 @@ async function create(req, res, next) {
       archived_by: req.user?._id || req.user?.id || null,
     });
 
+    // Referencing docs first — see services/childCleanup.js.
+    const cleaned = await cleanupChildrenOfRegistration(registration_id);
     await Child.deleteMany({ registration_id });
     await Collection.deleteMany({ registration_id });
     await Registration.findByIdAndDelete(registration_id);
+    console.log('[archive] cleaned refs for registration', String(registration_id), cleaned);
 
     res.status(201).json({
       message: 'Registration archived successfully',

@@ -155,6 +155,15 @@ photoSchema.index({ face_scan_status: 1, face_rematched_at: 1 });
 // אותה תמונה פעמיים באותה כיתה. `sparse` כי לשורות ישנות אין חתימה, ובלעדיו
 // כולן היו מתנגשות על null. לא גלובלי בכוונה: אותה תמונה בשתי כיתות היא
 // לגיטימית — אחים בשני חדרים — ולחסום אותה זה להפתיע גננת בלי סיבה.
-photoSchema.index({ classroom_id: 1, sha256: 1 }, { sparse: true });
+// UNIQUE via partial filter (not `sparse`): on a COMPOUND index sparse still
+// indexes every row (classroom_id always exists), so legacy rows with
+// sha256:null would all collide on null. Partial on "sha256 is a string"
+// covers exactly the signed rows. Unique because the twin check in the
+// controller is findOne-then-create — press send twice on slow Wi-Fi and both
+// requests pass the check; the database is the only judge with no window.
+photoSchema.index(
+  { classroom_id: 1, sha256: 1 },
+  { unique: true, partialFilterExpression: { sha256: { $type: 'string' } } },
+);
 
 module.exports = mongoose.model('Photo', photoSchema);

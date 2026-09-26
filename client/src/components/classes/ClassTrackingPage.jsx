@@ -11,7 +11,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import PeopleIcon from '@mui/icons-material/People';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError } from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useConfirm } from '../shared/ConfirmProvider';
 
@@ -33,14 +33,18 @@ function ProvidersDialog({ open, onClose }) {
   const [draft, setDraft] = useState({ name: '', field: '', phone: '', email: '' });
   const load = () => api.get('/classes/providers').then(r => setProviders(r.data.providers || [])).catch(() => {});
   useEffect(() => { if (open) { load(); setDraft({ name: '', field: '', phone: '', email: '' }); } }, [open]);
+  const [adding, setAdding] = useState(false);
   const add = () => {
+    if (adding) return; // double-tap = two identical suppliers
     if (!draft.name.trim()) return toast.error('שם ספק נדרש');
+    setAdding(true);
     api.post('/classes/providers', draft).then(() => { toast.success('נוסף'); setDraft({ name: '', field: '', phone: '', email: '' }); load(); })
-      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'));
+      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
+      .finally(() => setAdding(false));
   };
   const del = async (p) => {
     if (!(await confirm({ title: 'הסרת ספק', message: `להסיר את "${p.name}"?` }))) return;
-    api.delete(`/classes/providers/${p._id}`).then(() => load()).catch(() => {});
+    api.delete(`/classes/providers/${p._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
@@ -68,7 +72,7 @@ function ProvidersDialog({ open, onClose }) {
             <TextField size="small" label="שם" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
             <TextField size="small" label="תחום" value={draft.field} onChange={e => setDraft(d => ({ ...d, field: e.target.value }))} />
             <TextField size="small" label="טלפון" value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))} />
-            <Button variant="contained" startIcon={<AddIcon />} onClick={add}>הוסף</Button>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={add} disabled={adding}>הוסף</Button>
           </Stack>
         </Stack>
       </DialogContent>
@@ -87,11 +91,15 @@ function ProgramDialog({ open, program, branchId, providers, onClose, onSaved })
       default_rate: program.default_rate ?? '', default_day: program.default_day ?? '', default_time: program.default_time || '',
     } : { name: '', provider_id: '', instructor_name: '', classroom_category: '', default_rate: '', default_day: '', default_time: '' });
   }, [program, open]);
+  const [saving, setSaving] = useState(false);
   const save = () => {
+    if (saving) return; // double-tap = duplicate program
     if (!d.name?.trim()) return toast.error('שם חוג נדרש');
+    setSaving(true);
     const payload = { ...d, branch_id: branchId, default_rate: Number(d.default_rate) || 0, default_day: d.default_day === '' ? null : Number(d.default_day) };
     const req = program ? api.put(`/classes/programs/${program._id}`, payload) : api.post('/classes/programs', payload);
-    req.then(() => { toast.success('נשמר'); onSaved(); onClose(); }).catch(e => toast.error(e.response?.data?.error || 'שגיאה'));
+    req.then(() => { toast.success('נשמר'); onSaved(); onClose(); }).catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
+      .finally(() => setSaving(false));
   };
   return (
     <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
@@ -122,7 +130,7 @@ function ProgramDialog({ open, program, branchId, providers, onClose, onSaved })
           </Stack>
         </Stack>
       </DialogContent>
-      <DialogActions><Button onClick={onClose}>ביטול</Button><Button variant="contained" onClick={save}>שמור</Button></DialogActions>
+      <DialogActions><Button onClick={onClose}>ביטול</Button><Button variant="contained" onClick={save} disabled={saving}>שמור</Button></DialogActions>
     </Dialog>
   );
 }
@@ -138,11 +146,15 @@ function ProgramSessions({ program, month, onChanged }) {
   }, [program._id, month]);
   useEffect(() => { load(); }, [load]);
 
+  const [addingDate, setAddingDate] = useState(false);
   const addDate = () => {
+    if (addingDate) return; // double-tap = duplicate session
     if (!newDate) return;
+    setAddingDate(true);
     api.post('/classes/sessions', { program_id: program._id, date: newDate })
       .then(() => { setNewDate(''); load(); onChanged && onChanged(); })
-      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'));
+      .catch(e => toast.error(e.response?.data?.error || 'שגיאה'))
+      .finally(() => setAddingDate(false));
   };
   const setStatus = (s, status) => {
     // Manual status set (occurred / no_show) — reuses the answer endpoint.
@@ -151,7 +163,7 @@ function ProgramSessions({ program, month, onChanged }) {
   };
   const del = async (s) => {
     if (!(await confirm({ title: 'מחיקת מפגש', message: `למחוק את המפגש ${s.date}?` }))) return;
-    api.delete(`/classes/sessions/${s._id}`).then(() => { load(); onChanged && onChanged(); }).catch(() => {});
+    api.delete(`/classes/sessions/${s._id}`).then(() => { load(); onChanged && onChanged(); }).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
 
   const occurred = sessions.filter(s => s.status === 'occurred');
@@ -161,7 +173,7 @@ function ProgramSessions({ program, month, onChanged }) {
     <Box>
       <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
         <TextField size="small" type="date" value={newDate} onChange={e => setNewDate(e.target.value)} InputLabelProps={{ shrink: true }} />
-        <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addDate}>הוסף מפגש</Button>
+        <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addDate} disabled={addingDate}>הוסף מפגש</Button>
         <Box sx={{ flex: 1 }} />
         <Chip color="success" label={`סה״כ לתשלום: ${ils(total)} (${occurred.length} מפגשים)`} sx={{ fontWeight: 700 }} />
       </Stack>
@@ -228,7 +240,7 @@ export default function ClassTrackingPage() {
 
   const delProgram = async (p) => {
     if (!(await confirm({ title: 'הסרת חוג', message: `להסיר את "${p.name}"?` }))) return;
-    api.delete(`/classes/programs/${p._id}`).then(() => load()).catch(() => {});
+    api.delete(`/classes/programs/${p._id}`).then(() => load()).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
 
   if (isAllBranches) {

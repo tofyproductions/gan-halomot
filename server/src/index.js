@@ -86,9 +86,15 @@ app.get('/api/health', (req, res) => {
     gc: !!global.gc });
 });
 
+// Diagnostics below spin REAL Chromium renders — unauthenticated, that is a
+// one-URL denial of service on this memory tier (the file's own history says
+// so). Admin-only, like any other lever that can OOM the instance.
+const { authMiddleware: diagAuth, requireRole: diagRole } = require('./middleware/auth');
+const diagGate = [diagAuth, diagRole('system_admin')];
+
 // Diagnostic: can Chromium render a PDF here? (verifies the emailed-report PDF
 // path works on this instance without sending an email).
-app.get('/api/pdf-selftest', async (req, res) => {
+app.get('/api/pdf-selftest', ...diagGate, async (req, res) => {
   const t0 = Date.now();
   try {
     const { htmlToPdf } = require('./services/htmlPdf');
@@ -102,7 +108,7 @@ app.get('/api/pdf-selftest', async (req, res) => {
 // Diagnostic: render a REAL multi-employee hours report on this instance and
 // report page count + memory — reproduces the exact production send workload
 // (the piece that used to OOM) without sending any email.
-app.get('/api/pdf-loadtest', async (req, res) => {
+app.get('/api/pdf-loadtest', ...diagGate, async (req, res) => {
   const t0 = Date.now();
   try {
     const month = String(req.query.month || '').trim();
@@ -125,7 +131,7 @@ app.get('/api/pdf-loadtest', async (req, res) => {
 // Diagnostic: does this Chromium honor CSS page breaks? Renders N full-height
 // blocks separated by break-after:page and reports the resulting page count —
 // if pages === N the single-render hours report separates employees correctly.
-app.get('/api/pdf-pagetest', async (req, res) => {
+app.get('/api/pdf-pagetest', ...diagGate, async (req, res) => {
   const t0 = Date.now();
   const n = Math.min(Math.max(parseInt(req.query.n, 10) || 3, 1), 10);
   try {

@@ -55,8 +55,15 @@ function errorHandler(err, req, res, _next) {
   if (process.env.NODE_ENV !== 'production') console.error(err.stack);
 
   const status = err.status || 500;
+  // 4xx messages are deliberate, user-facing Hebrew — pass them through.
+  // A 5xx message is a driver/library internal (Mongo topology, cast paths,
+  // stack fragments): in production it leaks schema details to the browser
+  // and helps nobody. Log it fully above; answer generically.
+  const clientMessage = (status >= 500 && process.env.NODE_ENV === 'production')
+    ? 'שגיאה פנימית — נסו שוב, ואם זה חוזר ספרו למשרד'
+    : (err.message || 'Internal server error');
   res.status(status).json({
-    error: err.message || 'Internal server error',
+    error: clientMessage,
     ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
   });
 }

@@ -188,7 +188,7 @@ async function list(req, res, next) {
       const q = String(req.query.q).trim();
       const digits = q.replace(/\D/g, '');
       filter.$or = [
-        { full_name: { $regex: q, $options: 'i' } },
+        { full_name: { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } },
         ...(digits ? [{ phone: { $regex: digits } }] : []),
       ];
       // A search is a search: it looks through everything this caller may see,

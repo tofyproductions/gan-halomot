@@ -66,6 +66,16 @@ const collectionSchema = new mongoose.Schema({
   last_updated: { type: Date, default: Date.now },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 
-collectionSchema.index({ registration_id: 1, academic_year: 1 });
+// UNIQUE: updateMonth and the hourly sheet-sync both did findOne-then-create,
+// and two concurrent calls minted two Collection docs for one registration —
+// receipts then split across them and getByRegistration returned one
+// arbitrarily, so paid months "disappeared". The database now refuses the twin.
+// Partial (registration set) on purpose: production carries three legacy rows
+// with registration_id null from an old import — they are outside this
+// business key anyway, and a full unique index would refuse to build over them.
+collectionSchema.index(
+  { registration_id: 1, academic_year: 1 },
+  { unique: true, partialFilterExpression: { registration_id: { $type: 'objectId' } } },
+);
 
 module.exports = mongoose.model('Collection', collectionSchema);

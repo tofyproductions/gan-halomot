@@ -10,7 +10,7 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import { toast } from 'react-toastify';
-import api from '../../api/client';
+import api, { apiError } from '../../api/client';
 import { useBranch } from '../../hooks/useBranch';
 import { useConfirm } from '../shared/ConfirmProvider';
 
@@ -94,11 +94,11 @@ export default function LeadsPage() {
   useEffect(() => { load(); }, [load]);
 
   const quickStatus = (lead, status) => {
-    api.put(`/leads/${lead.id}`, { status }).then(load).catch(() => {});
+    api.put(`/leads/${lead.id}`, { status }).then(load).catch(err => toast.error(apiError(err, 'עדכון הסטטוס נכשל')));
   };
   const del = async (lead) => {
     if (!(await confirm({ title: 'מחיקת פנייה', message: `למחוק את הפנייה של ${lead.parent_name}?`, danger: true }))) return;
-    api.delete(`/leads/${lead.id}`).then(() => { toast.success('נמחק'); load(); }).catch(() => {});
+    api.delete(`/leads/${lead.id}`).then(() => { toast.success('נמחק'); load(); }).catch(err => toast.error(apiError(err, 'המחיקה נכשלה')));
   };
 
   const copyLink = (path) => {

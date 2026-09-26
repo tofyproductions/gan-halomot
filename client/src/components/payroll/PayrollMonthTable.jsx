@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import useFetchSeq from '../../hooks/useFetchSeq';
 import useUnsavedChangesWarning from '../../hooks/useUnsavedChangesWarning';
 import {
@@ -1006,6 +1006,11 @@ export default function PayrollMonthTable() {
   const [bankDlg, setBankDlg] = useState({ open: false, row: null });
   const [savedDlg, setSavedDlg] = useState({ open: false, row: null });
   const [empSearch, setEmpSearch] = useState('');
+  // The grid is ~70 rows × ~27 tooltip-heavy cells; filtering on the RAW
+  // keystroke re-reconciled all of it per character and typing visibly
+  // lagged. The deferred value lets the input stay instant and the grid
+  // catch up a beat later.
+  const empSearchDeferred = useDeferredValue(empSearch);
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
@@ -2196,7 +2201,7 @@ export default function PayrollMonthTable() {
                   לא נבחרו גנים להצגה. בחר גנים מהסינון למעלה.
                 </TableCell></TableRow>);
               }
-              const q = empSearch.trim().toLowerCase();
+              const q = empSearchDeferred.trim().toLowerCase();
               for (const group of visibleGroups) {
                 const rows = q
                   ? group.rows.filter(r => (r.full_name || '').toLowerCase().includes(q))

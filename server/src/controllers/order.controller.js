@@ -6,6 +6,15 @@ const { deliveryFromResult, deliveryFromError } = require('../services/order-del
 const { dispatchOrders } = require('../services/order-dispatch.service');
 const { createEvent, resolveEvents, branchManagerIds } = require('../services/notification.service');
 const env = require('../config/env');
+const { nextSeq } = require('../models/Counter');
+
+// ORD-<seq>, atomic. The old 'ORD-' + Date.now() collided when two orders were
+// created in the same millisecond (group invites create one per branch in a
+// loop) — E11000 surfaced to the user as a bare 500. Seeded high so new
+// numbers are visually distinct from the legacy timestamp ones.
+async function nextOrderNumber() {
+  return 'ORD-' + (100000 + await nextSeq('order_number'));
+}
 
 async function findOrCreateStockItem({ branch_id, product_id, name, supplier_id }) {
   if (product_id) {
@@ -151,7 +160,7 @@ async function create(req, res, next) {
       });
     }
 
-    const order_number = 'ORD-' + Date.now();
+    const order_number = await nextOrderNumber();
 
     const order = await Order.create({
       order_number, branch_id, supplier_id,
@@ -312,7 +321,7 @@ async function invite(req, res, next) {
     const inviterName = req.user?.full_name || '';
 
     const created = await Order.create({
-      order_number: 'ORD-' + Date.now(),
+      order_number: await nextOrderNumber(),
       branch_id, supplier_id: order.supplier_id,
       items: [], total_amount: 0, notes: '',
       created_by: '', status: 'draft',
