@@ -617,7 +617,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
                 {Number(loan.installments_total) > 0 && Number(loan.installments_paid) >= 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
                     נותרו {Math.max(0, Number(loan.installments_total) - Number(loan.installments_paid))} תשלומים •
-                    {' '}סה״כ שולם ₪{(Number(loan.installment_amount) * Number(loan.installments_paid)).toLocaleString()} מתוך ₪{Number(loan.total_amount).toLocaleString()}
+                    {' '}סה״כ שולם {formatCurrency(Number(loan.installment_amount) * Number(loan.installments_paid))} מתוך {formatCurrency(Number(loan.total_amount))}
                   </Typography>
                 )}
               </Paper>

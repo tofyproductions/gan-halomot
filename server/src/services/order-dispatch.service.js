@@ -43,6 +43,21 @@ async function dispatchOrders(orderIds, { supplier, user }) {
     err.status = 400;
     throw err;
   }
+  // ALL OR NOTHING. Per-document claims are atomic, but a GROUP send that
+  // wins only part of its list means a concurrent send owns the rest — and
+  // the supplier would receive two partial emails instead of one combined
+  // order. A partial claim releases what it took and refuses; whoever won
+  // the other half sends everything they claimed, and a refresh shows the
+  // truth. (One combined email is the entire point of a group.)
+  if (claim.modifiedCount < ids.length) {
+    await Order.updateMany(
+      { _id: { $in: ids }, status: 'pending', sent_at: now, sent_by: sentBy },
+      { $set: { status: 'draft', sent_at: null, sent_by: '' } },
+    ).catch(() => {});
+    const err = new Error('חלק מהזמנות הקבוצה כבר נשלחו — רעננו את המסך ונסו שוב');
+    err.status = 409;
+    throw err;
+  }
 
   const orders = await Order.find({ _id: { $in: ids }, sent_at: now }).lean();
   const branchIds = [...new Set(orders.map(o => String(o.branch_id)))];

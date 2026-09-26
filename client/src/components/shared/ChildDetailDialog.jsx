@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatCurrency } from '../../utils/hebrewYear';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack,
   Typography, TextField, Box, Chip, Divider, InputAdornment, Alert,
@@ -346,12 +347,12 @@ export default function ChildDetailDialog({ open, childId, onClose, onChanged })
                     <Grid size={{ xs: 4 }}>
                       <Typography variant="caption" color="text.secondary">חודשי</Typography>
                       <Typography sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#d97706' }}>
-                        ₪{registration?.monthly_fee?.toLocaleString() || '—'}
+                        {registration?.monthly_fee != null ? formatCurrency(registration.monthly_fee) : '—'}
                       </Typography>
                     </Grid>
                     <Grid size={{ xs: 4 }}>
                       <Typography variant="caption" color="text.secondary">דמי רישום</Typography>
-                      <Typography>₪{registration?.registration_fee?.toLocaleString() || '0'}</Typography>
+                      <Typography>{formatCurrency(registration?.registration_fee || 0)}</Typography>
                     </Grid>
                     <Grid size={{ xs: 4 }}>
                       <Typography variant="caption" color="text.secondary">חוזה</Typography>
@@ -510,7 +511,7 @@ function ContractSection({ registrationId }) {
                 <DescriptionIcon fontSize="small" sx={{ color: '#92400e' }} />
                 <Typography variant="caption" sx={{ flex: 1, fontWeight: 600 }}>
                   גרסה {v.version}
-                  {v.snapshot?.monthly_fee != null && ` · ₪${v.snapshot.monthly_fee.toLocaleString()}`}
+                  {v.snapshot?.monthly_fee != null && ` · ${formatCurrency(v.snapshot.monthly_fee)}`}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
                   {new Date(v.archived_at).toLocaleDateString('he-IL')}
