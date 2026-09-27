@@ -91,6 +91,18 @@ const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].s
   check('rejects the two fake domains and junk',
     !R.isRealEmail('1@gan-halomot.local') && !R.isRealEmail('x@ganhalomot.co.il') && !R.isRealEmail('nope') && !R.isRealEmail(''));
 
+  console.log('\ncleanRouting (the grid\'s save):');
+  const candIds = [String(ben._id), String(orly._id)];
+  let c = R.cleanRouting({ hr: { user_ids: [String(orly._id), String(orly._id)], extra_emails: [' A@B.co ', 'a@b.co'] } }, candIds);
+  check('fills every topic, de-dupes ids and addresses',
+    !c.error && Object.keys(c.topics).length === 7
+      && same(c.topics.hr.user_ids, [String(orly._id)]) && same(c.topics.hr.extra_emails, ['a@b.co'])
+      && c.topics.contact_general.user_ids.length === 0, JSON.stringify(c));
+  check('unknown topic refused', !!R.cleanRouting({ nope: {} }, candIds).error);
+  check('a non-candidate refused', !!R.cleanRouting({ hr: { user_ids: [String(amit._id)] } }, candIds).error);
+  check('a placeholder address refused', !!R.cleanRouting({ hr: { extra_emails: ['1@gan-halomot.local'] } }, candIds).error);
+  check('junk input → all topics empty, no crash', !R.cleanRouting(null, candIds).error);
+
   await mongoose.disconnect();
   await mongod.stop();
   if (failures.length) { console.log(`\n${failures.length} failed`); process.exit(1); }

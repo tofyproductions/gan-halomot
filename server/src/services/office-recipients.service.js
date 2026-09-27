@@ -110,7 +110,35 @@ async function candidates() {
   return users.filter(u => isRealEmail(u.email));
 }
 
+const MAX_EXTRA = 20;
+
+/**
+ * The admin grid's save, checked: every topic present, only known topics,
+ * only people the grid could list, only real addresses. Pure — the caller
+ * passes the candidate ids it read. Returns `{ topics }` or `{ error }`.
+ */
+function cleanRouting(input, candidateIds) {
+  const allowed = new Set(candidateIds.map(String));
+  const src = input && typeof input === 'object' ? input : {};
+  for (const key of Object.keys(src)) {
+    if (!TOPIC_KEYS.has(key)) return { error: `נושא לא מוכר: ${key}` };
+  }
+  const topics = {};
+  for (const t of TOPICS) {
+    const entry = src[t.key] || {};
+    const ids = [...new Set((Array.isArray(entry.user_ids) ? entry.user_ids : []).map(String))];
+    const stranger = ids.find(id => !allowed.has(id));
+    if (stranger) return { error: `משתמש שאינו איש משרד פעיל עם מייל (${t.label})` };
+    const extra = [...new Set((Array.isArray(entry.extra_emails) ? entry.extra_emails : []).map(norm).filter(Boolean))];
+    const bad = extra.find(e => !isRealEmail(e));
+    if (bad) return { error: `כתובת מייל לא תקינה: ${bad}` };
+    if (extra.length > MAX_EXTRA) return { error: `יותר מ-${MAX_EXTRA} כתובות נוספות (${t.label})` };
+    topics[t.key] = { user_ids: ids, extra_emails: extra };
+  }
+  return { topics };
+}
+
 module.exports = {
   ROUTING_KEY, OFFICE_ROLES, TOPICS, isRealEmail,
-  readRouting, officeEmails, officeUserIds, candidates,
+  readRouting, officeEmails, officeUserIds, candidates, cleanRouting,
 };

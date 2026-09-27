@@ -31,6 +31,11 @@ const appVersion = require('../controllers/appVersion.controller');
 router.get('/app-version', appVersion.getVersions);
 router.put('/app-version', appVersion.setVersions);
 
+// "מי מקבל מה" — which office people each email topic reaches.
+const emailRouting = require('../controllers/emailRouting.controller');
+router.get('/email-routing', emailRouting.getRouting);
+router.put('/email-routing', emailRouting.setRouting);
+
 // SMTP diagnostics
 router.get('/email-diagnostic', ctrl.emailDiagnostic);
 router.post('/email-test', ctrl.emailTest);

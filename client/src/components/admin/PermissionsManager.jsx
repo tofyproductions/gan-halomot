@@ -16,6 +16,7 @@ import { TAB_GROUPS, ALL_TABS, isDefaultAllowed, roleHasTab, customRoleHasTab } 
 import api from '../../api/client';
 import { toast } from 'react-toastify';
 import StoreVersionPanel from './StoreVersionPanel';
+import EmailRoutingPanel from './EmailRoutingPanel';
 
 const ROLE_LABELS = {
   system_admin: 'מנהל מערכת',
@@ -529,6 +530,7 @@ export default function PermissionsManager() {
       {/* Not permissions, but the only other thing on this screen's side of
           the line: a setting only a system_admin may touch, with no screen of
           its own to live on. */}
+      <EmailRoutingPanel />
       <StoreVersionPanel />
 
       {/* Shown once. All three details, because logging in needs the full name
