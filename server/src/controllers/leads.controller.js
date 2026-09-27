@@ -162,10 +162,9 @@ async function notifyNewLead(lead, branch) {
     const managers = await User.find(branchManagerFilter(lead.branch_id)).select('email').lean();
     recipients = managers.map(m => m.email).filter(Boolean);
   }
-  // No branch (or no manager on it) → fall back to system admins.
+  // No branch (or no manager on it) → the office, by its "הורים וכספים" routing.
   if (recipients.length === 0) {
-    const admins = await User.find({ role: 'system_admin' }).select('email').lean();
-    recipients = admins.map(a => a.email).filter(Boolean);
+    recipients = await require('../services/office-recipients.service').officeEmails('parents_finance');
   }
   if (recipients.length === 0) return;
   const branchName = branch?.name || 'לא נבחר סניף';

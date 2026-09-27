@@ -1,4 +1,4 @@
-const { Candidate, Branch, Setting, User } = require('../models');
+const { Candidate, Branch, Setting } = require('../models');
 const { dispatchEmail } = require('./email.service');
 const recruitment = require('./recruitment.service');
 
@@ -100,15 +100,13 @@ function dueFilter(branchIds) {
   };
 }
 
-/** The office: whoever has network-wide sight. */
-async function officeRecipients() {
-  const setting = await Setting.findOne({ key: 'accountant_email' }).lean();
-  const admins = await User.find({ role: { $in: ['system_admin', 'accountant'] }, is_active: true })
-    .select('email').lean();
-  const all = [setting?.value, ...admins.map(a => a.email)]
-    .map(e => String(e || '').trim().toLowerCase())
-    .filter(e => e.includes('@'));
-  return [...new Set(all)];
+/**
+ * The office, by its "עובדים" routing. Setting `accountant_email` is NOT read
+ * here any more: it holds the external CPA's address, and the recruitment
+ * digest has no business in his inbox.
+ */
+function officeRecipients() {
+  return require('./office-recipients.service').officeEmails('hr');
 }
 
 /**

@@ -15,12 +15,11 @@ const scanner = require('./face/scanner');
  * So the check is not "did something throw". It is "is work waiting while
  * nothing is being done", which is the shape this failure actually has.
  *
- * ONE PERSON GETS THIS, and it is not a branch manager. A queue that is stuck
+ * THE OFFICE'S "תקלות במערכת" ROUTING GETS THIS, never a branch manager. A queue that is stuck
  * is a technical fault she can do nothing about except worry; telling her
  * converts a developer's problem into a manager's anxiety and fixes nothing.
  */
 
-const ALERT_KEY = 'face_alert_email';
 const LAST_SENT_KEY = 'face_alert_last_sent';
 
 // Long enough that an ordinary busy afternoon never trips it — the queue
@@ -34,9 +33,9 @@ const REMIND_HOURS = 24;
 const EVERY_MS = 60 * 60 * 1000;
 const FIRST_RUN_MS = 15 * 60 * 1000;
 
+/** The office's "תקלות במערכת" routing, as one comma-joined `to`. */
 async function recipient() {
-  const doc = await Setting.findOne({ key: ALERT_KEY }).lean();
-  return (doc && doc.value && doc.value.email) || process.env.FACE_ALERT_EMAIL || '';
+  return (await require('./office-recipients.service').officeEmails('system_faults')).join(',');
 }
 
 async function tick() {
@@ -67,7 +66,7 @@ async function tick() {
     // Still worth a log line: a missing address must not turn a real fault
     // into silence, which is the exact failure this job exists to prevent.
     console.error(`[face-health] ${h.pending} photographs waiting, nothing scanned `
-      + `for ${Math.round(stalledHours)}h — and no alert address is set (${ALERT_KEY}).`);
+      + `for ${Math.round(stalledHours)}h — and nobody to tell (email_routing → system_faults, and no system admin).`);
     return { ok: false, pending: h.pending, reason: 'no recipient' };
   }
 
@@ -106,5 +105,5 @@ function describeTick(r) {
 }
 
 module.exports = {
-  tick, describeTick, EVERY_MS, FIRST_RUN_MS, ALERT_KEY, STALL_HOURS,
+  tick, describeTick, EVERY_MS, FIRST_RUN_MS, STALL_HOURS,
 };

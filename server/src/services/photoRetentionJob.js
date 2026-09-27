@@ -85,8 +85,7 @@ async function checkCap(used) {
   // Once, not every day, until it drops back under.
   const already = await Setting.findOne({ key: CAP_ALERTED_KEY }).lean();
   if (!already) {
-    const to = (await Setting.findOne({ key: 'face_alert_email' }).lean())?.value?.email
-      || process.env.FACE_ALERT_EMAIL;
+    const to = (await require('./office-recipients.service').officeEmails('system_faults')).join(',');
     if (to) {
       await dispatchEmail({
         to,

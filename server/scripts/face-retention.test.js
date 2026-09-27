@@ -112,8 +112,8 @@ const check = (name, cond, detail = '') => {
   console.log('התקרה:');
   await Setting.updateOne({ key: job.CAP_KEY },
     { $set: { key: job.CAP_KEY, value: { gb: 0.0000001 } } }, { upsert: true });
-  await Setting.updateOne({ key: 'face_alert_email' },
-    { $set: { key: 'face_alert_email', value: { email: 'amit@example.com' } } }, { upsert: true });
+  await Setting.updateOne({ key: 'email_routing' },
+    { $set: { key: 'email_routing', value: { topics: { system_faults: { user_ids: [], extra_emails: ['amit@example.com'] } } } } }, { upsert: true });
   const countBefore = await Photo.countDocuments();
   const r3 = await job.tick(now);
   check('חציית התקרה מתריעה', r3.cap.over === true && mails.length === 1, JSON.stringify(r3.cap));

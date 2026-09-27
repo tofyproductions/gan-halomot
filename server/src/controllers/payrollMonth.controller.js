@@ -5399,8 +5399,10 @@ async function sendToAccountant(req, res, next) {
       try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: false, month, message: e.message, code: e.code || null, responseCode: e.responseCode || null, detail: e.detail || null } }, { upsert: true }); } catch (_) {}
       // Notify the office so a silent failure doesn't go unnoticed.
       try {
+        // The office that sent it, plus whoever handles system faults.
+        const faults = await require('../services/office-recipients.service').officeEmails('system_faults').catch(() => []);
         await dispatchEmail({
-          to: cc.length ? cc : to,
+          to: [...new Set([...(cc.length ? cc : to), ...faults])].join(','),
           subject: `⚠️ שליחת טבלת שכר ${month} לרו״ח נכשלה`,
           html: `<div dir="rtl" style="font-family:Arial,sans-serif"><p>השליחה האוטומטית של טבלת השכר לחודש <b>${month}</b> לרו״ח נכשלה.</p><p>פרטי השגיאה: ${e.message}</p><p>נסו שוב מהמערכת.</p></div>`,
         });

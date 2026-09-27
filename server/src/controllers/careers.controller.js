@@ -199,8 +199,8 @@ async function notifyManagers(candidate, { created, reopened }) {
     }).catch(err => console.error('[careers] push create failed:', err.message));
   }
 
-  // Email goes to the same people, by address.
-  const emails = new Set(office.map(u => u.email).filter(Boolean));
+  // Email: the branch managers, plus the office by its "עובדים" routing.
+  const emails = new Set(await require('../services/office-recipients.service').officeEmails('hr'));
   for (const bid of branchIds) {
     const managers = await User.find(branchManagerFilter(bid)).select('email').lean().catch(() => []);
     managers.forEach(m => m.email && emails.add(m.email));

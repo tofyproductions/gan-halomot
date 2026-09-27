@@ -346,10 +346,7 @@ async function emailSignLink(req, doc, empMaybe) {
 
 /** Tell the admins a branch manager's contract waits for their yes. */
 async function notifyAdminsPending(doc, emp) {
-  const admins = await User.find({ role: { $in: ['system_admin', 'accountant'] }, is_active: true })
-    .select('email').lean();
-  const to = admins.map(u => u.email)
-    .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e));
+  const to = await require('../services/office-recipients.service').officeEmails('hr');
   if (!to.length) return;
   await dispatchEmail({
     to: to.join(','),
@@ -1079,15 +1076,14 @@ async function publicSign(req, res, next) {
     // wheel is turning. Best-effort: a failed notification must not undo a
     // signature the employee just gave.
     try {
-      const [approvers, managers] = await Promise.all([
-        User.find({ role: { $in: ['accountant', 'system_admin'] }, is_active: true })
-          .select('email').lean(),
+      const [office, managers] = await Promise.all([
+        require('../services/office-recipients.service').officeEmails('hr'),
         doc.branch_id
           ? User.find(branchManagerFilter(doc.branch_id)).select('email').lean().catch(() => [])
           : [],
       ]);
-      const to = [...approvers, ...managers].map(u => u.email)
-        .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e));
+      const to = [...office, ...managers.map(u => u.email)
+        .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e))];
       if (to.length) {
         await dispatchEmail({
           to: [...new Set(to)].join(','),

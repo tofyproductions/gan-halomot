@@ -1,4 +1,4 @@
-const { Branch, User, Setting } = require('../models');
+const { Branch, Setting } = require('../models');
 const { dispatchEmail } = require('./email.service');
 const { enrollmentYear, formatAcademicYear } = require('./academic-year.service');
 const { buildReconciliation, isTmtSupervised } = require('../controllers/tmtApproval.controller');
@@ -79,13 +79,12 @@ function hashOf({ rows }) {
 }
 
 async function recipients() {
-  const [setting, admins] = await Promise.all([
+  const [setting, office] = await Promise.all([
     Setting.findOne({ key: RECIPIENTS_KEY }).lean(),
-    User.find({ role: { $in: ['system_admin', 'accountant'] }, is_active: { $ne: false } })
-      .select('email').lean(),
+    require('./office-recipients.service').officeEmails('parents_finance'),
   ]);
   const extra = Array.isArray(setting?.value) ? setting.value : [];
-  const all = [...extra, ...admins.map(a => a.email)]
+  const all = [...extra, ...office]
     .map(e => String(e || '').trim().toLowerCase())
     .filter(e => e.includes('@'));
   return [...new Set(all)];

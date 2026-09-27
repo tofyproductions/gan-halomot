@@ -1,4 +1,4 @@
-const { ReconcileDecision, Branch, User } = require('../models');
+const { ReconcileDecision, Branch } = require('../models');
 const storage = require('../services/storage.service');
 const { dispatchEmail } = require('../services/email.service');
 const { normalizeId } = require('../services/tmt.service');
@@ -209,13 +209,9 @@ async function updateDocument(req, res, next) {
   } catch (err) { next(err); }
 }
 
-/** Every system_admin with a real email address. */
-async function adminEmails() {
-  const admins = await User.find({ role: 'system_admin', is_active: { $ne: false } })
-    .select('email').lean();
-  return [...new Set(
-    admins.map(a => String(a.email || '').trim().toLowerCase()).filter(e => e.includes('@')),
-  )];
+/** Whoever the office routes "הורים וכספים" to (admin grid, Setting email_routing). */
+function adminEmails() {
+  return require('../services/office-recipients.service').officeEmails('parents_finance');
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, c => (

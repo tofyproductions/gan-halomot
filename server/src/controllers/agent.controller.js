@@ -177,6 +177,22 @@ const CLOCK_ALERT_COOLDOWN_MS = 12 * 60 * 60 * 1000;  // re-alert every 12h max
  * silently hid the May 2026 outage (agent heartbeating, clock not polled).
  * Never throws to the caller; alerting must not break the heartbeat.
  */
+/**
+ * Who hears that a branch's clock or Pi went quiet: that branch's managers
+ * (they can walk over and check the cable) plus the office's "תקלות במערכת"
+ * routing (admin grid, Setting email_routing).
+ */
+async function alertRecipients(branchId) {
+  const { User } = require('../models');
+  const managers = await User.find({
+    is_active: true,
+    is_test_account: { $ne: true },
+    $or: branchManagerClauses(branchId),
+  }).select('email').lean();
+  const office = await require('../services/office-recipients.service').officeEmails('system_faults');
+  return [...new Set([...managers.map(m => m.email).filter(Boolean), ...office])];
+}
+
 async function maybeAlertClockDown(branch, now) {
   if (branch.clock_reachable !== false) return;
   const lastOk = branch.clock_last_ok_at ? branch.clock_last_ok_at.getTime() : 0;
@@ -185,13 +201,7 @@ async function maybeAlertClockDown(branch, now) {
   const sinceAlert = branch.clock_alerted_at ? (now.getTime() - branch.clock_alerted_at.getTime()) : Infinity;
   if (sinceAlert < CLOCK_ALERT_COOLDOWN_MS) return;
 
-  const { User } = require('../models');
-  const recips = await User.find({
-    is_active: true,
-    is_test_account: { $ne: true },
-    $or: [{ role: 'system_admin' }, ...branchManagerClauses(branch._id)],
-  }).select('email').lean();
-  const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
+  const emails = await alertRecipients(branch._id);
   if (!emails.length) return;
 
   const hours = Number.isFinite(downMs) ? Math.round(downMs / 3600000) : null;
@@ -348,7 +358,7 @@ async function checkStaleAgents() {
     }).format(now));
     if (ilHour < 7 || ilHour >= 21) return;
 
-    const { Branch, User } = require('../models');
+    const { Branch } = require('../models');
     const { dispatchEmail } = require('../services/email.service');
     // Only branches that have EVER had an agent (ignore branches with no clock).
     const branches = await Branch.find({ agent_last_seen_at: { $ne: null } });
@@ -359,12 +369,7 @@ async function checkStaleAgents() {
       const sinceAlert = branch.agent_alerted_at ? (now.getTime() - branch.agent_alerted_at.getTime()) : Infinity;
       if (sinceAlert < AGENT_ALERT_COOLDOWN_MS) continue;
 
-      const recips = await User.find({
-        is_active: true,
-        is_test_account: { $ne: true },
-        $or: [{ role: 'system_admin' }, ...branchManagerClauses(branch._id)],
-      }).select('email').lean();
-      const emails = [...new Set(recips.map(r => r.email).filter(Boolean))];
+      const emails = await alertRecipients(branch._id);
       if (!emails.length) continue;
 
       const hours = Math.round(downMs / 3600000);

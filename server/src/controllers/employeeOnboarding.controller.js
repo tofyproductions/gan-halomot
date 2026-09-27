@@ -144,11 +144,7 @@ function fieldKind(fieldname) {
 }
 
 async function notifyOffice(doc, branch) {
-  const emails = new Set();
-  const office = await User.find({
-    role: { $in: ['system_admin', 'accountant'] }, is_active: { $ne: false },
-  }).select('email').lean();
-  office.forEach(u => u.email && emails.add(u.email));
+  const emails = new Set(await require('../services/office-recipients.service').officeEmails('hr'));
   if (doc.branch_id) {
     const managers = await User.find(branchManagerFilter(doc.branch_id)).select('email').lean().catch(() => []);
     managers.forEach(m => m.email && emails.add(m.email));

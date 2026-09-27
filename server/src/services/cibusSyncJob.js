@@ -9,7 +9,7 @@
  * retrying daily until the month actually succeeds rather than firing once on a
  * fixed date and giving up.
  */
-const { CibusSync, User } = require('../models');
+const { CibusSync } = require('../models');
 const mailbox = require('./mailbox.service');
 const { applyCibusReport } = require('./cibusImport');
 const { dispatchEmail } = require('./email.service');
@@ -148,10 +148,7 @@ async function alertIfStale(doc) {
   // Once a week at most, not on every tick.
   if (doc.stale_alerted_at && Date.now() - new Date(doc.stale_alerted_at) < 7 * 864e5) return;
   try {
-    const to = (await User.find({ role: { $in: ['accountant', 'system_admin'] }, is_active: true })
-      .select('email').lean())
-      .map(u => u.email)
-      .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e));
+    const to = await require('./office-recipients.service').officeEmails('system_faults');
     if (!to.length) return;
     await dispatchEmail({
       to: to.join(','),

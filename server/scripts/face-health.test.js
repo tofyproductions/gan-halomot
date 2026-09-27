@@ -52,9 +52,10 @@ const hoursAgo = (h) => new Date(Date.now() - h * 3600000);
 
   const job = require('../src/services/faceHealthJob');
   const { Setting } = require('../src/models');
+  // The address comes from the office routing (topic system_faults).
   await Setting.updateOne(
-    { key: job.ALERT_KEY },
-    { $set: { key: job.ALERT_KEY, value: { email: 'amit@example.com' } } },
+    { key: 'email_routing' },
+    { $set: { key: 'email_routing', value: { topics: { system_faults: { user_ids: [], extra_emails: ['amit@example.com'] } } } } },
     { upsert: true },
   );
   const clearMemory = () => Setting.deleteOne({ key: 'face_alert_last_sent' });
@@ -96,8 +97,8 @@ const hoursAgo = (h) => new Date(Date.now() - h * 3600000);
   check('  two messages now', sent.length === 2, `got ${sent.length}`);
 
   await clearMemory();
-  await Setting.updateOne({ key: job.ALERT_KEY }, { $set: { value: { email: '' } } });
-  delete process.env.FACE_ALERT_EMAIL;
+  // Nobody routed and no system admin to fall back on.
+  await Setting.deleteOne({ key: 'email_routing' });
   r = await job.tick();
   check('no address configured is reported, not swallowed', r.reason === 'no recipient');
   check('  and nothing is sent', sent.length === 2, `got ${sent.length}`);
