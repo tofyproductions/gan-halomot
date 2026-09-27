@@ -98,6 +98,21 @@ async function createEvent({ type, ref_collection, ref_id, recipient_id, title, 
   return event;
 }
 
+/**
+ * A one-shot push: sent now, never resent. The hourly resend exists for things
+ * a manager must act on; an employee being told something (her morning list,
+ * a decision on her report) is told once — the app's own popup is where the
+ * repeating reminder lives.
+ */
+async function notifyOnce(args) {
+  const event = await createEvent(args);
+  await NotificationEvent.updateOne(
+    { _id: event._id, status: 'pending' },
+    { $set: { status: 'resolved', resolved_at: new Date() } },
+  );
+  return event;
+}
+
 /** Close every pending row for one underlying record, for every recipient at once. */
 async function resolveEvents({ ref_collection, ref_id }) {
   await NotificationEvent.updateMany(
@@ -127,4 +142,4 @@ async function resendDue() {
   return due.length;
 }
 
-module.exports = { createEvent, resolveEvents, resendDue, branchManagerIds, accountantIds };
+module.exports = { createEvent, notifyOnce, resolveEvents, resendDue, branchManagerIds, accountantIds };

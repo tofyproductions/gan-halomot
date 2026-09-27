@@ -30,7 +30,7 @@ function walk(dir, out = []) {
 
 // A creation call and the `type:` inside the next few lines — the shape every
 // call site uses (createEvent / pushOnce / NotificationEvent.create).
-const CALL = /(createEvent|pushOnce|NotificationEvent\.create)\s*\(/g;
+const CALL = /(createEvent|notifyOnce|pushOnce|NotificationEvent\.create)\s*\(/g;
 const used = [];
 for (const file of walk(path.join(__dirname, '..', 'src'))) {
   const src = fs.readFileSync(file, 'utf8');

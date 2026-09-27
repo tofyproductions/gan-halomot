@@ -3398,6 +3398,7 @@ async function approvePunch(req, res, next) {
       return res.status(403).json({ error: 'אין הרשאה לאשר את ההחתמה בשלב זה' });
     }
     await p.save();
+    if (st === 'pending_manager' || st === 'pending') notifySelfReportDecision(p, true);
     // Fire-and-forget: the approval already succeeded, so a
     // notification-layer failure here must not turn it into a 500.
     notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
@@ -3412,6 +3413,28 @@ async function approvePunch(req, res, next) {
     }
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
+}
+
+/**
+ * Tell the employee what happened to a punch SHE reported (created_by = her
+ * own login). Once, never resent — her popup and "ההחתמות שלי" hold the rest.
+ * Fire-and-forget: the decision already happened; a push failure must not
+ * turn it into a 500.
+ */
+function notifySelfReportDecision(p, approved, note = '') {
+  (async () => {
+    const emp = await Employee.findById(p.employee_id).select('user_id').lean();
+    if (!emp?.user_id || String(emp.user_id) !== String(p.created_by || '')) return;
+    const when = new Date(p.timestamp).toLocaleString('he-IL', {
+      timeZone: 'Asia/Jerusalem', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit',
+    });
+    await notificationService.notifyOnce({
+      type: 'punch_followup_decision', ref_collection: 'Punch', ref_id: p._id, recipient_id: emp.user_id,
+      title: approved ? 'דיווח ההחתמה שלך אושר' : 'דיווח ההחתמה שלך נדחה',
+      body: approved ? `ההחתמה מ-${when} אושרה ע״י המנהלת` : `ההחתמה מ-${when} נדחתה${note ? `: ${note}` : ''} — יש לתקן שוב`,
+      url: approved ? '/my-attendance' : '/?punch_fix=1',
+    });
+  })().catch(err => console.error('self-report decision push failed:', err.message));
 }
 
 /**
@@ -3470,6 +3493,7 @@ async function rejectPunch(req, res, next) {
     // failure here must not turn it into a 500 for the caller.
     notificationService.resolveEvents({ ref_collection: 'Punch', ref_id: p._id })
       .catch(err => console.error('rejectPunch resolve events failed:', err.message));
+    notifySelfReportDecision(p, false, req.body?.note || '');
     res.json({ ok: true, punch: p });
   } catch (err) { next(err); }
 }
@@ -4269,6 +4293,7 @@ async function myForm101File(req, res, next) {
 }
 
 module.exports = {
+  resolveSelfEmployee,
   // Exported for scripts/duplicate-israeli-id.test.js: the wording is the whole
   // point of the guard, so it is asserted rather than eyeballed.
   findIdClash,
