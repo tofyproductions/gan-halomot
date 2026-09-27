@@ -35,8 +35,9 @@
  */
 
 const OPEN_QUESTIONS = [
-  '"סוג רשומה" — לא בשימוש לדברי הרו"ח; נשלח ריק עד תשובת בית התוכנה.',
-  'קודי מפרעה/מקדמה/הלוואה ושווי ארוחות (סיבוס) — ממתינים לאקסולוגיה המורחבת מהרו"ח; בינתיים בגיליון ההערות.',
+  '"סוג רשומה" — כנראה מבדיל בין שלוש טבלאות הקודים (רכיבי שכר / ניכויי רשות / זקופות); ממתינים לערכים מבית התוכנה. עד אז מקדמות וסיבוס בגיליון ההערות, עם הקוד ליד כל שורה.',
+  'סיבוס: שווי ארוחות מופיע פעמיים באקסולוגיית הזקופות (קוד 2 וקוד 21) — לוודא איזה מהם בשימוש.',
+  'החזר הלוואה: אין קוד ייעודי בניכויי הרשות — לוודא אם נקלט כמקדמה (קוד 1).',
   'חודש ניסיון: ספטמבר 2026 — הקבצים נשלחים לרו"ח במייל.',
 ];
 
@@ -69,15 +70,21 @@ const HOURS = {
   ot150: { code: 33, factor: 1.5 },
 };
 
-/** Components awaiting codes from the EXTENDED אקסולוגיה — surfaced, never guessed. */
+/**
+ * Components whose CODES are now known (the extended אקסולוגיה, 27.09.2026)
+ * but whose "סוג רשומה" value is not — they live in the OTHER code tables
+ * (ניכויי רשות / הכנסות זקופות), and until the software house says how the
+ * movements file marks those tables, they ride the notes sheet WITH their
+ * code, so the accountant keys them in seconds.
+ */
 const UNMAPPED = [
-  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', get: (ce) => ce.earnings.meal_vouchers },
-  { key: 'cibus', label: 'סיבוס (שווי ארוחות)', get: (ce) => ce.earnings.cibus },
-  { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', get: (ce) => ce.earnings.gift_card },
-  { key: 'loans', label: 'ניכוי הלוואה', get: (ce) => ce.deductions.loans },
+  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
+  { key: 'cibus', label: 'סיבוס', hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.cibus },
+  { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', hint: 'זקופה — לוודא קוד', get: (ce) => ce.earnings.gift_card },
+  { key: 'loans', label: 'ניכוי הלוואה', hint: 'ניכוי רשות — כנראה כמקדמה (קוד 1), לוודא', get: (ce) => ce.deductions.loans },
   // הבראה — the accountant computes it by job scope; when our table carries
   // an amount anyway, it is surfaced so nobody pays it twice.
-  { key: 'recreation', label: 'הבראה (מחושבת אצל הרו"ח — לידיעה)', get: (ce) => ce.earnings.recreation },
+  { key: 'recreation', label: 'הבראה', hint: 'מחושבת אצל הרו"ח לפי היקף משרה — לידיעה בלבד', get: (ce) => ce.earnings.recreation },
 ];
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -141,7 +148,7 @@ function buildMovements(source) {
         employee_number: empNo,
         full_name: ce.employee.full_name,
         subject: comp.label,
-        text: `₪${amount} — אין קוד רכיב בשקלולית, לקליטה ידנית.`,
+        text: `₪${amount} — ${comp.hint}.`,
       });
     }
 
@@ -149,7 +156,7 @@ function buildMovements(source) {
     if (d.advance_deduction) {
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
-        subject: 'ניכוי מקדמה', text: d.advance_deduction,
+        subject: 'ניכוי מקדמה (ניכוי רשות קוד 1; מפרעה = קוד 3)', text: d.advance_deduction,
       });
     }
     for (const [subject, text] of [
