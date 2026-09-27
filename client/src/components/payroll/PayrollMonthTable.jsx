@@ -791,6 +791,88 @@ function AccountantContactsDialog({ open, onClose }) {
 
 /* Preview the accountant PDF before sending, and choose recipients per-send.
    Renders the same cards HTML the PDF is built from inside an iframe. */
+/* ייצוא לשקלולית — the accountant's payroll software. Shows who is in, who
+   failed and why, what rides on the notes sheet, and hands over the two
+   template files. The month always covers ALL branches: one amuta = one
+   company (600) in שקלולית. */
+function ShkulitExportDialog({ open, month, onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setData(null); setErr('');
+    api.get(`/payroll-month/${month}/shkulit-export`)
+      .then(res => setData(res.data))
+      .catch(e => setErr(e.response?.data?.error || 'שגיאה בטעינת הסיכום'));
+  }, [open, month]);
+
+  const download = async (type) => {
+    setBusy(true);
+    try {
+      const res = await api.get(`/payroll-month/${month}/shkulit-export/file`, {
+        params: { type }, responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = type === 'master' ? `נתוני עובד ${month}.xlsx` : `נתוני שכר לחודש ${month}.xlsx`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      toast.error('שגיאה בהורדת הקובץ');
+    } finally { setBusy(false); }
+  };
+
+  const s = data?.summary;
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="sm" fullWidth>
+      <DialogTitle sx={{ fontWeight: 800 }}>ייצוא לשקלולית — {month}</DialogTitle>
+      <DialogContent dividers>
+        {err && <Alert severity="error">{err}</Alert>}
+        {!err && !data && <LinearProgress />}
+        {data?.setup_error && <Alert severity="error">{data.setup_error}</Alert>}
+        {s && !data.setup_error && (
+          <Stack spacing={1.5}>
+            <Alert severity={data.failed?.length ? 'warning' : 'success'}>
+              {s.ready} עובדים בקובץ ({data.movement_rows} שורות תנועה)
+              {s.failed ? ` · ${s.failed} נכשלו` : ''}{s.skipped ? ` · ${s.skipped} הוחרגו` : ''}
+            </Alert>
+            {data.failed?.length > 0 && (
+              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#fef2f2' }}>
+                <Typography sx={{ fontWeight: 800, mb: 0.5 }}>לא ייכנסו לקובץ:</Typography>
+                {data.failed.map(f => (
+                  <Typography key={f.employee_id} variant="body2">
+                    • {(f.errors || []).join(' · ')}
+                  </Typography>
+                ))}
+              </Paper>
+            )}
+            {data.notes?.length > 0 && (
+              <Alert severity="info">
+                {data.notes.length} הערות/הוראות (מקדמות, סיבוס, הלוואות…) — בגיליון "הוראות והערות" שבקובץ התנועות.
+              </Alert>
+            )}
+            {(data.open_questions || []).map(q => (
+              <Typography key={q} variant="caption" color="text.secondary">◦ {q}</Typography>
+            ))}
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>סגור</Button>
+        <Button variant="outlined" disabled={busy || !s || !!data?.setup_error} onClick={() => download('master')}>
+          קובץ נתוני עובד
+        </Button>
+        <Button variant="contained" disabled={busy || !s || !!data?.setup_error} onClick={() => download('movements')}>
+          קובץ נתוני שכר לחודש
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, onClose, onManageContacts }) {
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
@@ -1424,6 +1506,7 @@ export default function PayrollMonthTable() {
 
   const [acctContactsOpen, setAcctContactsOpen] = useState(false);
   const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
+  const [shkulitOpen, setShkulitOpen] = useState(false);
   const acctBranch = (selectedBranch && !isAllBranches) ? selectedBranch : null;
 
   const finalize = async () => {
@@ -2588,6 +2671,16 @@ export default function PayrollMonthTable() {
           <Tooltip title="הגדרת נמעני רו״ח"><span>
             <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
           </span></Tooltip>
+          {isReviewer && (
+            <Tooltip title="שני קבצי הקליטה לתוכנת השכר של הרו״ח — כל הסניפים יחד">
+              <span>
+                <Button size="small" variant="outlined" color="secondary" startIcon={<DownloadIcon />}
+                  onClick={() => setShkulitOpen(true)} disabled={!data || stagingMode}>
+                  שקלולית
+                </Button>
+              </span>
+            </Tooltip>
+          )}
           <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
             <MenuItem disabled sx={{ opacity: 1 }}>
               <ListItemText primaryTypographyProps={{ fontSize: '0.72rem', fontWeight: 800, color: 'text.secondary' }}
@@ -2770,6 +2863,7 @@ export default function PayrollMonthTable() {
         onClear={() => { if (travelDlg.row) setEmployeeTravel(travelDlg.row.employee_id, null); setTravelDlg({ open: false, row: null, locked: false }); }}
       />
       <AccountantContactsDialog open={acctContactsOpen} onClose={() => setAcctContactsOpen(false)} />
+      <ShkulitExportDialog open={shkulitOpen} month={month} onClose={() => setShkulitOpen(false)} />
       <AccountantPreviewDialog open={acctPreviewOpen} month={month} branch={acctBranch}
         blocked={punchGate.blocked} blockedCount={punchGate.count}
         onClose={() => setAcctPreviewOpen(false)} onManageContacts={() => { setAcctPreviewOpen(false); setAcctContactsOpen(true); }} />
