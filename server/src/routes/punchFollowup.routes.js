@@ -1,5 +1,5 @@
 const express = require('express');
-const { authMiddleware } = require('../middleware/auth');
+const { authMiddleware, requireRole } = require('../middleware/auth');
 const c = require('../controllers/punchFollowup.controller');
 
 /**
@@ -11,5 +11,12 @@ const router = express.Router();
 router.use(authMiddleware);
 router.get('/mine', c.mine);
 router.post('/fix', c.fixIssue);
+
+// The manager's side — scoped in the controller to her own branches.
+const MANAGERS = requireRole('branch_manager', 'admin_viewer', 'system_admin', 'accountant');
+router.get('/manager', MANAGERS, c.managerList);
+router.post('/decide', MANAGERS, c.decide);
+router.post('/fix-as-manager', MANAGERS, c.fixAsManager);
+router.post('/remind', MANAGERS, c.remind);
 
 module.exports = router;

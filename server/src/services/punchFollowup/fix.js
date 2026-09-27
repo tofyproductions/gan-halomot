@@ -83,4 +83,16 @@ function pushText(issues) {
   return { title: `יש לך ${issues.length} ימים לתיקון בהחתמות`, body: 'לחצי כאן לתיקון' };
 }
 
-module.exports = { dayLabel, missingSide, validateLabels, pickEmployeePushes, pushText };
+const KIND_REMINDER = {
+  missing: 'חסרה לך החתמה',
+  duplicate: 'יש לך החתמה כפולה',
+  empty_day: 'לא נמצאו החתמות',
+};
+
+/** The WhatsApp text a manager sends — first name, the problem, the day. */
+function reminderText(kind, date, fullName) {
+  const first = String(fullName || '').trim().split(/\s+/)[0] || '';
+  return `היי ${first}, ${KIND_REMINDER[kind] || 'יש בעיה בהחתמה'} ב${dayLabel(date)} — אנא עדכני באפליקציה של הגן (חלון "ימים לתקן בהחתמות"). תודה!`;
+}
+
+module.exports = { dayLabel, missingSide, validateLabels, pickEmployeePushes, pushText, reminderText };

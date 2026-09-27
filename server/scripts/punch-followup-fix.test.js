@@ -63,4 +63,33 @@ ok('several → one summary', () => {
     'יש לך 2 ימים לתיקון בהחתמות');
 });
 
+console.log('\ninvoke (delegate to an existing handler)');
+const { invoke } = require('../src/services/punchFollowup/invoke');
+(async () => {})();
+ok('invoke is exported', () => assert.strictEqual(typeof invoke, 'function'));
+
+console.log('\nreminderText');
+ok('names the problem and the day, addressed by first name', () => {
+  const t = F.reminderText('missing', '2026-09-27', 'שרית כהן');
+  assert.ok(t.startsWith('היי שרית,'));
+  assert.ok(t.includes('חסרה לך החתמה ביום ראשון 27.9'));
+  assert.ok(F.reminderText('duplicate', '2026-09-27', 'שרית').includes('החתמה כפולה'));
+  assert.ok(F.reminderText('empty_day', '2026-09-27', 'שרית').includes('לא נמצאו החתמות'));
+});
+
 console.log(`\nAll punch follow-up fix tests passed (${passed} checks).`);
+
+// invoke — async, so checked after the sync suite.
+(async () => {
+  const { invoke } = require('../src/services/punchFollowup/invoke');
+  const base = { user: { id: 'u1', role: 'branch_manager' }, body: { x: 1 }, params: {} };
+  const r1 = await invoke((req, res) => res.status(409).json({ error: 'no', saw: req.params.id, user: req.user.id, body: req.body }), base, { params: { id: 'p9' }, body: { note: 'n' } });
+  assert.deepStrictEqual(r1, { status: 409, body: { error: 'no', saw: 'p9', user: 'u1', body: { note: 'n' } } });
+  const r2 = await invoke((req, res) => res.json({ ok: true }), base, {});
+  assert.deepStrictEqual(r2, { status: 200, body: { ok: true } });
+  let threw = false;
+  try { await invoke((req, res, next) => next(new Error('boom')), base, {}); } catch (e) { threw = e.message === 'boom'; }
+  assert.ok(threw, 'next(err) rejects');
+  assert.deepStrictEqual(base.body, { x: 1 }, 'the original request is untouched');
+  console.log('  ✓ invoke: status+body captured, params/body overridden, next(err) rejects, original untouched');
+})().catch((e) => { console.error(e); process.exit(1); });
