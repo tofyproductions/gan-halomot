@@ -30,6 +30,7 @@ const {
 } = require('../services/augustBonus');
 const { buildExportSource } = require('../services/payrollExport/sourceLayer');
 const shkulit = require('../services/payrollExport/shkulitAdapter');
+const { classifyDayCount } = require('../services/punchFollowup/engine');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
 const { materializeScope } = require('../utils/branch-scope');
 const { branchManagersFilter, branchesCoveredBy } = require('../services/branch-recipients.service');
@@ -4332,11 +4333,12 @@ async function punchIssues(month, { includePending = false } = {}) {
   const dupKeys = [], missKeys = [], crossKeys = [];
   for (const [k, list] of byDay) {
     const dayOf = k.split('|')[1];
-    if (list.length > 2) dupKeys.push(k);
+    const cls = classifyDayCount(list.length);
+    if (cls === 'duplicate') dupKeys.push(k);
     // A lone punch TODAY is a shift in progress, not an omission. A duplicate
     // today is still a duplicate — nothing about the day being unfinished
     // explains four readings.
-    else if (list.length === 1) { if (dayOf < todayIL) missKeys.push(k); }
+    else if (cls === 'missing') { if (dayOf < todayIL) missKeys.push(k); }
     else if (list.length === 2) {
       // Clocked in at one branch and out at another. The day looks complete, so
       // nothing else flags it — but the whole session is billed to the IN
