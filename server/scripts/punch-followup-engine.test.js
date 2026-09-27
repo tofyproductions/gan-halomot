@@ -140,4 +140,23 @@ ok('empty-day states: pending request / explanation → pending_manager; accepte
   assert.strictEqual(st({ punches: [P('2026-10-05', 'pending_accountant'), P('2026-10-05', 'pending_accountant')] }).state, 'handled');
 });
 
+console.log('\nvisibility');
+const iss = (date, state) => ({ date, state });
+const V = (i, hasUser = true) => E.visibility(i, { today: '2026-10-15', hasUser });
+ok('yesterday, open → employee fixes, manager not yet', () => {
+  assert.deepStrictEqual(V(iss('2026-10-14', 'open')), { employee: 'fix', manager: null });
+});
+ok('two days ago, open → both (stays with the employee too)', () => {
+  assert.deepStrictEqual(V(iss('2026-10-13', 'open')), { employee: 'fix', manager: 'unhandled' });
+});
+ok('no app user → straight to the manager, from yesterday', () => {
+  assert.deepStrictEqual(V(iss('2026-10-14', 'open'), false), { employee: null, manager: 'unhandled' });
+});
+ok('pending_manager → employee sees "sent", manager must approve', () => {
+  assert.deepStrictEqual(V(iss('2026-10-14', 'pending_manager')), { employee: 'sent', manager: 'awaiting' });
+});
+ok('handled → nobody', () => {
+  assert.deepStrictEqual(V(iss('2026-10-10', 'handled')), { employee: null, manager: null });
+});
+
 console.log(`\nAll punch follow-up engine tests passed (${passed} checks).`);

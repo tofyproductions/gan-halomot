@@ -158,4 +158,19 @@ function buildIssues(input) {
   return issues;
 }
 
-module.exports = { classifyDayCount, addDays, followupWindow, buildIssues };
+/**
+ * Who sees an issue today. The employee keeps an open issue on her popup
+ * until someone handles it; the manager gets it after one day of grace —
+ * immediately when the employee has no app login to be asked through.
+ */
+function visibility(issue, { today, hasUser }) {
+  if (issue.state === 'handled') return { employee: null, manager: null };
+  if (issue.state === 'pending_manager') return { employee: 'sent', manager: 'awaiting' };
+  const graceOver = issue.date <= addDays(today, -2);
+  return {
+    employee: hasUser ? 'fix' : null,
+    manager: (graceOver || !hasUser) ? 'unhandled' : null,
+  };
+}
+
+module.exports = { classifyDayCount, addDays, followupWindow, buildIssues, visibility };
