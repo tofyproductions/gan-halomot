@@ -93,4 +93,51 @@ ok('days outside the window are ignored', () => {
   assert.strictEqual(E.buildIssues(base({ punches: [P('2026-10-09')] })).length, 0);
 });
 
+console.log('\nbuildIssues — empty scheduled day');
+// Works Sun–Thu 07:30–15:00, Friday off.
+const SCHED = new Map([['e1', {
+  days: [0, 1, 2, 3, 4].map(day => ({ day, is_off: false, start_hhmm: '07:30', end_hhmm: '15:00' }))
+    .concat([{ day: 5, is_off: true, start_hhmm: '', end_hhmm: '' }]),
+  is_alternating_off: false, alternating_day: null,
+}]]);
+const empties = (over) => E.buildIssues(base({ commitments: SCHED, ...over }))
+  .filter(i => i.kind === 'empty_day').map(i => i.date);
+
+ok('every scheduled day with no punch is an empty day (Sun–Thu)', () => {
+  assert.deepStrictEqual(empties({}), ['2026-10-04', '2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08']);
+});
+ok('no commitment → no empty days', () => {
+  assert.strictEqual(E.buildIssues(base()).filter(i => i.kind === 'empty_day').length, 0);
+});
+ok('Friday off / Saturday never / alternating day never', () => {
+  const win = { from: '2026-10-09', to: '2026-10-10' }; // Fri, Sat
+  assert.deepStrictEqual(empties({ window: win }), []);
+  const alt = new Map([['e1', { ...SCHED.get('e1'), is_alternating_off: true, alternating_day: 0 }]]);
+  assert.ok(!empties({ commitments: alt }).includes('2026-10-04'));
+});
+ok('approved sick/vacation covering the day → no issue', () => {
+  const requests = [{ employee_id: 'e1', from_date: '2026-10-05', to_date: '2026-10-06', status: 'approved' }];
+  assert.deepStrictEqual(empties({ requests }), ['2026-10-04', '2026-10-07', '2026-10-08']);
+});
+ok('closure (branch or all-branches) → no issue', () => {
+  const closures = [{ branch_id: 'b1', from: '2026-10-04', to: '2026-10-05' }, { branch_id: null, from: '2026-10-08', to: '2026-10-08' }];
+  assert.deepStrictEqual(empties({ closures }), ['2026-10-06', '2026-10-07']);
+  const other = [{ branch_id: 'b2', from: '2026-10-04', to: '2026-10-08' }];
+  assert.strictEqual(empties({ closures: other }).length, 5);
+});
+ok('before her start date → no issue', () => {
+  assert.deepStrictEqual(empties({ employees: [{ ...emp, start_date: '2026-10-07' }] }), ['2026-10-07', '2026-10-08']);
+});
+ok('empty-day states: pending request / explanation → pending_manager; accepted explanation → gone; manager-approved report → handled', () => {
+  const st = (over) => E.buildIssues(base({ commitments: SCHED, ...over }))
+    .find(i => i.kind === 'empty_day' && i.date === '2026-10-05');
+  assert.strictEqual(st({ requests: [{ employee_id: 'e1', from_date: '2026-10-05', to_date: null, status: 'pending_manager' }] }).state, 'pending_manager');
+  assert.strictEqual(st({ requests: [{ employee_id: 'e1', from_date: '2026-10-05', to_date: null, status: 'pending_accountant' }] }).state, 'handled');
+  assert.strictEqual(st({ explanations: [{ employee_id: 'e1', date: '2026-10-05', status: 'pending_manager' }] }).state, 'pending_manager');
+  assert.strictEqual(st({ explanations: [{ employee_id: 'e1', date: '2026-10-05', status: 'accepted' }] }), undefined);
+  assert.strictEqual(st({ explanations: [{ employee_id: 'e1', date: '2026-10-05', status: 'rejected' }] }).state, 'open');
+  assert.strictEqual(st({ punches: [P('2026-10-05', 'pending_manager'), P('2026-10-05', 'pending_manager')] }).state, 'pending_manager');
+  assert.strictEqual(st({ punches: [P('2026-10-05', 'pending_accountant'), P('2026-10-05', 'pending_accountant')] }).state, 'handled');
+});
+
 console.log(`\nAll punch follow-up engine tests passed (${passed} checks).`);

@@ -78,6 +78,20 @@ function stateFromReports(pending) {
   return null;
 }
 
+const weekdayOf = (ymd) => new Date(`${ymd}T12:00:00Z`).getUTCDay();
+
+/** Her commitment says she works this weekday (Saturday never; the alternating day never — we can't know which week). */
+function isScheduled(commitment, date) {
+  if (!commitment) return false;
+  const wd = weekdayOf(date);
+  if (wd === 6) return false;
+  if (commitment.is_alternating_off && commitment.alternating_day === wd) return false;
+  const d = (commitment.days || []).find(x => x.day === wd);
+  return !!(d && !d.is_off && d.start_hhmm && d.end_hhmm);
+}
+
+const covers = (from, to, date) => from <= date && date <= (to || from);
+
 /**
  * Every problem day in the window, per employee, with where it stands:
  * open (nobody touched it) · pending_manager (the employee answered, the
@@ -89,6 +103,16 @@ function buildIssues(input) {
   if (!window) return [];
   const punchesByDay = byEmpDay((input.punches || []).filter(p => p.approval_status !== 'rejected'), 'day');
   const resolutionByDay = new Map((input.resolutions || []).map(r => [dayKey(String(r.employee_id), r.date), r]));
+  const commitments = input.commitments || new Map();
+  const requestsByEmp = new Map();
+  for (const r of input.requests || []) {
+    if (r.status === 'rejected') continue;
+    const k = String(r.employee_id);
+    if (!requestsByEmp.has(k)) requestsByEmp.set(k, []);
+    requestsByEmp.get(k).push(r);
+  }
+  const explanationByDay = new Map((input.explanations || []).map(x => [dayKey(String(x.employee_id), x.date), x]));
+  const closures = input.closures || [];
   const issues = [];
   const days = eachDay(window.from, window.to);
 
@@ -113,6 +137,21 @@ function buildIssues(input) {
         if (r && r.status === 'approved') continue;
         push('duplicate', r?.status === 'pending' ? 'handled'
           : r?.status === 'pending_manager' ? 'pending_manager' : 'open');
+      } else if (counted.length === 0 && isScheduled(commitments.get(empId), date)) {
+        // A scheduled day with no punch at all — unless the gan was closed,
+        // she was on approved sick/vacation, or her manager accepted why.
+        const branch = e.branch_id ? String(e.branch_id) : null;
+        if (closures.some(c => (c.branch_id == null || String(c.branch_id) === branch) && covers(c.from, c.to, date))) continue;
+        const reqs = (requestsByEmp.get(empId) || []).filter(r => covers(r.from_date, r.to_date, date));
+        if (reqs.some(r => r.status === 'approved')) continue;
+        const expl = explanationByDay.get(dayKey(empId, date));
+        if (expl && expl.status === 'accepted') continue;
+        const state = stateFromReports(pending)
+          || (reqs.some(r => r.status === 'pending_accountant') ? 'handled' : null)
+          || (reqs.some(r => AT_MANAGER.has(r.status)) ? 'pending_manager' : null)
+          || (expl && expl.status === 'pending_manager' ? 'pending_manager' : null)
+          || 'open';
+        push('empty_day', state);
       }
     }
   }
