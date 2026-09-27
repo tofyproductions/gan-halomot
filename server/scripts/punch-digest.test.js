@@ -43,6 +43,9 @@ const stubs = {
     branchManagerIds: async (branchId) => (branchId === 'b1' ? ['mgr1'] : ['mgr2a', 'mgr2b']),
     accountantIds: async () => ['acct1'],
   },
+  './punchFollowup/notify': {
+    sendEmployeeMorningPushes: async ({ today }) => { state.employeeRuns = (state.employeeRuns || []).concat(today); return { pushes: 0 }; },
+  },
   '../controllers/payrollMonth.controller': {
     punchIssues: async () => state.issues,
     fixedScheduleConflicts: async () => state.conflicts,
@@ -119,6 +122,8 @@ function withNow(iso, fn) {
   state.created.length = 0;
   r = await withNow('2026-09-28T08:00:00+03:00', () => digest.tick());
   ok(r.ran === true && r.branches === 0 && state.created.length === 0, 'אין בעיות — אין פוש');
+  ok(JSON.stringify(state.employeeRuns) === JSON.stringify(['2026-09-27', '2026-09-28']),
+    'פוש העובדות רץ פעם ביום — גם כשאין בעיות למנהלות');
 
   mongoose.Types.ObjectId = realOID;
   console.log('');

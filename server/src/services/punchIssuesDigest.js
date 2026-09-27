@@ -77,6 +77,13 @@ async function tick() {
     { key: MARKER_KEY }, { $set: { value: day } }, { upsert: true },
   );
 
+  // The employees first: yesterday's new problems, one push each (the punch
+  // follow-up). Its own catch — an employee-push failure must never cost the
+  // managers their digest below.
+  const employeePush = await require('./punchFollowup/notify')
+    .sendEmployeeMorningPushes({ today: day })
+    .catch((err) => { console.error('[punch-digest] employee pushes failed:', err.message); return { pushes: 0 }; });
+
   // The same engine the issues screen runs on — never a second implementation.
   const { punchIssues, fixedScheduleConflicts } = require('../controllers/payrollMonth.controller');
   const month = day.slice(0, 7);
