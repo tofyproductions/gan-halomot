@@ -430,4 +430,4 @@ async function remind(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { mine, fixIssue, managerList, decide, fixAsManager, remind };
+module.exports = { mine, fixIssue, managerList, decide, fixAsManager, remind, _internals: { describeForManager } };

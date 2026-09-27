@@ -84,6 +84,38 @@ async function tick() {
     .sendEmployeeMorningPushes({ today: day })
     .catch((err) => { console.error('[punch-digest] employee pushes failed:', err.message); return { pushes: 0 }; });
 
+  // Once the punch follow-up is live, managers are told what IS theirs to act
+  // on — answers awaiting approval, and days the employee never handled —
+  // and the push opens the follow-up popup. Dormant → the old counts below.
+  const followup = await require('./punchFollowup/notify')
+    .managerDigestCounts({ today: day })
+    .catch((err) => { console.error('[punch-digest] follow-up counts failed:', err.message); return null; });
+  let followupManagerPushes = null;
+  if (followup) {
+    const ids = [...followup.keys()];
+    const names = new Map((await Branch.find({ _id: { $in: ids } }).select('name').lean()).map(b => [String(b._id), b.name]));
+    let managerPushes = 0;
+    for (const [branchId, c] of followup) {
+      if (!c.awaiting && !c.unhandled) continue;
+      const parts = [];
+      if (c.awaiting) parts.push(`${c.awaiting} ממתינים לאישורך`);
+      if (c.unhandled) parts.push(`${c.unhandled} לא טופלו`);
+      const managers = await branchManagerIds(branchId).catch(() => []);
+      for (const uid of managers) {
+        await pushOnce({
+          type: 'punch_issues_digest',
+          refId: new mongoose.Types.ObjectId(branchId),
+          recipientId: uid,
+          title: `החתמות — ${names.get(branchId) || 'הסניף שלך'}`,
+          body: `${parts.join(' · ')} · לחצו לטיפול`,
+          url: '/?punch_followup=1',
+        });
+        managerPushes += 1;
+      }
+    }
+    followupManagerPushes = managerPushes;
+  }
+
   // The same engine the issues screen runs on — never a second implementation.
   const { punchIssues, fixedScheduleConflicts } = require('../controllers/payrollMonth.controller');
   const month = day.slice(0, 7);
@@ -106,15 +138,16 @@ async function tick() {
   bump(duplicates, 'duplicates');
   bump(conflicts || [], 'conflicts');
 
-  if (perBranch.size === 0) return { ran: true, branches: 0 };
+  if (perBranch.size === 0) return { ran: true, branches: 0, followupManagerPushes };
 
   const branchDocs = await Branch.find({ _id: { $in: [...perBranch.keys()] } })
     .select('name').lean();
   const nameOf = new Map(branchDocs.map(b => [String(b._id), b.name]));
 
-  // Branch managers — each gets their own branch's line.
-  let managerPushes = 0;
-  for (const [branchId, counts] of perBranch) {
+  // Branch managers — each gets their own branch's line (the old counts;
+  // skipped once the follow-up above has told them what is theirs).
+  let managerPushes = followupManagerPushes ?? 0;
+  for (const [branchId, counts] of (followupManagerPushes === null ? perBranch : new Map())) {
     const managers = await branchManagerIds(branchId).catch(() => []);
     for (const uid of managers) {
       await pushOnce({

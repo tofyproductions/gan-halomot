@@ -37,4 +37,22 @@ async function sendEmployeeMorningPushes({ today }) {
   return { pushes };
 }
 
-module.exports = { sendEmployeeMorningPushes };
+/**
+ * The manager digest's numbers once the follow-up is live: per branch, how
+ * many answers wait for her approval and how many days nobody handled.
+ * null while dormant — the digest then keeps its old month-to-date counts.
+ */
+async function managerDigestCounts({ today }) {
+  const { window, issues } = await loadFollowup({ today });
+  if (!window) return null;
+  const perBranch = new Map();
+  for (const i of issues) {
+    const v = i.visibility?.manager;
+    if (!v || !i.branch_id) continue;
+    if (!perBranch.has(i.branch_id)) perBranch.set(i.branch_id, { awaiting: 0, unhandled: 0 });
+    perBranch.get(i.branch_id)[v] += 1;
+  }
+  return perBranch;
+}
+
+module.exports = { sendEmployeeMorningPushes, managerDigestCounts };

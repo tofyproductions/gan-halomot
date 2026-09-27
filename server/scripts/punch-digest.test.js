@@ -45,6 +45,7 @@ const stubs = {
   },
   './punchFollowup/notify': {
     sendEmployeeMorningPushes: async ({ today }) => { state.employeeRuns = (state.employeeRuns || []).concat(today); return { pushes: 0 }; },
+    managerDigestCounts: async () => state.followup || null,
   },
   '../controllers/payrollMonth.controller': {
     punchIssues: async () => state.issues,
@@ -124,6 +125,20 @@ function withNow(iso, fn) {
   ok(r.ran === true && r.branches === 0 && state.created.length === 0, 'אין בעיות — אין פוש');
   ok(JSON.stringify(state.employeeRuns) === JSON.stringify(['2026-09-27', '2026-09-28']),
     'פוש העובדות רץ פעם ביום — גם כשאין בעיות למנהלות');
+
+  console.log('\n🟢 follow-up live — managers get the new counts, the office is unchanged\n');
+  state.markerValue = null;
+  state.created.length = 0;
+  state.issues = { missing: [{ branch_id: 'b1' }], duplicates: [] };
+  state.conflicts = [];
+  state.followup = new Map([['b1', { awaiting: 3, unhandled: 4 }], ['b2', { awaiting: 0, unhandled: 0 }]]);
+  r = await withNow('2026-09-29T07:10:00+03:00', () => digest.tick());
+  const live = state.created.filter(e => e.type === 'punch_issues_digest');
+  ok(live.length === 1 && live[0].recipient_id === 'mgr1', 'רק מנהלת עם מה לטפל מקבלת פוש');
+  ok(live[0].body.startsWith('3 ממתינים לאישורך · 4 לא טופלו'), 'הגוף — ממתינים ולא טופלו');
+  ok(live[0].url === '/?punch_followup=1', 'הקישור פותח את החלון של המנהלת');
+  ok(state.created.some(e => e.type === 'punch_issues_digest_office'), 'סיכום המשרד עדיין נשלח');
+  state.followup = null;
 
   mongoose.Types.ObjectId = realOID;
   console.log('');
