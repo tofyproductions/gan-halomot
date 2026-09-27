@@ -7,7 +7,7 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday, SpecialDay,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
-  User, PunchEntryTask, PayrollRollup,
+  User, PunchEntryTask, PayrollRollup, ShkulitEmployeeSnapshot,
 } = require('../models');
 const { readEmployeeDocumentBase64 } = require('../services/employeeDocumentFile');
 const { ADMIN_VIEWER } = require('../constants/roles');
@@ -5423,6 +5423,19 @@ async function shkulitSourceFor(req, month) {
   return buildExportSource(month, data.rows || []);
 }
 
+/** The master rows + the diff against what the accountant already keyed. */
+async function shkulitMasterFor(source) {
+  const numbers = source.ready.map(ce => ce.employee.employee_number).filter(Boolean);
+  const emps = await Employee.find({ employee_number: { $in: numbers } })
+    .select('employee_number birth_date start_date gender').lean();
+  const extras = new Map(emps.map(e => [String(e.employee_number), e]));
+  const master = shkulit.buildMaster(source, extras);
+  const snaps = await ShkulitEmployeeSnapshot.find({ employee_number: { $in: numbers } }).lean();
+  const snapshotByNumber = new Map(snaps.map(s => [String(s.employee_number), s.data || {}]));
+  const diff = shkulit.buildMasterDiff(master, snapshotByNumber);
+  return { master, diff };
+}
+
 /**
  * GET /payroll-month/:month/shkulit-export — the dry summary for the dialog:
  * who is in, who failed and why, what must travel beside the file.
@@ -5433,6 +5446,9 @@ async function getShkulitExport(req, res, next) {
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const source = await shkulitSourceFor(req, month);
     const { rows, notes } = shkulit.buildMovements(source);
+    // The master is issued on CHANGE, not monthly — the accountant already
+    // holds everyone he keyed. The dialog says exactly who is new or changed.
+    const { diff } = source.setup_error ? { diff: null } : await shkulitMasterFor(source);
     res.json({
       month,
       setup_error: source.setup_error,
@@ -5442,6 +5458,14 @@ async function getShkulitExport(req, res, next) {
       skipped: source.skipped,
       warned: source.warned,
       notes,
+      master_changes: diff && {
+        new: diff.new,
+        changed: diff.changed.map(c => ({
+          ...c,
+          changes: c.changes.map(ch => `${ch.column}: ${ch.before || '—'} ← ${ch.after || '—'}`),
+        })),
+        unchanged: diff ? diff.unchanged : 0,
+      },
       open_questions: shkulit.OPEN_QUESTIONS,
     });
   } catch (err) {
@@ -5468,14 +5492,29 @@ async function getShkulitFile(req, res, next) {
     let baseName;
 
     if (type === 'master') {
-      // Birth/start/gender live on the card, not in the canonical month —
-      // read them here and hand them to the adapter keyed by employee number.
-      const numbers = source.ready.map(ce => ce.employee.employee_number).filter(Boolean);
-      const emps = await Employee.find({ employee_number: { $in: numbers } })
-        .select('employee_number birth_date start_date gender').lean();
-      const extras = new Map(emps.map(e => [String(e.employee_number), e]));
-      const master = shkulit.buildMaster(source, extras);
+      const { master, diff } = await shkulitMasterFor(source);
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([master.header, ...master.rows]), 'נתוני עובד');
+      // What changed since the last file — so the accountant keys ONLY these
+      // rows instead of hunting for the difference across seventy.
+      const changeRows = [
+        ['מספר עובד', 'שם', 'מה השתנה'],
+        ...diff.new.map(n => [n.employee_number, n.full_name, 'עובד/ת חדש/ה — לקלוט']),
+        ...diff.changed.flatMap(c => c.changes.map(ch => [
+          c.employee_number, c.full_name, `${ch.column}: ${ch.before || '—'} ← ${ch.after || '—'}`,
+        ])),
+      ];
+      if (changeRows.length === 1) changeRows.push(['', '', 'אין שינויים מאז הקובץ הקודם']);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(changeRows), 'שינויים מאז הקובץ הקודם');
+      // Downloading IS the handoff: record what the accountant now has, so
+      // the next diff starts from this file.
+      for (const row of master.rows) {
+        const named = shkulit.masterRowToNamed(row);
+        await ShkulitEmployeeSnapshot.updateOne(
+          { employee_number: String(named['מספר עובד']) },
+          { $set: { data: named, last_exported_at: new Date() } },
+          { upsert: true },
+        );
+      }
       baseName = `נתוני עובד ${month}`;
     } else {
       const { header, rows, notes } = shkulit.buildMovements(source);

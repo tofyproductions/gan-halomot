@@ -854,6 +854,32 @@ function ShkulitExportDialog({ open, month, onClose }) {
                 {data.notes.length} הערות/הוראות (מקדמות, סיבוס, הלוואות…) — בגיליון "הוראות והערות" שבקובץ התנועות.
               </Alert>
             )}
+            {data.master_changes && (
+              (data.master_changes.new.length + data.master_changes.changed.length) > 0 ? (
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: '#eff6ff' }}>
+                  <Typography sx={{ fontWeight: 800, mb: 0.5 }}>
+                    נתוני עובד — יש מה לשלוח לרו״ח:
+                    {data.master_changes.new.length > 0 && ` ${data.master_changes.new.length} חדשים`}
+                    {data.master_changes.changed.length > 0 && ` · ${data.master_changes.changed.length} עודכנו`}
+                  </Typography>
+                  {data.master_changes.new.map(n => (
+                    <Typography key={n.employee_number} variant="body2">• {n.full_name} — עובד/ת חדש/ה</Typography>
+                  ))}
+                  {data.master_changes.changed.map(c => (
+                    <Typography key={c.employee_number} variant="body2">
+                      • {c.full_name} — {c.changes.join(' · ')}
+                    </Typography>
+                  ))}
+                  <Typography variant="caption" color="text.secondary">
+                    הפירוט נכנס גם לגיליון "שינויים מאז הקובץ הקודם" שבתוך הקובץ.
+                  </Typography>
+                </Paper>
+              ) : (
+                <Alert severity="success" variant="outlined">
+                  נתוני העובדים לא השתנו מאז הקובץ האחרון — אין צורך לשלוח קובץ נתוני עובד.
+                </Alert>
+              )
+            )}
             {(data.open_questions || []).map(q => (
               <Typography key={q} variant="caption" color="text.secondary">◦ {q}</Typography>
             ))}
@@ -862,7 +888,10 @@ function ShkulitExportDialog({ open, month, onClose }) {
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
-        <Button variant="outlined" disabled={busy || !s || !!data?.setup_error} onClick={() => download('master')}>
+        <Button
+          variant={(data?.master_changes && (data.master_changes.new.length + data.master_changes.changed.length) > 0) ? 'contained' : 'outlined'}
+          color={(data?.master_changes && (data.master_changes.new.length + data.master_changes.changed.length) > 0) ? 'info' : 'primary'}
+          disabled={busy || !s || !!data?.setup_error} onClick={() => download('master')}>
           קובץ נתוני עובד
         </Button>
         <Button variant="contained" disabled={busy || !s || !!data?.setup_error} onClick={() => download('movements')}>

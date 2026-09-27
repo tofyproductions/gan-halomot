@@ -229,9 +229,50 @@ function buildMaster(source, extras = new Map()) {
   return { header: MASTER_HEADER, rows };
 }
 
+/**
+ * The master row as named fields — the shape the snapshot stores, so a diff
+ * speaks in column names ("בנק-מספר חשבון") rather than array indexes.
+ * Only the columns WE fill are compared; the ones the accountant completes
+ * on his side (מצב משפחתי, קופ"ח…) are not ours to report changes on.
+ */
+function masterRowToNamed(row) {
+  const named = {};
+  const TRACKED = [0, 1, 2, 3, 4, 5, 6, 12, 13, 14];
+  for (const i of TRACKED) named[MASTER_HEADER[i]] = String(row[i] ?? '');
+  return named;
+}
+
+/**
+ * Diff the master against what the accountant already has (the snapshots).
+ * Returns { new: [{employee_number, full_name}], changed: [{employee_number,
+ * full_name, changes: [{column, before, after}]}], unchanged: N }.
+ */
+function masterDiff(master, snapshotByNumber) {
+  const added = [];
+  const changed = [];
+  let unchanged = 0;
+  for (const row of master.rows) {
+    const named = masterRowToNamed(row);
+    const empNo = named['מספר עובד'];
+    const fullName = `${named['שם פרטי']} ${named['שם משפחה']}`.trim();
+    const snap = snapshotByNumber.get(String(empNo));
+    if (!snap) { added.push({ employee_number: empNo, full_name: fullName }); continue; }
+    const changes = [];
+    for (const [column, after] of Object.entries(named)) {
+      const before = String(snap[column] ?? '');
+      if (before !== after) changes.push({ column, before, after });
+    }
+    if (changes.length) changed.push({ employee_number: empNo, full_name: fullName, changes });
+    else unchanged += 1;
+  }
+  return { new: added, changed, unchanged };
+}
+
 module.exports = {
   buildMovements,
   buildMaster,
+  buildMasterDiff: masterDiff,
+  masterRowToNamed,
   monthLabel,
   RECORD_TYPE,
   COMPONENTS,

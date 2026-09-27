@@ -88,7 +88,7 @@ ok('unmapped components + directives land in notes, not rows', () => {
   const subjects = notes.map(n => n.subject);
   assert.ok(subjects.includes('תו קנייה (גיפט קארד)'));
   assert.ok(subjects.includes('ניכוי הלוואה'));
-  assert.ok(subjects.includes('ניכוי מקדמה'));
+  assert.ok(subjects.some(s => s.startsWith('ניכוי מקדמה')));
   assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36].includes(r[3])), 'no invented codes');
 });
 ok('global employee → base as the resolved amount; net employee → flagged', () => {
@@ -132,6 +132,29 @@ ok('identity + bank in the template columns', () => {
   assert.strictEqual(r[12], '10');
   assert.strictEqual(r[13], '936');
   assert.strictEqual(r[14], '123456');
+});
+
+console.log('master diff');
+ok('new employee, changed field, unchanged row — each called by name', () => {
+  const extras = new Map([['17', { birth_date: '1990-05-01', start_date: '2026-08-01', gender: 'female' }]]);
+  const master = shkulit.buildMaster(source, extras);
+  const named = shkulit.masterRowToNamed(master.rows[0]);
+
+  // Nothing known → she is new.
+  let d = shkulit.buildMasterDiff(master, new Map());
+  assert.strictEqual(d.new.length, 1);
+  assert.strictEqual(d.changed.length, 0);
+
+  // Snapshot identical → unchanged.
+  d = shkulit.buildMasterDiff(master, new Map([['17', { ...named }]]));
+  assert.strictEqual(d.new.length, 0);
+  assert.strictEqual(d.changed.length, 0);
+  assert.strictEqual(d.unchanged, 1);
+
+  // A moved bank account → exactly one change, named by its column.
+  d = shkulit.buildMasterDiff(master, new Map([['17', { ...named, 'בנק-מספר חשבון': '999' }]]));
+  assert.strictEqual(d.changed.length, 1);
+  assert.deepStrictEqual(d.changed[0].changes, [{ column: 'בנק-מספר חשבון', before: '999', after: '123456' }]);
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

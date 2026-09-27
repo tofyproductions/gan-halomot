@@ -55,6 +55,7 @@ const PayslipAuditRecord = require('./PayslipAuditRecord');
 const PayslipAuditPdf = require('./PayslipAuditPdf');
 const SavedPayslip = require('./SavedPayslip');
 const SavedPayslipVersion = require('./SavedPayslipVersion');
+const ShkulitEmployeeSnapshot = require('./ShkulitEmployeeSnapshot');
 const DirectPayslipBatch = require('./DirectPayslipBatch');
 const HoursDistributionLog = require('./HoursDistributionLog');
 const PayrollMonth = require('./PayrollMonth');
@@ -160,6 +161,7 @@ const real = {
   PayslipAuditPdf,
   SavedPayslip,
   SavedPayslipVersion,
+  ShkulitEmployeeSnapshot,
   DirectPayslipBatch,
   HoursDistributionLog,
   PayrollMonth,
