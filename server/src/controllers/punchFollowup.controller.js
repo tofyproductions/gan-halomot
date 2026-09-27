@@ -219,7 +219,7 @@ async function describeForManager(issues, employeesById) {
     const hhmmOf = new Map(dayP.map(p => [String(p._id), ISR_HHMM(p.timestamp)]));
     return {
       key: i.key, kind: i.kind, date: i.date, state: i.state, view: i.visibility.manager,
-      employee_id: i.employee_id, full_name: e.full_name || '', has_user: i.has_user, has_phone: !!waNumber(e.phone),
+      employee_id: i.employee_id, full_name: e.full_name || '', first_name: e.first_name || '', has_user: i.has_user, has_phone: !!waNumber(e.phone),
       branch_name: branchName.get(i.branch_id) || '',
       days_open: Math.max(0, Math.round((new Date(`${today}T12:00:00Z`) - new Date(`${i.date}T12:00:00Z`)) / 864e5)),
       punches: dayP.map(p => ({
@@ -404,6 +404,7 @@ async function remind(req, res, next) {
     if (!found) return undefined;
     const { issue, emp } = found;
     const channel = req.body?.channel;
+    const text = fix.reminderText(issue.kind, issue.date, fix.greetingName(emp, req.body?.greeting));
     const log = (action) => PunchFollowupLog.create({
       issue_key: issue.key, employee_id: issue.employee_id, date: issue.date, kind: issue.kind, action, by_user: req.user?.id || null,
     });
@@ -412,7 +413,7 @@ async function remind(req, res, next) {
       const num = waNumber(emp?.phone);
       if (!num) return res.status(400).json({ error: 'אין לעובדת מספר נייד תקין בכרטיס' });
       await log('manager_whatsapp');
-      return res.json({ url: `https://wa.me/${num}?text=${encodeURIComponent(fix.reminderText(issue.kind, issue.date, emp.full_name))}` });
+      return res.json({ url: `https://wa.me/${num}?text=${encodeURIComponent(text)}` });
     }
     if (channel === 'push') {
       if (!emp?.user_id) return res.status(400).json({ error: 'לעובדת אין אפליקציה — שלחי תזכורת בוואטסאפ' });
@@ -421,7 +422,7 @@ async function remind(req, res, next) {
       if (already) return res.status(409).json({ error: 'כבר נשלחה היום תזכורת בפוש על היום הזה' });
       await notificationService.notifyOnce({
         type: 'punch_followup_reminder', ref_collection: 'Employee', ref_id: emp._id, recipient_id: emp.user_id,
-        title: 'תזכורת מהמנהלת', body: fix.reminderText(issue.kind, issue.date, emp.full_name), url: '/?punch_fix=1',
+        title: 'תזכורת מהמנהלת', body: text, url: '/?punch_fix=1',
       });
       await log('manager_push');
       return res.json({ ok: true });

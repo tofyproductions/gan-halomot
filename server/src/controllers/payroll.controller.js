@@ -576,7 +576,7 @@ async function updateEmployee(req, res, next) {
     }
 
     const fields = [
-      'full_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
+      'full_name', 'first_name', 'israeli_id', 'employee_number', 'is_freelancer', 'receives_salary',
       'branch_id', 'phone', 'email', 'address', 'gender', 'birth_date',
       'position', 'start_date',
       'salary_type', 'salary_is_net', 'amuta_distribution', 'branch_rates', 'hourly_bonuses',

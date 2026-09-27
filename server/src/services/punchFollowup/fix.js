@@ -89,10 +89,22 @@ const KIND_REMINDER = {
   empty_day: 'לא נמצאו החתמות',
 };
 
-/** The WhatsApp text a manager sends — first name, the problem, the day. */
-function reminderText(kind, date, fullName) {
-  const first = String(fullName || '').trim().split(/\s+/)[0] || '';
-  return `היי ${first}, ${KIND_REMINDER[kind] || 'יש בעיה בהחתמה'} ב${dayLabel(date)} — אנא עדכני באפליקציה של הגן (חלון "ימים לתקן בהחתמות"). תודה!`;
+/**
+ * How the manager addresses her, by the manager's choice: 'first' (the card's
+ * שם פרטי, or the full name when nobody entered one), 'full', or 'none'.
+ * Never the first word of full_name — names are stored in either order.
+ */
+function greetingName(emp, greeting) {
+  if (greeting === 'none') return '';
+  const full = String(emp?.full_name || '').trim();
+  if (greeting === 'full') return full;
+  return String(emp?.first_name || '').trim() || full;
 }
 
-module.exports = { dayLabel, missingSide, validateLabels, pickEmployeePushes, pushText, reminderText };
+/** The WhatsApp text a manager sends — the greeting, the problem, the day. */
+function reminderText(kind, date, name) {
+  const hi = String(name || '').trim() ? `היי ${String(name).trim()},` : 'היי,';
+  return `${hi} ${KIND_REMINDER[kind] || 'יש בעיה בהחתמה'} ב${dayLabel(date)} — אנא עדכני באפליקציה של הגן (חלון "ימים לתקן בהחתמות"). תודה!`;
+}
+
+module.exports = { dayLabel, missingSide, validateLabels, pickEmployeePushes, pushText, greetingName, reminderText };

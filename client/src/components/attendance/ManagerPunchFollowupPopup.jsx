@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Stack, Typography, Paper,
-  Chip, TextField, Divider, Fab, Box,
+  Chip, TextField, Divider, Fab, Box, ToggleButton, ToggleButtonGroup,
 } from '@mui/material';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
@@ -20,6 +20,13 @@ import { MissingCard, DuplicateCard, EmptyDayCard, dayLabel, KIND_TITLE } from '
  * (approve / reject), and days nobody handled (fix it herself, or remind).
  */
 const DISMISS_KEY = 'punchFollowupDismissedOn';
+// How her reminders address the employee — her choice, kept on this device.
+// 'first' = the card's שם פרטי, or the full name when none was entered.
+const GREETING_KEY = 'punchFollowupGreeting';
+const GREETINGS = [['first', 'שם פרטי'], ['full', 'שם מלא'], ['none', 'בלי שם']];
+const readGreeting = () => {
+  try { const g = localStorage.getItem(GREETING_KEY); return GREETINGS.some(([k]) => k === g) ? g : 'first'; } catch { return 'first'; }
+};
 const todayIL = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
 const ROLE_HE = { in: 'כניסה', out: 'יציאה', ignore: 'בטעות' };
 const REQ_HE = { sick: 'בקשת מחלה', vacation: 'בקשת חופשה', pregnancy_exam: 'בדיקת הריון' };
@@ -119,6 +126,12 @@ export default function ManagerPunchFollowupPopup() {
   const [data, setData] = useState({ active: false, awaiting: [], unhandled: [] });
   const [open, setOpen] = useState(false);
   const [busyKey, setBusyKey] = useState(null);
+  const [greeting, setGreeting] = useState(readGreeting);
+  const chooseGreeting = (g) => {
+    if (!g) return;
+    setGreeting(g);
+    try { localStorage.setItem(GREETING_KEY, g); } catch { /* private mode */ }
+  };
   const forced = new URLSearchParams(location.search).get('punch_followup') === '1';
 
   const load = useCallback(() => {
@@ -203,13 +216,21 @@ export default function ManagerPunchFollowupPopup() {
             {data.awaiting.length > 0 && data.unhandled.length > 0 && <Divider />}
             {data.unhandled.length > 0 && (
               <>
-                <Typography sx={{ fontWeight: 800 }}>⛔ לא טופלו ע״י העובדת</Typography>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap spacing={1}>
+                  <Typography sx={{ fontWeight: 800 }}>⛔ לא טופלו ע״י העובדת</Typography>
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <Typography variant="caption" color="text.secondary">פנייה בתזכורת:</Typography>
+                    <ToggleButtonGroup size="small" exclusive value={greeting} onChange={(e, g) => chooseGreeting(g)}>
+                      {GREETINGS.map(([k, label]) => <ToggleButton key={k} value={k} sx={{ py: 0.25, px: 1 }}>{label}</ToggleButton>)}
+                    </ToggleButtonGroup>
+                  </Stack>
+                </Stack>
                 {data.unhandled.map(card => (
                   <Paper key={card.key} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
                     {title(card)}
                     <UnhandledCard card={card} busy={busyKey === card.key}
                       onFix={(payload) => call(card, 'fix-as-manager', payload, 'נשמר — עבר לאישור הנה״ח')}
-                      onRemind={(channel) => call(card, 'remind', { channel }, channel === 'push' ? 'נשלחה תזכורת בפוש' : null)} />
+                      onRemind={(channel) => call(card, 'remind', { channel, greeting }, channel === 'push' ? 'נשלחה תזכורת בפוש' : null)} />
                   </Paper>
                 ))}
               </>

@@ -216,6 +216,10 @@ const employeeSchema = new mongoose.Schema({
   // Identity
   full_name: { type: String, required: true, trim: true },
   israeli_id: { type: String, default: '', index: true, trim: true }, // 9-digit ת"ז, matches clock userId
+  // How to address her in a message ("היי מירב"). `full_name` is stored in
+  // either order — surname first or last — so the first word is not safe to
+  // use. Empty = unknown; callers fall back to the full name.
+  first_name: { type: String, default: '', trim: true },
   /**
    * Date of birth of the EMPLOYEE. Not to be confused with `gave_birth_date`
    * further down, which is when a baby was born and belongs to maternity leave.

@@ -84,6 +84,7 @@ const translatePosition = (value, gender) => {
 
 const EMPTY_FORM = {
   full_name: '',
+  first_name: '',
   israeli_id: '',
   branch_id: '',
   phone: '',
@@ -399,6 +400,7 @@ export default function EmployeeManager() {
       mode: 'edit',
       data: {
         full_name: emp.full_name || '',
+        first_name: emp.first_name || '',
         israeli_id: emp.israeli_id || '',
         branch_id: emp.branch_id || '',
         phone: emp.phone || '',
@@ -525,6 +527,7 @@ export default function EmployeeManager() {
 
     const payload = {
       full_name: data.full_name.trim(),
+      first_name: (data.first_name || '').trim(),
       israeli_id: (data.israeli_id || '').trim(),
       branch_id: data.branch_id,
       phone: data.phone || '',
@@ -1202,6 +1205,8 @@ export default function EmployeeManager() {
             <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>פרטים אישיים</Typography>
             <Stack direction="row" spacing={2}>
               <TextField label="שם מלא" value={dialog.data.full_name || ''} onChange={e => updateField('full_name', e.target.value)} fullWidth required />
+              <TextField label="שם פרטי (לפנייה)" value={dialog.data.first_name || ''} onChange={e => updateField('first_name', e.target.value)} fullWidth
+                helperText="כך נפנה אליה בהודעות. ריק = השם המלא" />
               <TextField label="ת״ז" value={dialog.data.israeli_id || ''} onChange={e => updateField('israeli_id', e.target.value)} fullWidth
                 inputProps={{ dir: 'ltr', maxLength: 9 }}
                 helperText="9 ספרות; חייב להתאים ל-userId בשעון"

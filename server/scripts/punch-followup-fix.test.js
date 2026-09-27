@@ -69,12 +69,23 @@ const { invoke } = require('../src/services/punchFollowup/invoke');
 ok('invoke is exported', () => assert.strictEqual(typeof invoke, 'function'));
 
 console.log('\nreminderText');
-ok('names the problem and the day, addressed by first name', () => {
+ok('names the problem and the day, addressed as given', () => {
   const t = F.reminderText('missing', '2026-09-27', 'שרית כהן');
-  assert.ok(t.startsWith('היי שרית,'));
+  assert.ok(t.startsWith('היי שרית כהן,'));
+  assert.ok(F.reminderText('missing', '2026-09-27', '').startsWith('היי, חסרה'));
   assert.ok(t.includes('חסרה לך החתמה ביום ראשון 27.9'));
   assert.ok(F.reminderText('duplicate', '2026-09-27', 'שרית').includes('החתמה כפולה'));
   assert.ok(F.reminderText('empty_day', '2026-09-27', 'שרית').includes('לא נמצאו החתמות'));
+});
+
+ok('greeting: the card\'s first name, else the full name — never a guessed first word', () => {
+  const withFirst = { full_name: 'כהן שרית', first_name: 'שרית' };
+  const without = { full_name: 'כהן שרית', first_name: '' };
+  assert.strictEqual(F.greetingName(withFirst, 'first'), 'שרית');
+  assert.strictEqual(F.greetingName(without, 'first'), 'כהן שרית');
+  assert.strictEqual(F.greetingName(without, undefined), 'כהן שרית');
+  assert.strictEqual(F.greetingName(withFirst, 'full'), 'כהן שרית');
+  assert.strictEqual(F.greetingName(withFirst, 'none'), '');
 });
 
 console.log(`\nAll punch follow-up fix tests passed (${passed} checks).`);

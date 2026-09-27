@@ -20,7 +20,7 @@ async function loadFollowup({ today, employeeFilter = {}, startOverride = null }
   if (!window) return { window: null, issues: [], employeesById: new Map() };
 
   const employees = await Employee.find({ ...employeeFilter, is_active: { $ne: false } })
-    .select('_id full_name branch_id start_date is_active receives_salary user_id phone').lean();
+    .select('_id full_name first_name branch_id start_date is_active receives_salary user_id phone').lean();
   const ids = employees.map(e => e._id);
   const userIds = employees.map(e => e.user_id).filter(Boolean);
   const empByUser = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
