@@ -6,10 +6,15 @@ const crypto = require('crypto');
  *
  * The lifecycle mirrors what actually happens in the office:
  *
- *   draft    — generated from the employee card, not yet sent
- *   sent     — a signing link is live; the employee signs on her phone
- *   signed   — she signed; accounting has not confirmed yet
- *   approved — accounting confirmed → the employee is fully set up
+ *   draft         — generated from the employee card, not yet sent
+ *   pending_admin — a branch manager issued it; a system admin must approve
+ *                   the terms BEFORE any link reaches the employee
+ *   sent          — a signing link is live; the employee signs on her phone
+ *   signed        — she signed; the branch manager counter-signs (a saved
+ *                   signature, applied on her one-click confirmation), and the
+ *                   full contract goes out to accounting, to the employee's
+ *                   file and to the employee herself
+ *   approved      — accounting confirmed → the employee is fully set up
  *
  * plus two escapes for the ~80 people already employed without a contract in
  * the system, so introducing this doesn't make every existing employee look
@@ -28,10 +33,15 @@ const employmentContractSchema = new mongoose.Schema({
   variant: { type: String, enum: ['hourly', 'global'], default: 'hourly' },
   status: {
     type: String,
-    enum: ['draft', 'sent', 'signed', 'approved', 'waived', 'uploaded'],
+    enum: ['draft', 'pending_admin', 'sent', 'signed', 'approved', 'waived', 'uploaded'],
     default: 'draft',
     index: true,
   },
+
+  // --- admin gate before sending (branch-manager-issued contracts) --------
+  admin_approved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  admin_approved_by_name: { type: String, default: '' },
+  admin_approved_at: { type: Date, default: null },
 
   fields: { type: mongoose.Schema.Types.Mixed, default: {} },
   html: { type: String, default: '' },     // frozen at send time
@@ -48,6 +58,17 @@ const employmentContractSchema = new mongoose.Schema({
   signer_id_last4: { type: String, default: '' },    // last 4 of ת"ז, entered to unlock
   signed_at: { type: Date, default: null },
   signed_ip: { type: String, default: '' },
+
+  // --- employer counter-signature ----------------------------------------
+  // The branch manager's SAVED signature, stamped when she confirms the signed
+  // contract. She draws it once (User.signature_image); here it is a copy, so
+  // the document stays reproducible even if she later changes her signature.
+  employer_signature_data: { type: String, default: null },
+  employer_signer_name: { type: String, default: '' },
+  employer_signed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  employer_signed_at: { type: Date, default: null },
+  /** When the countersigned contract went out (accounting + employee + תיק). */
+  distributed_at: { type: Date, default: null },
 
   // --- accounting confirmation -------------------------------------------
   approved_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

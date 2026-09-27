@@ -19,6 +19,72 @@ import { API_ORIGIN } from '../../api/config';
  */
 const publicApi = axios.create({ baseURL: `${API_ORIGIN}/api/public`, timeout: 30000 });
 
+/** רשימת הבנקים של בנק ישראל — כמו בטופס רישום העובד/ת. */
+const BANKS = [
+  ['4', 'בנק יהב'], ['9', 'בנק הדואר'], ['10', 'בנק לאומי'], ['11', 'בנק דיסקונט'],
+  ['12', 'בנק הפועלים'], ['14', 'בנק אוצר החייל'], ['17', 'בנק מרכנתיל דיסקונט'],
+  ['18', 'וואן זירו (One Zero)'], ['20', 'בנק מזרחי טפחות'], ['31', 'הבנק הבינלאומי'],
+  ['34', 'בנק ערבי ישראלי'], ['46', 'בנק מסד'], ['52', 'בנק פועלי אגודת ישראל'], ['54', 'בנק ירושלים'],
+];
+const RELIGIONS = ['יהודית', 'מוסלמית', 'נוצרית', 'דרוזית', 'אחרת'];
+
+/**
+ * A contract with a blank line where the signer's own details belong is a
+ * contract missing them forever. The server says exactly which personal fields
+ * the card didn't know; she completes them here and they land both in the
+ * signed text and on her employee card.
+ */
+function MissingFields({ missing, fills, setFills }) {
+  const set = (k) => (e) => setFills(s => ({ ...s, [k]: e.target.value }));
+  const has = (k) => missing.some(m => m.key === k);
+  if (!missing.length) return null;
+  return (
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2, bgcolor: '#eff6ff', borderColor: '#bfdbfe' }}>
+      <Typography sx={{ fontWeight: 800, mb: 0.5 }}>השלמת פרטים להסכם</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        הפרטים הבאים חסרים בהסכם — הם ייכנסו לנוסח החתום ולתיק העובד/ת.
+      </Typography>
+      <Stack spacing={2}>
+        {has('address') && (
+          <TextField size="small" label="כתובת מגורים" value={fills.address || ''} onChange={set('address')} fullWidth />
+        )}
+        {has('phone') && (
+          <TextField size="small" label="טלפון" value={fills.phone || ''} onChange={set('phone')} type="tel" fullWidth />
+        )}
+        {has('email') && (
+          <TextField size="small" label="אימייל" value={fills.email || ''} onChange={set('email')} type="email" fullWidth />
+        )}
+        {has('religion') && (
+          <>
+            <TextField select size="small" label="דת (לתשלום ימי חג)" value={fills.religion_pick || ''}
+              onChange={set('religion_pick')} fullWidth SelectProps={{ native: true }} InputLabelProps={{ shrink: true }}>
+              <option value="" />
+              {RELIGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </TextField>
+            {fills.religion_pick === 'אחרת' && (
+              <TextField size="small" label="פרטו את הדת" value={fills.religion_other || ''} onChange={set('religion_other')} fullWidth />
+            )}
+          </>
+        )}
+        {has('bank') && (
+          <>
+            <TextField select size="small" label="בנק" value={fills.bank_number || ''}
+              onChange={set('bank_number')} fullWidth SelectProps={{ native: true }} InputLabelProps={{ shrink: true }}>
+              <option value="" />
+              {BANKS.map(([code, label]) => <option key={code} value={code}>{label} ({code})</option>)}
+            </TextField>
+            <Stack direction="row" spacing={1.5}>
+              <TextField size="small" label="מספר סניף" value={fills.bank_branch || ''} onChange={set('bank_branch')} inputProps={{ inputMode: 'numeric' }} fullWidth />
+              <TextField size="small" label="מספר חשבון" value={fills.bank_account || ''} onChange={set('bank_account')} inputProps={{ inputMode: 'numeric' }} fullWidth />
+            </Stack>
+            <TextField size="small" label="שם המוטב (אם החשבון אינו על שמך)" value={fills.bank_account_holder || ''} onChange={set('bank_account_holder')} fullWidth />
+          </>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
+
 /**
  * What happens after she signs.
  *
@@ -120,6 +186,7 @@ export default function ContractSigning() {
   // unopened annex is exactly the thing a contract shouldn't claim she read.
   const [openedAnnexes, setOpenedAnnexes] = useState({});
   const [annexAck, setAnnexAck] = useState(false);
+  const [fills, setFills] = useState({});
   const sigRef = useRef(null);
 
   useEffect(() => {
@@ -136,18 +203,38 @@ export default function ContractSigning() {
   const annexes = data?.annexes || [];
   const allOpened = annexes.every(a => openedAnnexes[a.id]);
 
+  const missing = data?.missing_fields || [];
+
   const submit = async () => {
     if (annexes.length > 0 && !(allOpened && annexAck)) {
       return toast.error('יש לפתוח את נספח ג׳ ולאשר שקראתם אותו');
     }
     if (!sigRef.current || sigRef.current.isEmpty()) return toast.error('נא לחתום במסגרת');
     if (String(idLast4).trim().length !== 4) return toast.error('נא להזין 4 ספרות אחרונות של ת״ז');
+    // What the contract is missing must be filled before the ink goes on.
+    for (const m of missing) {
+      if (m.key === 'bank') {
+        if (!fills.bank_number || !String(fills.bank_branch || '').trim() || !String(fills.bank_account || '').trim()) {
+          return toast.error('נא להשלים את פרטי חשבון הבנק');
+        }
+      } else if (m.key === 'religion') {
+        if (!fills.religion_pick) return toast.error('נא לבחור דת');
+        if (fills.religion_pick === 'אחרת' && !String(fills.religion_other || '').trim()) return toast.error('נא לפרט את הדת');
+      } else if (!String(fills[m.key] || '').trim()) {
+        return toast.error(`נא להשלים: ${m.label}`);
+      }
+    }
     setSaving(true);
     try {
       await publicApi.post(`/contract/${token}/sign`, {
         signature: sigRef.current.toDataURL('image/png'),
         signer_name: name,
         id_last4: String(idLast4).trim(),
+        fills: {
+          ...fills,
+          religion: fills.religion_pick === 'אחרת' ? fills.religion_other : fills.religion_pick,
+          bank_name: (BANKS.find(([code]) => code === fills.bank_number) || [])[1] || '',
+        },
       });
       setDone(true);
     } catch (e) {
@@ -172,7 +259,7 @@ export default function ContractSigning() {
       {done ? (
         <>
           <Alert severity="success" sx={{ mb: 2 }}>
-            ההסכם נחתם בהצלחה ונשלח להנהלת החשבונות לאישור.
+            ההסכם נחתם בהצלחה. מנהלת הסניף תחתום כמעסיק, והעותק המלא יישלח אלייך במייל.
           </Alert>
           <InstallAndLogin employeeName={data.employee_name} />
         </>
@@ -189,6 +276,8 @@ export default function ContractSigning() {
           sx={{ width: '100%', height: { xs: 460, sm: 620 }, border: 0, bgcolor: '#fff' }}
         />
       </Paper>
+
+      {!done && <MissingFields missing={missing} fills={fills} setFills={setFills} />}
 
       {!done && annexes.length > 0 && (
         <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2, bgcolor: '#fffbeb', borderColor: '#fde68a' }}>

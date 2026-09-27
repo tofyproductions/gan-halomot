@@ -35,10 +35,32 @@ const SECTION = {
 const EMPTY = {
   full_name: '', israeli_id: '', phone: '', email: '', address: '', birth_date: '',
   branch_id: '', position: '',
+  religion: '', religion_other: '',
+  pension_has: '', pension_fund: '',
   bank_number: '', bank_branch: '', bank_account: '', bank_account_holder: '',
   emergency_name: '', emergency_phone: '', emergency_relation: '',
   note: '',
 };
+
+/** רשימת הבנקים של בנק ישראל — הקוד הרשמי ליד השם. */
+const BANKS = [
+  ['4', 'בנק יהב'],
+  ['9', 'בנק הדואר'],
+  ['10', 'בנק לאומי'],
+  ['11', 'בנק דיסקונט'],
+  ['12', 'בנק הפועלים'],
+  ['14', 'בנק אוצר החייל'],
+  ['17', 'בנק מרכנתיל דיסקונט'],
+  ['18', 'וואן זירו (One Zero)'],
+  ['20', 'בנק מזרחי טפחות'],
+  ['31', 'הבנק הבינלאומי'],
+  ['34', 'בנק ערבי ישראלי'],
+  ['46', 'בנק מסד'],
+  ['52', 'בנק פועלי אגודת ישראל'],
+  ['54', 'בנק ירושלים'],
+];
+
+const RELIGIONS = ['יהודית', 'מוסלמית', 'נוצרית', 'דרוזית', 'אחרת'];
 
 /** One labelled file slot. Kept separate so each says what it is for. */
 function FilePick({ label, file, onPick, onClear }) {
@@ -99,12 +121,31 @@ export default function JoinForm() {
     if (id.length < 8 || id.length > 9) return setError('תעודת זהות צריכה להיות 9 ספרות');
     if (v.phone.replace(/\D/g, '').length < 9) return setError('מספר הטלפון קצר מדי');
     if (!v.branch_id) return setError('נא לבחור סניף');
+    // הפרטים האלה נכנסים לחוזה ההעסקה ולשכר — טופס חסר חוזר בוואטסאפ,
+    // אז הוא פשוט לא נשלח חסר.
+    if (!v.email.trim()) return setError('נא למלא אימייל — אליו יישלח חוזה ההעסקה');
+    if (!v.address.trim()) return setError('נא למלא כתובת מגורים — היא מופיעה בחוזה');
+    if (!v.religion) return setError('נא לבחור דת — נדרשת לתשלום ימי חג בחוזה');
+    if (v.religion === 'אחרת' && !v.religion_other.trim()) return setError('נא לפרט את הדת');
+    if (!v.pension_has) return setError('נא לציין אם קיימת קרן פנסיה');
+    if (v.pension_has === 'yes' && !v.pension_fund.trim()) return setError('נא למלא באיזו חברה מתנהלת קרן הפנסיה');
+    if (!v.bank_number) return setError('נא לבחור בנק מהרשימה');
+    if (!v.bank_branch.trim() || !v.bank_account.trim()) return setError('נא למלא מספר סניף ומספר חשבון');
 
     setError('');
     setBusy(true);
     try {
       const body = new FormData();
-      Object.entries(v).forEach(([k, val]) => val && body.append(k, val));
+      const out = {
+        ...v,
+        religion: v.religion === 'אחרת' ? v.religion_other.trim() : v.religion,
+        pension_fund: v.pension_has === 'yes' ? v.pension_fund.trim() : '',
+        bank_name: (BANKS.find(([code]) => code === v.bank_number) || [])[1] || '',
+        bank_account_holder: v.bank_account_holder.trim() || v.full_name.trim(),
+      };
+      delete out.religion_other;
+      delete out.pension_has;
+      Object.entries(out).forEach(([k, val]) => val && body.append(k, val));
       // The field name carries what the file IS, so the server files it on the
       // right shelf of the employee's תיק without anybody choosing again.
       Object.entries(files).forEach(([kind, f]) => { if (f) body.append(kind, f); });
@@ -183,11 +224,11 @@ export default function JoinForm() {
           <input id="j-phone" style={FIELD} value={v.phone} onChange={set('phone')} type="tel" inputMode="tel" autoComplete="tel" />
         </div>
         <div>
-          <label style={LABEL} htmlFor="j-email">אימייל</label>
+          <label style={LABEL} htmlFor="j-email">אימייל {REQ}</label>
           <input id="j-email" style={FIELD} value={v.email} onChange={set('email')} type="email" autoComplete="email" />
         </div>
         <div>
-          <label style={LABEL} htmlFor="j-addr">כתובת מגורים</label>
+          <label style={LABEL} htmlFor="j-addr">כתובת מגורים {REQ}</label>
           <input id="j-addr" style={FIELD} value={v.address} onChange={set('address')} autoComplete="street-address" />
         </div>
         <div>
@@ -205,24 +246,56 @@ export default function JoinForm() {
           <label style={LABEL} htmlFor="j-pos">תפקיד</label>
           <input id="j-pos" style={FIELD} value={v.position} onChange={set('position')} placeholder="לדוגמה: מטפלת" />
         </div>
+        <div>
+          <label style={LABEL} htmlFor="j-religion">דת {REQ}</label>
+          <select id="j-religion" style={FIELD} value={v.religion} onChange={set('religion')}>
+            <option value="">בחרו — נדרש לתשלום ימי חג</option>
+            {RELIGIONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </div>
+        {v.religion === 'אחרת' && (
+          <div>
+            <label style={LABEL} htmlFor="j-religion-other">פרטו את הדת {REQ}</label>
+            <input id="j-religion-other" style={FIELD} value={v.religion_other} onChange={set('religion_other')} />
+          </div>
+        )}
+
+        <p style={SECTION}>קרן פנסיה</p>
+        <div>
+          <label style={LABEL} htmlFor="j-pension-has">האם קיימת לך קרן פנסיה פעילה? {REQ}</label>
+          <select id="j-pension-has" style={FIELD} value={v.pension_has} onChange={set('pension_has')}>
+            <option value="">בחרו</option>
+            <option value="yes">כן, יש לי קרן פנסיה</option>
+            <option value="no">אין לי קרן פנסיה</option>
+          </select>
+        </div>
+        {v.pension_has === 'yes' && (
+          <div>
+            <label style={LABEL} htmlFor="j-pension">באיזו חברה מתנהלת הקרן? {REQ}</label>
+            <input id="j-pension" style={FIELD} value={v.pension_fund} onChange={set('pension_fund')} placeholder="לדוגמה: מנורה מבטחים, הראל, מיטב…" />
+          </div>
+        )}
 
         <p style={SECTION}>פרטי בנק למשכורת</p>
+        <div>
+          <label style={LABEL} htmlFor="j-bank">בנק {REQ}</label>
+          <select id="j-bank" style={FIELD} value={v.bank_number} onChange={set('bank_number')}>
+            <option value="">בחרו בנק מהרשימה</option>
+            {BANKS.map(([code, name]) => <option key={code} value={code}>{name} ({code})</option>)}
+          </select>
+        </div>
         <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
           <div>
-            <label style={LABEL} htmlFor="j-bank">בנק</label>
-            <input id="j-bank" style={FIELD} value={v.bank_number} onChange={set('bank_number')} inputMode="numeric" placeholder="קוד או שם" />
-          </div>
-          <div>
-            <label style={LABEL} htmlFor="j-bbranch">סניף</label>
+            <label style={LABEL} htmlFor="j-bbranch">מספר סניף {REQ}</label>
             <input id="j-bbranch" style={FIELD} value={v.bank_branch} onChange={set('bank_branch')} inputMode="numeric" />
           </div>
           <div>
-            <label style={LABEL} htmlFor="j-acct">מספר חשבון</label>
+            <label style={LABEL} htmlFor="j-acct">מספר חשבון {REQ}</label>
             <input id="j-acct" style={FIELD} value={v.bank_account} onChange={set('bank_account')} inputMode="numeric" />
           </div>
         </div>
         <div>
-          <label style={LABEL} htmlFor="j-holder">שם בעל/ת החשבון</label>
+          <label style={LABEL} htmlFor="j-holder">שם המוטב (בעל/ת החשבון)</label>
           <input id="j-holder" style={FIELD} value={v.bank_account_holder} onChange={set('bank_account_holder')} placeholder="אם החשבון אינו על שמך" />
         </div>
 

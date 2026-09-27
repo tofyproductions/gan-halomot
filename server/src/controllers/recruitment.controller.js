@@ -2,6 +2,7 @@ const { Candidate, Branch } = require('../models');
 const { resolveBranchScope } = require('../utils/branch-scope');
 const recruitment = require('../services/recruitment.service');
 const storage = require('../services/storage.service');
+const { dispatchEmail } = require('../services/email.service');
 
 /**
  * גיוס עובדים — the queue between somebody asking for work and a manager
@@ -489,7 +490,38 @@ async function recordOutcome(req, res, next) {
     doc.events.push({ at: now, ...actor(req), type: 'hired', note: reason });
     doc.retain_until = recruitment.retentionFrom(now, doc.retain_until);
     await doc.save();
-    res.json({ ok: true, status: doc.status });
+
+    // התקבלה → the next stop is the רישום עובד/ת חדש/ה form, where she fills
+    // everything the contract and payroll need (ת"ז, כתובת, דת, פנסיה, בנק).
+    // Email goes out by itself when we have an address; the WhatsApp link is
+    // returned for the manager to press send on, same as every wa.me here.
+    const joinUrl = `${process.env.FRONTEND_URL || `${req.protocol}://${req.get('host')}`}/join`;
+    const onboardingWhatsapp = doc.phone ? `https://wa.me/${waNumber(doc.phone_raw || doc.phone)}?text=${encodeURIComponent([
+      `שלום ${doc.full_name},`,
+      'ברוכה הבאה לגן החלומות! שמחים שהצטרפת אלינו.',
+      'לפני שנכין את חוזה ההעסקה, נבקש למלא טופס קצר עם הפרטים הנדרשים (תעודת זהות, כתובת, פרטי בנק ועוד):',
+      joinUrl,
+      '',
+      'חשוב למלא את כל הפרטים - הם נכנסים ישירות לחוזה ולשכר.',
+    ].join('\n'))}` : null;
+    let onboardingEmailed = false;
+    if (doc.email && doc.email.includes('@')) {
+      onboardingEmailed = await dispatchEmail({
+        to: doc.email,
+        subject: 'ברוכה הבאה לגן החלומות — טופס רישום עובד/ת',
+        html: `<div dir="rtl" style="font-family:Arial,sans-serif">
+          <h2 style="margin:0 0 8px">ברוכה הבאה לגן החלומות! 🎉</h2>
+          <p>שמחים שהצטרפת אלינו. לפני הכנת חוזה ההעסקה, נבקש למלא טופס קצר עם כל הפרטים הנדרשים — תעודת זהות, כתובת, דת, קרן פנסיה ופרטי חשבון הבנק:</p>
+          <p><a href="${joinUrl}" style="display:inline-block;background:#6c5ce7;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:bold">למילוי טופס הרישום</a></p>
+          <p style="color:#888">הפרטים נכנסים ישירות לחוזה ההעסקה ולשכר, לכן חשוב למלא את כולם.</p>
+        </div>`,
+        text: `ברוכה הבאה לגן החלומות! טופס הרישום: ${joinUrl}`,
+      }).then(() => true).catch(err => {
+        console.error('[recruitment] onboarding email failed:', err.message);
+        return false;
+      });
+    }
+    res.json({ ok: true, status: doc.status, onboarding_whatsapp: onboardingWhatsapp, onboarding_emailed: onboardingEmailed });
   } catch (error) {
     next(error);
   }

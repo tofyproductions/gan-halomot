@@ -155,14 +155,24 @@ export default function RecruitmentPage() {
 
   const saveOutcome = async () => {
     try {
-      await api.post(`/recruitment/${outcome.row.id}/outcome`, {
+      const res = await api.post(`/recruitment/${outcome.row.id}/outcome`, {
         result: outcome.result,
         reason: outcome.reason,
         future_relevant: outcome.future,
         callback_at: outcome.future ? outcome.callback : null,
       });
       toast.success('נשמר');
-      setOutcome(null);
+      if (outcome.result === 'hired') {
+        // The dialog stays open with the onboarding-form handoff: the mail (if
+        // any) already left, the WhatsApp link waits for the manager to send.
+        setOutcome(v => ({
+          ...v, saved: true,
+          onboarding_whatsapp: res.data.onboarding_whatsapp,
+          onboarding_emailed: !!res.data.onboarding_emailed,
+        }));
+      } else {
+        setOutcome(null);
+      }
       load();
     } catch (err) {
       toast.error(err.response?.data?.error || 'שגיאה');
@@ -497,12 +507,32 @@ export default function RecruitmentPage() {
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            {outcome?.result === 'hired' ? (
+            {outcome?.result === 'hired' ? (outcome?.saved ? (
               <>
                 <Alert severity="success">
                   <AlertTitle>מסומן/ת כהתקבל/ה</AlertTitle>
-                  הפקת החוזה, אישור הנה״ח, החתימה ופתיחת המשתמש בשעון עדיין נעשים ידנית —
-                  החיבור האוטומטי אליהם הוא השלב הבא.
+                  {outcome.onboarding_emailed
+                    ? 'טופס הרישום נשלח למועמד/ת במייל. '
+                    : 'למועמד/ת אין מייל במערכת. '}
+                  אפשר לשלוח את הטופס גם בוואטסאפ — ההודעה מוכנה בכפתור.
+                  אחרי שהטופס ימולא ויאושר, מנפיקים חוזה מכרטיס העובד/ת.
+                </Alert>
+                {outcome.onboarding_whatsapp && (
+                  <Button
+                    variant="outlined" color="success" fullWidth
+                    component="a" href={outcome.onboarding_whatsapp}
+                    target="_blank" rel="noopener noreferrer"
+                  >
+                    שליחת טופס הרישום בוואטסאפ
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Alert severity="success">
+                  <AlertTitle>סימון כהתקבל/ה</AlertTitle>
+                  בשמירה יישלח למועמד/ת טופס "רישום עובד/ת חדש/ה" במייל, ותקבלו
+                  גם קישור וואטסאפ מוכן. בטופס ימולאו כל הפרטים לחוזה ולשכר.
                 </Alert>
                 <TextField
                   label="תנאים שסוכמו (לא חובה)" multiline minRows={2}
@@ -512,7 +542,7 @@ export default function RecruitmentPage() {
                   fullWidth
                 />
               </>
-            ) : (
+            )) : (
               <>
                 <TextField
                   label="סיבה" multiline minRows={3} required
@@ -540,11 +570,17 @@ export default function RecruitmentPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setOutcome(null)}>ביטול</Button>
-          <Button variant="contained" color={outcome?.result === 'hired' ? 'success' : 'error'}
-            onClick={saveOutcome}>
-            שמירה
-          </Button>
+          {outcome?.saved ? (
+            <Button variant="contained" onClick={() => setOutcome(null)}>סגירה</Button>
+          ) : (
+            <>
+              <Button onClick={() => setOutcome(null)}>ביטול</Button>
+              <Button variant="contained" color={outcome?.result === 'hired' ? 'success' : 'error'}
+                onClick={saveOutcome}>
+                שמירה
+              </Button>
+            </>
+          )}
         </DialogActions>
       </Dialog>
 

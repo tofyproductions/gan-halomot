@@ -115,7 +115,10 @@ async function publicSubmit(req, res, next) {
       requested_branch: branch?.name || clean(b.branch_name, 80),
       branch_id: branch?._id || null,
       position: clean(b.position, 60),
+      religion: clean(b.religion, 40),
+      pension_fund: clean(b.pension_fund, 80),
       bank_number: clean(b.bank_number, 10),
+      bank_name: clean(b.bank_name, 60),
       bank_branch: clean(b.bank_branch, 10),
       bank_account: clean(b.bank_account, 30),
       bank_account_holder: clean(b.bank_account_holder, 80),
@@ -189,6 +192,8 @@ function shape(doc, withBank) {
     requested_branch: doc.requested_branch,
     branch_id: doc.branch_id ? String(doc.branch_id) : null,
     position: doc.position,
+    religion: doc.religion,
+    pension_fund: doc.pension_fund,
     emergency_name: doc.emergency_name,
     emergency_phone: doc.emergency_phone,
     emergency_relation: doc.emergency_relation,
@@ -208,6 +213,7 @@ function shape(doc, withBank) {
   };
   if (withBank) {
     out.bank_number = doc.bank_number;
+    out.bank_name = doc.bank_name;
     out.bank_branch = doc.bank_branch;
     out.bank_account = doc.bank_account;
     out.bank_account_holder = doc.bank_account_holder;
@@ -327,8 +333,11 @@ async function approve(req, res, next) {
       birth_date: doc.birth_date ? new Date(doc.birth_date) : null,
       branch_id: doc.branch_id || null,
       position: doc.position || '',
+      religion: doc.religion || '',
+      pension_fund: doc.pension_fund || '',
       is_active: true,
       bank_number: doc.bank_number,
+      bank_name: doc.bank_name,
       bank_branch: doc.bank_branch,
       bank_account: doc.bank_account,
       bank_account_holder: doc.bank_account_holder || doc.full_name,

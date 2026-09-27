@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Box, Dialog, DialogTitle, DialogContent, DialogActions, Button, TextField,
   MenuItem, Stack, Typography, Chip, Alert, Divider, LinearProgress, Paper,
@@ -13,6 +13,8 @@ import BlockIcon from '@mui/icons-material/Block';
 import PaidIcon from '@mui/icons-material/Paid';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline';
+import DrawIcon from '@mui/icons-material/Draw';
+import SignatureCanvas from 'react-signature-canvas';
 import { toast } from 'react-toastify';
 import api, { apiError, UPLOAD_TIMEOUT_MS } from '../../api/client';
 import EmploymentTermsPanel from './EmploymentTermsPanel';
@@ -28,12 +30,13 @@ import { useConfirm } from '../shared/ConfirmProvider';
  */
 
 export const CONTRACT_STATUS = {
-  draft:    { label: 'טיוטה',            color: 'default' },
-  sent:     { label: 'נשלח לחתימה',      color: 'info' },
-  signed:   { label: 'נחתם — ממתין להנה״ח', color: 'warning' },
-  approved: { label: 'מאושר',            color: 'success' },
-  waived:   { label: 'ללא חוזה (בוויתור)', color: 'default' },
-  uploaded: { label: 'הועלה — ממתין להנה״ח', color: 'warning' },
+  draft:         { label: 'טיוטה',            color: 'default' },
+  pending_admin: { label: 'ממתין לאישור מנהל מערכת', color: 'secondary' },
+  sent:          { label: 'נשלח לחתימה',      color: 'info' },
+  signed:        { label: 'נחתם — ממתין לחתימת המעסיק', color: 'warning' },
+  approved:      { label: 'מאושר',            color: 'success' },
+  waived:        { label: 'ללא חוזה (בוויתור)', color: 'default' },
+  uploaded:      { label: 'הועלה — ממתין להנה״ח', color: 'warning' },
 };
 
 const isApproverRole = (r) => r === 'system_admin' || r === 'accountant';
@@ -134,6 +137,49 @@ function WeeklyHoursEditor({ rows, onChange }) {
   );
 }
 
+/**
+ * The manager's signature, drawn ONCE. After this, counter-signing any signed
+ * contract is a single confirmation — the saved drawing is stamped as the
+ * employer's signature and the completed contract goes out on its own.
+ */
+function MySignatureDialog({ open, onClose, onSaved }) {
+  const ref = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!ref.current || ref.current.isEmpty()) return toast.error('נא לצייר חתימה במסגרת');
+    setBusy(true);
+    try {
+      await api.put('/employment-contracts/my-signature', {
+        signature: ref.current.toDataURL('image/png'),
+      });
+      toast.success('החתימה נשמרה — מעכשיו אישור חוזה חותם אותה אוטומטית');
+      onSaved && onSaved();
+      onClose();
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontWeight: 800 }}>החתימה שלי</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          מציירים פעם אחת. בכל חוזה שעובד/ת חתמה עליו, לחיצה על "אשר וחתום
+          כמעסיק" תחתום את החתימה הזו בשם המעסיק ותשלח את החוזה המלא.
+        </Typography>
+        <Box sx={{ border: '2px dashed #cbd5e1', borderRadius: 2, bgcolor: '#fff', touchAction: 'none' }}>
+          <SignatureCanvas ref={ref} penColor="#111"
+            canvasProps={{ style: { width: '100%', height: 180, display: 'block' } }} />
+        </Box>
+        <Button size="small" sx={{ mt: 0.5 }} onClick={() => ref.current?.clear()}>נקה</Button>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={save} disabled={busy}>שמור חתימה</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 export default function EmploymentContractDialog({ open, employee, role, onClose, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [ctx, setCtx] = useState(null);
@@ -152,6 +198,10 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   // backlog of contracts for people already being paid correctly.
   const [alsoTerms, setAlsoTerms] = useState(false);
   const [termsContractId, setTermsContractId] = useState(null);
+  const [sigDialog, setSigDialog] = useState(false);
+  // The countersign that was refused for lack of a saved signature — retried
+  // automatically the moment the signature is drawn and saved.
+  const [retryCountersign, setRetryCountersign] = useState(null);
 
   const empId = employee?.id || employee?._id;
 
@@ -180,7 +230,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
   const set = (k, v) => setValues(s => ({ ...s, [k]: v }));
 
   const current = history[0] || null;
-  const active = current && ['sent', 'signed', 'approved'].includes(current.status) ? current : null;
+  const active = current && ['pending_admin', 'sent', 'signed', 'approved'].includes(current.status) ? current : null;
 
   // wa.me with no number opens WhatsApp on the contact list, so sending the
   // signing link meant searching for the employee by name — for someone whose
@@ -206,7 +256,11 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       const res = await api.post('/employment-contracts', {
         employee_id: empId, overrides: values, send, replace: !!active,
       });
-      toast.success(send ? 'ההסכם נשלח לחתימה' : 'טיוטה נשמרה');
+      const st = res.data.contract?.status;
+      toast.success(!send ? 'טיוטה נשמרה'
+        : st === 'pending_admin' ? 'ההסכם נשלח לאישור מנהל/ת המערכת — לאחר האישור הקישור יישלח לעובד/ת'
+          : res.data.emailed ? 'ההסכם נשלח לעובד/ת במייל, והקישור זמין גם לוואטסאפ'
+            : 'ההסכם נשלח לחתימה');
       if (res.data.sign_url) setSignUrl(res.data.sign_url);
       load(); onChanged && onChanged();
     } catch (err) {
@@ -233,6 +287,43 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
       load(); onChanged && onChanged();
     } catch (err) { toast.error(apiError(err)); }
     finally { setBusy(false); }
+  };
+
+  /** The admin's yes on a manager-issued contract — mints and sends the link. */
+  const approveSend = async (id) => {
+    setBusy(true);
+    try {
+      const res = await api.post(`/employment-contracts/${id}/approve-send`);
+      setSignUrl(res.data.sign_url);
+      toast.success(res.data.emailed
+        ? 'החוזה אושר ונשלח לעובד/ת במייל'
+        : 'החוזה אושר וקישור נוצר — אין מייל תקין, שלחו בוואטסאפ');
+      load(); onChanged && onChanged();
+    } catch (err) { toast.error(apiError(err)); }
+    finally { setBusy(false); }
+  };
+
+  /**
+   * One click: the saved signature is stamped as the employer's and the
+   * completed contract goes to accounting, to the תיק and to the employee.
+   * No saved signature yet → the drawing dialog opens, and the click is
+   * replayed the moment it is saved.
+   */
+  const countersign = async (id) => {
+    setBusy(true);
+    try {
+      const res = await api.post(`/employment-contracts/${id}/countersign`);
+      const d = res.data.distribution;
+      toast.success(d
+        ? `נחתם כמעסיק. נשלח: ${[d.accountant && 'להנה״ח', d.employee && 'לעובד/ת', d.filed && 'לתיק העובד/ת'].filter(Boolean).join(', ') || 'נשמר במערכת'}`
+        : 'נחתם כמעסיק');
+      load(); onChanged && onChanged();
+    } catch (err) {
+      if (err.response?.data?.needs_signature) {
+        setRetryCountersign(id);
+        setSigDialog(true);
+      } else toast.error(apiError(err));
+    } finally { setBusy(false); }
   };
 
   /**
@@ -381,7 +472,14 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
                     </TableCell>
                     <TableCell>{h.variant === 'global' ? 'גלובלי' : 'שעתי'}</TableCell>
                     <TableCell>{new Date(h.created_at).toLocaleDateString('he-IL')}</TableCell>
-                    <TableCell>{h.signed_at ? new Date(h.signed_at).toLocaleDateString('he-IL') : '—'}</TableCell>
+                    <TableCell>
+                      {h.signed_at ? new Date(h.signed_at).toLocaleDateString('he-IL') : '—'}
+                      {h.employer_signed_at && (
+                        <Typography variant="caption" sx={{ display: 'block', color: 'success.main' }}>
+                          נחתם כמעסיק ע"י {h.employer_signer_name}{h.distributed_at ? ' · נשלח' : ''}
+                        </Typography>
+                      )}
+                    </TableCell>
                     <TableCell align="left">
                       <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                         {(h.status !== 'waived') && (
@@ -392,6 +490,16 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
                           <Tooltip title="שלח / חדש קישור"><IconButton size="small" color="primary" onClick={() => resend(h.id)}>
                             <SendIcon fontSize="small" /></IconButton></Tooltip>
                         )}
+                        {h.status === 'pending_admin' && isApproverRole(role) && (
+                          <Tooltip title="אשר ושלח לעובד/ת לחתימה">
+                            <IconButton size="small" color="secondary" onClick={() => approveSend(h.id)}>
+                              <CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
+                        )}
+                        {h.status === 'signed' && !h.employer_signed_at && (
+                          <Tooltip title="אשר וחתום כמעסיק — החוזה המלא יישלח להנה״ח, לתיק ולעובד/ת">
+                            <IconButton size="small" color="warning" onClick={() => countersign(h.id)}>
+                              <DrawIcon fontSize="small" /></IconButton></Tooltip>
+                        )}
                         {['signed', 'uploaded'].includes(h.status) && isApproverRole(role) && (
                           <Tooltip title="אשר סופית"><IconButton size="small" color="success" onClick={() => approve(h.id)}>
                             <CheckCircleIcon fontSize="small" /></IconButton></Tooltip>
@@ -399,7 +507,7 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
                         {/* Only a contract nobody signed. A signed one is the
                             evidence that the agreement exists; it is replaced,
                             never removed. */}
-                        {['draft', 'sent'].includes(h.status) && isApproverRole(role) && (
+                        {['draft', 'pending_admin', 'sent'].includes(h.status) && isApproverRole(role) && (
                           <Tooltip title="מחק חוזה שהונפק בטעות">
                             <IconButton size="small" color="error" onClick={() => removeContract(h)}>
                               <DeleteOutlineIcon fontSize="small" /></IconButton></Tooltip>
@@ -435,6 +543,10 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
           <Button variant={mode === 'waive' ? 'contained' : 'outlined'} size="small" color="inherit"
             startIcon={<BlockIcon />} onClick={() => setMode('waive')}>
             התעלם מחוזה עבודה
+          </Button>
+          <Button variant="outlined" size="small" color="warning"
+            startIcon={<DrawIcon />} onClick={() => setSigDialog(true)}>
+            החתימה שלי
           </Button>
         </Stack>
 
@@ -576,6 +688,17 @@ export default function EmploymentContractDialog({ open, employee, role, onClose
           </>
         )}
       </DialogActions>
+      <MySignatureDialog
+        open={sigDialog}
+        onClose={() => setSigDialog(false)}
+        onSaved={() => {
+          if (retryCountersign) {
+            const id = retryCountersign;
+            setRetryCountersign(null);
+            countersign(id);
+          }
+        }}
+      />
     </Dialog>
   );
 }

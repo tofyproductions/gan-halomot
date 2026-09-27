@@ -8,6 +8,7 @@
  */
 const {
   Employee, Branch, EmploymentContract, ContractAnnex, PayrollMonth, User, EmployeeCommitment,
+  EmployeeDocument, Setting,
 } = require('../models');
 const tpl = require('../services/employmentContract');
 const terms = require('../services/employmentTerms');
@@ -15,6 +16,7 @@ const storage = require('../services/storage.service');
 const { htmlToPdf } = require('../services/htmlPdf');
 const { dispatchEmail } = require('../services/email.service');
 const letterhead = require('../services/letterhead');
+const { branchManagerFilter } = require('../services/branch-recipients.service');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -173,6 +175,11 @@ const publicShape = (d) => (d ? {
   created_at: d.created_at,
   token_expires_at: d.token_expires_at,
   has_link: !!d.access_token,
+  admin_approved_by_name: d.admin_approved_by_name,
+  admin_approved_at: d.admin_approved_at,
+  employer_signed_at: d.employer_signed_at,
+  employer_signer_name: d.employer_signer_name,
+  distributed_at: d.distributed_at,
 } : null);
 
 /**
@@ -269,7 +276,7 @@ async function create(req, res, next) {
     if (error) return res.status(error.status).json({ error: error.message });
 
     const existing = await currentFor(emp._id).lean();
-    if (existing && ['sent', 'signed', 'approved'].includes(existing.status) && !req.body.replace) {
+    if (existing && ['pending_admin', 'sent', 'signed', 'approved'].includes(existing.status) && !req.body.replace) {
       return res.status(409).json({
         error: 'לעובד/ת כבר קיים חוזה פעיל. לביטולו והנפקת חוזה חדש יש לסמן "החלף חוזה קיים".',
         current: publicShape(existing),
@@ -286,20 +293,97 @@ async function create(req, res, next) {
       commitment: saved || commitment,
       overrides: { annex_c_parts: await annexParts(), ...(overrides || {}) },
     });
+
+    // A contract a branch manager issues carries salary terms she agreed to on
+    // the gan's behalf — an admin approves those BEFORE any link reaches the
+    // employee. A contract an admin (or accounting) issues is its own approval.
+    const autoApproved = isApprover(req);
+    const sendStatus = autoApproved ? 'sent' : 'pending_admin';
     const doc = await EmploymentContract.create({
       employee_id: emp._id,
       branch_id: emp.branch_id || null,
       variant: ctx.variant,
-      status: send ? 'sent' : 'draft',
+      status: send ? sendStatus : 'draft',
       fields: ctx,
       html: tpl.render(ctx),
-      access_token: send ? EmploymentContract.newToken() : null,
-      token_expires_at: send ? new Date(Date.now() + SIGN_LINK_DAYS * 864e5) : null,
-      sent_at: send ? new Date() : null,
+      access_token: send && autoApproved ? EmploymentContract.newToken() : null,
+      token_expires_at: send && autoApproved ? new Date(Date.now() + SIGN_LINK_DAYS * 864e5) : null,
+      sent_at: send && autoApproved ? new Date() : null,
+      admin_approved_by: send && autoApproved ? req.user?.id || null : null,
+      admin_approved_by_name: send && autoApproved ? req.user?.full_name || '' : '',
+      admin_approved_at: send && autoApproved ? new Date() : null,
       created_by: req.user?.id || null,
       created_by_name: req.user?.full_name || '',
     });
-    res.status(201).json({ contract: publicShape(doc), sign_url: signUrl(req, doc) });
+    let emailed = false;
+    if (send && autoApproved) {
+      emailed = await emailSignLink(req, doc, emp);
+    } else if (send) {
+      notifyAdminsPending(doc, emp).catch(e => console.error('[contract] pending-admin notify failed:', e.message));
+    }
+    res.status(201).json({ contract: publicShape(doc), sign_url: signUrl(req, doc), emailed });
+  } catch (err) { next(err); }
+}
+
+/** The signing-link mail. Best-effort; the link always comes back for WhatsApp. */
+async function emailSignLink(req, doc, empMaybe) {
+  const url = signUrl(req, doc);
+  if (!url) return false;
+  const emp = empMaybe || await Employee.findById(doc.employee_id).select('full_name email').lean();
+  if (!emp?.email || !emp.email.includes('@') || /@gan-halomot\.local$/i.test(emp.email)) return false;
+  try {
+    await dispatchEmail({
+      to: emp.email,
+      subject: 'הסכם העסקה לחתימה — גן החלומות',
+      html: `<div dir="rtl">שלום ${emp.full_name},<br/><br/>
+        להלן הסכם ההעסקה שלך לחתימה. ניתן לקרוא ולחתום ישירות מהנייד:<br/><br/>
+        <a href="${url}">${url}</a><br/><br/>
+        הקישור תקף ל-${SIGN_LINK_DAYS} ימים.<br/><br/>גן החלומות ע.ר</div>`,
+    });
+    return true;
+  } catch (e) { console.error('[contract] email failed:', e.message); return false; }
+}
+
+/** Tell the admins a branch manager's contract waits for their yes. */
+async function notifyAdminsPending(doc, emp) {
+  const admins = await User.find({ role: { $in: ['system_admin', 'accountant'] }, is_active: true })
+    .select('email').lean();
+  const to = admins.map(u => u.email)
+    .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e));
+  if (!to.length) return;
+  await dispatchEmail({
+    to: to.join(','),
+    subject: `חוזה העסקה ממתין לאישורך — ${emp?.full_name || ''}`,
+    html: `<div dir="rtl">${doc.created_by_name || 'מנהלת סניף'} הנפיקה חוזה העסקה עבור ${emp?.full_name || ''}.<br/>
+      החוזה ממתין לאישור מנהל/ת מערכת לפני שיישלח לעובד/ת לחתימה.<br/>
+      האישור נמצא בכרטיס העובד/ת, בחלון "הסכם העסקה".</div>`,
+  });
+}
+
+/**
+ * POST /api/employment-contracts/:id/approve-send — the admin's yes on a
+ * branch-manager-issued contract: mints the link and sends it to the employee.
+ */
+async function approveSend(req, res, next) {
+  try {
+    if (!isApprover(req)) {
+      return res.status(403).json({ error: 'רק מנהל/ת מערכת או הנהלת חשבונות מאשרים שליחת חוזה' });
+    }
+    const doc = await EmploymentContract.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'חוזה לא נמצא' });
+    if (doc.status !== 'pending_admin') {
+      return res.status(409).json({ error: 'החוזה אינו ממתין לאישור' });
+    }
+    doc.admin_approved_by = req.user?.id || null;
+    doc.admin_approved_by_name = req.user?.full_name || '';
+    doc.admin_approved_at = new Date();
+    doc.access_token = EmploymentContract.newToken();
+    doc.token_expires_at = new Date(Date.now() + SIGN_LINK_DAYS * 864e5);
+    doc.sent_at = new Date();
+    doc.status = 'sent';
+    await doc.save();
+    const emailed = await emailSignLink(req, doc);
+    res.json({ contract: publicShape(doc), sign_url: signUrl(req, doc), emailed });
   } catch (err) { next(err); }
 }
 
@@ -318,6 +402,15 @@ async function send(req, res, next) {
     }
     if (['signed', 'approved'].includes(doc.status)) {
       return res.status(409).json({ error: 'החוזה כבר נחתם' });
+    }
+    if (doc.status === 'pending_admin' && !isApprover(req)) {
+      return res.status(403).json({ error: 'החוזה ממתין לאישור מנהל/ת מערכת — רק אישור זה שולח אותו לעובד/ת' });
+    }
+    if (doc.status === 'pending_admin') {
+      // An approver resending a pending contract IS the approval.
+      doc.admin_approved_by = req.user?.id || null;
+      doc.admin_approved_by_name = req.user?.full_name || '';
+      doc.admin_approved_at = new Date();
     }
     doc.access_token = EmploymentContract.newToken();
     doc.token_expires_at = new Date(Date.now() + SIGN_LINK_DAYS * 864e5);
@@ -369,6 +462,172 @@ async function approve(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// --- the manager's saved signature + counter-signing ----------------------
+
+/** GET /api/employment-contracts/my-signature — has this user drawn one? */
+async function getMySignature(req, res, next) {
+  try {
+    const u = await User.findById(req.user?.id).select('signature_image').lean();
+    res.json({ signature_image: u?.signature_image || null });
+  } catch (err) { next(err); }
+}
+
+/** PUT /api/employment-contracts/my-signature  { signature } — drawn once, reused. */
+async function setMySignature(req, res, next) {
+  try {
+    const sig = String(req.body?.signature || '');
+    if (!sig.startsWith('data:image') || sig.length > 200 * 1024) {
+      return res.status(400).json({ error: 'נדרשת חתימה מצוירת (עד 200KB)' });
+    }
+    await User.updateOne({ _id: req.user?.id }, { $set: { signature_image: sig } });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+/** The accountant's inbox, as payroll already knows it. */
+async function accountantRecipients() {
+  const [listDoc, single] = await Promise.all([
+    Setting.findOne({ key: 'accountant_emails' }).lean(),
+    Setting.findOne({ key: 'accountant_email' }).lean(),
+  ]);
+  const list = Array.isArray(listDoc?.value) ? listDoc.value : [];
+  const all = [...list, single?.value].map(e => String(e || '').trim()).filter(e => e.includes('@'));
+  return [...new Set(all)];
+}
+
+/**
+ * POST /api/employment-contracts/:id/countersign
+ *
+ * The employee signed; the branch manager (or an admin) confirms — and her
+ * SAVED signature is stamped as the employer's. One click, because the drawing
+ * happened once, in advance. The completed contract then goes out on its own:
+ * to accounting, into the employee's תיק, and to the employee herself.
+ */
+async function countersign(req, res, next) {
+  try {
+    const doc = await EmploymentContract.findById(req.params.id);
+    if (!doc) return res.status(404).json({ error: 'חוזה לא נמצא' });
+    const scope = branchScopeOf(req);
+    if (scope && !scope.map(String).includes(String(doc.branch_id))) {
+      return res.status(403).json({ error: 'אין הרשאה' });
+    }
+    if (doc.status !== 'signed') {
+      return res.status(409).json({ error: 'ניתן לחתום כמעסיק רק על חוזה שהעובד/ת חתמה עליו' });
+    }
+    if (doc.employer_signed_at) {
+      return res.status(409).json({ error: 'החוזה כבר נחתם על ידי המעסיק' });
+    }
+    const u = await User.findById(req.user?.id).select('signature_image full_name').lean();
+    if (!u?.signature_image) {
+      return res.status(400).json({
+        error: 'לא הוגדרה חתימה. יש לצייר חתימה פעם אחת (בחלון החוזה — "החתימה שלי") ואז לאשר.',
+        needs_signature: true,
+      });
+    }
+
+    doc.employer_signature_data = u.signature_image;
+    doc.employer_signer_name = u.full_name || '';
+    doc.employer_signed_by = req.user?.id || null;
+    doc.employer_signed_at = new Date();
+    await doc.save();
+
+    const distributed = await distributeSignedContract(doc)
+      .catch(e => { console.error('[contract] distribution failed:', e.message); return null; });
+    if (distributed) {
+      doc.distributed_at = new Date();
+      await doc.save();
+    }
+    res.json({
+      contract: publicShape(doc),
+      distributed: !!distributed,
+      distribution: distributed || undefined,
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * The completed (double-signed) contract, delivered everywhere it belongs:
+ * accounting's inbox, the employee's document file, and the employee's email.
+ * Best-effort per lane — one failed mail must not hide the contract from the
+ * other two readers; what happened is reported back to the button.
+ */
+async function distributeSignedContract(doc) {
+  const emp = await Employee.findById(doc.employee_id).select('full_name email branch_id').lean();
+  const pdf = await htmlToPdf(withSignature(doc));
+  const fileName = `הסכם העסקה — ${emp?.full_name || ''}.pdf`;
+  const out = { filed: false, accountant: false, employee: false };
+
+  // 1. The employee's תיק — this is where anybody will look in a year.
+  try {
+    const record = {
+      employee_id: doc.employee_id,
+      branch_id: doc.branch_id || emp?.branch_id || null,
+      name: 'הסכם העסקה חתום',
+      description: `נחתם ע"י העובד/ת ${doc.signer_name || ''} ונחתם ע"י ${doc.employer_signer_name || 'המעסיק'}`,
+      doc_type: 'employment_contract',
+      file_name: fileName,
+      file_mimetype: 'application/pdf',
+      size_bytes: pdf.length,
+      storage_key: null,
+      data: null,
+      file_data: null,
+      created_by: doc.employer_signed_by || null,
+    };
+    if (storage.isConfigured()) {
+      try {
+        const key = storage.makeKey('contracts', 'pdf');
+        await storage.putObject({ key, body: pdf, contentType: 'application/pdf' });
+        record.storage_key = key;
+      } catch (e) {
+        console.error('[contract] storage put failed, keeping inline:', e.message);
+        record.file_data = pdf.toString('base64');
+      }
+    } else {
+      record.file_data = pdf.toString('base64');
+    }
+    await EmployeeDocument.create(record);
+    out.filed = true;
+  } catch (e) { console.error('[contract] filing failed:', e.message); }
+
+  const attachment = {
+    filename: fileName,
+    contentBase64: pdf.toString('base64'),
+    contentType: 'application/pdf',
+  };
+
+  // 2. Accounting.
+  try {
+    const to = await accountantRecipients();
+    if (to.length) {
+      await dispatchEmail({
+        to: to.join(','),
+        subject: `הסכם העסקה חתום — ${emp?.full_name || ''}`,
+        html: `<div dir="rtl">מצורף הסכם ההעסקה החתום של ${emp?.full_name || ''} (נחתם ע"י שני הצדדים).<br/>
+          ההסכם שמור גם בתיק העובד/ת במערכת.</div>`,
+        fileAttachments: [attachment],
+      });
+      out.accountant = true;
+    }
+  } catch (e) { console.error('[contract] accountant mail failed:', e.message); }
+
+  // 3. The employee — her own copy of what she signed.
+  try {
+    if (emp?.email && emp.email.includes('@') && !/@gan-halomot\.local$/i.test(emp.email)) {
+      await dispatchEmail({
+        to: emp.email,
+        subject: 'הסכם ההעסקה החתום שלך — גן החלומות',
+        html: `<div dir="rtl">שלום ${emp.full_name},<br/><br/>
+          מצורף עותק של הסכם ההעסקה שלך, חתום על ידי שני הצדדים.<br/>
+          ברוכה הבאה לגן החלומות!<br/><br/>גן החלומות ע.ר</div>`,
+        fileAttachments: [attachment],
+      });
+      out.employee = true;
+    }
+  } catch (e) { console.error('[contract] employee mail failed:', e.message); }
+
+  return out;
+}
+
 
 /**
  * DELETE /api/employment-contracts/:id — a contract issued by mistake.
@@ -392,7 +651,7 @@ async function approve(req, res, next) {
  * stops opening. That is the desired behaviour — the whole reason to delete a
  * mistaken send is that somebody may be holding a link they should not use.
  */
-const DELETABLE = ['draft', 'sent'];
+const DELETABLE = ['draft', 'pending_admin', 'sent'];
 
 async function remove(req, res, next) {
   try {
@@ -562,14 +821,19 @@ async function file(req, res, next) {
  * on at read time so the signed copy can never disagree with what was signed.
  */
 function withSignature(doc) {
-  if (!doc.signature_data) return letterhead.inject(doc.html);
+  if (!doc.signature_data && !doc.employer_signature_data) return letterhead.inject(doc.html);
   return letterhead.inject(tpl.render(doc.fields || {}, {
-    signature: {
+    signature: doc.signature_data ? {
       data_url: doc.signature_data,
       signed_at: doc.signed_at,
       signer_name: doc.signer_name,
       ip: doc.signed_ip,
-    },
+    } : null,
+    employerSignature: doc.employer_signature_data ? {
+      data_url: doc.employer_signature_data,
+      signed_at: doc.employer_signed_at,
+      signer_name: doc.employer_signer_name,
+    } : null,
   }));
 }
 
@@ -685,6 +949,9 @@ async function publicGet(req, res, next) {
       already_signed: !!doc.signed_at,
       employee_name: emp?.full_name || '',
       id_hint: (emp?.israeli_id || '').slice(-4),
+      // A contract must not stay blank where it names the person signing it.
+      // Whatever the card didn't know, the signer completes right here.
+      missing_fields: missingPersonalFields(doc.fields || {}),
       // The employee must be able to actually open נספח ג' before she signs it.
       annexes: annexes.map(a => ({
         id: String(a._id), title: a.title, part: a.part,
@@ -696,13 +963,77 @@ async function publicGet(req, res, next) {
 }
 
 /**
- * POST /api/public/contract/:token/sign  { signature, signer_name, id_last4 }
+ * The personal fields the contract's own text embeds. Anything empty here
+ * prints as a ruled blank — which is exactly what the signer is asked to
+ * complete before signing, so no signed contract carries an empty line where
+ * the law expects a detail.
+ */
+const PERSONAL_FIELDS = [
+  { key: 'address', label: 'כתובת מגורים' },
+  { key: 'phone', label: 'טלפון' },
+  { key: 'email', label: 'אימייל' },
+  { key: 'religion', label: 'דת (לתשלום ימי חג)' },
+  { key: 'bank_text', label: 'פרטי חשבון בנק', compound: 'bank' },
+];
+
+function missingPersonalFields(fields) {
+  return PERSONAL_FIELDS
+    .filter(f => !String(fields?.[f.key] || '').trim())
+    .map(f => ({ key: f.compound || f.key, label: f.label }));
+}
+
+/**
+ * What the signer may complete: her own personal details, nothing the manager
+ * negotiated. Values land in the frozen merge fields (the signed render reads
+ * them) AND on the employee card, so payroll knows them too.
+ */
+function applyFills(doc, emp, fills) {
+  const clean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
+  const empUpdate = {};
+  const f = fills || {};
+  const setIfEmpty = (ctxKey, empKey, value, max) => {
+    const v = clean(value, max);
+    if (!v || String(doc.fields?.[ctxKey] || '').trim()) return;
+    doc.fields[ctxKey] = v;
+    if (empKey && !String(emp?.[empKey] || '').trim()) empUpdate[empKey] = v;
+  };
+  doc.fields = doc.fields || {};
+  setIfEmpty('address', 'address', f.address, 160);
+  setIfEmpty('phone', 'phone', f.phone, 30);
+  setIfEmpty('email', 'email', f.email, 120);
+  setIfEmpty('religion', 'religion', f.religion, 40);
+  if (!String(doc.fields.bank_text || '').trim()) {
+    const bank = {
+      bank_number: clean(f.bank_number, 10),
+      bank_name: clean(f.bank_name, 60),
+      bank_branch: clean(f.bank_branch, 10),
+      bank_account: clean(f.bank_account, 30),
+      bank_account_holder: clean(f.bank_account_holder, 80),
+    };
+    if (bank.bank_number && bank.bank_branch && bank.bank_account) {
+      doc.fields.bank_text = [
+        `בנק ${bank.bank_name ? `${bank.bank_name} (${bank.bank_number})` : bank.bank_number}`,
+        `סניף ${bank.bank_branch}`,
+        `חשבון ${bank.bank_account}`,
+        bank.bank_account_holder ? `ע"ש ${bank.bank_account_holder}` : '',
+      ].filter(Boolean).join(', ');
+      for (const [k, v] of Object.entries(bank)) {
+        if (v && !String(emp?.[k] || '').trim()) empUpdate[k] = v;
+      }
+    }
+  }
+  doc.markModified('fields');
+  return empUpdate;
+}
+
+/**
+ * POST /api/public/contract/:token/sign  { signature, signer_name, id_last4, fills }
  * Signing is one-way: once signed the token stops accepting new signatures, so
  * a re-opened link cannot overwrite a signature that already exists.
  */
 async function publicSign(req, res, next) {
   try {
-    const { signature, signer_name, id_last4 } = req.body || {};
+    const { signature, signer_name, id_last4, fills } = req.body || {};
     const doc = await EmploymentContract.findOne({ access_token: req.params.token });
     if (!doc) return res.status(404).json({ error: 'הקישור אינו תקף' });
     if (doc.token_expires_at && doc.token_expires_at < new Date()) {
@@ -712,10 +1043,28 @@ async function publicSign(req, res, next) {
     if (!signature || !String(signature).startsWith('data:image')) {
       return res.status(400).json({ error: 'נדרשת חתימה' });
     }
-    const emp = await Employee.findById(doc.employee_id).select('full_name israeli_id').lean();
+    const emp = await Employee.findById(doc.employee_id)
+      .select('full_name israeli_id address phone email religion bank_number bank_name bank_branch bank_account bank_account_holder')
+      .lean();
     const expected = (emp?.israeli_id || '').slice(-4);
     if (!expected || String(id_last4 || '').trim() !== expected) {
       return res.status(403).json({ error: 'ארבע ספרות ת"ז אינן תואמות' });
+    }
+
+    // A signature over a blank line is a contract missing a detail forever —
+    // whatever the card didn't know, the signer supplies right now, or the
+    // signature is refused with the exact list of what is still empty.
+    const empUpdate = applyFills(doc, emp, fills);
+    const stillMissing = missingPersonalFields(doc.fields);
+    if (stillMissing.length) {
+      return res.status(400).json({
+        error: 'יש להשלים את הפרטים החסרים לפני החתימה',
+        missing_fields: stillMissing,
+      });
+    }
+    if (Object.keys(empUpdate).length) {
+      await Employee.updateOne({ _id: doc.employee_id }, { $set: empUpdate })
+        .catch(e => console.error('[contract] employee backfill failed:', e.message));
     }
 
     doc.signature_data = signature;
@@ -726,19 +1075,27 @@ async function publicSign(req, res, next) {
     doc.status = 'signed';
     await doc.save();
 
-    // Tell accounting there is something to confirm. Best-effort: a failed
-    // notification must not undo a signature the employee just gave.
+    // Tell the branch manager her signature is next, and accounting that the
+    // wheel is turning. Best-effort: a failed notification must not undo a
+    // signature the employee just gave.
     try {
-      const approvers = await User.find({ role: { $in: ['accountant', 'system_admin'] }, is_active: true })
-        .select('email full_name').lean();
-      const to = approvers.map(u => u.email)
+      const [approvers, managers] = await Promise.all([
+        User.find({ role: { $in: ['accountant', 'system_admin'] }, is_active: true })
+          .select('email').lean(),
+        doc.branch_id
+          ? User.find(branchManagerFilter(doc.branch_id)).select('email').lean().catch(() => [])
+          : [],
+      ]);
+      const to = [...approvers, ...managers].map(u => u.email)
         .filter(e => e && e.includes('@') && !/@gan-halomot\.local$/i.test(e));
       if (to.length) {
         await dispatchEmail({
-          to: to.join(','),
+          to: [...new Set(to)].join(','),
           subject: `הסכם העסקה נחתם — ${emp?.full_name || ''}`,
           html: `<div dir="rtl">${emp?.full_name || ''} חתמה על הסכם ההעסקה.<br/>
-                 יש לאשר אותו במסך העובדים כדי להשלים את הקליטה.</div>`,
+                 השלב הבא: מנהלת הסניף מאשרת וחותמת כמעסיק בכרטיס העובד/ת
+                 (כפתור "אשר וחתום כמעסיק"), והחוזה המלא יישלח אוטומטית להנהלת
+                 החשבונות, לתיק העובד/ת ולעובד/ת.</div>`,
         });
       }
     } catch (e) { console.error('[contract] approver notification failed:', e.message); }
@@ -864,8 +1221,11 @@ async function saveTerms(req, res, next) {
 module.exports = {
   MAX_STORED_FILE_BYTES, MAX_INLINE_FILE_BYTES, maxUploadBytes,
   list, statusMap, getContext, preview, create, send, approve, waive, upload, file,
+  approveSend, countersign, getMySignature, setMySignature,
   remove, DELETABLE,
   listAnnexes, uploadAnnex, annexFile,
   termsHistory, previewTerms, saveTerms,
   publicGet, publicSign,
+  // for tests
+  missingPersonalFields, applyFills,
 };

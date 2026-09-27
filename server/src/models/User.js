@@ -108,6 +108,13 @@ const userSchema = new mongoose.Schema({
   managed_branch_ids: { type: [mongoose.Schema.Types.ObjectId], ref: 'Branch', default: [] },
 
   /**
+   * A saved, reusable drawn signature (data:image/png;base64,…), for
+   * counter-signing employment contracts: drawn once, then every signed
+   * contract needs only her confirmation to be stamped with it.
+   */
+  signature_image: { type: String, default: null },
+
+  /**
    * Where this person stands in the customer's org chart — the node, not a
    * rank. Null for a gan with no chart, which is most customers.
    *

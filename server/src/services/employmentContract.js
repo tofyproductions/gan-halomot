@@ -265,8 +265,10 @@ function hoursSentence(rows, fallback) {
 /**
  * @param {object} c  merge context (see buildContext)
  * @param {object} opts.signature  { data_url, signed_at, signer_name } once signed
+ * @param {object} opts.employerSignature  { data_url, signed_at, signer_name }
+ *                 — the branch manager's saved signature, stamped on her confirmation
  */
-function render(c, { signature = null } = {}) {
+function render(c, { signature = null, employerSignature = null } = {}) {
   const global = c.variant === 'global';
   const signed = dateParts(c.signed_on || null);
   const jobLines = String(c.job_definition || '').split(/\r?\n/).filter(Boolean);
@@ -281,6 +283,12 @@ function render(c, { signature = null } = {}) {
        <div class="signline">העובדת — ${esc(signature.signer_name || c.employee_name)}</div>
        <div class="small">נחתם דיגיטלית ב-${esc(longDate(signature.signed_at))}</div>`
     : `<div class="signline">העובדת</div>`;
+
+  const employerBox = employerSignature?.data_url
+    ? `<img class="sigimg" src="${employerSignature.data_url}" alt="חתימת המעסיק"/>
+       <div class="signline">המעסיק — גן החלומות ע.ר${employerSignature.signer_name ? `, באמצעות ${esc(employerSignature.signer_name)}` : ''}</div>
+       <div class="small">נחתם דיגיטלית ב-${esc(longDate(employerSignature.signed_at))}</div>`
+    : `<div class="signline">המעסיק — גן החלומות ע.ר</div>`;
 
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"/>
 <title>הסכם העסקה — ${esc(c.employee_name)}</title><style>${CSS}${letterhead.CSS}</style></head><body>
@@ -416,7 +424,7 @@ ${letterhead.SLOT}
 
 <p><b>ולראייה באו הצדדים על החתום:</b></p>
 <div class="signrow">
-  <div class="signbox"><div class="signline">המעסיק — גן החלומות ע.ר</div></div>
+  <div class="signbox">${employerBox}</div>
   <div class="signbox">${signatureBox}</div>
 </div>
 ${signature?.data_url ? `<div class="stamp">נחתם דיגיטלית על ידי ${esc(signature.signer_name || c.employee_name)} בתאריך ${esc(longDate(signature.signed_at))}${signature.ip ? ` · מכתובת ${esc(signature.ip)}` : ''}.</div>` : ''}
@@ -513,9 +521,12 @@ function weeklyHoursFrom(employee, commitment) {
 function buildContext(employee, { branch, commitment = null, overrides = {} } = {}) {
   const variant = overrides.variant || (employee.salary_type === 'global' ? 'global' : 'hourly');
   const dist = (employee.amuta_distribution || [])[0] || {};
-  const bank = [employee.bank_number && `בנק ${employee.bank_number}`,
+  const bank = [
+    employee.bank_number && `בנק ${employee.bank_name ? `${employee.bank_name} (${employee.bank_number})` : employee.bank_number}`,
     employee.bank_branch && `סניף ${employee.bank_branch}`,
-    employee.bank_account && `חשבון ${employee.bank_account}`].filter(Boolean).join(', ');
+    employee.bank_account && `חשבון ${employee.bank_account}`,
+    employee.bank_account_holder && `ע"ש ${employee.bank_account_holder}`,
+  ].filter(Boolean).join(', ');
 
   const base = {
     variant,
@@ -536,7 +547,7 @@ function buildContext(employee, { branch, commitment = null, overrides = {} } = 
     required_hours: dist.required_hours || null,
     bank_text: bank,
     pension_text: employee.pension_fund ? `קרן הפנסיה מצויה בחברת ${employee.pension_fund}.` : '',
-    religion: '',
+    religion: employee.religion || '',
     school_year_start: '', school_year_end: '', camp_end: '',
     weekday_start: '', weekday_end: '', friday_start: '', friday_end: '',
     weekly_hours: weeklyHoursFrom(employee, commitment),

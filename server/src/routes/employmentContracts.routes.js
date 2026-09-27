@@ -39,6 +39,9 @@ router.get('/annexes', c.listAnnexes);
 router.post('/annexes', c.uploadAnnex);
 router.get('/annexes/:id/file', c.annexFile);
 router.get('/context/:employeeId', c.getContext);
+// The manager's saved signature — drawn once, stamped on every countersign.
+router.get('/my-signature', c.getMySignature);
+router.put('/my-signature', c.setMySignature);
 // תנאי העסקה — accountant/admin only, enforced in the controller (this router
 // deliberately admits branch managers so they can file their own hires).
 router.get('/terms/:employeeId', c.termsHistory);
@@ -50,6 +53,11 @@ router.post('/upload', upload.single('file'), uploadErrors, c.upload);
 router.post('/', c.create);
 router.post('/:id/send', c.send);
 router.post('/:id/approve', c.approve);
+// Admin's yes on a branch-manager-issued contract → the link goes out.
+router.post('/:id/approve-send', c.approveSend);
+// The manager confirms the signed contract; her saved signature is stamped
+// and the completed contract is distributed (accounting, תיק, employee).
+router.post('/:id/countersign', c.countersign);
 router.get('/:id/file', c.file);
 // A contract issued by mistake — unsigned only, and the controller says why
 // when it is not. Deleting a sent one retires its signing link with it.

@@ -41,7 +41,7 @@ const BINARY = 'binary';   // GET → the file itself (blob)
 const BASE64 = 'base64';   // GET → { data, name, mimetype }
 
 const CONTRACT_STATUS_HE = {
-  draft: 'טיוטה', sent: 'נשלח לחתימה', signed: 'חתום',
+  draft: 'טיוטה', pending_admin: 'ממתין לאישור מנהל', sent: 'נשלח לחתימה', signed: 'חתום',
   approved: 'אושר', waived: 'ויתור', uploaded: 'הועלה סרוק',
 };
 

@@ -151,6 +151,8 @@ export default function OnboardingQueue() {
                   <Field label="אימייל" value={row.email} />
                   <Field label="כתובת" value={row.address} />
                   <Field label="תאריך לידה" value={row.birth_date} />
+                  <Field label="דת" value={row.religion} />
+                  <Field label="קרן פנסיה" value={row.pension_fund || 'אין'} />
                 </Stack>
                 <Stack spacing={0.4} sx={{ flex: 1 }}>
                   <Field label="איש קשר" value={row.emergency_name} />
@@ -158,7 +160,7 @@ export default function OnboardingQueue() {
                   <Field label="קרבה" value={row.emergency_relation} />
                   {row.bank_visible ? (
                     <>
-                      <Field label="בנק" value={row.bank_number} />
+                      <Field label="בנק" value={row.bank_name ? `${row.bank_name} (${row.bank_number})` : row.bank_number} />
                       <Field label="סניף בנק" value={row.bank_branch} />
                       <Field label="חשבון" value={row.bank_account} />
                       <Field label="על שם" value={row.bank_account_holder} />

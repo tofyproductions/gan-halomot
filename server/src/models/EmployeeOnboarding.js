@@ -56,8 +56,15 @@ const employeeOnboardingSchema = new mongoose.Schema({
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null, index: true },
   position: { type: String, default: '' },
 
+  /** For holiday pay in the contract (ימי חג לפי דת). Free text, their words. */
+  religion: { type: String, default: '' },
+
   // --- payroll ----------------------------------------------------------
+  /** Existing pension fund, if any — goes into the contract and to the accountant. */
+  pension_fund: { type: String, default: '' },
   bank_number: { type: String, default: '' },
+  /** The bank's NAME from the state list, matched to bank_number on the client. */
+  bank_name: { type: String, default: '' },
   bank_branch: { type: String, default: '' },
   bank_account: { type: String, default: '' },
   bank_account_holder: { type: String, default: '' },
