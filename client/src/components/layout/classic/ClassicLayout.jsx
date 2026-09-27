@@ -9,6 +9,7 @@ import SetPasswordDialog from '../../shared/SetPasswordDialog';
 import PunchEntryTaskGate from '../../attendance/PunchEntryTaskGate';
 import PunchIssuesBanner from '../../attendance/PunchIssuesBanner';
 import { MyDecisionsPopup } from '../../payroll/MyDecisions';
+import EmployeePunchFixPopup from '../../attendance/EmployeePunchFixPopup';
 
 // Routes that benefit from extra horizontal space — payroll/attendance tables
 // are dense, used mostly on desktops, and the 1200px cap was leaving big gutters.
@@ -159,6 +160,8 @@ function RouteAwareContainer() {
       {/* What accounting decided on the requests THIS person sent. Shown once
           on entry, then reachable from the bell — the screen keeps the rest. */}
       <MyDecisionsPopup />
+        {/* Her own open punch problems — fix first, before anyone chases her. */}
+        <EmployeePunchFixPopup />
       <Outlet />
     </Box>
   );

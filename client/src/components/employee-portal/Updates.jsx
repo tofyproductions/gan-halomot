@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, Stack, Card, CardContent, Button, TextField,
   Dialog, DialogTitle, DialogContent, DialogActions, Chip, Divider,
@@ -35,6 +36,21 @@ export default function Updates() {
   };
 
   useEffect(() => { fetchRequests(); }, []);
+
+  // Arriving from the punch follow-up popup ("לא עבדתי — מחלה / חופשה"): open
+  // that dialog with the day already filled in, so the request covers exactly
+  // the day the popup asked about.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const kind = params.get('open');
+    const date = params.get('date');
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    if (kind !== 'sick' && kind !== 'vacation') return;
+    setForm({ from_date: date, to_date: date, reason: '' });
+    if (kind === 'sick') setSickDialog(true); else setVacationDialog(true);
+    setParams({}, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSubmitVacation = async () => {
     setSending(true);
