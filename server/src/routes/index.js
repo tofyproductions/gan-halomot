@@ -47,6 +47,8 @@ router.use('/salary-requests', require('./salary.routes'));
 router.use('/payroll', require('./payroll.routes'));
 // Monthly payroll table — per-amuta breakdown + manual fields (sick, vacation, etc.)
 router.use('/payroll-month', require('./payrollMonth.routes'));
+// Punch follow-up — the employee fixes her own missing/duplicate/empty days first.
+router.use('/punch-followup', require('./punchFollowup.routes'));
 // What accounting decided on the requests THIS person sent — one answer across
 // the three separate request collections a branch manager writes into.
 router.use('/my-decisions', require('./decisions.routes'));
