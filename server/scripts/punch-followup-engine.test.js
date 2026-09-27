@@ -38,4 +38,59 @@ ok('addDays crosses months', () => {
   assert.strictEqual(E.addDays('2026-10-01', -2), '2026-09-29');
 });
 
+console.log('\nbuildIssues — missing / duplicate');
+const WIN = { from: '2026-10-04', to: '2026-10-08' }; // Sun 4 … Thu 8
+const emp = { id: 'e1', branch_id: 'b1', start_date: null, is_active: true, receives_salary: true };
+const base = (over = {}) => ({
+  window: WIN, employees: [emp], punches: [], commitments: new Map(), requests: [],
+  closures: [], resolutions: [], explanations: [], ...over,
+});
+const P = (day, approval_status = 'auto') => ({ employee_id: 'e1', day, approval_status });
+const one = (issues, date, kind) => issues.filter(i => i.date === date && i.kind === kind);
+
+ok('one counted punch → missing, open', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05')] }));
+  assert.deepStrictEqual(one(out, '2026-10-05', 'missing').map(i => i.state), ['open']);
+  assert.strictEqual(out[0].key, 'e1|2026-10-05|missing');
+});
+ok('missing + her report at the manager → pending_manager', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05'), P('2026-10-05', 'pending_manager')] }));
+  assert.deepStrictEqual(one(out, '2026-10-05', 'missing').map(i => i.state), ['pending_manager']);
+});
+ok('legacy "pending" counts as at the manager', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05'), P('2026-10-05', 'pending')] }));
+  assert.strictEqual(one(out, '2026-10-05', 'missing')[0].state, 'pending_manager');
+});
+ok('missing + manager already approved (pending_accountant) → handled', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05'), P('2026-10-05', 'pending_accountant')] }));
+  assert.strictEqual(one(out, '2026-10-05', 'missing')[0].state, 'handled');
+});
+ok('rejected report → back to open', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05'), P('2026-10-05', 'rejected')] }));
+  assert.strictEqual(one(out, '2026-10-05', 'missing')[0].state, 'open');
+});
+ok('a complete day is not an issue', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-05'), P('2026-10-05')] }));
+  assert.strictEqual(out.length, 0);
+});
+ok('three counted punches → duplicate, open', () => {
+  const out = E.buildIssues(base({ punches: [P('2026-10-06'), P('2026-10-06'), P('2026-10-06')] }));
+  assert.strictEqual(one(out, '2026-10-06', 'duplicate')[0].state, 'open');
+});
+ok('duplicate: employee labels at manager → pending_manager; manager-approved (pending) → handled; approved → gone', () => {
+  const punches = [P('2026-10-06'), P('2026-10-06'), P('2026-10-06')];
+  const at = (status) => E.buildIssues(base({ punches, resolutions: [{ employee_id: 'e1', date: '2026-10-06', status }] }));
+  assert.strictEqual(one(at('pending_manager'), '2026-10-06', 'duplicate')[0].state, 'pending_manager');
+  assert.strictEqual(one(at('pending'), '2026-10-06', 'duplicate')[0].state, 'handled');
+  assert.strictEqual(one(at('approved'), '2026-10-06', 'duplicate').length, 0);
+});
+ok('unpaid or inactive employees are never chased', () => {
+  const punches = [P('2026-10-05')];
+  assert.strictEqual(E.buildIssues(base({ punches, employees: [{ ...emp, receives_salary: false }] })).length, 0);
+  assert.strictEqual(E.buildIssues(base({ punches, employees: [{ ...emp, is_active: false }] })).length, 0);
+});
+ok('days outside the window are ignored', () => {
+  assert.strictEqual(E.buildIssues(base({ punches: [P('2026-10-09')] })).length, 0);
+});
+
 console.log(`\nAll punch follow-up engine tests passed (${passed} checks).`);

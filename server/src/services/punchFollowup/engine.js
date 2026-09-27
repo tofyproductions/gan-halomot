@@ -45,4 +45,78 @@ function followupWindow(today, startDate) {
   return from > to ? null : { from, to };
 }
 
-module.exports = { classifyDayCount, addDays, followupWindow };
+const COUNTED = new Set(['auto', 'approved']);
+const AT_MANAGER = new Set(['pending', 'pending_manager']);
+
+function eachDay(from, to) {
+  const out = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+const dayKey = (empId, date) => `${empId}|${date}`;
+
+/** Group a list by employee|day. */
+function byEmpDay(list, dateField) {
+  const m = new Map();
+  for (const x of list) {
+    const k = dayKey(String(x.employee_id), x[dateField]);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(x);
+  }
+  return m;
+}
+
+/**
+ * Where a day's own reports put it. A report the manager has not seen yet →
+ * pending_manager; one she approved (now with the accountant) → handled.
+ * Rejected reports are gone, so a rejection falls back to open by itself.
+ */
+function stateFromReports(pending) {
+  if (pending.some(p => p.approval_status === 'pending_accountant')) return 'handled';
+  if (pending.some(p => AT_MANAGER.has(p.approval_status))) return 'pending_manager';
+  return null;
+}
+
+/**
+ * Every problem day in the window, per employee, with where it stands:
+ * open (nobody touched it) · pending_manager (the employee answered, the
+ * manager hasn't) · handled (the manager approved — it is the accountant's
+ * now, and neither the employee nor the manager is asked about it again).
+ */
+function buildIssues(input) {
+  const { window, employees } = input;
+  if (!window) return [];
+  const punchesByDay = byEmpDay((input.punches || []).filter(p => p.approval_status !== 'rejected'), 'day');
+  const resolutionByDay = new Map((input.resolutions || []).map(r => [dayKey(String(r.employee_id), r.date), r]));
+  const issues = [];
+  const days = eachDay(window.from, window.to);
+
+  for (const e of employees) {
+    if (e.is_active === false || e.receives_salary === false) continue;
+    const empId = String(e.id);
+    for (const date of days) {
+      if (e.start_date && date < e.start_date) continue;
+      const dayPunches = punchesByDay.get(dayKey(empId, date)) || [];
+      const counted = dayPunches.filter(p => COUNTED.has(p.approval_status || 'auto'));
+      const pending = dayPunches.filter(p => !COUNTED.has(p.approval_status || 'auto'));
+      const kind = classifyDayCount(counted.length);
+      const push = (k, state) => issues.push({
+        key: `${empId}|${date}|${k}`, employee_id: empId, branch_id: e.branch_id ? String(e.branch_id) : null,
+        date, kind: k, state,
+      });
+
+      if (kind === 'missing') {
+        push('missing', stateFromReports(pending) || 'open');
+      } else if (kind === 'duplicate') {
+        const r = resolutionByDay.get(dayKey(empId, date));
+        if (r && r.status === 'approved') continue;
+        push('duplicate', r?.status === 'pending' ? 'handled'
+          : r?.status === 'pending_manager' ? 'pending_manager' : 'open');
+      }
+    }
+  }
+  return issues;
+}
+
+module.exports = { classifyDayCount, addDays, followupWindow, buildIssues };
