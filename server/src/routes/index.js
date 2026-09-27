@@ -52,6 +52,7 @@ router.use('/punch-followup', require('./punchFollowup.routes'));
 // What accounting decided on the requests THIS person sent — one answer across
 // the three separate request collections a branch manager writes into.
 router.use('/my-decisions', require('./decisions.routes'));
+router.use('/contact-requests', require('./contactRequests.routes'));
 // Employee requests (vacation, sick leave)
 router.use('/employee-requests', require('./employeeRequests.routes'));
 // Employee documents — files attached to an employee from the salary table

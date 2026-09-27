@@ -57,6 +57,7 @@ const SavedPayslip = require('./SavedPayslip');
 const SavedPayslipVersion = require('./SavedPayslipVersion');
 const ShkulitEmployeeSnapshot = require('./ShkulitEmployeeSnapshot');
 const PunchDayExplanation = require('./PunchDayExplanation');
+const ContactRequest = require('./ContactRequest');
 const PunchFollowupLog = require('./PunchFollowupLog');
 const DirectPayslipBatch = require('./DirectPayslipBatch');
 const HoursDistributionLog = require('./HoursDistributionLog');
@@ -165,6 +166,7 @@ const real = {
   SavedPayslipVersion,
   ShkulitEmployeeSnapshot,
   PunchDayExplanation,
+  ContactRequest,
   PunchFollowupLog,
   DirectPayslipBatch,
   HoursDistributionLog,

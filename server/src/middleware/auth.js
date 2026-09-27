@@ -158,7 +158,13 @@ function convert403ToProposal(req, res) {
  *     set-password is the ONE write a must_change_password token exists to
  *     make.
  */
-const NO_WRITE_GATE_PREFIXES = ['/api/auth'];
+// /api/contact-requests: every write there is the caller's own message in a
+// thread the controller has already checked she may take part in — a question
+// to the office, or the office's answer. Nothing a gan is run from changes, and
+// a viewer's reply filed as a "proposal" would never reach the employee.
+// Whole prefix (not allowSelfWrite) because a viewer WITHOUT managed branches
+// is refused before any route runs, and attaching a screenshot is multipart.
+const NO_WRITE_GATE_PREFIXES = ['/api/auth', '/api/contact-requests'];
 
 /**
  * On a WRITE, a viewer never writes — decided once, here, for every route.

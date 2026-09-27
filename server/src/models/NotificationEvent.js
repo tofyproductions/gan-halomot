@@ -33,6 +33,9 @@ const notificationEventSchema = new mongoose.Schema({
       // Punch follow-up (docs/superpowers/specs/2026-09-27-punch-followup-design.md):
       // the employee's morning push, a manager's reminder, and the decision on her fix.
       'punch_followup_employee', 'punch_followup_reminder', 'punch_followup_decision',
+      // "פניות למשרד": a new request (or the employee's reply) for the routed office
+      // people, and the office's answer for the employee.
+      'contact_request_new', 'contact_request_reply',
     ],
     required: true,
   },
