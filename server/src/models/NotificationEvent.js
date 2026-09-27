@@ -28,6 +28,11 @@ const notificationEventSchema = new mongoose.Schema({
       'child_moved',
       // A branch was invited into a joint supply order; its manager adds items.
       'order_shared',
+      // The 07:00 punch-issues digest — per branch manager, and the office summary.
+      'punch_issues_digest', 'punch_issues_digest_office',
+      // Punch follow-up (docs/superpowers/specs/2026-09-27-punch-followup-design.md):
+      // the employee's morning push, a manager's reminder, and the decision on her fix.
+      'punch_followup_employee', 'punch_followup_reminder', 'punch_followup_decision',
     ],
     required: true,
   },

@@ -12,6 +12,7 @@ import ScheduleIcon from '@mui/icons-material/Schedule';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import { useAuth } from '../../hooks/useAuth';
 import { BusyButton } from '../shared/UploadControls';
 import { COLOR } from '../../theme/tokens';
 
@@ -55,6 +56,7 @@ const ALL = '__all__';
  *   • שעות קבועות — a fixed-hours employee who also clocked in that day.
  */
 export default function PunchIssuesDialog({ open, month, canFix, canRemind = false, onClose, onChanged }) {
+  const { isAdmin, isAccountant, isManager } = useAuth();
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState({ duplicates: [], missing: [], conflicts: [] });
@@ -182,14 +184,18 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
 
   // A "missing" day that already carries a PENDING report: the right fix is
   // approving that report, not retyping it (the dedup guard 409s the retype).
-  // A report still waiting for the branch manager needs the explicit
-  // override flag — with a confirmation, so the bypass is never a silent click.
+  // A report still at the manager stage: the branch manager approves it as
+  // her normal first gate; only system_admin may bypass that gate (with a
+  // confirmation) — an accountant waits for the manager (owner's rule, 26.09).
+  const managerStage = (pp) => pp.status === 'pending_manager' || pp.status === 'pending';
+  const accountantWaits = (pp) => managerStage(pp) && isAccountant && !isAdmin;
   const approvePending = (item, pp) => {
-    const needsOverride = pp.status === 'pending_manager' || pp.status === 'pending';
-    if (needsOverride
+    if (accountantWaits(pp)) return undefined;
+    const bypass = managerStage(pp) && isAdmin && !isManager;
+    if (bypass
       && !window.confirm('הדיווח עדיין לא אושר ע״י מנהל/ת הסניף — לאשר בכל זאת ולעקוף את שלב המנהל?')) return undefined;
     return withBusy(`pp|${pp.id}`,
-      api.patch(`/payroll/punches/${pp.id}/approve`, needsOverride ? { override_manager: true } : {})
+      api.patch(`/payroll/punches/${pp.id}/approve`)
         .then(async () => {
           // The day's mirrored twins — pending reports duplicating an existing
           // punch to the minute — are moot the moment the day completes.
@@ -627,11 +633,16 @@ export default function PunchIssuesDialog({ open, month, canFix, canRemind = fal
                             </Typography>
                             <Stack direction="row" spacing={1} sx={{ mt: 0.5 }} flexWrap="wrap" useFlexGap>
                               {item.pending_punches.map(pp => (
-                                <BusyButton key={pp.id} size="small" variant="contained" color="success"
-                                  loading={!!busy[`pp|${pp.id}`]} onClick={() => approvePending(item, pp)}>
-                                  אשר {pp.state === 0 ? 'כניסה' : 'יציאה'} {pp.hhmm}
-                                  {(pp.status === 'pending_manager' || pp.status === 'pending') ? ' · ממתין למנהל' : ''}
-                                </BusyButton>
+                                accountantWaits(pp) ? (
+                                  <Chip key={pp.id} size="small" color="warning" variant="outlined"
+                                    label={`${pp.state === 0 ? 'כניסה' : 'יציאה'} ${pp.hhmm} · ממתין לאישור מנהל/ת הסניף`} />
+                                ) : (
+                                  <BusyButton key={pp.id} size="small" variant="contained" color="success"
+                                    loading={!!busy[`pp|${pp.id}`]} onClick={() => approvePending(item, pp)}>
+                                    אשר {pp.state === 0 ? 'כניסה' : 'יציאה'} {pp.hhmm}
+                                    {managerStage(pp) ? ' · ממתין למנהל' : ''}
+                                  </BusyButton>
+                                )
                               ))}
                             </Stack>
                           </Alert>

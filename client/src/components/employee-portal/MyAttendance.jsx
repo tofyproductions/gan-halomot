@@ -23,16 +23,19 @@ function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClo
   // Someone who works at more than one branch has to say WHERE the forgotten
   // shift happened — the hours are paid at that branch's rate.
   const multiBranch = (branches || []).length > 1;
-  // Opened from a specific incomplete day: start on that date with the time the
-  // clock already recorded filled in, so only the missing half is left to type.
+  // Opened from a specific incomplete day: the side the clock already recorded
+  // is SHOWN (read-only) and never sent — the server refuses a report that
+  // repeats what the device recorded (CLOCK_ALREADY_PUNCHED), so only the
+  // missing half is left to type and only it goes out.
+  const recorded = prefill?.recorded || null; // { side: 'in'|'out', time }
   useEffect(() => {
     if (!open) return;
     const known = (branches || []).map(b => b.branch_id);
     const fallback = known.includes(homeBranchId) ? homeBranchId : (known[0] || '');
     setForm({
       date: prefill?.date || today,
-      in_time: prefill?.in_time || '',
-      out_time: prefill?.out_time || '',
+      in_time: recorded?.side === 'in' ? recorded.time : '',
+      out_time: recorded?.side === 'out' ? recorded.time : '',
       note: '',
       // Completing a day that already has one punch: keep that day's branch.
       branch_id: (prefill?.branch_id && known.includes(prefill.branch_id)) ? prefill.branch_id : fallback,
@@ -42,9 +45,14 @@ function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClo
 
   const save = () => {
     if (!form.date) return toast.error('יש לבחור תאריך');
-    if (!form.in_time && !form.out_time) return toast.error('יש למלא שעת כניסה או יציאה לפחות');
+    const out = { ...form };
+    if (recorded?.side === 'in') out.in_time = '';
+    if (recorded?.side === 'out') out.out_time = '';
+    if (!out.in_time && !out.out_time) {
+      return toast.error(recorded ? 'יש למלא את השעה החסרה' : 'יש למלא שעת כניסה או יציאה לפחות');
+    }
     if (multiBranch && !form.branch_id) return toast.error('יש לבחור את הסניף שבו עבדת');
-    onSubmit(form);
+    onSubmit(out);
   };
 
   return (
@@ -72,9 +80,13 @@ function ReportMissingPunchDialog({ open, prefill, branches, homeBranchId, onClo
           <Stack direction="row" spacing={2}>
             <TextField label="שעת כניסה" type="time" value={form.in_time}
               onChange={e => setForm(f => ({ ...f, in_time: e.target.value }))}
+              disabled={recorded?.side === 'in'}
+              helperText={recorded?.side === 'in' ? 'נרשם בשעון' : ''}
               InputLabelProps={{ shrink: true }} fullWidth />
             <TextField label="שעת יציאה" type="time" value={form.out_time}
               onChange={e => setForm(f => ({ ...f, out_time: e.target.value }))}
+              disabled={recorded?.side === 'out'}
+              helperText={recorded?.side === 'out' ? 'נרשם בשעון' : ''}
               InputLabelProps={{ shrink: true }} fullWidth />
           </Stack>
           <TextField label="הערה למנהל" value={form.note}
@@ -124,7 +136,10 @@ export default function MyAttendance() {
 
   const completeDay = (p) => {
     setPrefill({
-      date: p.iso_date, in_time: p.in_time || '', out_time: p.out_time || '',
+      date: p.iso_date,
+      recorded: p.in_time && !p.out_time ? { side: 'in', time: p.in_time }
+        : p.out_time && !p.in_time ? { side: 'out', time: p.out_time }
+          : null,
       branch_id: p.branch_id || '',
     });
     setReportOpen(true);
