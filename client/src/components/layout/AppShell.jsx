@@ -14,6 +14,7 @@ import PunchEntryTaskGate from '../attendance/PunchEntryTaskGate';
 import PunchIssuesBanner from '../attendance/PunchIssuesBanner';
 import { MyDecisionsPopup } from '../payroll/MyDecisions';
 import EmployeePunchFixPopup from '../attendance/EmployeePunchFixPopup';
+import ManagerPunchFollowupPopup from '../attendance/ManagerPunchFollowupPopup';
 import HelpButton from '../shared/HelpButton';
 
 /**
@@ -66,6 +67,8 @@ export default function AppShell() {
         <MyDecisionsPopup />
         {/* Her own open punch problems — fix first, before anyone chases her. */}
         <EmployeePunchFixPopup />
+        {/* The branch manager's daily list — what employees answered, what nobody handled. */}
+        <ManagerPunchFollowupPopup />
 
         {/* Where you are, and what the browser tab says — both from
             config/screenMeta, both here rather than in each of 62 screens, so
