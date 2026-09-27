@@ -21,6 +21,7 @@
     "test:export-source": "node scripts/payroll-export-source.test.js",
     "test:contract-chain": "node scripts/contract-chain.test.js",
     "test:punch-followup": "node scripts/punch-followup-engine.test.js",
+    "test:punch-followup-models": "node scripts/punch-followup-models.test.js",
     "test:employee-age": "node scripts/employee-age.test.js",
     "test:forgot": "node scripts/auth-forgot-password.test.js",
     "test:contracts": "node scripts/contract-upload.test.js",

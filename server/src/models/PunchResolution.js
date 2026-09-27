@@ -25,7 +25,10 @@ const punchResolutionSchema = new mongoose.Schema({
   employee_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Employee', required: true, index: true },
   date: { type: String, required: true },            // 'YYYY-MM-DD' (Israel-local)
   branch_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Branch', default: null },
-  status: { type: String, enum: ['pending', 'approved'], default: 'approved' },
+  status: { type: String, enum: ['pending_manager', 'pending', 'approved'], default: 'approved' },
+  // Who drew up the labels: the employee herself (from her follow-up popup →
+  // pending_manager) or a branch manager (→ pending, the accountant's queue).
+  proposed_by_role: { type: String, enum: ['employee', 'manager', ''], default: '' },
   // Who proposed it, when the proposer isn't the approver (branch manager).
   proposed_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   proposed_by_name: { type: String, default: '' },
