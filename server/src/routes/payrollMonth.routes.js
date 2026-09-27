@@ -111,6 +111,12 @@ router.post('/adjustments/:id/decide',        requireRole('system_admin', 'accou
 router.patch('/adjustments/:id',              requireRole('system_admin', 'accountant'), c.updateAdjustment);
 router.delete('/adjustments/:id',             requireRole('system_admin', 'accountant'), c.deleteAdjustment);
 
+// ייצוא לשקלולית — the accountant's payroll software. Summary for the dialog,
+// then the two template files (movements / employee master). Accounting and
+// admin only: the files carry bank details.
+router.get('/:month/shkulit-export',          requireRole('system_admin', 'accountant'), c.getShkulitExport);
+router.get('/:month/shkulit-export/file',     requireRole('system_admin', 'accountant'), c.getShkulitFile);
+
 // Cibus import — uploads a monthly Pluxee report and writes each employee's
 // total into PayrollMonth.manual.cibus.
 router.post('/import-cibus',

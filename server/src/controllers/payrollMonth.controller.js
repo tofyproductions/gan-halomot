@@ -28,6 +28,8 @@ const {
   augustBonusWindow, candidateDays: augustCandidateDays, applyBonusSplit, sanitizeApprovedDates,
   bonusDayMinutes,
 } = require('../services/augustBonus');
+const { buildExportSource } = require('../services/payrollExport/sourceLayer');
+const shkulit = require('../services/payrollExport/shkulitAdapter');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
 const { materializeScope } = require('../utils/branch-scope');
 const { branchManagersFilter, branchesCoveredBy } = require('../services/branch-recipients.service');
@@ -5409,6 +5411,94 @@ async function sendToAccountant(req, res, next) {
   }
 }
 
+// ── ייצוא לשקלולית ──────────────────────────────────────────────────────────
+// The whole amuta is one company (600) in שקלולית, so the export always runs
+// across all branches; the accountant gets one movements file and one master.
+
+async function shkulitSourceFor(req, month) {
+  // Fetched as the CALLER — bank fields are present only for accounting/admin,
+  // and the source layer's setup_error says so if anyone else sneaks in.
+  const data = await fetchMonthData({ month, branch: req.query.branch || 'all' }, req.user);
+  if (data?.error) throw Object.assign(new Error(data.error), { status: 400 });
+  return buildExportSource(month, data.rows || []);
+}
+
+/**
+ * GET /payroll-month/:month/shkulit-export — the dry summary for the dialog:
+ * who is in, who failed and why, what must travel beside the file.
+ */
+async function getShkulitExport(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const source = await shkulitSourceFor(req, month);
+    const { rows, notes } = shkulit.buildMovements(source);
+    res.json({
+      month,
+      setup_error: source.setup_error,
+      summary: source.summary,
+      movement_rows: rows.length,
+      failed: source.failed,
+      skipped: source.skipped,
+      warned: source.warned,
+      notes,
+      open_questions: shkulit.OPEN_QUESTIONS,
+    });
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+}
+
+/**
+ * GET /payroll-month/:month/shkulit-export/file?type=movements|master
+ * The actual xlsx, in שקלולית's own template columns.
+ */
+async function getShkulitFile(req, res, next) {
+  try {
+    const { month } = req.params;
+    if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
+    const type = req.query.type === 'master' ? 'master' : 'movements';
+    const source = await shkulitSourceFor(req, month);
+    if (source.setup_error) return res.status(400).json({ error: source.setup_error });
+
+    const XLSX = require('xlsx');
+    const wb = XLSX.utils.book_new();
+    wb.Workbook = { Views: [{ RTL: true }] };
+    let baseName;
+
+    if (type === 'master') {
+      // Birth/start/gender live on the card, not in the canonical month —
+      // read them here and hand them to the adapter keyed by employee number.
+      const numbers = source.ready.map(ce => ce.employee.employee_number).filter(Boolean);
+      const emps = await Employee.find({ employee_number: { $in: numbers } })
+        .select('employee_number birth_date start_date gender').lean();
+      const extras = new Map(emps.map(e => [String(e.employee_number), e]));
+      const master = shkulit.buildMaster(source, extras);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([master.header, ...master.rows]), 'נתוני עובד');
+      baseName = `נתוני עובד ${month}`;
+    } else {
+      const { header, rows, notes } = shkulit.buildMovements(source);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
+      // What has no component code (or is free text) rides on a second sheet,
+      // so the accountant reads it in the same file she imports.
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+        ['מספר עובד', 'שם', 'נושא', 'פירוט'],
+        ...notes.map(n => [n.employee_number, n.full_name, n.subject, n.text]),
+      ]), 'הוראות והערות');
+      baseName = `נתוני שכר לחודש ${month}`;
+    }
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(baseName)}.xlsx`);
+    res.send(buf);
+  } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message });
+    next(err);
+  }
+}
+
 module.exports = {
   // Exported for services/punchIssuesDigest.js — the digest must run on the
   // SAME issue engine as the screen, never a second implementation.
@@ -5473,5 +5563,6 @@ module.exports = {
   // Internal helper reused by the per-employee hours report so it shows the
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
+  getShkulitExport, getShkulitFile,
   buildAccountantHtml,
 };
