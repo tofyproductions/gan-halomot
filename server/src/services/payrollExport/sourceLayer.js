@@ -141,6 +141,12 @@ function toCanonicalEmployee(row) {
 
     month: row.month || b.month || '',
 
+    // The standing rates, COPIED from the engine's own snapshot — for a target
+    // (שקלולית) that wants hours × rate and prices them on its side.
+    rates: {
+      hourly_rate: num(b.rates?.hourly_rate),
+    },
+
     // Raw counts — for a target that ingests quantities and prices them itself.
     quantities: {
       worked_hours: num(b.hours?.total),

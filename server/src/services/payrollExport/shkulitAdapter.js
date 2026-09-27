@@ -12,29 +12,36 @@
  *   2. נתוני עובד — the employee master (identity + bank), used by the
  *      accountant to open new employees in שקלולית.
  *
- * THE AMOUNT RULE. Until the accountant confirms which components שקלולית
- * expects as quantities (rate × qty computed on their side), EVERY component
- * is emitted as a resolved amount: תעריף = the shekel figure our screen pays,
- * כמות = 1. This is the only mode that cannot double-pay or re-price anything,
- * because the amount is copied from the field the on-screen payroll already
- * shows. Switching a component to quantity mode later is a one-line change in
- * COMPONENTS below — never a recalculation.
+ * MODES, PER THE ACCOUNTANT'S ANSWERS (אפרים, 27.09.2026):
+ *   - HOURLY employees: שקלולית prices the hours itself — we send code 1 as
+ *     rate × regular hours, and codes 32/33 as the 125%/150% rate × OT hours.
+ *     The rate is COPIED from the engine's own snapshot (breakdown.rates);
+ *     the 125/150 rates are that same rate × the statutory factor, which is
+ *     the definition of those components, not a re-computation of pay.
+ *   - GLOBAL employees: שקלולית computes brutto × (actual/standard hours) —
+ *     exactly the proration our engine already resolved into base_salary, so
+ *     we send the resolved amount (תעריף=סכום, כמות=1).
+ *   - Everything else stays a resolved amount (bonus explicitly "בסכום").
+ *   - הבראה is NOT sent — the accountant computes it by job scope.
+ *   - Deductions (36 ימים חסרים, 41 שעות חסרות) go out NEGATIVE — confirmed.
+ *   - Net employees: amounts are sent as-is (they are net) and the employee
+ *     is flagged in the notes; the gross-up happens on the accountant's side.
  *
- * WHAT DOES NOT GO IN THE FILE. Components with no code in the אקסולוגיה
- * (cibus, gift card, meal vouchers, loan/advance deductions) and every
- * free-text directive are NOT guessed into a numeric row. They come back from
- * buildMovements() as `notes` — the adapter's caller shows them to the person
- * sending the file, and they land on a dedicated sheet the accountant reads.
+ * WHAT DOES NOT GO IN THE FILE. Components whose codes we still don't have
+ * (cibus/meal value, gift card, loan/advance — they live in the EXTENDED
+ * אקסולוגיה the accountant is sending) and every free-text directive are NOT
+ * guessed into numeric rows. They come back from buildMovements() as `notes`
+ * and land on a dedicated sheet the accountant reads.
  */
 
 const OPEN_QUESTIONS = [
-  'ערכי "סוג רשומה" טרם אושרו מול הרו"ח — כרגע נשלח 1 בכל שורה.',
-  'כל הרכיבים נשלחים כסכום (תעריף=סכום, כמות=1) עד לאישור אילו רכיבים נקלטים ככמויות.',
-  'שעות נוספות אינן נשלחות בנפרד (קודים 32/33) — הן כלולות בשכר הבסיס שלנו.',
+  '"סוג רשומה" — לא בשימוש לדברי הרו"ח; נשלח ריק עד תשובת בית התוכנה.',
+  'קודי מפרעה/מקדמה/הלוואה ושווי ארוחות (סיבוס) — ממתינים לאקסולוגיה המורחבת מהרו"ח; בינתיים בגיליון ההערות.',
+  'חודש ניסיון: ספטמבר 2026 — הקבצים נשלחים לרו"ח במייל.',
 ];
 
-/** "סוג רשומה" — open question; 1 until the accountant says otherwise. */
-const RECORD_TYPE = 1;
+/** "סוג רשומה" — the accountant: not in use. Sent empty until told otherwise. */
+const RECORD_TYPE = '';
 
 /**
  * The component map: canonical field → שקלולית code (אקסולוגיה, חברה 600).
@@ -42,11 +49,10 @@ const RECORD_TYPE = 1;
  * misread as pay — flip to +1 if the trial import shows שקלולית expects
  * positives on deduction codes.
  */
+/** Amount components (תעריף=סכום, כמות=1). Base salary is handled apart. */
 const COMPONENTS = [
-  { key: 'base_salary', code: 1, label: 'שכר יסוד', get: (ce) => ce.earnings.base_salary },
   { key: 'salary_completion', code: 38, label: 'השלמת שכר', get: (ce) => ce.earnings.salary_completion },
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
-  { key: 'recreation', code: 4, label: 'הבראה', get: (ce) => ce.earnings.recreation },
   { key: 'holiday_pay', code: 44, label: 'ימי חג', get: (ce) => ce.earnings.holiday_pay },
   { key: 'sick_pay', code: 34, label: 'ימי מחלה', get: (ce) => ce.earnings.sick_pay },
   { key: 'bonus', code: 35, label: 'בונוס', get: (ce) => ce.earnings.bonus },
@@ -56,13 +62,25 @@ const COMPONENTS = [
   { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, get: (ce) => ce.deductions.partial_absence },
 ];
 
-/** Components we PAY but have no שקלולית code yet — surfaced, never guessed. */
+/** Hours codes for hourly employees — שקלולית prices rate × quantity. */
+const HOURS = {
+  regular: { code: 1, factor: 1 },
+  ot125: { code: 32, factor: 1.25 },
+  ot150: { code: 33, factor: 1.5 },
+};
+
+/** Components awaiting codes from the EXTENDED אקסולוגיה — surfaced, never guessed. */
 const UNMAPPED = [
   { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', get: (ce) => ce.earnings.meal_vouchers },
-  { key: 'cibus', label: 'סיבוס', get: (ce) => ce.earnings.cibus },
+  { key: 'cibus', label: 'סיבוס (שווי ארוחות)', get: (ce) => ce.earnings.cibus },
   { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', get: (ce) => ce.earnings.gift_card },
   { key: 'loans', label: 'ניכוי הלוואה', get: (ce) => ce.deductions.loans },
+  // הבראה — the accountant computes it by job scope; when our table carries
+  // an amount anyway, it is surfaced so nobody pays it twice.
+  { key: 'recreation', label: 'הבראה (מחושבת אצל הרו"ח — לידיעה)', get: (ce) => ce.earnings.recreation },
 ];
+
+const round2 = (n) => Math.round(n * 100) / 100;
 
 /** 'YYYY-MM' → 'MM/YYYY' (the shape a Hebrew payroll clerk reads; to confirm). */
 function monthLabel(month) {
@@ -83,6 +101,31 @@ function buildMovements(source) {
 
   for (const ce of source.ready) {
     const empNo = ce.employee.employee_number;
+
+    // Base pay. Hourly → hours priced on שקלולית's side; global → the amount
+    // our engine already prorated (their formula, our resolution — same number).
+    const hourlyRate = Number(ce.rates?.hourly_rate) || 0;
+    if (ce.employee.salary_type === 'hourly' && hourlyRate > 0) {
+      const q = ce.quantities;
+      if (q.regular_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.regular.code, hourlyRate, round2(q.regular_hours)]);
+      if (q.ot_125_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours)]);
+      if (q.ot_150_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours)]);
+    } else if (ce.earnings.base_salary) {
+      rows.push([label, empNo, RECORD_TYPE, HOURS.regular.code, ce.earnings.base_salary, 1]);
+      if (ce.employee.salary_type === 'hourly') {
+        notes.push({
+          employee_number: empNo, full_name: ce.employee.full_name,
+          subject: 'שכר בסיס', text: 'עובד/ת שעתי/ת ללא תעריף שעה בכרטיס — נשלח כסכום במקום כשעות.',
+        });
+      }
+    }
+
+    if (ce.employee.salary_is_net) {
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'עובד/ת נטו', text: 'הסכומים בקובץ הם נטו לתשלום — הגילום אצלכם.',
+      });
+    }
 
     for (const comp of COMPONENTS) {
       const amount = Number(comp.get(ce)) || 0;
@@ -185,6 +228,7 @@ module.exports = {
   monthLabel,
   RECORD_TYPE,
   COMPONENTS,
+  HOURS,
   UNMAPPED,
   OPEN_QUESTIONS,
   _internals: { splitName, dateCell },

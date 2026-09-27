@@ -2,14 +2,15 @@
 /**
  * The שקלולית adapter, tested against hand-built canonical employees.
  *
- * What matters:
- *   1. every non-zero mapped component becomes exactly one movement row with
- *      the right code, as an amount (rate=sum, qty=1) — zero components vanish;
- *   2. deductions come out NEGATIVE, so a "missing days" figure can never be
- *      read as pay;
- *   3. what has no שקלולית code (cibus, gift card, loans) and every free-text
- *      directive lands in notes — never guessed into a numeric row;
- *   4. the master file carries identity + bank in the template's columns.
+ * What matters (per the accountant's answers, 27.09.2026):
+ *   1. an HOURLY employee's base pay goes out as hours: code 1 at the card's
+ *      rate, codes 32/33 at the 125%/150% rate — שקלולית prices them;
+ *   2. a GLOBAL employee's base goes out as the resolved amount;
+ *   3. amount components (bonus etc.) are one row each, zeros vanish;
+ *   4. deductions come out NEGATIVE — confirmed by the accountant;
+ *   5. what has no שקלולית code yet (cibus, gift card, loans, הבראה) and
+ *      every free-text directive lands in notes — never guessed into rows;
+ *   6. the master file carries identity + bank in the template's columns.
  *
  *   node scripts/shkulit-adapter.test.js
  */
@@ -35,6 +36,7 @@ const row = {
     components: { base_salary: 5000, travel: 250, recreation_monthly: 0, meal_vouchers: 0 },
     deductions: { loans: 300, absence: 120 },
     hours: { total: 120, regular: 110, ot_125: 8, ot_150: 2, days_worked: 20 },
+    rates: { hourly_rate: 45 },
     estimated_total: 5130,
     warnings: [],
   },
@@ -59,18 +61,23 @@ console.log('movements');
 ok('template columns, exactly', () => {
   assert.deepStrictEqual(header, ['חודש עבודה', 'מספר עובד', 'סוג רשומה', 'קוד רכיב', 'תעריף', 'כמות']);
 });
-ok('every non-zero mapped component is one amount row; zeros vanish', () => {
+ok('hourly base goes out as hours: 1 / 32 / 33 at the card rate × factor', () => {
   const byCode = new Map(rows.map(r => [r[3], r]));
-  assert.strictEqual(byCode.get(1)[4], 5000);   // שכר יסוד
+  assert.deepStrictEqual(byCode.get(1).slice(4), [45, 110]);      // regular
+  assert.deepStrictEqual(byCode.get(32).slice(4), [56.25, 8]);    // 125%
+  assert.deepStrictEqual(byCode.get(33).slice(4), [67.5, 2]);     // 150%
+});
+ok('every non-zero amount component is one row (qty 1); zeros vanish', () => {
+  const byCode = new Map(rows.map(r => [r[3], r]));
   assert.strictEqual(byCode.get(3)[4], 250);    // נסיעות
   assert.strictEqual(byCode.get(34)[4], 480);   // ימי מחלה
   assert.strictEqual(byCode.get(35)[4], 350);   // בונוס
-  assert.ok(!byCode.has(4), 'recreation is 0 → no row');
+  assert.ok(!byCode.has(4), 'recreation never becomes a row — the accountant computes it');
   assert.ok(!byCode.has(44), 'holiday 0 → no row');
   for (const r of rows) {
     assert.strictEqual(r[0], '08/2026');
     assert.strictEqual(r[1], '17');
-    assert.strictEqual(r[5], 1, 'amount mode: quantity is always 1');
+    assert.strictEqual(r[2], '', 'record type: empty (not in use per the accountant)');
   }
 });
 ok('deductions are negative', () => {
@@ -82,7 +89,32 @@ ok('unmapped components + directives land in notes, not rows', () => {
   assert.ok(subjects.includes('תו קנייה (גיפט קארד)'));
   assert.ok(subjects.includes('ניכוי הלוואה'));
   assert.ok(subjects.includes('ניכוי מקדמה'));
-  assert.ok(!rows.some(r => ![1, 3, 34, 35, 36].includes(r[3])), 'no invented codes');
+  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36].includes(r[3])), 'no invented codes');
+});
+ok('global employee → base as the resolved amount; net employee → flagged', () => {
+  const globalRow = {
+    ...row, employee_number: '18', full_name: 'גלובלית נטו', israeli_id: '999000002',
+    salary_type: 'global', salary_is_net: true,
+    breakdown: { ...row.breakdown, components: { base_salary: 8000 }, deductions: {}, rates: {} },
+    manual: {},
+  };
+  const src2 = buildExportSource('2026-08', [globalRow]);
+  const m2 = shkulit.buildMovements(src2);
+  const base = m2.rows.find(r => r[3] === 1);
+  assert.deepStrictEqual(base.slice(4), [8000, 1]);
+  assert.ok(!m2.rows.some(r => [32, 33].includes(r[3])), 'no OT rows for a global');
+  assert.ok(m2.notes.some(n => n.subject === 'עובד/ת נטו'));
+});
+ok('hourly without a card rate falls back to the amount, with a note', () => {
+  const noRate = {
+    ...row, employee_number: '19', full_name: 'בלי תעריף', israeli_id: '999000003',
+    breakdown: { ...row.breakdown, rates: {} }, manual: {},
+  };
+  const src3 = buildExportSource('2026-08', [noRate]);
+  const m3 = shkulit.buildMovements(src3);
+  const base = m3.rows.find(r => r[3] === 1);
+  assert.deepStrictEqual(base.slice(4), [5000, 1]);
+  assert.ok(m3.notes.some(n => n.subject === 'שכר בסיס'));
 });
 
 console.log('master');
