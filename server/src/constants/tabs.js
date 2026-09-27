@@ -31,6 +31,7 @@ const TAB_DEFAULT_ROLES = {
   clicktac_write: ['system_admin', 'accountant'],
   collections: ['system_admin', 'admin_viewer', 'accountant'],
   proposed_changes: ['system_admin', 'accountant', 'admin_viewer'],
+  contact_inbox: ['system_admin', 'accountant', 'admin_viewer'],
   parent_letters: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   parent_supply_list: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
   pricing: ['system_admin', 'admin_viewer', 'branch_manager', 'accountant'],
@@ -80,6 +81,7 @@ const TAB_DEFAULT_ROLES = {
   my_documents: EMPLOYEE_ROLES,
   my_attendance: EMPLOYEE_ROLES,
   my_updates: EMPLOYEE_ROLES,
+  contact_office: null,
 };
 
 const ALL_TAB_IDS = Object.keys(TAB_DEFAULT_ROLES);

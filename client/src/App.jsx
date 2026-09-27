@@ -46,6 +46,8 @@ import { UndoProvider } from './components/shared/UndoProvider';
  * loading the screen it lands on would buy a spinner and nothing else.
  */
 const Absences = lazy(() => import('./components/absences/Absences'));
+const ContactOffice = lazy(() => import('./components/employee-portal/ContactOffice'));
+const ContactInbox = lazy(() => import('./components/admin/ContactInbox'));
 const Announcements = lazy(() => import('./components/announcements/Announcements'));
 const ArchiveList = lazy(() => import('./components/archive/ArchiveList'));
 const AttendanceMonitor = lazy(() => import('./components/attendance/AttendanceMonitor'));
@@ -360,6 +362,12 @@ function AppRoutes() {
         <Route path="my-documents" element={<MyDocuments />} />
         <Route path="my-attendance" element={<MyAttendance />} />
         <Route path="my-updates" element={<Updates />} />
+        <Route path="contact-office" element={<ContactOffice />} />
+        <Route path="contact-inbox" element={
+          <ProtectedRoute tab="contact_inbox">
+            <ContactInbox />
+          </ProtectedRoute>
+        } />
 
         <Route path="employee-requests" element={<RequestsManager />} />
         <Route path="employee-letters" element={<EmployeeLetters />} />

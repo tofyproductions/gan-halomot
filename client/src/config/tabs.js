@@ -167,6 +167,9 @@ export const TAB_GROUPS = [
     items: [
       // שינויים שביקש "מנהל מערכת - לצפייה בלבד" ומחכים למשרד.
       { id: 'proposed_changes', label: 'שינויים לאישור', path: '/proposed-changes', defaultRoles: ['system_admin', 'accountant', 'admin_viewer'] },
+      // "פניות למשרד", the office side. Each person sees only the topics the
+      // admin grid "מי מקבל מה" gives them — the server decides that.
+      { id: 'contact_inbox', label: 'פניות מעובדים', path: '/contact-inbox', defaultRoles: ['system_admin', 'accountant', 'admin_viewer'] },
       { id: 'archive',        label: 'ארכיון',    path: '/archive',           defaultRoles: ['system_admin', 'admin_viewer', 'branch_manager'] },
       // The papers each branch operates under — רישיון הפעלה, חשמלאי, גילוי
       // אש — with the expiry dates the mail digest watches.
@@ -187,6 +190,8 @@ export const TAB_GROUPS = [
       { id: 'my_documents',  label: 'המסמכים שלי',   path: '/my-documents',  defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_attendance', label: 'ההחתמות שלי',   path: '/my-attendance', defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_updates',    label: 'עדכונים',       path: '/my-updates',    defaultRoles: EMPLOYEE_ROLES },
+      // Everybody may write to the office — managers and the office included.
+      { id: 'contact_office', label: 'פניות למשרד',  path: '/contact-office', defaultRoles: null },
     ],
   },
 ];

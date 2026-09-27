@@ -56,6 +56,8 @@ import NotificationsActiveIcon from '@mui/icons-material/NotificationsActive';
 import StorefrontIcon from '@mui/icons-material/Storefront';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
+import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 
 export const ICON_BY_TAB = {
   // ניהול
@@ -113,6 +115,8 @@ export const ICON_BY_TAB = {
   my_documents: FolderIcon,
   my_attendance: AccessTimeIcon,
   my_updates: NotificationsActiveIcon,
+  contact_office: SupportAgentIcon,
+  contact_inbox: MarkEmailUnreadIcon,
 };
 
 /** Never returns undefined: an unmapped id gets a neutral mark, not a gap. */

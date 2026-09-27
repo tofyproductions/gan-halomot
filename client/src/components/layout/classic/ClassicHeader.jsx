@@ -34,12 +34,15 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import CelebrationIcon from '@mui/icons-material/Celebration';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import RuleFolderIcon from '@mui/icons-material/RuleFolder';
+import SupportAgentIcon from '@mui/icons-material/SupportAgent';
+import MarkEmailUnreadIcon from '@mui/icons-material/MarkEmailUnread';
 import { useBranch } from '../../../hooks/useBranch';
 import { useAcademicYear, formatAcademicYear } from '../../../hooks/useAcademicYear';
 import { useUiVersion } from '../../../hooks/useUiVersion';
 import { useAuth } from '../../../hooks/useAuth';
 import { usePendingProposals } from '../../../hooks/usePendingProposals';
 import { useNewLeadsCount } from '../../../hooks/useNewLeadsCount';
+import { useContactInboxCount } from '../../../hooks/useContactInboxCount';
 import { toast } from 'react-toastify';
 import { startRegistration } from '@simplewebauthn/browser';
 import api from '../../../api/client';
@@ -81,6 +84,8 @@ const ICON_BY_TAB = {
   my_attendance: AccessTimeIcon,
   my_updates: NotificationsIcon,
   proposed_changes: RuleFolderIcon,
+  contact_office: SupportAgentIcon,
+  contact_inbox: MarkEmailUnreadIcon,
 };
 
 // Nav structure now lives in client/src/config/tabs.js (TAB_GROUPS).
@@ -119,6 +124,7 @@ export default function Header() {
   const { user, logout, isAdmin, canSeeAllBranches } = useAuth();
   const pendingProposals = usePendingProposals();
   const newLeadsCount = useNewLeadsCount();
+  const contactOpen = useContactInboxCount();
   // Selected gan marker colour — drives the branch switcher's own colour so
   // the switcher always shows the current gan's colour (synced with payroll).
   const selectedBranchObj = branches.find(b => (b._id || b.id) === selectedBranch);
@@ -349,7 +355,9 @@ export default function Header() {
                           ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                           : item.id === 'leads' && newLeadsCount > 0
                             ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
-                            : item.label}
+                            : item.id === 'contact_inbox' && contactOpen > 0
+                              ? <Badge badgeContent={contactOpen} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
+                              : item.label}
                       </MenuItem>
                     );
                   })}
@@ -550,7 +558,9 @@ export default function Header() {
                             ? <Badge badgeContent={pendingProposals} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
                             : item.id === 'leads' && newLeadsCount > 0
                               ? <Badge badgeContent={newLeadsCount} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
-                              : item.label}
+                              : item.id === 'contact_inbox' && contactOpen > 0
+                                ? <Badge badgeContent={contactOpen} color="error" sx={{ '& .MuiBadge-badge': { insetInlineEnd: -14 } }}>{item.label}</Badge>
+                                : item.label}
                           primaryTypographyProps={{ fontWeight: isActive ? 800 : 600, fontSize: '0.95rem' }}
                         />
                       </ListItemButton>

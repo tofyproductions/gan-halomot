@@ -16,6 +16,7 @@ import { useBranch } from '../../hooks/useBranch';
 import { useAcademicYear, formatAcademicYear } from '../../hooks/useAcademicYear';
 import { usePendingProposals } from '../../hooks/usePendingProposals';
 import { useNewLeadsCount } from '../../hooks/useNewLeadsCount';
+import { useContactInboxCount } from '../../hooks/useContactInboxCount';
 
 export const SIDEBAR_WIDTH = 244;
 
@@ -26,9 +27,10 @@ export const SIDEBAR_WIDTH = 244;
 function useBadges() {
   const pendingProposals = usePendingProposals();
   const newLeads = useNewLeadsCount();
+  const contactOpen = useContactInboxCount();
   return useMemo(
-    () => ({ proposed_changes: pendingProposals, leads: newLeads }),
-    [pendingProposals, newLeads]
+    () => ({ proposed_changes: pendingProposals, leads: newLeads, contact_inbox: contactOpen }),
+    [pendingProposals, newLeads, contactOpen]
   );
 }
 
