@@ -101,6 +101,10 @@ const COMPONENTS = [
   // The first code in this file that arrived confirmed rather than guessed,
   // which is why it is a row here instead of a line on the notes sheet.
   { key: 'gift_card', code: 22, table: RECORD_TYPE.IMPUTED, label: 'שי לחג', get: (ce) => ce.earnings.gift_card },
+  // סיבוס — confirmed 28.09.2026: סוג רשומה 2 (הכנסות זקופות), קוד 21.
+  // The אקסולוגיה listed שווי ארוחות twice, as 2 and as 21, and that ambiguity
+  // is what kept it on the notes sheet; 21 is the one in use.
+  { key: 'cibus', code: 21, table: RECORD_TYPE.IMPUTED, label: 'סיבוס', get: (ce) => ce.earnings.cibus },
 ];
 
 
@@ -124,8 +128,10 @@ const HOURS = {
  * they become rows with `table` set.
  */
 const UNMAPPED = [
-  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
-  { key: 'cibus', label: 'סיבוס', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.cibus },
+  // תווי מזון is NOT assumed to share סיבוס's code. Both sit under שווי ארוחות
+  // in the אקסולוגיה, but only סיבוס was confirmed as 21 — and "probably the
+  // same line" is the reasoning that put a work-day count under הבראה.
+  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות. סיבוס אושר כ-21; לוודא אם תווי מזון נקלטים באותו קוד', get: (ce) => ce.earnings.meal_vouchers },
   { key: 'loans', label: 'ניכוי הלוואה', table: RECORD_TYPE.VOLUNTARY_DEDUCTION, sign: -1, hint: 'ניכוי רשות — כנראה כמקדמה (קוד 1), לוודא', get: (ce) => ce.deductions.loans },
   // הבראה — the accountant computes it by job scope; when our table carries
   // an amount anyway, it is surfaced so nobody pays it twice.

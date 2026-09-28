@@ -357,23 +357,37 @@ ok('with no history nothing is zeroed', () => {
 
 console.log('a code that gets confirmed becomes a row, without a deploy');
 ok('a component with no confirmed code stays a note until one is entered', () => {
-  const r = { ...row, manual: { ...row.manual, cibus: { kind: 'number', amount: 120 } } };
+  // תווי מזון is the remaining unconfirmed one. It sits under שווי ארוחות in
+  // the אקסולוגיה just as סיבוס does, and it is deliberately NOT given סיבוס's
+  // code: "probably the same line" is the reasoning that once put a work-day
+  // count under הבראה.
+  const r = { ...row, manual: { ...row.manual, gift_card: { kind: 'empty' } } };
+  r.breakdown = { ...row.breakdown, components: { ...row.breakdown.components, meal_vouchers: 90 } };
   const src = buildExportSource('2026-09', [r]);
 
-  // סיבוס still has no confirmed code — שווי ארוחות appears twice in the
-  // imputed table (2 and 21) and nobody has said which.
   const bare = shkulit.buildMovements(src);
-  assert.ok(!bare.rows.some((x) => [21, 55].includes(x[3])), 'nothing is guessed into the file');
-  assert.ok(bare.notes.some((n) => n.subject === 'סיבוס'), 'it travels as a note instead');
+  assert.ok(bare.notes.some((n) => n.subject === 'תווי מזון / כלכלה'), 'it travels as a note');
+  assert.ok(!bare.rows.some((x) => x[3] === 21 && x[4] === 90),
+    'and is never filed under סיבוס\'s code just because it is the same table');
 
-  // Once the code is confirmed it is entered in settings — no deploy.
-  const withCodes = shkulit.buildMovements(src, new Map(), { cibus: 21 });
-  const cibus = withCodes.rows.find((x) => x[3] === 21);
-  assert.ok(cibus, 'סיבוס is now a row');
-  assert.strictEqual(cibus[2], 2, 'זקופות — table 2, not the salary table');
-  assert.strictEqual(cibus[4], 120);
-  assert.ok(!withCodes.notes.some((n) => n.subject === 'סיבוס'),
+  // Once confirmed it is entered in settings — no deploy.
+  const withCode = shkulit.buildMovements(src, new Map(), { meal_vouchers: 2 });
+  const mv = withCode.rows.find((x) => x[3] === 2);
+  assert.ok(mv, 'it is now a row');
+  assert.strictEqual(mv[2], 2, 'זקופות — table 2');
+  assert.strictEqual(mv[4], 90);
+  assert.ok(!withCode.notes.some((n) => n.subject === 'תווי מזון / כלכלה'),
     'once it is a row it stops being a note — otherwise it gets keyed twice');
+});
+ok('the two confirmed imputed codes are rows, not notes', () => {
+  const r = { ...row, manual: { ...row.manual, cibus: { kind: 'number', amount: 180 } } };
+  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const gift = rr.find((x) => x[3] === 22);
+  const cibus = rr.find((x) => x[3] === 21);
+  assert.deepStrictEqual(gift.slice(2), [2, 22, 200, 1], 'שי לחג: table 2, code 22');
+  assert.deepStrictEqual(cibus.slice(2), [2, 21, 180, 1], 'סיבוס: table 2, code 21');
+  assert.ok(!nn.some((n) => ['סיבוס', 'שי לחג', 'תו קנייה (גיפט קארד)'].includes(n.subject)),
+    'neither is also a note');
 });
 ok('a configured deduction keeps its sign and its own table', () => {
   const src = buildExportSource('2026-09', [row]);
