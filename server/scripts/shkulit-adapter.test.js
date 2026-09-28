@@ -434,26 +434,36 @@ ok('an hourly employee: days and the pay for them, in one row', () => {
   assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 2000, 'and it comes to the pay');
   assert.strictEqual(v[2], 1, 'רכיבי שכר');
 });
-ok('a תקן employee: the days are used, and NOTHING is added to her salary', () => {
-  // Her salary does not move with the days — it already contains them. A rate
-  // here would pay the same leave twice: once inside the agreed salary and
-  // once beside it.
+ok('a תקן employee gets NO vacation row at all — a zero rate does not suppress pay', () => {
+  // The first attempt filed code 8 at תעריף 0, assuming a zero rate reports the
+  // days and adds nothing. שקלולית treats 0 as "not supplied" and substitutes
+  // the component's own stored rate: ליאור's six days went out as 0 × 6 and
+  // came back ₪476.85 × 6 = ₪2,861, paid on top of a salary that already
+  // contained them.
   const r = {
-    ...row, salary_type: 'global', vacation_eff_days: 5, vacation_pay: 0,
-    vacation_balance_available: 3, manual: {},
+    ...row, salary_type: 'global', vacation_eff_days: 6, vacation_pay: 0,
+    vacation_balance_available: 4, manual: {},
     breakdown: { ...row.breakdown, rates: {},
       components: { base_salary: 10300,
         teken_breakdown: { teken_salary: 10300, hourly_value: 62, regular_pay: 10300, ot125_pay: 0, ot150_pay: 0, completion: 0 } },
       deductions: {} },
   };
   const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
-  const v = rr.find((x) => x[3] === 8);
-  assert.ok(v, 'the row still exists — the balance has to be drawn from');
-  assert.strictEqual(v[5], 5, 'all five days are reported as used');
-  assert.strictEqual(v[4], 0, 'and the rate is zero — no money is added');
-  assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 0);
-  assert.ok(nn.some((n) => n.subject === 'ימי חופשה' && /מעבר ליתרה/.test(n.text)),
-    'the two days beyond her balance are reported for גמר חשבון');
+  assert.ok(!rr.some((x) => x[3] === 8),
+    'nothing may be filed under code 8 for a תקן employee — not even at rate 0');
+  const note = nn.find((n) => n.subject === 'ימי חופשה');
+  assert.ok(note, 'the days still reach the accountant');
+  assert.ok(/ניצול חופשה בלבד/.test(note.text), 'told explicitly to record use without payment');
+  assert.ok(/6/.test(note.text), 'with the number of days');
+});
+ok('a quantity of zero still switches a component off — that part did work', () => {
+  // Worth pinning: the carried-forward rows rely on qty 0, and they behaved
+  // correctly in the same file where the rate-0 assumption failed. The two are
+  // different columns and only one of them is honoured at zero.
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr } = shkulit.buildMovements(src, new Map([['17', [{ code: 44, table: 1 }]]]));
+  const z = rr.find((x) => x[3] === 44);
+  assert.deepStrictEqual(z.slice(4), [0, 0], 'rate AND quantity zero is the switch-off');
 });
 ok('an hourly employee capped at her balance files only what she had', () => {
   const r = { ...row, salary_type: 'hourly', vacation_eff_days: 5, vacation_pay: 800,

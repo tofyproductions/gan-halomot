@@ -373,27 +373,44 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     const vacDays = round2(Number(ce.quantities?.vacation_days) || 0);
     const vacTaken = round2(Number(ce.quantities?.vacation_days_taken) || 0);
     const vacPay = round2(Number(ce.earnings?.vacation_pay) || 0);
-    if (vacDays > 0) {
-      if (vacPay > 0) {
-        pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
-          'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
-      } else {
-        // Used, not paid — a תקן employee, or an hourly one with no rate on
-        // her card. Either way the count must still reach the balance.
-        push(RECORD_TYPE.SALARY, VACATION_CODE, 0, vacDays);
-      }
+    const vacIsGlobal = ce.employee.salary_type === 'global';
+
+    if (vacDays > 0 && vacPay > 0 && !vacIsGlobal) {
+      // An HOURLY employee: the days are paid, and one row carries both facts —
+      // quantity is the days, rate is the daily rate.
+      pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
+        'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
     }
+
     if (vacDays > 0 || vacTaken > 0) {
+      // A תקן employee's days are NOT filed as a row at all.
+      //
+      // The first attempt sent code 8 with תעריף 0, on the assumption that a
+      // zero rate reports the days and adds nothing. It does not: שקלולית
+      // treats a rate of 0 as "not supplied" and substitutes the component's
+      // own stored rate. ליאור's six days went out as 0 × 6 and came back as
+      // ₪476.85 × 6 = ₪2,861 — paid on top of a salary that already contained
+      // them, which is precisely the double payment this was meant to prevent.
+      //
+      // (A quantity of 0 DOES switch a component off — that is what the
+      // carried-forward rows rely on, and those behaved exactly as intended in
+      // the same file. It is the RATE column that is not honoured at zero.)
+      //
+      // So nothing is filed for her, and the count travels on the notes sheet
+      // for the accountant to enter as ניצול חופשה. Our own balance is the
+      // authoritative one either way — it is what the employee sees and what
+      // גמר חשבון is settled from.
+      const base = vacIsGlobal
+        ? `${vacDays} ימי חופשה — עובדת תקן. ⚠️ לרשום כניצול חופשה בלבד, ללא תמורה: השכר החודשי כבר כולל את הימים. הרכיב לא נשלח בקובץ כי תעריף 0 אינו מכבה תשלום בשקלולית.`
+        : (vacPay > 0 ? `${vacDays} ימי חופשה בתשלום.` : `${vacDays} ימי חופשה — ללא תעריף שעה בכרטיס, לרשום כניצול בלבד.`);
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'ימי חופשה',
         text: ce.quantities?.vacation_capped
           ? `${vacDays} ימים לתשלום — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
           : (ce.quantities?.vacation_overdraft_days
-            ? `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו במלואם במסגרת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`
-            : (vacPay > 0
-              ? `${vacDays} ימי חופשה בתשלום.`
-              : `${vacDays} ימי חופשה — נוצלו מהיתרה, ללא תוספת תשלום (השכר החודשי כולל אותם).`)),
+            ? `${base} מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה — היתרה נכנסת למינוס לקיזוז בגמר חשבון.`
+            : base),
       });
     }
 
