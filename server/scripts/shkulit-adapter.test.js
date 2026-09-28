@@ -81,8 +81,10 @@ ok('every non-zero amount component is one row; zeros vanish', () => {
     assert.strictEqual(r[0], 8);
     assert.strictEqual(typeof r[0], 'number', 'must be numeric, not a date string');
     assert.strictEqual(r[1], '17');
-    // סוג רשומה = which code table. Every row we emit is a רכיבי שכר row.
-    assert.strictEqual(r[2], 1, 'record type: 1 = שכר');
+    // סוג רשומה = which code table the row's קוד רכיב came from. Salary
+    // components are table 1; שי לחג is an imputed income and is table 2 —
+    // the column exists precisely so the two cannot be confused.
+    assert.strictEqual(r[2], r[3] === 22 ? 2 : 1, `record type for code ${r[3]}`);
   }
 });
 ok('deductions are negative', () => {
@@ -91,10 +93,16 @@ ok('deductions are negative', () => {
 });
 ok('unmapped components + directives land in notes, not rows', () => {
   const subjects = notes.map(n => n.subject);
-  assert.ok(subjects.includes('תו קנייה (גיפט קארד)'));
+  // שי לחג is NOT here any more: its code was confirmed on 28.09.2026 and it
+  // is a row (22, table 2). A component that is both a row and a note gets
+  // keyed twice, so leaving it in this list would be the bug.
+  assert.ok(!subjects.includes('תו קנייה (גיפט קארד)') && !subjects.includes('שי לחג'),
+    'a component with a confirmed code stops being a note');
+  assert.ok(rows.some(r => r[3] === 22 && r[2] === 2), 'שי לחג is a row in the imputed table');
   assert.ok(subjects.includes('ניכוי הלוואה'));
   assert.ok(subjects.some(s => s.startsWith('ניכוי מקדמה')));
-  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36].includes(r[3])), 'no invented codes');
+  // 22 is שי לחג, confirmed by the software house on 28.09.2026.
+  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36, 22].includes(r[3])), 'no invented codes');
 });
 ok('global employee → base as the resolved amount; net employee → flagged', () => {
   const globalRow = {
@@ -348,25 +356,23 @@ ok('with no history nothing is zeroed', () => {
 });
 
 console.log('a code that gets confirmed becomes a row, without a deploy');
-ok('gift card and סיבוס ride the notes sheet until a code is configured', () => {
+ok('a component with no confirmed code stays a note until one is entered', () => {
   const r = { ...row, manual: { ...row.manual, cibus: { kind: 'number', amount: 120 } } };
   const src = buildExportSource('2026-09', [r]);
 
-  // No codes configured — unchanged behaviour, nothing guessed into the file.
+  // סיבוס still has no confirmed code — שווי ארוחות appears twice in the
+  // imputed table (2 and 21) and nobody has said which.
   const bare = shkulit.buildMovements(src);
-  assert.ok(!bare.rows.some((x) => [2, 21, 55].includes(x[3])), 'no invented codes');
-  assert.ok(bare.notes.some((n) => n.subject === 'תו קנייה (גיפט קארד)'));
-  assert.ok(bare.notes.some((n) => n.subject === 'סיבוס'));
+  assert.ok(!bare.rows.some((x) => [21, 55].includes(x[3])), 'nothing is guessed into the file');
+  assert.ok(bare.notes.some((n) => n.subject === 'סיבוס'), 'it travels as a note instead');
 
-  // Codes confirmed and entered in the settings screen.
-  const withCodes = shkulit.buildMovements(src, new Map(), { gift_card: 55, cibus: 2 });
-  const gift = withCodes.rows.find((x) => x[3] === 55);
-  const cibus = withCodes.rows.find((x) => x[3] === 2);
-  assert.ok(gift, 'the gift card is now a row');
-  assert.deepStrictEqual(gift.slice(2), [2, 55, 200, 1], 'imputed-income table, the amount, quantity 1');
+  // Once the code is confirmed it is entered in settings — no deploy.
+  const withCodes = shkulit.buildMovements(src, new Map(), { cibus: 21 });
+  const cibus = withCodes.rows.find((x) => x[3] === 21);
   assert.ok(cibus, 'סיבוס is now a row');
   assert.strictEqual(cibus[2], 2, 'זקופות — table 2, not the salary table');
-  assert.ok(!withCodes.notes.some((n) => n.subject === 'תו קנייה (גיפט קארד)'),
+  assert.strictEqual(cibus[4], 120);
+  assert.ok(!withCodes.notes.some((n) => n.subject === 'סיבוס'),
     'once it is a row it stops being a note — otherwise it gets keyed twice');
 });
 ok('a configured deduction keeps its sign and its own table', () => {

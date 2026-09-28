@@ -97,6 +97,10 @@ const COMPONENTS = [
   { key: 'miluim', code: 42, label: 'ימי מילואים', get: (ce) => ce.earnings.miluim },
   { key: 'absence', code: 36, label: 'ימים חסרים', sign: -1, unit: 'ימים', get: (ce) => ce.deductions.absence, units: (ce) => ce.quantities.absence_deduct_days },
   { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, unit: 'שעות', get: (ce) => ce.deductions.partial_absence, units: (ce) => ce.quantities.partial_absence_hours },
+  // שי לחג — confirmed 28.09.2026: סוג רשומה 2 (הכנסות זקופות), קוד 22.
+  // The first code in this file that arrived confirmed rather than guessed,
+  // which is why it is a row here instead of a line on the notes sheet.
+  { key: 'gift_card', code: 22, table: RECORD_TYPE.IMPUTED, label: 'שי לחג', get: (ce) => ce.earnings.gift_card },
 ];
 
 
@@ -122,7 +126,6 @@ const HOURS = {
 const UNMAPPED = [
   { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
   { key: 'cibus', label: 'סיבוס', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.cibus },
-  { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', table: RECORD_TYPE.IMPUTED, hint: 'זקופה — לוודא קוד', get: (ce) => ce.earnings.gift_card },
   { key: 'loans', label: 'ניכוי הלוואה', table: RECORD_TYPE.VOLUNTARY_DEDUCTION, sign: -1, hint: 'ניכוי רשות — כנראה כמקדמה (קוד 1), לוודא', get: (ce) => ce.deductions.loans },
   // הבראה — the accountant computes it by job scope; when our table carries
   // an amount anyway, it is surfaced so nobody pays it twice.

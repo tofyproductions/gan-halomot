@@ -91,35 +91,54 @@ function vacationBalance(opening, monthlyAccrual, targetMonth, usedSinceOpening 
 }
 
 /**
- * How many vacation days may actually be FILED for the month.
+ * How many vacation days may actually be FILED for the month — and this is the
+ * one place where a global employee and an hourly one are treated differently.
  *
- * She was away seven days; her balance holds two. The accountant is sent two,
- * because paid vacation is drawn from a balance and a balance cannot go below
- * nothing — filing seven would pay five days of leave she has not earned, and
- * the payslip would then report a balance that never existed.
+ * AN HOURLY EMPLOYEE is paid for the days she has. She was away seven and holds
+ * two: two are filed. Paid leave is drawn from a balance, and there is no pay
+ * behind the five she has not earned — her salary is the hours she worked.
  *
- * The other five days do not vanish from the record. They come back as
- * `unpaid`, with the reason, so the office sees that a person was absent for
- * days nobody is paying for and can decide what they were — unpaid leave, a
- * correction to the balance, or an advance the gan chooses to grant. That
- * decision is a person's; this function only refuses to invent the days.
+ * A GLOBAL EMPLOYEE is paid for all five days of סוכות whether or not the
+ * balance covers them, because her salary does not move with the days: she
+ * receives the agreed figure and the leave is drawn against it. So the days are
+ * filed in full and the BALANCE GOES NEGATIVE. That negative is real money the
+ * gan has advanced, and at גמר חשבון it is set against her final payment — so
+ * it has to be traceable to the month it happened in, not discovered as a lump
+ * nobody can explain to the person it is being deducted from.
  *
- * With no balance on file (`available` null) NOTHING is capped: an unknown
- * balance must not silently reduce what an employee is paid. That is the whole
- * difference between "she has two days" and "we do not know how many she has".
+ * That is why `overdraft` comes back with the days rather than being inferred
+ * later from a balance that has since accrued forward. A person being handed a
+ * deduction on her last day is owed the sentence "these five days, this month,
+ * and here is what your balance was then".
  *
- * @param {number} taken       days the office recorded for the month
+ * With no balance on file (`available` null) NOTHING is capped and nothing is
+ * recorded as an overdraft: an unknown balance must not reduce anyone's pay, and
+ * it must not manufacture a debt either.
+ *
+ * @param {number} taken           days the office recorded for the month
  * @param {number|null} available  days in hand, or null when unknown
- * @returns {{paid:number, unpaid:number, capped:boolean, available:number|null}}
+ * @param {object} [opts]
+ * @param {boolean} [opts.isGlobal=false]  a תקן employee — paid regardless
+ * @returns {{paid:number, unpaid:number, overdraft:number, capped:boolean, available:number|null}}
  */
-function vacationUsageForMonth(taken, available) {
+function vacationUsageForMonth(taken, available, opts = {}) {
   const want = Math.max(0, Number(taken) || 0);
+  const isGlobal = opts.isGlobal === true;
+
   if (available == null || !Number.isFinite(Number(available))) {
-    return { paid: want, unpaid: 0, capped: false, available: null };
+    return { paid: want, unpaid: 0, overdraft: 0, capped: false, available: null };
   }
-  const have = Math.max(0, round3(Number(available)));
-  if (want <= have) return { paid: want, unpaid: 0, capped: false, available: have };
-  return { paid: have, unpaid: round3(want - have), capped: true, available: have };
+  const have = round3(Number(available));           // may itself already be negative
+  const beyond = round3(Math.max(0, want - Math.max(0, have)));
+
+  if (beyond === 0) {
+    return { paid: want, unpaid: 0, overdraft: 0, capped: false, available: have };
+  }
+  if (isGlobal) {
+    // Paid in full; the excess is an advance, recorded against this month.
+    return { paid: want, unpaid: 0, overdraft: beyond, capped: false, available: have };
+  }
+  return { paid: round3(Math.max(0, have)), unpaid: beyond, overdraft: 0, capped: true, available: have };
 }
 
 module.exports = {

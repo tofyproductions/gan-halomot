@@ -166,4 +166,54 @@ console.log('what may be FILED is capped by the balance');
   ok('a month with no vacation is not flagged');
 }
 
+console.log('a global employee and an hourly one are not treated the same');
+{
+  // סוכות: five days away, three in the balance.
+  const hourly = V.vacationUsageForMonth(5, 3, { isGlobal: false });
+  assert.strictEqual(hourly.paid, 3, 'an hourly employee is paid the days she has');
+  assert.strictEqual(hourly.unpaid, 2);
+  assert.strictEqual(hourly.overdraft, 0, 'she owes nothing — she simply was not paid');
+  assert.strictEqual(hourly.capped, true);
+  ok('an hourly employee is capped at her balance and owes nothing');
+
+  const global = V.vacationUsageForMonth(5, 3, { isGlobal: true });
+  assert.strictEqual(global.paid, 5, 'a תקן salary does not move with the days — all five are paid');
+  assert.strictEqual(global.unpaid, 0);
+  assert.strictEqual(global.overdraft, 2, 'the two uncovered days are an advance');
+  assert.strictEqual(global.capped, false, 'nothing was withheld, so nothing was capped');
+  assert.strictEqual(global.balance_before ?? global.available, 3,
+    'the balance she had that month travels with the debt');
+  ok('a global employee is paid in full and the uncovered days become a debt');
+}
+{
+  const none = V.vacationUsageForMonth(5, 0, { isGlobal: true });
+  assert.strictEqual(none.paid, 5);
+  assert.strictEqual(none.overdraft, 5, 'no balance at all means the whole absence is advanced');
+  ok('a global employee with no balance is still paid, and owes every day');
+
+  const already = V.vacationUsageForMonth(2, -4, { isGlobal: true });
+  assert.strictEqual(already.paid, 2);
+  assert.strictEqual(already.overdraft, 2,
+    'an already-negative balance funds nothing, so both days are advanced');
+  ok('an employee already in arrears adds the whole of this month to the debt');
+}
+{
+  const fits = V.vacationUsageForMonth(2, 7, { isGlobal: true });
+  assert.strictEqual(fits.overdraft, 0, 'inside the balance there is no debt');
+  assert.strictEqual(fits.paid, 2);
+  ok('a global employee within her balance owes nothing');
+
+  // The distinction that must never collapse: unknown is not zero. A balance
+  // nobody has imported must not manufacture a debt against an employee.
+  const unknown = V.vacationUsageForMonth(5, null, { isGlobal: true });
+  assert.strictEqual(unknown.paid, 5);
+  assert.strictEqual(unknown.overdraft, 0, 'an unknown balance creates no debt');
+  assert.strictEqual(unknown.available, null);
+  ok('with no balance on file a global employee is paid and owes nothing');
+
+  const unknownHourly = V.vacationUsageForMonth(5, null, { isGlobal: false });
+  assert.strictEqual(unknownHourly.paid, 5, 'and an unknown balance still reduces nobody');
+  ok('an unknown balance never reduces an hourly employee either');
+}
+
 console.log(`\nAll vacation-balance tests passed (${passed} checks).`);

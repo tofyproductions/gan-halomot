@@ -118,6 +118,7 @@ function toCanonicalEmployee(row) {
   const vacationUsage = vacationUsageForMonth(
     vacationDaysTaken,
     row.vacation_balance_available == null ? null : num(row.vacation_balance_available),
+    { isGlobal },
   );
   const vacationDays = vacationUsage.paid;
 
@@ -180,6 +181,9 @@ function toCanonicalEmployee(row) {
       // and risk disagreeing with the file that was actually sent.
       vacation_days_taken: vacationDaysTaken,
       vacation_days_unpaid: vacationUsage.unpaid,
+      // Days a GLOBAL employee was paid for but had not earned — an advance the
+      // gan set against her final payment at גמר חשבון.
+      vacation_overdraft_days: vacationUsage.overdraft,
       vacation_capped: vacationUsage.capped,
       vacation_balance_available: vacationUsage.available,
       holiday_days: num(holidayDays),

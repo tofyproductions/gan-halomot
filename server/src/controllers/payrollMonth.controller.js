@@ -1713,6 +1713,10 @@ async function getMonth(req, res, next) {
             // Merging them would hide exactly the disagreement worth seeing.
             balance: balance && {
               ...balance,
+              // A תקן employee is paid her leave whether or not the balance
+              // covers it, so this is the debt side of that: days advanced this
+              // month, and where the running balance stands after them.
+              overdraft_this_month: vacUse.overdraft,
               // The month's own days are not charged above — show what the
               // balance would be once this month is saved, so the office sees
               // an overdraw before approving it rather than after.
@@ -2000,6 +2004,10 @@ async function upsertEntry(req, res, next) {
       },
       { new: true, upsert: true },
     ).populate('manual.advance_deduction_preset_id');
+
+    // The vacation debt is pinned to the month it arose in, every time the
+    // month's days change — including back down to zero.
+    await recordVacationOverdraft(employeeId, month);
 
     // Auto-bump usage_count for the chosen preset (helps sort by popularity)
     if (body.advance_deduction_preset_id) {
@@ -3842,7 +3850,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // speaks about the same number the שקלולית file carries.
     const vacTaken = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0);
     const vacAvail = r.vacation_balance_available;
-    const vacUse = vacationUsageForMonth(vacTaken, vacAvail == null ? null : Number(vacAvail));
+    const vacUse = vacationUsageForMonth(vacTaken, vacAvail == null ? null : Number(vacAvail), { isGlobal });
     const vac = vacUse.paid;
     const bonus = r.bonus?.effective || 0;
     const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
@@ -3996,7 +4004,10 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${payRow}
       </tr>
       <tr>
-        ${cell('חופשה', vac ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}` : (vacUse.capped ? `0 (מתוך ${n1(vacTaken)} — אין יתרה)` : ''), vacUse.capped ? { color: '#b91c1c', bold: true } : {})}
+        ${cell('חופשה', vac
+          ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
+          : (vacUse.capped ? `0 (מתוך ${n1(vacTaken)} — אין יתרה)` : ''),
+          (vacUse.capped || vacUse.overdraft) ? { color: '#b91c1c', bold: true } : {})}
         ${cell('מילואים', nt(r.manual?.miluim))}
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}
@@ -5672,6 +5683,89 @@ async function setShkulitCodes(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * Record — or clear — a month's חופשה overdraft for a תקן employee.
+ *
+ * Written whenever the month's vacation days change, because the debt only
+ * means anything if it is pinned to the month it arose in. Recomputed later
+ * from a balance that has since accrued forward, the same five days look like
+ * a different number, and an employee cannot be shown a deduction that cannot
+ * be reconstructed.
+ *
+ * Clearing matters as much as writing: if the days are corrected downwards, or
+ * a balance import shows she had the leave after all, the debt has to go away
+ * rather than sit there until somebody is charged for it.
+ */
+async function recordVacationOverdraft(employeeId, month) {
+  try {
+    const emp = await Employee.findById(employeeId)
+      .select('salary_type vacation_balance_opening vacation_monthly_accrual').lean();
+    if (!emp) return;
+    const opening = emp.vacation_balance_opening || {};
+    const isGlobal = emp.salary_type === 'global';
+
+    const rowNow = await PayrollMonth.findOne({ employee_id: employeeId, month })
+      .select('vacation_eff_days manual.vacation_days').lean();
+    const taken = Number(rowNow?.vacation_eff_days ?? rowNow?.manual?.vacation_days) || 0;
+
+    let overdraft = { days: 0, balance_before: 0, days_taken: taken, recorded_at: new Date() };
+    if (isGlobal && taken > 0 && opening.as_of_month) {
+      const prior = await PayrollMonth.find({
+        employee_id: employeeId, month: { $lt: month, $gt: opening.as_of_month },
+      }).select('month vacation_eff_days manual.vacation_days').lean();
+      const usedSince = prior.reduce(
+        (n, r) => n + (Number(r.vacation_eff_days ?? r.manual?.vacation_days) || 0), 0,
+      );
+      const bal = vacationBalanceFor(opening, emp.vacation_monthly_accrual, month, usedSince);
+      const available = bal ? bal.available : null;
+      const use = vacationUsageForMonth(taken, available, { isGlobal });
+      overdraft = {
+        days: use.overdraft,
+        balance_before: available == null ? 0 : available,
+        days_taken: taken,
+        recorded_at: use.overdraft > 0 ? new Date() : null,
+      };
+    }
+    await PayrollMonth.updateOne({ employee_id: employeeId, month }, { $set: { vacation_overdraft: overdraft } });
+  } catch (e) {
+    console.error('[vacation-overdraft] recording failed:', e.message);
+  }
+}
+
+/**
+ * GET /payroll-month/vacation-overdraft/:employeeId
+ *
+ * Every month this employee was paid leave she had not earned, oldest first —
+ * what גמר חשבון is settled from, and what she is entitled to be shown.
+ */
+async function getVacationOverdraft(req, res, next) {
+  try {
+    const { employeeId } = req.params;
+    const emp = await Employee.findById(employeeId)
+      .select('full_name salary_type vacation_balance_opening vacation_monthly_accrual').lean();
+    if (!emp) return res.status(404).json({ error: 'עובד/ת לא נמצא/ה' });
+
+    const rows = await PayrollMonth.find({
+      employee_id: employeeId, 'vacation_overdraft.days': { $gt: 0 },
+    }).select('month vacation_overdraft').sort({ month: 1 }).lean();
+
+    const months = rows.map((r) => ({
+      month: r.month,
+      days: r.vacation_overdraft.days,
+      days_taken: r.vacation_overdraft.days_taken,
+      balance_before: r.vacation_overdraft.balance_before,
+      recorded_at: r.vacation_overdraft.recorded_at,
+    }));
+    res.json({
+      employee_id: String(employeeId),
+      full_name: emp.full_name,
+      salary_type: emp.salary_type,
+      total_days: Math.round(months.reduce((n, m) => n + m.days, 0) * 1000) / 1000,
+      months,
+    });
+  } catch (err) { next(err); }
+}
+
 async function shkulitSourceFor(req, month) {
   // Fetched as the CALLER — bank fields are present only for accounting/admin,
   // and the source layer's setup_error says so if anyone else sneaks in.
@@ -5931,6 +6025,7 @@ module.exports = {
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
   getShkulitExport, getShkulitFile, getShkulitCodes, setShkulitCodes,
+  getVacationOverdraft,
   // The workbook builders are exported so the download path, the send path and
   // the tests all assemble the accountant's files from the same code.
   shkulitMovementsWorkbook, shkulitMasterWorkbook,

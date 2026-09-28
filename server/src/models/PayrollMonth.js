@@ -188,6 +188,25 @@ const payrollMonthSchema = new mongoose.Schema({
   // UI to show "balance available" alongside any month-level vacation usage.
   vacation_balance_from_payslip: { type: Number, default: null },
   vacation_balance_recorded_at: { type: Date, default: null },
+
+  // ── חופשה taken beyond the balance, by a תקן employee ──────────────────
+  //
+  // A global employee is paid for her leave whether or not the balance covers
+  // it — her salary does not move with the days. The uncovered days are an
+  // advance the gan makes, and at גמר חשבון they are set against her final
+  // payment.
+  //
+  // They are RECORDED here, on the month they happened, rather than inferred
+  // later from a balance that has since accrued forward or been re-imported.
+  // Somebody being handed a deduction on her last day is owed the sentence
+  // "these days, this month, and this was your balance then" — and a figure
+  // recomputed from today's data cannot say that.
+  vacation_overdraft: {
+    days: { type: Number, default: 0 },          // days beyond the balance
+    balance_before: { type: Number, default: 0 }, // what was in hand that month
+    days_taken: { type: Number, default: 0 },     // the whole absence
+    recorded_at: { type: Date, default: null },
+  },
   // Vacation requests (EmployeeRequest._id) approved into this month.
   // When a manager approves a vacation request, the days are added to
   // manual.vacation_days and the request id is recorded here so the UI
