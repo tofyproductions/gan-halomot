@@ -55,16 +55,58 @@ function monthsElapsed(asOf, target) {
   const d = (ty - ay) * 12 + (tm - am);
   return d < 0 ? 0 : d;
 }
+function addDaysToYmd(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+// Groups certificates into continuous spells by calendar-date adjacency —
+// mirrors server/src/services/sickPay.js's groupSickSpells(). Certificates
+// with zero gap between them are the same spell even filed separately; a
+// real gap (at least one calendar day) starts a fresh spell at day 1.
+function groupSickSpells(certs) {
+  const sorted = [...certs].filter(c => c && c.from_date)
+    .sort((a, b) => String(a.from_date).localeCompare(String(b.from_date)));
+  const groups = [];
+  let current = null;
+  let currentMaxTo = null;
+  for (const c of sorted) {
+    const from = String(c.from_date).slice(0, 10);
+    const to = String(c.to_date || c.from_date).slice(0, 10);
+    if (current && from <= addDaysToYmd(currentMaxTo, 1)) {
+      current.push(c);
+      if (to > currentMaxTo) currentMaxTo = to;
+    } else {
+      current = [c];
+      groups.push(current);
+      currentMaxTo = to;
+    }
+  }
+  return groups;
+}
 // certs: [{ id, from_date, to_date, days, pay_from_first_day }]
 function computePreview(certs, { dailyValue, balanceAvailable, policyFull }) {
   let rem = balanceAvailable == null ? Infinity : Number(balanceAvailable);
   const sorted = [...certs].sort((a, b) => String(a.from_date).localeCompare(String(b.from_date)));
+  // Work-days already used earlier IN THE SAME SPELL, before this
+  // certificate — so a certificate that continues a spell (no gap) picks up
+  // the bracket where the earlier one left off instead of resetting to a
+  // fresh unpaid day 1.
+  const spellPriorById = new Map();
+  for (const group of groupSickSpells(sorted)) {
+    let running = 0;
+    for (const c of group) {
+      spellPriorById.set(String(c.id), running);
+      running += Math.max(0, Math.round(Number(c.days) || 0));
+    }
+  }
   const rows = sorted.map(c => {
     const days = Math.max(0, Math.round(Number(c.days) || 0));
     const full = !!c.pay_from_first_day || policyFull;
     const covered = Math.max(0, Math.min(days, rem));
     rem -= covered;
-    const paid = paidDaysForSpell(covered, full);
+    const priorInSpell = spellPriorById.get(String(c.id)) || 0;
+    const paid = paidDaysForSpell(priorInSpell + covered, full) - paidDaysForSpell(priorInSpell, full);
     return {
       ...c, work_days: days, covered_days: covered, uncovered_days: days - covered,
       paid_days: round2(paid), paid_amount: round2(paid * dailyValue), full,
@@ -78,8 +120,9 @@ function computePreview(certs, { dailyValue, balanceAvailable, policyFull }) {
  * Sick-day management + statutory sick pay (חוק דמי מחלה) for one employee in a
  * month. The accountant:
  *   - sees approved sick periods with day count, certificate, AND the computed
- *     paid days + ₪ per certificate (each certificate is its own spell — no
- *     continuity — so two certs in a month never merge into one paid period);
+ *     paid days + ₪ per certificate (brackets follow the SPELL — certificates
+ *     with no calendar-day gap between them share one continuous period even
+ *     when filed separately; a real gap starts a fresh spell at day 1);
  *   - toggles "שלם מהיום הראשון" per certificate (skips the day-1=0/2-3=50% law);
  *   - sets the employee's sick-pay policy, opening balance, and ₪-per-day value;
  *   - approves/rejects pending sick reports the employee filed (with their cert);
@@ -433,7 +476,7 @@ export default function SickDetailDialog({ open, row, month, onClose, onSaved })
           <Divider />
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>מחלות מאושרות החודש</Typography>
           <Typography variant="caption" color="text.secondary">
-            כל אישור מחושב בנפרד (אין רצף) — יום 1 ללא תשלום, ימים 2-3 ב-50%, יום 4+ במלא. "מהיום ה-1" משלם הכל במלא.
+            המדרגה עוקבת אחרי הרצף בתאריכים — אישורים ללא פער ביניהם (גם אם הוגשו בנפרד) נספרים כרצף אחד: יום 1 ללא תשלום, ימים 2-3 ב-50%, יום 4+ במלא. פער של יום אחד לפחות מתחיל רצף חדש. "מהיום ה-1" משלם הכל במלא.
           </Typography>
           {approved.length === 0 ? (
             <Typography variant="body2" color="text.secondary">אין מחלות מאושרות החודש.</Typography>

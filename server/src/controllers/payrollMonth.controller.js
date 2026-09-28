@@ -99,7 +99,7 @@ function suggestPunchLabels(sortedPunches) {
 const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { applyCibusReport } = require('../services/cibusImport');
-const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
+const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
 const { lookbackMonths, dayRatesFrom, aggregate } = require('../services/hourlyDayRates');
 const { dispatchEmail } = require('../services/email.service');
@@ -1211,9 +1211,12 @@ async function getMonth(req, res, next) {
       if (specialDayPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + specialDayPay;
 
       // --- Sick pay (דמי מחלה) --------------------------------------------
-      // Each approved certificate is its OWN spell ("אין רצף") — bracketed per
-      // חוק דמי מחלה (day 1 = 0%, days 2-3 = 50%, day 4+ = 100%), unless the
-      // employee's policy is 'full' or a certificate is flagged pay_from_first_day.
+      // The day brackets (day 1 = 0%, days 2-3 = 50%, day 4+ = 100%) follow the
+      // SPELL — certificates with no calendar-day gap between them are the same
+      // spell even when filed separately — not the certificate. A real gap (she
+      // was back, then sick again) starts a fresh spell at day 1. See
+      // groupSickSpells() below. Unless the employee's policy is 'full' or a
+      // certificate is flagged pay_from_first_day.
       // Daily value = the employee's daily wage (overridable). Paid days are
       // capped by the accrued sick-day balance (1.5/month, max 90, minus used).
       const sickDailyValue = (emp.sick_daily_value_override != null && emp.sick_daily_value_override !== '')
@@ -1231,6 +1234,22 @@ async function getMonth(req, res, next) {
       // falling back to work_days — so a day she works (e.g. Friday) isn't dropped.
       const sickWorkdays = workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days);
       const empSickReqs = sickReqByEmp.get(String(emp._id)) || [];
+      // Group into spells BEFORE slicing to this month — a spell can straddle
+      // two certificates that are each entirely inside this month (מאי filed
+      // 22–23.09 and, separately, 24.09 — zero gap, one spell) as well as
+      // straddle the month boundary itself. For every cert, how many of the
+      // SAME spell's work-days came before it — whether that's this cert's own
+      // earlier days (cross-month) or an earlier cert in the same spell
+      // (same month or not) — starts its bracket position where the spell
+      // left off, instead of resetting to a fresh unpaid day 1.
+      const spellPriorByCertId = new Map();
+      for (const group of groupSickSpells(empSickReqs)) {
+        let running = 0;
+        for (const c of group) {
+          spellPriorByCertId.set(String(c._id), running);
+          running += countSickWorkDays(c.from_date, c.to_date || c.from_date, sickWorkdays, null);
+        }
+      }
       // Certificates OVERLAPPING the month — not only those that start in it.
       // A spell of 27.08–03.09 used to belong to August alone: its September
       // days were never paid, while the balance (counted below by the full
@@ -1247,7 +1266,8 @@ async function getMonth(req, res, next) {
           from_date: r.from_date,
           to_date: r.to_date || r.from_date,
           work_days: countSickWorkDays(r.from_date, r.to_date || r.from_date, sickWorkdays, month),
-          prior_days: countSickWorkDaysStrictlyBefore(r.from_date, r.to_date || r.from_date, sickWorkdays, month),
+          prior_days: countSickWorkDaysStrictlyBefore(r.from_date, r.to_date || r.from_date, sickWorkdays, month)
+            + (spellPriorByCertId.get(String(r._id)) || 0),
           pay_from_first_day: !!r.pay_from_first_day,
         }));
       // Sick work-days consumed in months strictly before this one — drawn down

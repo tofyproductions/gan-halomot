@@ -2,10 +2,12 @@
  * Israeli statutory sick pay — חוק דמי מחלה (התשל"ו-1976).
  *
  * Core rules implemented here:
- *  - Each sick certificate is treated as its OWN spell ("אין רצף") — the day
- *    brackets restart for every certificate. Two certificates in the same month
- *    are NEVER merged into one continuous period, so the employee gets less than
- *    one long period would yield. This is deliberate, per the business rule.
+ *  - The day brackets follow the SPELL — a run of calendar dates with no gap
+ *    between them — not the certificate. Two certificates that happen to be
+ *    date-adjacent (one ends the day before the next starts, or they overlap)
+ *    are the SAME spell even though they were filed separately; a certificate
+ *    that starts after an actual gap (she was back, then sick again) starts a
+ *    fresh spell at day 1. See groupSickSpells().
  *  - Statutory brackets within a single spell of consecutive sick work-days:
  *        day 1      → 0%
  *        days 2-3   → 50%
@@ -148,6 +150,47 @@ function availableBalance(opening, targetMonth, usedBeforeMonth = 0) {
   return Math.max(0, accrued - (Number(usedBeforeMonth) || 0));
 }
 
+function addDaysToYmd(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Group sick certificates into continuous spells by calendar-date adjacency.
+ * Two certificates with zero gap between them (one's to_date is the day
+ * before the next's from_date, or they overlap) are the SAME spell — even
+ * filed as separate certificates, even across a month boundary. A gap of one
+ * or more calendar days (she was back at work in between) starts a new spell.
+ *
+ * Order-independent; groups (and each group's certs) come back sorted
+ * chronologically by from_date.
+ *
+ * @param {Array<{from_date:string, to_date?:string}>} certs
+ * @returns {Array<Array<cert>>}
+ */
+function groupSickSpells(certs) {
+  const sorted = [...(certs || [])]
+    .filter((c) => c && c.from_date)
+    .sort((a, b) => String(a.from_date).localeCompare(String(b.from_date)));
+  const groups = [];
+  let current = null;
+  let currentMaxTo = null;
+  for (const c of sorted) {
+    const from = String(c.from_date).slice(0, 10);
+    const to = String(c.to_date || c.from_date).slice(0, 10);
+    if (current && from <= addDaysToYmd(currentMaxTo, 1)) {
+      current.push(c);
+      if (to > currentMaxTo) currentMaxTo = to;
+    } else {
+      current = [c];
+      groups.push(current);
+      currentMaxTo = to;
+    }
+  }
+  return groups;
+}
+
 module.exports = {
   STATUTORY_MONTHLY_ACCRUAL,
   STATUTORY_MAX_BALANCE,
@@ -157,4 +200,5 @@ module.exports = {
   monthsElapsed,
   accruedBalance,
   availableBalance,
+  groupSickSpells,
 };
