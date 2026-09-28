@@ -155,7 +155,8 @@
     "test:photo-bulk": "node scripts/photo-bulk.test.js",
     "test:office-recipients": "node scripts/office-recipients.test.js",
     "test:contact-requests": "node scripts/contact-requests.test.js",
-    "test:clock-roster": "node scripts/clock-roster.test.js"
+    "test:clock-roster": "node scripts/clock-roster.test.js",
+    "test:accountant-send": "node scripts/accountant-send-shkulit.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

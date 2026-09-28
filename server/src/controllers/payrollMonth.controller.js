@@ -5269,6 +5269,18 @@ async function sendToAccountant(req, res, next) {
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const branch = req.query.branch || 'all';
 
+    // HARD GATE: the send carries the שקלולית import files, and those are built
+    // for the whole amuta at once (one company, 600) — they cannot be cut to a
+    // single branch. Letting a per-branch send go out would either drop the
+    // import files silently or mail the full amuta file once per branch, and a
+    // file imported twice pays the month twice. One send, all the gans.
+    if (branch !== 'all') {
+      return res.status(409).json({
+        error: 'שליחה לרו״ח נעשית לכל הגנים יחד — קבצי הקליטה לשקלולית נבנים לעמותה כולה (חברה 600) ולא לפי סניף. עברו לתצוגת "כל הסניפים" ושלחו משם.',
+        branch_scoped: true,
+      });
+    }
+
     // HARD GATE: no month leaves while any >2-punch day anywhere is unapproved.
     // The response carries the FULL fix-list (duplicates + missing punches) so
     // the UI can show exactly what has to be sorted out.
@@ -5352,12 +5364,84 @@ async function sendToAccountant(req, res, next) {
       });
     }
 
+    // ── the שקלולית import files ────────────────────────────────────────────
+    // The same two workbooks the "שקלולית" button downloads, built here so the
+    // accountant receives the cards and the files she actually imports in one
+    // email instead of waiting for someone to remember the second button.
+    //
+    // A failure here must NOT swallow the send: the cards and the supporting
+    // documents are worth sending on their own, and the email says plainly
+    // what is missing so nobody imports half a month believing it whole.
+    let shkulitAttachments = [];
+    let shkulitNote = '';
+    let masterForHandoff = null;
+    let shkulitFailed = [];
+    let shkulitError = null;
+    try {
+      const source = await shkulitSourceFor(req, month);
+      if (source.setup_error) {
+        shkulitError = source.setup_error;
+      } else {
+        const movements = shkulitMovementsWorkbook(source, month);
+        shkulitAttachments.push({
+          filename: `${movements.baseName}.xlsx`,
+          contentBase64: movements.buffer.toString('base64'),
+          contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        shkulitFailed = source.failed || [];
+
+        // The master is issued ON CHANGE, not monthly — the accountant already
+        // holds everyone she keyed. Attaching an unchanged master every month
+        // invites a needless re-key of seventy rows.
+        const { master, diff } = await shkulitMasterFor(source);
+        const changedCount = diff.new.length + diff.changed.length;
+        if (changedCount > 0) {
+          const masterWb = shkulitMasterWorkbook(master, diff, month);
+          shkulitAttachments.push({
+            filename: `${masterWb.baseName}.xlsx`,
+            contentBase64: masterWb.buffer.toString('base64'),
+            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          });
+          masterForHandoff = master;
+        }
+        shkulitNote = changedCount > 0
+          ? `מצורפים גם שני קבצי הקליטה לשקלולית: <b>נתוני שכר לחודש</b> ו<b>נתוני עובד</b> (${changedCount} עובדים חדשים/מעודכנים — הפירוט בגיליון "שינויים מאז הקובץ הקודם").`
+          : 'מצורף גם קובץ הקליטה <b>נתוני שכר לחודש</b>. נתוני העובדים לא השתנו מאז הקובץ הקודם, ולכן אין קובץ נתוני עובד החודש.';
+      }
+    } catch (e) {
+      shkulitError = e.message;
+      console.error('accountant send: שקלולית build failed:', e.message);
+    }
+
+    // Employees the import file could not carry. The accountant has to see this
+    // BEFORE she imports — a missing row is a תלוש that never gets produced.
+    const shkulitWarning = shkulitError
+      ? `<div dir="rtl" style="font-family:Arial,sans-serif;border:2px solid #dc2626;background:#fef2f2;padding:12px;border-radius:8px;margin-bottom:12px">
+           <p style="font-weight:800;color:#991b1b;margin:0 0 6px">⚠️ קבצי הקליטה לשקלולית לא צורפו</p>
+           <p style="margin:0">הפקת הקבצים נכשלה: ${shkulitError}</p>
+           <p style="margin:6px 0 0">הכרטיסים והמסמכים התומכים מצורפים כרגיל. הקבצים יישלחו בנפרד לאחר תיקון.</p>
+         </div>`
+      : (shkulitFailed.length
+        ? `<div dir="rtl" style="font-family:Arial,sans-serif;border:2px solid #dc2626;background:#fef2f2;padding:12px;border-radius:8px;margin-bottom:12px">
+             <p style="font-weight:800;color:#991b1b;margin:0 0 6px">⚠️ שימו לב — ${shkulitFailed.length} עובדים לא נכנסו לקובץ הקליטה</p>
+             <p style="margin:0 0 6px">השורות הבאות חסרות בקובץ <b>נתוני שכר לחודש</b>. קליטה של הקובץ כמות שהוא תשאיר אותן ללא תלוש:</p>
+             <ul style="margin:0;padding-inline-start:20px">
+               ${shkulitFailed.map(f => `<li><b>${f.full_name || f.employee_number || 'עובד/ת'}</b> — ${(f.errors || []).join(' · ')}</li>`).join('')}
+             </ul>
+             <p style="margin:6px 0 0">הכרטיסים המצורפים כן כוללים אותן, כך שאפשר להקליד אותן ידנית.</p>
+           </div>`
+        : '');
+
     // Email size: Gmail/GAS caps a whole message at ~25MB. Pack the supporting
     // files into batches under a budget so a heavy month never bounces — the
     // cards PDF goes in email #1, extra files follow in additional emails.
     const FILE_BUDGET = 14 * 1024 * 1024; // base64 chars per email (headroom under GmailApp's 25MB)
     const batches = [];
-    let cur = [], curSize = 0;
+    // The import files ride in email #1 beside the cards — splitting them into
+    // a later "supporting documents" email is how an import gets forgotten.
+    // They are seeded into the first batch so they also count against its budget.
+    let cur = [...shkulitAttachments];
+    let curSize = cur.reduce((n, fa) => n + (fa.contentBase64 || '').length, 0);
     for (const fa of fileAttachments) {
       const sz = (fa.contentBase64 || '').length;
       if (cur.length && curSize + sz > FILE_BUDGET) { batches.push(cur); cur = []; curSize = 0; }
@@ -5366,10 +5450,11 @@ async function sendToAccountant(req, res, next) {
     if (cur.length) batches.push(cur);
     if (batches.length === 0) batches.push([]); // at least the cards email
 
-    const intro = `<div dir="rtl" style="font-family:Arial,sans-serif">
+    const intro = `${shkulitWarning}<div dir="rtl" style="font-family:Arial,sans-serif">
       <p>שלום,</p>
       <p>מצורף קובץ PDF מוכן להדפסה עם <b>כרטיס שכר לכל עובד</b> לחודש <b>${month}</b> (${rows.length} עובדים),
          מחולק לפי סניפים וצבעים, הכולל את כל הנתונים הנדרשים להפקת התלושים.</p>
+      ${shkulitNote ? `<p>${shkulitNote}</p>` : ''}
       <p>מצורפים גם ${fileAttachments.length} מסמכים תומכים לאותו חודש (אישורי מחלה, מילואים וכו')${
         batches.length > 1 ? `, מחולקים ל-${batches.length} מיילים בשל גודלם` : ''}.</p>
     </div><hr>`;
@@ -5391,8 +5476,20 @@ async function sendToAccountant(req, res, next) {
       });
       provider = r?.provider || provider;
     }
-    console.log(`accountant send complete: ${month} → ${to.join(', ')} · ${rows.length} emp · ${batches.length} emails · ${provider}`);
-    try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: true, month, provider, emails: batches.length, employees: rows.length, files: fileAttachments.length, to } }, { upsert: true }); } catch (_) {}
+    // The master has now genuinely reached her, so the next diff starts from
+    // it. Recorded here and not at build time: had the send failed above, a
+    // snapshot written early would leave next month's diff empty and the
+    // employee changes would never be sent at all.
+    if (masterForHandoff) {
+      try {
+        await recordShkulitMasterHandoff(masterForHandoff);
+      } catch (e) {
+        console.error('accountant send: recording the שקלולית master handoff failed:', e.message);
+      }
+    }
+
+    console.log(`accountant send complete: ${month} → ${to.join(', ')} · ${rows.length} emp · ${batches.length} emails · ${shkulitAttachments.length} shkulit files · ${provider}`);
+    try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: true, month, provider, emails: batches.length, employees: rows.length, files: fileAttachments.length, to, shkulit_files: shkulitAttachments.length, shkulit_error: shkulitError || null, shkulit_failed: shkulitFailed.length, shkulit_master_sent: !!masterForHandoff } }, { upsert: true }); } catch (_) {}
     } catch (e) {
       console.error('accountant send (bg) failed:', e.message, JSON.stringify(e.detail || e.code || ''));
       // Record the failure so it can be diagnosed (read from the settings store).
@@ -5425,6 +5522,75 @@ async function shkulitSourceFor(req, month) {
   const data = await fetchMonthData({ month, branch: req.query.branch || 'all' }, req.user);
   if (data?.error) throw Object.assign(new Error(data.error), { status: 400 });
   return buildExportSource(month, data.rows || []);
+}
+
+/**
+ * The two שקלולית workbooks, assembled in ONE place.
+ *
+ * Both the manual download and the monthly send to the accountant go through
+ * these, so the file she downloads and the file that lands in her inbox are
+ * byte-for-byte the same workbook. Two copies of this sheet layout would
+ * eventually disagree about what was filed for the month, and the disagreement
+ * would only surface as a wrong תלוש.
+ *
+ * Recording the snapshot is deliberately NOT done here: downloading records it
+ * immediately, while the send records it only once the email actually left.
+ */
+function shkulitMovementsWorkbook(source, month) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.utils.book_new();
+  wb.Workbook = { Views: [{ RTL: true }] };
+  const { header, rows, notes } = shkulit.buildMovements(source);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
+  // What has no component code (or is free text) rides on a second sheet,
+  // so the accountant reads it in the same file she imports.
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['מספר עובד', 'שם', 'נושא', 'פירוט'],
+    ...notes.map(n => [n.employee_number, n.full_name, n.subject, n.text]),
+  ]), 'הוראות והערות');
+  return {
+    buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
+    baseName: `נתוני שכר לחודש ${month}`,
+    rows, notes,
+  };
+}
+
+function shkulitMasterWorkbook(master, diff, month) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.utils.book_new();
+  wb.Workbook = { Views: [{ RTL: true }] };
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([master.header, ...master.rows]), 'נתוני עובד');
+  // What changed since the last file — so the accountant keys ONLY these
+  // rows instead of hunting for the difference across seventy.
+  const changeRows = [
+    ['מספר עובד', 'שם', 'מה השתנה'],
+    ...diff.new.map(n => [n.employee_number, n.full_name, 'עובד/ת חדש/ה — לקלוט']),
+    ...diff.changed.flatMap(c => c.changes.map(ch => [
+      c.employee_number, c.full_name, `${ch.column}: ${ch.before || '—'} ← ${ch.after || '—'}`,
+    ])),
+  ];
+  if (changeRows.length === 1) changeRows.push(['', '', 'אין שינויים מאז הקובץ הקודם']);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(changeRows), 'שינויים מאז הקובץ הקודם');
+  return {
+    buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
+    baseName: `נתוני עובד ${month}`,
+  };
+}
+
+/**
+ * Record that the accountant now holds this master, so the next diff starts
+ * from it. Called only once the file has genuinely reached her — recording it
+ * earlier would make next month's diff empty and silently drop the changes.
+ */
+async function recordShkulitMasterHandoff(master) {
+  for (const row of master.rows) {
+    const named = shkulit.masterRowToNamed(row);
+    await ShkulitEmployeeSnapshot.updateOne(
+      { employee_number: String(named['מספר עובד']) },
+      { $set: { data: named, last_exported_at: new Date() } },
+      { upsert: true },
+    );
+  }
 }
 
 /** The master rows + the diff against what the accountant already keyed. */
@@ -5490,49 +5656,18 @@ async function getShkulitFile(req, res, next) {
     const source = await shkulitSourceFor(req, month);
     if (source.setup_error) return res.status(400).json({ error: source.setup_error });
 
-    const XLSX = require('xlsx');
-    const wb = XLSX.utils.book_new();
-    wb.Workbook = { Views: [{ RTL: true }] };
-    let baseName;
+    let buf, baseName;
 
     if (type === 'master') {
       const { master, diff } = await shkulitMasterFor(source);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([master.header, ...master.rows]), 'נתוני עובד');
-      // What changed since the last file — so the accountant keys ONLY these
-      // rows instead of hunting for the difference across seventy.
-      const changeRows = [
-        ['מספר עובד', 'שם', 'מה השתנה'],
-        ...diff.new.map(n => [n.employee_number, n.full_name, 'עובד/ת חדש/ה — לקלוט']),
-        ...diff.changed.flatMap(c => c.changes.map(ch => [
-          c.employee_number, c.full_name, `${ch.column}: ${ch.before || '—'} ← ${ch.after || '—'}`,
-        ])),
-      ];
-      if (changeRows.length === 1) changeRows.push(['', '', 'אין שינויים מאז הקובץ הקודם']);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(changeRows), 'שינויים מאז הקובץ הקודם');
+      ({ buffer: buf, baseName } = shkulitMasterWorkbook(master, diff, month));
       // Downloading IS the handoff: record what the accountant now has, so
       // the next diff starts from this file.
-      for (const row of master.rows) {
-        const named = shkulit.masterRowToNamed(row);
-        await ShkulitEmployeeSnapshot.updateOne(
-          { employee_number: String(named['מספר עובד']) },
-          { $set: { data: named, last_exported_at: new Date() } },
-          { upsert: true },
-        );
-      }
-      baseName = `נתוני עובד ${month}`;
+      await recordShkulitMasterHandoff(master);
     } else {
-      const { header, rows, notes } = shkulit.buildMovements(source);
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
-      // What has no component code (or is free text) rides on a second sheet,
-      // so the accountant reads it in the same file she imports.
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-        ['מספר עובד', 'שם', 'נושא', 'פירוט'],
-        ...notes.map(n => [n.employee_number, n.full_name, n.subject, n.text]),
-      ]), 'הוראות והערות');
-      baseName = `נתוני שכר לחודש ${month}`;
+      ({ buffer: buf, baseName } = shkulitMovementsWorkbook(source, month));
     }
 
-    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(baseName)}.xlsx`);
     res.send(buf);
@@ -5607,5 +5742,8 @@ module.exports = {
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
   getShkulitExport, getShkulitFile,
+  // The workbook builders are exported so the download path, the send path and
+  // the tests all assemble the accountant's files from the same code.
+  shkulitMovementsWorkbook, shkulitMasterWorkbook,
   buildAccountantHtml,
 };

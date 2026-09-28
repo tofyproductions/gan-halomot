@@ -972,7 +972,7 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
     const params = {};
     if (branch) params.branch = branch;
     api.post(`/payroll-month/${month}/send-accountant`, { emails: chosen }, { params })
-      .then(res => { toast.success(`השליחה יצאה ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} — הכרטיסים והמסמכים יגיעו תוך כמה דקות`, { autoClose: 6000 }); onClose(); })
+      .then(res => { toast.success(`השליחה יצאה ל-${res.data.sent_to}${res.data.cc ? ` (עותק: ${res.data.cc})` : ''} — הכרטיסים, המסמכים וקבצי הקליטה לשקלולית יגיעו תוך כמה דקות`, { autoClose: 6000 }); onClose(); })
       .catch(err => toast.error(err.response?.data?.error || 'שגיאה בשליחה'))
       .finally(() => setSending(false));
   };
@@ -1034,6 +1034,13 @@ function AccountantPreviewDialog({ open, month, branch, blocked, blockedCount, o
             <Button size="small" variant="outlined" onClick={addExtra}>הוסף</Button>
           </Stack>
           {data && <Typography variant="caption" color="text.secondary">עותק למשרד: <span dir="ltr">{data.office_cc}</span></Typography>}
+          {/* What actually leaves, spelled out — the send now carries the
+              שקלולית import files too, and a silent attachment is one nobody
+              checks before importing it. */}
+          <Alert severity="info" sx={{ fontSize: '0.72rem', py: 0.25 }}>
+            נשלח: כרטיסי שכר (PDF), המסמכים התומכים, וקבצי הקליטה לשקלולית.
+            קובץ "נתוני עובד" מצורף רק אם השתנו פרטי עובדים מאז הקובץ הקודם.
+          </Alert>
           <Button size="small" onClick={onManageContacts}>ניהול אנשי קשר קבועים</Button>
         </Box>
       </DialogContent>
@@ -2685,15 +2692,17 @@ export default function PayrollMonthTable() {
               בעיות בהחתמה
             </Button>
           </Badge>
-          <Tooltip title={punchGate.blocked
-            ? `${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — התצוגה המקדימה פתוחה לצפייה, אבל השליחה עצמה חסומה עד לפתרון ב"בעיות בהחתמה"`
-            : 'שליחת טבלת השכר לרו״ח'}>
+          <Tooltip title={acctBranch
+            ? 'השליחה נעשית לכל הגנים יחד — קבצי הקליטה לשקלולית נבנים לעמותה כולה (חברה 600) ולא לפי סניף. עברו ל"כל הסניפים" כדי לשלוח.'
+            : (punchGate.blocked
+              ? `${punchGate.count} ימים עם יותר מ-2 החתמות ממתינים להחלטת הנה״ח (בכל הגנים) — התצוגה המקדימה פתוחה לצפייה, אבל השליחה עצמה חסומה עד לפתרון ב"בעיות בהחתמה"`
+              : 'שליחת טבלת השכר לרו״ח — כרטיסי שכר, מסמכים תומכים וקבצי הקליטה לשקלולית')}>
             <span>
               <Button size="small" variant="contained" color="primary"
                 startIcon={<SendIcon />}
                 onClick={() => setAcctPreviewOpen(true)}
-                disabled={!data || stagingMode}>
-                שלח לרו״ח{punchGate.blocked ? ` (שליחה חסומה — ${punchGate.count})` : ''}
+                disabled={!data || stagingMode || !!acctBranch}>
+                שלח לרו״ח{acctBranch ? ' (כל הגנים בלבד)' : (punchGate.blocked ? ` (שליחה חסומה — ${punchGate.count})` : '')}
               </Button>
             </span>
           </Tooltip>
