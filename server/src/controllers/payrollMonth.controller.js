@@ -7,7 +7,7 @@ const {
   PayrollMonth, PayrollPresetOption, PayrollCustomColumn, SalaryAdjustment,
   Employee, Branch, Amuta, Punch, EmployeeCommitment, Holiday, SpecialDay,
   PayrollChangeRequest, EmployeeRequest, EmployeeDocument, Setting, PunchResolution,
-  User, PunchEntryTask, PayrollRollup, ShkulitEmployeeSnapshot,
+  User, PunchEntryTask, PayrollRollup, ShkulitEmployeeSnapshot, ShkulitMovementSnapshot,
 } = require('../models');
 const { readEmployeeDocumentBase64 } = require('../services/employeeDocumentFile');
 const { ADMIN_VIEWER } = require('../constants/roles');
@@ -5458,6 +5458,7 @@ async function sendToAccountant(req, res, next) {
     let shkulitAttachments = [];
     let shkulitNote = '';
     let masterForHandoff = null;
+    let movementsFiled = null;
     let shkulitFailed = [];
     let shkulitError = null;
     try {
@@ -5465,7 +5466,9 @@ async function sendToAccountant(req, res, next) {
       if (source.setup_error) {
         shkulitError = source.setup_error;
       } else {
-        const movements = shkulitMovementsWorkbook(source, month);
+        const prevComponents = await previousMovementComponents(source);
+        const movements = shkulitMovementsWorkbook(source, month, prevComponents);
+        movementsFiled = movements.filed;
         shkulitAttachments.push({
           filename: `${movements.baseName}.xlsx`,
           contentBase64: movements.buffer.toString('base64'),
@@ -5570,6 +5573,15 @@ async function sendToAccountant(req, res, next) {
         console.error('accountant send: recording the שקלולית master handoff failed:', e.message);
       }
     }
+    // Same discipline for the movements: only once the file has actually left
+    // may we believe the components in it were switched off.
+    if (movementsFiled) {
+      try {
+        await recordShkulitMovementHandoff(movementsFiled, month);
+      } catch (e) {
+        console.error('accountant send: recording the שקלולית movement handoff failed:', e.message);
+      }
+    }
 
     console.log(`accountant send complete: ${month} → ${to.join(', ')} · ${rows.length} emp · ${batches.length} emails · ${shkulitAttachments.length} shkulit files · ${provider}`);
     try { await Setting.findOneAndUpdate({ key: 'last_accountant_send' }, { value: { at: new Date().toISOString(), ok: true, month, provider, emails: batches.length, employees: rows.length, files: fileAttachments.length, to, shkulit_files: shkulitAttachments.length, shkulit_error: shkulitError || null, shkulit_failed: shkulitFailed.length, shkulit_master_sent: !!masterForHandoff } }, { upsert: true }); } catch (_) {}
@@ -5619,11 +5631,11 @@ async function shkulitSourceFor(req, month) {
  * Recording the snapshot is deliberately NOT done here: downloading records it
  * immediately, while the send records it only once the email actually left.
  */
-function shkulitMovementsWorkbook(source, month) {
+function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map()) {
   const XLSX = require('xlsx');
   const wb = XLSX.utils.book_new();
   wb.Workbook = { Views: [{ RTL: true }] };
-  const { header, rows, notes } = shkulit.buildMovements(source);
+  const { header, rows, notes, filed } = shkulit.buildMovements(source, previousByEmployee);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
   // What has no component code (or is free text) rides on a second sheet,
   // so the accountant reads it in the same file she imports.
@@ -5634,8 +5646,37 @@ function shkulitMovementsWorkbook(source, month) {
   return {
     buffer: XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }),
     baseName: `נתוני שכר לחודש ${month}`,
-    rows, notes,
+    rows, notes, filed,
   };
+}
+
+/**
+ * What each employee was last filed with, so the next file can switch off what
+ * no longer applies. See models/ShkulitMovementSnapshot.js for why this has to
+ * be remembered at all.
+ */
+async function previousMovementComponents(source) {
+  const numbers = source.ready.map((ce) => ce.employee.employee_number).filter(Boolean);
+  if (numbers.length === 0) return new Map();
+  const snaps = await ShkulitMovementSnapshot.find({ employee_number: { $in: numbers } }).lean();
+  return new Map(snaps.map((sn) => [String(sn.employee_number), sn.components || []]));
+}
+
+/**
+ * Record the components this file carried — done only once the file has
+ * genuinely been handed over, exactly like the master snapshot. Recorded
+ * earlier, a failed send would leave us believing we had switched components
+ * off that the accountant never received.
+ */
+async function recordShkulitMovementHandoff(filed, month) {
+  for (const [employeeNumber, components] of filed) {
+    if (!employeeNumber) continue;
+    await ShkulitMovementSnapshot.updateOne(
+      { employee_number: String(employeeNumber) },
+      { $set: { components, month, last_exported_at: new Date() } },
+      { upsert: true },
+    );
+  }
 }
 
 function shkulitMasterWorkbook(master, diff, month) {
@@ -5748,7 +5789,11 @@ async function getShkulitFile(req, res, next) {
       // the next diff starts from this file.
       await recordShkulitMasterHandoff(master);
     } else {
-      ({ buffer: buf, baseName } = shkulitMovementsWorkbook(source, month));
+      const prev = await previousMovementComponents(source);
+      const mv = shkulitMovementsWorkbook(source, month, prev);
+      ({ buffer: buf, baseName } = mv);
+      // Downloading IS the handoff, the same rule the master follows.
+      await recordShkulitMovementHandoff(mv.filed, month);
     }
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

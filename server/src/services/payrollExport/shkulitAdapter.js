@@ -99,21 +99,6 @@ const COMPONENTS = [
   { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, unit: 'שעות', get: (ce) => ce.deductions.partial_absence, units: (ce) => ce.quantities.partial_absence_hours },
 ];
 
-/**
- * ימי עבודה — the worked-day count, reported rather than paid.
- *
- * A global employee's days are already inside her base salary, so this row
- * carries the COUNT with תעריף 0: it adds no money, it only makes the payslip's
- * summary line say how many days the month actually held.
- *
- * Only the global code (4) is here. The accountant also named 05 for an
- * employee paid BY THE DAY, and this system has no such employee — salary_type
- * is hourly or global and nothing else. An hourly employee's time already goes
- * out as hours (codes 1/32/33). Sending her days under the global code would be
- * a guessed code on a money file, which is exactly what cost the 28.09 import,
- * so hourly days stay on the notes sheet until someone confirms the code.
- */
-const WORK_DAYS_GLOBAL_CODE = 4;
 
 /** Hours codes for hourly employees — שקלולית prices rate × quantity. */
 const HOURS = {
@@ -185,25 +170,56 @@ function monthValue(month) {
  * notes (unmapped components + free-text directives) that must travel beside
  * the file, per employee, in the accountant's language.
  */
-function buildMovements(source) {
+function buildMovements(source, previousByEmployee = new Map()) {
   const header = ['חודש עבודה', 'מספר עובד', 'סוג רשומה', 'קוד רכיב', 'תעריף', 'כמות'];
   const rows = [];
   const notes = [];
   const label = monthValue(source.month);
+  // What each employee's file actually contained, so the caller can record it
+  // and next month knows which components to switch off.
+  const filed = new Map();
 
   for (const ce of source.ready) {
     const empNo = ce.employee.employee_number;
+
+    // Every row this employee gets is recorded as it is pushed, so the caller
+    // can remember the set and next month can switch off whatever leaves it.
+    // A zero row is deliberately NOT recorded — it is the switch-off itself,
+    // and remembering it would mean re-sending a zero for a component nobody
+    // is filing any more, for ever.
+    const mine = [];
+    filed.set(empNo, mine);
+    const push = (table, code, rate, qty) => {
+      rows.push([label, empNo, table, code, rate, qty]);
+      if (rate !== 0 || qty !== 0) mine.push({ code, table });
+    };
 
     // Base pay. Hourly → hours priced on שקלולית's side; global → the amount
     // our engine already prorated (their formula, our resolution — same number).
     const hourlyRate = Number(ce.rates?.hourly_rate) || 0;
     if (ce.employee.salary_type === 'hourly' && hourlyRate > 0) {
       const q = ce.quantities;
-      if (q.regular_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.regular.code, hourlyRate, round2(q.regular_hours)]);
-      if (q.ot_125_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours)]);
-      if (q.ot_150_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours)]);
+      if (q.regular_hours) push(RECORD_TYPE.SALARY, HOURS.regular.code, hourlyRate, round2(q.regular_hours));
+      if (q.ot_125_hours) push(RECORD_TYPE.SALARY, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours));
+      if (q.ot_150_hours) push(RECORD_TYPE.SALARY, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours));
+    } else if (ce.earnings.teken_regular || ce.earnings.teken_ot125 || ce.earnings.teken_ot150) {
+      // A תקן employee is filed as the parts her salary is MADE of, never as
+      // the headline figure.
+      //
+      // ליאור מחפוד worked 129.9 of 162.5 committed hours. Her agreed ₪10,300
+      // is ₪7,685 regular + ₪554 OT 125% + ₪2,062 completion. Filing the agreed
+      // ₪10,300 as שכר יסוד and then the completion beside it files ₪12,867 —
+      // the shortfall is paid twice, once because the headline ignores it and
+      // once because the completion exists to cover it.
+      //
+      // The three lines below plus code 38 add back to the agreed salary
+      // exactly, and they are the same four numbers her payslip card shows.
+      const t = ce.earnings;
+      if (t.teken_regular) push(RECORD_TYPE.SALARY, HOURS.regular.code, t.teken_regular, 1);
+      if (t.teken_ot125) push(RECORD_TYPE.SALARY, HOURS.ot125.code, t.teken_ot125, 1);
+      if (t.teken_ot150) push(RECORD_TYPE.SALARY, HOURS.ot150.code, t.teken_ot150, 1);
     } else if (ce.earnings.base_salary) {
-      rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.regular.code, ce.earnings.base_salary, 1]);
+      push(RECORD_TYPE.SALARY, HOURS.regular.code, ce.earnings.base_salary, 1);
       if (ce.employee.salary_type === 'hourly') {
         notes.push({
           employee_number: empNo, full_name: ce.employee.full_name,
@@ -238,9 +254,9 @@ function buildMovements(source) {
       const exact = units > 1 && perUnit > 0 && round2(perUnit * units) === round2(gross);
 
       if (exact) {
-        rows.push([label, empNo, table, comp.code, sign * perUnit, units]);
+        push(table, comp.code, sign * perUnit, units);
       } else {
-        rows.push([label, empNo, table, comp.code, sign * gross, 1]);
+        push(table, comp.code, sign * gross, 1);
         if (units > 1) {
           notes.push({
             employee_number: empNo, full_name: ce.employee.full_name,
@@ -276,18 +292,26 @@ function buildMovements(source) {
       });
     }
 
-    // ימי עבודה — the count, not more money. Global only; see the constant.
+    // ימי עבודה — the count, and it does NOT go in the file.
+    //
+    // It was briefly filed under code 4, on the understanding that 4 was the
+    // work-days code for a global employee. Code 4 is הבראה. Both our own
+    // אקסולוגיה table and שקלולית's screen say so, and the row our file
+    // produced showed up in the payslip as a הבראה line. It paid nothing only
+    // because the rate went out as 0 — put a rate on that row and it pays
+    // recreation money to every global employee in the gan, in the wrong month.
+    //
+    // That is the guessed-code failure the 28.09 import already cost us once,
+    // and it is the reason nothing enters this file on a verbal code alone. The
+    // count travels as a note for everybody until someone confirms the real
+    // code with the software house.
     const daysWorked = round2(Number(ce.quantities?.days_worked) || 0);
     if (daysWorked > 0) {
-      if (ce.employee.salary_type === 'global') {
-        rows.push([label, empNo, RECORD_TYPE.SALARY, WORK_DAYS_GLOBAL_CODE, 0, daysWorked]);
-      } else {
-        notes.push({
-          employee_number: empNo, full_name: ce.employee.full_name,
-          subject: 'ימי עבודה',
-          text: `${daysWorked} ימי עבודה בחודש. קוד 4 הוא לעובד גלובלי בלבד — לעובד/ת שעתי/ת הקוד טרם אושר, ולכן הכמות נמסרת כאן ולא כשורה בקובץ.`,
-        });
-      }
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'ימי עבודה',
+        text: `${daysWorked} ימי עבודה בחודש. הקוד לדיווח ימי עבודה טרם אושר (קוד 4 שייך להבראה), ולכן הכמות נמסרת כאן ולא כשורה בקובץ.`,
+      });
     }
 
     for (const comp of UNMAPPED) {
@@ -321,7 +345,41 @@ function buildMovements(source) {
     }
   }
 
-  return { header, rows, notes };
+  // ── switching off last month's leftovers ────────────────────────────────
+  //
+  // שקלולית carries a payslip forward: a component that was filed last month
+  // and is missing this month is not dropped, it is PAID AGAIN at last month's
+  // value. That is how הבראה — paid once a year, in August — turns up in
+  // September, and how last month's 150% overtime keeps paying an employee who
+  // worked none.
+  //
+  // So every code we filed before and are not filing now goes out again at
+  // zero, which is what switches it off. The alternative is the accountant
+  // reading seventy previous payslips line by line every month, which is
+  // exactly the kind of task that works until the one month it doesn't.
+  //
+  // Only codes WE filed can be switched off this way — see the note in
+  // models/ShkulitMovementSnapshot.js. What the accountant keys by hand is
+  // listed for her below instead of being silently overwritten.
+  for (const ce of source.ready) {
+    const empNo = ce.employee.employee_number;
+    const nowFiled = filed.get(empNo) || [];
+    const nowCodes = new Set(nowFiled.map((c) => `${c.table}:${c.code}`));
+    const previous = previousByEmployee.get(String(empNo)) || [];
+    const stale = previous.filter((p) => !nowCodes.has(`${p.table || RECORD_TYPE.SALARY}:${p.code}`));
+    for (const p of stale) {
+      rows.push([label, empNo, p.table || RECORD_TYPE.SALARY, p.code, 0, 0]);
+    }
+    if (stale.length) {
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'רכיבים שבוטלו',
+        text: `${stale.length} רכיבים שהופיעו בקובץ הקודם ואינם רלוונטיים החודש נשלחו עם 0 כדי לבטלם: קודים ${stale.map((p) => p.code).join(', ')}.`,
+      });
+    }
+  }
+
+  return { header, rows, notes, filed };
 }
 
 const MASTER_HEADER = [

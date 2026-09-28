@@ -255,24 +255,96 @@ ok('a deduction keeps its sign when it is split into units', () => {
   assert.strictEqual(miss[2], 1, 'a negative salary component stays table 1');
 });
 
-console.log('ימי עבודה — reported, not paid');
-ok('a global employee gets code 4 with the day count and no money', () => {
-  const r = {
+console.log('ימי עבודה — never filed under a code nobody confirmed');
+ok('code 4 is הבראה, so no work-days row is ever produced under it', () => {
+  // A code-4 row briefly went out carrying the work-day count. Code 4 is
+  // הבראה — both our אקסולוגיה table and שקלולית's own screen say so — and it
+  // surfaced in the payslip as a recreation line. It paid nothing only because
+  // the rate was 0; a rate on that row pays הבראה to every global employee.
+  const globalRow = {
     ...row, employee_number: '21', israeli_id: '999000021', salary_type: 'global',
     breakdown: { ...row.breakdown, rates: {} },
   };
-  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
-  const days = rr.find(x => x[3] === 4);
-  assert.ok(days, 'a global employee must carry a ימי עבודה row');
-  assert.deepStrictEqual(days.slice(4), [0, 20], 'rate 0 — the row reports, it does not pay');
-  assert.strictEqual(days[2], 1, 'the salary code table');
+  for (const r of [globalRow, row]) {
+    const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+    assert.ok(!rr.some(x => x[3] === 4),
+      'nothing may be filed under code 4 — it belongs to הבראה');
+    assert.ok(nn.some(n => n.subject === 'ימי עבודה' && /20/.test(n.text)),
+      'the day count still reaches the accountant, as a note');
+  }
 });
-ok('an hourly employee never gets the global day code guessed onto her', () => {
-  const { rows: rr, notes: nn } = shkulit.buildMovements(source);
-  assert.ok(!rr.some(x => x[3] === 4),
-    'code 4 is the GLOBAL day code — guessing it onto an hourly employee is how 28.09 broke');
-  assert.ok(nn.some(n => n.subject === 'ימי עבודה' && /20/.test(n.text)),
-    'her day count still reaches the accountant, as a note');
+
+console.log('a תקן employee is filed as the parts, not the headline');
+ok('the agreed salary is never sent whole beside its own completion', () => {
+  // ליאור מחפוד, 09.2026: 129.9 of 162.5 committed hours, מקדם תקן 0.746.
+  // Agreed ₪10,300 = ₪7,685 regular + ₪554 OT125 + ₪2,062 completion.
+  const teken = {
+    ...row, employee_number: '27', israeli_id: '203677125', full_name: 'מחפוד ליאור',
+    salary_type: 'global',
+    breakdown: {
+      ...row.breakdown,
+      rates: {},
+      components: {
+        base_salary: 10300, travel: 272, recreation_monthly: 0, meal_vouchers: 0,
+        teken_breakdown: { regular_pay: 7685, ot125_pay: 554, ot150_pay: 0, completion: 2062 },
+      },
+      deductions: {},
+    },
+    manual: { include_salary_completion: true },
+  };
+  const src = buildExportSource('2026-09', [teken]);
+  const { rows: rr } = shkulit.buildMovements(src);
+  const byCode = new Map(rr.map((r) => [r[3], r]));
+
+  assert.deepStrictEqual(byCode.get(1).slice(4), [7685, 1],
+    'שכר יסוד is the prorated regular pay, NOT the agreed ₪10,300');
+  assert.deepStrictEqual(byCode.get(32).slice(4), [554, 1], 'OT 125% as the amount inside the salary');
+  assert.ok(!byCode.has(33), '150% is zero this month — no row');
+  assert.strictEqual(byCode.get(38)[4], 2062, 'the completion still travels');
+
+  // The whole point: the parts add back to the agreed salary exactly.
+  const salaryTotal = [1, 32, 33, 38]
+    .filter((c) => byCode.has(c))
+    .reduce((t, c) => t + byCode.get(c)[4] * byCode.get(c)[5], 0);
+  assert.strictEqual(salaryTotal, 10301, 'within a shekel of the agreed ₪10,300 — never ₪12,867');
+});
+
+console.log('last month\'s components are switched off, not left to pay again');
+ok('a code filed before and absent now goes out at zero', () => {
+  const src = buildExportSource('2026-09', [row]);
+  // Last month she had ימי חג (44) and הבראה (4); this month neither — the
+  // fixture's holiday pay is zero and הבראה is never filed by us at all.
+  // Code 3 (נסיעות) IS filed this month and must be left alone.
+  const previous = new Map([['17', [
+    { code: 44, table: 1 }, { code: 4, table: 1 }, { code: 3, table: 1 },
+  ]]]);
+  const { rows: rr, notes: nn, filed } = shkulit.buildMovements(src, previous);
+
+  const z44 = rr.find((r) => r[3] === 44);
+  assert.ok(z44, 'the stale ימי חג row must be present');
+  assert.deepStrictEqual(z44.slice(4), [0, 0], 'zeroed — rate and quantity both');
+  const z4 = rr.find((r) => r[3] === 4 && r[4] === 0 && r[5] === 0);
+  assert.ok(z4, 'הבראה from last month is switched off too');
+
+  // Code 3 (נסיעות) IS filed this month, so it must NOT be zeroed.
+  const threes = rr.filter((r) => r[3] === 3);
+  assert.strictEqual(threes.length, 1, 'a component still being filed gets one row, not a zero as well');
+  assert.notStrictEqual(threes[0][4], 0);
+
+  assert.ok(nn.some((n) => n.subject === 'רכיבים שבוטלו'),
+    'the accountant is told which components were switched off');
+
+  // The zero rows must NOT be remembered — otherwise we would re-send a zero
+  // for a component nobody files any more, every month, for ever.
+  const mine = filed.get('17') || [];
+  assert.ok(!mine.some((c) => c.code === 44), 'a switch-off is not itself remembered');
+  assert.ok(mine.some((c) => c.code === 3), 'what was really filed is remembered');
+});
+ok('with no history nothing is zeroed', () => {
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr } = shkulit.buildMovements(src, new Map());
+  assert.ok(!rr.some((r) => r[4] === 0 && r[5] === 0),
+    'a first-ever file has nothing to switch off');
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

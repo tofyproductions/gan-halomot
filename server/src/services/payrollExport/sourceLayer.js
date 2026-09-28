@@ -192,6 +192,20 @@ function toCanonicalEmployee(row) {
     earnings: {
       base_salary: money(c.base_salary),
       salary_completion: salaryCompletion,
+      // ── the תקן split ──────────────────────────────────────────────────
+      // For a global employee `base_salary` is the AGREED salary, not what the
+      // month earned. ליאור מחפוד worked 129.9 of 162.5 committed hours, so her
+      // agreed ₪10,300 is made of ₪7,685 regular + ₪554 OT 125% + ₪2,062
+      // completion. Sending base_salary AND the completion files ₪12,867 for a
+      // ₪10,300 salary — the completion is counted twice, once inside the
+      // agreed figure and once beside it.
+      //
+      // These four are what the payslip card already shows and what they add up
+      // to is the agreed salary exactly. A target that wants components must be
+      // given these, never the headline number.
+      teken_regular: isGlobal ? money(tb.regular_pay) : 0,
+      teken_ot125: isGlobal ? money(tb.ot125_pay) : 0,
+      teken_ot150: isGlobal ? money(tb.ot150_pay) : 0,
       travel: money(c.travel),
       recreation: money(c.recreation_monthly),
       meal_vouchers: money(c.meal_vouchers),
