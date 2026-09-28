@@ -1806,21 +1806,18 @@ async function getMonth(req, res, next) {
           holiday_pay: Math.round((Number(holidayPayInfo?.total_pay ?? manual.holiday_pay) || 0) * 100) / 100,
           // ימים לתלוש: every day she was paid for, not only worked days.
           //
-          // ⚠️ מילואים days are NOT included: this system records the מילואים
-          // PAYMENT as a number-or-text field and never its day count. So a
-          // month of reserve duty contributes its money to the average and no
-          // days, which makes the daily value slightly HIGH rather than low —
-          // the safe direction, and flagged rather than silently assumed.
           days_for_payslip: Math.round((
             (Number(breakdown.hours?.days_worked) || 0)
             + (Number(vacEffDays) || 0)
             + (Number(manual.sick_days) || 0)
+            + (Number(manual.miluim_days) || 0)
             + (Number(holidayPayInfo?.total_days) || 0)
           ) * 100) / 100,
           // שעות משולמות: worked hours plus the hours behind the paid days.
           paid_hours: Math.round((
             (Number(breakdown.hours?.total) || 0)
             + ((Number(vacEffDays) || 0) + (Number(manual.sick_days) || 0)
+               + (Number(manual.miluim_days) || 0)
                + (Number(holidayPayInfo?.total_days) || 0))
               * (Number(avgDailyHours) || 8)
           ) * 100) / 100,
@@ -2005,7 +2002,7 @@ async function upsertEntry(req, res, next) {
     const role = req.user?.role;
     const setObj = {};
     const allowed = [
-      'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
+      'sick_days', 'miluim_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
       'travel_override', 'travel_note', 'bonus', 'notes', 'custom_values',
@@ -3699,7 +3696,7 @@ const MANAGER_LEAVE_KINDS = [
 ];
 
 const CHANGE_ALLOWED_FIELDS = [
-  'sick_days', 'absence_days', 'vacation_days', 'holiday_pay',
+  'sick_days', 'miluim_days', 'absence_days', 'vacation_days', 'holiday_pay',
   'advance_deduction_preset_id', 'advance_deduction_text',
   'gift_card', 'recreation', 'cibus', 'miluim',
   'travel_override', 'travel_note', 'notes', 'custom_values', 'include_salary_completion',

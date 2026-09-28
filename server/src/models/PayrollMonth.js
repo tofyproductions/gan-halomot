@@ -26,6 +26,15 @@ const payrollMonthSchema = new mongoose.Schema({
   // --- Manual fields the admin fills in each month ---
   manual: {
     sick_days:       { type: Number, default: 0 },      // ימי מחלה
+    // ימי מילואים — the COUNT, kept apart from `miluim` which holds the ₪.
+    //
+    // The money was always recorded; the days never were, and they are needed
+    // in two places that both got them wrong without it. They belong in
+    // ימים לתלוש, which is the divisor an hourly employee's day of leave is
+    // averaged over — leaving them out made every such day come out too
+    // expensive. And שקלולית keeps them as an attendance figure of its own
+    // (סוג רשומה 4, קוד 3), which we could not fill from an amount.
+    miluim_days:     { type: Number, default: 0 },      // ימי מילואים (ספירה)
     absence_days:    { type: Number, default: 0 },      // ימי היעדרות
     vacation_days:   { type: Number, default: 0 },      // ימי חופשה
     holiday_pay:     { type: Number, default: 0 },      // דמי חגים

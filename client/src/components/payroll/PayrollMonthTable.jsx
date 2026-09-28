@@ -76,7 +76,8 @@ const FIELD_LABELS = {
   gift_card: 'GIFT CARD',
   recreation: 'הבראה',
   cibus: 'סיבוס',
-  miluim: 'מילואים',
+  miluim: 'מילואים (₪)',
+  miluim_days: 'ימי מילואים',
   notes: 'הערות',
   advance_deduction_text: 'קיזוז מקדמה',
   advance_deduction_preset_id: 'קיזוז מקדמה',
@@ -1754,7 +1755,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'ימי מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
@@ -1802,6 +1803,7 @@ export default function PayrollMonthTable() {
         r.manual.recreation?.kind === 'number' ? r.manual.recreation.amount : (r.manual.recreation?.text || ''),
         r.manual.cibus?.kind === 'number' ? r.manual.cibus.amount : (r.manual.cibus?.text || ''),
         r.manual.miluim?.kind === 'number' ? r.manual.miluim.amount : (r.manual.miluim?.text || ''),
+        r.manual.miluim_days || '',
         r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
         r.bonus?.effective ? Math.round(r.bonus.effective) : '',
         r.breakdown?.estimated_total != null ? Math.round(r.breakdown.estimated_total) : '',
@@ -2510,6 +2512,14 @@ export default function PayrollMonthTable() {
                       )}
                       <TableCell align="center"><NumberOrTextCell value={r.manual.cibus}      disabled={locked} onSave={v => patchManual(r.employee_id, { cibus: v })} /></TableCell>
                       <TableCell align="center"><NumberOrTextCell value={r.manual.miluim}     disabled={locked} onSave={v => patchManual(r.employee_id, { miluim: v })} /></TableCell>
+                      {/* The COUNT, beside the ₪. Separate because ימים לתלוש
+                          is the divisor an hourly day of leave is averaged
+                          over — a month of reserve duty with no days recorded
+                          made every one of her leave days come out too dear. */}
+                      <TableCell align="center">
+                        <NumberCell value={r.manual.miluim_days} disabled={locked}
+                          onSave={v => patchManual(r.employee_id, { miluim_days: v })} />
+                      </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: 'error.soft' }} onClick={() => setLoansDlg({ open: true, row: r })}>
                         <LoansSummaryCell row={r} />
                       </TableCell>
@@ -2918,6 +2928,7 @@ export default function PayrollMonthTable() {
             {showRecreation && <col style={{ width: W.money }} />}{/* הבראה — אוגוסט בלבד */}
             <col style={{ width: W.money }} />{/* סיבוס */}
             <col style={{ width: W.money }} />{/* מילואים */}
+            <col style={{ width: W.days }} />{/* ימי מילואים */}
             <col style={{ width: W.money }} />{/* הלוואות */}
             <col style={{ width: W.money }} />{/* בונוס */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
@@ -2986,6 +2997,7 @@ export default function PayrollMonthTable() {
               )}
               <TableCell align="center" sx={{ fontWeight: 700 }}>סיבוס</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>ימי מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
               {customColumns.map(c => (

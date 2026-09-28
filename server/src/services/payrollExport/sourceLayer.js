@@ -175,6 +175,9 @@ function toCanonicalEmployee(row) {
       ot_150_hours: num(b.hours?.ot_150),
       days_worked: num(b.hours?.days_worked),
       sick_days: num(manual.sick_days),
+      // ימי מילואים — the count. `earnings.miluim` is the ₪; this is the days,
+      // and שקלולית keeps them as separate figures in separate tables.
+      miluim_days: num(manual.miluim_days),
       // The capped figure — this is what goes to the accountant.
       vacation_days: vacationDays,
       // And the audit trail beside it, so no screen has to recompute the cap

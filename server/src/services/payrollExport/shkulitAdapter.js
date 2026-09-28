@@ -420,6 +420,13 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     if (sickDaysUsed > 0) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.SICK_USED, 0, sickDaysUsed);
     }
+    // ימי מילואים: the count goes to the attendance table, the ₪ stays a
+    // salary component (code 42). Two figures about the same absence, and
+    // שקלולית keeps them apart.
+    const miluimDays = round2(Number(ce.quantities?.miluim_days) || 0);
+    if (miluimDays > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.RESERVE_DAYS, 0, miluimDays);
+    }
 
     // ── the money, for an hourly employee only ──────────────────────────────
     //
