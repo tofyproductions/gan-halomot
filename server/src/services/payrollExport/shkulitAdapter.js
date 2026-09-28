@@ -451,14 +451,38 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
 
     // ── ימי עבודה ושעות עבודה ───────────────────────────────────────────────
     //
-    // Also סוג רשומה 4, which is why the earlier attempt failed: קוד 4 in the
-    // SALARY table is הבראה, and a work-day count filed there appeared as a
-    // recreation line. In the attendance table קוד 4 is ימי עבודה משולמים,
-    // which is what it was meant to be all along.
+    // Two different counts, and שקלולית keeps a separate code for each:
+    //
+    //   קוד 4  ימי עבודה משולמים — every day she was PAID for
+    //   קוד 7  ימי עבודה בפועל   — the days she actually worked
+    //
+    // Only the second was being filed, under the first one's code. מהרט worked
+    // two days and was paid for two more of חופשה, and her payslip read
+    // "ימים משולמים 2, בפועל 2" — the two paid days of leave were nowhere, so
+    // the payslip disagreed with its own תמורת חופשה line.
+    //
+    // (This is also the table where קוד 4 belongs at all: קוד 4 of the SALARY
+    // table is הבראה, and an earlier attempt to file work days there surfaced
+    // as a recreation line.)
     const daysWorked = round2(Number(ce.quantities?.days_worked) || 0);
-    if (daysWorked > 0) {
-      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_PAID, 0, daysWorked);
+    const q = ce.quantities || {};
+    const daysPaid = round2(
+      daysWorked
+      + (Number(q.vacation_days) || 0)    // the FILED days, already capped
+      + (Number(q.sick_days) || 0)
+      + (Number(q.holiday_days) || 0)
+      + (Number(q.miluim_days) || 0),
+    );
+    if (daysPaid > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_PAID, 0, daysPaid);
     }
+    // Filed only when it differs — an employee who took no leave has one number
+    // for both, and two identical rows invite the reader to wonder which is
+    // authoritative.
+    if (daysWorked > 0 && daysWorked !== daysPaid) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_ACTUAL, 0, daysWorked);
+    }
+
     const workedHours = round2(Number(ce.quantities?.worked_hours) || 0);
     if (workedHours > 0) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_HOURS, 0, workedHours);

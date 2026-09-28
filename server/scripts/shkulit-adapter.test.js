@@ -314,7 +314,10 @@ ok('ימי עבודה is code 4 in the ATTENDANCE table, not in the salary table
   const { rows: rr } = shkulit.buildMovements(source);
   const days = rr.find((x) => x[2] === 4 && x[3] === 4);
   assert.ok(days, 'the work-day count is filed');
-  assert.deepStrictEqual(days.slice(4), [0, 20]);
+  // 20 worked + the fixture's 2 sick days: code 4 is ימי עבודה מ-שולמים, so a
+  // paid day of absence belongs in it. The 20 alone go out under code 7.
+  assert.deepStrictEqual(days.slice(4), [0, 22]);
+  assert.deepStrictEqual(rr.find((x) => x[2] === 4 && x[3] === 7).slice(4), [0, 20]);
   assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 4),
     'nothing may be filed under code 4 of the SALARY table — that is הבראה');
 });
@@ -538,6 +541,41 @@ ok('an empty list changes nothing', () => {
   const a = shkulit.buildMovements(src, new Map(), {}, []);
   const b = shkulit.buildMovements(src, new Map(), {});
   assert.deepStrictEqual(a.rows, b.rows, 'no list means the previous behaviour, exactly');
+});
+
+console.log('ימי עבודה: paid and actual are two counts, not one');
+ok('days of leave count as PAID days, and only worked days count as actual', () => {
+  // מהרט worked two days and was paid for two more of חופשה. Her payslip read
+  // "ימים משולמים 2 · בפועל 2" — the paid leave was nowhere, so the payslip
+  // disagreed with its own תמורת חופשה line.
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 2, vacation_pay: 238,
+    vacation_balance_available: 5, manual: {},
+    breakdown: { ...row.breakdown, hours: { total: 17.02, regular: 16, ot_125: 1.02, ot_150: 0, days_worked: 2 } } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const paid = rr.find((x) => x[2] === 4 && x[3] === 4);
+  const actual = rr.find((x) => x[2] === 4 && x[3] === 7);
+  assert.strictEqual(paid[5], 4, 'two worked + two of leave');
+  assert.strictEqual(actual[5], 2, 'and two actually worked');
+  assert.strictEqual(paid[4], 0, 'an attendance row carries no rate');
+});
+ok('with no leave there is one count, filed once', () => {
+  // Two identical rows would invite the reader to wonder which is authoritative.
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 0, manual: {},
+    breakdown: { ...row.breakdown, hours: { total: 80, regular: 80, ot_125: 0, ot_150: 0, days_worked: 10 } } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.strictEqual(rr.find((x) => x[2] === 4 && x[3] === 4)[5], 10);
+  assert.ok(!rr.some((x) => x[2] === 4 && x[3] === 7),
+    'ימי עבודה בפועל is filed only when it differs from the paid count');
+});
+ok('sick, חג and מילואים days are paid days too', () => {
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 1, manual: { sick_days: 2, miluim_days: 3 },
+    holiday_pay_auto: { total_pay: 400, total_days: 1 },
+    vacation_balance_available: 9,
+    breakdown: { ...row.breakdown, hours: { total: 40, regular: 40, ot_125: 0, ot_150: 0, days_worked: 5 } } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  // 5 worked + 1 vacation + 2 sick + 1 חג + 3 מילואים
+  assert.strictEqual(rr.find((x) => x[2] === 4 && x[3] === 4)[5], 12);
+  assert.strictEqual(rr.find((x) => x[2] === 4 && x[3] === 7)[5], 5);
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);
