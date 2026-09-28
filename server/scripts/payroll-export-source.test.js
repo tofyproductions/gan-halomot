@@ -183,4 +183,33 @@ console.log('buildExportSource — no bank permission is a setup error, once');
   ok('all-bank-absent → single setup_error surfaced');
 }
 
+console.log('בונוס אוגוסט is an object, and its amount is what travels');
+{
+  // The live breakdown stores closure_completion_bonus as
+  // { amount, days, dates, deduction, reason } — never a bare number. This
+  // fixture used to say 0, and that lie is the whole reason the bug lived:
+  // money() of an object is NaN → 0, so 35 employees' בונוס אוגוסט for 08.2026
+  // never reached שקלולית at all. The accountant typed אילנה שימחי's ₪1,844 in
+  // by hand, and because we had never filed the code there was nothing for
+  // September to switch off — it rode forward into the next payslip.
+  const row = validHourlyRow();
+  row.breakdown.components.closure_completion_bonus = {
+    amount: 1844.4,
+    dates: ['2026-08-17', '2026-08-18'],
+    days: [],
+    deduction: 0,
+    unapproved_days: [],
+    reason: 'בונוס אוגוסט — ימי חופשת קיץ בתשלום',
+  };
+  const out = buildExportSource('2026-08', [row]);
+  assert.strictEqual(out.ready[0].earnings.august_bonus, 1844.4,
+    'the amount, not the object');
+  ok('an object-shaped בונוס אוגוסט yields its amount, never 0');
+
+  // Absent is still 0, and a bare number keeps working for old records.
+  const none = buildExportSource('2026-08', [validHourlyRow()]);
+  assert.strictEqual(none.ready[0].earnings.august_bonus, 0);
+  ok('no בונוס אוגוסט is 0, not NaN');
+}
+
 console.log('\nAll payroll-export source tests passed (' + passed + ' checks).');

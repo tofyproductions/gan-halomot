@@ -230,7 +230,12 @@ function toCanonicalEmployee(row) {
       vacation_pay: money(row.vacation_pay),
       sick_pay: money(row.sick_info?.pay),
       bonus: money(row.bonus?.effective),
-      august_bonus: money(c.closure_completion_bonus),
+      // closure_completion_bonus is an OBJECT ({amount, days, dates, ...}).
+      // money() of an object is NaN → 0, so בונוס אוגוסט never once reached
+      // the file: אילנה שימחי's ₪1,844 for 08.2026 was typed in by hand at the
+      // accountant's, and because we never filed it there was nothing for the
+      // following month to switch off — it rode forward into September.
+      august_bonus: money(c.closure_completion_bonus?.amount),
       gift_card: giftCard.amount,
       cibus: cibus.amount,
       miluim: miluim.amount,
