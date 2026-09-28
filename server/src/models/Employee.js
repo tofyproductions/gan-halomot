@@ -291,6 +291,20 @@ const employeeSchema = new mongoose.Schema({
   phone: { type: String, default: '' },
   email: { type: String, default: '' },
   address: { type: String, default: '' },
+  // Kept apart from `address` because the accountant's roster carries it as its
+  // own column and a postal code glued into a free-text street line cannot be
+  // compared, corrected, or handed to anyone who needs to post a letter.
+  postal_code: { type: String, default: '' },
+
+  // מצב משפחתי, as שקלולית records it. A closed set: anything outside it is a
+  // typo rather than a new category, and an empty value means "not on file"
+  // rather than "single" — the two must not collapse, because a tax credit
+  // point hangs off this and a wrong guess is money.
+  marital_status: {
+    type: String,
+    enum: ['', 'רווק/ה', 'נשוי/אה', 'גרוש/ה', 'אלמן/ה', 'פרוד/ה'],
+    default: '',
+  },
 
   // How to address her/him in generated documents. The office's letter
   // templates are written in the feminine because almost the whole staff is
@@ -421,6 +435,44 @@ const employeeSchema = new mongoose.Schema({
   // derives it from the employee's daily wage (rate × daily hours, or global
   // salary ÷ monthly work-days).
   sick_daily_value_override: { type: Number, default: null },
+
+  // Opening חופשה / הבראה balances, shaped exactly like sick_balance_opening
+  // above so all three read the same way.
+  //
+  // These exist because the accountant's system is the one that has been
+  // counting since before this one did. Her yearly דוח העדרויות carries a
+  // closing balance per employee, and without a place to put it the system
+  // either starts everyone at zero or infers a balance from payslips it has
+  // seen — both of which quietly disagree with what the employee is actually
+  // owed.
+  //
+  // `as_of_month` is not decoration: a balance without the month it closed on
+  // cannot be accrued forward, and pasting an August figure onto a December
+  // balance overstates leave by four months. A balance with no as_of_month is
+  // therefore ignored rather than guessed at.
+  //
+  // ⚠️ The vacation balance the payslip reports lives elsewhere, on
+  // PayrollMonth.vacation_balance_from_payslip, and is a per-month observation
+  // rather than an opening figure. Keep them apart: this is what we were told
+  // the balance WAS at a stated month; that is what a payslip SAID later. Two
+  // numbers that answer different questions must not be merged into one.
+  vacation_balance_opening: {
+    days: { type: Number, default: 0 },
+    as_of_month: { type: String, default: null }, // 'YYYY-MM'
+  },
+  // חופשה days earned per month. Unlike sick leave — one statutory 1.5 for
+  // everyone — this varies with seniority and job scope: the gan's own staff
+  // run from 0.18 to 1.167 a month in the accountant's records, and no formula
+  // here reproduces that. So it is imported alongside the opening balance.
+  //
+  // 0 means "not on file" and accrues NOTHING. A balance that is too low gets
+  // questioned; one invented from a default is leave the gan never owed and
+  // cannot take back once someone has planned around it.
+  vacation_monthly_accrual: { type: Number, default: 0 },
+  recreation_balance_opening: {
+    days: { type: Number, default: 0 },
+    as_of_month: { type: String, default: null }, // 'YYYY-MM'
+  },
 
   // Tax / pension flags
   pension_exempt: { type: Boolean, default: false },

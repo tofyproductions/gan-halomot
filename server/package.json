@@ -156,7 +156,9 @@
     "test:office-recipients": "node scripts/office-recipients.test.js",
     "test:contact-requests": "node scripts/contact-requests.test.js",
     "test:clock-roster": "node scripts/clock-roster.test.js",
-    "test:accountant-send": "node scripts/accountant-send-shkulit.test.js"
+    "test:accountant-send": "node scripts/accountant-send-shkulit.test.js",
+    "test:roster-import": "node scripts/employee-roster-import.test.js",
+    "test:vacation-balance": "node scripts/vacation-balance.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

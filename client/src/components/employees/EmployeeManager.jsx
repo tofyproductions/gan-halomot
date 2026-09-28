@@ -17,11 +17,13 @@ import DescriptionIcon from '@mui/icons-material/Description';
 import { useNavigate } from 'react-router-dom';
 import EmploymentContractDialog, { CONTRACT_STATUS } from './EmploymentContractDialog';
 import LinkIcon from '@mui/icons-material/Link';
+import UploadFileIcon from '@mui/icons-material/UploadFile';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import RestoreFromTrashIcon from '@mui/icons-material/RestoreFromTrash';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
+import RosterImportDialog from './RosterImportDialog';
 import { todayIL } from '../../utils/ilDates';
 import PageHeader from '../ui/PageHeader';
 import EmptyState from '../ui/EmptyState';
@@ -326,6 +328,7 @@ export default function EmployeeManager() {
   }, []);
 
   const [clockMatchOpen, setClockMatchOpen] = useState(false);
+  const [rosterImportOpen, setRosterImportOpen] = useState(false);
   const [changeReqOpen, setChangeReqOpen] = useState(false);
   const [pendingChanges, setPendingChanges] = useState(0);
   // Inline editing: { empId, field, value }
@@ -838,6 +841,11 @@ export default function EmployeeManager() {
             label: 'שיוך לשעון',
             icon: <LinkIcon fontSize="small" />,
             onClick: () => setClockMatchOpen(true),
+          },
+          (isAdmin || isAccountant) && {
+            label: 'ייבוא אלפון מהרו״ח',
+            icon: <UploadFileIcon fontSize="small" />,
+            onClick: () => setRosterImportOpen(true),
           },
           {
             label: hideSalary ? 'הצג עמודות שכר' : 'הסתר עמודות שכר',
@@ -1723,6 +1731,11 @@ export default function EmployeeManager() {
         branchName={selectedBranchName}
         onClose={() => setClockMatchOpen(false)}
         onSaved={fetchEmployees}
+      />
+      <RosterImportDialog
+        open={rosterImportOpen}
+        onClose={() => setRosterImportOpen(false)}
+        onDone={fetchEmployees}
       />
       <EmployeeChangeRequests
         open={changeReqOpen}
