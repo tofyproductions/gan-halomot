@@ -67,12 +67,13 @@ ok('hourly base goes out as hours: 1 / 32 / 33 at the card rate × factor', () =
   assert.deepStrictEqual(byCode.get(32).slice(4), [56.25, 8]);    // 125%
   assert.deepStrictEqual(byCode.get(33).slice(4), [67.5, 2]);     // 150%
 });
-ok('every non-zero amount component is one row (qty 1); zeros vanish', () => {
+ok('every non-zero amount component is one row; zeros vanish', () => {
   const byCode = new Map(rows.map(r => [r[3], r]));
-  assert.strictEqual(byCode.get(3)[4], 250);    // נסיעות
-  assert.strictEqual(byCode.get(34)[4], 480);   // ימי מחלה
-  assert.strictEqual(byCode.get(35)[4], 350);   // בונוס
-  assert.ok(!byCode.has(4), 'recreation never becomes a row — the accountant computes it');
+  assert.deepStrictEqual(byCode.get(3).slice(4), [250, 1]);   // נסיעות — an amount, not a count
+  assert.strictEqual(byCode.get(35)[4], 350);                  // בונוס
+  // ימי מחלה is COUNTED: 480 over 2 days is 240 a day, so the payslip says
+  // two days instead of one. See the units rule in the adapter.
+  assert.deepStrictEqual(byCode.get(34).slice(4), [240, 2]);
   assert.ok(!byCode.has(44), 'holiday 0 → no row');
   for (const r of rows) {
     // חודש עבודה is a NUMBER. שקלולית rejected the old '08/2026' string on
@@ -211,6 +212,67 @@ ok('garbage returns 0 on purpose — the row fails loudly, never books a wrong m
   for (const bad of ['', null, undefined, 'שלום', '2026', '09/2026', '2026-13', '2026-00']) {
     assert.strictEqual(shkulit.monthValue(bad), 0, `${JSON.stringify(bad)} → 0`);
   }
+});
+
+
+console.log('counted components — the quantity is the count, not 1');
+ok('two days of חג go out as 2 × the daily rate, not 1 × the total', () => {
+  // רינת אברבנאל, 09.2026: 622.36 for two days went out as כמות 1, and the
+  // payslip then said one day of חג. The money was right; the count was not.
+  const r = { ...row, holiday_pay_auto: { total_pay: 622.36, total_days: 2 } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const holiday = rr.find(x => x[3] === 44);
+  assert.ok(holiday, 'a holiday row must exist');
+  assert.deepStrictEqual(holiday.slice(4), [311.18, 2]);
+  assert.strictEqual(Math.round(holiday[4] * holiday[5] * 100) / 100, 622.36,
+    'rate × quantity must still be the money the table says');
+});
+ok('one day stays one row of one — nothing to split', () => {
+  const r = { ...row, holiday_pay_auto: { total_pay: 311.18, total_days: 1 } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.deepStrictEqual(rr.find(x => x[3] === 44).slice(4), [311.18, 1]);
+});
+ok('a count that does not divide exactly keeps the money whole and says so', () => {
+  // 100 over 3 days is 33.33, and 33.33 × 3 is 99.99. Paying 99.99 in order to
+  // report a count would be a wage claim, so the amount travels whole and the
+  // real count is told to the accountant in words.
+  const r = { ...row, holiday_pay_auto: { total_pay: 100, total_days: 3 } };
+  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.deepStrictEqual(rr.find(x => x[3] === 44).slice(4), [100, 1]);
+  assert.ok(nn.some(n => n.subject === 'ימי חג' && /3 ימים/.test(n.text)),
+    'the real count must reach the accountant in words');
+});
+ok('a deduction keeps its sign when it is split into units', () => {
+  const r = {
+    ...row,
+    absence: { deductible_days: 2 },
+    breakdown: { ...row.breakdown, deductions: { loans: 0, absence: 300 } },
+  };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const miss = rr.find(x => x[3] === 36);
+  assert.ok(miss, 'ימים חסרים must be a row');
+  assert.deepStrictEqual(miss.slice(4), [-150, 2], 'negative rate, positive count');
+  assert.strictEqual(miss[2], 1, 'a negative salary component stays table 1');
+});
+
+console.log('ימי עבודה — reported, not paid');
+ok('a global employee gets code 4 with the day count and no money', () => {
+  const r = {
+    ...row, employee_number: '21', israeli_id: '999000021', salary_type: 'global',
+    breakdown: { ...row.breakdown, rates: {} },
+  };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const days = rr.find(x => x[3] === 4);
+  assert.ok(days, 'a global employee must carry a ימי עבודה row');
+  assert.deepStrictEqual(days.slice(4), [0, 20], 'rate 0 — the row reports, it does not pay');
+  assert.strictEqual(days[2], 1, 'the salary code table');
+});
+ok('an hourly employee never gets the global day code guessed onto her', () => {
+  const { rows: rr, notes: nn } = shkulit.buildMovements(source);
+  assert.ok(!rr.some(x => x[3] === 4),
+    'code 4 is the GLOBAL day code — guessing it onto an hourly employee is how 28.09 broke');
+  assert.ok(nn.some(n => n.subject === 'ימי עבודה' && /20/.test(n.text)),
+    'her day count still reaches the accountant, as a note');
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

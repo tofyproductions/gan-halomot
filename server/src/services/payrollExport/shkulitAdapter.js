@@ -74,18 +74,46 @@ const RECORD_TYPE = Object.freeze({
  * misread as pay — flip to +1 if the trial import shows שקלולית expects
  * positives on deduction codes.
  */
-/** Amount components (תעריף=סכום, כמות=1). Base salary is handled apart. */
+/**
+ * Amount components. Base salary is handled apart.
+ *
+ * `units` marks a component that is COUNTED as well as paid — days of חג, days
+ * of מחלה, hours missing. For those, "כמות 1 × the whole amount" is wrong on
+ * the תלוש even when the money is right: רינת's two days of חג went out on
+ * 09.2026 as כמות 1 / תעריף 622.36, and the payslip then said she had one day
+ * of חג. The count is what the employee reads and what an audit counts, so
+ * these are emitted as תעריף-per-unit × כמות instead.
+ *
+ * `sign` -1 marks a deduction, emitted as a negative amount so it cannot be
+ * misread as pay.
+ */
 const COMPONENTS = [
   { key: 'salary_completion', code: 38, label: 'השלמת שכר', get: (ce) => ce.earnings.salary_completion },
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
-  { key: 'holiday_pay', code: 44, label: 'ימי חג', get: (ce) => ce.earnings.holiday_pay },
-  { key: 'sick_pay', code: 34, label: 'ימי מחלה', get: (ce) => ce.earnings.sick_pay },
+  { key: 'holiday_pay', code: 44, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
+  { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay, units: (ce) => ce.quantities.sick_days },
   { key: 'bonus', code: 35, label: 'בונוס', get: (ce) => ce.earnings.bonus },
   { key: 'august_bonus', code: 39, label: 'בונוס מיוחד (מענק אוגוסט)', get: (ce) => ce.earnings.august_bonus },
   { key: 'miluim', code: 42, label: 'ימי מילואים', get: (ce) => ce.earnings.miluim },
-  { key: 'absence', code: 36, label: 'ימים חסרים', sign: -1, get: (ce) => ce.deductions.absence },
-  { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, get: (ce) => ce.deductions.partial_absence },
+  { key: 'absence', code: 36, label: 'ימים חסרים', sign: -1, unit: 'ימים', get: (ce) => ce.deductions.absence, units: (ce) => ce.quantities.absence_deduct_days },
+  { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, unit: 'שעות', get: (ce) => ce.deductions.partial_absence, units: (ce) => ce.quantities.partial_absence_hours },
 ];
+
+/**
+ * ימי עבודה — the worked-day count, reported rather than paid.
+ *
+ * A global employee's days are already inside her base salary, so this row
+ * carries the COUNT with תעריף 0: it adds no money, it only makes the payslip's
+ * summary line say how many days the month actually held.
+ *
+ * Only the global code (4) is here. The accountant also named 05 for an
+ * employee paid BY THE DAY, and this system has no such employee — salary_type
+ * is hourly or global and nothing else. An hourly employee's time already goes
+ * out as hours (codes 1/32/33). Sending her days under the global code would be
+ * a guessed code on a money file, which is exactly what cost the 28.09 import,
+ * so hourly days stay on the notes sheet until someone confirms the code.
+ */
+const WORK_DAYS_GLOBAL_CODE = 4;
 
 /** Hours codes for hourly employees — שקלולית prices rate × quantity. */
 const HOURS = {
@@ -194,8 +222,47 @@ function buildMovements(source) {
     for (const comp of COMPONENTS) {
       const amount = Number(comp.get(ce)) || 0;
       if (!amount) continue; // a zero component is not a row
-      const signed = (comp.sign === -1 ? -1 : 1) * Math.abs(amount);
-      rows.push([label, empNo, comp.table || RECORD_TYPE.SALARY, comp.code, signed, 1]);
+      const sign = comp.sign === -1 ? -1 : 1;
+      const gross = Math.abs(amount);
+      const table = comp.table || RECORD_TYPE.SALARY;
+      const units = comp.units ? round2(Number(comp.units(ce)) || 0) : 0;
+
+      // The count only goes out when the per-unit rate reproduces the amount
+      // EXACTLY. שקלולית multiplies תעריף × כמות on its side, so a rate that
+      // does not divide evenly (100 over 3 days → 33.33 × 3 = 99.99) would pay
+      // a different number than our table says. A payslip that undercounts days
+      // is a complaint; a payslip that underpays is a wage claim. So when the
+      // split is not exact the amount travels whole, and the real count is told
+      // to the accountant in words instead of being quietly rounded into money.
+      const perUnit = units > 0 ? round2(gross / units) : 0;
+      const exact = units > 1 && perUnit > 0 && round2(perUnit * units) === round2(gross);
+
+      if (exact) {
+        rows.push([label, empNo, table, comp.code, sign * perUnit, units]);
+      } else {
+        rows.push([label, empNo, table, comp.code, sign * gross, 1]);
+        if (units > 1) {
+          notes.push({
+            employee_number: empNo, full_name: ce.employee.full_name,
+            subject: comp.label,
+            text: `${units} ${comp.unit || 'יחידות'} בסך ${round2(gross)} ש״ח. הסכום לא מתחלק בדיוק ליחידה, לכן השורה נשלחה ככמות 1 עם הסכום המלא — הכמות בתלוש תצטרך תיקון ידני.`,
+          });
+        }
+      }
+    }
+
+    // ימי עבודה — the count, not more money. Global only; see the constant.
+    const daysWorked = round2(Number(ce.quantities?.days_worked) || 0);
+    if (daysWorked > 0) {
+      if (ce.employee.salary_type === 'global') {
+        rows.push([label, empNo, RECORD_TYPE.SALARY, WORK_DAYS_GLOBAL_CODE, 0, daysWorked]);
+      } else {
+        notes.push({
+          employee_number: empNo, full_name: ce.employee.full_name,
+          subject: 'ימי עבודה',
+          text: `${daysWorked} ימי עבודה בחודש. קוד 4 הוא לעובד גלובלי בלבד — לעובד/ת שעתי/ת הקוד טרם אושר, ולכן הכמות נמסרת כאן ולא כשורה בקובץ.`,
+        });
+      }
     }
 
     for (const comp of UNMAPPED) {
