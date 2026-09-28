@@ -569,153 +569,203 @@ function BankDialog({ open, row, onClose, onSave }) {
   );
 }
 
-// בונוס קבוע cell — shows the effective standing bonus (auto from Employee.
-// bonuses[], or this month's manual override) with a tooltip breakdown.
-// Click opens BonusDialog. Edit the RULES themselves in the employee's own
-// "בונוס קבוע" tab; this dialog only overrides/disables THIS month.
+// One בונוס cell/column covering both בונוס קבוע (standing) and בונוס חד
+// פעמי (one-off) — shows their sum; the dialog behind it edits both.
 function BonusCell({ row }) {
   const b = row.bonus || {};
-  const eff = b.effective || 0;
-  const isManual = b.override_amount != null || b.disabled;
-  if (!eff && !b.auto) {
+  const ot = row.one_time_bonus || {};
+  const total = (Number(b.effective) || 0) + (Number(ot.amount) || 0);
+  if (!total && !b.auto) {
     return <Typography variant="body2" color="text.disabled">—</Typography>;
   }
   return (
     <Tooltip arrow title={
       <Box sx={{ fontSize: '0.72rem' }}>
-        {b.lines?.length
-          ? b.lines.map((l, i) => (
-            <div key={i}>
-              {l.reason || 'בונוס קבוע'}
-              {l.rate != null && l.quantity != null ? `: ${l.quantity}× × ₪${l.rate}` : ''} = ₪{l.amount}
-            </div>
-          ))
-          : <div>אין בונוס קבוע אוטומטי</div>}
-        {b.note && <div style={{ marginTop: 4, opacity: 0.85 }}>📝 {b.note}</div>}
-        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה (לחודש זה) · כללי הבונוס עצמם — בכרטיס העובד/ת</div>
-      </Box>
-    }>
-      <Box sx={{ cursor: 'help' }}>
-        <Typography variant="body2" sx={{ fontWeight: 700, color: eff ? COLOR.success.main : 'text.disabled' }}>
-          {eff ? fmtCurrency(eff) : '₪0'}
-        </Typography>
-        <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-          {b.disabled ? 'בוטל לחודש זה' : (isManual ? 'ידני' : 'אוטומטי')}
-        </Typography>
-      </Box>
-    </Tooltip>
-  );
-}
-
-function BonusDialog({ open, row, onClose, onSave }) {
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-  const [disabled, setDisabled] = useState(false);
-  useEffect(() => {
-    if (row) {
-      const b = row.bonus || {};
-      setAmount(b.override_amount != null ? String(b.override_amount) : '');
-      setNote(b.note || '');
-      setDisabled(!!b.disabled);
-    }
-  }, [row]);
-  if (!row) return null;
-  const auto = row.bonus?.auto || 0;
-  const autoNote = row.bonus?.auto_note || '';
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
-      <DialogTitle>בונוס קבוע — {row.full_name}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          <Alert severity="info" sx={{ py: 0.5 }}>
-            בונוס קבוע אוטומטי (מכללי העובד/ת): <b>{auto ? fmtCurrency(auto) : '₪0'}</b>{autoNote ? ` — ${autoNote}` : ''}
-          </Alert>
-          <TextField
-            label="סכום ידני (ריק = אוטומטי)" type="number" value={amount}
-            onChange={e => setAmount(e.target.value)} disabled={disabled}
-            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-          />
-          <TextField
-            label="הערה / עבור מה הבונוס" value={note} multiline minRows={2}
-            onChange={e => setNote(e.target.value)} placeholder={autoNote || 'תיאור הבונוס…'}
-          />
-          <FormControlLabel
-            control={<Checkbox checked={disabled} onChange={e => setDisabled(e.target.checked)} />}
-            label="בטל בונוס קבוע לחודש זה"
-          />
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={() => {
-          onSave({ override_amount: amount === '' ? null : Number(amount), note: note.trim(), disabled });
-          onClose();
-        }}>שמור</Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-// בונוס חד פעמי cell — an independent one-off amount for this month only.
-// No "auto" baseline, no disable toggle: empty = nothing, a number = paid
-// once, this month, on top of everything else.
-function OneTimeBonusCell({ row }) {
-  const o = row.one_time_bonus || {};
-  const amt = Number(o.amount) || 0;
-  if (!amt) return <Typography variant="body2" color="text.disabled">—</Typography>;
-  return (
-    <Tooltip arrow title={
-      <Box sx={{ fontSize: '0.72rem' }}>
-        {o.note && <div>📝 {o.note}</div>}
+        <div><b>קבוע:</b> {b.effective ? fmtCurrency(b.effective) : '₪0'}{b.disabled ? ' (בוטל לחודש זה)' : ''}</div>
+        {b.lines?.length > 0 && b.lines.map((l, i) => (
+          <div key={i} style={{ paddingRight: 8, opacity: 0.85 }}>
+            {l.reason || 'בונוס'}
+            {l.rate != null && l.quantity != null ? `: ${l.quantity}× × ₪${l.rate}` : ''} = ₪{l.amount}
+          </div>
+        ))}
+        {b.note && <div style={{ opacity: 0.85 }}>📝 {b.note}</div>}
+        {Number(ot.amount) > 0 && (
+          <div style={{ marginTop: 4 }}>
+            <b>חד פעמי:</b> {fmtCurrency(ot.amount)}{ot.note ? ` — ${ot.note}` : ''}
+          </div>
+        )}
         <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה</div>
       </Box>
     }>
       <Box sx={{ cursor: 'help' }}>
-        <Typography variant="body2" sx={{ fontWeight: 700, color: COLOR.success.main }}>
-          {fmtCurrency(amt)}
+        <Typography variant="body2" sx={{ fontWeight: 700, color: total ? COLOR.success.main : 'text.disabled' }}>
+          {total ? fmtCurrency(total) : '₪0'}
         </Typography>
-        <Typography variant="caption" sx={{ color: 'text.disabled' }}>חד פעמי</Typography>
       </Box>
     </Tooltip>
   );
 }
 
-function OneTimeBonusDialog({ open, row, onClose, onSave }) {
+function emptyBonusRule() {
+  return { type: 'fixed', amount: '', reason: '' };
+}
+
+// One dialog, three parts:
+//  1. The standing rules themselves (Employee.bonuses[]) — קבוע ₪ or ₪/hour,
+//     with a reason. Editing here writes the employee card directly.
+//  2. This month's override/disable of the standing total.
+//  3. בונוס חד פעמי — an independent one-off for this month only.
+function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [disabled, setDisabled] = useState(false);
+  const [oneTimeAmount, setOneTimeAmount] = useState('');
+  const [oneTimeNote, setOneTimeNote] = useState('');
+  const [rules, setRules] = useState([]);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
+
   useEffect(() => {
-    if (row) {
-      const o = row.one_time_bonus || {};
-      setAmount(o.amount != null ? String(o.amount) : '');
-      setNote(o.note || '');
-    }
+    if (!row) return;
+    const b = row.bonus || {};
+    setAmount(b.override_amount != null ? String(b.override_amount) : '');
+    setNote(b.note || '');
+    setDisabled(!!b.disabled);
+    const ot = row.one_time_bonus || {};
+    setOneTimeAmount(ot.amount != null ? String(ot.amount) : '');
+    setOneTimeNote(ot.note || '');
   }, [row]);
+
+  useEffect(() => {
+    if (!open || !row) { setRules([]); return; }
+    setRulesLoading(true);
+    api.get(`/payroll/employees/${row.employee_id}`)
+      .then(res => setRules((res.data?.employee?.bonuses || []).map(r => ({
+        type: r.type || 'fixed', amount: r.amount ?? '', reason: r.reason || '',
+      }))))
+      .catch(() => toast.error('שגיאה בטעינת כללי הבונוס הקבוע'))
+      .finally(() => setRulesLoading(false));
+  }, [open, row]);
+
   if (!row) return null;
+  const auto = row.bonus?.auto || 0;
+
+  const saveRules = async () => {
+    setRulesSaving(true);
+    try {
+      const clean = rules
+        .map(r => ({ type: r.type || 'fixed', amount: Number(r.amount) || 0, reason: r.reason || '', active: true }))
+        .filter(r => r.amount !== 0);
+      await api.put(`/payroll/employees/${row.employee_id}`, { bonuses: clean });
+      toast.success('כללי הבונוס הקבוע עודכנו');
+      onRulesSaved?.();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'שגיאה בשמירה');
+    } finally {
+      setRulesSaving(false);
+    }
+  };
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
-      <DialogTitle>בונוס חד פעמי — {row.full_name}</DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth dir="rtl">
+      <DialogTitle>בונוס — {row.full_name}</DialogTitle>
       <DialogContent>
-        <Stack spacing={2} sx={{ mt: 1 }}>
-          <Alert severity="info" sx={{ py: 0.5 }}>
-            סכום לחודש זה בלבד — לא חוזר בחודשים הבאים.
-          </Alert>
-          <TextField
-            label="סכום" type="number" value={amount}
-            onChange={e => setAmount(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-          />
-          <TextField
-            label="הערה / עבור מה הבונוס" value={note} multiline minRows={2}
-            onChange={e => setNote(e.target.value)} placeholder="תיאור הבונוס…"
-          />
+        <Stack spacing={2.5} sx={{ mt: 1 }}>
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>בונוס קבוע — כללים</Typography>
+            {rulesLoading ? (
+              <Typography variant="body2" color="text.secondary">טוען…</Typography>
+            ) : (
+              <Stack spacing={1.5}>
+                {rules.length === 0 && (
+                  <Alert severity="info" sx={{ py: 0.5 }}>אין כלל בונוס קבוע. אפשר להוסיף כלל למטה.</Alert>
+                )}
+                {rules.map((r, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="center">
+                    <TextField select label="סוג" size="small" sx={{ width: 130 }}
+                      value={r.type}
+                      onChange={e => { const arr = [...rules]; arr[i] = { ...arr[i], type: e.target.value }; setRules(arr); }}
+                    >
+                      <MenuItem value="fixed">סכום קבוע</MenuItem>
+                      <MenuItem value="per_hour">לפי שעה</MenuItem>
+                      <MenuItem value="per_day">לפי יום</MenuItem>
+                    </TextField>
+                    <TextField label={r.type === 'fixed' ? 'סכום' : 'סכום ליחידה'} type="number" size="small" sx={{ width: 130 }}
+                      value={r.amount}
+                      onChange={e => { const arr = [...rules]; arr[i] = { ...arr[i], amount: e.target.value }; setRules(arr); }}
+                      InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+                    />
+                    <TextField label="הערה — עבור מה" size="small" fullWidth
+                      value={r.reason}
+                      onChange={e => { const arr = [...rules]; arr[i] = { ...arr[i], reason: e.target.value }; setRules(arr); }}
+                    />
+                    <IconButton color="error" size="small" onClick={() => setRules(rules.filter((_, idx) => idx !== i))}>
+                      <DeleteOutlineIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                ))}
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <Button size="small" startIcon={<AddCircleOutlineIcon />} onClick={() => setRules([...rules, emptyBonusRule()])}>
+                    הוסף כלל
+                  </Button>
+                  <Button size="small" variant="contained" onClick={saveRules} disabled={rulesSaving}>
+                    {rulesSaving ? 'שומר…' : 'שמור כללים'}
+                  </Button>
+                </Stack>
+                {rules.some(r => r.type === 'per_hour' || r.type === 'per_day') && (
+                  <Typography variant="caption" color="text.secondary">
+                    "לפי שעה"/"לפי יום" = הסכום × סה״כ שעות/ימי עבודה בחודש (כולל שעות נוספות).
+                  </Typography>
+                )}
+              </Stack>
+            )}
+          </Box>
+
+          <Divider />
+
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>בונוס קבוע — לחודש זה</Typography>
+            <Stack spacing={1.5}>
+              <Alert severity="info" sx={{ py: 0.5 }}>
+                אוטומטי לפי הכללים למעלה: <b>{auto ? fmtCurrency(auto) : '₪0'}</b>
+              </Alert>
+              <TextField
+                label="סכום ידני (ריק = אוטומטי)" type="number" value={amount}
+                onChange={e => setAmount(e.target.value)} disabled={disabled}
+                InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+              />
+              <TextField label="הערה" value={note} onChange={e => setNote(e.target.value)} />
+              <FormControlLabel
+                control={<Checkbox checked={disabled} onChange={e => setDisabled(e.target.checked)} />}
+                label="בטל בונוס קבוע לחודש זה"
+              />
+            </Stack>
+          </Box>
+
+          <Divider />
+
+          <Box>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>בונוס חד פעמי — לחודש זה בלבד</Typography>
+            <Stack spacing={1.5}>
+              <TextField
+                label="סכום" type="number" value={oneTimeAmount}
+                onChange={e => setOneTimeAmount(e.target.value)}
+                InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+              />
+              <TextField label="הערה / עבור מה" value={oneTimeNote} onChange={e => setOneTimeNote(e.target.value)} />
+            </Stack>
+          </Box>
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>ביטול</Button>
+        <Button onClick={onClose}>סגור</Button>
         <Button variant="contained" onClick={() => {
-          onSave({ amount: amount === '' ? null : Number(amount), note: note.trim() });
+          onSaveMonthly({
+            bonus: { override_amount: amount === '' ? null : Number(amount), note: note.trim(), disabled },
+            one_time_bonus: { amount: oneTimeAmount === '' ? null : Number(oneTimeAmount), note: oneTimeNote.trim() },
+          });
           onClose();
-        }}>שמור</Button>
+        }}>שמור לחודש זה</Button>
       </DialogActions>
     </Dialog>
   );
@@ -1327,7 +1377,6 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
-  const [oneTimeBonusDlg, setOneTimeBonusDlg] = useState({ open: false, row: null });
   // The scrolling box. Same fix as AttendanceMonitor's grid: a full reload sets
   // `loading`, and while loading the table body collapses to one spinner row
   // (line ~1870) — an empty container has nothing to scroll, so the browser
@@ -2640,9 +2689,6 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
-                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: COLOR.payrollColumn.bonus.cell }} onClick={() => !locked && setOneTimeBonusDlg({ open: true, row: r })}>
-                        <OneTimeBonusCell row={r} />
-                      </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
                           <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
@@ -3008,8 +3054,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.money }} />{/* מילואים */}
             <col style={{ width: W.days }} />{/* ימי מילואים */}
             <col style={{ width: W.money }} />{/* הלוואות */}
-            <col style={{ width: W.money }} />{/* בונוס קבוע */}
-            <col style={{ width: W.money }} />{/* בונוס חד פעמי */}
+            <col style={{ width: W.money }} />{/* בונוס */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
@@ -3029,7 +3074,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={18 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
+              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -3078,8 +3123,7 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>ימי מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס קבוע</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס חד פעמי</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -3158,9 +3202,8 @@ export default function PayrollMonthTable() {
         onSave={(text) => notes.row && patchManual(notes.row.employee_id, { notes: text })}
         onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />
       <BonusDialog open={bonusDlg.open} row={bonusDlg.row} onClose={() => setBonusDlg({ open: false, row: null })}
-        onSave={(bonus) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, { bonus })} />
-      <OneTimeBonusDialog open={oneTimeBonusDlg.open} row={oneTimeBonusDlg.row} onClose={() => setOneTimeBonusDlg({ open: false, row: null })}
-        onSave={(one_time_bonus) => oneTimeBonusDlg.row && patchManual(oneTimeBonusDlg.row.employee_id, { one_time_bonus })} />
+        onSaveMonthly={(patch) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, patch)}
+        onRulesSaved={() => fetchData({ quiet: true })} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
       <SalaryAdjustmentDialog
         open={adjustments.open}
