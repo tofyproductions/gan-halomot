@@ -61,6 +61,7 @@ require.cache[modelsPath] = {
   exports: { Employee: FakeEmployee },
 };
 
+const ymdOf = (d) => (d ? d.toISOString().slice(0, 10) : '');
 let passed = 0;
 const ok = (label) => { console.log('  ✓ ' + label); passed += 1; };
 
@@ -218,6 +219,55 @@ const ok = (label) => { console.log('  ✓ ' + label); passed += 1; };
     assert.strictEqual(after.email, 'rinat8891996@gmail.com');
     assert.strictEqual(res.skipped.length + res.updated.length, 1);
     ok('values come from the re-derived plan, not from what the caller posted');
+  }
+
+  console.log("שקלולית's own sheet, as it actually arrives");
+  {
+    const XLSX = require('xlsx');
+    const { parseUpload } = require('../src/controllers/employeeRosterImport.controller');
+
+    // The real אלפון עובדים export: five preamble lines, the header on row 6,
+    // a total line at the bottom, IDs and phones stripped of their leading
+    // zeros by Excel, gender as a single letter, address split over three
+    // columns. Every one of those broke the first version of this importer.
+    const aoa = [
+      ['חברה 600: עמותת גן החלומות'],
+      ['אלפון עובדים   ל 9/2026'],
+      ['שם משתמש: מנהל מערכת'],
+      ['הופק ע"י דמבין אופיר רו"ח ב 28/09/2026 12:42:48'],
+      ['באמצעות "שיקלולית חלונות" של ט.מ.ל.'],
+      [''],
+      ['מספר עובד', 'מספר זהות', 'שם משפחה', 'שם פרטי', 'מחלקה', "ת' לידה",
+        'גיל', 'מין', 'מ.מ.', 'עיר', 'רחוב', 'בית', 'מיקוד', 'ת.ד.', 'טלפון', 'EMail'],
+      ['67', '208430777', 'אברבנל', 'רינת', 'סניף תל אביב', '16/12/1996', '29', 'נ',
+        'רווק/ה', 'תל אביב ', 'סוקרטס', '14', '6800329', '', '547018164', 'rinat8891996@gmail.com'],
+      // Employee 2's ID really does lose a leading zero in the file.
+      ['2', '24073124', 'מור', 'אורלי', 'גן משה דיין כ"ס', '24/12/1968', '57', 'נ',
+        'גרוש/ה', 'כפר סבא ', 'לופבן', '6', '4431930', '', '529480580', 'tofy10.office@gmail.com'],
+      ['סה"כ כללי: 95 עובדים'],
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'גליון1');
+    const parsed = parseUpload(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+
+    assert.strictEqual(parsed.length, 2,
+      'two employees — the preamble and the total line are not people');
+    ok('the header is found below five preamble lines, and the total line is not an employee');
+
+    const r = R.normalizeRow(parsed.find((x) => x.employee_number === '67'));
+    assert.strictEqual(r.israeli_id, '208430777');
+    assert.strictEqual(r.phone, '0547018164', 'the leading zero Excel ate is put back');
+    assert.strictEqual(r.gender, 'female', 'נ is a gender, not a blank');
+    assert.strictEqual(r.marital_status, 'רווק/ה');
+    assert.strictEqual(r.address, 'סוקרטס 14, תל אביב', 'street, house and city become one line');
+    assert.strictEqual(ymdOf(r.birth_date), '1996-12-16');
+    ok('a row survives the sheet intact — phone, gender, address and date');
+
+    const two = R.normalizeRow(parsed.find((x) => x.employee_number === '2'));
+    assert.strictEqual(two.israeli_id, '024073124',
+      'an ID that lost its leading zero is restored, not matched to somebody else');
+    assert.strictEqual(R.isValidIsraeliId(two.israeli_id), true);
+    ok('a ת"ז stripped to eight digits is padded back and still passes its check digit');
   }
 
   console.log(`\nAll employee-roster import tests passed (${passed} checks).`);

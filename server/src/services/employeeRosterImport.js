@@ -42,6 +42,7 @@ const PLAIN_FIELDS = [
   { key: 'email', label: 'מייל' },
   { key: 'phone', label: 'טלפון' },
   { key: 'postal_code', label: 'מיקוד' },
+  { key: 'address', label: 'כתובת' },
   { key: 'marital_status', label: 'מצב משפחתי' },
   { key: 'gender', label: 'מין' },
 ];
@@ -88,8 +89,25 @@ function isValidIsraeliId(v) {
   return total % 10 === 0;
 }
 
-/** Phones are compared by digits alone — 054-123 and 054123 are one number. */
-const phoneDigits = (v) => str(v).replace(/\D/g, '');
+/**
+ * A telephone number, with the leading zero Excel ate put back.
+ *
+ * שקלולית's sheet stores the number as a NUMBER, so 0543599422 comes out of the
+ * file as 543599422 and 097654321 as 97654321. Stored as-is, every employee in
+ * the gan ends up with an unusable phone number that looks almost right — which
+ * is worse than a blank one, because nobody checks a field that has something
+ * in it.
+ *
+ * Israeli numbers are ten digits (mobile) or nine (landline), both starting 0.
+ * A number one short of either, not starting with a zero, is missing exactly
+ * that zero. Anything else is left alone rather than padded into a shape it
+ * never had.
+ */
+function phoneDigits(v) {
+  const d = str(v).replace(/\D/g, '');
+  if (!d || d.startsWith('0')) return d;
+  return (d.length === 9 || d.length === 8) ? `0${d}` : d;
+}
 
 /** 'DD/MM/YYYY' (what שקלולית prints) → Date, or null. */
 function parseBirthDate(v) {
@@ -122,9 +140,13 @@ function normalizeRow(raw) {
     email: str(raw.email).toLowerCase(),
     phone: phoneDigits(raw.phone),
     postal_code: str(raw.postal_code || raw.postal),
+    address: str(raw.address),
     marital_status: MARITAL.includes(marital) ? marital : '',
-    gender: gender === 'נקבה' || gender === 'female' ? 'female'
-      : (gender === 'זכר' || gender === 'male' ? 'male' : ''),
+    // שקלולית writes a single letter — נ / ז — where a person would write the
+    // word. Both spellings are accepted; anything else stays empty rather than
+    // being guessed from a first name.
+    gender: ['נקבה', 'נ', 'female', 'f'].includes(gender) ? 'female'
+      : (['זכר', 'ז', 'male', 'm'].includes(gender) ? 'male' : ''),
     birth_date: parseBirthDate(raw.birth_date),
     vacation_monthly_accrual: str(raw.vacation_accrual ?? raw.vacation_monthly_accrual),
     vacation_balance: raw.vacation_balance,
@@ -207,7 +229,7 @@ async function buildImportPlan(rows, asOfMonth = null) {
   const employees = await Employee.find({ israeli_id: { $in: ids } })
     .select([
       '_id full_name israeli_id employee_number email phone postal_code',
-      'marital_status gender birth_date is_active branch_id vacation_monthly_accrual',
+      'marital_status gender birth_date is_active branch_id vacation_monthly_accrual address',
       'vacation_balance_opening sick_balance_opening recreation_balance_opening',
     ].join(' '))
     .lean();
