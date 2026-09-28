@@ -476,10 +476,13 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     if (daysPaid > 0) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_PAID, 0, daysPaid);
     }
-    // Filed only when it differs — an employee who took no leave has one number
-    // for both, and two identical rows invite the reader to wonder which is
-    // authoritative.
-    if (daysWorked > 0 && daysWorked !== daysPaid) {
+    // Filed whenever it differs from the paid count — INCLUDING when it is
+    // zero. An employee who took no leave has one number for both, and two
+    // identical rows only invite the reader to wonder which is authoritative;
+    // but fourteen employees this month worked no days at all — the whole
+    // month was חופשה or מחלה — and saying nothing about them leaves a payslip
+    // that reads as though they worked every paid day.
+    if (daysPaid > 0 && daysWorked !== daysPaid) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_ACTUAL, 0, daysWorked);
     }
 

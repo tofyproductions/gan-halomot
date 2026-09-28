@@ -578,4 +578,19 @@ ok('sick, חג and מילואים days are paid days too', () => {
   assert.strictEqual(rr.find((x) => x[2] === 4 && x[3] === 7)[5], 5);
 });
 
+console.log('an employee who worked no days at all says so');
+ok('zero worked days is filed, not omitted', () => {
+  // Fourteen employees in 09.2026 worked nothing — the whole month was חופשה
+  // or מחלה. Suppressing the row left a payslip reading as though they had
+  // worked every paid day.
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 6, vacation_pay: 900,
+    vacation_balance_available: 10, manual: {},
+    breakdown: { ...row.breakdown, hours: { total: 0, regular: 0, ot_125: 0, ot_150: 0, days_worked: 0 } } };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.strictEqual(rr.find((x) => x[2] === 4 && x[3] === 4)[5], 6, 'six paid days');
+  const actual = rr.find((x) => x[2] === 4 && x[3] === 7);
+  assert.ok(actual, 'and the worked count must be present');
+  assert.strictEqual(actual[5], 0, 'saying zero out loud');
+});
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

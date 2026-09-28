@@ -236,4 +236,17 @@ console.log("what the employee's own screen has to be able to say");
   ok('an employee with no imported balance gets null, never a zero to act on');
 }
 
+console.log('pay follows the days that may be FILED');
+{
+  // אילנה שימחי took 2 days against a balance of 0.28. The file reports 0.28;
+  // paying for 2 made the daily rate come out ₪1,057 — pay ÷ days, where the
+  // two numbers had stopped describing the same thing.
+  const u = V.vacationUsageForMonth(2, 0.28, { isGlobal: false });
+  assert.strictEqual(u.paid, 0.28, 'only what the balance covers may be paid');
+  const dayValue = 148.02;
+  assert.strictEqual(Math.round(u.paid * dayValue * 100) / 100, 41.45,
+    'and the pay follows those days, not the days she was away');
+  ok('an hourly employee is paid for the filed days, so rate × days holds');
+}
+
 console.log(`\nAll vacation-balance tests passed (${passed} checks).`);

@@ -1112,8 +1112,14 @@ async function getMonth(req, res, next) {
       const vacationDayValue = dayRates
         ? dayRates.vacation_day
         : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100;
-      const vacationPay = (!isTeken && vacEffDays > 0)
-        ? Math.round(vacEffDays * vacationDayValue * 100) / 100
+      // Paid for the days that may actually be FILED, not the days she was
+      // away. אילנה שימחי took 2 days against a balance of 0.28: the file
+      // reports 0.28, and paying for 2 made the rate come out ₪1,057 a day —
+      // pay ÷ days, where the two numbers had stopped describing the same
+      // thing. An employee cannot be paid for leave the file says she did not
+      // take.
+      const vacationPay = (!isTeken && vacUseRow.paid > 0)
+        ? Math.round(vacUseRow.paid * vacationDayValue * 100) / 100
         : 0;
       if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
 
@@ -5595,7 +5601,7 @@ async function sendToAccountant(req, res, next) {
       if (source.setup_error) {
         shkulitError = source.setup_error;
       } else {
-        const prevComponents = await previousMovementComponents(source);
+        const prevComponents = await previousMovementComponents(source, month, req);
         const movements = shkulitMovementsWorkbook(source, month, prevComponents, await readShkulitComponentCodes(), await readShkulitAlwaysZero());
         movementsFiled = movements.filed;
         shkulitAttachments.push({
@@ -6018,11 +6024,42 @@ function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map(),
  * no longer applies. See models/ShkulitMovementSnapshot.js for why this has to
  * be remembered at all.
  */
-async function previousMovementComponents(source) {
+async function previousMovementComponents(source, month, req) {
   const numbers = source.ready.map((ce) => ce.employee.employee_number).filter(Boolean);
   if (numbers.length === 0) return new Map();
+
   const snaps = await ShkulitMovementSnapshot.find({ employee_number: { $in: numbers } }).lean();
-  return new Map(snaps.map((sn) => [String(sn.employee_number), sn.components || []]));
+  const out = new Map(snaps.map((sn) => [String(sn.employee_number), sn.components || []]));
+
+  // Employees with no snapshot — everyone, the first time this runs, because
+  // the remembering only began when the code did. Their previous month is
+  // DERIVED instead: last month's payroll data is built through the same
+  // adapter, and whatever it would have filed becomes the set to switch off.
+  //
+  // Without this the switch-off is useless in exactly the month it is needed
+  // most. אילנה שימחי's August bonus is the case in point: שקלולית carried it
+  // into September, we had never filed a bonus row for her, so nothing in the
+  // snapshot could reach it and it would have been paid a second time.
+  const missing = numbers.filter((n) => !out.has(String(n)));
+  if (missing.length === 0 || !month || !req) return out;
+
+  const prev = lookbackMonths(month, 1)[0];
+  if (!prev) return out;
+  try {
+    const prevData = await fetchMonthData({ month: prev, branch: 'all' }, req.user);
+    const prevSource = buildExportSource(prev, (prevData.rows || []).filter(
+      (r) => missing.includes(String(r.employee_number)),
+    ));
+    const { filed } = shkulit.buildMovements(prevSource);
+    for (const [empNo, components] of filed) {
+      if (!out.has(String(empNo))) out.set(String(empNo), components);
+    }
+  } catch (e) {
+    // A month we cannot rebuild leaves those employees without a switch-off —
+    // the same position as before, and said out loud rather than silently.
+    console.error(`[shkulit] deriving ${prev} for the switch-off failed:`, e.message);
+  }
+  return out;
 }
 
 /**
@@ -6152,7 +6189,7 @@ async function getShkulitFile(req, res, next) {
       // the next diff starts from this file.
       await recordShkulitMasterHandoff(master);
     } else {
-      const prev = await previousMovementComponents(source);
+      const prev = await previousMovementComponents(source, month, req);
       const mv = shkulitMovementsWorkbook(source, month, prev, await readShkulitComponentCodes(), await readShkulitAlwaysZero());
       ({ buffer: buf, baseName } = mv);
       // Downloading IS the handoff, the same rule the master follows.
@@ -6237,6 +6274,7 @@ module.exports = {
   // the SAME figures the live path does, and the only way to guarantee that is
   // to run the same function rather than reimplement its arithmetic.
   __fetchMonthData: fetchMonthData,
+  __previousMovementComponents: previousMovementComponents,
   getVacationOverdraft,
   // The workbook builders are exported so the download path, the send path and
   // the tests all assemble the accountant's files from the same code.
