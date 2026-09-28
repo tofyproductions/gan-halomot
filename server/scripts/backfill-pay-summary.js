@@ -59,7 +59,9 @@ const argOf = (name) => {
 
   let written = 0;
   let skipped = 0;
+  let unsaved = 0;
   const miluimGaps = [];
+  const unsavedMonths = [];
 
   for (const month of scope) {
     let data;
@@ -84,11 +86,32 @@ const argOf = (name) => {
         miluimGaps.push({ month, employee: r.full_name, amount: r.manual.miluim.amount });
       }
 
-      if (WRITE) {
-        await PayrollMonth.updateOne(
+      // fetchMonthData answers for every employee on the payroll, whether or
+      // not the month was ever SAVED. An update with no upsert matches nothing
+      // for the unsaved ones — and counting the attempt rather than the effect
+      // is how a run reported 467 records while writing 373. Count what the
+      // database actually changed.
+      const res = WRITE
+        ? await PayrollMonth.updateOne(
           { employee_id: r.employee_id, month },
           { $set: { pay_summary: { ...s, recorded_at: new Date() } } },
-        );
+        )
+        : { matchedCount: await PayrollMonth.countDocuments({ employee_id: r.employee_id, month }) };
+
+      if (!res.matchedCount) {
+        // No PayrollMonth document: this month was never run for her. It is
+        // therefore absent from her average — and when it carried real pay,
+        // that is a month of her history going missing, so it is named.
+        unsaved += 1;
+        const paid = (Number(s.base_salary) || 0) + (Number(s.vacation_pay) || 0)
+          + (Number(s.sick_pay) || 0) + (Number(s.miluim_pay) || 0) + (Number(s.holiday_pay) || 0);
+        if (paid > 0) {
+          unsavedMonths.push({
+            month, employee: r.full_name,
+            pay: Math.round(paid), days: Number(s.days_for_payslip) || 0,
+          });
+        }
+        continue;
       }
       monthWrote += 1;
     }
@@ -96,7 +119,17 @@ const argOf = (name) => {
     console.log(`  ${month}  ${String(monthWrote).padStart(3)} עובדים`);
   }
 
-  console.log(`\n${WRITE ? 'נכתבו' : 'יכתבו'}: ${written} רשומות · ללא נתונים: ${skipped}`);
+  console.log(`\n${WRITE ? 'נכתבו' : 'יכתבו'}: ${written} רשומות · ללא נתונים: ${skipped} · חודשים שלא נשמרו מעולם: ${unsaved}`);
+
+  if (unsavedMonths.length) {
+    console.log(`\n⚠️  ${unsavedMonths.length} חודשי־עובד עם תשלום אמיתי שאין להם רשומת שכר שמורה:`);
+    for (const g of unsavedMonths.sort((x, y) => y.pay - x.pay).slice(0, 20)) {
+      console.log(`    ${g.month}  ${g.employee}  ₪${g.pay}  ${g.days} ימים`);
+    }
+    if (unsavedMonths.length > 20) console.log(`    ...ועוד ${unsavedMonths.length - 20}`);
+    console.log('    החודשים האלה אינם נכנסים לממוצע — לא ניתן לכתוב אליהם.');
+    console.log('    כדי לכלול אותם צריך לפתוח את החודש בטבלת השכר ולשמור אותו.');
+  }
 
   if (miluimGaps.length) {
     console.log(`\n⚠️  ${miluimGaps.length} חודשי־עובד עם תשלום מילואים וללא ספירת ימים:`);
