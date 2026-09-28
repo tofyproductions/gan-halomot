@@ -99,6 +99,7 @@ const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = r
 const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
+const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
 const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
@@ -536,8 +537,8 @@ async function getMonth(req, res, next) {
     // same reason as the first group. This used to be ~11 sequential awaits;
     // on a slow moment that stacking was most of what made the table hang.
     const [
-      punches, resolutionDocs, [allDocs, allCerts], existing, adjustments,
-      commitments, kindergartenHolidays, specialDays, leaveRequests,
+      punches, resolutionDocs, [allDocs, allCerts], existing, priorVacationRows,
+      adjustments, commitments, kindergartenHolidays, specialDays, leaveRequests,
       sickRequests, examRequests,
     ] = await Promise.all([
       // Pull punches for all in-scope employees
@@ -578,6 +579,18 @@ async function getMonth(req, res, next) {
         employee_id: { $in: empIdList },
         month,
       }).populate('manual.advance_deduction_preset_id').lean(),
+      // Vacation days taken in EARLIER months, for the חופשה balance.
+      //
+      // Only months up to (not including) the one being shown: the current
+      // month's own days are the thing being decided, and counting them here
+      // would charge them before anyone pressed save. Each employee's opening
+      // balance then decides how far back of this is actually hers to be
+      // charged for — days before her as_of_month are already inside the
+      // opening figure, and adding them again bills the same leave twice.
+      PayrollMonth.find({
+        employee_id: { $in: empIdList },
+        month: { $lt: month },
+      }).select('employee_id month vacation_eff_days manual.vacation_days').lean(),
       // Salary adjustments — managers' ad-hoc credits/debits/hour corrections
       SalaryAdjustment.find({
         employee_id: { $in: empIdList },
@@ -779,6 +792,20 @@ async function getMonth(req, res, next) {
     // be shown in the table — an employee from branch A may have punched at B.
     const allBranchesData = await Branch.find({}).select('_id name amuta_id').sort({ name: 1 }).lean();
     const branchNameById = new Map(allBranchesData.map(b => [String(b._id), b.name]));
+
+    // Vacation days already taken, per employee, per month — the raw material
+    // for the חופשה balance. Kept as a month map rather than one total because
+    // each employee's opening balance starts at her OWN as_of_month, and only
+    // the months after it may be charged against her.
+    const priorVacationByEmp = new Map();
+    for (const r of priorVacationRows || []) {
+      const key = String(r.employee_id);
+      if (!priorVacationByEmp.has(key)) priorVacationByEmp.set(key, new Map());
+      // vacation_eff_days is what the month actually drew; the manual entry is
+      // the fallback for rows saved before that field existed.
+      const days = Number(r.vacation_eff_days ?? r.manual?.vacation_days) || 0;
+      if (days > 0) priorVacationByEmp.get(key).set(r.month, days);
+    }
 
     const rows = employees.map(emp => {
       const empPunches = punchesByEmp.get(String(emp._id)) || [];
@@ -1027,6 +1054,21 @@ async function getMonth(req, res, next) {
       const vacEffDays = (Number(manual.vacation_days) > 0)
         ? Number(manual.vacation_days)
         : (vacationAutoGated ? 0 : (vacationAutoInfo.total || 0));
+
+      // Days in hand BEFORE this month is charged — what the export cap reads.
+      // Null when no opening balance is on file, and null means "do not cap":
+      // an unknown balance must not quietly reduce anybody's paid leave.
+      const vacOpening = emp.vacation_balance_opening || {};
+      let vacAvailable = null;
+      if (vacOpening.as_of_month) {
+        const takenByMonth = priorVacationByEmp.get(String(emp._id)) || new Map();
+        let usedSince = 0;
+        for (const [mm2, dd] of takenByMonth) {
+          if (mm2 > vacOpening.as_of_month) usedSince += dd;
+        }
+        const bal = vacationBalanceFor(vacOpening, emp.vacation_monthly_accrual, month, usedSince);
+        vacAvailable = bal ? bal.available : null;
+      }
       const vacationPay = (!isTeken && vacEffDays > 0)
         ? Math.round(vacEffDays * (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100
         : 0;
@@ -1644,10 +1686,39 @@ async function getMonth(req, res, next) {
           };
         })(),
         vacation_info: (() => {
+          // The accrued balance, from the opening figure the accountant's
+          // דוח העדרויות gave us plus this employee's own monthly rate.
+          //
+          // Only months AFTER her as_of_month are charged: anything earlier is
+          // already inside the opening number, and counting it again would bill
+          // the same leave twice. `balance` is null when no opening is on file
+          // — null shows nothing, whereas 0 would tell her she has no days.
+          const opening = emp.vacation_balance_opening || {};
+          let balance = null;
+          if (opening.as_of_month) {
+            const taken = priorVacationByEmp.get(String(emp._id)) || new Map();
+            let usedSince = 0;
+            for (const [m, d] of taken) {
+              if (m > opening.as_of_month) usedSince += d;
+            }
+            balance = vacationBalanceFor(opening, emp.vacation_monthly_accrual, month, usedSince);
+          }
           return {
             balance_from_payslip: row?.vacation_balance_from_payslip ?? null,
             balance_recorded_at: row?.vacation_balance_recorded_at || null,
             request_ids: row?.vacation_request_ids?.map(String) || [],
+            // Two numbers that answer different questions, kept apart on
+            // purpose: `balance` is what our own accrual says she has; the
+            // payslip figure above is what the accountant's system reported.
+            // Merging them would hide exactly the disagreement worth seeing.
+            balance: balance && {
+              ...balance,
+              // The month's own days are not charged above — show what the
+              // balance would be once this month is saved, so the office sees
+              // an overdraw before approving it rather than after.
+              after_this_month: Math.round((balance.available - (Number(vacEffDays) || 0)) * 1000) / 1000,
+              days_this_month: Number(vacEffDays) || 0,
+            },
           };
         })(),
         vacation_days_auto: {
@@ -1697,7 +1768,11 @@ async function getMonth(req, res, next) {
           });
           return res ? { ...res, start_date: startIso, weekly_hours: weekly } : null;
         })() : null,
-        vacation_eff_days: vacEffDays,    // effective vacation days drawn from balance
+        vacation_eff_days: vacEffDays,    // the days the office recorded this month
+        // What her balance allows. The export layer caps vacation_eff_days by
+        // this, so the accountant's file and this table cannot disagree about
+        // how many days were actually filed.
+        vacation_balance_available: vacAvailable,
         sick_info: {
           policy: emp.sick_pay_policy || 'statutory',
           daily_value: Math.round(sickDailyValue * 100) / 100,
@@ -3760,7 +3835,15 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     const sickPay = r.sick_info?.pay || 0;
     const sickDays = Number(r.manual?.sick_days) || 0;
     const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
-    const vac = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0);
+    // What the office recorded, and what her balance actually allows to be
+    // filed. Seven days away against a balance of two is two days paid: the
+    // rest have not been earned. `vac` stays the FILED figure so every line
+    // below — the card cell, the global-employee instruction, the totals —
+    // speaks about the same number the שקלולית file carries.
+    const vacTaken = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0);
+    const vacAvail = r.vacation_balance_available;
+    const vacUse = vacationUsageForMonth(vacTaken, vacAvail == null ? null : Number(vacAvail));
+    const vac = vacUse.paid;
     const bonus = r.bonus?.effective || 0;
     const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
     const paDed = r.partial_absence?.deduction || 0;
@@ -3913,7 +3996,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${payRow}
       </tr>
       <tr>
-        ${cell('חופשה', vac ? `${n1(vac)} ימים` : '')}
+        ${cell('חופשה', vac ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}` : (vacUse.capped ? `0 (מתוך ${n1(vacTaken)} — אין יתרה)` : ''), vacUse.capped ? { color: '#b91c1c', bold: true } : {})}
         ${cell('מילואים', nt(r.manual?.miluim))}
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}

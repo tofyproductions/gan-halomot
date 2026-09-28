@@ -1,3 +1,4 @@
+const { vacationUsageForMonth } = require('../vacationBalance');
 'use strict';
 
 /**
@@ -97,10 +98,28 @@ function toCanonicalEmployee(row) {
     : money(row.holiday_pay_auto?.total_pay);
   const holidayDays = row.holiday_pay_auto?.total_days || 0;
 
-  // Vacation: effective days actually drawn from balance, else the manual entry.
-  const vacationDays = row.vacation_eff_days != null
+  // Vacation: the days the office recorded for the month.
+  const vacationDaysTaken = row.vacation_eff_days != null
     ? num(row.vacation_eff_days)
     : num(manual.vacation_days);
+
+  // ...and what may actually be FILED, once her balance has its say.
+  //
+  // She was away seven days and holds two: the accountant is sent two, because
+  // paid leave comes out of a balance and five of those days have not been
+  // earned. The remaining days are not erased — they travel as `unpaid` with
+  // the reason attached, so the office can see that somebody was absent on days
+  // nobody is paying for and decide what they were.
+  //
+  // `vacation_balance_available` arrives from the payroll month, which is the
+  // only layer that knows the opening balance and what has been drawn since.
+  // When it is absent NOTHING is capped: an unknown balance must never quietly
+  // reduce what a person is paid.
+  const vacationUsage = vacationUsageForMonth(
+    vacationDaysTaken,
+    row.vacation_balance_available == null ? null : num(row.vacation_balance_available),
+  );
+  const vacationDays = vacationUsage.paid;
 
   // Salary completion (השלמת שכר) is a teken-only line, and only when enabled.
   const salaryCompletion = (isGlobal && manual.include_salary_completion !== false)
@@ -155,7 +174,14 @@ function toCanonicalEmployee(row) {
       ot_150_hours: num(b.hours?.ot_150),
       days_worked: num(b.hours?.days_worked),
       sick_days: num(manual.sick_days),
+      // The capped figure — this is what goes to the accountant.
       vacation_days: vacationDays,
+      // And the audit trail beside it, so no screen has to recompute the cap
+      // and risk disagreeing with the file that was actually sent.
+      vacation_days_taken: vacationDaysTaken,
+      vacation_days_unpaid: vacationUsage.unpaid,
+      vacation_capped: vacationUsage.capped,
+      vacation_balance_available: vacationUsage.available,
       holiday_days: num(holidayDays),
       absence_deduct_days: num(row.absence?.deductible_days),
       partial_absence_hours: num(row.partial_absence?.effective_hours),

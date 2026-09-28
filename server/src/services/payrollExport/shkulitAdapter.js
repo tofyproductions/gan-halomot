@@ -251,6 +251,31 @@ function buildMovements(source) {
       }
     }
 
+    // ימי חופשה — the days FILED, which is not always the days taken.
+    //
+    // Paid leave is drawn from a balance: seven days away against a balance of
+    // two is two days filed, because the other five have not been earned and
+    // filing them would pay leave she does not hold. The capping happens in the
+    // source layer so this file and the accountant's cards cannot disagree; all
+    // that is decided here is how the number travels.
+    //
+    // It travels as a NOTE rather than a row because ימי חופשה has no confirmed
+    // קוד רכיב — the checklist still lists it as an open question ("7/8/לא
+    // בקובץ?"). Guessing one is what cost the 28.09 import, so the count and its
+    // reason go where the accountant reads them and she keys the line herself.
+    // The day the code is confirmed this becomes a row and nothing else changes.
+    const vacDays = round2(Number(ce.quantities?.vacation_days) || 0);
+    const vacTaken = round2(Number(ce.quantities?.vacation_days_taken) || 0);
+    if (vacDays > 0 || vacTaken > 0) {
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'ימי חופשה',
+        text: ce.quantities?.vacation_capped
+          ? `לתשלום: ${vacDays} ימים — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
+          : `${vacDays} ימי חופשה.`,
+      });
+    }
+
     // ימי עבודה — the count, not more money. Global only; see the constant.
     const daysWorked = round2(Number(ce.quantities?.days_worked) || 0);
     if (daysWorked > 0) {
