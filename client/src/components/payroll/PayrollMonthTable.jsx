@@ -128,6 +128,10 @@ function fmtCurrency(n) {
   return Math.round(Number(n) || 0).toLocaleString('he-IL');
 }
 
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 function computeTravel(row) {
   // Use the value the salary engine actually paid (it already honours the
   // manager's manual override) so the displayed travel always equals what's paid.
@@ -780,9 +784,25 @@ function OneTimeCompletionCell({ row }) {
   );
 }
 
+// The rate a previous-month hour correction gets paid at: the employee's
+// CURRENT value-per-hour (global: the computed teken hourly_value; hourly:
+// the hourly_rate). There is no clean way to reach back to an old month's
+// rate from this simple dialog — if it differs, the accountant types the
+// amount directly instead of using the hours calculator.
+function currentHourlyValue(row) {
+  if (row.salary_type === 'global') {
+    return Number(row.breakdown?.components?.teken_breakdown?.hourly_value) || 0;
+  }
+  return Number(row.breakdown?.rates?.hourly_rate) || 0;
+}
+
 function OneTimeCompletionDialog({ open, row, onClose, onSave }) {
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [useHours, setUseHours] = useState(false);
+  const [hRegular, setHRegular] = useState('');
+  const [hOt125, setHOt125] = useState('');
+  const [hOt150, setHOt150] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -790,9 +810,38 @@ function OneTimeCompletionDialog({ open, row, onClose, onSave }) {
     const oc = row.one_time_salary_completion || {};
     setAmount(oc.amount != null ? String(oc.amount) : '');
     setNote(oc.note || '');
+    const h = oc.hours || {};
+    const hasHours = h.regular != null || h.ot125 != null || h.ot150 != null;
+    setUseHours(hasHours);
+    setHRegular(h.regular != null ? String(h.regular) : '');
+    setHOt125(h.ot125 != null ? String(h.ot125) : '');
+    setHOt150(h.ot150 != null ? String(h.ot150) : '');
   }, [row]);
 
   if (!row) return null;
+
+  const rate = currentHourlyValue(row);
+  const recompute = (regular, ot125, ot150) => round2(
+    (Number(regular) || 0) * rate
+    + (Number(ot125) || 0) * rate * 1.25
+    + (Number(ot150) || 0) * rate * 1.5,
+  );
+  const computedAmount = recompute(hRegular, hOt125, hOt150);
+  // Any hours field change pushes its computed value straight into the
+  // amount field — that IS the mechanism; the accountant can still type
+  // over it afterward if the rate that applied back then was different.
+  // Each handler recomputes with the INCOMING value for its own field (state
+  // setters are async, so reading computedAmount here would still reflect
+  // the value from before this keystroke — one step behind on every field
+  // after the first).
+  const onHoursChange = (which) => (e) => {
+    const v = e.target.value;
+    const next = { regular: hRegular, ot125: hOt125, ot150: hOt150, [which]: v };
+    if (which === 'regular') setHRegular(v);
+    else if (which === 'ot125') setHOt125(v);
+    else setHOt150(v);
+    setAmount(String(recompute(next.regular, next.ot125, next.ot150)));
+  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
@@ -807,6 +856,27 @@ function OneTimeCompletionDialog({ open, row, onClose, onSave }) {
             onChange={e => setAmount(e.target.value)}
             InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
           />
+          <FormControlLabel
+            control={<Checkbox checked={useHours} onChange={e => setUseHours(e.target.checked)} />}
+            label="במקום זה — לחשב לפי שעות מחודש קודם"
+          />
+          {useHours && (
+            <Box sx={{ p: 1.5, border: '1px dashed', borderColor: 'divider', borderRadius: 1 }}>
+              <Stack spacing={1}>
+                <Typography variant="caption" color="text.secondary">
+                  לפי ערך שעה נוכחי: ₪{rate.toLocaleString('he-IL')}/שעה. אם התעריף אז היה שונה — עדיף להזין את הסכום ישירות למעלה.
+                </Typography>
+                <Stack direction="row" spacing={1}>
+                  <TextField label="שעות רגילות" type="number" size="small" value={hRegular} onChange={onHoursChange('regular')} />
+                  <TextField label="שע״נ 125%" type="number" size="small" value={hOt125} onChange={onHoursChange('ot125')} />
+                  <TextField label="שע״נ 150%" type="number" size="small" value={hOt150} onChange={onHoursChange('ot150')} />
+                </Stack>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                  סכום מחושב: ₪{fmtCurrency(computedAmount)}
+                </Typography>
+              </Stack>
+            </Box>
+          )}
           <TextField label="הערה / עבור מה" value={note} onChange={e => setNote(e.target.value)} multiline minRows={2} />
         </Stack>
       </DialogContent>
@@ -816,7 +886,15 @@ function OneTimeCompletionDialog({ open, row, onClose, onSave }) {
           onClick={() => {
             setSaving(true);
             onSave({
-              one_time_salary_completion: { amount: amount === '' ? null : Number(amount), note: note.trim() },
+              one_time_salary_completion: {
+                amount: amount === '' ? null : Number(amount),
+                note: note.trim(),
+                hours: useHours ? {
+                  regular: hRegular === '' ? null : Number(hRegular),
+                  ot125: hOt125 === '' ? null : Number(hOt125),
+                  ot150: hOt150 === '' ? null : Number(hOt150),
+                } : { regular: null, ot125: null, ot150: null },
+              },
             })
               .then(() => { toast.success('השלמת שכר חד פעמית עודכנה'); onClose(); })
               .finally(() => setSaving(false));
@@ -3291,7 +3369,9 @@ export default function PayrollMonthTable() {
         onRulesSaved={() => fetchData({ quiet: true })} />
       <OneTimeCompletionDialog open={oneTimeCompletionDlg.open} row={oneTimeCompletionDlg.row}
         onClose={() => setOneTimeCompletionDlg({ open: false, row: null })}
-        onSave={(patch) => oneTimeCompletionDlg.row && patchManual(oneTimeCompletionDlg.row.employee_id, patch)} />
+        onSave={(patch) => oneTimeCompletionDlg.row
+          ? patchManual(oneTimeCompletionDlg.row.employee_id, patch).then(() => fetchData({ quiet: true }))
+          : Promise.resolve()} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
       <SalaryAdjustmentDialog
         open={adjustments.open}

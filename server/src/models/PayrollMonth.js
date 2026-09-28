@@ -89,6 +89,16 @@ const payrollMonthSchema = new mongoose.Schema({
     one_time_salary_completion: {
       amount: { type: Number, default: null },
       note:   { type: String, default: '' },
+      // Optional record of the hours that produced `amount`, for a previous
+      // month's missing regular/125%/150% hours — the client computes amount
+      // from these at the employee's current rate and sends both; kept here
+      // ONLY so the dialog can re-show and re-compute them later. `amount` is
+      // still the one number payroll math and שקלולית actually read.
+      hours: {
+        regular: { type: Number, default: null },
+        ot125:   { type: Number, default: null },
+        ot150:   { type: Number, default: null },
+      },
     },
 
     // Optional per-month override of the employee's default travel allowance.

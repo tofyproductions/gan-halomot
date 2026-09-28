@@ -72,6 +72,30 @@ async function main() {
     ok('estimated_total is exactly 640 higher with the one-time completion set than without it');
   }
 
+  console.log('the hours breakdown that produced the amount round-trips on the row (for the dialog to re-show and re-compute)');
+  {
+    const emp2 = await Employee.create({
+      full_name: 'עובדת בדיקה — השלמה לפי שעות', israeli_id: '975318642',
+      branch_id: branch._id, salary_type: 'hourly', hourly_rate: 60, is_active: true,
+      start_date: new Date('2024-01-01'), work_days: [0, 1, 2, 3, 4],
+      amuta_distribution: [{ amuta_id: amuta._id, hourly_rate: 60 }],
+    });
+    await PayrollMonth.create({
+      employee_id: emp2._id, branch_id: branch._id, month,
+      manual: {
+        one_time_salary_completion: {
+          amount: 585, note: '5 שעות רגילות + 2 שע"נ 125%',
+          hours: { regular: 5, ot125: 2, ot150: 0 },
+        },
+      },
+    });
+    const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
+    const row = (data.rows || []).find(r => String(r.employee_id) === String(emp2._id));
+    assert.strictEqual(row.one_time_salary_completion.amount, 585);
+    assert.deepStrictEqual(row.one_time_salary_completion.hours, { regular: 5, ot125: 2, ot150: 0 });
+    ok('hours {regular, ot125, ot150} round-trip exactly as stored, alongside the amount they produced');
+  }
+
   console.log('the automatic תקן completion and the manual one-off never interact');
   {
     const global = await Employee.create({

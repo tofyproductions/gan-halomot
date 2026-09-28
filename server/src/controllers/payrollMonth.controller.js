@@ -1709,6 +1709,11 @@ async function getMonth(req, res, next) {
         one_time_salary_completion: {
           amount: oneTimeCompletion,
           note: oneTimeCompletionNote,
+          hours: {
+            regular: mOneTimeCompletion.hours?.regular ?? null,
+            ot125: mOneTimeCompletion.hours?.ot125 ?? null,
+            ot150: mOneTimeCompletion.hours?.ot150 ?? null,
+          },
         },
         manual: {
           sick_days:      manual.sick_days || 0,
