@@ -119,8 +119,20 @@ const COMPONENTS = [
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
   { key: 'holiday_pay', code: 44, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
   { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay, units: (ce) => ce.quantities.sick_days },
-  { key: 'bonus', code: 35, label: 'בונוס', get: (ce) => ce.earnings.bonus },
-  { key: 'august_bonus', code: 39, label: 'בונוס מיוחד (מענק אוגוסט)', get: (ce) => ce.earnings.august_bonus },
+  // בונוס — code 35, and בונוס אוגוסט rides the SAME code.
+  //
+  // 39 "בונוס מיוחד" exists in the אקסולוגיה and was the guess here, written
+  // with a "(לוודא)" beside it in the checklist and never verified. אילנה
+  // שימחי's 08.2026 payslip settles it: her ₪1,844 sits on a line named
+  // "בונוס" — the accountant's own hand, code 35. Filing 39 would have left
+  // her real bonus standing under 35 with a zero sent to an empty 39.
+  //
+  // The two are SUMMED rather than sent as two rows: one code twice leaves
+  // שקלולית to decide whether to add them or keep the last, and neither answer
+  // is written down anywhere. What the row contains is said in the notes.
+  { key: 'bonus', code: 35, label: 'בונוס',
+    get: (ce) => round2((Number(ce.earnings.bonus) || 0)
+      + (Number(ce.earnings.august_bonus) || 0)) },
   { key: 'miluim', code: 42, label: 'ימי מילואים', get: (ce) => ce.earnings.miluim },
   { key: 'absence', code: 36, label: 'ימים חסרים', sign: -1, unit: 'ימים', get: (ce) => ce.deductions.absence, units: (ce) => ce.quantities.absence_deduct_days },
   { key: 'partial_absence', code: 41, label: 'שעות חסרות', sign: -1, unit: 'שעות', get: (ce) => ce.deductions.partial_absence, units: (ce) => ce.quantities.partial_absence_hours },
@@ -376,6 +388,21 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
           });
         }
       }
+    }
+
+    // What the single בונוס row is made of, whenever it is not just a bonus.
+    // The accountant reads one number under code 35 and has no way to see that
+    // part of it is חופשת הקיץ; this is the only place that can tell them.
+    const augBonus = round2(Number(ce.earnings.august_bonus) || 0);
+    if (augBonus > 0) {
+      const plain = round2(Number(ce.earnings.bonus) || 0);
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'בונוס אוגוסט',
+        text: plain > 0
+          ? `שורת בונוס (קוד 35) מכילה ${plain} ש״ח בונוס רגיל + ${augBonus} ש״ח בונוס אוגוסט (ימי חופשת קיץ בתשלום) = ${round2(plain + augBonus)} ש״ח.`
+          : `שורת בונוס (קוד 35) בסך ${augBonus} ש״ח היא בונוס אוגוסט — ימי חופשת קיץ בתשלום.`,
+      });
     }
 
     // ימי חופשה — code 8, תמורת חופשה (אקסולוגיה, אושר 28.09.2026).

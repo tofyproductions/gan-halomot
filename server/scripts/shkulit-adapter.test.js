@@ -593,4 +593,50 @@ ok('zero worked days is filed, not omitted', () => {
   assert.strictEqual(actual[5], 0, 'saying zero out loud');
 });
 
+console.log('בונוס אוגוסט goes out under code 35, with the regular bonus');
+{
+  const withAug = (aug, plain) => {
+    const r = { ...row, bonus: { effective: plain }, manual: {},
+      breakdown: { ...row.breakdown,
+        components: { ...row.breakdown.components,
+          closure_completion_bonus: { amount: aug, days: [], dates: [],
+            deduction: 0, unapproved_days: [], reason: 'בונוס אוגוסט' } } } };
+    return shkulit.buildMovements(buildExportSource('2026-08', [r]));
+  };
+
+  ok('a בונוס אוגוסט alone is code 35, never 39', () => {
+    // אילנה שימחי's 08.2026 payslip puts her ₪1,844 on a line named "בונוס".
+    // 39 "בונוס מיוחד" exists in the אקסולוגיה and is NOT what the accountant
+    // used, so filing it there would have left the real bonus untouched under
+    // 35 and sent a zero to an empty code.
+    const { rows: rr } = withAug(1844.4, 0);
+    const b = rr.filter((x) => x[2] === 1 && x[3] === 35);
+    assert.strictEqual(b.length, 1, 'exactly one bonus row');
+    assert.strictEqual(b[0][4], 1844.4);
+    assert.strictEqual(rr.filter((x) => x[3] === 39).length, 0, 'code 39 is not used');
+  });
+
+  ok('a regular bonus and a בונוס אוגוסט are summed into ONE row', () => {
+    // Two rows under one code would leave שקלולית to decide whether to add
+    // them or keep the last, and that answer is written down nowhere.
+    const { rows: rr } = withAug(1844.4, 350);
+    const b = rr.filter((x) => x[2] === 1 && x[3] === 35);
+    assert.strictEqual(b.length, 1, 'still one row');
+    assert.strictEqual(b[0][4], 2194.4, '350 + 1,844.40');
+  });
+
+  ok('and the notes say what the single row is made of', () => {
+    const { notes: nn } = withAug(1844.4, 350);
+    const n = nn.find((x) => x.subject === 'בונוס אוגוסט');
+    assert.ok(n, 'a note is written');
+    assert.ok(n.text.includes('350') && n.text.includes('1844.4'),
+      'both halves are named: ' + n.text);
+  });
+
+  ok('no בונוס אוגוסט writes no note', () => {
+    const { notes: nn } = withAug(0, 350);
+    assert.ok(!nn.some((x) => x.subject === 'בונוס אוגוסט'));
+  });
+}
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);
