@@ -1117,6 +1117,16 @@ async function getMonth(req, res, next) {
       const oneTimeNote = mOneTime.note || '';
       if (oneTimeBonus) breakdown.estimated_total = (breakdown.estimated_total || 0) + oneTimeBonus;
 
+      // "השלמת שכר חד פעמית" — a manual one-off completion amount the
+      // accountant enters by hand (e.g. hours from a previous month that never
+      // made it into that month's report). Independent of the automatic תקן
+      // completion above — its own שקלולית code (38), while the automatic one
+      // now files under 47.
+      const mOneTimeCompletion = manual.one_time_salary_completion || {};
+      const oneTimeCompletion = Number(mOneTimeCompletion.amount) || 0;
+      const oneTimeCompletionNote = mOneTimeCompletion.note || '';
+      if (oneTimeCompletion) breakdown.estimated_total = (breakdown.estimated_total || 0) + oneTimeCompletion;
+
       // Fold holiday pay (דמי חגים) into the total — manager override if set,
       // otherwise the auto-eligible amount (hourly employees only). Was computed
       // and displayed but never actually added to the salary.
@@ -1696,6 +1706,10 @@ async function getMonth(req, res, next) {
           amount: oneTimeBonus,
           note: oneTimeNote,
         },
+        one_time_salary_completion: {
+          amount: oneTimeCompletion,
+          note: oneTimeCompletionNote,
+        },
         manual: {
           sick_days:      manual.sick_days || 0,
           absence_days:   manual.absence_days || 0,
@@ -2129,7 +2143,7 @@ async function upsertEntry(req, res, next) {
       'sick_days', 'miluim_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
-      'travel_override', 'travel_note', 'bonus', 'one_time_bonus', 'notes', 'custom_values',
+      'travel_override', 'travel_note', 'bonus', 'one_time_bonus', 'one_time_salary_completion', 'notes', 'custom_values',
       'include_salary_completion', 'closure_completion', 'closure_completion_approved_dates',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'vacation_pay_confirmed',
@@ -5889,7 +5903,10 @@ const SHKULIT_CODES_KEY = 'shkulit_component_codes';
 /**
  * Codes שקלולית carries forward that we never file, and that must therefore be
  * switched off by hand every month — ליאור's קוד 47 (השלמת שכר על ידי מעביד)
- * being the one that started this.
+ * being the one that started this, back when we never sent code 47 at all. As
+ * of 28.09.2026 we DO file code 47 (the automatic תקן completion), so it no
+ * longer needs a manual entry here — this list is for whatever OTHER code
+ * still isn't ours to file.
  *
  * ⚠️ A code here is zeroed EVERY month we do not file it. If the accountant
  * enters it deliberately one month, this wipes it. That is why it is an empty

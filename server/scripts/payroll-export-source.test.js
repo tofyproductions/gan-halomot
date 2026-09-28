@@ -109,6 +109,19 @@ console.log('בונוס קבוע and בונוס חד פעמי travel as two sepa
   ok('קבוע and חד פעמי are copied as two distinct earnings, neither overwriting the other');
 }
 
+console.log('השלמת שכר אוטומטית and השלמת שכר חד פעמית travel as two separate figures');
+{
+  const ceNone = toCanonicalEmployee(validHourlyRow());
+  assert.strictEqual(ceNone.earnings.one_time_salary_completion, 0);
+  ok('no one_time_salary_completion on the row → 0');
+
+  const ce = toCanonicalEmployee(validHourlyRow({
+    one_time_salary_completion: { amount: 800, note: 'השלמה מחודש קודם' },
+  }));
+  assert.strictEqual(ce.earnings.one_time_salary_completion, 800, 'the manual one-off travels as its own figure');
+  ok('one_time_salary_completion is copied independently of the automatic salary_completion');
+}
+
 console.log('holiday pay — manual overrides auto');
 {
   const ce = toCanonicalEmployee(validHourlyRow({

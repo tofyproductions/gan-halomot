@@ -755,6 +755,79 @@ function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
   );
 }
 
+// השלמת שכר חד פעמית: a manual one-off completion for THIS month only —
+// separate from the automatic תקן completion column ("השלמת שכר ⓘ"). For
+// example, hours worked last month that never made it into that month's
+// report. Independent שקלולית code (38) from the automatic one (47).
+function OneTimeCompletionCell({ row }) {
+  const oc = row.one_time_salary_completion || {};
+  const amount = Number(oc.amount) || 0;
+  if (!amount) return <Typography variant="body2" color="text.disabled">—</Typography>;
+  return (
+    <Tooltip arrow title={
+      <Box sx={{ fontSize: '0.72rem' }}>
+        <div>{fmtCurrency(amount)}</div>
+        {oc.note && <div style={{ opacity: 0.85 }}>📝 {oc.note}</div>}
+        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה</div>
+      </Box>
+    }>
+      <Box sx={{ cursor: 'help' }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: COLOR.success.main }}>
+          {fmtCurrency(amount)}
+        </Typography>
+      </Box>
+    </Tooltip>
+  );
+}
+
+function OneTimeCompletionDialog({ open, row, onClose, onSave }) {
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!row) return;
+    const oc = row.one_time_salary_completion || {};
+    setAmount(oc.amount != null ? String(oc.amount) : '');
+    setNote(oc.note || '');
+  }, [row]);
+
+  if (!row) return null;
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>השלמת שכר חד פעמית — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ mt: 1 }}>
+          <Alert severity="info" sx={{ py: 0.5 }}>
+            להזין כאן רק השלמת שכר חד-פעמית שהנה"ח מזינה ידנית (למשל: השלמה מחודש קודם על שעות שלא נכנסו לדוח). זה נפרד לגמרי מהשלמת השכר האוטומטית של עובד תקן.
+          </Alert>
+          <TextField
+            label="סכום" type="number" value={amount}
+            onChange={e => setAmount(e.target.value)}
+            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+          />
+          <TextField label="הערה / עבור מה" value={note} onChange={e => setNote(e.target.value)} multiline minRows={2} />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" disabled={saving}
+          onClick={() => {
+            setSaving(true);
+            onSave({
+              one_time_salary_completion: { amount: amount === '' ? null : Number(amount), note: note.trim() },
+            })
+              .then(() => { toast.success('השלמת שכר חד פעמית עודכנה'); onClose(); })
+              .finally(() => setSaving(false));
+          }}>
+          {saving ? 'שומר…' : 'שמור'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function AddColumnDialog({ open, month, onClose, onCreated }) {
   const [label, setLabel] = useState('');
   const [kind, setKind] = useState('number');
@@ -1361,6 +1434,7 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
+  const [oneTimeCompletionDlg, setOneTimeCompletionDlg] = useState({ open: false, row: null });
   // The scrolling box. Same fix as AttendanceMonitor's grid: a full reload sets
   // `loading`, and while loading the table body collapses to one spinner row
   // (line ~1870) — an empty container has nothing to scroll, so the browser
@@ -1866,7 +1940,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'ימי מילואים', 'הלוואות', 'בונוס קבוע', 'בונוס חד פעמי', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'ימי מילואים', 'הלוואות', 'בונוס קבוע', 'בונוס חד פעמי', 'השלמת שכר חד פעמית', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
@@ -1918,6 +1992,7 @@ export default function PayrollMonthTable() {
         r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
         r.bonus?.effective ? Math.round(r.bonus.effective) : '',
         r.one_time_bonus?.amount ? Math.round(r.one_time_bonus.amount) : '',
+        r.one_time_salary_completion?.amount ? Math.round(r.one_time_salary_completion.amount) : '',
         r.breakdown?.estimated_total != null ? Math.round(r.breakdown.estimated_total) : '',
       );
       for (const c of customColumns) {
@@ -1935,6 +2010,7 @@ export default function PayrollMonthTable() {
         r.permanent_note || '',
         r.manual.notes || '',
         r.one_time_bonus?.note ? `בונוס חד פעמי: ${r.one_time_bonus.note}` : '',
+        r.one_time_salary_completion?.note ? `השלמת שכר חד פעמית: ${r.one_time_salary_completion.note}` : '',
       ].filter(Boolean).join(' · '));
       rowsAcc.push(cells);
     }
@@ -2253,7 +2329,7 @@ export default function PayrollMonthTable() {
   // changes; the dependency list below was generated and verified with
   // eslint-plugin-react-hooks (exhaustive-deps), not by eye.
   const tableBody = useMemo(() => {
-              const totalCols = 1 + 6 + (showRecreation ? 19 : 18) + customColumns.length;
+              const totalCols = 1 + 6 + (showRecreation ? 20 : 19) + customColumns.length;
               if (loading) {
                 return (<TableRow><TableCell colSpan={totalCols} align="center" sx={{ py: 4 }}><CircularProgress size={28} /></TableCell></TableRow>);
               }
@@ -2689,6 +2765,9 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer' }} onClick={() => !locked && setOneTimeCompletionDlg({ open: true, row: r })}>
+                        <OneTimeCompletionCell row={r} />
+                      </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
                           <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
@@ -3055,6 +3134,7 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.days }} />{/* ימי מילואים */}
             <col style={{ width: W.money }} />{/* הלוואות */}
             <col style={{ width: W.money }} />{/* בונוס */}
+            <col style={{ width: W.money }} />{/* השלמת שכר חד פעמית */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
@@ -3074,7 +3154,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
+              <TableCell colSpan={18 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -3124,6 +3204,11 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>ימי מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700 }}>
+                <Tooltip arrow title="השלמת שכר חד-פעמית שהנה״ח מזינה ידנית לחודש זה בלבד — נפרד לגמרי מהשלמת השכר האוטומטית של עובד תקן (עמודת 'השלמת שכר ⓘ').">
+                  <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>השלמת שכר חד פעמית</span>
+                </Tooltip>
+              </TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -3204,6 +3289,9 @@ export default function PayrollMonthTable() {
       <BonusDialog open={bonusDlg.open} row={bonusDlg.row} onClose={() => setBonusDlg({ open: false, row: null })}
         onSaveMonthly={(patch) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, patch)}
         onRulesSaved={() => fetchData({ quiet: true })} />
+      <OneTimeCompletionDialog open={oneTimeCompletionDlg.open} row={oneTimeCompletionDlg.row}
+        onClose={() => setOneTimeCompletionDlg({ open: false, row: null })}
+        onSave={(patch) => oneTimeCompletionDlg.row && patchManual(oneTimeCompletionDlg.row.employee_id, patch)} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
       <SalaryAdjustmentDialog
         open={adjustments.open}

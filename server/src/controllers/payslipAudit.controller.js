@@ -2064,6 +2064,7 @@ function systemRowToTableRow(r) {
     { label: 'שכר תקן (מוסכם)', value: gsal, currency: true },
     { label: 'שכר בסיס', value: baseRegular, currency: true },
     { label: 'השלמת שכר', value: rnd(tb?.completion), currency: true },
+    { label: 'השלמת שכר חד פעמית', value: rnd(r.one_time_salary_completion?.amount), currency: true },
     { label: 'תוספת שכר', value: rnd(tb?.supplement_applied), currency: true },
     { label: 'נסיעות', value: rnd(comp.travel), currency: true },
     { label: 'מחלה (ימים)', value: _num(r.manual?.sick_days) },

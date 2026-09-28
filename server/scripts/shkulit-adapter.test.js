@@ -352,13 +352,38 @@ ok('the agreed salary is never sent whole beside its own completion', () => {
     'שכר יסוד is the prorated regular pay, NOT the agreed ₪10,300');
   assert.deepStrictEqual(byCode.get(32).slice(4), [554, 1], 'OT 125% as the amount inside the salary');
   assert.ok(!byCode.has(33), '150% is zero this month — no row');
-  assert.strictEqual(byCode.get(38)[4], 2062, 'the completion still travels');
+  assert.strictEqual(byCode.get(47)[4], 2062, 'the automatic completion travels under code 47');
+  assert.ok(!byCode.has(38), 'no one-time completion entered this month — code 38 stays empty');
 
   // The whole point: the parts add back to the agreed salary exactly.
-  const salaryTotal = [1, 32, 33, 38]
+  const salaryTotal = [1, 32, 33, 47]
     .filter((c) => byCode.has(c))
     .reduce((t, c) => t + byCode.get(c)[4] * byCode.get(c)[5], 0);
   assert.strictEqual(salaryTotal, 10301, 'within a shekel of the agreed ₪10,300 — never ₪12,867');
+});
+
+ok('a one-time completion the accountant enters by hand travels separately, under code 38', () => {
+  const teken = {
+    ...row, employee_number: '27', israeli_id: '203677125', full_name: 'מחפוד ליאור',
+    salary_type: 'global',
+    breakdown: {
+      ...row.breakdown,
+      rates: {},
+      components: {
+        base_salary: 10300, travel: 272, recreation_monthly: 0, meal_vouchers: 0,
+        teken_breakdown: { regular_pay: 7685, ot125_pay: 554, ot150_pay: 0, completion: 2062 },
+      },
+      deductions: {},
+    },
+    manual: { include_salary_completion: true },
+    one_time_salary_completion: { amount: 800, note: 'השלמה מ-08.2026 על שעות שלא נכנסו לדוח' },
+  };
+  const src = buildExportSource('2026-09', [teken]);
+  const { rows: rr } = shkulit.buildMovements(src);
+  const byCode = new Map(rr.map((r) => [r[3], r]));
+
+  assert.strictEqual(byCode.get(47)[4], 2062, 'the automatic completion still travels under 47');
+  assert.strictEqual(byCode.get(38)[4], 800, 'the manual one-off completion travels separately under 38');
 });
 
 console.log('last month\'s components are switched off, not left to pay again');

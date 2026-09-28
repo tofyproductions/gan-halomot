@@ -81,6 +81,16 @@ const payrollMonthSchema = new mongoose.Schema({
       note:   { type: String, default: '' },
     },
 
+    // השלמת שכר חד פעמית: a one-off salary-completion amount the accountant
+    // enters by hand for THIS month only — e.g. hours worked last month that
+    // never made it into that month's report. Independent of the automatic
+    // תקן completion (calculateMonthlySalary's tb.completion): its own שקלולית
+    // code (38), separate from the automatic one (code 47).
+    one_time_salary_completion: {
+      amount: { type: Number, default: null },
+      note:   { type: String, default: '' },
+    },
+
     // Optional per-month override of the employee's default travel allowance.
     // If null, the auto value (travel_per_day × days_worked or monthly flat) is used.
     travel_override: { type: Number, default: null },

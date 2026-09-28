@@ -115,7 +115,14 @@ const ATTENDANCE = Object.freeze({
  * misread as pay.
  */
 const COMPONENTS = [
-  { key: 'salary_completion', code: 38, label: 'השלמת שכר', get: (ce) => ce.earnings.salary_completion },
+  // Two DIFFERENT completions, two DIFFERENT codes — confirmed with the user
+  // 28.09.2026: code 47 is the AUTOMATIC תקן completion (calculateMonthlySalary's
+  // tb.completion, the standing weekly top-up); code 38 is a manual ONE-OFF
+  // completion the accountant enters for this month only (e.g. hours from a
+  // prior month that missed that month's report). They used to share code 38,
+  // which conflated the two on the payslip.
+  { key: 'salary_completion', code: 47, label: 'השלמת שכר', get: (ce) => ce.earnings.salary_completion },
+  { key: 'one_time_salary_completion', code: 38, label: 'השלמת שכר חד פעמית', get: (ce) => ce.earnings.one_time_salary_completion },
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
   { key: 'holiday_pay', code: 44, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
   { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay, units: (ce) => ce.quantities.sick_days },
@@ -584,10 +591,14 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
   //   is switched off automatically. Safe, because a component we stopped
   //   filing is one we know is not due.
   //
-  //   WHAT WE NEVER FILED. ליאור's קוד 47 (השלמת שכר על ידי מעביד) sat in her
-  //   September payslip at August's ₪3,791 — we have never sent code 47, so it
-  //   was never in our snapshot and nothing here could reach it. Those codes
-  //   have to be named by hand, in the settings screen.
+  //   WHAT WE NEVER FILED. This is what started the list: ליאור's קוד 47
+  //   (השלמת שכר על ידי מעביד) sat in her September payslip at August's
+  //   ₪3,791 — back when we never sent code 47 at all, so it was never in our
+  //   snapshot and nothing here could reach it. As of 28.09.2026 code 47 IS
+  //   one we file (the automatic תקן completion — see shkulitAdapter's
+  //   COMPONENTS), so it now falls under "WHAT WE FILED" above instead. This
+  //   list stays for any OTHER code we still don't file but שקלולית might
+  //   carry forward — named by hand, in the settings screen.
   //
   //   ⚠️ A code on that list is zeroed EVERY month it is not filed by us. If
   //   the accountant enters it deliberately one month, this wipes it. That is
