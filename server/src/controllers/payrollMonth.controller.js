@@ -1069,6 +1069,15 @@ async function getMonth(req, res, next) {
         const bal = vacationBalanceFor(vacOpening, emp.vacation_monthly_accrual, month, usedSince);
         vacAvailable = bal ? bal.available : null;
       }
+      // What this month's days do to that balance. Computed HERE, in the row,
+      // rather than reached for from the accountant-card builder — that is a
+      // different function with its own scope, and the reference into it threw
+      // for every employee who had an opening balance, which is to say for
+      // nobody until the balances were imported and then for everybody.
+      const vacUseRow = vacationUsageForMonth(
+        vacEffDays, vacAvailable == null ? null : Number(vacAvailable),
+        { isGlobal: isTeken },
+      );
       const vacationPay = (!isTeken && vacEffDays > 0)
         ? Math.round(vacEffDays * (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100
         : 0;
@@ -1716,7 +1725,7 @@ async function getMonth(req, res, next) {
               // A תקן employee is paid her leave whether or not the balance
               // covers it, so this is the debt side of that: days advanced this
               // month, and where the running balance stands after them.
-              overdraft_this_month: vacUse.overdraft,
+              overdraft_this_month: vacUseRow.overdraft,
               // The month's own days are not charged above — show what the
               // balance would be once this month is saved, so the office sees
               // an overdraw before approving it rather than after.
