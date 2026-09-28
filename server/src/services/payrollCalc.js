@@ -150,13 +150,16 @@ function loanDeductionForMonth(loan, ym) {
   return Math.max(0, Number(loan.installment_amount) || 0);
 }
 
-function bonusAmountThisMonth(bonus, { hoursWorked, daysWorked, refDate }) {
+function bonusAmountThisMonth(bonus, { regularHours, daysWorked, refDate }) {
   if (!bonus || bonus.active === false) return 0;
   if (bonus.effective_from && new Date(bonus.effective_from) > refDate) return 0;
   if (bonus.effective_to && new Date(bonus.effective_to) < refDate) return 0;
   const amt = Number(bonus.amount) || 0;
   switch (bonus.type) {
-    case 'per_hour': return amt * hoursWorked;
+    // Regular hours only — a "5₪/hour" standing bonus is not itself an
+    // overtime premium, so OT hours (already paid their own 125%/150%) do
+    // not multiply it again.
+    case 'per_hour': return amt * regularHours;
     case 'per_day':  return amt * daysWorked;
     case 'fixed':
     default:         return amt;
@@ -714,7 +717,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
   let bonusTotal = 0;
   const bonusDetails = [];
   for (const b of bonuses) {
-    const amt = bonusAmountThisMonth(b, { hoursWorked, daysWorked, refDate });
+    const amt = bonusAmountThisMonth(b, { regularHours: regHours, daysWorked, refDate });
     if (amt > 0) {
       bonusTotal += amt;
       bonusDetails.push({
@@ -723,7 +726,7 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
         reason: b.reason || '',
         // For the table's tooltip — how the amount was reached.
         rate: b.type !== 'fixed' ? (Number(b.amount) || 0) : null,
-        quantity: b.type === 'per_hour' ? hoursWorked : (b.type === 'per_day' ? daysWorked : null),
+        quantity: b.type === 'per_hour' ? regHours : (b.type === 'per_day' ? daysWorked : null),
       });
     }
   }

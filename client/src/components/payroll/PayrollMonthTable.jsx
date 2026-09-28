@@ -714,7 +714,7 @@ function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
                 </Stack>
                 {rules.some(r => r.type === 'per_hour' || r.type === 'per_day') && (
                   <Typography variant="caption" color="text.secondary">
-                    "לפי שעה"/"לפי יום" = הסכום × סה״כ שעות/ימי עבודה בחודש (כולל שעות נוספות).
+                    "לפי שעה" = הסכום × שעות רגילות בלבד בחודש (לא כולל שעות נוספות) · "לפי יום" = הסכום × ימי עבודה.
                   </Typography>
                 )}
               </Stack>
