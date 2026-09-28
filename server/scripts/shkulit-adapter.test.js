@@ -102,7 +102,8 @@ ok('unmapped components + directives land in notes, not rows', () => {
   assert.ok(subjects.includes('ניכוי הלוואה'));
   assert.ok(subjects.some(s => s.startsWith('ניכוי מקדמה')));
   // 22 is שי לחג, confirmed by the software house on 28.09.2026.
-  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36, 22].includes(r[3])), 'no invented codes');
+  // 22 שי לחג and 8 תמורת חופשה were both confirmed on 28.09.2026.
+  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36, 22, 8].includes(r[3])), 'no invented codes');
 });
 ok('global employee → base as the resolved amount; net employee → flagged', () => {
   const globalRow = {
@@ -420,6 +421,54 @@ ok('the agreed salary times its coefficient comes to the payslip figure', () => 
   const ot = rr.find((x) => x[3] === 32);
   assert.strictEqual(ot[5], 7.1, 'the hours are the hours the payslip states — not a derived decimal');
   assert.strictEqual(Math.round(ot[4] * ot[5] * 100) / 100, 554, 'and the money is unchanged');
+});
+
+console.log('תמורת חופשה — code 8 carries the days, and the money only when there is money');
+ok('an hourly employee: days and the pay for them, in one row', () => {
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 5, vacation_pay: 2000,
+    vacation_balance_available: 10, manual: {} };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const v = rr.find((x) => x[3] === 8);
+  assert.ok(v, 'a vacation row must exist');
+  assert.deepStrictEqual(v.slice(4), [400, 5], 'the daily rate × the days');
+  assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 2000, 'and it comes to the pay');
+  assert.strictEqual(v[2], 1, 'רכיבי שכר');
+});
+ok('a תקן employee: the days are used, and NOTHING is added to her salary', () => {
+  // Her salary does not move with the days — it already contains them. A rate
+  // here would pay the same leave twice: once inside the agreed salary and
+  // once beside it.
+  const r = {
+    ...row, salary_type: 'global', vacation_eff_days: 5, vacation_pay: 0,
+    vacation_balance_available: 3, manual: {},
+    breakdown: { ...row.breakdown, rates: {},
+      components: { base_salary: 10300,
+        teken_breakdown: { teken_salary: 10300, hourly_value: 62, regular_pay: 10300, ot125_pay: 0, ot150_pay: 0, completion: 0 } },
+      deductions: {} },
+  };
+  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const v = rr.find((x) => x[3] === 8);
+  assert.ok(v, 'the row still exists — the balance has to be drawn from');
+  assert.strictEqual(v[5], 5, 'all five days are reported as used');
+  assert.strictEqual(v[4], 0, 'and the rate is zero — no money is added');
+  assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 0);
+  assert.ok(nn.some((n) => n.subject === 'ימי חופשה' && /מעבר ליתרה/.test(n.text)),
+    'the two days beyond her balance are reported for גמר חשבון');
+});
+ok('an hourly employee capped at her balance files only what she had', () => {
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 5, vacation_pay: 800,
+    vacation_balance_available: 2, manual: {} };
+  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const v = rr.find((x) => x[3] === 8);
+  assert.strictEqual(v[5], 2, 'two days — the balance she held');
+  assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 800);
+  assert.ok(nn.some((n) => /3 ימים נותרו ללא תשלום/.test(n.text)),
+    'and the three she was away without cover are named');
+});
+ok('no vacation means no row at all', () => {
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 0, vacation_pay: 0, manual: {} };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.ok(!rr.some((x) => x[3] === 8), 'a month with no leave files nothing');
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

@@ -108,6 +108,13 @@ const COMPONENTS = [
 ];
 
 
+/**
+ * תמורת חופשה — code 8 in the אקסולוגיה, confirmed 28.09.2026.
+ * (Code 7 is פדיון חופשה, the redemption paid out at the end of employment —
+ * a different event, and not something this monthly file ever emits.)
+ */
+const VACATION_CODE = 8;
+
 /** Hours codes for hourly employees — שקלולית prices rate × quantity. */
 const HOURS = {
   regular: { code: 1, factor: 1 },
@@ -344,28 +351,49 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       }
     }
 
-    // ימי חופשה — the days FILED, which is not always the days taken.
+    // ימי חופשה — code 8, תמורת חופשה (אקסולוגיה, אושר 28.09.2026).
     //
-    // Paid leave is drawn from a balance: seven days away against a balance of
-    // two is two days filed, because the other five have not been earned and
-    // filing them would pay leave she does not hold. The capping happens in the
-    // source layer so this file and the accountant's cards cannot disagree; all
-    // that is decided here is how the number travels.
+    // One row carries BOTH facts the payslip needs: how many days were used,
+    // and what was paid for them. Quantity is the days; rate is the daily rate.
     //
-    // It travels as a NOTE rather than a row because ימי חופשה has no confirmed
-    // קוד רכיב — the checklist still lists it as an open question ("7/8/לא
-    // בקובץ?"). Guessing one is what cost the 28.09 import, so the count and its
-    // reason go where the accountant reads them and she keys the line herself.
-    // The day the code is confirmed this becomes a row and nothing else changes.
+    // And the rate is where a תקן employee differs from an hourly one, which is
+    // the whole reason this is not a single formula:
+    //
+    //   HOURLY — the days are paid. Rate = the pay divided by the days, so the
+    //   row reads as a daily rate and comes to the money the table says.
+    //
+    //   תקן — the days are USED but not paid. Her salary does not move with
+    //   them; it already contains them. So the rate is 0: the row tells
+    //   שקלולית to draw the days from her balance and add nothing. Filing a
+    //   rate here would pay her the same leave twice — once inside the agreed
+    //   salary and once beside it.
+    //
+    // The days themselves were already capped (hourly) or allowed to overdraw
+    // (תקן) in the source layer, so what arrives here is what may be filed.
     const vacDays = round2(Number(ce.quantities?.vacation_days) || 0);
     const vacTaken = round2(Number(ce.quantities?.vacation_days_taken) || 0);
+    const vacPay = round2(Number(ce.earnings?.vacation_pay) || 0);
+    if (vacDays > 0) {
+      if (vacPay > 0) {
+        pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
+          'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
+      } else {
+        // Used, not paid — a תקן employee, or an hourly one with no rate on
+        // her card. Either way the count must still reach the balance.
+        push(RECORD_TYPE.SALARY, VACATION_CODE, 0, vacDays);
+      }
+    }
     if (vacDays > 0 || vacTaken > 0) {
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'ימי חופשה',
         text: ce.quantities?.vacation_capped
-          ? `לתשלום: ${vacDays} ימים — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
-          : `${vacDays} ימי חופשה.`,
+          ? `${vacDays} ימים לתשלום — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
+          : (ce.quantities?.vacation_overdraft_days
+            ? `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו במלואם במסגרת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`
+            : (vacPay > 0
+              ? `${vacDays} ימי חופשה בתשלום.`
+              : `${vacDays} ימי חופשה — נוצלו מהיתרה, ללא תוספת תשלום (השכר החודשי כולל אותם).`)),
       });
     }
 

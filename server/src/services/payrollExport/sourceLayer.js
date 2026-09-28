@@ -220,6 +220,11 @@ function toCanonicalEmployee(row) {
       recreation: money(c.recreation_monthly),
       meal_vouchers: money(c.meal_vouchers),
       holiday_pay: holidayPay,
+      // תמורת חופשה — paid to an HOURLY employee only, and the engine already
+      // resolves it to 0 for a תקן employee: her salary does not move with the
+      // days, so the leave is drawn from the balance without adding money.
+      // The count still travels; only the money is absent.
+      vacation_pay: money(row.vacation_pay),
       sick_pay: money(row.sick_info?.pay),
       bonus: money(row.bonus?.effective),
       august_bonus: money(c.closure_completion_bonus),
