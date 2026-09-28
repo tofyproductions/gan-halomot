@@ -5487,7 +5487,7 @@ async function sendToAccountant(req, res, next) {
         shkulitError = source.setup_error;
       } else {
         const prevComponents = await previousMovementComponents(source);
-        const movements = shkulitMovementsWorkbook(source, month, prevComponents, await readShkulitComponentCodes());
+        const movements = shkulitMovementsWorkbook(source, month, prevComponents, await readShkulitComponentCodes(), await readShkulitAlwaysZero());
         movementsFiled = movements.filed;
         shkulitAttachments.push({
           filename: `${movements.baseName}.xlsx`,
@@ -5641,6 +5641,26 @@ async function sendToAccountant(req, res, next) {
  * money file is worse than a line somebody has to key by hand.
  */
 const SHKULIT_CODES_KEY = 'shkulit_component_codes';
+/**
+ * Codes שקלולית carries forward that we never file, and that must therefore be
+ * switched off by hand every month — ליאור's קוד 47 (השלמת שכר על ידי מעביד)
+ * being the one that started this.
+ *
+ * ⚠️ A code here is zeroed EVERY month we do not file it. If the accountant
+ * enters it deliberately one month, this wipes it. That is why it is an empty
+ * list until somebody deliberately adds to it, never a default.
+ */
+const SHKULIT_ALWAYS_ZERO_KEY = 'shkulit_always_zero_codes';
+
+async function readShkulitAlwaysZero() {
+  try {
+    const doc = await Setting.findOne({ key: SHKULIT_ALWAYS_ZERO_KEY }).lean();
+    const list = Array.isArray(doc?.value) ? doc.value : [];
+    return list
+      .map((z) => ({ code: Number(z.code), table: Number(z.table) || 1, label: String(z.label || '') }))
+      .filter((z) => Number.isInteger(z.code) && z.code > 0);
+  } catch (_) { return []; }
+}
 
 async function readShkulitComponentCodes() {
   try {
@@ -5659,8 +5679,10 @@ async function readShkulitComponentCodes() {
 async function getShkulitCodes(req, res, next) {
   try {
     const doc = await Setting.findOne({ key: SHKULIT_CODES_KEY }).lean();
+    const zero = await readShkulitAlwaysZero();
     res.json({
       codes: doc?.value || {},
+      always_zero: zero,
       components: [
         { key: 'cibus', label: 'סיבוס', table: 2, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)' },
         { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: 2, hint: 'זקופות — שווי ארוחות' },
@@ -5687,8 +5709,31 @@ async function setShkulitCodes(req, res, next) {
       clean[k] = n;
     }
     await Setting.findOneAndUpdate({ key: SHKULIT_CODES_KEY }, { value: clean }, { upsert: true });
+
+    // The always-zero list travels with the same screen, and is validated the
+    // same way: a code here switches a component OFF for everybody, so a typo
+    // is not a cosmetic problem.
+    if (Array.isArray(req.body?.always_zero)) {
+      const zero = [];
+      for (const z of req.body.always_zero) {
+        const code = Number(z?.code);
+        const table = Number(z?.table) || 1;
+        if (!Number.isInteger(code) || code <= 0) {
+          return res.status(400).json({ error: `קוד לביטול קבוע חייב להיות מספר שלם חיובי (התקבל: ${z?.code}).` });
+        }
+        if (![1, 2, 3].includes(table)) {
+          return res.status(400).json({ error: `סוג רשומה חייב להיות 1, 2 או 3 (התקבל: ${z?.table}).` });
+        }
+        if (Object.values(clean).includes(code)) {
+          return res.status(400).json({ error: `קוד ${code} מוגדר כרכיב שאנחנו שולחים — אי אפשר גם לבטל אותו קבוע.` });
+        }
+        zero.push({ code, table, label: String(z?.label || '').trim() });
+      }
+      await Setting.findOneAndUpdate({ key: SHKULIT_ALWAYS_ZERO_KEY }, { value: zero }, { upsert: true });
+      console.log(`[shkulit-always-zero] ${req.user?.email || req.user?.id}: ${JSON.stringify(zero)}`);
+    }
     console.log(`[shkulit-codes] ${req.user?.email || req.user?.id}: ${JSON.stringify(clean)}`);
-    res.json({ ok: true, codes: clean });
+    res.json({ ok: true, codes: clean, always_zero: await readShkulitAlwaysZero() });
   } catch (err) { next(err); }
 }
 
@@ -5795,11 +5840,11 @@ async function shkulitSourceFor(req, month) {
  * Recording the snapshot is deliberately NOT done here: downloading records it
  * immediately, while the send records it only once the email actually left.
  */
-function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map(), componentCodes = {}) {
+function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map(), componentCodes = {}, alwaysZero = []) {
   const XLSX = require('xlsx');
   const wb = XLSX.utils.book_new();
   wb.Workbook = { Views: [{ RTL: true }] };
-  const { header, rows, notes, filed } = shkulit.buildMovements(source, previousByEmployee, componentCodes);
+  const { header, rows, notes, filed } = shkulit.buildMovements(source, previousByEmployee, componentCodes, alwaysZero);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
   // What has no component code (or is free text) rides on a second sheet,
   // so the accountant reads it in the same file she imports.
@@ -5954,7 +5999,7 @@ async function getShkulitFile(req, res, next) {
       await recordShkulitMasterHandoff(master);
     } else {
       const prev = await previousMovementComponents(source);
-      const mv = shkulitMovementsWorkbook(source, month, prev, await readShkulitComponentCodes());
+      const mv = shkulitMovementsWorkbook(source, month, prev, await readShkulitComponentCodes(), await readShkulitAlwaysZero());
       ({ buffer: buf, baseName } = mv);
       // Downloading IS the handoff, the same rule the master follows.
       await recordShkulitMovementHandoff(mv.filed, month);

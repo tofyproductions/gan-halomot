@@ -187,7 +187,7 @@ function monthValue(month) {
  * notes (unmapped components + free-text directives) that must travel beside
  * the file, per employee, in the accountant's language.
  */
-function buildMovements(source, previousByEmployee = new Map(), componentCodes = {}) {
+function buildMovements(source, previousByEmployee = new Map(), componentCodes = {}, alwaysZero = []) {
   const codes = componentCodes || {};
   const header = ['חודש עבודה', 'מספר עובד', 'סוג רשומה', 'קוד רכיב', 'תעריף', 'כמות'];
   const rows = [];
@@ -466,36 +466,59 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     }
   }
 
-  // ── switching off last month's leftovers ────────────────────────────────
+  // ── switching off what should not carry forward ─────────────────────────
   //
-  // שקלולית carries a payslip forward: a component that was filed last month
-  // and is missing this month is not dropped, it is PAID AGAIN at last month's
-  // value. That is how הבראה — paid once a year, in August — turns up in
-  // September, and how last month's 150% overtime keeps paying an employee who
-  // worked none.
+  // שקלולית carries a payslip forward: a component that was on last month's
+  // payslip and is missing from this month's file is not dropped, it is kept at
+  // last month's value and PAID AGAIN. That is how הבראה — paid once a year, in
+  // August — turns up in September, and how last month's 150% overtime keeps
+  // paying an employee who worked none.
   //
-  // So every code we filed before and are not filing now goes out again at
-  // zero, which is what switches it off. The alternative is the accountant
-  // reading seventy previous payslips line by line every month, which is
-  // exactly the kind of task that works until the one month it doesn't.
+  // Two sources of such rows, and they need different treatment:
   //
-  // Only codes WE filed can be switched off this way — see the note in
-  // models/ShkulitMovementSnapshot.js. What the accountant keys by hand is
-  // listed for her below instead of being silently overwritten.
+  //   WHAT WE FILED. Remembered per employee, so anything that leaves our file
+  //   is switched off automatically. Safe, because a component we stopped
+  //   filing is one we know is not due.
+  //
+  //   WHAT WE NEVER FILED. ליאור's קוד 47 (השלמת שכר על ידי מעביד) sat in her
+  //   September payslip at August's ₪3,791 — we have never sent code 47, so it
+  //   was never in our snapshot and nothing here could reach it. Those codes
+  //   have to be named by hand, in the settings screen.
+  //
+  //   ⚠️ A code on that list is zeroed EVERY month it is not filed by us. If
+  //   the accountant enters it deliberately one month, this wipes it. That is
+  //   the trade being made, and it is why the list is a deliberate act rather
+  //   than a default.
+  //
+  // Nothing on either list can zero a component we ARE filing this month — the
+  // filed set is checked first, so an always-zero code that becomes ours simply
+  // stops being zeroed.
+  const alwaysZeroList = (alwaysZero || [])
+    .map((z) => ({ code: Number(z.code), table: Number(z.table) || RECORD_TYPE.SALARY }))
+    .filter((z) => Number.isFinite(z.code) && z.code > 0);
+
   for (const ce of source.ready) {
     const empNo = ce.employee.employee_number;
     const nowFiled = filed.get(empNo) || [];
     const nowCodes = new Set(nowFiled.map((c) => `${c.table}:${c.code}`));
+    const key = (p) => `${p.table || RECORD_TYPE.SALARY}:${p.code}`;
+
     const previous = previousByEmployee.get(String(empNo)) || [];
-    const stale = previous.filter((p) => !nowCodes.has(`${p.table || RECORD_TYPE.SALARY}:${p.code}`));
-    for (const p of stale) {
+    const stale = previous.filter((p) => !nowCodes.has(key(p)));
+    const staleKeys = new Set(stale.map(key));
+    // Named codes that are neither filed by us nor already being switched off.
+    const standing = alwaysZeroList.filter((z) => !nowCodes.has(key(z)) && !staleKeys.has(key(z)));
+
+    for (const p of [...stale, ...standing]) {
       rows.push([label, empNo, p.table || RECORD_TYPE.SALARY, p.code, 0, 0]);
     }
-    if (stale.length) {
+    const all = [...stale, ...standing];
+    if (all.length) {
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'רכיבים שבוטלו',
-        text: `${stale.length} רכיבים שהופיעו בקובץ הקודם ואינם רלוונטיים החודש נשלחו עם 0 כדי לבטלם: קודים ${stale.map((p) => p.code).join(', ')}.`,
+        text: `${all.length} רכיבים שאינם רלוונטיים החודש נשלחו עם 0 כדי לבטלם: קודים ${all.map((p) => p.code).join(', ')}.`
+          + (standing.length ? ` (${standing.map((z) => z.code).join(', ')} — מרשימת הקודים לביטול קבוע)` : ''),
       });
     }
   }

@@ -471,4 +471,44 @@ ok('no vacation means no row at all', () => {
   assert.ok(!rr.some((x) => x[3] === 8), 'a month with no leave files nothing');
 });
 
+console.log('codes we never file can still be switched off, by name');
+ok("ליאור's קוד 47 is zeroed even though it was never in our file", () => {
+  // השלמת שכר על ידי מעביד sat in her September payslip at August's ₪3,791.
+  // We have never sent 47, so it was never in the snapshot and the automatic
+  // switch-off could not reach it. Naming it on the list does.
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr, notes: nn } = shkulit.buildMovements(
+    src, new Map(), {}, [{ code: 47, table: 1, label: 'השלמת שכר על ידי מעביד' }],
+  );
+  const z = rr.find((x) => x[3] === 47);
+  assert.ok(z, 'the row must be emitted');
+  assert.deepStrictEqual(z.slice(2), [1, 47, 0, 0], 'salary table, zeroed');
+  assert.ok(nn.some((n) => n.subject === 'רכיבים שבוטלו' && /47/.test(n.text)),
+    'and the accountant is told it was switched off');
+});
+ok('a standing code is NEVER zeroed in a month we file it ourselves', () => {
+  // The dangerous case: if the list could zero a component we are sending, it
+  // would silently delete that month's pay. The filed set wins.
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr } = shkulit.buildMovements(
+    src, new Map(), {}, [{ code: 3, table: 1, label: 'נסיעות' }],   // 3 IS filed
+  );
+  const threes = rr.filter((x) => x[3] === 3);
+  assert.strictEqual(threes.length, 1, 'one row, not a payment and a zero');
+  assert.notStrictEqual(threes[0][4], 0, 'and it still carries the money');
+});
+ok('a standing code is not emitted twice when it is also last month\'s leftover', () => {
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr } = shkulit.buildMovements(
+    src, new Map([['17', [{ code: 47, table: 1 }]]]), {}, [{ code: 47, table: 1 }],
+  );
+  assert.strictEqual(rr.filter((x) => x[3] === 47).length, 1, 'exactly one zero row');
+});
+ok('an empty list changes nothing', () => {
+  const src = buildExportSource('2026-09', [row]);
+  const a = shkulit.buildMovements(src, new Map(), {}, []);
+  const b = shkulit.buildMovements(src, new Map(), {});
+  assert.deepStrictEqual(a.rows, b.rows, 'no list means the previous behaviour, exactly');
+});
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

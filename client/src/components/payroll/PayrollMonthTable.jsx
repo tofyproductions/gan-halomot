@@ -10,6 +10,7 @@ import {
   InputAdornment, Alert, Menu, Divider, ListItemText, Badge, useMediaQuery, LinearProgress,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
+import SettingsIcon from '@mui/icons-material/Settings';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import LockIcon from '@mui/icons-material/Lock';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
@@ -795,6 +796,125 @@ function AccountantContactsDialog({ open, onClose }) {
    failed and why, what rides on the notes sheet, and hands over the two
    template files. The month always covers ALL branches: one amuta = one
    company (600) in שקלולית. */
+/**
+ * The two code lists שקלולית needs from us and cannot infer.
+ *
+ * CODES FOR OUR COMPONENTS: a component whose קוד רכיב the software house has
+ * not confirmed rides the notes sheet and the accountant keys it by hand.
+ * Entering the code here turns it into a real row — the same afternoon, without
+ * a deploy — which is the difference between "we don't know the code" and "we
+ * can't send it". Clearing the code puts it back on the notes sheet.
+ *
+ * CODES TO SWITCH OFF: שקלולית carries a payslip forward, so a component that
+ * was there last month and is absent this month keeps being PAID. We switch off
+ * whatever WE filed automatically; codes we never file — ליאור's קוד 47, which
+ * sat in September at August's ₪3,791 — have to be named here.
+ *
+ * ⚠️ A code on that second list is zeroed EVERY month we do not file it. If the
+ * accountant enters it deliberately one month, this wipes it. The screen says
+ * so, because it is a real trade and not a detail.
+ */
+function ShkulitCodesDialog({ open, onClose }) {
+  const [data, setData] = useState(null);
+  const [codes, setCodes] = useState({});
+  const [zero, setZero] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setData(null);
+    api.get('/payroll-month/shkulit-codes')
+      .then((res) => {
+        setData(res.data);
+        setCodes(res.data.codes || {});
+        setZero(res.data.always_zero || []);
+      })
+      .catch((e) => toast.error(e.response?.data?.error || 'שגיאה בטעינת הקודים'));
+  }, [open]);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put('/payroll-month/shkulit-codes', { codes, always_zero: zero });
+      toast.success('הקודים נשמרו');
+      onClose();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'שגיאה בשמירה');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} dir="rtl" maxWidth="md" fullWidth>
+      <DialogTitle sx={{ fontWeight: 800 }}>קודי רכיבים לשקלולית</DialogTitle>
+      <DialogContent dividers>
+        {!data && <LinearProgress />}
+        {data && (
+          <Stack spacing={3}>
+            <Box>
+              <Typography sx={{ fontWeight: 800, mb: 0.5 }}>קודים לרכיבים שאנחנו שולחים</Typography>
+              <Typography variant="caption" color="text.secondary">
+                רכיב בלי קוד נוסע בגיליון ההערות והרו״ח מקלידה אותו. מילוי הקוד הופך אותו לשורה בקובץ.
+              </Typography>
+              <Stack spacing={1} sx={{ mt: 1.5 }}>
+                {(data.components || []).map((c) => (
+                  <Stack key={c.key} direction="row" spacing={1} alignItems="center">
+                    <Typography sx={{ width: 190, fontWeight: 600 }}>{c.label}</Typography>
+                    <TextField size="small" sx={{ width: 110 }} label="קוד רכיב"
+                      value={codes[c.key] ?? ''}
+                      onChange={(e) => setCodes((p) => ({ ...p, [c.key]: e.target.value.trim() }))} />
+                    <Chip size="small" label={`סוג רשומה ${c.table}`} />
+                    <Typography variant="caption" color="text.secondary">{c.hint}</Typography>
+                  </Stack>
+                ))}
+              </Stack>
+            </Box>
+
+            <Box>
+              <Typography sx={{ fontWeight: 800, mb: 0.5 }}>קודים לביטול קבוע</Typography>
+              <Alert severity="warning" sx={{ my: 1, fontSize: '0.8rem' }}>
+                כל קוד ברשימה הזו נשלח עם <b>0</b> בכל חודש שבו אנחנו לא שולחים אותו בעצמנו —
+                כדי ששקלולית לא תגרור אותו מהתלוש הקודם ותשלם אותו שוב.
+                <br />
+                <b>שימו לב:</b> אם הרו״ח מזינה את הקוד הזה בכוונה באיזשהו חודש, הביטול ימחק לה אותו.
+              </Alert>
+              <Stack spacing={1}>
+                {zero.map((z, i) => (
+                  <Stack key={i} direction="row" spacing={1} alignItems="center">
+                    <TextField size="small" sx={{ width: 110 }} label="קוד"
+                      value={z.code ?? ''}
+                      onChange={(e) => setZero((p) => p.map((x, j) => j === i ? { ...x, code: e.target.value.trim() } : x))} />
+                    <TextField size="small" select sx={{ width: 130 }} label="סוג רשומה"
+                      value={z.table ?? 1}
+                      onChange={(e) => setZero((p) => p.map((x, j) => j === i ? { ...x, table: Number(e.target.value) } : x))}>
+                      <MenuItem value={1}>1 — שכר</MenuItem>
+                      <MenuItem value={2}>2 — זקופות</MenuItem>
+                      <MenuItem value={3}>3 — ניכויי רשות</MenuItem>
+                    </TextField>
+                    <TextField size="small" sx={{ flex: 1 }} label="שם (לתיעוד)"
+                      value={z.label ?? ''}
+                      onChange={(e) => setZero((p) => p.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} />
+                    <IconButton size="small" onClick={() => setZero((p) => p.filter((_, j) => j !== i))}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </Stack>
+                ))}
+                <Button size="small" startIcon={<AddIcon />} sx={{ alignSelf: 'flex-start' }}
+                  onClick={() => setZero((p) => [...p, { code: '', table: 1, label: '' }])}>
+                  הוסף קוד לביטול
+                </Button>
+              </Stack>
+            </Box>
+          </Stack>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={save} disabled={busy || !data}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function ShkulitExportDialog({ open, month, onClose }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -1543,6 +1663,7 @@ export default function PayrollMonthTable() {
   const [acctContactsOpen, setAcctContactsOpen] = useState(false);
   const [acctPreviewOpen, setAcctPreviewOpen] = useState(false);
   const [shkulitOpen, setShkulitOpen] = useState(false);
+  const [shkulitCodesOpen, setShkulitCodesOpen] = useState(false);
   const acctBranch = (selectedBranch && !isAllBranches) ? selectedBranch : null;
 
   const finalize = async () => {
@@ -2710,6 +2831,7 @@ export default function PayrollMonthTable() {
             <IconButton size="small" onClick={() => setAcctContactsOpen(true)}><ContactMailIcon fontSize="small" /></IconButton>
           </span></Tooltip>
           {isReviewer && (
+            <>
             <Tooltip title="שני קבצי הקליטה לתוכנת השכר של הרו״ח — כל הסניפים יחד">
               <span>
                 <Button size="small" variant="outlined" color="secondary" startIcon={<DownloadIcon />}
@@ -2718,6 +2840,14 @@ export default function PayrollMonthTable() {
                 </Button>
               </span>
             </Tooltip>
+            <Tooltip title="קודי רכיבים לשקלולית — קוד לרכיב שאנחנו שולחים, וקודים שצריך לכבות כל חודש כדי שלא ייגררו מהתלוש הקודם">
+              <span>
+                <IconButton size="small" onClick={() => setShkulitCodesOpen(true)} disabled={stagingMode}>
+                  <SettingsIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            </>
           )}
           <Menu open={!!exportMenu} anchorEl={exportMenu?.anchor} onClose={() => setExportMenu(null)}>
             <MenuItem disabled sx={{ opacity: 1 }}>
@@ -2902,6 +3032,7 @@ export default function PayrollMonthTable() {
       />
       <AccountantContactsDialog open={acctContactsOpen} onClose={() => setAcctContactsOpen(false)} />
       <ShkulitExportDialog open={shkulitOpen} month={month} onClose={() => setShkulitOpen(false)} />
+      <ShkulitCodesDialog open={shkulitCodesOpen} onClose={() => setShkulitCodesOpen(false)} />
       <AccountantPreviewDialog open={acctPreviewOpen} month={month} branch={acctBranch}
         blocked={punchGate.blocked} blockedCount={punchGate.count}
         onClose={() => setAcctPreviewOpen(false)} onManageContacts={() => { setAcctPreviewOpen(false); setAcctContactsOpen(true); }} />
