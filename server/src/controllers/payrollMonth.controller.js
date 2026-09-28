@@ -5467,7 +5467,7 @@ async function sendToAccountant(req, res, next) {
         shkulitError = source.setup_error;
       } else {
         const prevComponents = await previousMovementComponents(source);
-        const movements = shkulitMovementsWorkbook(source, month, prevComponents);
+        const movements = shkulitMovementsWorkbook(source, month, prevComponents, await readShkulitComponentCodes());
         movementsFiled = movements.filed;
         shkulitAttachments.push({
           filename: `${movements.baseName}.xlsx`,
@@ -5611,6 +5611,67 @@ async function sendToAccountant(req, res, next) {
 // The whole amuta is one company (600) in שקלולית, so the export always runs
 // across all branches; the accountant gets one movements file and one master.
 
+/**
+ * The קוד רכיב for each component whose code the software house has not
+ * confirmed — kept in a Setting so a confirmed code becomes a real row the same
+ * afternoon, rather than waiting on a deploy.
+ *
+ * Empty means unknown, and unknown means the component keeps travelling on the
+ * notes sheet. That is the rule the 28.09 import bought us: a guessed code on a
+ * money file is worse than a line somebody has to key by hand.
+ */
+const SHKULIT_CODES_KEY = 'shkulit_component_codes';
+
+async function readShkulitComponentCodes() {
+  try {
+    const doc = await Setting.findOne({ key: SHKULIT_CODES_KEY }).lean();
+    const v = doc?.value || {};
+    const out = {};
+    for (const [k, code] of Object.entries(v)) {
+      const n = Number(code);
+      if (Number.isFinite(n) && n > 0) out[k] = n;
+    }
+    return out;
+  } catch (_) { return {}; }
+}
+
+/** GET /payroll-month/shkulit-codes */
+async function getShkulitCodes(req, res, next) {
+  try {
+    const doc = await Setting.findOne({ key: SHKULIT_CODES_KEY }).lean();
+    res.json({
+      codes: doc?.value || {},
+      components: [
+        { key: 'cibus', label: 'סיבוס', table: 2, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)' },
+        { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: 2, hint: 'זקופות — שווי ארוחות' },
+        { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', table: 2, hint: 'זקופה — לוודא קוד' },
+        { key: 'loans', label: 'ניכוי הלוואה', table: 3, hint: 'ניכוי רשות — כנראה מקדמה (קוד 1)' },
+        { key: 'recreation', label: 'הבראה', table: 1, hint: 'מחושבת אצל הרו״ח — מלאו רק אם הוחלט שאנחנו שולחים' },
+      ],
+    });
+  } catch (err) { next(err); }
+}
+
+/** PUT /payroll-month/shkulit-codes */
+async function setShkulitCodes(req, res, next) {
+  try {
+    const incoming = req.body?.codes || {};
+    const clean = {};
+    for (const [k, v] of Object.entries(incoming)) {
+      const str = String(v ?? '').trim();
+      if (str === '') continue;              // cleared → back to the notes sheet
+      const n = Number(str);
+      if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+        return res.status(400).json({ error: `קוד לא תקין עבור ${k} — חייב להיות מספר שלם חיובי.` });
+      }
+      clean[k] = n;
+    }
+    await Setting.findOneAndUpdate({ key: SHKULIT_CODES_KEY }, { value: clean }, { upsert: true });
+    console.log(`[shkulit-codes] ${req.user?.email || req.user?.id}: ${JSON.stringify(clean)}`);
+    res.json({ ok: true, codes: clean });
+  } catch (err) { next(err); }
+}
+
 async function shkulitSourceFor(req, month) {
   // Fetched as the CALLER — bank fields are present only for accounting/admin,
   // and the source layer's setup_error says so if anyone else sneaks in.
@@ -5631,11 +5692,11 @@ async function shkulitSourceFor(req, month) {
  * Recording the snapshot is deliberately NOT done here: downloading records it
  * immediately, while the send records it only once the email actually left.
  */
-function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map()) {
+function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map(), componentCodes = {}) {
   const XLSX = require('xlsx');
   const wb = XLSX.utils.book_new();
   wb.Workbook = { Views: [{ RTL: true }] };
-  const { header, rows, notes, filed } = shkulit.buildMovements(source, previousByEmployee);
+  const { header, rows, notes, filed } = shkulit.buildMovements(source, previousByEmployee, componentCodes);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...rows]), 'נתוני שכר');
   // What has no component code (or is free text) rides on a second sheet,
   // so the accountant reads it in the same file she imports.
@@ -5739,7 +5800,7 @@ async function getShkulitExport(req, res, next) {
     const { month } = req.params;
     if (!/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'month=YYYY-MM נדרש' });
     const source = await shkulitSourceFor(req, month);
-    const { rows, notes } = shkulit.buildMovements(source);
+    const { rows, notes } = shkulit.buildMovements(source, new Map(), await readShkulitComponentCodes());
     // The master is issued on CHANGE, not monthly — the accountant already
     // holds everyone he keyed. The dialog says exactly who is new or changed.
     const { diff } = source.setup_error ? { diff: null } : await shkulitMasterFor(source);
@@ -5790,7 +5851,7 @@ async function getShkulitFile(req, res, next) {
       await recordShkulitMasterHandoff(master);
     } else {
       const prev = await previousMovementComponents(source);
-      const mv = shkulitMovementsWorkbook(source, month, prev);
+      const mv = shkulitMovementsWorkbook(source, month, prev, await readShkulitComponentCodes());
       ({ buffer: buf, baseName } = mv);
       // Downloading IS the handoff, the same rule the master follows.
       await recordShkulitMovementHandoff(mv.filed, month);
@@ -5869,7 +5930,7 @@ module.exports = {
   // Internal helper reused by the per-employee hours report so it shows the
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
-  getShkulitExport, getShkulitFile,
+  getShkulitExport, getShkulitFile, getShkulitCodes, setShkulitCodes,
   // The workbook builders are exported so the download path, the send path and
   // the tests all assemble the accountant's files from the same code.
   shkulitMovementsWorkbook, shkulitMasterWorkbook,

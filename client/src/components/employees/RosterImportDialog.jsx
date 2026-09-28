@@ -20,23 +20,58 @@ import api from '../../api/client';
  * is read, the differences are shown one employee at a time, and NOTHING is
  * written until a person ticks the rows and presses the second button.
  *
- * Two things are deliberately not offered. There is no "select all and apply"
- * shortcut on an untouched preview — approving ninety-five people should take a
- * deliberate action. And a row with nothing to change is not selectable at all,
- * so the count on the button is the number of records that will actually move.
+ * The choice is per FIELD, not per employee. The accountant's roster is not
+ * simply newer than us: the office collects email addresses the accountant
+ * never sees, and the accountant holds identity details the office never asks
+ * for. One checkbox per person forces an all-or-nothing answer to a question
+ * that is really "take her address, keep our telephone number".
+ *
+ * So every change carries its own checkbox, a change that would REPLACE an
+ * existing value is marked דורס, and "רק להשלים חוסרים" selects exactly the
+ * changes that fill a blank — the ones that cannot cost anything.
+ *
+ * Nothing is pre-ticked. A default of "everyone" turns a review into a
+ * formality, and this screen is the only thing standing between a spreadsheet
+ * and ninety-five personnel records.
  */
 export default function RosterImportDialog({ open, onClose, onDone }) {
   const [file, setFile] = useState(null);
   const [asOfMonth, setAsOfMonth] = useState('');
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [approved, setApproved] = useState({});
+  // Per FIELD, not per employee: `{ '<ת"ז>': { email: true, phone: false } }`.
+  // One checkbox per person cannot say "take the address, keep our telephone
+  // number", and that is the choice this screen exists to offer.
+  const [picked, setPicked] = useState({});
 
-  const reset = () => { setFile(null); setPlan(null); setApproved({}); setAsOfMonth(''); };
+  const reset = () => { setFile(null); setPlan(null); setPicked({}); setAsOfMonth(''); };
   const close = () => { reset(); onClose(); };
 
   const changed = (plan?.matched || []).filter((m) => m.changes.length > 0);
-  const chosen = changed.filter((m) => approved[m.israeli_id]);
+  const isPicked = (id, field) => !!picked[id]?.[field];
+  const setField = (id, field, on) =>
+    setPicked((p) => ({ ...p, [id]: { ...(p[id] || {}), [field]: on } }));
+  const setEmployee = (m, on) =>
+    setPicked((p) => ({ ...p, [m.israeli_id]: Object.fromEntries(m.changes.map((c) => [c.field, on])) }));
+  const countFor = (m) => m.changes.filter((c) => isPicked(m.israeli_id, c.field)).length;
+  const chosen = changed.filter((m) => countFor(m) > 0);
+  const totalFields = chosen.reduce((n, m) => n + countFor(m), 0);
+
+  /** Select every change that would fill a blank, and nothing that overwrites. */
+  const pickOnlyEmpty = () => {
+    const next = {};
+    for (const m of changed) {
+      next[m.israeli_id] = Object.fromEntries(
+        m.changes.map((c) => [c.field, c.before === '—' || c.before === '']),
+      );
+    }
+    setPicked(next);
+  };
+  const pickAll = () => {
+    const next = {};
+    for (const m of changed) next[m.israeli_id] = Object.fromEntries(m.changes.map((c) => [c.field, true]));
+    setPicked(next);
+  };
 
   const preview = async () => {
     if (!file) { toast.error('בחרו קובץ'); return; }
@@ -50,7 +85,7 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
       // Nothing is pre-ticked: a default of "everyone" turns review into a
       // formality, and this is the only screen standing between a spreadsheet
       // and ninety-five personnel records.
-      setApproved({});
+      setPicked({});
       if ((res.data.matched || []).every((m) => m.changes.length === 0)) {
         toast.info('אין מה לעדכן — כל הנתונים במערכת כבר תואמים לקובץ');
       }
@@ -60,16 +95,19 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
   };
 
   const applyNow = async () => {
-    if (chosen.length === 0) { toast.error('לא סומנו עובדים'); return; }
+    if (totalFields === 0) { toast.error('לא סומנו שדות לעדכון'); return; }
     setBusy(true);
     try {
       const body = new FormData();
       body.append('file', file);
       if (asOfMonth) body.append('as_of_month', asOfMonth);
       body.append('approved_ids', JSON.stringify(chosen.map((m) => m.israeli_id)));
+      body.append('approved_fields', JSON.stringify(Object.fromEntries(
+        chosen.map((m) => [m.israeli_id, m.changes.filter((c) => isPicked(m.israeli_id, c.field)).map((c) => c.field)]),
+      )));
       const res = await api.post('/employee-roster-import/apply', body);
       const { updated = [], failed = [] } = res.data;
-      toast.success(`${updated.length} עובדים עודכנו${failed.length ? ` · ${failed.length} נכשלו` : ''}`);
+      toast.success(`${updated.length} עובדים עודכנו (${totalFields} שדות)${failed.length ? ` · ${failed.length} נכשלו` : ''}`);
       if (failed.length) {
         failed.slice(0, 3).forEach((f) => toast.error(`${f.full_name || f.israeli_id}: ${f.error}`));
       }
@@ -101,7 +139,7 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
             <Button variant="outlined" component="label" startIcon={<UploadFileIcon />}>
               {file ? file.name : 'בחרו קובץ (Excel / CSV)'}
               <input hidden type="file" accept=".xlsx,.xls,.csv"
-                onChange={(e) => { setFile(e.target.files?.[0] || null); setPlan(null); setApproved({}); }} />
+                onChange={(e) => { setFile(e.target.files?.[0] || null); setPlan(null); setPicked({}); }} />
             </Button>
             <Tooltip title="החודש שאליו היתרות נכונות. בלעדיו יתרות חופשה/מחלה/הבראה לא ייקלטו — אי אפשר לצבור קדימה מיתרה בלי תאריך.">
               <TextField size="small" label="היתרות נכונות לחודש" placeholder="2026-08"
@@ -132,11 +170,18 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
 
           {changed.length > 0 && (
             <Paper variant="outlined" sx={{ borderRadius: 2 }}>
-              <Stack direction="row" spacing={1} sx={{ p: 1 }}>
-                <Button size="small" onClick={() => setApproved(Object.fromEntries(changed.map((m) => [m.israeli_id, true])))}>
-                  סמן הכל
-                </Button>
-                <Button size="small" onClick={() => setApproved({})}>נקה סימון</Button>
+              <Stack direction="row" spacing={1} sx={{ p: 1, flexWrap: 'wrap' }} alignItems="center">
+                <Button size="small" onClick={pickAll}>סמן הכל</Button>
+                <Tooltip title="מסמן רק שדות שריקים היום במערכת — משלים חוסרים ולא דורס שום ערך קיים.">
+                  <Button size="small" variant="outlined" onClick={pickOnlyEmpty}>
+                    רק להשלים חוסרים
+                  </Button>
+                </Tooltip>
+                <Button size="small" onClick={() => setPicked({})}>נקה סימון</Button>
+                <Box sx={{ flex: 1 }} />
+                <Typography variant="caption" color="text.secondary">
+                  סומנו {totalFields} שדות אצל {chosen.length} עובדים
+                </Typography>
               </Stack>
               <Box sx={{ overflowX: 'auto' }}>
                 <Table size="small">
@@ -144,36 +189,60 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
                     <TableRow>
                       <TableCell padding="checkbox" />
                       <TableCell sx={{ fontWeight: 800 }}>עובד/ת</TableCell>
+                      <TableCell padding="checkbox" />
                       <TableCell sx={{ fontWeight: 800 }}>שדה</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>במערכת היום</TableCell>
                       <TableCell sx={{ fontWeight: 800 }}>יעודכן ל</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {changed.map((m) => m.changes.map((c, i) => (
-                      <TableRow key={`${m.israeli_id}-${c.field}`} hover>
-                        {i === 0 && (
-                          <TableCell padding="checkbox" rowSpan={m.changes.length}>
-                            <Checkbox size="small" checked={!!approved[m.israeli_id]}
-                              onChange={(e) => setApproved((p) => ({ ...p, [m.israeli_id]: e.target.checked }))} />
+                    {changed.map((m) => m.changes.map((c, i) => {
+                      // A change that fills a blank is shown differently from one
+                      // that replaces something: the first is free, the second is
+                      // a choice between two people's records.
+                      const fills = c.before === '—' || c.before === '';
+                      return (
+                        <TableRow key={`${m.israeli_id}-${c.field}`} hover
+                          selected={isPicked(m.israeli_id, c.field)}>
+                          {i === 0 && (
+                            <TableCell padding="checkbox" rowSpan={m.changes.length}>
+                              <Tooltip title="סמן/נקה את כל השדות של העובד/ת">
+                                <Checkbox size="small"
+                                  checked={countFor(m) === m.changes.length}
+                                  indeterminate={countFor(m) > 0 && countFor(m) < m.changes.length}
+                                  onChange={(e) => setEmployee(m, e.target.checked)} />
+                              </Tooltip>
+                            </TableCell>
+                          )}
+                          {i === 0 && (
+                            <TableCell rowSpan={m.changes.length} sx={{ fontWeight: 700 }}>
+                              {m.full_name}
+                              {!m.is_active && <Chip size="small" color="warning" label="לא פעיל/ה" sx={{ mr: 0.5 }} />}
+                              {m.blocked.length > 0 && (
+                                <Tooltip title={m.blocked.map((b) => `${b.label}: ${b.reason}`).join(' · ')}>
+                                  <WarningAmberIcon fontSize="small" color="error" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
+                                </Tooltip>
+                              )}
+                            </TableCell>
+                          )}
+                          <TableCell padding="checkbox">
+                            <Checkbox size="small" checked={isPicked(m.israeli_id, c.field)}
+                              onChange={(e) => setField(m.israeli_id, c.field, e.target.checked)} />
                           </TableCell>
-                        )}
-                        {i === 0 && (
-                          <TableCell rowSpan={m.changes.length} sx={{ fontWeight: 700 }}>
-                            {m.full_name}
-                            {!m.is_active && <Chip size="small" color="warning" label="לא פעיל/ה" sx={{ mr: 0.5 }} />}
-                            {m.blocked.length > 0 && (
-                              <Tooltip title={m.blocked.map((b) => `${b.label}: ${b.reason}`).join(' · ')}>
-                                <WarningAmberIcon fontSize="small" color="error" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
+                          <TableCell>
+                            {c.label}
+                            {!fills && (
+                              <Tooltip title="יש כבר ערך במערכת — סימון כאן ידרוס אותו">
+                                <Chip size="small" color="warning" variant="outlined" label="דורס"
+                                  sx={{ mr: 0.5, height: 18, fontSize: '0.62rem' }} />
                               </Tooltip>
                             )}
                           </TableCell>
-                        )}
-                        <TableCell>{c.label}</TableCell>
-                        <TableCell sx={{ color: 'text.secondary' }}>{c.before}</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>{c.after}</TableCell>
-                      </TableRow>
-                    )))}
+                          <TableCell sx={{ color: 'text.secondary' }}>{c.before}</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>{c.after}</TableCell>
+                        </TableRow>
+                      );
+                    }))}
                   </TableBody>
                 </Table>
               </Box>
@@ -220,9 +289,9 @@ export default function RosterImportDialog({ open, onClose, onDone }) {
       </DialogContent>
       <DialogActions>
         <Button onClick={close}>סגור</Button>
-        <Button variant="contained" color="primary" disabled={busy || chosen.length === 0}
+        <Button variant="contained" color="primary" disabled={busy || totalFields === 0}
           onClick={applyNow}>
-          עדכן {chosen.length} עובדים
+          עדכן {totalFields} שדות ב-{chosen.length} עובדים
         </Button>
       </DialogActions>
     </Dialog>

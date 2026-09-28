@@ -335,8 +335,21 @@ const WRITABLE = new Set([
  *
  * @returns {Promise<{updated: object[], skipped: object[], failed: object[]}>}
  */
-async function applyImportPlan(rows, asOfMonth, approvedIds) {
+async function applyImportPlan(rows, asOfMonth, approvedIds, approvedFields = null) {
   const approved = new Set((approvedIds || []).map(normalizeId).filter(Boolean));
+  // Optional per-field approval: { '<ת"ז>': ['email', 'phone'] }.
+  //
+  // Without it an approved employee takes every change on her row, which is
+  // right when the roster is simply newer than us. It is NOT right when the
+  // office has a better email than the accountant does: whoever is reviewing
+  // has to be able to take the address and leave the telephone number, and one
+  // checkbox per person cannot express that.
+  const fieldsById = new Map();
+  if (approvedFields && typeof approvedFields === 'object') {
+    for (const [id, fields] of Object.entries(approvedFields)) {
+      if (Array.isArray(fields)) fieldsById.set(normalizeId(id), new Set(fields));
+    }
+  }
   const plan = await buildImportPlan(rows, asOfMonth);
 
   const updated = [];
@@ -347,9 +360,11 @@ async function applyImportPlan(rows, asOfMonth, approvedIds) {
     if (!approved.has(m.israeli_id)) { skipped.push({ israeli_id: m.israeli_id, reason: 'לא אושר' }); continue; }
     if (m.changes.length === 0) { skipped.push({ israeli_id: m.israeli_id, reason: 'אין מה לשנות' }); continue; }
 
+    const allowed = fieldsById.get(m.israeli_id) || null;
     const $set = {};
     for (const c of m.changes) {
       if (!WRITABLE.has(c.field)) continue; // belt and braces; the plan never emits others
+      if (allowed && !allowed.has(c.field)) continue; // this field was left on ours
       $set[c.field] = c.value;
     }
     if (Object.keys($set).length === 0) { skipped.push({ israeli_id: m.israeli_id, reason: 'אין שדה שניתן לכתיבה' }); continue; }
@@ -359,7 +374,7 @@ async function applyImportPlan(rows, asOfMonth, approvedIds) {
       // by the schema and not only by this file.
       await Employee.updateOne({ _id: m.employee_id }, { $set }, { runValidators: true });
       updated.push({ israeli_id: m.israeli_id, full_name: m.full_name,
-        fields: m.changes.map((c) => c.label) });
+        fields: m.changes.filter((c) => $set[c.field] !== undefined).map((c) => c.label) });
     } catch (e) {
       failed.push({ israeli_id: m.israeli_id, full_name: m.full_name, error: e.message });
     }

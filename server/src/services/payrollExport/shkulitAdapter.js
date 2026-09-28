@@ -120,16 +120,17 @@ const HOURS = {
  * they become rows with `table` set.
  */
 const UNMAPPED = [
-  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
-  { key: 'cibus', label: 'סיבוס', hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.cibus },
-  { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', hint: 'זקופה — לוודא קוד', get: (ce) => ce.earnings.gift_card },
-  { key: 'loans', label: 'ניכוי הלוואה', hint: 'ניכוי רשות — כנראה כמקדמה (קוד 1), לוודא', get: (ce) => ce.deductions.loans },
+  { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
+  { key: 'cibus', label: 'סיבוס', table: RECORD_TYPE.IMPUTED, hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.cibus },
+  { key: 'gift_card', label: 'תו קנייה (גיפט קארד)', table: RECORD_TYPE.IMPUTED, hint: 'זקופה — לוודא קוד', get: (ce) => ce.earnings.gift_card },
+  { key: 'loans', label: 'ניכוי הלוואה', table: RECORD_TYPE.VOLUNTARY_DEDUCTION, sign: -1, hint: 'ניכוי רשות — כנראה כמקדמה (קוד 1), לוודא', get: (ce) => ce.deductions.loans },
   // הבראה — the accountant computes it by job scope; when our table carries
   // an amount anyway, it is surfaced so nobody pays it twice.
   { key: 'recreation', label: 'הבראה', hint: 'מחושבת אצל הרו"ח לפי היקף משרה — לידיעה בלבד', get: (ce) => ce.earnings.recreation },
 ];
 
 const round2 = (n) => Math.round(n * 100) / 100;
+const round3 = (n) => Math.round(n * 1000) / 1000;
 
 /**
  * 'חודש עבודה' — the month number, 1–12. A NUMBER, not a date string.
@@ -170,7 +171,8 @@ function monthValue(month) {
  * notes (unmapped components + free-text directives) that must travel beside
  * the file, per employee, in the accountant's language.
  */
-function buildMovements(source, previousByEmployee = new Map()) {
+function buildMovements(source, previousByEmployee = new Map(), componentCodes = {}) {
+  const codes = componentCodes || {};
   const header = ['חודש עבודה', 'מספר עובד', 'סוג רשומה', 'קוד רכיב', 'תעריף', 'כמות'];
   const rows = [];
   const notes = [];
@@ -194,6 +196,44 @@ function buildMovements(source, previousByEmployee = new Map()) {
       if (rate !== 0 || qty !== 0) mine.push({ code, table });
     };
 
+    /**
+     * A rate × quantity row that must still come to `expected` to the agora.
+     *
+     * שקלולית multiplies the two columns on its side, so whichever one we round
+     * for readability changes the money. One of the two is the number a person
+     * actually reads — 7.1 hours, a מקדם of 0.746 — and that one is held fixed
+     * while the OTHER is lengthened until the product lands on the amount.
+     *
+     * `keep` says which is the readable one. For overtime it is the quantity:
+     * the payslip says 7.1 hours and the file must say 7.1 hours, so the hourly
+     * rate carries the extra decimals. For a תקן salary it is the rate: the
+     * agreed ₪10,300 has to be recognisable, so the מקדם carries them.
+     *
+     * If nothing we are willing to send reproduces the amount, the row falls
+     * back to the plain figure at quantity 1 and says so. A file that pays the
+     * right money and explains itself beats one that reads nicely and underpays
+     * — ליאור's מקדם at three decimals is ₪1.20 short of her payslip.
+     */
+    const pushExact = (table, code, rate, qty, expected, keep, what, human) => {
+      const target = round2(expected);
+      const tryRow = (r, q) => round2(r * q) === target;
+      const fixed = keep === 'qty' ? round2(qty) : round2(rate);
+      // Up to seven places: ליאור's מקדם needs 0.7461165 to land on ₪7,685
+      // exactly, and six places is still four agorot out.
+      for (const dp of [2, 3, 4, 5, 6, 7]) {
+        const flex = Number((keep === 'qty' ? rate : qty).toFixed(dp));
+        const r = keep === 'qty' ? flex : fixed;
+        const q = keep === 'qty' ? fixed : flex;
+        if (tryRow(r, q)) { push(table, code, r, q); return; }
+      }
+      push(table, code, target, 1);
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: what,
+        text: `${human}. הכמות לא מתחלקת בדיוק, ולכן נשלח הסכום המלא ${target} בכמות 1 כדי לא לשנות את השכר.`,
+      });
+    };
+
     // Base pay. Hourly → hours priced on שקלולית's side; global → the amount
     // our engine already prorated (their formula, our resolution — same number).
     const hourlyRate = Number(ce.rates?.hourly_rate) || 0;
@@ -203,21 +243,49 @@ function buildMovements(source, previousByEmployee = new Map()) {
       if (q.ot_125_hours) push(RECORD_TYPE.SALARY, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours));
       if (q.ot_150_hours) push(RECORD_TYPE.SALARY, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours));
     } else if (ce.earnings.teken_regular || ce.earnings.teken_ot125 || ce.earnings.teken_ot150) {
-      // A תקן employee is filed as the parts her salary is MADE of, never as
-      // the headline figure.
+      // A תקן employee is filed the way her payslip reads: the full agreed
+      // salary times its מקדם, and the hourly value times the overtime hours.
       //
-      // ליאור מחפוד worked 129.9 of 162.5 committed hours. Her agreed ₪10,300
-      // is ₪7,685 regular + ₪554 OT 125% + ₪2,062 completion. Filing the agreed
-      // ₪10,300 as שכר יסוד and then the completion beside it files ₪12,867 —
-      // the shortfall is paid twice, once because the headline ignores it and
-      // once because the completion exists to cover it.
+      // Not as a bare total. ליאור מחפוד worked 129.9 of 162.5 committed hours,
+      // מקדם 0.746, and her card says so — but a row reading "10,300 × 1" hides
+      // both the shortfall and the completion that covers it, and a row reading
+      // "7,685 × 1" hides where 7,685 came from. Neither can be checked against
+      // the payslip by the person whose salary it is.
       //
-      // The three lines below plus code 38 add back to the agreed salary
-      // exactly, and they are the same four numbers her payslip card shows.
+      // The quantity is derived from the AMOUNT rather than from the raw hours,
+      // because both components are capped at the agreed salary: when a month's
+      // overtime spills past the basket, the hours worked and the hours paid
+      // stop being the same number, and it is the paid one that belongs in a
+      // payroll file.
       const t = ce.earnings;
-      if (t.teken_regular) push(RECORD_TYPE.SALARY, HOURS.regular.code, t.teken_regular, 1);
-      if (t.teken_ot125) push(RECORD_TYPE.SALARY, HOURS.ot125.code, t.teken_ot125, 1);
-      if (t.teken_ot150) push(RECORD_TYPE.SALARY, HOURS.ot150.code, t.teken_ot150, 1);
+      const salary = round2(Number(t.teken_salary) || 0);
+      const hv = Number(t.teken_hourly_value) || 0;
+
+      if (t.teken_regular) {
+        if (salary > 0) {
+          const factor = t.teken_regular / salary;   // the מקדם תקן, as the payslip prints it
+          // The agreed salary must stay recognisable, so the מקדם flexes.
+          pushExact(RECORD_TYPE.SALARY, HOURS.regular.code, salary, factor, t.teken_regular,
+            'rate', 'שכר יסוד', `מקדם תקן ${round3(factor)} על שכר ${salary}`);
+        } else {
+          push(RECORD_TYPE.SALARY, HOURS.regular.code, t.teken_regular, 1);
+        }
+      }
+      for (const [amount, spec, label] of [
+        [t.teken_ot125, HOURS.ot125, 'שע״נ 125%'],
+        [t.teken_ot150, HOURS.ot150, 'שע״נ 150%'],
+      ]) {
+        if (!amount) continue;
+        const rate = round2(hv * spec.factor);
+        if (rate > 0) {
+          // The hours are what the payslip states, so the rate flexes.
+          const hours = round2(amount / rate);
+          pushExact(RECORD_TYPE.SALARY, spec.code, amount / hours, hours, amount,
+            'qty', label, `${hours} שעות × ${rate}`);
+        } else {
+          push(RECORD_TYPE.SALARY, spec.code, amount, 1);
+        }
+      }
     } else if (ce.earnings.base_salary) {
       push(RECORD_TYPE.SALARY, HOURS.regular.code, ce.earnings.base_salary, 1);
       if (ce.employee.salary_type === 'hourly') {
@@ -314,14 +382,30 @@ function buildMovements(source, previousByEmployee = new Map()) {
       });
     }
 
+    // Components whose קוד רכיב nobody has confirmed.
+    //
+    // Once a code IS confirmed it is entered in the settings screen, and from
+    // that moment the component becomes a real row instead of a line the
+    // accountant re-keys by hand. Nothing is guessed: with no code configured
+    // the component still travels as a note, exactly as before.
+    //
+    // This is the whole difference between "we don't know the code" and "we
+    // can't send it" — the second was never true, it was just how the first
+    // was implemented.
     for (const comp of UNMAPPED) {
-      const amount = Number(comp.get(ce)) || 0;
-      if (!amount) continue;
+      const raw = Number(comp.get(ce)) || 0;
+      if (!raw) continue;
+      const code = Number(codes[comp.key]) || 0;
+      if (code > 0) {
+        const sign = comp.sign === -1 ? -1 : 1;
+        push(comp.table || RECORD_TYPE.SALARY, code, sign * Math.abs(raw), 1);
+        continue;
+      }
       notes.push({
         employee_number: empNo,
         full_name: ce.employee.full_name,
         subject: comp.label,
-        text: `₪${amount} — ${comp.hint}.`,
+        text: `₪${raw} — ${comp.hint}.`,
       });
     }
 

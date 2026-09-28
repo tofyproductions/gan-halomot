@@ -114,6 +114,8 @@ router.delete('/adjustments/:id',             requireRole('system_admin', 'accou
 // ייצוא לשקלולית — the accountant's payroll software. Summary for the dialog,
 // then the two template files (movements / employee master). Accounting and
 // admin only: the files carry bank details.
+router.get('/shkulit-codes',                  requireRole('system_admin', 'accountant'), c.getShkulitCodes);
+router.put('/shkulit-codes',                  requireRole('system_admin', 'accountant'), c.setShkulitCodes);
 router.get('/:month/shkulit-export',          requireRole('system_admin', 'accountant'), c.getShkulitExport);
 router.get('/:month/shkulit-export/file',     requireRole('system_admin', 'accountant'), c.getShkulitFile);
 

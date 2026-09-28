@@ -206,6 +206,12 @@ function toCanonicalEmployee(row) {
       teken_regular: isGlobal ? money(tb.regular_pay) : 0,
       teken_ot125: isGlobal ? money(tb.ot125_pay) : 0,
       teken_ot150: isGlobal ? money(tb.ot150_pay) : 0,
+      // The two figures the payslip shows beside them, so the file can be
+      // written the way a payroll clerk reads it — a full salary times a
+      // coefficient, and an hourly value times hours — instead of a bare
+      // total nobody can check.
+      teken_salary: isGlobal ? money(tb.teken_salary) : 0,
+      teken_hourly_value: isGlobal ? num(tb.hourly_value) : 0,
       travel: money(c.travel),
       recreation: money(c.recreation_monthly),
       meal_vouchers: money(c.meal_vouchers),

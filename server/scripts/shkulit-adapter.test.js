@@ -347,4 +347,59 @@ ok('with no history nothing is zeroed', () => {
     'a first-ever file has nothing to switch off');
 });
 
+console.log('a code that gets confirmed becomes a row, without a deploy');
+ok('gift card and סיבוס ride the notes sheet until a code is configured', () => {
+  const r = { ...row, manual: { ...row.manual, cibus: { kind: 'number', amount: 120 } } };
+  const src = buildExportSource('2026-09', [r]);
+
+  // No codes configured — unchanged behaviour, nothing guessed into the file.
+  const bare = shkulit.buildMovements(src);
+  assert.ok(!bare.rows.some((x) => [2, 21, 55].includes(x[3])), 'no invented codes');
+  assert.ok(bare.notes.some((n) => n.subject === 'תו קנייה (גיפט קארד)'));
+  assert.ok(bare.notes.some((n) => n.subject === 'סיבוס'));
+
+  // Codes confirmed and entered in the settings screen.
+  const withCodes = shkulit.buildMovements(src, new Map(), { gift_card: 55, cibus: 2 });
+  const gift = withCodes.rows.find((x) => x[3] === 55);
+  const cibus = withCodes.rows.find((x) => x[3] === 2);
+  assert.ok(gift, 'the gift card is now a row');
+  assert.deepStrictEqual(gift.slice(2), [2, 55, 200, 1], 'imputed-income table, the amount, quantity 1');
+  assert.ok(cibus, 'סיבוס is now a row');
+  assert.strictEqual(cibus[2], 2, 'זקופות — table 2, not the salary table');
+  assert.ok(!withCodes.notes.some((n) => n.subject === 'תו קנייה (גיפט קארד)'),
+    'once it is a row it stops being a note — otherwise it gets keyed twice');
+});
+ok('a configured deduction keeps its sign and its own table', () => {
+  const src = buildExportSource('2026-09', [row]);
+  const { rows: rr } = shkulit.buildMovements(src, new Map(), { loans: 1 });
+  const loan = rr.find((x) => x[3] === 1 && x[2] === 3);
+  assert.ok(loan, 'the loan lands in the ניכויי רשות table');
+  assert.strictEqual(loan[4], -300, 'a deduction is negative, as every other deduction here is');
+});
+
+console.log('the תקן row shows the מקדם, and the money still lands');
+ok('the agreed salary times its coefficient comes to the payslip figure', () => {
+  const teken = {
+    ...row, employee_number: '27', israeli_id: '203677125', full_name: 'מחפוד ליאור',
+    salary_type: 'global',
+    breakdown: {
+      ...row.breakdown, rates: {},
+      components: { base_salary: 10300, travel: 272,
+        teken_breakdown: { teken_salary: 10300, hourly_value: 62.42, regular_pay: 7685, ot125_pay: 554, ot150_pay: 0, completion: 2062 } },
+      deductions: {},
+    },
+    manual: { include_salary_completion: true },
+  };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [teken]));
+  const base = rr.find((x) => x[3] === 1);
+  assert.strictEqual(base[4], 10300, 'the rate is the agreed salary, recognisable on sight');
+  assert.ok(base[5] > 0.74 && base[5] < 0.75, 'the quantity is the מקדם תקן');
+  assert.strictEqual(Math.round(base[4] * base[5] * 100) / 100, 7685,
+    'and rate × quantity is still exactly the payslip figure');
+
+  const ot = rr.find((x) => x[3] === 32);
+  assert.strictEqual(ot[5], 7.1, 'the hours are the hours the payslip states — not a derived decimal');
+  assert.strictEqual(Math.round(ot[4] * ot[5] * 100) / 100, 554, 'and the money is unchanged');
+});
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

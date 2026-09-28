@@ -132,8 +132,12 @@ async function apply(req, res, next) {
       // nothing ticked is a mis-click, and saying so is kinder than "0 updated".
       return res.status(400).json({ error: 'לא סומנו עובדים לעדכון.' });
     }
+    let fields = req.body?.approved_fields;
+    if (typeof fields === 'string') {
+      try { fields = JSON.parse(fields); } catch (_) { fields = null; }
+    }
     const rows = parseUpload(req.file.buffer);
-    const result = await applyImportPlan(rows, asOfMonth, approved);
+    const result = await applyImportPlan(rows, asOfMonth, approved, fields || null);
     console.log(`[roster-import] ${req.user?.email || req.user?.id}: ${result.updated.length} עודכנו, ${result.failed.length} נכשלו (as_of ${asOfMonth || '—'})`);
     res.json(result);
   } catch (err) { next(err); }
