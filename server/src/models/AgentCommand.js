@@ -22,6 +22,7 @@ const agentCommandSchema = new mongoose.Schema({
       'update_user',     // payload: { uid, ...fields }
       'export_template', // payload: { israeli_id } — READ-ONLY: return the user's fingerprint templates
       'import_template', // payload: { israeli_id, name, templates:[{fid,valid,b64}] } — write templates to the device
+      'list_users',      // payload: {} — READ-ONLY: the device's whole roster, refreshes Branch.clock_users
       'sync_time',       // payload: {}
       'reboot_device',   // payload: {}
       'clear_attendance',// payload: {}  — DANGER, audit-only

@@ -231,6 +231,7 @@ async function heartbeat(req, res, next) {
     const {
       agent_version = '',
       clock_reachable = null,
+      clock_user_count = null,
       clock_log_count = null,
       last_user_sn = null,
     } = req.body || {};
@@ -241,6 +242,11 @@ async function heartbeat(req, res, next) {
     branch.agent_last_seen_at = now;
     if (agent_version) branch.agent_version = agent_version;
     if (clock_reachable !== null) branch.clock_reachable = clock_reachable;
+    // The agent has sent this every minute since the beginning and the server
+    // used to destructure it and drop it on the floor. It is the device's own
+    // count of registered users — the cheapest possible check that the cached
+    // clock_users roster is still current.
+    if (clock_user_count != null) branch.clock_user_count = clock_user_count;
     if (clock_log_count != null) branch.clock_log_count = clock_log_count;
     if (last_user_sn != null) branch.clock_last_user_sn = last_user_sn;
     if (clock_reachable === true) branch.clock_last_ok_at = now;
@@ -326,6 +332,12 @@ async function commandResult(req, res, next) {
     // agent's next poll — it never throws.
     if (cmd.type === 'export_template' || cmd.type === 'import_template') {
       await require('../services/fingerprintSync').handleCommandConfirmed(cmd);
+    }
+
+    // A confirmed roster read replaces the branch's cached clock_users. Awaited
+    // so the cache is current before anything else reads it; never throws.
+    if (cmd.type === 'list_users') {
+      await require('../services/clockRosterJob').storeRoster(cmd);
     }
 
     res.json({ ok: true });

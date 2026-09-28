@@ -1,6 +1,6 @@
 {
   "name": "timedox-agent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Pi-side agent that bridges a TIMEDOX TANDEM4 PRO clock to the gan-halomot server.",
   "main": "agent.js",
   "scripts": {

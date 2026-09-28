@@ -59,6 +59,11 @@ const branchSchema = new mongoose.Schema({
   clock_reachable: { type: Boolean, default: null },     // last heartbeat's clock probe
   clock_last_ok_at: { type: Date, default: null },       // last time clock was reachable
   clock_log_count: { type: Number, default: null },      // device record count
+  // The device's OWN count of registered users, straight off the heartbeat.
+  // The agent has always sent it and the server used to throw it away, which is
+  // part of why nobody noticed clock_users had gone stale. Compare the two: a
+  // mismatch means the cached roster below is out of date.
+  clock_user_count: { type: Number, default: null },
   clock_last_user_sn: { type: Number, default: null },   // agent's last_user_sn baseline
   clock_alerted_at: { type: Date, default: null },       // last "clock down" email sent
   // A server-side watchdog alerts when the AGENT (Pi) itself goes silent — no

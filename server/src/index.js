@@ -342,6 +342,19 @@ connectDB().then(() => {
     setTimeout(staleAgents, 90000);           // first check after 90s
     setInterval(staleAgents, 60 * 60 * 1000); // then hourly
 
+    // Clock roster: ask each branch's clock who is registered on it, once a
+    // day, and cache the answer on the branch. Nothing used to refresh that
+    // cache — it was a hand-typed dump from April 2026 on one branch and empty
+    // on the other three, while two live code paths read it as truth.
+    const clockRoster = require('./services/clockRosterJob');
+    const runClockRoster = () => clockRoster.tick()
+      .then(r => { if (r?.queued) console.log(`[clock-roster] queued ${r.queued} roster reads (skipped ${r.skipped} still in flight)`); })
+      .catch(e => console.error('[clock-roster] tick failed:', e.message));
+    if (!platformMode) {
+      setTimeout(runClockRoster, 5 * 60 * 1000);       // first pass after 5 min
+      setInterval(runClockRoster, 24 * 60 * 60 * 1000); // then daily
+    }
+
     // Fingerprint mirroring: a cross-branch employee must be able to put her
     // finger on ANY of her branches' clocks. The sweep captures her template
     // once and pushes it to every branch she works at (no-op when nothing is

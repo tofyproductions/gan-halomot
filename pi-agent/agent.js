@@ -427,6 +427,38 @@ async function pollCommands() {
             result: { israeli_id, uid: w.uid, written: w.fingers, verified_fingers: verified },
           });
 
+        } else if (cmd.type === 'list_users') {
+          // READ-ONLY: the device's whole user roster, so the server can keep
+          // Branch.clock_users honest.
+          //
+          // Until this command existed nothing on the Pi ever told the server
+          // who was on a clock. The cache was a list typed by hand out of
+          // gan-pi-1 in April 2026 and seeded onto ONE branch; the other three
+          // were never filled, and by September the one that was had drifted by
+          // 17 people. Two real code paths read that cache — the clock-match
+          // dialog and the delete_user fan-out — so both were quietly wrong.
+          //
+          // Names are deliberately dropped: the TANDEM4 PRO returns them
+          // mangled (\x01 0^3 0^1 ...), and a mangled name in the UI is worse
+          // than no name. The ת"ז is the identity here.
+          const users = await clock.getUsers();
+          const roster = users
+            .map(u => ({
+              uid: u.uid,
+              // The device drops a leading zero on a ת"ז. The server compares
+              // these against 9-digit padded ids, so pad once here rather than
+              // at every place that reads the cache.
+              user_id: String(u.userId ?? u.user_id ?? '').replace(/\D/g, '').padStart(9, '0'),
+              password: String(u.password || ''),
+              cardno: u.cardno || 0,
+              role: u.role || 0,
+            }))
+            .filter(u => u.user_id !== '000000000');
+          log.info(`list_users OK: ${roster.length} users on device`);
+          await server.commandResult(cmd.id, 'confirmed', {
+            result: { count: roster.length, users: roster },
+          });
+
         } else if (cmd.type === 'sync_time') {
           // Future: await clock.setTime(new Date());
           await server.commandResult(cmd.id, 'failed', { error: 'sync_time not yet implemented' });
