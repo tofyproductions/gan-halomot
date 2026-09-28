@@ -2019,13 +2019,15 @@ function systemRowToTableRow(r) {
   const gsal = isGlobal ? _num(bd.rates?.global_salary) : null;
   const numKind = (o) => (o && o.kind === 'number' ? _num(o.amount) : null);
   const rnd = (n) => (n == null || n === '' || isNaN(Number(n)) ? null : Math.round(Number(n)));
-  // "בונוס" on a real payslip is one line covering both the personal
-  // hourly-branch bonus AND August's closure-completion bonus — they are
+  // "בונוס" on a real payslip is one line covering the standing bonus (בונוס
+  // קבוע), a one-off (בונוס חד פעמי) AND August's closure-completion bonus —
   // computed and approved separately in-system but the accountant never sees
-  // two rows, so both the detail list and the gap-comparison must read this
-  // one combined figure or a fully-approved closure bonus still reads as a
+  // three rows, so both the detail list and the gap-comparison must read this
+  // one combined figure or a fully-approved piece still reads as a
   // mismatch/absence against the payslip's single line.
-  const bonusTotal = rnd((_num(r.bonus?.effective) || 0) + (_num(comp.closure_completion_bonus?.amount) || 0));
+  const bonusTotal = rnd((_num(r.bonus?.effective) || 0)
+    + (_num(r.one_time_bonus?.amount) || 0)
+    + (_num(comp.closure_completion_bonus?.amount) || 0));
   const perHour = isGlobal
     ? (tb?.hourly_value != null ? Math.round(tb.hourly_value * 100) / 100 : null)
     : _num(bd.rates?.hourly_rate);

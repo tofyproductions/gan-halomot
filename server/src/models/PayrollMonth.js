@@ -73,6 +73,14 @@ const payrollMonthSchema = new mongoose.Schema({
       adjustment_total: { type: Number, default: 0 },
     },
 
+    // בונוס חד פעמי: an independent one-off amount for THIS month only. Never
+    // repeats, never touches `bonus` above (the standing rule) — disabling the
+    // standing bonus for a month does not zero this out, and vice versa.
+    one_time_bonus: {
+      amount: { type: Number, default: null },
+      note:   { type: String, default: '' },
+    },
+
     // Optional per-month override of the employee's default travel allowance.
     // If null, the auto value (travel_per_day × days_worked or monthly flat) is used.
     travel_override: { type: Number, default: null },

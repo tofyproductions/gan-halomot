@@ -3929,8 +3929,11 @@ async function mySalaryPreview(req, res, next) {
     add('travel', 'נסיעות', c.travel);
     add('meals', 'ארוחות', c.meal_vouchers);
     add('recreation', 'הבראה', c.recreation_monthly);
-    add('bonuses', 'בונוסים', c.bonuses);
-    add('hourly_bonus', 'תוספת שעתית', row.bonus?.effective);
+    // Not c.bonuses — that is the pre-override auto figure, already folded
+    // into row.bonus.effective below (which reflects this month's override/
+    // disable too). Showing both would double-count the standing bonus.
+    add('fixed_bonus', 'בונוס קבוע', row.bonus?.effective);
+    add('one_time_bonus', 'בונוס חד פעמי', row.one_time_bonus?.amount);
     add('absence', 'ניכוי היעדרות', -(row.absence?.deduction || 0));
     add('partial_absence', 'ניכוי שעות חסרות', -(row.partial_absence?.deduction || 0));
     add('loans', 'ניכוי הלוואה', -(ded.loans || 0));

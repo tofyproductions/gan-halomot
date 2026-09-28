@@ -717,7 +717,14 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     const amt = bonusAmountThisMonth(b, { hoursWorked, daysWorked, refDate });
     if (amt > 0) {
       bonusTotal += amt;
-      bonusDetails.push({ type: b.type, amount: amt, reason: b.reason || '' });
+      bonusDetails.push({
+        type: b.type,
+        amount: amt,
+        reason: b.reason || '',
+        // For the table's tooltip — how the amount was reached.
+        rate: b.type !== 'fixed' ? (Number(b.amount) || 0) : null,
+        quantity: b.type === 'per_hour' ? hoursWorked : (b.type === 'per_day' ? daysWorked : null),
+      });
     }
   }
 

@@ -291,7 +291,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
         <Tab label="סיכום" />
         <Tab label={`שעות יומיות (${hoursReport?.totals.days_worked || 0})`} />
         <Tab label={`הלוואות (${loans.length})`} />
-        <Tab label={`בונוסים (${bonuses.length})`} />
+        <Tab label={`בונוס קבוע (${bonuses.length})`} />
         <Tab label="פרטים אישיים ושכר" />
       </Tabs>
 
@@ -638,8 +638,12 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
               </Button>
               <Box sx={{ flex: 1 }} />
             </Stack>
+            <Alert severity="info">
+              כללים קבועים שרצים אוטומטית כל חודש (עד שיימחקו כאן), ומוצגים בעמודת "בונוס קבוע" בטבלה החודשית.
+              לבונוס חד-פעמי לחודש בודד — עריכה ישירה מהטבלה החודשית, לא כאן.
+            </Alert>
             {bonuses.length === 0 && (
-              <Alert severity="info">אין בונוסים פעילים.</Alert>
+              <Alert severity="info">אין בונוסים קבועים.</Alert>
             )}
             {bonuses.map((bonus, i) => (
               <Paper key={i} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>

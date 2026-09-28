@@ -569,8 +569,10 @@ function BankDialog({ open, row, onClose, onSave }) {
   );
 }
 
-// Bonus cell — shows the effective bonus (auto or manual override) with a
-// tooltip breakdown. Click opens BonusDialog.
+// בונוס קבוע cell — shows the effective standing bonus (auto from Employee.
+// bonuses[], or this month's manual override) with a tooltip breakdown.
+// Click opens BonusDialog. Edit the RULES themselves in the employee's own
+// "בונוס קבוע" tab; this dialog only overrides/disables THIS month.
 function BonusCell({ row }) {
   const b = row.bonus || {};
   const eff = b.effective || 0;
@@ -582,10 +584,15 @@ function BonusCell({ row }) {
     <Tooltip arrow title={
       <Box sx={{ fontSize: '0.72rem' }}>
         {b.lines?.length
-          ? b.lines.map((l, i) => <div key={i}>{l.reason || ('בונוס ' + l.branch_name)}: {l.hours}ש׳ × ₪{l.rate} = ₪{l.amount}</div>)
-          : <div>אין בונוס אוטומטי</div>}
+          ? b.lines.map((l, i) => (
+            <div key={i}>
+              {l.reason || 'בונוס קבוע'}
+              {l.rate != null && l.quantity != null ? `: ${l.quantity}× × ₪${l.rate}` : ''} = ₪{l.amount}
+            </div>
+          ))
+          : <div>אין בונוס קבוע אוטומטי</div>}
         {b.note && <div style={{ marginTop: 4, opacity: 0.85 }}>📝 {b.note}</div>}
-        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה</div>
+        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה (לחודש זה) · כללי הבונוס עצמם — בכרטיס העובד/ת</div>
       </Box>
     }>
       <Box sx={{ cursor: 'help' }}>
@@ -593,7 +600,7 @@ function BonusCell({ row }) {
           {eff ? fmtCurrency(eff) : '₪0'}
         </Typography>
         <Typography variant="caption" sx={{ color: 'text.disabled' }}>
-          {b.disabled ? 'בוטל' : (isManual ? 'ידני' : 'אוטומטי')}
+          {b.disabled ? 'בוטל לחודש זה' : (isManual ? 'ידני' : 'אוטומטי')}
         </Typography>
       </Box>
     </Tooltip>
@@ -617,11 +624,11 @@ function BonusDialog({ open, row, onClose, onSave }) {
   const autoNote = row.bonus?.auto_note || '';
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
-      <DialogTitle>בונוס — {row.full_name}</DialogTitle>
+      <DialogTitle>בונוס קבוע — {row.full_name}</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Alert severity="info" sx={{ py: 0.5 }}>
-            בונוס אוטומטי: <b>{auto ? fmtCurrency(auto) : '₪0'}</b>{autoNote ? ` — ${autoNote}` : ''}
+            בונוס קבוע אוטומטי (מכללי העובד/ת): <b>{auto ? fmtCurrency(auto) : '₪0'}</b>{autoNote ? ` — ${autoNote}` : ''}
           </Alert>
           <TextField
             label="סכום ידני (ריק = אוטומטי)" type="number" value={amount}
@@ -634,7 +641,7 @@ function BonusDialog({ open, row, onClose, onSave }) {
           />
           <FormControlLabel
             control={<Checkbox checked={disabled} onChange={e => setDisabled(e.target.checked)} />}
-            label="בטל בונוס לחודש זה"
+            label="בטל בונוס קבוע לחודש זה"
           />
         </Stack>
       </DialogContent>
@@ -642,6 +649,71 @@ function BonusDialog({ open, row, onClose, onSave }) {
         <Button onClick={onClose}>ביטול</Button>
         <Button variant="contained" onClick={() => {
           onSave({ override_amount: amount === '' ? null : Number(amount), note: note.trim(), disabled });
+          onClose();
+        }}>שמור</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// בונוס חד פעמי cell — an independent one-off amount for this month only.
+// No "auto" baseline, no disable toggle: empty = nothing, a number = paid
+// once, this month, on top of everything else.
+function OneTimeBonusCell({ row }) {
+  const o = row.one_time_bonus || {};
+  const amt = Number(o.amount) || 0;
+  if (!amt) return <Typography variant="body2" color="text.disabled">—</Typography>;
+  return (
+    <Tooltip arrow title={
+      <Box sx={{ fontSize: '0.72rem' }}>
+        {o.note && <div>📝 {o.note}</div>}
+        <div style={{ marginTop: 4, opacity: 0.7 }}>לחץ לעריכה</div>
+      </Box>
+    }>
+      <Box sx={{ cursor: 'help' }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: COLOR.success.main }}>
+          {fmtCurrency(amt)}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.disabled' }}>חד פעמי</Typography>
+      </Box>
+    </Tooltip>
+  );
+}
+
+function OneTimeBonusDialog({ open, row, onClose, onSave }) {
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (row) {
+      const o = row.one_time_bonus || {};
+      setAmount(o.amount != null ? String(o.amount) : '');
+      setNote(o.note || '');
+    }
+  }, [row]);
+  if (!row) return null;
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth dir="rtl">
+      <DialogTitle>בונוס חד פעמי — {row.full_name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Alert severity="info" sx={{ py: 0.5 }}>
+            סכום לחודש זה בלבד — לא חוזר בחודשים הבאים.
+          </Alert>
+          <TextField
+            label="סכום" type="number" value={amount}
+            onChange={e => setAmount(e.target.value)}
+            InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
+          />
+          <TextField
+            label="הערה / עבור מה הבונוס" value={note} multiline minRows={2}
+            onChange={e => setNote(e.target.value)} placeholder="תיאור הבונוס…"
+          />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>ביטול</Button>
+        <Button variant="contained" onClick={() => {
+          onSave({ amount: amount === '' ? null : Number(amount), note: note.trim() });
           onClose();
         }}>שמור</Button>
       </DialogActions>
@@ -1255,6 +1327,7 @@ export default function PayrollMonthTable() {
   const [holidayPay, setHolidayPay] = useState({ open: false, row: null });
   const [loansDlg, setLoansDlg] = useState({ open: false, row: null });
   const [bonusDlg, setBonusDlg] = useState({ open: false, row: null });
+  const [oneTimeBonusDlg, setOneTimeBonusDlg] = useState({ open: false, row: null });
   // The scrolling box. Same fix as AttendanceMonitor's grid: a full reload sets
   // `loading`, and while loading the table body collapses to one spinner row
   // (line ~1870) — an empty container has nothing to scroll, so the browser
@@ -1755,7 +1828,7 @@ export default function PayrollMonthTable() {
     const cols = ['ימי עבודה', 'שעות רגילות', 'שע"נ א\'', 'שע"נ ב\'', 'תעריף לשעה', 'שכר תקן'];
     const headerTop = ['סניף', 'שם העובד', 'ת"ז', 'מספר עובד', ...cols,
       'שכר בסיס', 'שע"נ 125%', 'שע"נ 150%', 'השלמת שכר',
-      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'ימי מילואים', 'הלוואות', 'בונוס', 'שכר משוער'];
+      'נסיעות', 'מחלה', 'היעדרות', 'היעדרות (שעות)', 'חופשה', 'דמי חגים (ימים)', 'קיזוז מקדמה', 'GIFT CARD', 'הבראה', 'סיבוס', 'מילואים', 'ימי מילואים', 'הלוואות', 'בונוס קבוע', 'בונוס חד פעמי', 'שכר משוער'];
     for (const c of customColumns) headerTop.push(c.label);
     headerTop.push('פירוט תשלום לפי סניף');
     headerTop.push('בונוס - פירוט');
@@ -1806,6 +1879,7 @@ export default function PayrollMonthTable() {
         r.manual.miluim_days || '',
         r.loans_info?.month_deduction ? -Math.round(r.loans_info.month_deduction) : '',
         r.bonus?.effective ? Math.round(r.bonus.effective) : '',
+        r.one_time_bonus?.amount ? Math.round(r.one_time_bonus.amount) : '',
         r.breakdown?.estimated_total != null ? Math.round(r.breakdown.estimated_total) : '',
       );
       for (const c of customColumns) {
@@ -1822,6 +1896,7 @@ export default function PayrollMonthTable() {
         r.commitment?.committed_hours != null ? `התחייבות: ${r.commitment.committed_hours}h` : '',
         r.permanent_note || '',
         r.manual.notes || '',
+        r.one_time_bonus?.note ? `בונוס חד פעמי: ${r.one_time_bonus.note}` : '',
       ].filter(Boolean).join(' · '));
       rowsAcc.push(cells);
     }
@@ -2565,6 +2640,9 @@ export default function PayrollMonthTable() {
                           </Tooltip>
                         )}
                       </TableCell>
+                      <TableCell align="center" sx={{ cursor: 'pointer', bgcolor: COLOR.payrollColumn.bonus.cell }} onClick={() => !locked && setOneTimeBonusDlg({ open: true, row: r })}>
+                        <OneTimeBonusCell row={r} />
+                      </TableCell>
                       {customColumns.map(c => (
                         <TableCell key={c.id} align="center">
                           <CustomCell column={c} value={r.manual.custom_values?.[c.id]} disabled={locked} onSave={v => patchCustomValue(r.employee_id, c.id, v)} />
@@ -2930,7 +3008,8 @@ export default function PayrollMonthTable() {
             <col style={{ width: W.money }} />{/* מילואים */}
             <col style={{ width: W.days }} />{/* ימי מילואים */}
             <col style={{ width: W.money }} />{/* הלוואות */}
-            <col style={{ width: W.money }} />{/* בונוס */}
+            <col style={{ width: W.money }} />{/* בונוס קבוע */}
+            <col style={{ width: W.money }} />{/* בונוס חד פעמי */}
             {customColumns.map(c => <col key={`cc-${c.id}`} style={{ width: W.custom }} />)}
             <col style={{ width: W.adjust }} />
             <col style={{ width: W.notes }} />
@@ -2950,7 +3029,7 @@ export default function PayrollMonthTable() {
                 fontWeight: 800, bgcolor: 'primary.soft', color: 'primary.dark',
                 letterSpacing: 0.2,
               }}>שעות עבודה</TableCell>
-              <TableCell colSpan={17 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
+              <TableCell colSpan={18 + customColumns.length + 2} align="center" sx={{ fontWeight: 800, bgcolor: 'warning.soft' }} className="ag-divider">
                 נתונים חודשיים
               </TableCell>
             </TableRow>
@@ -2999,7 +3078,8 @@ export default function PayrollMonthTable() {
               <TableCell align="center" sx={{ fontWeight: 700 }}>מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700 }}>ימי מילואים</TableCell>
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: 'error.soft' }}>הלוואות</TableCell>
-              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס קבוע</TableCell>
+              <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.bonus.head }}>בונוס חד פעמי</TableCell>
               {customColumns.map(c => (
                 <TableCell key={c.id} align="center" sx={{ fontWeight: 700, position: 'relative', '&:hover .col-del': { opacity: 1 } }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.3 }}>
@@ -3079,6 +3159,8 @@ export default function PayrollMonthTable() {
         onSavePermanent={(text) => notes.row && savePermanentNote(notes.row.employee_id, text)} />
       <BonusDialog open={bonusDlg.open} row={bonusDlg.row} onClose={() => setBonusDlg({ open: false, row: null })}
         onSave={(bonus) => bonusDlg.row && patchManual(bonusDlg.row.employee_id, { bonus })} />
+      <OneTimeBonusDialog open={oneTimeBonusDlg.open} row={oneTimeBonusDlg.row} onClose={() => setOneTimeBonusDlg({ open: false, row: null })}
+        onSave={(one_time_bonus) => oneTimeBonusDlg.row && patchManual(oneTimeBonusDlg.row.employee_id, { one_time_bonus })} />
       <AddColumnDialog open={addCol} month={month} onClose={() => setAddCol(false)} onCreated={() => fetchData()} />
       <SalaryAdjustmentDialog
         open={adjustments.open}

@@ -229,7 +229,11 @@ function toCanonicalEmployee(row) {
       // The count still travels; only the money is absent.
       vacation_pay: money(row.vacation_pay),
       sick_pay: money(row.sick_info?.pay),
+      // בונוס קבוע — the standing per-employee rule (fixed ₪, ₪/hour or
+      // ₪/day), already netted of this month's override/disable.
       bonus: money(row.bonus?.effective),
+      // בונוס חד פעמי — an independent one-off for this month only.
+      one_time_bonus: money(row.one_time_bonus?.amount),
       // closure_completion_bonus is an OBJECT ({amount, days, dates, ...}).
       // money() of an object is NaN → 0, so בונוס אוגוסט never once reached
       // the file: אילנה שימחי's ₪1,844 for 08.2026 was typed in by hand at the

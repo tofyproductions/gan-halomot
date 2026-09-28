@@ -1017,41 +1017,44 @@ async function getMonth(req, res, next) {
         return acc;
       }, { money_add: 0, money_deduct: 0, hours_delta: 0 });
 
-      // Personal per-branch hourly bonus (individually agreed, e.g. ליאל +3₪/hr
-      // at Herzliya): bonus = rate × hours worked at that branch. Auto-computed,
-      // shown in the dedicated bonus column, and ADDED to the estimated total.
-      const bonusLines = [];
-      let bonusAuto = 0;
-      if (emp.salary_type === 'hourly' && Array.isArray(emp.hourly_bonuses) && emp.hourly_bonuses.length) {
-        const ruleByBranch = new Map(emp.hourly_bonuses.map(b => [String(b.branch_id?._id || b.branch_id), b]));
-        for (const [bid, bk] of Object.entries(breakdown.per_branch || {})) {
-          const rule = ruleByBranch.get(String(bid));
-          const rate = rule ? (Number(rule.rate) || 0) : 0;
-          const hrs = (bk.regular_hours || 0) + (bk.ot_125_hours || 0) + (bk.ot_150_hours || 0);
-          if (rate > 0 && hrs > 0) {
-            const roundedHrs = Math.round(hrs * 10) / 10;
-            const amount = Math.round(rate * hrs);
-            bonusLines.push({ branch_name: branchNameById.get(String(bid)) || '', hours: roundedHrs, rate, amount, reason: rule.reason || '' });
-            bonusAuto += amount;
-          }
-        }
-      }
+      // "בונוס קבוע" — a standing per-employee rule (Employee.bonuses[]: flat
+      // ₪, ₪/hour worked, or ₪/day worked). calculateMonthlySalary already
+      // computed this employee's rules into breakdown.components.bonuses and
+      // folded it into breakdown.estimated_total — so bonusAuto here is a
+      // READ of that same figure, never a second computation of it (the exact
+      // bug class the adjustment_total comment below already warns about).
+      const bonusAuto = Number(breakdown.components?.bonuses) || 0;
+      const bonusLines = breakdown.components?.bonus_details || [];
       const bonusAutoNote = bonusLines
-        .map(l => `${l.reason || ('בונוס ' + l.branch_name)}: ${l.hours}ש׳ × ₪${l.rate} = ₪${l.amount}`)
+        .map(l => l.reason || (l.rate != null && l.quantity != null
+          ? `${l.quantity}× × ₪${l.rate} = ₪${l.amount}`
+          : `בונוס: ₪${l.amount}`))
         .join(' · ');
       const mBonus = manual.bonus || {};
       const bonusDisabled = !!mBonus.disabled;
-      // Effective = (manual override, else the auto personal bonus) PLUS any
+      // Effective = (manual override, else the auto standing bonus) PLUS any
       // approved adjustments. Adjustments ride on top — they are other money
       // (reimbursements, deductions) that happens to share the column, and
-      // must never replace the personal hourly bonus.
+      // must never replace the standing bonus.
       const bonusAdjustments = Number(mBonus.adjustment_total) || 0;
       const bonusEffective = bonusDisabled
         ? 0
         : (mBonus.override_amount != null ? Number(mBonus.override_amount) : bonusAuto) + bonusAdjustments;
       const bonusNote = mBonus.note || bonusAutoNote;
-      // Fold the effective bonus into the estimated total so the salary reflects it.
-      if (bonusEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + bonusEffective;
+      // bonusAuto is ALREADY inside estimated_total (folded there by
+      // calculateMonthlySalary) — only the DIFFERENCE an override/disable/
+      // adjustment makes needs to move the total, or the standing bonus gets
+      // counted twice the moment nobody has touched this month's override.
+      const bonusDelta = bonusEffective - bonusAuto;
+      if (bonusDelta) breakdown.estimated_total = (breakdown.estimated_total || 0) + bonusDelta;
+
+      // "בונוס חד פעמי" — an independent one-off amount for this month only.
+      // Never repeats, never interacts with the standing bonus above: disabling
+      // the standing bonus does not zero this, and this has no "auto" baseline.
+      const mOneTime = manual.one_time_bonus || {};
+      const oneTimeBonus = Number(mOneTime.amount) || 0;
+      const oneTimeNote = mOneTime.note || '';
+      if (oneTimeBonus) breakdown.estimated_total = (breakdown.estimated_total || 0) + oneTimeBonus;
 
       // Fold holiday pay (דמי חגים) into the total — manager override if set,
       // otherwise the auto-eligible amount (hourly employees only). Was computed
@@ -1594,6 +1597,10 @@ async function getMonth(req, res, next) {
           adjustment_total: bonusAdjustments,
           lines: bonusLines,
         },
+        one_time_bonus: {
+          amount: oneTimeBonus,
+          note: oneTimeNote,
+        },
         manual: {
           sick_days:      manual.sick_days || 0,
           absence_days:   manual.absence_days || 0,
@@ -2027,7 +2034,7 @@ async function upsertEntry(req, res, next) {
       'sick_days', 'miluim_days', 'absence_days', 'vacation_days', 'holiday_pay',
       'advance_deduction_preset_id', 'advance_deduction_text',
       'gift_card', 'recreation', 'cibus', 'miluim',
-      'travel_override', 'travel_note', 'bonus', 'notes', 'custom_values',
+      'travel_override', 'travel_note', 'bonus', 'one_time_bonus', 'notes', 'custom_values',
       'include_salary_completion', 'closure_completion', 'closure_completion_approved_dates',
       'supplement_manager_approved', 'supplement_accounting_approved',
       'vacation_pay_confirmed',
@@ -3976,7 +3983,10 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     const vacAvail = r.vacation_balance_available;
     const vacUse = vacationUsageForMonth(vacTaken, vacAvail == null ? null : Number(vacAvail), { isGlobal });
     const vac = vacUse.paid;
-    const bonus = r.bonus?.effective || 0;
+    // "בונוס" here is the SAME combined figure the שקלולית export and the
+    // payslip audit read — standing bonus + this month's one-off — because the
+    // real payslip shows one בונוס line, not two.
+    const bonus = (r.bonus?.effective || 0) + (r.one_time_bonus?.amount || 0);
     const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
     const paDed = r.partial_absence?.deduction || 0;
     const paExtra = r.partial_absence?.extra_pay || 0;

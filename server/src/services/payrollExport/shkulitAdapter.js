@@ -132,6 +132,7 @@ const COMPONENTS = [
   // is written down anywhere. What the row contains is said in the notes.
   { key: 'bonus', code: 35, label: 'בונוס',
     get: (ce) => round2((Number(ce.earnings.bonus) || 0)
+      + (Number(ce.earnings.one_time_bonus) || 0)
       + (Number(ce.earnings.august_bonus) || 0)) },
   { key: 'miluim', code: 42, label: 'ימי מילואים', get: (ce) => ce.earnings.miluim },
   { key: 'absence', code: 36, label: 'ימים חסרים', sign: -1, unit: 'ימים', get: (ce) => ce.deductions.absence, units: (ce) => ce.quantities.absence_deduct_days },
@@ -402,6 +403,20 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
         text: plain > 0
           ? `שורת בונוס (קוד 35) מכילה ${plain} ש״ח בונוס רגיל + ${augBonus} ש״ח בונוס אוגוסט (ימי חופשת קיץ בתשלום) = ${round2(plain + augBonus)} ש״ח.`
           : `שורת בונוס (קוד 35) בסך ${augBonus} ש״ח היא בונוס אוגוסט — ימי חופשת קיץ בתשלום.`,
+      });
+    }
+
+    // בונוס חד פעמי rides the same code 35 row as the standing בונוס — same
+    // reasoning as בונוס אוגוסט above: one code, so the notes say what it holds.
+    const oneTimeBonus = round2(Number(ce.earnings.one_time_bonus) || 0);
+    if (oneTimeBonus > 0) {
+      const standing = round2(Number(ce.earnings.bonus) || 0);
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'בונוס חד פעמי',
+        text: standing > 0
+          ? `שורת בונוס (קוד 35) מכילה ${standing} ש״ח בונוס קבוע + ${oneTimeBonus} ש״ח בונוס חד פעמי = ${round2(standing + oneTimeBonus)} ש״ח.`
+          : `שורת בונוס (קוד 35) בסך ${oneTimeBonus} ש״ח היא בונוס חד פעמי.`,
       });
     }
 

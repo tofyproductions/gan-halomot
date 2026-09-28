@@ -1610,8 +1610,8 @@ export default function EmployeeManager() {
                   <Typography variant="subtitle2" sx={{ fontWeight: 700, color: 'primary.main' }}>בונוס אישי לפי סניף</Typography>
                   <Chip size="small" label="אופציונלי" variant="outlined" />
                 </Stack>
-                <Alert severity="info" sx={{ borderRadius: 2, py: 0.5 }}>
-                  בונוס אישי לשעה לסניף מסוים (למשל +3₪ בהרצליה). הבונוס = הסכום × שעות שעבדה באותו סניף, ומתווסף אוטומטית לשכר ולעמודת הבונוס בטבלה.
+                <Alert severity="warning" sx={{ borderRadius: 2, py: 0.5 }}>
+                  שדה זה כרגע משמש רק לשיוך לסניף (למשל בבדיקת הרשאות עריכת שעון) — <b>אינו</b> משפיע על השכר או על עמודת הבונוס בטבלה. לבונוס אישי לפי שעה/יום/סכום קבוע יש להשתמש בטאב "בונוס קבוע" בכרטיס העובד/ת.
                 </Alert>
                 {(dialog.data.hourly_bonuses || []).map((hb, i) => (
                   <Stack key={i} direction="row" spacing={1} alignItems="center">
