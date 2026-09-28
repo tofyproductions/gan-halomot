@@ -27,22 +27,46 @@
  *   - Net employees: amounts are sent as-is (they are net) and the employee
  *     is flagged in the notes; the gross-up happens on the accountant's side.
  *
- * WHAT DOES NOT GO IN THE FILE. Components whose codes we still don't have
- * (cibus/meal value, gift card, loan/advance — they live in the EXTENDED
- * אקסולוגיה the accountant is sending) and every free-text directive are NOT
- * guessed into numeric rows. They come back from buildMovements() as `notes`
- * and land on a dedicated sheet the accountant reads.
+ *   - "סוג רשומה" says WHICH code table the row's קוד רכיב comes from:
+ *     1 שכר, 2 זקופות, 3 ניכויי רשות (answered 28.09.2026). Every row this
+ *     file emits today is a שכר row.
+ *
+ * WHAT DOES NOT GO IN THE FILE. Components whose CODES we still don't have
+ * (cibus/meal value, gift card, loan/advance) and every free-text directive are
+ * NOT guessed into numeric rows — knowing their table is not knowing their
+ * code. They come back from buildMovements() as `notes` and land on a dedicated
+ * sheet the accountant reads.
  */
 
 const OPEN_QUESTIONS = [
-  '"סוג רשומה" — כנראה מבדיל בין שלוש טבלאות הקודים (רכיבי שכר / ניכויי רשות / זקופות); ממתינים לערכים מבית התוכנה. עד אז מקדמות וסיבוס בגיליון ההערות, עם הקוד ליד כל שורה.',
-  'סיבוס: שווי ארוחות מופיע פעמיים באקסולוגיית הזקופות (קוד 2 וקוד 21) — לוודא איזה מהם בשימוש.',
+  'סיבוס: שווי ארוחות מופיע פעמיים באקסולוגיית הזקופות (קוד 2 וקוד 21) — לוודא איזה מהם בשימוש. כל עוד הקוד לא ודאי, הרכיב נשאר בגיליון ההערות למרות שסוג הרשומה כבר ידוע (2).',
   'החזר הלוואה: אין קוד ייעודי בניכויי הרשות — לוודא אם נקלט כמקדמה (קוד 1).',
   'חודש ניסיון: ספטמבר 2026 — הקבצים נשלחים לרו"ח במייל.',
 ];
 
-/** "סוג רשומה" — the accountant: not in use. Sent empty until told otherwise. */
-const RECORD_TYPE = '';
+/**
+ * "סוג רשומה" — which of the three code tables the row's קוד רכיב belongs to.
+ * Answered 28.09.2026; the hypothesis in the original spec was right.
+ *
+ *   1  שכר          רכיבי שכר        (יסוד, ש"נ, נסיעות, מחלה, חג, בונוס, חסרים…)
+ *   2  זקופות       הכנסות זקופות    (שווי ארוחות, שווי רכב…)
+ *   3  ניכויי רשות  ניכויי רשות      (מקדמה, מפרעה…)
+ *
+ * It was sent EMPTY until now, on the accountant's word that the column was
+ * not in use. Every row this file emits today is a רכיבי שכר row, so they all
+ * carry SALARY; the table lives on the component so a row from another table
+ * cannot silently inherit the wrong one.
+ *
+ * Knowing the table is NOT enough to move the notes-sheet components into real
+ * rows — their קוד רכיב is still unconfirmed (שווי ארוחות 2 or 21, תו קנייה
+ * unknown, הלוואה probably מקדמה=1). Guessing a code is exactly what cost the
+ * 28.09 import; they stay on the notes sheet until the codes are confirmed.
+ */
+const RECORD_TYPE = Object.freeze({
+  SALARY: 1,             // רכיבי שכר
+  IMPUTED: 2,            // הכנסות זקופות
+  VOLUNTARY_DEDUCTION: 3, // ניכויי רשות
+});
 
 /**
  * The component map: canonical field → שקלולית code (אקסולוגיה, חברה 600).
@@ -71,11 +95,16 @@ const HOURS = {
 };
 
 /**
- * Components whose CODES are now known (the extended אקסולוגיה, 27.09.2026)
- * but whose "סוג רשומה" value is not — they live in the OTHER code tables
- * (ניכויי רשות / הכנסות זקופות), and until the software house says how the
- * movements file marks those tables, they ride the notes sheet WITH their
- * code, so the accountant keys them in seconds.
+ * Components that belong to the OTHER two code tables and still ride the notes
+ * sheet rather than becoming rows.
+ *
+ * "סוג רשומה" was the blocker and is now answered (2 זקופות, 3 ניכויי רשות),
+ * but that alone does not let these out: their קוד רכיב is still unconfirmed —
+ * שווי ארוחות appears TWICE in the imputed table (2 and 21), תו קנייה is not
+ * in any list we hold, and loan repayment has no code of its own. Guessing a
+ * code is what cost the 28.09 import, so each still travels as a note WITH its
+ * candidate code, and the accountant keys it in seconds. Confirm the codes and
+ * they become rows with `table` set.
  */
 const UNMAPPED = [
   { key: 'meal_vouchers', label: 'תווי מזון / כלכלה', hint: 'זקופות — שווי ארוחות (קוד 2 או 21)', get: (ce) => ce.earnings.meal_vouchers },
@@ -142,11 +171,11 @@ function buildMovements(source) {
     const hourlyRate = Number(ce.rates?.hourly_rate) || 0;
     if (ce.employee.salary_type === 'hourly' && hourlyRate > 0) {
       const q = ce.quantities;
-      if (q.regular_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.regular.code, hourlyRate, round2(q.regular_hours)]);
-      if (q.ot_125_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours)]);
-      if (q.ot_150_hours) rows.push([label, empNo, RECORD_TYPE, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours)]);
+      if (q.regular_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.regular.code, hourlyRate, round2(q.regular_hours)]);
+      if (q.ot_125_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours)]);
+      if (q.ot_150_hours) rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours)]);
     } else if (ce.earnings.base_salary) {
-      rows.push([label, empNo, RECORD_TYPE, HOURS.regular.code, ce.earnings.base_salary, 1]);
+      rows.push([label, empNo, RECORD_TYPE.SALARY, HOURS.regular.code, ce.earnings.base_salary, 1]);
       if (ce.employee.salary_type === 'hourly') {
         notes.push({
           employee_number: empNo, full_name: ce.employee.full_name,
@@ -166,7 +195,7 @@ function buildMovements(source) {
       const amount = Number(comp.get(ce)) || 0;
       if (!amount) continue; // a zero component is not a row
       const signed = (comp.sign === -1 ? -1 : 1) * Math.abs(amount);
-      rows.push([label, empNo, RECORD_TYPE, comp.code, signed, 1]);
+      rows.push([label, empNo, comp.table || RECORD_TYPE.SALARY, comp.code, signed, 1]);
     }
 
     for (const comp of UNMAPPED) {

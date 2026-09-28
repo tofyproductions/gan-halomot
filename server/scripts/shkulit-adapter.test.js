@@ -80,7 +80,8 @@ ok('every non-zero amount component is one row (qty 1); zeros vanish', () => {
     assert.strictEqual(r[0], 8);
     assert.strictEqual(typeof r[0], 'number', 'must be numeric, not a date string');
     assert.strictEqual(r[1], '17');
-    assert.strictEqual(r[2], '', 'record type: empty (not in use per the accountant)');
+    // סוג רשומה = which code table. Every row we emit is a רכיבי שכר row.
+    assert.strictEqual(r[2], 1, 'record type: 1 = שכר');
   }
 });
 ok('deductions are negative', () => {
@@ -158,6 +159,33 @@ ok('new employee, changed field, unchanged row — each called by name', () => {
   d = shkulit.buildMasterDiff(master, new Map([['17', { ...named, 'בנק-מספר חשבון': '999' }]]));
   assert.strictEqual(d.changed.length, 1);
   assert.deepStrictEqual(d.changed[0].changes, [{ column: 'בנק-מספר חשבון', before: '999', after: '123456' }]);
+});
+
+console.log('record type');
+ok('the three code tables, as the software house numbered them', () => {
+  assert.strictEqual(shkulit.RECORD_TYPE.SALARY, 1);
+  assert.strictEqual(shkulit.RECORD_TYPE.IMPUTED, 2);
+  assert.strictEqual(shkulit.RECORD_TYPE.VOLUNTARY_DEDUCTION, 3);
+});
+ok('every movement row carries a numeric table, never the old empty string', () => {
+  const valid = new Set([1, 2, 3]);
+  for (const r of rows) {
+    assert.strictEqual(typeof r[2], 'number', `row ${JSON.stringify(r)} record type must be a number`);
+    assert.ok(valid.has(r[2]), `row ${JSON.stringify(r)} record type must be 1, 2 or 3`);
+  }
+});
+ok('deductions from the SALARY table stay type 1 — a negative amount is not a ניכוי רשות', () => {
+  const byCode = new Map(rows.map(r => [r[3], r]));
+  const absence = byCode.get(36);
+  assert.ok(absence, 'the fixture must produce ימים חסרים');
+  assert.strictEqual(absence[2], 1, 'ימים חסרים is a salary component');
+  assert.ok(absence[4] < 0, 'and still goes out negative');
+});
+ok('the components still on the notes sheet produced no rows', () => {
+  // Their table is known now; their קוד רכיב is not. They must not have leaked
+  // into the file on the strength of half an answer.
+  const codes = new Set(rows.map(r => r[3]));
+  for (const c of [2, 21]) assert.ok(!codes.has(c), `imputed code ${c} must not appear yet`);
 });
 
 console.log('month encoding');
