@@ -402,7 +402,16 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       // גמר חשבון is settled from.
       const base = vacIsGlobal
         ? `${vacDays} ימי חופשה — עובדת תקן. ⚠️ לרשום כניצול חופשה בלבד, ללא תמורה: השכר החודשי כבר כולל את הימים. הרכיב לא נשלח בקובץ כי תעריף 0 אינו מכבה תשלום בשקלולית.`
-        : (vacPay > 0 ? `${vacDays} ימי חופשה בתשלום.` : `${vacDays} ימי חופשה — ללא תעריף שעה בכרטיס, לרשום כניצול בלבד.`);
+        : (vacPay > 0
+          // ⚠️ Filing code 8 with our own rate pays the money but does NOT
+          // appear to register the days as ניצול חופשה: מהרט's three days came
+          // back paid, with ניצול at 0.000, while ליאור's six — filed at rate 0,
+          // which שקלולית repriced itself — did register as 6.000. Same code,
+          // opposite outcome, and nobody here knows the rule. Until the
+          // software house says which, the accountant is asked to check the
+          // field rather than being told it is handled.
+          ? `${vacDays} ימי חופשה בתשלום. ⚠️ לוודא ששדה "ניצול חופשה" בשקלולית מציג ${vacDays} — בקליטה של 09.2026 הוא נשאר 0 למרות שהתמורה שולמה.`
+          : `${vacDays} ימי חופשה — ללא תעריף שעה בכרטיס, לרשום כניצול בלבד.`);
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'ימי חופשה',
