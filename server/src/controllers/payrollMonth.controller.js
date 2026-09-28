@@ -100,6 +100,7 @@ const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHo
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
+const { lookbackMonths, dayRatesFrom } = require('../services/hourlyDayRates');
 const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
@@ -797,6 +798,26 @@ async function getMonth(req, res, next) {
     // for the חופשה balance. Kept as a month map rather than one total because
     // each employee's opening balance starts at her OWN as_of_month, and only
     // the months after it may be charged against her.
+    // An hourly employee's day of חופשה or מחלה is an average over her own
+    // recent history. Fetched once for everybody rather than per row.
+    const dayRatesByEmp = new Map();
+    {
+      const window = lookbackMonths(month);
+      if (window.length) {
+        const hist = await PayrollMonth.find({
+          employee_id: { $in: empIdList }, month: { $in: window },
+          'pay_summary.recorded_at': { $ne: null },
+        }).select('employee_id month pay_summary').lean();
+        const byEmp = new Map();
+        for (const h of hist) {
+          const k = String(h.employee_id);
+          if (!byEmp.has(k)) byEmp.set(k, []);
+          byEmp.get(k).push({ month: h.month, ...(h.pay_summary || {}) });
+        }
+        for (const [k, rowsFor] of byEmp) dayRatesByEmp.set(k, dayRatesFrom(rowsFor));
+      }
+    }
+
     const priorVacationByEmp = new Map();
     for (const r of priorVacationRows || []) {
       const key = String(r.employee_id);
@@ -1078,8 +1099,21 @@ async function getMonth(req, res, next) {
         vacEffDays, vacAvailable == null ? null : Number(vacAvailable),
         { isGlobal: isTeken },
       );
+      // ── what a day of leave is worth ────────────────────────────────────
+      //
+      // An hourly wage is not a daily wage. A woman who worked 54 days one
+      // month and 4 the next has no single "day" to be paid for, so the value
+      // is averaged over her own recent history — the same way the accountant's
+      // ריכוז משכורות computes it.
+      //
+      // `rate × avgDailyHours` is kept as the fallback for an employee with no
+      // history yet. A new employee is not one whose day is worth nothing.
+      const dayRates = isTeken ? null : (dayRatesByEmp.get(String(emp._id)) || null);
+      const vacationDayValue = dayRates
+        ? dayRates.vacation_day
+        : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100;
       const vacationPay = (!isTeken && vacEffDays > 0)
-        ? Math.round(vacEffDays * (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100
+        ? Math.round(vacEffDays * vacationDayValue * 100) / 100
         : 0;
       if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
 
@@ -1116,7 +1150,13 @@ async function getMonth(req, res, next) {
         ? Number(emp.sick_daily_value_override)
         : (isTeken
             ? (dailyRate > 0 ? dailyRate : (tekenSalary > 0 ? Math.round((tekenSalary / 22) * 100) / 100 : 0))
-            : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100);
+            // Same averaging as חופשה, but over the MONTHS and then over 30 —
+            // a monthly figure spread across a calendar month, which is a
+            // different question from "a day she was paid for" and so a
+            // different divisor. An explicit override still wins over both.
+            : (dayRates
+              ? dayRates.sick_day
+              : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100));
       // Count sick days by the employee's REAL working days (commitment schedule),
       // falling back to work_days — so a day she works (e.g. Friday) isn't dropped.
       const sickWorkdays = workingWeekdays(commitmentByEmp.get(String(emp._id)), emp.work_days);
@@ -1748,6 +1788,43 @@ async function getMonth(req, res, next) {
           worked_on_holiday: vacationAutoInfo.worked_on_holiday,
         },
         vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
+        // How the day rates were arrived at, so the office can check them
+        // against the payslip instead of taking them on trust.
+        day_rates: dayRates && {
+          ...dayRates,
+          vacation_day_used: vacationDayValue,
+          source: 'history',
+        },
+        // The five figures a future month's day rates are averaged from. Sent
+        // on the row so the client can show them, and persisted on save so the
+        // twelve-month window has something to read — see PayrollMonth.pay_summary.
+        pay_summary: {
+          base_salary: Math.round((Number(breakdown.components?.base_salary) || 0) * 100) / 100,
+          vacation_pay: Math.round((Number(vacationPay) || 0) * 100) / 100,
+          sick_pay: Math.round((Number(sickPay) || 0) * 100) / 100,
+          miluim_pay: Math.round((Number(manual.miluim?.amount) || 0) * 100) / 100,
+          holiday_pay: Math.round((Number(holidayPayInfo?.total_pay ?? manual.holiday_pay) || 0) * 100) / 100,
+          // ימים לתלוש: every day she was paid for, not only worked days.
+          //
+          // ⚠️ מילואים days are NOT included: this system records the מילואים
+          // PAYMENT as a number-or-text field and never its day count. So a
+          // month of reserve duty contributes its money to the average and no
+          // days, which makes the daily value slightly HIGH rather than low —
+          // the safe direction, and flagged rather than silently assumed.
+          days_for_payslip: Math.round((
+            (Number(breakdown.hours?.days_worked) || 0)
+            + (Number(vacEffDays) || 0)
+            + (Number(manual.sick_days) || 0)
+            + (Number(holidayPayInfo?.total_days) || 0)
+          ) * 100) / 100,
+          // שעות משולמות: worked hours plus the hours behind the paid days.
+          paid_hours: Math.round((
+            (Number(breakdown.hours?.total) || 0)
+            + ((Number(vacEffDays) || 0) + (Number(manual.sick_days) || 0)
+               + (Number(holidayPayInfo?.total_days) || 0))
+              * (Number(avgDailyHours) || 8)
+          ) * 100) / 100,
+        },
         special_days: { pay: specialDayPay, lines: specialDayLines },
         // דמי הבראה — August's suggested figure per the צו (seniority bracket ×
         // day rate × היקף משרה); basis 'not_yet_eligible' = no completed year,
@@ -2017,6 +2094,25 @@ async function upsertEntry(req, res, next) {
     // The vacation debt is pinned to the month it arose in, every time the
     // month's days change — including back down to zero.
     await recordVacationOverdraft(employeeId, month);
+
+    // And the month's own five figures, so future months can average over it.
+    //
+    // NOT awaited, and scoped to this employee's own branch. Deriving the
+    // summary means recomputing the month, which is the expensive read in this
+    // controller — blocking on it would make every single cell edit wait for a
+    // whole branch to be recalculated. The figures are only ever read by a
+    // LATER month's average, so a second's delay costs nothing, and a failure
+    // must not fail the edit the user actually asked for.
+    void (async () => {
+      try {
+        const scope = emp.branch_id ? String(emp.branch_id) : 'all';
+        const fresh = await fetchMonthData({ month, branch: scope }, req.user);
+        const mine = (fresh.rows || []).find((r) => String(r.employee_id) === String(employeeId));
+        if (mine?.pay_summary) await recordMonthPaySummary(employeeId, month, mine.pay_summary);
+      } catch (e) {
+        console.error('[pay-summary] refresh failed:', e.message);
+      }
+    })();
 
     // Auto-bump usage_count for the chosen preset (helps sort by popularity)
     if (body.advance_deduction_preset_id) {
@@ -5750,6 +5846,51 @@ async function setShkulitCodes(req, res, next) {
  * a balance import shows she had the leave after all, the debt has to go away
  * rather than sit there until somebody is charged for it.
  */
+/**
+ * Persist the month's five figures, so a future month's day rates have history
+ * to average over.
+ *
+ * Written on save rather than on read: a read that writes is a read that
+ * changes what the next read sees. The window therefore fills as months are
+ * worked on, which is exactly the growth the office described — the gan has not
+ * been on this system a year, and the average uses whatever exists.
+ */
+async function recordMonthPaySummary(employeeId, month, summary) {
+  if (!summary) return;
+  try {
+    await PayrollMonth.updateOne(
+      { employee_id: employeeId, month },
+      { $set: { pay_summary: { ...summary, recorded_at: new Date() } } },
+    );
+  } catch (e) {
+    console.error('[pay-summary] recording failed:', e.message);
+  }
+}
+
+/**
+ * An hourly employee's day rates, averaged over the twelve months before
+ * `month` — or over however many of them this system holds.
+ *
+ * Returns null when there is no history at all. Null means "cannot say", and
+ * every caller must fall back to the previous behaviour rather than paying
+ * zero: an employee with no months on file is a new employee, not one whose
+ * day is worth nothing.
+ */
+async function hourlyDayRatesFor(employeeId, month) {
+  try {
+    const months = lookbackMonths(month);
+    if (months.length === 0) return null;
+    const rows = await PayrollMonth.find({
+      employee_id: employeeId, month: { $in: months }, 'pay_summary.recorded_at': { $ne: null },
+    }).select('month pay_summary').lean();
+    if (rows.length === 0) return null;
+    return dayRatesFrom(rows.map((r) => ({ month: r.month, ...(r.pay_summary || {}) })));
+  } catch (e) {
+    console.error('[hourly-day-rates] failed:', e.message);
+    return null;
+  }
+}
+
 async function recordVacationOverdraft(employeeId, month) {
   try {
     const emp = await Employee.findById(employeeId)
@@ -6079,6 +6220,10 @@ module.exports = {
   // SAME authoritative shortfall/extra numbers as the salary table.
   fetchMonthData,
   getShkulitExport, getShkulitFile, getShkulitCodes, setShkulitCodes,
+  // Exposed for scripts/backfill-pay-summary.js only. The backfill must produce
+  // the SAME figures the live path does, and the only way to guarantee that is
+  // to run the same function rather than reimplement its arithmetic.
+  __fetchMonthData: fetchMonthData,
   getVacationOverdraft,
   // The workbook builders are exported so the download path, the send path and
   // the tests all assemble the accountant's files from the same code.

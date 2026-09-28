@@ -179,6 +179,35 @@ const payrollMonthSchema = new mongoose.Schema({
     custom_values: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
 
+  // ── A closed month, in the five figures the day rates are built from ────
+  //
+  // An hourly employee's day of חופשה or מחלה is an average over her own recent
+  // history, not her current rate — a woman who worked 54 days one month and 4
+  // the next has no single "day" to be paid for. So the rates need twelve
+  // months of history, and until now nothing was kept: auto_snapshot is written
+  // only when a month is FINALIZED, and most months never are.
+  //
+  // This is written whenever the month is saved, so the window fills as the
+  // system runs. Fewer than twelve months is normal and not an error — the gan
+  // has not been on this system a year, and neither has every employee. The
+  // average simply uses what exists and grows.
+  //
+  // Only the five components that belong in a daily value are here. נסיעות,
+  // הבראה, שעות נוספות and הפרשים are deliberately absent: including any of
+  // them would inflate every day of leave the employee is ever paid.
+  pay_summary: {
+    base_salary:      { type: Number, default: 0 },
+    vacation_pay:     { type: Number, default: 0 },
+    sick_pay:         { type: Number, default: 0 },
+    miluim_pay:       { type: Number, default: 0 },
+    holiday_pay:      { type: Number, default: 0 },
+    // ימים לתלוש — every day she was paid for, not only the days she worked.
+    days_for_payslip: { type: Number, default: 0 },
+    // שעות משולמות — including hours paid for מילואים, מחלה and חופשה.
+    paid_hours:       { type: Number, default: 0 },
+    recorded_at:      { type: Date, default: null },
+  },
+
   // --- Auto snapshot ---
   // Stored only when finalized; otherwise computed live on read.
   auto_snapshot: { type: mongoose.Schema.Types.Mixed, default: null },

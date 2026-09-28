@@ -159,7 +159,9 @@
     "test:accountant-send": "node scripts/accountant-send-shkulit.test.js",
     "test:roster-import": "node scripts/employee-roster-import.test.js",
     "test:vacation-balance": "node scripts/vacation-balance.test.js",
-    "test:pm-scope": "node scripts/payroll-month-scope.test.js"
+    "test:pm-scope": "node scripts/payroll-month-scope.test.js",
+    "test:day-rates": "node scripts/hourly-day-rates.test.js",
+    "backfill:pay-summary": "node scripts/backfill-pay-summary.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",
