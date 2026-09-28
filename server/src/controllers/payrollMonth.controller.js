@@ -18,6 +18,7 @@ const {
   conflictsForMonth: fixedScheduleConflicts,
   markDayOff: markFixedScheduleDayOff,
   ilDateTime: ilDateTimeOf,
+  datesInRange,
 } = require('../services/fixedSchedule');
 const {
   materializeMonth: materializeClosureCompletion,
@@ -333,6 +334,27 @@ function computeKindergartenVacationDays(holidays, monthYM, commitment, statutor
   }
   result.total = Math.round(result.total * 10) / 10;
   return result;
+}
+
+/**
+ * Every date ('YYYY-MM-DD', clamped to `month`) covered by one of this
+ * employee's APPROVED sick requests — so a kindergarten closure day that
+ * happens to fall inside an approved sick spell is never ALSO auto-charged
+ * as a vacation day. Before this, computeKindergartenVacationDays had no
+ * idea sick requests existed at all; the two mechanisms only avoided
+ * colliding by luck of the calendar, not by design.
+ */
+function sickDatesForEmp(sickReqByEmp, empId, month) {
+  const out = new Set();
+  for (const r of sickReqByEmp.get(String(empId)) || []) {
+    const from = String(r.from_date || '').slice(0, 10);
+    const to = String(r.to_date || r.from_date || '').slice(0, 10);
+    if (!from || !to) continue;
+    for (const d of datesInRange(from, to)) {
+      if (d.startsWith(month)) out.add(d);
+    }
+  }
+  return out;
 }
 
 /**
@@ -668,6 +690,33 @@ async function getMonth(req, res, next) {
         ],
       }).select('employee_id user_id from_date exam_hours status').lean(),
     ]);
+
+    // Sick requests still awaiting manager/accountant approval this month —
+    // flagged on the row so accounting knows a מחלה update is sitting there
+    // before they even open the employee's dialog.
+    const pendingSickRequests = await EmployeeRequest.find({
+      type: 'sick',
+      status: { $in: ['pending', 'pending_manager', 'pending_accountant'] },
+      from_date: { $lte: `${month}-31` },
+      $or: [
+        { employee_id: { $in: empIdList } },
+        ...(empUserIds.length ? [{ user_id: { $in: empUserIds } }] : []),
+      ],
+    }).select('employee_id user_id from_date to_date status').lean();
+    const pendingSickByEmp = new Map();
+    for (const r of pendingSickRequests) {
+      const to = String(r.to_date || r.from_date || '');
+      if (to && to < `${month}-01`) continue;
+      const eid = r.employee_id ? String(r.employee_id) : userIdToEmpId.get(String(r.user_id));
+      if (!eid) continue;
+      if (!pendingSickByEmp.has(eid)) pendingSickByEmp.set(eid, []);
+      pendingSickByEmp.get(eid).push({
+        id: String(r._id),
+        from_date: r.from_date,
+        to_date: r.to_date || r.from_date,
+        status: r.status,
+      });
+    }
 
     const punchesByEmp = new Map();
     for (const p of punches) {
@@ -1009,6 +1058,10 @@ async function getMonth(req, res, next) {
       if (closureFlagOn && augWindow) {
         for (let dd = 16; dd <= 31; dd++) augustExcludedDates.add(`${month}-${String(dd).padStart(2, '0')}`);
       }
+      // A day she was approved sick is hers already, not a closure's to also
+      // charge against her vacation balance — same reasoning as the August
+      // window above, same exclusion mechanism.
+      for (const d of sickDatesForEmp(sickReqByEmp, emp._id, month)) augustExcludedDates.add(d);
       const vacationAutoInfo = computeKindergartenVacationDays(
         kgHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates, workedDates,
         augustExcludedDates,
@@ -1543,6 +1596,10 @@ async function getMonth(req, res, next) {
         // Uploaded files awaiting the accountant's acknowledgement.
         pending_docs: pendingDocsByEmp.get(String(emp._id)) || [],
         docs_total: docsTotalByEmp.get(String(emp._id)) || 0,
+        // Sick requests still awaiting approval — flagged directly on the
+        // מחלה cell so accounting doesn't have to open every employee card
+        // to discover an update is pending.
+        pending_sick: pendingSickByEmp.get(String(emp._id)) || [],
         // Days with MORE THAN TWO punches — every one needs an accountant/admin
         // decision on how to pair them. Unresolved days are billed provisionally
         // (first→last span) and flagged red until approved.
@@ -3231,12 +3288,35 @@ async function applyKindergartenVacationDays(req, res, next) {
     if (bulkAugWindow) {
       for (let dd = 16; dd <= 31; dd++) augWindowDates.add(`${month}-${String(dd).padStart(2, '0')}`);
     }
+    // Same reasoning as the salary table: a day she was approved sick is
+    // hers already, not a closure's to also draw from her vacation balance.
+    const empUserIdsForSick = employees.filter(e => e.user_id).map(e => e.user_id);
+    const userIdToEmpIdForSick = new Map(employees.filter(e => e.user_id).map(e => [String(e.user_id), String(e._id)]));
+    const sickRequestsForVacation = await EmployeeRequest.find({
+      type: 'sick',
+      status: 'approved',
+      from_date: { $lte: `${month}-31` },
+      $or: [
+        { employee_id: { $in: empIds } },
+        ...(empUserIdsForSick.length ? [{ user_id: { $in: empUserIdsForSick } }] : []),
+      ],
+    }).select('employee_id user_id from_date to_date').lean();
+    const sickReqByEmpForVacation = new Map();
+    for (const r of sickRequestsForVacation) {
+      const eid = r.employee_id ? String(r.employee_id) : userIdToEmpIdForSick.get(String(r.user_id));
+      if (!eid) continue;
+      if (!sickReqByEmpForVacation.has(eid)) sickReqByEmpForVacation.set(eid, []);
+      sickReqByEmpForVacation.get(eid).push(r);
+    }
     for (const emp of employees) {
       const empHolidays = holidaysByBranch.get(String(emp.branch_id)) || [];
       const empClosureFlag = !!existingByEmp.get(String(emp._id))?.manual?.closure_completion;
+      const excludedForEmp = new Set();
+      if (empClosureFlag && bulkAugWindow) for (const d of augWindowDates) excludedForEmp.add(d);
+      for (const d of sickDatesForEmp(sickReqByEmpForVacation, emp._id, month)) excludedForEmp.add(d);
       const info = computeKindergartenVacationDays(
         empHolidays, month, commitmentByEmp.get(String(emp._id)), statutoryHolidayDates,
-        undefined, (empClosureFlag && bulkAugWindow) ? augWindowDates : undefined,
+        undefined, excludedForEmp.size ? excludedForEmp : undefined,
       );
       if (info.total <= 0) { noKindergartenHolidays++; continue; }
       const cur = Number(existingByEmp.get(String(emp._id))?.manual?.vacation_days) || 0;

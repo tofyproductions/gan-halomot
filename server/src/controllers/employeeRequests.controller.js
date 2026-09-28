@@ -141,16 +141,26 @@ async function syncSickDaysForMonth(emp, month) {
     ? { $or: [{ employee_id: emp._id }, { user_id: emp.user_id }] }
     : { employee_id: emp._id };
   const requests = await EmployeeRequest.find({
-    ...ownerMatch,
     type: 'sick',
     status: 'approved',
     // OVERLAPS the month — not "starts in it". A certificate running
     // 27.08–03.09 belongs to September too; keying on from_date alone made
     // its September days vanish from September's count entirely.
     from_date: { $lte: `${month}-31` },
-    $or: [
-      { to_date: { $gte: `${month}-01` } },
-      { to_date: { $in: [null, ''] }, from_date: { $regex: `^${month}` } },
+    // $and, not a second top-level $or: spreading ownerMatch's own $or
+    // alongside a literal $or key here SILENTLY OVERWRITES it (later key
+    // wins in the object literal) — the owner filter vanished entirely and
+    // this matched every employee's approved sick requests, not just hers.
+    // That is exactly how it was written until this fix, and it is how a
+    // stranger's request quietly padded another employee's sick-day count.
+    $and: [
+      ownerMatch,
+      {
+        $or: [
+          { to_date: { $gte: `${month}-01` } },
+          { to_date: { $in: [null, ''] }, from_date: { $regex: `^${month}` } },
+        ],
+      },
     ],
   }).lean();
   // Count by the employee's REAL working days (commitment schedule), falling back

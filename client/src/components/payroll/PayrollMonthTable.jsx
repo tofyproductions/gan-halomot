@@ -67,6 +67,13 @@ import { COLOR } from '../../theme/tokens';
    columns specific to a month (or all months).
    ──────────────────────────────────────────────────────────────────────── */
 
+// Hebrew labels for EmployeeRequest approval-stage statuses.
+const STATUS_LABEL = {
+  pending: 'ממתין',
+  pending_manager: 'ממתין למנהל/ת',
+  pending_accountant: 'ממתין להנה״ח',
+};
+
 // Hebrew labels for staged change-request items (branch-manager flow).
 const FIELD_LABELS = {
   sick_days: 'מחלה',
@@ -2522,27 +2529,38 @@ export default function PayrollMonthTable() {
                         </Stack>
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important' }} onClick={() => setSick({ open: true, row: r })}>
-                        {Number(r.manual.sick_days) ? (
-                          <Stack spacing={0.25} alignItems="center">
-                            <Chip size="small" label={`${Number(r.manual.sick_days)} ימים`} color="error" />
-                            {Number(r.sick_info?.pay) > 0 && (
-                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main' }}>
-                                ₪{Math.round(Number(r.sick_info.pay)).toLocaleString('he-IL')}
-                              </Typography>
-                            )}
-                            {/* The sick pay is real; the completion shrank by
-                                it. Say so, or the smaller completion looks
-                                like a bug. */}
-                            {Number(r.sick_info?.completion_offset) > 0 && (
-                              <Tooltip arrow title={`דמי המחלה שולמו במלואם, והשלמת השכר הופחתה ב-₪${Math.round(Number(r.sick_info.completion_offset)).toLocaleString('he-IL')} כדי לא לשלם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא.`}>
-                                <Chip size="small" color="info" variant="outlined" label="מקוזז מההשלמה"
-                                  sx={{ height: 14, fontSize: '0.53rem', '& .MuiChip-label': { px: 0.5 } }} />
-                              </Tooltip>
-                            )}
-                          </Stack>
-                        ) : (
-                          <Typography variant="body2" color="text.secondary">—</Typography>
-                        )}
+                        <Stack spacing={0.25} alignItems="center">
+                          {Number(r.manual.sick_days) ? (
+                            <>
+                              <Chip size="small" label={`${Number(r.manual.sick_days)} ימים`} color="error" />
+                              {Number(r.sick_info?.pay) > 0 && (
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: 'success.main' }}>
+                                  ₪{Math.round(Number(r.sick_info.pay)).toLocaleString('he-IL')}
+                                </Typography>
+                              )}
+                              {/* The sick pay is real; the completion shrank by
+                                  it. Say so, or the smaller completion looks
+                                  like a bug. */}
+                              {Number(r.sick_info?.completion_offset) > 0 && (
+                                <Tooltip arrow title={`דמי המחלה שולמו במלואם, והשלמת השכר הופחתה ב-₪${Math.round(Number(r.sick_info.completion_offset)).toLocaleString('he-IL')} כדי לא לשלם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא.`}>
+                                  <Chip size="small" color="info" variant="outlined" label="מקוזז מההשלמה"
+                                    sx={{ height: 14, fontSize: '0.53rem', '& .MuiChip-label': { px: 0.5 } }} />
+                                </Tooltip>
+                              )}
+                            </>
+                          ) : (
+                            <Typography variant="body2" color="text.secondary">—</Typography>
+                          )}
+                          {/* A manager added sick days that nobody approved
+                              yet — flag it right here, or accounting has no
+                              way to know which employee needs a look. */}
+                          {Array.isArray(r.pending_sick) && r.pending_sick.length > 0 && (
+                            <Tooltip arrow title={r.pending_sick.map(p => `${p.from_date}${p.to_date && p.to_date !== p.from_date ? `–${p.to_date}` : ''} (${STATUS_LABEL[p.status] || p.status})`).join(' · ')}>
+                              <Chip size="small" color="warning" variant="filled" label="⏳ ממתין לאישור"
+                                sx={{ height: 16, fontSize: '0.55rem', fontWeight: 700, '& .MuiChip-label': { px: 0.5 } }} />
+                            </Tooltip>
+                          )}
+                        </Stack>
                       </TableCell>
                       <TableCell align="center" sx={{ cursor: 'pointer', padding: '6px !important', minWidth: 100 }} onClick={() => setAbsence({ open: true, row: r })}>
                         <AbsenceCell row={r} />
