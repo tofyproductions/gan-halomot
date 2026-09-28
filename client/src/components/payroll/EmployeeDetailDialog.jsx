@@ -51,7 +51,6 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
   const [branchRates, setBranchRates] = useState([]);
   const [breakdown, setBreakdown] = useState(null);
   const [hoursReport, setHoursReport] = useState(null);
-  const [forceFullGlobal, setForceFullGlobal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   // Local edit state for loans/bonuses
@@ -68,7 +67,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
     setLoading(true);
     Promise.all([
       api.get(`/payroll/employees/${employeeId}`),
-      api.get(`/payroll/employees/${employeeId}/salary`, { params: { month, force_full_global: forceFullGlobal } }),
+      api.get(`/payroll/employees/${employeeId}/salary`, { params: { month } }),
       api.get(`/payroll/employees/${employeeId}/hours-report`, { params: { month } }),
     ])
       .then(([empRes, salaryRes, hoursRes]) => {
@@ -111,7 +110,7 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
         toast.error('שגיאה בטעינת נתוני העובד');
       })
       .finally(() => setLoading(false));
-  }, [employeeId, month, forceFullGlobal]);
+  }, [employeeId, month]);
 
   useEffect(() => { if (open) refresh(); }, [open, refresh]);
   // When opened with an explicit initialTab, jump there (and only there) once per open cycle.
@@ -355,29 +354,6 @@ export default function EmployeeDetailDialog({ open, employeeId, initialMonth, i
             {breakdown.warnings.length > 0 && (
               <Alert severity="warning" sx={{ borderRadius: 2 }}>
                 {breakdown.warnings.join(' • ')}
-              </Alert>
-            )}
-
-            {/* "Force full global" toggle — only for global employees with required_hours */}
-            {breakdown.salary_type === 'global' && breakdown.rates.required_hours > 0 && (
-              <Alert
-                severity={forceFullGlobal ? 'success' : 'warning'}
-                sx={{ borderRadius: 2 }}
-                action={
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color={forceFullGlobal ? 'warning' : 'success'}
-                    onClick={() => setForceFullGlobal(!forceFullGlobal)}
-                  >
-                    {forceFullGlobal ? 'חזור לחישוב יחסי' : 'השלם לשכר תקן מלא'}
-                  </Button>
-                }
-              >
-                {forceFullGlobal
-                  ? `שכר תקן מלא: ₪${breakdown.rates.global_salary} (מנהל השלים ידנית)`
-                  : `שכר יחסי: עבד/ה ${breakdown.hours.total}h מתוך ${breakdown.rates.required_hours}h נדרשות`
-                }
               </Alert>
             )}
 

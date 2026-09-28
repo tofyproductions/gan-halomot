@@ -610,27 +610,22 @@ function emptyBonusRule() {
   return { type: 'fixed', amount: '', reason: '' };
 }
 
-// One dialog, three parts:
-//  1. The standing rules themselves (Employee.bonuses[]) — קבוע ₪ or ₪/hour,
-//     with a reason. Editing here writes the employee card directly.
-//  2. This month's override/disable of the standing total.
-//  3. בונוס חד פעמי — an independent one-off for this month only.
+// One dialog, two parts:
+//  1. The standing rules themselves (Employee.bonuses[]) — קבוע ₪, ₪/hour or
+//     ₪/day, with a reason. Editing here writes the employee card directly
+//     and takes effect every month until changed — no separate per-month
+//     override; edit the rule itself if a standing amount needs to change.
+//  2. בונוס חד פעמי — an independent one-off for this month only.
 function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-  const [disabled, setDisabled] = useState(false);
   const [oneTimeAmount, setOneTimeAmount] = useState('');
   const [oneTimeNote, setOneTimeNote] = useState('');
+  const [oneTimeSaving, setOneTimeSaving] = useState(false);
   const [rules, setRules] = useState([]);
   const [rulesLoading, setRulesLoading] = useState(false);
   const [rulesSaving, setRulesSaving] = useState(false);
 
   useEffect(() => {
     if (!row) return;
-    const b = row.bonus || {};
-    setAmount(b.override_amount != null ? String(b.override_amount) : '');
-    setNote(b.note || '');
-    setDisabled(!!b.disabled);
     const ot = row.one_time_bonus || {};
     setOneTimeAmount(ot.amount != null ? String(ot.amount) : '');
     setOneTimeNote(ot.note || '');
@@ -648,7 +643,6 @@ function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
   }, [open, row]);
 
   if (!row) return null;
-  const auto = row.bonus?.auto || 0;
 
   const saveRules = async () => {
     setRulesSaving(true);
@@ -724,27 +718,6 @@ function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
           <Divider />
 
           <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>בונוס קבוע — לחודש זה</Typography>
-            <Stack spacing={1.5}>
-              <Alert severity="info" sx={{ py: 0.5 }}>
-                אוטומטי לפי הכללים למעלה: <b>{auto ? fmtCurrency(auto) : '₪0'}</b>
-              </Alert>
-              <TextField
-                label="סכום ידני (ריק = אוטומטי)" type="number" value={amount}
-                onChange={e => setAmount(e.target.value)} disabled={disabled}
-                InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
-              />
-              <TextField label="הערה" value={note} onChange={e => setNote(e.target.value)} />
-              <FormControlLabel
-                control={<Checkbox checked={disabled} onChange={e => setDisabled(e.target.checked)} />}
-                label="בטל בונוס קבוע לחודש זה"
-              />
-            </Stack>
-          </Box>
-
-          <Divider />
-
-          <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>בונוס חד פעמי — לחודש זה בלבד</Typography>
             <Stack spacing={1.5}>
               <TextField
@@ -753,19 +726,23 @@ function BonusDialog({ open, row, onClose, onSaveMonthly, onRulesSaved }) {
                 InputProps={{ startAdornment: <InputAdornment position="start">₪</InputAdornment> }}
               />
               <TextField label="הערה / עבור מה" value={oneTimeNote} onChange={e => setOneTimeNote(e.target.value)} />
+              <Button size="small" variant="contained" sx={{ alignSelf: 'flex-start' }} disabled={oneTimeSaving}
+                onClick={() => {
+                  setOneTimeSaving(true);
+                  onSaveMonthly({
+                    one_time_bonus: { amount: oneTimeAmount === '' ? null : Number(oneTimeAmount), note: oneTimeNote.trim() },
+                  })
+                    .then(() => { toast.success('בונוס חד פעמי עודכן'); onRulesSaved?.(); })
+                    .finally(() => setOneTimeSaving(false));
+                }}>
+                {oneTimeSaving ? 'שומר…' : 'שמור בונוס חד פעמי'}
+              </Button>
             </Stack>
           </Box>
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>סגור</Button>
-        <Button variant="contained" onClick={() => {
-          onSaveMonthly({
-            bonus: { override_amount: amount === '' ? null : Number(amount), note: note.trim(), disabled },
-            one_time_bonus: { amount: oneTimeAmount === '' ? null : Number(oneTimeAmount), note: oneTimeNote.trim() },
-          });
-          onClose();
-        }}>שמור לחודש זה</Button>
       </DialogActions>
     </Dialog>
   );
@@ -1463,7 +1440,7 @@ export default function PayrollMonthTable() {
         ...prev,
         rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, manual: { ...r.manual, ...patch } } : r),
       });
-      return;
+      return Promise.resolve();
     }
     setData(prev => {
       if (!prev) return prev;
@@ -1472,7 +1449,12 @@ export default function PayrollMonthTable() {
         rows: prev.rows.map(r => r.employee_id === employeeId ? { ...r, manual: { ...r.manual, ...patch } } : r),
       };
     });
-    api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
+    // The optimistic update above only touches manual.* — fields the server
+    // COMPUTES from manual (like bonus.effective, one_time_bonus.amount, the
+    // ones cells actually read) stay stale until a real refetch. Cheap edits
+    // (sick_days, notes, …) don't care and stay fast; callers whose cell
+    // reads a computed field (בונוס) chain a quiet refresh onto this promise.
+    return api.patch(`/payroll-month/${employeeId}`, { manual: patch }, { params: { month } })
       .catch(err => { toast.error(err.response?.data?.error || 'שמירה נכשלה'); fetchData(); });
   }, [month, fetchData, stagingMode, data]);
 

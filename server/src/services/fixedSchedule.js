@@ -1,4 +1,4 @@
-const { Employee, Punch } = require('../models');
+const { Employee, Punch, Holiday } = require('../models');
 
 /**
  * Fixed hours — punches for employees who don't clock in.
@@ -80,17 +80,52 @@ function datesInMonth(month, lastDate) {
   return out;
 }
 
+/** Every 'YYYY-MM-DD' from `startStr` through `endStr`, inclusive. */
+function datesInRange(startStr, endStr) {
+  const out = [];
+  const [sy, sm, sd] = startStr.split('-').map(Number);
+  const [ey, em, ed] = endStr.split('-').map(Number);
+  let cur = new Date(Date.UTC(sy, sm - 1, sd));
+  const end = new Date(Date.UTC(ey, em - 1, ed));
+  while (cur <= end) {
+    out.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 24 * 3600 * 1000);
+  }
+  return out;
+}
+
+/**
+ * Every date this branch's gan is fully closed (Holiday.kind === 'closure')
+ * — NOT 'short_day', which still runs. A weekly pattern must not schedule
+ * hours on a day the gan simply does not open, the same as any other
+ * employee's vacation calendar already draws for her.
+ */
+function closureDateSet(holidays, branchId) {
+  const out = new Set();
+  for (const h of holidays || []) {
+    if (h.kind !== 'closure') continue;
+    if (String(h.branch_id) !== String(branchId)) continue;
+    for (const d of datesInRange(ISR_DAY(h.start_date), ISR_DAY(h.end_date))) out.add(d);
+  }
+  return out;
+}
+
 /**
  * What the schedule says about one date: the hours to work, or null for a day
- * off. An exception always beats the weekly pattern.
+ * off. An exception always beats the weekly pattern AND the gan's closure
+ * calendar — a person who genuinely works through a break (office staff
+ * doing prep, e.g.) is still recorded correctly. Absent an exception, the gan
+ * being closed beats the weekly pattern: no hours are invented for a
+ * clock-free employee on a day nobody was there to work them.
  */
-function plannedHoursFor(schedule, dateStr) {
+function plannedHoursFor(schedule, dateStr, closureDates = null) {
   const ex = (schedule.exceptions || []).find(e => e.date === dateStr);
   if (ex) {
     if (ex.off) return null;
     if (ex.in && ex.out) return { in: ex.in, out: ex.out, from_exception: true };
     // An exception with no hours and not marked off is meaningless — fall through.
   }
+  if (closureDates && closureDates.has(dateStr)) return null;
   const day = (schedule.days || []).find(d => d.weekday === weekdayOf(dateStr));
   if (!day || !day.in || !day.out) return null;
   return { in: day.in, out: day.out, from_exception: false };
@@ -213,6 +248,24 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
   const dates = datesInMonth(month, month === currentMonth ? today : null);
   if (dates.length === 0) return { created: 0, conflicts: [] };
 
+  // The gan's own closure calendar (לוח חופשות הגן) — per employee's home
+  // branch, for the WHOLE calendar month (not just `dates`, which the jitter
+  // pass below also reads out to the month's end).
+  const [monthY, monthM] = month.split('-').map(Number);
+  const monthStart = new Date(Date.UTC(monthY, monthM - 1, 1));
+  const monthEnd = new Date(Date.UTC(monthY, monthM, 0, 23, 59, 59));
+  const empBranchIds = [...new Set(employees.map(e => String(e.branch_id)).filter(Boolean))];
+  const monthHolidays = empBranchIds.length
+    ? await Holiday.find({
+      branch_id: { $in: empBranchIds },
+      start_date: { $lte: monthEnd },
+      end_date: { $gte: monthStart },
+    }).select('branch_id kind start_date end_date').lean()
+    : [];
+  const closureDatesByBranch = new Map(
+    empBranchIds.map(bid => [bid, closureDateSet(monthHolidays, bid)]),
+  );
+
   // One read for the whole month's punches for these employees — we only need
   // to know WHICH days are already occupied and by what.
   const empIds = employees.map(e => e._id);
@@ -239,10 +292,11 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     // Earliest date the arrangement covers.
     const empStart = emp.start_date ? ISR_DAY(emp.start_date) : null;
     const floor = [sched.start_date, empStart].filter(Boolean).sort().pop() || null;
+    const closureDates = closureDatesByBranch.get(String(emp.branch_id));
 
     for (const date of dates) {
       if (floor && date < floor) continue;
-      const planned = plannedHoursFor(sched, date);
+      const planned = plannedHoursFor(sched, date, closureDates);
       if (!planned) continue;
 
       const slot = occupied.get(`${String(emp._id)}|${date}`);
@@ -280,10 +334,11 @@ async function materializeMonth(month, { branchIds = null, employeeIds = null, u
     const sched = emp.fixed_schedule || {};
     const empStart = emp.start_date ? ISR_DAY(emp.start_date) : null;
     const floor = [sched.start_date, empStart].filter(Boolean).sort().pop() || null;
+    const closureDates = closureDatesByBranch.get(String(emp.branch_id));
     const entries = [];
     for (const date of wholeMonth) {
       if (floor && date < floor) continue;
-      const planned = plannedHoursFor(sched, date);
+      const planned = plannedHoursFor(sched, date, closureDates);
       if (planned) entries.push({ date, planned });
     }
     for (const e of applyJitter(emp._id, entries)) {
@@ -356,6 +411,21 @@ async function conflictsForMonth(month, { branchIds = null } = {}) {
   const dates = datesInMonth(month, month === currentMonth ? today : null);
   if (dates.length === 0) return [];
 
+  const [monthY, monthM] = month.split('-').map(Number);
+  const monthStart = new Date(Date.UTC(monthY, monthM - 1, 1));
+  const monthEnd = new Date(Date.UTC(monthY, monthM, 0, 23, 59, 59));
+  const empBranchIds = [...new Set(employees.map(e => String(e.branch_id)).filter(Boolean))];
+  const monthHolidays = empBranchIds.length
+    ? await Holiday.find({
+      branch_id: { $in: empBranchIds },
+      start_date: { $lte: monthEnd },
+      end_date: { $gte: monthStart },
+    }).select('branch_id kind start_date end_date').lean()
+    : [];
+  const closureDatesByBranch = new Map(
+    empBranchIds.map(bid => [bid, closureDateSet(monthHolidays, bid)]),
+  );
+
   const empIds = employees.map(e => e._id);
   const from = ilDateTime(dates[0], '00:00');
   const to = new Date(ilDateTime(dates[dates.length - 1], '00:00').getTime() + 36 * 3600 * 1000);
@@ -374,10 +444,11 @@ async function conflictsForMonth(month, { branchIds = null } = {}) {
 
   const out = [];
   for (const emp of employees) {
+    const closureDates = closureDatesByBranch.get(String(emp.branch_id));
     for (const date of dates) {
       const n = realByDay.get(`${String(emp._id)}|${date}`);
       if (!n) continue;
-      const planned = plannedHoursFor(emp.fixed_schedule || {}, date);
+      const planned = plannedHoursFor(emp.fixed_schedule || {}, date, closureDates);
       if (!planned) continue;
       out.push({
         employee_id: String(emp._id),
@@ -422,6 +493,8 @@ module.exports = {
   markDayOff,
   plannedHoursFor,
   datesInMonth,
+  datesInRange,
+  closureDateSet,
   weekdayOf,
   todayIsrael,
   ilDateTime,

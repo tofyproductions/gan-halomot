@@ -3731,8 +3731,7 @@ async function salaryForEmployee(req, res, next) {
       ignored: { $ne: true },
     }).sort({ timestamp: 1 }).lean();
 
-    const forceFullGlobal = req.query.force_full_global === 'true';
-    const breakdown = calculateMonthlySalary(emp, punches, month, { force_full_global: forceFullGlobal });
+    const breakdown = calculateMonthlySalary(emp, punches, month);
     res.json({ ok: true, breakdown });
   } catch (err) { next(err); }
 }
@@ -3760,78 +3759,91 @@ async function salarySummary(req, res, next) {
       }
     }
 
-    const employees = await Employee.find({ branch_id: branch, is_active: true })
-      .sort({ full_name: 1 })
-      .lean();
+    // Same authoritative pipeline the monthly table ("טבלה חודשית") reads —
+    // sick pay's statutory bracket + completion offset, holiday pay, vacation
+    // pay, בונוס overrides, approved adjustments — every layer getMonth
+    // applies on top of calculateMonthlySalary. This dashboard used to call
+    // calculateMonthlySalary directly and skip all of it: a global employee
+    // out sick the whole month showed her FULL agreed salary here (₪9,016 for
+    // הדר שם טוב, 09/2026) while the authoritative table correctly docked her
+    // to ₪5,540.04 for the same month. One source of the truth, not two.
+    const { fetchMonthData } = require('./payrollMonth.controller');
+    const data = await fetchMonthData({ month, branch }, req.user);
+    const activeRows = (data.rows || []).filter(r => r.is_active !== false);
 
+    const employeeIds = activeRows.map(r => r.employee_id);
     const [y, m] = month.split('-').map(Number);
     const from = new Date(Date.UTC(y, m - 1, 1, 0, 0, 0) - 3 * 3600 * 1000);
     const to   = new Date(Date.UTC(y, m,     2, 0, 0, 0));
 
-    // Cross-branch: pull all punches by these employees regardless of where
-    // they physically clocked in. Salary = work × home-branch rate, even if
-    // the work happened at a sister branch. Branch info is preserved on the
-    // punch so we can break it down per-row for the UI.
+    // Cross-branch punch breakdown — a display-only extra the authoritative
+    // row doesn't carry, so it's still fetched here directly.
     const allPunches = await Punch.find({
-      employee_id: { $in: employees.map(e => e._id) },
+      employee_id: { $in: employeeIds },
       timestamp: { $gte: from, $lt: to },
       ignored: { $ne: true },
-    }).sort({ timestamp: 1 }).lean();
+    }).select('employee_id branch_id').lean();
 
     const branches = await Branch.find({}).select('_id name').lean();
     const branchById = new Map(branches.map(b => [String(b._id), b.name]));
+    const homeBranchById = new Map(activeRows.map(r => [String(r.employee_id), String(r.branch_id)]));
 
-    const byEmpId = new Map();
+    const branchCountsByEmp = new Map();
     for (const p of allPunches) {
-      const k = String(p.employee_id);
-      if (!byEmpId.has(k)) byEmpId.set(k, []);
-      byEmpId.get(k).push(p);
+      const eid = String(p.employee_id);
+      if (!branchCountsByEmp.has(eid)) branchCountsByEmp.set(eid, {});
+      const counts = branchCountsByEmp.get(eid);
+      const bid = String(p.branch_id);
+      counts[bid] = (counts[bid] || 0) + 1;
     }
 
-    const rows = employees.map(emp => {
-      const empPunches = byEmpId.get(String(emp._id)) || [];
-      const b = calculateMonthlySalary(emp, empPunches, month);
+    const rows = activeRows.map(r => {
+      const b = r.breakdown || {};
+      const c = b.components || {};
+      const tb = c.teken_breakdown || {};
+      const baseSalary = Math.round((Number(c.base_salary) || 0) * 100) / 100;
+      const loansDed = Math.round((Number(b.deductions?.loans) || 0) * 100) / 100;
+      const estimatedTotal = Math.round((Number(b.estimated_total) || 0) * 100) / 100;
+      // Reconciling bucket — everything estimated_total carries beyond base
+      // salary and loans (travel, בונוס, sick/holiday/vacation pay, approved
+      // adjustments…). Derived rather than enumerated, so a component folded
+      // into estimated_total tomorrow shows up here automatically instead of
+      // silently going missing from this dashboard the way sick pay did.
+      const extras = Math.round((estimatedTotal - baseSalary + loansDed) * 100) / 100;
 
-      // Build a small breakdown of where the punches happened. The home
-      // branch's count includes any punches at branch=home; the other entries
-      // are guest visits. Only included when there's actually cross-branch
-      // activity, so the typical row stays clean.
-      const branchCounts = {};
-      for (const p of empPunches) {
-        const bid = String(p.branch_id);
-        branchCounts[bid] = (branchCounts[bid] || 0) + 1;
-      }
-      const homeBid = String(emp.branch_id);
+      const eid = String(r.employee_id);
+      const branchCounts = branchCountsByEmp.get(eid) || {};
+      const homeBid = homeBranchById.get(eid);
       const otherBranches = Object.keys(branchCounts).filter(bid => bid !== homeBid);
       const cross_branch = otherBranches.length === 0 ? null : {
-        home_punches:  branchCounts[homeBid] || 0,
+        home_punches: branchCounts[homeBid] || 0,
         elsewhere: otherBranches.map(bid => ({
-          branch_id:   bid,
+          branch_id: bid,
           branch_name: branchById.get(bid) || '?',
           punch_count: branchCounts[bid],
         })),
       };
 
       return {
-        employee_id: String(emp._id),
-        full_name: emp.full_name,
-        israeli_id: emp.israeli_id || '',
-        salary_type: emp.salary_type,
-        hours_total: b.hours.total,
-        hours_regular: b.hours.regular,
-        hours_ot125: b.hours.ot_125,
-        hours_ot150: b.hours.ot_150,
-        days_worked: b.hours.days_worked,
-        incomplete_days: b.hours.incomplete_days,
-        required_hours: b.rates.required_hours,
+        employee_id: eid,
+        full_name: r.full_name,
+        israeli_id: r.israeli_id || '',
+        salary_type: r.salary_type,
+        hours_total: b.hours?.total || 0,
+        hours_regular: b.hours?.regular || 0,
+        hours_ot125: b.hours?.ot_125 || 0,
+        hours_ot150: b.hours?.ot_150 || 0,
+        days_worked: b.hours?.days_worked || 0,
+        incomplete_days: b.hours?.incomplete_days || 0,
+        required_hours: b.rates?.required_hours || 0,
         // תקן OT addition (overtime beyond commitment) for global employees.
-        teken_ot: Math.round((b.components.teken_breakdown?.ot_part || 0)),
-        teken_ot_exceeded: !!b.components.teken_breakdown?.exceeded_commitment,
-        base_salary: b.components.base_salary,
-        extras: b.components.travel + b.components.meal_vouchers + b.components.recreation_monthly + b.components.bonuses,
-        deductions: b.deductions.loans,
-        estimated_total: b.estimated_total,
-        warnings: b.warnings,
+        teken_ot: Math.round(tb.ot_part || 0),
+        teken_ot_exceeded: !!tb.exceeded_commitment,
+        base_salary: baseSalary,
+        extras,
+        deductions: loansDed,
+        estimated_total: estimatedTotal,
+        warnings: b.warnings || [],
         cross_branch,
       };
     });

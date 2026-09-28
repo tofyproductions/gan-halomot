@@ -100,7 +100,7 @@ const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHo
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
-const { lookbackMonths, dayRatesFrom } = require('../services/hourlyDayRates');
+const { lookbackMonths, dayRatesFrom, aggregate } = require('../services/hourlyDayRates');
 const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
@@ -817,6 +817,9 @@ async function getMonth(req, res, next) {
         for (const [k, rowsFor] of byEmp) dayRatesByEmp.set(k, dayRatesFrom(rowsFor));
       }
     }
+    // דמי חגים prices a day at her recent average — 3 months, not 12, and
+    // hours/day rather than ₪/day (see holidayAvgHoursByEmp above).
+    const holidayHoursByEmp = await holidayAvgHoursByEmp(empIdList, month);
 
     const priorVacationByEmp = new Map();
     for (const r of priorVacationRows || []) {
@@ -977,9 +980,14 @@ async function getMonth(req, res, next) {
       // who pass tenure + guard-day rules. Manager can still override via
       // manual.holiday_pay; we expose both so the UI can show the breakdown.
       const hourlyRate = emp.amuta_distribution?.[0]?.hourly_rate || 0;
-      const avgDailyHours = (breakdown.hours.days_worked > 0)
+      // Prefer her 3-month average; fall back to this month alone (new
+      // employee / gap in history), and only then to a flat 8h.
+      const currentMonthAvgHours = (breakdown.hours.days_worked > 0)
         ? (breakdown.hours.total / breakdown.hours.days_worked)
-        : 8;
+        : null;
+      const avgDailyHours = holidayHoursByEmp.get(String(emp._id)) ?? currentMonthAvgHours ?? 8;
+      const avgDailyHoursSource = holidayHoursByEmp.get(String(emp._id)) != null
+        ? '3-months' : (currentMonthAvgHours != null ? 'this-month' : 'default');
       const holidayPayInfo = computeHolidayPay({
         employee: emp,
         monthYM: month,
@@ -1701,7 +1709,7 @@ async function getMonth(req, res, next) {
           ineligible: holidayPayInfo.ineligible_days,
           blocking_reason: holidayPayInfo.blocking_reason,
           is_eligible: holidayPayInfo.total_days > 0,
-          calc: holidayPayInfo.calc,
+          calc: { ...holidayPayInfo.calc, avg_daily_hours_source: avgDailyHoursSource },
         },
         loans_info: (() => {
           const list = Array.isArray(emp.loans) ? emp.loans : [];
@@ -3094,6 +3102,7 @@ async function applyAutoHolidays(req, res, next) {
 
     const existing = await PayrollMonth.find({ employee_id: { $in: empIds }, month }).lean();
     const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
+    const holidayHoursByEmp = await holidayAvgHoursByEmp(empIds, month);
 
     let updated = 0;
     let skippedAlreadySet = 0;
@@ -3124,7 +3133,8 @@ async function applyAutoHolidays(req, res, next) {
         }
         return total;
       })();
-      const avgDailyHours = daysWorked > 0 ? (totalMinutes / 60 / daysWorked) : 8;
+      const currentMonthAvgHours = daysWorked > 0 ? (totalMinutes / 60 / daysWorked) : null;
+      const avgDailyHours = holidayHoursByEmp.get(String(emp._id)) ?? currentMonthAvgHours ?? 8;
 
       const info = computeHolidayPay({
         employee: emp,
@@ -5930,6 +5940,38 @@ async function hourlyDayRatesFor(employeeId, month) {
   }
 }
 
+/**
+ * Average WORKED HOURS PER DAY over the 3 months before `month`, for pricing
+ * a day of דמי חגים. Unlike hourlyDayRatesFor (₪/day, 12-month window), this
+ * is hours/day over a shorter window — a schedule change should move the
+ * holiday rate faster than it should move the vacation/sick day value.
+ *
+ * @returns {Promise<Map<string, number|null>>} employee_id → hours/day, or
+ *   null for an employee with no usable history in the window. null is NOT
+ *   zero — every caller must fall back to the current month's own average
+ *   (and ultimately to 8h) rather than price a holiday day at ₪0.
+ */
+async function holidayAvgHoursByEmp(empIds, month) {
+  const result = new Map();
+  const months = lookbackMonths(month, 3);
+  if (!months.length || !empIds?.length) return result;
+  const rows = await PayrollMonth.find({
+    employee_id: { $in: empIds }, month: { $in: months },
+    'pay_summary.recorded_at': { $ne: null },
+  }).select('employee_id month pay_summary').lean();
+  const byEmp = new Map();
+  for (const r of rows) {
+    const k = String(r.employee_id);
+    if (!byEmp.has(k)) byEmp.set(k, []);
+    byEmp.get(k).push({ month: r.month, ...(r.pay_summary || {}) });
+  }
+  for (const [k, rowsFor] of byEmp) {
+    const agg = aggregate(rowsFor);
+    result.set(k, agg.days > 0 ? agg.hours / agg.days : null);
+  }
+  return result;
+}
+
 async function recordVacationOverdraft(employeeId, month) {
   try {
     const emp = await Employee.findById(employeeId)
@@ -6300,4 +6342,5 @@ module.exports = {
   // the tests all assemble the accountant's files from the same code.
   shkulitMovementsWorkbook, shkulitMasterWorkbook,
   buildAccountantHtml,
+  holidayAvgHoursByEmp,
 };

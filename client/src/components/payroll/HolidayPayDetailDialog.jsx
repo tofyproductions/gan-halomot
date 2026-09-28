@@ -90,12 +90,16 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
               <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>איך חושב הסכום?</Typography>
               <Box component="pre" sx={{ fontFamily: 'inherit', m: 0, fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>
                 {`תעריף שעתי: ${auto.calc.hourly_rate} ₪/שעה
-ממוצע שעות יומי (מהחתמות החודש): ${auto.calc.avg_daily_hours}h
+ממוצע שעות יומי (${
+  auto.calc.avg_daily_hours_source === '3-months' ? 'ממוצע 3 חודשים אחרונים'
+    : auto.calc.avg_daily_hours_source === 'this-month' ? 'מהחתמות החודש'
+    : 'ברירת מחדל'
+}): ${auto.calc.avg_daily_hours}h
 תעריף יומי = ${auto.calc.hourly_rate} × ${auto.calc.avg_daily_hours} = ${auto.calc.daily_rate} ₪
 סה״כ = ${auto.calc.daily_rate} ₪ × ${auto.total_days} ימי חג זכאי = ${auto.total_pay} ₪`}
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                אם בחודש לא היו החתמות, ברירת המחדל היא 8 שעות יומיות.
+                מבוסס על 3 החודשים האחרונים שבהם נשמר שכר; בלי היסטוריה — החודש הנוכחי; בלי החתמות בכלל — 8 שעות יומיות כברירת מחדל.
               </Typography>
             </Alert>
           )}

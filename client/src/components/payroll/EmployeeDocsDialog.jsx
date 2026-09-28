@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Stack,
   Typography, Chip, TextField, Divider, CircularProgress, Table, TableHead,
-  TableBody, TableRow, TableCell, IconButton, Tooltip,
+  TableBody, TableRow, TableCell, IconButton, Tooltip, Checkbox, FormControlLabel,
 } from '@mui/material';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -34,11 +34,18 @@ export default function EmployeeDocsDialog({ open, row, month, onClose, onSaved 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [file, setFile] = useState(null); // { name, data, mimetype }
+  // Default to THIS month only — matches exactly what "שלח לרו״ח" actually
+  // attaches, so this list never implies old, already-passed months' files
+  // are still waiting to go out. A manager cleaning up old clutter can still
+  // switch to all months.
+  const [showAllMonths, setShowAllMonths] = useState(false);
 
-  const load = () => {
+  const load = (allMonths = showAllMonths) => {
     if (!row) return;
     setLoading(true);
-    api.get('/employee-documents', { params: { employee_id: row.employee_id } })
+    const params = { employee_id: row.employee_id };
+    if (!allMonths && month) params.month = month;
+    api.get('/employee-documents', { params })
       .then(res => setDocs(res.data.documents || []))
       .catch(() => setDocs([]))
       .finally(() => setLoading(false));
@@ -46,8 +53,8 @@ export default function EmployeeDocsDialog({ open, row, month, onClose, onSaved 
 
   useEffect(() => {
     if (!open || !row) return;
-    setName(''); setDescription(''); setFile(null);
-    load();
+    setName(''); setDescription(''); setFile(null); setShowAllMonths(false);
+    load(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, row]);
 
@@ -114,10 +121,26 @@ export default function EmployeeDocsDialog({ open, row, month, onClose, onSaved 
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
+          {month && (
+            <FormControlLabel
+              sx={{ alignSelf: 'flex-start' }}
+              control={
+                <Checkbox
+                  size="small"
+                  checked={showAllMonths}
+                  onChange={e => { setShowAllMonths(e.target.checked); load(e.target.checked); }}
+                />
+              }
+              label={<Typography variant="caption" color="text.secondary">הצג מסמכים מכל החודשים (ברירת מחדל: חודש {month} בלבד — זה מה שנשלח לרו״ח)</Typography>}
+            />
+          )}
+
           {loading && <Box sx={{ textAlign: 'center', py: 1 }}><CircularProgress size={24} /></Box>}
 
           {!loading && docs.length === 0 && (
-            <Typography variant="body2" color="text.secondary">אין מסמכים מצורפים לעובד זה.</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {showAllMonths || !month ? 'אין מסמכים מצורפים לעובד זה.' : `אין מסמכים לחודש ${month}.`}
+            </Typography>
           )}
 
           {docs.length > 0 && (

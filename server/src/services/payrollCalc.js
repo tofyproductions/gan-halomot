@@ -270,14 +270,9 @@ function splitDayIntoAmutas(sorted, branchAmutaMap, fallbackAmutaId) {
  * @param {Array}  punches   — Punch records for this employee in the month
  * @param {String} monthYM   — "YYYY-MM"
  * @param {Object} opts      — optional overrides
- * @param {Boolean} opts.force_full_global — if true, global employees get full
- *   salary even if they didn't complete required hours. If false (default),
- *   the salary is pro-rated: (hours_worked / required_hours) × global_salary.
- *   The admin can toggle this per employee from the UI.
  * @returns breakdown object
  */
 function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
-  const forceFullGlobal = opts.force_full_global || false;
   const branchAmutaMap = opts.branchAmutaMap || new Map();
 
   // Rates (and which pay model applies) are needed early: the countable-punch
@@ -752,7 +747,6 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     employee_name: employee.full_name,
     salary_type: salaryType,
     salary_is_net: !!employee.salary_is_net,
-    force_full_global: forceFullGlobal,
     hours: {
       total: hoursWorked,
       regular: regHours,
