@@ -80,6 +80,7 @@ const TAB_DEFAULT_ROLES = {
   my_payslips: EMPLOYEE_ROLES,
   my_documents: EMPLOYEE_ROLES,
   my_attendance: EMPLOYEE_ROLES,
+  my_vacation: EMPLOYEE_ROLES,
   my_updates: EMPLOYEE_ROLES,
   contact_office: null,
 };

@@ -189,6 +189,7 @@ export const TAB_GROUPS = [
       { id: 'my_payslips',   label: 'התלושים שלי',   path: '/my-payslips',   defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_documents',  label: 'המסמכים שלי',   path: '/my-documents',  defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_attendance', label: 'ההחתמות שלי',   path: '/my-attendance', defaultRoles: EMPLOYEE_ROLES },
+      { id: 'my_vacation',   label: 'ימי החופשה שלי', path: '/my-vacation',  defaultRoles: EMPLOYEE_ROLES },
       { id: 'my_updates',    label: 'עדכונים',       path: '/my-updates',    defaultRoles: EMPLOYEE_ROLES },
       // Everybody may write to the office — managers and the office included.
       { id: 'contact_office', label: 'פניות למשרד',  path: '/contact-office', defaultRoles: null },

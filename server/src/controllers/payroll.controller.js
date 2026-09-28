@@ -8,6 +8,7 @@
  */
 const mongoose = require('mongoose');
 const { Employee, Punch, Branch, Amuta, User, AgentCommand, EmployeeCommitment, Holiday, EmployeeRequest, EmployeeChangeRequest, PunchResolution, SavedPayslip, PayrollMonth, EmployeeDocument, CrossBranchPunchEdit } = require('../models');
+const { vacationBalance } = require('../services/vacationBalance');
 const { calculateMonthlySalary, billableDayPunches } = require('../services/payrollCalc');
 const { analyzeCommitment } = require('../services/commitmentAnalysis');
 const { dispatchEmail } = require('../services/email.service');
@@ -3979,6 +3980,72 @@ async function mySalaryPreview(req, res, next) {
  * GET /api/payroll/my-punches?month=YYYY-MM
  * Returns punches for the logged-in employee
  */
+/**
+ * GET /payroll/my-vacation — the employee's own חופשה balance.
+ *
+ * She can already see her hours and her payslips; the balance was the one
+ * number she had to ask the office for, and the office had to ask the
+ * accountant. By the time a payslip answers it the leave has been taken.
+ *
+ * It shows the working, not just a figure: the opening balance and the month it
+ * was measured, what has accrued since, every month she took days, and what is
+ * left. A balance nobody can reconstruct is a balance nobody trusts, and this
+ * one is going to be used to plan a holiday.
+ *
+ * A תקן employee who has overdrawn sees that too, by name and by month. She is
+ * going to be shown it anyway at גמר חשבון; finding out then, from a deduction,
+ * is the version of this that ends in an argument nobody can settle.
+ */
+async function myVacation(req, res, next) {
+  try {
+    const emp = await resolveSelfEmployee(req);
+    if (!emp) return res.json({ available: null, reason: 'no_employee' });
+
+    const opening = emp.vacation_balance_opening || {};
+    // No opening balance means UNKNOWN, not zero. Telling somebody she has no
+    // vacation days because nobody has imported her balance yet is a false
+    // statement about her own entitlement.
+    if (!opening.as_of_month) {
+      return res.json({ available: null, reason: 'no_opening_balance', full_name: emp.full_name });
+    }
+
+    const isGlobal = emp.salary_type === 'global';
+    const rows = await PayrollMonth.find({
+      employee_id: emp._id, month: { $gt: opening.as_of_month },
+    }).select('month vacation_eff_days manual.vacation_days vacation_overdraft')
+      .sort({ month: 1 }).lean();
+
+    const taken = rows
+      .map((r) => ({
+        month: r.month,
+        days: Number(r.vacation_eff_days ?? r.manual?.vacation_days) || 0,
+        overdraft: Number(r.vacation_overdraft?.days) || 0,
+      }))
+      .filter((x) => x.days > 0);
+
+    const usedSince = taken.reduce((n, x) => n + x.days, 0);
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const bal = vacationBalance(opening, emp.vacation_monthly_accrual, thisMonth, usedSince);
+
+    res.json({
+      full_name: emp.full_name,
+      salary_type: emp.salary_type,
+      as_of_month: opening.as_of_month,
+      opening_days: Number(opening.days) || 0,
+      monthly_accrual: Number(emp.vacation_monthly_accrual) || 0,
+      accrued: bal ? bal.accrued : null,
+      used: bal ? bal.used : 0,
+      available: bal ? bal.available : null,
+      overdrawn: bal ? bal.overdrawn : false,
+      // A תקן employee is paid leave she has not earned; an hourly one is not.
+      // Saying which she is explains why the number behaves as it does.
+      pays_beyond_balance: isGlobal,
+      taken,
+      overdraft_total: Math.round(taken.reduce((n, x) => n + x.overdraft, 0) * 1000) / 1000,
+    });
+  } catch (err) { next(err); }
+}
+
 async function myPunches(req, res, next) {
   try {
     const month = req.query.month;
@@ -4354,6 +4421,7 @@ module.exports = {
   materializeFixedSchedules,
   mySalaryPreview,
   myPunches,
+  myVacation,
   myPayslips,
   // Reused by the payslip-distribution flow (payslipAudit.controller):
   buildHoursReportHtml,

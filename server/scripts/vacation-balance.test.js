@@ -216,4 +216,24 @@ console.log('a global employee and an hourly one are not treated the same');
   ok('an unknown balance never reduces an hourly employee either');
 }
 
+console.log("what the employee's own screen has to be able to say");
+{
+  // The numbers the screen prints must reconcile: opening + accrued − used
+  // = what is left. If they do not, somebody plans a holiday on a wrong figure.
+  const opening = { days: 6.002, as_of_month: '2026-08' };
+  const b = V.vacationBalance(opening, 1.167, '2026-11', 4);
+  const accruedSince = Math.round((b.accrued - opening.days) * 1000) / 1000;
+  assert.strictEqual(accruedSince, 3.501, 'three months at 1.167');
+  assert.strictEqual(Math.round((opening.days + accruedSince - b.used) * 1000) / 1000, b.available,
+    'opening + accrued − used must equal the number shown as remaining');
+  ok('the working shown on screen adds up to the figure shown on screen');
+}
+{
+  // "No balance imported" must never render as a confident zero: an employee
+  // told she has no days when nobody has entered her balance is being given
+  // false information about her own entitlement.
+  assert.strictEqual(V.vacationBalance({ days: 5 }, 1, '2026-11', 0), null);
+  ok('an employee with no imported balance gets null, never a zero to act on');
+}
+
 console.log(`\nAll vacation-balance tests passed (${passed} checks).`);

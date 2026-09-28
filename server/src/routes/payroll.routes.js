@@ -100,6 +100,7 @@ router.patch('/punches/:id',                   requireRole('system_admin', 'bran
 // Employee self-service (any authenticated user)
 router.get('/my-salary-preview',               c.mySalaryPreview);
 router.get('/my-punches',                      c.myPunches);
+router.get('/my-vacation',                     c.myVacation);
 router.get('/my-payslips',                     c.myPayslips);
 router.get('/my-payslips/:ym/file',            c.myPayslipFile);
 // The hours report that was mailed with it — archived on send, so the employee

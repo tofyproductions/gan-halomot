@@ -114,6 +114,7 @@ export const ICON_BY_TAB = {
   my_payslips: DescriptionIcon,
   my_documents: FolderIcon,
   my_attendance: AccessTimeIcon,
+  my_vacation: BeachAccessIcon,
   my_updates: NotificationsActiveIcon,
   contact_office: SupportAgentIcon,
   contact_inbox: MarkEmailUnreadIcon,
