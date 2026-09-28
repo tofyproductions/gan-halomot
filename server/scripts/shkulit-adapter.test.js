@@ -84,7 +84,12 @@ ok('every non-zero amount component is one row; zeros vanish', () => {
     // סוג רשומה = which code table the row's קוד רכיב came from. Salary
     // components are table 1; שי לחג is an imputed income and is table 2 —
     // the column exists precisely so the two cannot be confused.
-    assert.strictEqual(r[2], r[3] === 22 ? 2 : 1, `record type for code ${r[3]}`);
+    // Salary components are table 1; שי לחג is an imputed income (2); counts
+    // — ניצול חופשה/מחלה, ימי ושעות עבודה — live in the attendance table (4),
+    // where the spec says the rate is not relevant.
+    const expectTable = r[3] === 22 ? 2 : 1;
+    assert.ok([expectTable, 4].includes(r[2]), `record type for code ${r[3]} was ${r[2]}`);
+    if (r[2] === 4) assert.strictEqual(r[4], 0, 'an attendance row carries no rate');
   }
 });
 ok('deductions are negative', () => {
@@ -103,7 +108,8 @@ ok('unmapped components + directives land in notes, not rows', () => {
   assert.ok(subjects.some(s => s.startsWith('ניכוי מקדמה')));
   // 22 is שי לחג, confirmed by the software house on 28.09.2026.
   // 22 שי לחג and 8 תמורת חופשה were both confirmed on 28.09.2026.
-  assert.ok(!rows.some(r => ![1, 32, 33, 3, 34, 35, 36, 22, 8].includes(r[3])), 'no invented codes');
+  const salaryCodes = rows.filter(r => r[2] !== 4).map(r => r[3]);
+  assert.ok(!salaryCodes.some(c => ![1, 32, 33, 3, 34, 35, 36, 22, 8].includes(c)), 'no invented codes');
 });
 ok('global employee → base as the resolved amount; net employee → flagged', () => {
   const globalRow = {
@@ -178,10 +184,12 @@ ok('the three code tables, as the software house numbered them', () => {
   assert.strictEqual(shkulit.RECORD_TYPE.VOLUNTARY_DEDUCTION, 3);
 });
 ok('every movement row carries a numeric table, never the old empty string', () => {
-  const valid = new Set([1, 2, 3]);
+  // 1/2/3 are the three code tables; 4 is היעדרויות ונתוני העסקה, where the
+  // counts live and the rate is not relevant.
+  const valid = new Set([1, 2, 3, 4]);
   for (const r of rows) {
     assert.strictEqual(typeof r[2], 'number', `row ${JSON.stringify(r)} record type must be a number`);
-    assert.ok(valid.has(r[2]), `row ${JSON.stringify(r)} record type must be 1, 2 or 3`);
+    assert.ok(valid.has(r[2]), `row ${JSON.stringify(r)} record type must be 1-4`);
   }
 });
 ok('deductions from the SALARY table stay type 1 — a negative amount is not a ניכוי רשות', () => {
@@ -194,8 +202,10 @@ ok('deductions from the SALARY table stay type 1 — a negative amount is not a 
 ok('the components still on the notes sheet produced no rows', () => {
   // Their table is known now; their קוד רכיב is not. They must not have leaked
   // into the file on the strength of half an answer.
-  const codes = new Set(rows.map(r => r[3]));
-  for (const c of [2, 21]) assert.ok(!codes.has(c), `imputed code ${c} must not appear yet`);
+  // Scoped to the IMPUTED table: code 2 also exists in the attendance table,
+  // where it means ניצול מחלה and is perfectly legitimate.
+  const imputed = new Set(rows.filter(r => r[2] === 2).map(r => r[3]));
+  for (const c of [2, 21]) assert.ok(!imputed.has(c), `imputed code ${c} must not appear yet`);
 });
 
 console.log('month encoding');
@@ -264,23 +274,53 @@ ok('a deduction keeps its sign when it is split into units', () => {
   assert.strictEqual(miss[2], 1, 'a negative salary component stays table 1');
 });
 
-console.log('ימי עבודה — never filed under a code nobody confirmed');
-ok('code 4 is הבראה, so no work-days row is ever produced under it', () => {
-  // A code-4 row briefly went out carrying the work-day count. Code 4 is
-  // הבראה — both our אקסולוגיה table and שקלולית's own screen say so — and it
-  // surfaced in the payslip as a recreation line. It paid nothing only because
-  // the rate was 0; a rate on that row pays הבראה to every global employee.
-  const globalRow = {
-    ...row, employee_number: '21', israeli_id: '999000021', salary_type: 'global',
-    breakdown: { ...row.breakdown, rates: {} },
+console.log('counts go to the attendance table, where a count belongs');
+ok('ניצול חופשה is סוג רשומה 4 קוד 1, with no rate', () => {
+  // This is what a month of guessing was for. The days were being filed as a
+  // salary component — which pays money and never touches the attendance
+  // figures — so the payslip showed תמורת חופשה paid and ניצול חופשה at 0.000
+  // at the same time. The spec is explicit: table 4, rate not relevant.
+  const r = { ...row, salary_type: 'hourly', vacation_eff_days: 3, vacation_pay: 900,
+    vacation_balance_available: 10, manual: {} };
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  const used = rr.find((x) => x[2] === 4 && x[3] === 1);
+  assert.ok(used, 'the count must be filed');
+  assert.deepStrictEqual(used.slice(4), [0, 3], 'no rate, three days');
+
+  // And the money is a SEPARATE row in the salary table — two facts, two
+  // tables, which is what they always were.
+  const paid = rr.find((x) => x[2] === 1 && x[3] === 8);
+  assert.ok(paid, 'the payment is still filed');
+  assert.strictEqual(Math.round(paid[4] * paid[5] * 100) / 100, 900);
+});
+ok('a תקן employee reports the count and is paid nothing for it', () => {
+  const r = {
+    ...row, salary_type: 'global', vacation_eff_days: 6, vacation_pay: 0,
+    vacation_balance_available: 4, manual: {},
+    breakdown: { ...row.breakdown, rates: {},
+      components: { base_salary: 10300,
+        teken_breakdown: { teken_salary: 10300, hourly_value: 62, regular_pay: 10300, ot125_pay: 0, ot150_pay: 0, completion: 0 } },
+      deductions: {} },
   };
-  for (const r of [globalRow, row]) {
-    const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
-    assert.ok(!rr.some(x => x[3] === 4),
-      'nothing may be filed under code 4 — it belongs to הבראה');
-    assert.ok(nn.some(n => n.subject === 'ימי עבודה' && /20/.test(n.text)),
-      'the day count still reaches the accountant, as a note');
-  }
+  const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
+  assert.deepStrictEqual(rr.find((x) => x[2] === 4 && x[3] === 1).slice(4), [0, 6],
+    'six days used');
+  assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 8),
+    'and nothing in the salary table — her salary already contains them');
+});
+ok('ימי עבודה is code 4 in the ATTENDANCE table, not in the salary table', () => {
+  // קוד 4 in the salary table is הבראה, which is why the first attempt showed
+  // up as a recreation line. In table 4 it is ימי עבודה משולמים.
+  const { rows: rr } = shkulit.buildMovements(source);
+  const days = rr.find((x) => x[2] === 4 && x[3] === 4);
+  assert.ok(days, 'the work-day count is filed');
+  assert.deepStrictEqual(days.slice(4), [0, 20]);
+  assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 4),
+    'nothing may be filed under code 4 of the SALARY table — that is הבראה');
+});
+ok('שעות עבודה בפועל is code 5 in the attendance table', () => {
+  const { rows: rr } = shkulit.buildMovements(source);
+  assert.deepStrictEqual(rr.find((x) => x[2] === 4 && x[3] === 5).slice(4), [0, 120]);
 });
 
 console.log('a תקן employee is filed as the parts, not the headline');
@@ -373,7 +413,8 @@ ok('a component with no confirmed code stays a note until one is entered', () =>
 
   // Once confirmed it is entered in settings — no deploy.
   const withCode = shkulit.buildMovements(src, new Map(), { meal_vouchers: 2 });
-  const mv = withCode.rows.find((x) => x[3] === 2);
+  // Scoped to the imputed table — code 2 in table 4 is ניצול מחלה.
+  const mv = withCode.rows.find((x) => x[2] === 2 && x[3] === 2);
   assert.ok(mv, 'it is now a row');
   assert.strictEqual(mv[2], 2, 'זקופות — table 2');
   assert.strictEqual(mv[4], 90);
@@ -433,28 +474,6 @@ ok('an hourly employee: days and the pay for them, in one row', () => {
   assert.deepStrictEqual(v.slice(4), [400, 5], 'the daily rate × the days');
   assert.strictEqual(Math.round(v[4] * v[5] * 100) / 100, 2000, 'and it comes to the pay');
   assert.strictEqual(v[2], 1, 'רכיבי שכר');
-});
-ok('a תקן employee gets NO vacation row at all — a zero rate does not suppress pay', () => {
-  // The first attempt filed code 8 at תעריף 0, assuming a zero rate reports the
-  // days and adds nothing. שקלולית treats 0 as "not supplied" and substitutes
-  // the component's own stored rate: ליאור's six days went out as 0 × 6 and
-  // came back ₪476.85 × 6 = ₪2,861, paid on top of a salary that already
-  // contained them.
-  const r = {
-    ...row, salary_type: 'global', vacation_eff_days: 6, vacation_pay: 0,
-    vacation_balance_available: 4, manual: {},
-    breakdown: { ...row.breakdown, rates: {},
-      components: { base_salary: 10300,
-        teken_breakdown: { teken_salary: 10300, hourly_value: 62, regular_pay: 10300, ot125_pay: 0, ot150_pay: 0, completion: 0 } },
-      deductions: {} },
-  };
-  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [r]));
-  assert.ok(!rr.some((x) => x[3] === 8),
-    'nothing may be filed under code 8 for a תקן employee — not even at rate 0');
-  const note = nn.find((n) => n.subject === 'ימי חופשה');
-  assert.ok(note, 'the days still reach the accountant');
-  assert.ok(/ניצול חופשה בלבד/.test(note.text), 'told explicitly to record use without payment');
-  assert.ok(/6/.test(note.text), 'with the number of days');
 });
 ok('a quantity of zero still switches a component off — that part did work', () => {
   // Worth pinning: the carried-forward rows rely on qty 0, and they behaved

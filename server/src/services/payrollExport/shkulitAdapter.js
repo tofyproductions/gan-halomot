@@ -66,6 +66,33 @@ const RECORD_TYPE = Object.freeze({
   SALARY: 1,             // רכיבי שכר
   IMPUTED: 2,            // הכנסות זקופות
   VOLUNTARY_DEDUCTION: 3, // ניכויי רשות
+  ATTENDANCE: 4,         // היעדרויות ונתוני העסקה
+});
+
+/**
+ * סוג רשומה 4 — היעדרויות ונתוני העסקה, per ט.מ.ל.'s own import spec
+ * (docs/payroll-export/מבנה-קובץ-העברת-נתוני-נוכחות-לשיקלולית.pdf).
+ *
+ * This is the table that answers what none of the salary codes could: how to
+ * report that days were USED without paying for them. The spec is explicit —
+ * "בסוג רשומה 4 או 7 - התעריף לא רלוונטי", and the quantity is a positive
+ * number. So a row here is a COUNT and nothing else.
+ *
+ * It is the reason ניצול חופשה stayed at 0.000 all month: the count was being
+ * sent as a salary component (table 1, code 8), which pays money and is not
+ * where שקלולית keeps its attendance figures. Code 8 in THIS table means
+ * something else again — שעות עבודה משולמות — which is exactly the kind of
+ * collision that makes a number look filed when it is not.
+ */
+const ATTENDANCE = Object.freeze({
+  VACATION_USED: 1,   // ניצול חופשה
+  SICK_USED: 2,       // ניצול מחלה
+  RESERVE_DAYS: 3,    // ימי מילואים
+  WORK_DAYS_PAID: 4,  // ימי עבודה משולמים
+  WORK_HOURS: 5,      // שעות עבודה בפועל
+  DAILY_TAX_DAYS: 6,  // ימים למ.ה — עובד יומי
+  WORK_DAYS_ACTUAL: 7, // ימי עבודה בפועל
+  WORK_HOURS_PAID: 8, // שעות עבודה משולמות
 });
 
 /**
@@ -375,86 +402,61 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     const vacPay = round2(Number(ce.earnings?.vacation_pay) || 0);
     const vacIsGlobal = ce.employee.salary_type === 'global';
 
+    // ── the count, in the table that holds counts ───────────────────────────
+    //
+    // ניצול חופשה is סוג רשומה 4, קוד 1, and the spec says the rate is not
+    // relevant there. That is the answer to a month of guessing: the days were
+    // being sent as a salary component, which pays money and never touches the
+    // attendance figures, so the payslip showed תמורת חופשה paid and ניצול
+    // חופשה at 0.000 at the same time.
+    //
+    // Both kinds of employee report the count. Only an hourly one is also PAID
+    // for it, below — and the two are now separate rows in separate tables,
+    // which is what they always were.
+    if (vacDays > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.VACATION_USED, 0, vacDays);
+    }
+    const sickDaysUsed = round2(Number(ce.quantities?.sick_days) || 0);
+    if (sickDaysUsed > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.SICK_USED, 0, sickDaysUsed);
+    }
+
+    // ── the money, for an hourly employee only ──────────────────────────────
+    //
+    // A תקן salary does not move with the days; it already contains them, so
+    // there is nothing to pay beside it. An hourly employee is paid, and the
+    // row carries the daily rate.
     if (vacDays > 0 && vacPay > 0 && !vacIsGlobal) {
-      // An HOURLY employee: the days are paid, and one row carries both facts —
-      // quantity is the days, rate is the daily rate.
       pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
         'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
     }
 
-    if (vacDays > 0 || vacTaken > 0) {
-      // A תקן employee's days are NOT filed as a row at all.
-      //
-      // The first attempt sent code 8 with תעריף 0, on the assumption that a
-      // zero rate reports the days and adds nothing. It does not: שקלולית
-      // treats a rate of 0 as "not supplied" and substitutes the component's
-      // own stored rate. ליאור's six days went out as 0 × 6 and came back as
-      // ₪476.85 × 6 = ₪2,861 — paid on top of a salary that already contained
-      // them, which is precisely the double payment this was meant to prevent.
-      //
-      // (A quantity of 0 DOES switch a component off — that is what the
-      // carried-forward rows rely on, and those behaved exactly as intended in
-      // the same file. It is the RATE column that is not honoured at zero.)
-      //
-      // So nothing is filed for her, and the count travels on the notes sheet
-      // for the accountant to enter as ניצול חופשה. Our own balance is the
-      // authoritative one either way — it is what the employee sees and what
-      // גמר חשבון is settled from.
-      const base = vacIsGlobal
-        ? `${vacDays} ימי חופשה — עובדת תקן. ⚠️ לרשום כניצול חופשה בלבד, ללא תמורה: השכר החודשי כבר כולל את הימים. הרכיב לא נשלח בקובץ כי תעריף 0 אינו מכבה תשלום בשקלולית.`
-        : (vacPay > 0
-          // ⚠️ Filing code 8 with our own rate pays the money but does NOT
-          // appear to register the days as ניצול חופשה: מהרט's three days came
-          // back paid, with ניצול at 0.000, while ליאור's six — filed at rate 0,
-          // which שקלולית repriced itself — did register as 6.000. Same code,
-          // opposite outcome, and nobody here knows the rule. Until the
-          // software house says which, the accountant is asked to check the
-          // field rather than being told it is handled.
-          ? `${vacDays} ימי חופשה בתשלום. ⚠️ לוודא ששדה "ניצול חופשה" בשקלולית מציג ${vacDays} — בקליטה של 09.2026 הוא נשאר 0 למרות שהתמורה שולמה.`
-          : `${vacDays} ימי חופשה — ללא תעריף שעה בכרטיס, לרשום כניצול בלבד.`);
+    if (vacTaken > vacDays || ce.quantities?.vacation_overdraft_days) {
+      // Only worth a note when the days absent and the days filed differ.
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'ימי חופשה',
         text: ce.quantities?.vacation_capped
           ? `${vacDays} ימים לתשלום — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
-          : (ce.quantities?.vacation_overdraft_days
-            ? `${base} מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה — היתרה נכנסת למינוס לקיזוז בגמר חשבון.`
-            : base),
+          : `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו במסגרת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`,
       });
     }
 
-    // ימי עבודה — the count, and it does NOT go in the file.
+    // ── ימי עבודה ושעות עבודה ───────────────────────────────────────────────
     //
-    // It was briefly filed under code 4, on the understanding that 4 was the
-    // work-days code for a global employee. Code 4 is הבראה. Both our own
-    // אקסולוגיה table and שקלולית's screen say so, and the row our file
-    // produced showed up in the payslip as a הבראה line. It paid nothing only
-    // because the rate went out as 0 — put a rate on that row and it pays
-    // recreation money to every global employee in the gan, in the wrong month.
-    //
-    // That is the guessed-code failure the 28.09 import already cost us once,
-    // and it is the reason nothing enters this file on a verbal code alone. The
-    // count travels as a note for everybody until someone confirms the real
-    // code with the software house.
+    // Also סוג רשומה 4, which is why the earlier attempt failed: קוד 4 in the
+    // SALARY table is הבראה, and a work-day count filed there appeared as a
+    // recreation line. In the attendance table קוד 4 is ימי עבודה משולמים,
+    // which is what it was meant to be all along.
     const daysWorked = round2(Number(ce.quantities?.days_worked) || 0);
     if (daysWorked > 0) {
-      notes.push({
-        employee_number: empNo, full_name: ce.employee.full_name,
-        subject: 'ימי עבודה',
-        text: `${daysWorked} ימי עבודה בחודש. הקוד לדיווח ימי עבודה טרם אושר (קוד 4 שייך להבראה), ולכן הכמות נמסרת כאן ולא כשורה בקובץ.`,
-      });
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_DAYS_PAID, 0, daysWorked);
+    }
+    const workedHours = round2(Number(ce.quantities?.worked_hours) || 0);
+    if (workedHours > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_HOURS, 0, workedHours);
     }
 
-    // Components whose קוד רכיב nobody has confirmed.
-    //
-    // Once a code IS confirmed it is entered in the settings screen, and from
-    // that moment the component becomes a real row instead of a line the
-    // accountant re-keys by hand. Nothing is guessed: with no code configured
-    // the component still travels as a note, exactly as before.
-    //
-    // This is the whole difference between "we don't know the code" and "we
-    // can't send it" — the second was never true, it was just how the first
-    // was implemented.
     for (const comp of UNMAPPED) {
       const raw = Number(comp.get(ce)) || 0;
       if (!raw) continue;
