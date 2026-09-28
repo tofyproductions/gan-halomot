@@ -89,10 +89,38 @@ const UNMAPPED = [
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
-/** 'YYYY-MM' → 'MM/YYYY' (the shape a Hebrew payroll clerk reads; to confirm). */
-function monthLabel(month) {
+/**
+ * 'חודש עבודה' — the month number, 1–12. A NUMBER, not a date string.
+ *
+ * We shipped `MM/YYYY` because that is what a Hebrew payroll clerk reads and
+ * the accountant confirmed the shape — he was answering about what a person
+ * reads. The September trial import on 28.09.2026 rejected all 203 rows, one
+ * error each: "צריך להיות מספר חיובי שלם או אפס" against `09/2026`. Nothing
+ * else in the file was refused.
+ *
+ * A three-row probe the same morning settled which number, because it is
+ * documented nowhere — both templates are header-only and the two אקסולוגיה
+ * tables describe component codes, not the file layout. שקלולית's answer:
+ *
+ *     9        accepted (absent from the error report)
+ *     202609   "שדה חודש עבודה יכול להיות מספר מ 1 עד 12"
+ *     0        "חודש עבודה לא מתאים"
+ *
+ * So the range really is 1–12 and the first message was a generic type check —
+ * zero is NOT accepted despite what it said. The importer already knows the
+ * year: the operator picks the period when starting the import, and its own
+ * error report is headed "לחודש 9/2026".
+ *
+ * An unparseable month returns 0 ON PURPOSE. 0 is the one value שקלולית names
+ * out loud ("חודש עבודה לא מתאים"), so a broken month fails the row with a
+ * message a human can read, instead of quietly booking pay into the wrong
+ * month. Never return a string here — that is the bug this replaced.
+ */
+function monthValue(month) {
   const m = /^(\d{4})-(\d{2})$/.exec(String(month || ''));
-  return m ? `${m[2]}/${m[1]}` : String(month || '');
+  if (!m) return 0;
+  const mon = Number(m[2]);
+  return mon >= 1 && mon <= 12 ? mon : 0;
 }
 
 /**
@@ -104,7 +132,7 @@ function buildMovements(source) {
   const header = ['חודש עבודה', 'מספר עובד', 'סוג רשומה', 'קוד רכיב', 'תעריף', 'כמות'];
   const rows = [];
   const notes = [];
-  const label = monthLabel(source.month);
+  const label = monthValue(source.month);
 
   for (const ce of source.ready) {
     const empNo = ce.employee.employee_number;
@@ -273,7 +301,7 @@ module.exports = {
   buildMaster,
   buildMasterDiff: masterDiff,
   masterRowToNamed,
-  monthLabel,
+  monthValue,
   RECORD_TYPE,
   COMPONENTS,
   HOURS,

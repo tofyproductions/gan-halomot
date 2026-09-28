@@ -75,7 +75,10 @@ ok('every non-zero amount component is one row (qty 1); zeros vanish', () => {
   assert.ok(!byCode.has(4), 'recreation never becomes a row — the accountant computes it');
   assert.ok(!byCode.has(44), 'holiday 0 → no row');
   for (const r of rows) {
-    assert.strictEqual(r[0], '08/2026');
+    // חודש עבודה is a NUMBER. שקלולית rejected the old '08/2026' string on
+    // every row of the September trial: "צריך להיות מספר חיובי שלם או אפס".
+    assert.strictEqual(r[0], 8);
+    assert.strictEqual(typeof r[0], 'number', 'must be numeric, not a date string');
     assert.strictEqual(r[1], '17');
     assert.strictEqual(r[2], '', 'record type: empty (not in use per the accountant)');
   }
@@ -155,6 +158,31 @@ ok('new employee, changed field, unchanged row — each called by name', () => {
   d = shkulit.buildMasterDiff(master, new Map([['17', { ...named, 'בנק-מספר חשבון': '999' }]]));
   assert.strictEqual(d.changed.length, 1);
   assert.deepStrictEqual(d.changed[0].changes, [{ column: 'בנק-מספר חשבון', before: '999', after: '123456' }]);
+});
+
+console.log('month encoding');
+ok('the month alone, 1-12 — what שקלולית accepted on 28.09', () => {
+  assert.strictEqual(shkulit.monthValue('2026-09'), 9);
+  assert.strictEqual(shkulit.monthValue('2026-01'), 1, 'no leading zero survives as a string');
+  assert.strictEqual(shkulit.monthValue('2026-12'), 12);
+  for (let m = 1; m <= 12; m++) {
+    const v = shkulit.monthValue(`2026-${String(m).padStart(2, '0')}`);
+    assert.strictEqual(typeof v, 'number', `month ${m} must be a number`);
+    assert.ok(Number.isInteger(v) && v >= 1 && v <= 12, `month ${m} must land in 1..12, got ${v}`);
+  }
+});
+ok('the two shapes שקלולית rejected are never produced', () => {
+  // 202609 → "יכול להיות מספר מ 1 עד 12"; '09/2026' → the original failure.
+  for (const m of ['2026-09', '2026-01', '2026-12']) {
+    const v = shkulit.monthValue(m);
+    assert.ok(v < 100, `${m} must not be a YYYYMM period, got ${v}`);
+    assert.notStrictEqual(typeof v, 'string');
+  }
+});
+ok('garbage returns 0 on purpose — the row fails loudly, never books a wrong month', () => {
+  for (const bad of ['', null, undefined, 'שלום', '2026', '09/2026', '2026-13', '2026-00']) {
+    assert.strictEqual(shkulit.monthValue(bad), 0, `${JSON.stringify(bad)} → 0`);
+  }
 });
 
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);
