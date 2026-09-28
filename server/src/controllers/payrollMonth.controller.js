@@ -1216,25 +1216,35 @@ async function getMonth(req, res, next) {
       // --- דמי מחלה come FIRST, the completion fills what is left ----------
       //
       // For a תקן employee the completion tops her up to the full agreed salary
-      // whatever caused the shortfall — including being sick. Paying sick pay
-      // on top of that paid the same days twice: קרן בן שבת worked 40 of 149
-      // committed hours, was topped up ₪8,017 to her full ₪11,000, and was then
-      // paid a further ₪5,000 for the days that top-up had already covered.
+      // whatever caused the shortfall — including being sick, which by default
+      // pays it TWICE: קרן בן שבת worked 40 of 149 committed hours, was topped
+      // up ₪8,017 to her full ₪11,000, and was then paid a further ₪5,000 for
+      // the days that top-up had already covered.
       //
-      // Suppressing the sick pay would fix the total but is the wrong way
-      // round: דמי מחלה are statutory and must be PAID, and they have to appear
-      // on the payslip as דמי מחלה — that is the employee's record of having
-      // used them. So sick pay stands, and the completion is reduced by it. The
-      // total lands on the same agreed salary; only the composition is right.
+      // Suppressing the sick pay would fix the double-count but is the wrong
+      // way round: דמי מחלה are statutory and must be PAID, and they have to
+      // appear on the payslip as דמי מחלה. So sick pay stands as its own line,
+      // and the completion is reduced instead — but by the FULL value of every
+      // sick day this month (covered by balance or not), not merely by what
+      // sick pay itself paid out. A day at 0% (day 1) or 50% (days 2-3) must
+      // actually cost her that unpaid portion — the statutory bracket has to
+      // bite, or a תקן employee is never actually docked for the days the law
+      // says are unpaid/half-paid, and the tiers exist only as a label.
       //
-      // If the statutory sick pay is larger than the gap the completion was
-      // filling, the completion goes to zero and she is paid the excess: the
-      // law wins over the top-up, which is what "ימי המחלה חזקים על ההשלמה"
-      // means.
+      //   completion drop = min(completion, ALL sick-day value this month)
+      //   net effect      = + sickPay − completion drop
+      //                    = − (unpaid + half of the half-paid days), exactly
+      //                      what the bracket is supposed to cost her.
+      //
+      // If that full day-value exceeds the gap the completion was filling, the
+      // completion goes to zero and no more is removed — the law can dock her
+      // pay for being sick, not push her below what she'd have earned anyway.
       const tb = breakdown.components?.teken_breakdown;
       let completionOffset = 0;
-      if (isTeken && tb && tb.include_completion !== false && sickPay > 0 && (tb.completion || 0) > 0) {
-        completionOffset = Math.min(tb.completion, sickPay);
+      const sickDaysThisMonth = (sickCalc.total_days_used || 0) + (sickCalc.total_days_uncovered || 0);
+      const sickDayValueThisMonth = Math.round(sickDaysThisMonth * sickDailyValue * 100) / 100;
+      if (isTeken && tb && tb.include_completion !== false && sickDayValueThisMonth > 0 && (tb.completion || 0) > 0) {
+        completionOffset = Math.min(tb.completion, sickDayValueThisMonth);
         tb.completion = Math.round((tb.completion - completionOffset) * 100) / 100;
         tb.completion_reduced_by_sick = Math.round(completionOffset * 100) / 100;
         breakdown.components.base_salary =
@@ -4168,7 +4178,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ${branchDetailRow}
       ${(isGlobal && r.sick_info?.completion_offset > 0) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">מחלה (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה שולמו כדמי מחלה (${f(r.sick_info.pay)}), <u>והשלמת השכר הופחתה באותו סכום</u> (${f(r.sick_info.completion_offset)}) — כדי שלא ישולם פעמיים על אותם ימים. סה״כ המשכורת נשאר שכר התקן המלא. יש לנכות את הימים ממאזן המחלה.</span></td></tr>` : ''}
+          <span style="font-size:12px;color:#111827;font-weight:700">${n1(r.sick_info.days_used_this_month || 0)} ימי מחלה שולמו כדמי מחלה (${f(r.sick_info.pay)}) לפי המדרגה החוקית (יום 1 = 0%, ימים 2-3 = 50%, מיום 4 = 100%). <u>השלמת השכר הופחתה בערך המלא של הימים</u> (${f(r.sick_info.completion_offset)}) כדי שהמדרגה תשפיע בפועל על השכר ולא תיבלע בהשלמה — נטו, ${f(r.sick_info.completion_offset - r.sick_info.pay)} ניכוי מהמשכורת החודש. יש לנכות את הימים ממאזן המחלה.</span></td></tr>` : ''}
       ${(augBonus && Number(augBonus.amount) > 0) ? `<tr><td colspan="6" style="border:2px solid #7c3aed;background:#f5f3ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#6d28d9;font-weight:800">בונוס אוגוסט: </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.days || []).length} ימי חופשת קיץ שאושרו שולמו כבונוס במתנה מהגן (${f(augBonus.amount)}). העובדת <u>לא עבדה</u> בימים אלה — הם אינם כלולים בימי העבודה ובשעות שלמעלה, והתוספת מתבטאת בסכום הבונוס בלבד. <u>אין לנכות ימים אלה מיתרת החופשה</u>.${(augBonus.days || []).length ? subLine((augBonus.days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}

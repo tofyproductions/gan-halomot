@@ -93,6 +93,22 @@ console.log('toCanonicalEmployee — copies authoritative fields');
   ok('valid hourly row maps cleanly');
 }
 
+console.log('בונוס קבוע and בונוס חד פעמי travel as two separate figures');
+{
+  // No one_time_bonus on the row at all — the field must default to 0, not NaN.
+  const ceNone = toCanonicalEmployee(validHourlyRow());
+  assert.strictEqual(ceNone.earnings.one_time_bonus, 0);
+  ok('no one_time_bonus on the row → 0');
+
+  const ceBoth = toCanonicalEmployee(validHourlyRow({
+    bonus: { effective: 300 },
+    one_time_bonus: { amount: 150, note: 'מתנת חג' },
+  }));
+  assert.strictEqual(ceBoth.earnings.bonus, 300, 'the standing figure is untouched');
+  assert.strictEqual(ceBoth.earnings.one_time_bonus, 150, 'the one-off travels as its own figure');
+  ok('קבוע and חד פעמי are copied as two distinct earnings, neither overwriting the other');
+}
+
 console.log('holiday pay — manual overrides auto');
 {
   const ce = toCanonicalEmployee(validHourlyRow({

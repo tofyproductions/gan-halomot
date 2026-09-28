@@ -54,6 +54,16 @@ console.log('systemRowToTableRow — בונוס sums personal bonus + closure-co
 
   const neither = baseRow();
   check('neither present → 0, row still shown', bonusDetail(neither)?.value === 0);
+
+  const oneTimeOnly = baseRow({ one_time_bonus: { amount: 500 } });
+  check('one-time bonus alone → 500', bonusDetail(oneTimeOnly)?.value === 500);
+
+  const allThree = baseRow({
+    bonus: { effective: 250 },
+    one_time_bonus: { amount: 500 },
+    breakdown: { hours: {}, rates: {}, components: { closure_completion_bonus: { amount: 960 } }, deductions: {}, estimated_total: 1710 },
+  });
+  check('קבוע + חד פעמי + אוגוסט → 1710 (no double-count)', bonusDetail(allThree)?.value === 1710);
 }
 
 if (failures) {

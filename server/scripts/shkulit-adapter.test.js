@@ -639,4 +639,63 @@ console.log('בונוס אוגוסט goes out under code 35, with the regular bo
   });
 }
 
+console.log('בונוס חד פעמי rides the SAME code 35 row as בונוס קבוע');
+{
+  const withOneTime = (oneTime, plain) => {
+    const r = { ...row, bonus: { effective: plain }, one_time_bonus: { amount: oneTime, note: 'מתנת חג' }, manual: {} };
+    return shkulit.buildMovements(buildExportSource('2026-08', [r]));
+  };
+
+  ok('a one-time bonus alone is code 35', () => {
+    const { rows: rr } = withOneTime(500, 0);
+    const b = rr.filter((x) => x[2] === 1 && x[3] === 35);
+    assert.strictEqual(b.length, 1, 'exactly one bonus row');
+    assert.strictEqual(b[0][4], 500);
+  });
+
+  ok('a standing bonus and a one-time bonus are summed into ONE row', () => {
+    const { rows: rr } = withOneTime(500, 350);
+    const b = rr.filter((x) => x[2] === 1 && x[3] === 35);
+    assert.strictEqual(b.length, 1, 'still one row');
+    assert.strictEqual(b[0][4], 850, '350 + 500');
+  });
+
+  ok('and the notes say what the single row is made of', () => {
+    const { notes: nn } = withOneTime(500, 350);
+    const n = nn.find((x) => x.subject === 'בונוס חד פעמי');
+    assert.ok(n, 'a note is written');
+    assert.ok(n.text.includes('350') && n.text.includes('500'), 'both halves are named: ' + n.text);
+  });
+
+  ok('no one-time bonus writes no note', () => {
+    const { notes: nn } = withOneTime(0, 350);
+    assert.ok(!nn.some((x) => x.subject === 'בונוס חד פעמי'));
+  });
+}
+
+console.log('כל שלושת רכיבי הבונוס (קבוע + חד פעמי + אוגוסט) מסתכמים לשורת קוד 35 אחת');
+{
+  const r = {
+    ...row,
+    bonus: { effective: 350 },
+    one_time_bonus: { amount: 500, note: 'מתנת חג' },
+    manual: {},
+    breakdown: {
+      ...row.breakdown,
+      components: {
+        ...row.breakdown.components,
+        closure_completion_bonus: {
+          amount: 1844.4, days: [], dates: [], deduction: 0, unapproved_days: [], reason: 'בונוס אוגוסט',
+        },
+      },
+    },
+  };
+  ok('קבוע + חד פעמי + אוגוסט → שורה אחת, סכום אחד', () => {
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-08', [r]));
+    const b = rr.filter((x) => x[2] === 1 && x[3] === 35);
+    assert.strictEqual(b.length, 1, 'still exactly one row');
+    assert.strictEqual(b[0][4], 2694.4, '350 + 500 + 1844.40');
+  });
+}
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);
