@@ -133,4 +133,29 @@ console.log('a month with no days does not divide by zero');
   ok('a month paid with no days on it yields 0, not Infinity');
 }
 
+console.log("מהרט's own payslip, worked by hand on paper");
+{
+  // אדולה מהרט started 02.08.2026, so September's window holds one month:
+  // שכר יסוד 3,218 · ימים לתלוש 11 · שעות משולמות 74. The office worked it
+  // out by hand and got ₪119; the file was sending ₪439.
+  const r = H.dayRatesFrom([m('2026-08', 3218, 0, 0, 0, 0, 11, 74)]);
+  assert.strictEqual(r.full_day, 292.55, '3,218 ÷ 11 — the figure on the paper');
+  assert.strictEqual(r.raw_coefficient, 0.4066, '74 ÷ 182 — also on the paper');
+  assert.strictEqual(r.vacation_day, 118.95, 'and ₪119 a day, to the agora');
+  ok('one month of history reproduces the hand calculation exactly');
+}
+{
+  // Why it was ₪125 before the base was narrowed: our base_salary sums the
+  // 125%/150% premiums in with the regular hours, and the accountant's
+  // שכר יסוד does not. Overtime is premium pay for hours beyond the working
+  // day — averaging it into a day of LEAVE pays that premium again, on days
+  // she did not work at all.
+  const withOt = H.dayRatesFrom([m('2026-08', 3378.04, 0, 0, 0, 0, 11, 74.37)]);
+  assert.ok(withOt.vacation_day > 125, `overtime inflates it to ${withOt.vacation_day}`);
+  const withoutOt = H.dayRatesFrom([m('2026-08', 3220.04, 0, 0, 0, 0, 11, 74.37)]);
+  assert.ok(Math.abs(withoutOt.vacation_day - 119) < 1,
+    `regular hours alone lands on ₪${withoutOt.vacation_day}, beside the accountant's 119`);
+  ok('overtime in the numerator is worth ₪6 a day, and does not belong there');
+}
+
 console.log(`\nAll hourly day-rate tests passed (${passed} checks).`);

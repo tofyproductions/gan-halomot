@@ -1799,7 +1799,23 @@ async function getMonth(req, res, next) {
         // on the row so the client can show them, and persisted on save so the
         // twelve-month window has something to read — see PayrollMonth.pay_summary.
         pay_summary: {
-          base_salary: Math.round((Number(breakdown.components?.base_salary) || 0) * 100) / 100,
+          // שכר יסוד WITHOUT overtime.
+          //
+          // breakdown.components.base_salary sums regular hours AND the 125/150
+          // premiums into one figure — for an hourly employee it is her whole
+          // hours pay. The accountant's שכר יסוד is the regular hours alone,
+          // with overtime on its own line, and this average has to match hers
+          // or the two disagree about what a day is worth: מהרט's August came
+          // to ₪3,378 our way against ₪3,218 hers, and her vacation day came
+          // out ₪125 instead of ₪119.
+          //
+          // Overtime is premium pay for hours already beyond the working day.
+          // Averaging it into the value of a day of leave pays that premium
+          // again, on days she did not work at all.
+          base_salary: Math.round((isTeken
+            ? (Number(breakdown.components?.teken_breakdown?.regular_pay) || 0)
+            : (Number(breakdown.hours?.regular) || 0) * (Number(hourlyRate) || 0)
+          ) * 100) / 100,
           vacation_pay: Math.round((Number(vacationPay) || 0) * 100) / 100,
           sick_pay: Math.round((Number(sickPay) || 0) * 100) / 100,
           miluim_pay: Math.round((Number(manual.miluim?.amount) || 0) * 100) / 100,
