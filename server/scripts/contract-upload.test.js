@@ -71,9 +71,18 @@ function startBucket() {
     }
     res.writeHead(404).end();
   });
-  return new Promise((resolve) => server.listen(BUCKET_PORT, () => resolve({ server, objects })));
+  // Without the error leg an EADDRINUSE here is an unhandled 'error' event —
+  // the promise never settles and the run stops dead with nothing said. The
+  // bucket's port is as likely to be squatted as the server's.
+  return new Promise((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(BUCKET_PORT, () => resolve({ server, objects }));
+  });
 }
 
+// A deadline, so a request to a server that is not really ours fails loudly
+// instead of hanging the whole run. An orphan left on this port answers
+// /api/health in milliseconds and then never answers anything else.
 async function api(pathname, { token, method = 'GET', body, raw } = {}) {
   const res = await fetch(B + pathname, {
     method,
@@ -82,6 +91,7 @@ async function api(pathname, { token, method = 'GET', body, raw } = {}) {
       ...(body && !raw ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: raw ? body : JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(20000),
   });
   return res;
 }
@@ -112,9 +122,16 @@ function boot(uri, withBucket, port) {
     STORAGE_ENDPOINT: '', STORAGE_ACCESS_KEY_ID: '', STORAGE_SECRET_ACCESS_KEY: '',
     STORAGE_BUCKET: '', R2_ACCOUNT_ID: '', R2_ACCESS_KEY_ID: '', R2_SECRET_ACCESS_KEY: '', R2_BUCKET: '',
   };
+  // GC_REEXEC stops src/index.js re-exec'ing itself with --expose-gc. That
+  // re-exec makes the process we spawn a WRAPPER around the real server, and
+  // the wrapper only forwards SIGTERM/SIGINT — the SIGKILL below cannot be
+  // caught, so the wrapper died and the server underneath it survived, kept
+  // the port, and was reparented to init. Every later run of this file then
+  // aborted with "משהו כבר מאזין על <PORT>", and a run that talked to the
+  // stale orphan tested code from whenever that orphan was started.
   return spawn('node', ['src/index.js'], {
     cwd: process.cwd(),
-    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(port), NODE_ENV: 'test', ...bucketEnv },
+    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(port), NODE_ENV: 'test', GC_REEXEC: '1', ...bucketEnv },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -129,7 +146,10 @@ function formFor(buf, empId, filename = 'scan.pdf') {
 }
 
 (async () => {
-  for (const port of [PORT, PORT_NO_BUCKET]) {
+  // BUCKET_PORT belongs in this loop too: it was the one port this file binds
+  // that nothing checked, so a leftover on it failed later and less clearly
+  // than the two that were checked.
+  for (const port of [PORT, PORT_NO_BUCKET, BUCKET_PORT]) {
     B = `http://localhost:${port}`;
     if (!await portIsFree()) {
       console.error(`\n❌  משהו כבר מאזין על ${port} — כנראה שרת שנשאר מריצה קודמת:\n\n   lsof -nP -iTCP:${port} -sTCP:LISTEN -t | xargs kill -9\n`);

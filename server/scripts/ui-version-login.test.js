@@ -43,7 +43,11 @@ const { spawn } = require('child_process');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 
-const PORT = 5423;
+// 5423 was shared with staff-classrooms-api.test.js. That file SIGKILLs its
+// server wrapper and used to leave an orphan listening here, which this file
+// — the only API test without a port guard — would then mistake for its own:
+// health answered 200, login hit the wrong database, and the run hung for good.
+const PORT = 5439;
 const B = `http://localhost:${PORT}`;
 let failures = 0;
 
@@ -55,12 +59,12 @@ function ok(cond, label, detail = '') {
 async function post(pathname, body, token) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(B + pathname, { method: 'POST', headers, body: JSON.stringify(body) });
+  const res = await fetch(B + pathname, { method: 'POST', headers, body: JSON.stringify(body), signal: AbortSignal.timeout(20000) });
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
 async function get(pathname, token) {
-  const res = await fetch(B + pathname, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(B + pathname, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000) });
   return { status: res.status, json: await res.json().catch(() => null) };
 }
 
@@ -100,7 +104,25 @@ const PEOPLE = [
   },
 ];
 
+/**
+ * The guard the other five API tests have and this one did not.
+ *
+ * Without it a stranger already listening on our port is adopted as our own
+ * server: `waitFor` below is satisfied by ITS /api/health, and everything after
+ * that talks to the wrong database with the wrong JWT secret. That is not a
+ * hypothetical — it is what 5423 did to this file.
+ */
+async function portIsFree() {
+  try { await fetch(`${B}/api/health`, { signal: AbortSignal.timeout(1500) }); return false; }
+  catch { return true; }
+}
+
 (async () => {
+  if (!await portIsFree()) {
+    console.error(`\n❌  משהו כבר מאזין על ${PORT} — כנראה שרת שנשאר מריצה קודמת:\n\n   lsof -nP -iTCP:${PORT} -sTCP:LISTEN -t | xargs kill -9\n`);
+    process.exit(1);
+  }
+
   const mongo = await MongoMemoryServer.create();
   const base = mongo.getUri();
   const client = await MongoClient.connect(base);
@@ -126,6 +148,12 @@ const PEOPLE = [
       MONGODB_URI: base + 'gf_ui',
       JWT_SECRET: 'ui-version-test',
       DISABLE_JOBS: '1', NODE_ENV: 'development', PORT: String(PORT),
+      // Stop src/index.js re-exec'ing itself with --expose-gc, so the process
+      // we hold is the server itself and not a wrapper around it. The SIGTERM
+      // below is forwarded by that wrapper, unlike the SIGKILL the other API
+      // tests send — but a spawn that leaks the port on any failure path costs
+      // every later run of this file, so it is not left to the happy path.
+      GC_REEXEC: '1',
     },
     stdio: 'ignore',
   });

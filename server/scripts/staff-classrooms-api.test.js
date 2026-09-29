@@ -40,6 +40,9 @@ const eq = (a, b, label) => {
   if (!good) failures++;
 };
 
+// A deadline, so a request to a server that is not really ours fails loudly
+// instead of hanging the whole run. An orphan left on this port answers
+// /api/health in milliseconds and then never answers anything else.
 async function api(pathname, { token, method = 'GET', body } = {}) {
   const res = await fetch(B + pathname, {
     method,
@@ -48,6 +51,7 @@ async function api(pathname, { token, method = 'GET', body } = {}) {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(20000),
   });
   const text = await res.text();
   let json = null; try { json = JSON.parse(text); } catch { /* html */ }
@@ -82,7 +86,18 @@ async function portIsFree() {
   const amutaId = new ObjectId();
   const roomA = new ObjectId();   // בוגרים
   const roomB = new ObjectId();   // תינוקייה
-  const YEAR = 'תשפ״ז';
+  // The academic year AS THE PRODUCT STORES IT — "2026-2027", not "תשפ״ז".
+  //
+  // דף הקשר filters on `academic_year: getAcademicYears().current.range` when
+  // the request names no year (contacts.controller.js:21), and that range is
+  // the numeric form. Seeded as the Hebrew form, every child and classroom
+  // here was invisible to it, the endpoint answered its no-children 404, and
+  // the whole דף הקשר block has failed since this file was added in 90b7ce9 —
+  // a fixture mismatch, not a product fault: the feature itself works.
+  //
+  // Taken from the service rather than written out, so the fixture follows the
+  // calendar instead of expiring the next time the academic year turns over.
+  const YEAR = require('../src/services/academic-year.service').getAcademicYears().current.range;
 
   await db.collection('amutas').insertOne({ _id: amutaId, name: 'עמותת בדיקה' });
   await db.collection('branches').insertOne({ _id: branchId, name: 'כפר סבא', amuta_id: amutaId });
@@ -103,9 +118,16 @@ async function portIsFree() {
   const admin = token('system_admin');
   const manager = token('branch_manager', { managed_branch_ids: [String(branchId)], branch_id: String(branchId) });
 
+  // GC_REEXEC stops src/index.js re-exec'ing itself with --expose-gc. That
+  // re-exec makes the process we spawn a WRAPPER around the real server, and
+  // the wrapper only forwards SIGTERM/SIGINT — the SIGKILL below cannot be
+  // caught, so the wrapper died and the server underneath it survived, kept
+  // the port, and was reparented to init. Every later run of this file then
+  // aborted with "משהו כבר מאזין על <PORT>", and a run that talked to the
+  // stale orphan tested code from whenever that orphan was started.
   const srv = spawn('node', ['src/index.js'], {
     cwd: process.cwd(),
-    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(PORT), NODE_ENV: 'test' },
+    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(PORT), NODE_ENV: 'test', GC_REEXEC: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = [];

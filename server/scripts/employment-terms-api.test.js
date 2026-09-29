@@ -39,6 +39,9 @@ const eq = (a, b, label) => {
   if (!good) failures++;
 };
 
+// A deadline, so a request to a server that is not really ours fails loudly
+// instead of hanging the whole run. An orphan left on this port answers
+// /api/health in milliseconds and then never answers anything else.
 async function api(pathname, { token, method = 'GET', body } = {}) {
   const res = await fetch(B + pathname, {
     method,
@@ -47,6 +50,7 @@ async function api(pathname, { token, method = 'GET', body } = {}) {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(20000),
   });
   let json = null; try { json = await res.json(); } catch { /* empty */ }
   return { status: res.status, json };
@@ -117,9 +121,16 @@ async function portIsFree() {
   const manager = token('branch_manager', { managed_branch_ids: [String(branchId)], branch_id: String(branchId) });
 
   // --- boot the server --------------------------------------------------
+  // GC_REEXEC stops src/index.js re-exec'ing itself with --expose-gc. That
+  // re-exec makes the process we spawn a WRAPPER around the real server, and
+  // the wrapper only forwards SIGTERM/SIGINT — the SIGKILL below cannot be
+  // caught, so the wrapper died and the server underneath it survived, kept
+  // the port, and was reparented to init. Every later run of this file then
+  // aborted with "משהו כבר מאזין על <PORT>", and a run that talked to the
+  // stale orphan tested code from whenever that orphan was started.
   const srv = spawn('node', ['src/index.js'], {
     cwd: process.cwd(),
-    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(PORT), NODE_ENV: 'test' },
+    env: { ...process.env, MONGODB_URI: uri, JWT_SECRET: SECRET, PORT: String(PORT), NODE_ENV: 'test', GC_REEXEC: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const log = [];
