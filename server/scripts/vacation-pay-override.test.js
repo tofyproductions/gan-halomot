@@ -122,6 +122,19 @@ async function main() {
     assert.ok(shkulitRows.some(r => r[3] === 8 && r[4] > 0), 'a nonzero vacation-pay row (code 8) must be filed');
     assert.ok(notes.some(n => n.subject === 'ימי חופשה — אישור הנה״ח'), 'the override note is filed under its own subject');
     ok('the shkulit file carries the paid amount AND a note explaining why the cap was lifted');
+
+    // The accountant PDF (buildAccountantHtml) used to recompute vacation
+    // usage a SECOND time, independently — from scratch, via its own
+    // vacationUsageForMonth call — which both ignored this override AND fed
+    // it the already-capped vacation_eff_days, re-capping an already-capped
+    // number. Caught live: אתי טדלה's card showed "0" days used despite the
+    // override, right next to a note saying accounting approved paying her
+    // in full anyway — the two halves of the same card disagreeing.
+    const { buildAccountantHtml } = require('../src/controllers/payrollMonth.controller');
+    const html = buildAccountantHtml(month, [row]);
+    assert.ok(html.includes('5 ימים'), 'the accountant PDF must show the overridden day count (5), not a re-capped 0');
+    assert.ok(!/חופשה[^<]*>\s*0(?!\d)/.test(html.replace(/\s+/g, ' ')), 'the vacation cell must not read "0" for an overridden employee');
+    ok('the accountant PDF shows the same overridden figure as the row and the שקלולית export — not a second, disagreeing recompute');
   }
 
   await mongoose.disconnect();

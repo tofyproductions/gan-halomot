@@ -59,8 +59,9 @@ console.log('the row builder cannot borrow the card builder\'s variables');
 console.log('the vacation balance block is self-contained');
 {
   // The specific shape that broke: the balance payload must take its usage from
-  // a variable the row builder itself declares.
-  assert.ok(/const vacUseRow = vacationUsageForMonth\(/.test(rowMap),
+  // a variable the row builder itself declares. `let` as of 28.09.2026 — the
+  // confirmed-override exception reassigns it after the initial computation.
+  assert.ok(/(?:const|let) vacUseRow = vacationUsageForMonth\(/.test(rowMap),
     'the row builder computes its own vacation usage');
   assert.ok(!/\bvacUse\b(?!Row)/.test(rowMap),
     'and never reaches for the card builder\'s vacUse');

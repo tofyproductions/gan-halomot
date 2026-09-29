@@ -4177,9 +4177,20 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // rest have not been earned. `vac` stays the FILED figure so every line
     // below — the card cell, the global-employee instruction, the totals —
     // speaks about the same number the שקלולית file carries.
-    const vacTaken = r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0);
-    const vacAvail = r.vacation_balance_available;
-    const vacUse = vacationUsageForMonth(vacTaken, vacAvail == null ? null : Number(vacAvail), { isGlobal });
+    //
+    // vacUse comes from the row's OWN vacation_usage — computed once, in
+    // getMonth, respecting a confirmed-override — never recomputed here.
+    // This used to call vacationUsageForMonth a SECOND time, independently,
+    // which both ignored any override (אתי טדלה: approved to be paid in
+    // full, then this recompute silently re-capped her to 0 anyway) and fed
+    // it r.vacation_eff_days — which is now the ALREADY-CAPPED figure — so a
+    // capped result was being capped again.
+    const vacTaken = r.vacation_days_requested != null
+      ? r.vacation_days_requested
+      : (r.vacation_eff_days != null ? r.vacation_eff_days : (Number(r.manual?.vacation_days) || 0));
+    const vacUse = r.vacation_usage || vacationUsageForMonth(
+      vacTaken, r.vacation_balance_available == null ? null : Number(r.vacation_balance_available), { isGlobal },
+    );
     const vac = vacUse.paid;
     // "בונוס" here is the SAME combined figure the שקלולית export and the
     // payslip audit read — standing bonus + this month's one-off — because the
