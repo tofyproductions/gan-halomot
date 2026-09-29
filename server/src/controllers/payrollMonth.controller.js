@@ -1186,6 +1186,18 @@ async function getMonth(req, res, next) {
       if (!isTeken && vacationPayConfirmed && vacUseRow.capped) {
         vacUseRow = { ...vacUseRow, paid: vacEffDays, unpaid: 0, capped: false, override_applied: true };
       }
+      // The days actually CREDITED this month — capped at the balance for an
+      // hourly employee (unless just overridden above), always the full
+      // request for a תקן employee (vacationUsageForMonth already returns
+      // paid=want for her). This — NOT the raw request — is what "ניצול
+      // חופשה" should mean everywhere a human reads it: an hourly employee
+      // asking for 7 days with 2 in the bank was, until now, shown and paid
+      // as having used 7 (₪ was capped separately, but the DAY COUNT never
+      // was) — quietly running her balance further negative every month with
+      // no approval anywhere. `vacEffDays` below stays the raw request; it is
+      // still what feeds vacationUsageForMonth above and what an export needs
+      // for its own "asked for X, filed Y" audit line.
+      const vacCreditedDays = vacUseRow.paid;
       // ── what a day of leave is worth ────────────────────────────────────
       //
       // An hourly wage is not a daily wage. A woman who worked 54 days one
@@ -1913,9 +1925,12 @@ async function getMonth(req, res, next) {
               overdraft_this_month: vacUseRow.overdraft,
               // The month's own days are not charged above — show what the
               // balance would be once this month is saved, so the office sees
-              // an overdraw before approving it rather than after.
-              after_this_month: Math.round((balance.available - (Number(vacEffDays) || 0)) * 1000) / 1000,
-              days_this_month: Number(vacEffDays) || 0,
+              // an overdraw before approving it rather than after. Credited
+              // days, not the raw request — an hourly employee who asked for
+              // more than she has draws down only what she actually has
+              // (unless the balance-cap override above already lifted it).
+              after_this_month: Math.round((balance.available - (Number(vacCreditedDays) || 0)) * 1000) / 1000,
+              days_this_month: Number(vacCreditedDays) || 0,
             },
           };
         })(),
@@ -1966,10 +1981,13 @@ async function getMonth(req, res, next) {
           miluim_pay: Math.round((Number(manual.miluim?.amount) || 0) * 100) / 100,
           holiday_pay: Math.round((Number(holidayPayInfo?.total_pay ?? manual.holiday_pay) || 0) * 100) / 100,
           // ימים לתלוש: every day she was paid for, not only worked days.
+          // Credited vacation days (post-balance-cap), not the raw request —
+          // this is "days she was PAID for", and an hourly employee capped at
+          // her balance was not paid for the days beyond it.
           //
           days_for_payslip: Math.round((
             (Number(breakdown.hours?.days_worked) || 0)
-            + (Number(vacEffDays) || 0)
+            + (Number(vacCreditedDays) || 0)
             + (Number(manual.sick_days) || 0)
             + (Number(manual.miluim_days) || 0)
             + (Number(holidayPayInfo?.total_days) || 0)
@@ -1977,7 +1995,7 @@ async function getMonth(req, res, next) {
           // שעות משולמות: worked hours plus the hours behind the paid days.
           paid_hours: Math.round((
             (Number(breakdown.hours?.total) || 0)
-            + ((Number(vacEffDays) || 0) + (Number(manual.sick_days) || 0)
+            + ((Number(vacCreditedDays) || 0) + (Number(manual.sick_days) || 0)
                + (Number(manual.miluim_days) || 0)
                + (Number(holidayPayInfo?.total_days) || 0))
               * (Number(avgDailyHours) || 8)
@@ -2016,7 +2034,18 @@ async function getMonth(req, res, next) {
           });
           return res ? { ...res, start_date: startIso, weekly_hours: weekly } : null;
         })() : null,
-        vacation_eff_days: vacEffDays,    // the days the office recorded this month
+        // The days actually CREDITED this month — capped at the balance for
+        // an hourly employee unless vacation_pay_confirmed lifted it, always
+        // the full request for a תקן employee. This is what the table, the
+        // vacation dialog, and ימים לתלוש all mean by "days used" — an hourly
+        // employee is not shown or paid as having used days she does not have.
+        vacation_eff_days: vacCreditedDays,
+        // The raw request BEFORE that cap — what was actually recorded/asked
+        // (manual.vacation_days, or the gan-calendar suggestion). Kept
+        // separate so an export's own audit trail can still say "she asked
+        // for 7, only 2 were hers to take" instead of the two numbers
+        // silently becoming the same thing.
+        vacation_days_requested: vacEffDays,
         // What her balance allows. The export layer caps vacation_eff_days by
         // this, so the accountant's file and this table cannot disagree about
         // how many days were actually filed.

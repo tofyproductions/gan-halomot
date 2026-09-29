@@ -64,6 +64,14 @@ async function main() {
     assert.strictEqual(row.vacation_usage.capped, true, 'still capped without the override');
     assert.strictEqual(row.vacation_pay, 0, 'paid nothing beyond the (zero) balance');
     ok('capped at 0 — matches the balance, no override requested');
+
+    // The DAY COUNT, not just the money — an hourly employee with 0 balance
+    // who asked for 5 days must be shown/credited 0, not 5. Before this fix
+    // vacation_eff_days was always the raw request, uncapped, for every
+    // employee — the day count (and the balance it draws down) never
+    // reflected the cap the money already respected.
+    assert.strictEqual(row.vacation_eff_days, 0, 'the credited/shown day count is capped too, not just the ₪');
+    assert.strictEqual(row.vacation_days_requested, 5, 'the raw request is preserved separately, for audit');
   }
 
   console.log('with the override, the same employee is paid in full — and it reaches estimated_total, the row, and the שקלולית export');
@@ -84,10 +92,22 @@ async function main() {
     assert.strictEqual(row.vacation_usage.capped, false, 'override lifts the cap');
     assert.strictEqual(row.vacation_usage.paid, 5, 'all 5 days now paid, not capped to the balance');
     assert.strictEqual(row.vacation_usage.override_applied, true);
+    assert.strictEqual(row.vacation_eff_days, 5, 'the override lifts the shown/credited day count too, not just the ₪');
     ok('vacation_usage reflects the override: paid=5, capped=false');
 
     assert.ok(row.vacation_pay > 0, `vacation_pay must be nonzero, got ${row.vacation_pay}`);
     ok(`vacation_pay is nonzero (₪${row.vacation_pay}) — the approval actually pays, not just a PDF note`);
+
+    // This fetch returns BOTH employees at once — the exact shape of the bug
+    // report ("לכל העובדים נוצלו ימי החופשה באופן מלא"): confirm the OTHER,
+    // unconfirmed employee from the block above is still correctly capped in
+    // the SAME batch, not accidentally uncapped by sitting next to a
+    // confirmed one.
+    const otherRow = (data.rows || []).find(r => r.full_name === 'עתי בדיקה (ללא אישור)');
+    assert.ok(otherRow, 'the unconfirmed employee from the earlier block must still be in this fetch');
+    assert.strictEqual(otherRow.vacation_eff_days, 0, 'a DIFFERENT, unconfirmed employee stays capped in the same batch');
+    assert.strictEqual(otherRow.vacation_pay, 0);
+    ok('an unrelated, unconfirmed employee in the same fetch is unaffected by this one\'s override');
 
     // The שקלולית export must read the SAME override — not recompute its own
     // (uncapped) answer independently and disagree with the row.

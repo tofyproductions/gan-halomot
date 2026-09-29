@@ -3625,6 +3625,12 @@ function VacationCell({ row }) {
   const remaining = balance != null ? Math.round((balance - days) * 10) / 10 : null;
   const isGlobal = row.salary_type === 'global';
   const pay = row.vacation_pay || 0;
+  // days is now the CREDITED figure (capped at the balance for an hourly
+  // employee, unless "אישור הנה״ח" lifted it) — requested may be higher.
+  // Silently showing only the smaller number reads as "she took fewer days",
+  // not "she asked for more than she had" — worth its own chip either way.
+  const requested = row.vacation_days_requested != null ? Number(row.vacation_days_requested) : days;
+  const balanceCapped = !isGlobal && requested > days;
   // Closures she worked through: not drawn from her balance, but the month
   // should still say she came in on a day the gan was listed as shut.
   const workedOnHoliday = row.vacation_days_auto?.worked_on_holiday || [];
@@ -3645,13 +3651,19 @@ function VacationCell({ row }) {
   // still shows them as a suggestion so the accountant knows there's a
   // decision waiting behind the click.
   const pendingApply = !!row.vacation_days_auto?.pending_manual_apply;
-  if (!days && balance == null && !pendingApply) {
+  if (!days && !requested && balance == null && !pendingApply) {
     return workedChip || <Typography variant="body2" color="text.secondary">—</Typography>;
   }
   return (
     <Stack spacing={0.2} alignItems="center" sx={{ lineHeight: 1.15 }}>
       {workedChip}
-      {days > 0 && <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days} ימים</Typography>}
+      {(days > 0 || balanceCapped) && <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{days} ימים</Typography>}
+      {balanceCapped && (
+        <Tooltip arrow title={`נרשמו/התבקשו ${requested} ימי חופשה, אך רק ${days} מכוסים ביתרה הקיימת — ${round2(requested - days)} ללא ניצול/תשלום. לאשר בכל זאת: "אישור הנה״ח" בחלונית.`}>
+          <Chip size="small" color="warning" variant="outlined" label={`${requested} ביקשה — ${days} זוכו`}
+            sx={{ height: 15, fontSize: '0.55rem', fontWeight: 700 }} />
+        </Tooltip>
+      )}
       {pendingApply ? (
         <Tooltip title={`אוגוסט: ${auto} ימי חופשה מלוח החופשות ממתינים לאישור ידני — לא משולמים ולא נשלחים לרו״ח עד שתלחץ/י "החל לטבלת השכר" בחלונית`}>
           <Chip size="small" color="warning" variant="outlined" label={`מלוח ${auto} — לא הוחל`}

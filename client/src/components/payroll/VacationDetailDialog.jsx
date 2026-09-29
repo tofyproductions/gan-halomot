@@ -53,6 +53,12 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   const usedDays = row.vacation_eff_days != null ? Number(row.vacation_eff_days) : (Number(manualDays) || 0);
   const remaining = balance != null ? Math.round((balance - usedDays) * 100) / 100 : null;
   const pendingApply = !!row.vacation_days_auto?.pending_manual_apply;
+  // usedDays is now the CREDITED figure — capped at the balance for an
+  // hourly employee unless the "אישור הנה״ח" switch below lifted it.
+  // daysAsked is what was actually recorded/requested, before that cap.
+  const daysAsked = row.vacation_days_requested != null ? Number(row.vacation_days_requested) : usedDays;
+  const isGlobal = row.salary_type === 'global';
+  const balanceCapped = !isGlobal && daysAsked > usedDays;
 
   const saveManualDays = (next) => {
     api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_days: next } }, { params: { month } })
@@ -90,6 +96,11 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'warning.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">ניצול חודשי</Typography>
               <Typography variant="h5" sx={{ fontWeight: 800 }}>{usedDays}</Typography>
+              {balanceCapped && (
+                <Typography variant="caption" color="warning.dark" sx={{ display: 'block' }}>
+                  מתוך {daysAsked} שהתבקשו
+                </Typography>
+              )}
             </Box>
             <Box sx={{ flex: 1, p: 1.5, bgcolor: 'success.soft', borderRadius: 2, textAlign: 'center' }}>
               <Typography variant="caption" color="text.secondary">נשאר</Typography>
@@ -100,6 +111,11 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
           {balance == null && (
             <Alert severity="info">
               עדיין לא נטען תלוש לעובד זה לחודש זה — היתרה תתעדכן אוטומטית לאחר ביקורת תלושים הבאה.
+            </Alert>
+          )}
+          {balanceCapped && (
+            <Alert severity="warning">
+              נרשמו/התבקשו {daysAsked} ימי חופשה, אך רק {usedDays} מכוסים ביתרה הקיימת — {Math.round((daysAsked - usedDays) * 100) / 100} ימים ללא ניצול/תשלום. לאשר בכל זאת: המתג "אישור הנה״ח" למטה.
             </Alert>
           )}
           {remaining != null && remaining < 0 && (

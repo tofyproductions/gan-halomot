@@ -98,10 +98,14 @@ function toCanonicalEmployee(row) {
     : money(row.holiday_pay_auto?.total_pay);
   const holidayDays = row.holiday_pay_auto?.total_days || 0;
 
-  // Vacation: the days the office recorded for the month.
-  const vacationDaysTaken = row.vacation_eff_days != null
-    ? num(row.vacation_eff_days)
-    : num(manual.vacation_days);
+  // Vacation: the days actually asked for/recorded this month — BEFORE the
+  // balance has its say. row.vacation_eff_days is now the post-cap CREDITED
+  // figure (see payrollMonth.controller.js), so the raw request lives in its
+  // own field; a row built before that field existed (e.g. a hand-built test
+  // fixture) falls back to vacation_eff_days, same as always.
+  const vacationDaysTaken = row.vacation_days_requested != null
+    ? num(row.vacation_days_requested)
+    : (row.vacation_eff_days != null ? num(row.vacation_eff_days) : num(manual.vacation_days));
 
   // ...and what may actually be FILED, once her balance has its say.
   //
