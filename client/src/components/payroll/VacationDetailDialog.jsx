@@ -44,8 +44,15 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
   const balance = row.vacation_info?.balance_from_payslip;
   const balanceDate = row.vacation_info?.balance_recorded_at;
   const requestedDays = requests.reduce((s, r) => s + (Number(r.days) || 0), 0);
-  const usedDays = Number(manualDays) || 0;
+  // Outside August the calendar-suggested days already flow into pay
+  // automatically (see payrollMonth.controller.js — vacationAutoGated is
+  // August-only), even before manual.vacation_days is set by hand. Reading
+  // the raw manual value here showed "0 ימים" and a wrong "נשאר" even while
+  // the employee was actually being paid for them — vacation_eff_days is the
+  // server's own effective figure, the same one the main table cell uses.
+  const usedDays = row.vacation_eff_days != null ? Number(row.vacation_eff_days) : (Number(manualDays) || 0);
   const remaining = balance != null ? Math.round((balance - usedDays) * 100) / 100 : null;
+  const pendingApply = !!row.vacation_days_auto?.pending_manual_apply;
 
   const saveManualDays = (next) => {
     api.patch(`/payroll-month/${row.employee_id}`, { manual: { vacation_days: next } }, { params: { month } })
@@ -147,14 +154,21 @@ export default function VacationDetailDialog({ open, row, month, onClose, onSave
                       בטל / אפס
                     </Button>
                   )}
-                  {(!manualDays || Number(manualDays) === 0) && (
+                  {pendingApply ? (
                     <Button variant="contained" size="small" onClick={() => {
                       setManualDays(row.vacation_days_auto.total_days);
                       saveManualDays(row.vacation_days_auto.total_days);
                     }}>
                       החל לטבלת השכר
                     </Button>
-                  )}
+                  ) : ((!manualDays || Number(manualDays) === 0) && (
+                    // Outside August this already pays automatically (see
+                    // usedDays above) — no click needed. Said here so it
+                    // doesn't read as "nothing is happening".
+                    <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center' }}>
+                      מיושם אוטומטית בחישוב השכר — אין צורך בפעולה
+                    </Typography>
+                  ))}
                 </Stack>
               </Stack>
             </>

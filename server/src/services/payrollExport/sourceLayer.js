@@ -115,7 +115,16 @@ function toCanonicalEmployee(row) {
   // only layer that knows the opening balance and what has been drawn since.
   // When it is absent NOTHING is capped: an unknown balance must never quietly
   // reduce what a person is paid.
-  const vacationUsage = vacationUsageForMonth(
+  //
+  // row.vacation_usage is the payroll month's OWN, already-computed answer —
+  // including a confirmed-override exception (accounting can lift the cap for
+  // one employee, one month; see payrollMonth.controller.js). Reading it here
+  // instead of recomputing means this layer can never disagree with the table
+  // or silently drop that override — a second copy of the same capping logic
+  // is exactly the kind of thing that stops matching the first one someday.
+  // Falls back to a local computation only when the row wasn't built with it
+  // (e.g. a hand-built row in a unit test).
+  const vacationUsage = row.vacation_usage || vacationUsageForMonth(
     vacationDaysTaken,
     row.vacation_balance_available == null ? null : num(row.vacation_balance_available),
     { isGlobal },
@@ -188,6 +197,10 @@ function toCanonicalEmployee(row) {
       // gan set against her final payment at גמר חשבון.
       vacation_overdraft_days: vacationUsage.overdraft,
       vacation_capped: vacationUsage.capped,
+      // True when accounting explicitly lifted the balance cap for this
+      // employee this month — worth its own note, since `vacation_capped`
+      // is now false and would otherwise read as "nothing unusual happened".
+      vacation_override_applied: !!vacationUsage.override_applied,
       vacation_balance_available: vacationUsage.available,
       holiday_days: num(holidayDays),
       absence_deduct_days: num(row.absence?.deductible_days),

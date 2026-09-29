@@ -487,7 +487,17 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
         'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
     }
 
-    if (vacTaken > vacDays || ce.quantities?.vacation_overdraft_days) {
+    if (ce.quantities?.vacation_override_applied) {
+      // Accounting explicitly lifted the balance cap for THIS employee, this
+      // month — vacTaken === vacDays now (nothing capped), so the condition
+      // below would stay silent. That silence would read as "nothing unusual
+      // happened", when an exception was made — worth its own note either way.
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'ימי חופשה — אישור הנה״ח',
+        text: `${vacDays} ימי חופשה שולמו במלואם למרות שהיתרה (${round2(Number(ce.quantities.vacation_balance_available) || 0)}) לא כיסתה אותם — הנהלת חשבונות אישרה תשלום מלא בכל זאת.`,
+      });
+    } else if (vacTaken > vacDays || ce.quantities?.vacation_overdraft_days) {
       // Only worth a note when the days absent and the days filed differ.
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,

@@ -1169,10 +1169,23 @@ async function getMonth(req, res, next) {
       // different function with its own scope, and the reference into it threw
       // for every employee who had an opening balance, which is to say for
       // nobody until the balances were imported and then for everybody.
-      const vacUseRow = vacationUsageForMonth(
+      let vacUseRow = vacationUsageForMonth(
         vacEffDays, vacAvailable == null ? null : Number(vacAvailable),
         { isGlobal: isTeken },
       );
+      // Accounting can lift the balance cap for ONE employee, ONE month — a
+      // deliberate "pay her anyway" exception (עתי טדלה, 28.09.2026: balance
+      // already negative from a prior month, office approved paying the
+      // vacation days regardless). Before this, `vacation_pay_confirmed`
+      // changed only a note sentence on the accountant PDF — the actual pay,
+      // estimated_total, and the שקלולית export all still silently capped at
+      // the balance, so the "approval" paid nothing. Hourly only: a תקן
+      // employee is never capped to begin with (paid regardless; the balance
+      // just goes negative for גמר חשבון to settle later).
+      const vacationPayConfirmed = !!manual.vacation_pay_confirmed;
+      if (!isTeken && vacationPayConfirmed && vacUseRow.capped) {
+        vacUseRow = { ...vacUseRow, paid: vacEffDays, unpaid: 0, capped: false, override_applied: true };
+      }
       // ── what a day of leave is worth ────────────────────────────────────
       //
       // An hourly wage is not a daily wage. A woman who worked 54 days one
@@ -1745,6 +1758,11 @@ async function getMonth(req, res, next) {
           include_salary_completion: manual.include_salary_completion !== false,
           supplement_manager_approved: manual.supplement_manager_approved === true,
           supplement_accounting_approved: manual.supplement_accounting_approved === true,
+          // Missing here entirely before 28.09.2026 — the DB held it correctly,
+          // but the dialog reads row.manual.vacation_pay_confirmed to show the
+          // switch's state, and that always came back undefined, so the switch
+          // looked "off" again after every refetch even when it was saved on.
+          vacation_pay_confirmed: manual.vacation_pay_confirmed === true,
           absence_entries: absenceEntries,
           partial_absence_entries: paEntries,
           partial_extra_entries: paExtraEntries,
@@ -2003,6 +2021,18 @@ async function getMonth(req, res, next) {
         // this, so the accountant's file and this table cannot disagree about
         // how many days were actually filed.
         vacation_balance_available: vacAvailable,
+        // The authoritative result of that capping (or its override) — the
+        // export layer reads THIS instead of recomputing vacationUsageForMonth
+        // itself, so a change here (like the confirmed-override above) cannot
+        // disagree with what actually gets filed to שקלולית.
+        vacation_usage: {
+          paid: vacUseRow.paid,
+          unpaid: vacUseRow.unpaid,
+          overdraft: vacUseRow.overdraft,
+          capped: vacUseRow.capped,
+          available: vacUseRow.available,
+          override_applied: !!vacUseRow.override_applied,
+        },
         sick_info: {
           policy: emp.sick_pay_policy || 'statutory',
           daily_value: Math.round(sickDailyValue * 100) / 100,
