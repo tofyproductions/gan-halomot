@@ -30,8 +30,26 @@ const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 // background distribution job failing outside its try/catch would crash the
 // whole server mid-send (and lose the in-memory job with no log). Log and keep
 // serving instead.
-process.on('unhandledRejection', (err) => { console.error('UNHANDLED REJECTION:', err); });
-process.on('uncaughtException', (err) => { console.error('UNCAUGHT EXCEPTION:', err); });
+//
+// The logging inside these handlers has to be able to FAIL. On Render stdout
+// is a pipe to the log collector, and when that pipe closes, writing to it
+// raises EPIPE — from inside the uncaughtException handler, which re-enters
+// the handler, which writes again. Measured on a reproduction: 100% of a core
+// forever, RSS climbing 167 → 219MB, and `/api/health` still answering 200 in
+// 23ms while every other request hung with no response ever sent. A health
+// check that keeps passing is the worst possible shape for this: the platform
+// leaves the instance in rotation while it serves nobody.
+//
+// So the write is guarded, and the streams are given their own error handlers
+// — without those, an EPIPE on a later write becomes an uncaught exception in
+// its own right and starts the same loop from the other end.
+process.stdout.on('error', () => { /* the collector went away; keep serving */ });
+process.stderr.on('error', () => { /* idem */ });
+const logCrash = (label, err) => {
+  try { console.error(label, err); } catch { /* nowhere left to say it */ }
+};
+process.on('unhandledRejection', (err) => logCrash('UNHANDLED REJECTION:', err));
+process.on('uncaughtException', (err) => logCrash('UNCAUGHT EXCEPTION:', err));
 
 const app = express();
 
@@ -575,6 +593,19 @@ connectDB().then(() => {
     if (!platformMode) {
       setInterval(runNotificationResend, 5 * 60 * 1000);
     }
+  });
+
+  // A server that could not take the port must not stay alive pretending to.
+  //
+  // Without this, an EADDRINUSE is emitted as an 'error' event with no
+  // listener, which Node escalates to uncaughtException — caught by the
+  // handler at the top of this file, logged, and swallowed. What is left is a
+  // process holding ~175MB, serving nothing, listening on nothing, and exiting
+  // 0 whenever it finally stops: a deploy that failed and reported success.
+  // Exit non-zero instead and let the platform restart or fail the deploy.
+  server.on('error', (err) => {
+    logCrash('LISTEN FAILED:', err);
+    process.exit(1);
   });
 
   // ── Graceful shutdown ──────────────────────────────────────────────────
