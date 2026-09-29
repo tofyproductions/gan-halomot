@@ -102,7 +102,7 @@ const { computeHolidayPay, getHolidaysInMonth, unpaidHolidaysText } = require('.
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
-const { lookbackMonths, dayRatesFrom, aggregate } = require('../services/hourlyDayRates');
+const { lookbackMonths, dayRatesFrom, aggregate, paidHours: paidHoursFor } = require('../services/hourlyDayRates');
 const { dispatchEmail } = require('../services/email.service');
 
 // Absence categories that REDUCE pay (the rest — sick/vacation/reserve — are paid).
@@ -2002,14 +2002,22 @@ async function getMonth(req, res, next) {
             + (Number(manual.miluim_days) || 0)
             + (Number(holidayPayInfo?.total_days) || 0)
           ) * 100) / 100,
-          // שעות משולמות: worked hours plus the hours behind the paid days.
-          paid_hours: Math.round((
-            (Number(breakdown.hours?.total) || 0)
-            + ((Number(vacCreditedDays) || 0) + (Number(manual.sick_days) || 0)
-               + (Number(manual.miluim_days) || 0)
-               + (Number(holidayPayInfo?.total_days) || 0))
-              * (Number(avgDailyHours) || 8)
-          ) * 100) / 100,
+          // שעות משולמות: worked hours plus the hours behind the paid days —
+          // each day at its VALUE ÷ the value of an hour (hourlyDayRates.paidHours).
+          // A תקן employee's leave is inside her salary, so her day's value is
+          // the salary ÷ committed days and her hour's the salary ÷ committed
+          // hours: a day of leave adds one committed day's hours.
+          paid_hours: paidHoursFor({
+            workedHours: breakdown.hours?.total,
+            hourValue: isTeken ? paHourlyValue : hourlyRate,
+            leavePay: (isTeken ? (Number(vacCreditedDays) || 0) * (Number(dailyRate) || 0) : (Number(vacationPay) || 0))
+              + (Number(holidayPayEffective) || 0)
+              + (Number(sickPay) || 0)
+              + (Number(manual.miluim?.amount) || 0),
+            leaveDays: (Number(vacCreditedDays) || 0) + (Number(manual.sick_days) || 0)
+              + (Number(manual.miluim_days) || 0) + (Number(holidayPayInfo?.total_days) || 0),
+            fallbackHoursPerDay: avgDailyHours,
+          }),
         },
         special_days: { pay: specialDayPay, lines: specialDayLines },
         // דמי הבראה — August's suggested figure per the צו (seniority bracket ×

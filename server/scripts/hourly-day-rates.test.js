@@ -158,4 +158,30 @@ console.log("מהרט's own payslip, worked by hand on paper");
   ok('overtime in the numerator is worth ₪6 a day, and does not belong there');
 }
 
+console.log('שעות משולמות — a paid day adds its VALUE in hours, not her average working day');
+{
+  // אדולה מהרט, 09.2026: 17.02 hours worked, two days of חופשה at ₪119.56, ₪45
+  // an hour. The file said 30.54 paid hours (2 × her 6.76-hour average day);
+  // the money says 17.02 + 239.12 ÷ 45 = 22.33.
+  const mahret = H.paidHours({ workedHours: 17.02, hourValue: 45, leavePay: 239.12, leaveDays: 2, fallbackHoursPerDay: 6.76 });
+  assert.strictEqual(mahret, 22.33);
+  ok('מהרט: 17.02 + 2 × 119.56 ÷ 45 = 22.33, not 30.54');
+
+  // Day 1 of a sick spell pays 0% — it adds no paid hours; a 50% day adds half.
+  assert.strictEqual(H.paidHours({ workedHours: 40, hourValue: 50, leavePay: 0, leaveDays: 1, fallbackHoursPerDay: 8 }), 40);
+  assert.strictEqual(H.paidHours({ workedHours: 40, hourValue: 50, leavePay: 200, leaveDays: 1, fallbackHoursPerDay: 8 }), 44);
+  ok('an unpaid sick day adds nothing; a half-paid one adds half');
+
+  // תקן: a day of leave is salary ÷ committed days, an hour salary ÷ committed
+  // hours — so a day adds exactly one committed day's hours.
+  const S = 9500; const days = 22; const hours = 139.26;
+  const teken = H.paidHours({ workedHours: 92.22, hourValue: S / hours, leavePay: 6 * (S / days), leaveDays: 6, fallbackHoursPerDay: 8 });
+  assert.strictEqual(teken, Math.round((92.22 + 6 * hours / days) * 100) / 100);
+  ok('תקן: each day of leave adds one committed day of hours');
+
+  // No rate on the card: the old count, at her average day — not zero hours.
+  assert.strictEqual(H.paidHours({ workedHours: 0, hourValue: 0, leavePay: 0, leaveDays: 2.74, fallbackHoursPerDay: 8 }), 21.92);
+  ok('no hourly value → each paid day at her average working day, as before');
+}
+
 console.log(`\nAll hourly day-rate tests passed (${passed} checks).`);

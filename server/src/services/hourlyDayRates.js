@@ -142,10 +142,43 @@ function dayRatesFrom(rows) {
   };
 }
 
+/**
+ * שעות משולמות — the hours worked, plus the hours behind every paid day off.
+ *
+ * A paid day is worth, in HOURS, what it is worth in money divided by the value
+ * of one hour. For an hourly employee that is the leave pay ÷ her rate: אדולה
+ * מהרט's day of חופשה is ₪119.56 at ₪45 an hour, so each one adds 2.66 hours,
+ * not the 6.76 of her average working day. Counting her average day made her
+ * September read 30.54 paid hours for 17.02 worked and two days of leave,
+ * where the payslip's own money says 22.33 — the part-time proportion the
+ * day's value already carries (full day × מקדם), ignored in the hours.
+ *
+ * Because it goes by the money, a sick day on the unpaid first-day bracket adds
+ * nothing, and a half-paid one adds half.
+ *
+ * With no value for an hour (no rate on the card), the old count stays as the
+ * fallback: each paid day at her average working day.
+ *
+ * @param {object} a
+ * @param {number} a.workedHours           hours actually worked this month
+ * @param {number} a.hourValue             ₪ of one hour (rate, or תקן salary ÷ committed hours)
+ * @param {number} a.leavePay              ₪ of the paid days off (vacation + holiday + sick + מילואים)
+ * @param {number} a.leaveDays             the same days, counted
+ * @param {number} a.fallbackHoursPerDay   her average working day, for the no-rate case
+ */
+function paidHours({ workedHours, hourValue, leavePay, leaveDays, fallbackHoursPerDay }) {
+  const hv = num(hourValue);
+  const extra = hv > 0
+    ? num(leavePay) / hv
+    : num(leaveDays) * (num(fallbackHoursPerDay) || 8);
+  return r2(num(workedHours) + extra);
+}
+
 module.exports = {
   FULL_TIME_MONTHLY_HOURS,
   SICK_MONTH_DAYS,
   lookbackMonths,
   aggregate,
   dayRatesFrom,
+  paidHours,
 };
