@@ -384,6 +384,27 @@ function auditEmployee(ce) {
     warnings.push(`${name}: אין רכיבי שכר חיוביים החודש.`);
   }
 
+  // Blocking: a תקן employee with NO salary at all that the engine could find.
+  //
+  // The rate is read off `amuta_distribution` (payrollCalc's primaryRates), and
+  // an employee marked global with nothing there resolves to ₪0 — quietly. If
+  // she also has נסיעות or a bonus, the "nothing positive this month" warning
+  // above does not fire, and every layer downstream agrees on the zero: the
+  // table shows it, the card prints it, the file files it, and the three
+  // reconcile to the shekel. Nobody is contradicted and she is paid nothing.
+  //
+  // BOTH have to be empty. A global employee with no commitment on file has no
+  // teken split and is legitimately paid her resolved base_salary as one
+  // amount — that is a supported shape, not a misconfiguration.
+  //
+  // Blocked rather than warned, on the same reasoning as missing bank details:
+  // a person held out of the file gets looked at before it is sent, and a
+  // warning beside seventy rows does not.
+  if (ce.employee.salary_type === 'global'
+    && num(ce.earnings.teken_salary) <= 0 && num(ce.earnings.base_salary) <= 0) {
+    errors.push(`${name}: עובדת תקן ללא שכר מוסכם בכרטיס — השכר ייצא 0. יש להזין שכר תקן בחלוקת העמותות.`);
+  }
+
   // Warning: carry the calc engine's own warnings (missing punches, etc.).
   for (const w of ce.flags.calc_warnings) warnings.push(`${name}: ${w}`);
 

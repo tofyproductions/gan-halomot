@@ -247,4 +247,37 @@ console.log('בונוס אוגוסט is an object, and its amount is what travel
   ok('no בונוס אוגוסט is 0, not NaN');
 }
 
+// A תקן employee's rate is read off amuta_distribution, and one marked global
+// with nothing there resolves to ₪0. She can still carry נסיעות and a bonus, so
+// "nothing positive this month" stays quiet — and the table, the card and the
+// file then agree, to the shekel, that she is owed almost nothing. Agreement is
+// not correctness, so this one is held out of the file to be looked at.
+console.log('a תקן employee with no salary the engine could find is held back');
+{
+  const bare = () => ({
+    employee_id: 'g9', employee_number: '99', israeli_id: '999000099',
+    full_name: 'תקן ללא שכר מוסכם', salary_type: 'global', is_active: true,
+    bank_number: '10', bank_branch: '936', bank_account: '123456',
+    manual: {},
+    breakdown: {
+      components: { base_salary: 0, travel: 272, teken_breakdown: null },
+      deductions: {}, hours: { total: 136, regular: 136, days_worked: 17 },
+      rates: {}, estimated_total: 272, warnings: [],
+    },
+  });
+  const out = buildExportSource('2026-09', [bare()]);
+  assert.strictEqual(out.ready.length, 0, 'she must not reach the file');
+  const why = JSON.stringify(out.failed || out.blocked || []);
+  assert.ok(/שכר מוסכם/.test(why), `the reason must name the missing salary — got ${why}`);
+  ok('a global employee with neither a teken salary nor a base salary is blocked, by name');
+
+  // The supported shape stays supported: no commitment on file, paid as one
+  // resolved amount. Blocking her would stop a real salary going out.
+  const plain = bare();
+  plain.breakdown.components.base_salary = 8000;
+  plain.breakdown.estimated_total = 8272;
+  assert.strictEqual(buildExportSource('2026-09', [plain]).ready.length, 1);
+  ok('a global employee paid a plain base_salary with no teken split still goes out');
+}
+
 console.log('\nAll payroll-export source tests passed (' + passed + ' checks).');
