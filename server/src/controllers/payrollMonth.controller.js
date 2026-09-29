@@ -1163,6 +1163,17 @@ async function getMonth(req, res, next) {
         }
         const bal = vacationBalanceFor(vacOpening, emp.vacation_monthly_accrual, month, usedSince);
         vacAvailable = bal ? bal.available : null;
+      } else if (row?.vacation_balance_from_payslip != null) {
+        // שילו בגים, 29.09.2026: vacation_balance_opening was never entered
+        // for her (nor for 5 other active hourly employees) — "unknown
+        // balance, don't cap" then left the cap permanently inert for her,
+        // not because her balance was fine but because our OWN opening figure
+        // was never configured. The accountant's own imported number (from
+        // ביקורת תלושים) is real, current data sitting right there on this
+        // same row — used as-is (not projected forward by an accrual rate:
+        // these employees don't have vacation_monthly_accrual set either),
+        // rather than leaving her uncapped by an accident of missing setup.
+        vacAvailable = Number(row.vacation_balance_from_payslip);
       }
       // What this month's days do to that balance. Computed HERE, in the row,
       // rather than reached for from the accountant-card builder — that is a
@@ -1908,6 +1919,15 @@ async function getMonth(req, res, next) {
               if (m > opening.as_of_month) usedSince += d;
             }
             balance = vacationBalanceFor(opening, emp.vacation_monthly_accrual, month, usedSince);
+          } else if (row?.vacation_balance_from_payslip != null) {
+            // Same fallback as vacAvailable above, shaped like vacationBalanceFor's
+            // own return value so the dialog's breakdown doesn't show holes for an
+            // employee who only has the payslip-imported figure on file.
+            const avail = Number(row.vacation_balance_from_payslip);
+            balance = {
+              accrued: avail, used: 0, available: avail, overdrawn: avail < 0,
+              as_of_month: null, monthly_accrual: Number(emp.vacation_monthly_accrual) || 0,
+            };
           }
           return {
             balance_from_payslip: row?.vacation_balance_from_payslip ?? null,

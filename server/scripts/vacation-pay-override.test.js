@@ -137,6 +137,34 @@ async function main() {
     ok('the accountant PDF shows the same overridden figure as the row and the שקלולית export — not a second, disagreeing recompute');
   }
 
+  console.log('no vacation_balance_opening on file — falls back to the payslip-imported balance instead of leaving the cap inert (שילו בגים, 29.09.2026)');
+  {
+    const emp = await Employee.create({
+      full_name: 'עובדת בדיקה — יתרה מתלוש בלבד', israeli_id: '111333557',
+      branch_id: branch._id, salary_type: 'hourly', hourly_rate: 60, is_active: true,
+      start_date: new Date('2022-01-01'), work_days: [0, 1, 2, 3, 4],
+      amuta_distribution: [{ amuta_id: amuta._id, hourly_rate: 60 }],
+      bank_number: '10', bank_branch: '001', bank_account: '333333',
+      // Deliberately NO vacation_balance_opening / vacation_monthly_accrual —
+      // exactly שילו's real configuration.
+    });
+    await PayrollMonth.create({
+      employee_id: emp._id, branch_id: branch._id, month,
+      manual: { vacation_days: 5 },
+      vacation_balance_from_payslip: 3,
+      vacation_balance_recorded_at: new Date('2026-09-07'),
+    });
+
+    const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
+    const row = (data.rows || []).find(r => String(r.employee_id) === String(emp._id));
+    assert.ok(row, 'the row must exist');
+    assert.strictEqual(row.vacation_usage.capped, true, 'the payslip balance (3) now caps the request (5), instead of the cap staying inert');
+    assert.strictEqual(row.vacation_eff_days, 3, 'credited days = the payslip balance, not the full 5 requested');
+    assert.strictEqual(row.vacation_days_requested, 5);
+    assert.strictEqual(row.vacation_info.balance.available, 3, 'the dialog\'s own balance breakdown also reflects the payslip fallback');
+    ok('an employee with no opening balance configured is capped by her payslip-imported balance instead of not being capped at all');
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
 
