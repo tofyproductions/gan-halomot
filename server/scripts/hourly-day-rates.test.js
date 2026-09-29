@@ -184,4 +184,46 @@ console.log('שעות משולמות — a paid day adds its VALUE in hours, not
   ok('no hourly value → each paid day at her average working day, as before');
 }
 
+console.log('the month she joined partway through is left out of the averages');
+{
+  // She joined on 15.07.2026: July holds a fortnight's hours but counts as a
+  // whole month, and drags the מקדם (hours ÷ months ÷ 182) down with it.
+  const hist = [
+    { month: '2026-07', base_salary: 900, days_for_payslip: 3, paid_hours: 18 },   // joined mid-month
+    { month: '2026-08', base_salary: 4200, days_for_payslip: 14, paid_hours: 84 },
+  ];
+  const withJuly = H.dayRatesFrom(hist);
+  const withoutJuly = H.dayRatesFrom(hist, { startDate: '2026-07-15' });
+  assert.strictEqual(withoutJuly.months, 1);
+  assert.strictEqual(withoutJuly.excluded_month, '2026-07');
+  assert.strictEqual(withoutJuly.coefficient, Math.round((84 / 182) * 10000) / 10000);
+  assert.ok(withoutJuly.vacation_day > withJuly.vacation_day,
+    `the partial month no longer drags the day down: ${withJuly.vacation_day} → ${withoutJuly.vacation_day}`);
+  ok('a mid-month start leaves that month out — only that month');
+
+  assert.strictEqual(H.dayRatesFrom(hist, { startDate: '2026-07-01' }).months, 2);
+  assert.strictEqual(H.dayRatesFrom(hist, { startDate: '2026-07-01' }).excluded_month, null);
+  ok('a start on the 1st is a whole month, whatever she did inside it');
+
+  // 01.08.2026 is a Saturday: starting Sunday the 2nd missed nothing.
+  assert.strictEqual(H.partialStartMonth('2026-08-02'), null);
+  // 01.03.2026 is a Sunday: starting on the 2nd missed a working day.
+  assert.strictEqual(H.partialStartMonth('2026-03-02'), '2026-03');
+  ok('the month\'s first WORKING day counts as its start — a Friday/Saturday before it misses nothing');
+
+  // Saved at Israel midnight = the evening before in UTC; still June.
+  assert.strictEqual(H.partialStartMonth('2026-05-31T21:00:00Z'), null);
+  ok('a start date saved at Israel midnight is read as the Israel date');
+
+  assert.strictEqual(H.dayRatesFrom(hist).excluded_month, null);
+  assert.deepStrictEqual(H.dayRatesFrom(hist, { startDate: null }), H.dayRatesFrom(hist));
+  ok('no start date on file → nothing is left out, exactly as before');
+
+  assert.strictEqual(H.dayRatesFrom([hist[0]], { startDate: '2026-07-15' }), null);
+  ok('when the partial month is all there is, there is no history — the caller falls back');
+
+  assert.strictEqual(H.dayRatesFrom(hist, { startDate: '2024-03-10' }).months, 2);
+  ok('a start long before the window leaves nothing out');
+}
+
 console.log(`\nAll hourly day-rate tests passed (${passed} checks).`);

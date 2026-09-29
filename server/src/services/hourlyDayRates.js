@@ -106,14 +106,58 @@ function aggregate(rows) {
   return { pay: r2(pay), days: r2(days), hours: r2(hours), months: paidMonths, sourceMonths: months.length };
 }
 
+/** Israel-local 'YYYY-MM-DD' — a start date saved at local midnight is the
+ *  evening before in UTC, and slicing the ISO string would move her a month. */
+function israelYmd(d) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(d);
+}
+
 /**
+ * The month she started in, when she was NOT employed for all of it — the
+ * month to leave out of her averages. Null when she started on the month's
+ * first working day, or when there is no start date on file.
+ *
+ * Only the start counts. Days she did not work inside a month she was
+ * employed for — off-days in her commitment, absences, חופשה — do not make it
+ * a partial month; they are what her month really looked like.
+ *
+ * "First working day": a start on Sunday the 3rd, after Friday the 1st and
+ * Saturday the 2nd, missed nothing, so that month is whole.
+ *
+ * Why: a month she joined halfway through counts as ONE month in the average
+ * while holding a few days' hours, and the מקדם (hours ÷ months ÷ 182) falls
+ * with it. טנגי עופרי's day of חופשה came out ₪15.24, הנרי אביב's ₪14.68.
+ */
+function partialStartMonth(startDate) {
+  if (!startDate) return null;
+  const dt = new Date(startDate);
+  if (Number.isNaN(dt.getTime())) return null;
+  const [y, m, d] = israelYmd(dt).split('-').map(Number);
+  for (let day = 1; day < d; day += 1) {
+    const weekday = new Date(Date.UTC(y, m - 1, day, 12)).getUTCDay(); // 0 Sun … 6 Sat
+    if (weekday !== 5 && weekday !== 6) return `${y}-${String(m).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+/**
+ * @param {object[]} rows  the months of pay_summary to average
+ * @param {object} [opts]
+ * @param {Date|string} [opts.startDate]  her start date — a month she joined
+ *   partway through is left out (see partialStartMonth)
  * @returns {null|{
  *   full_day:number, coefficient:number, vacation_day:number, sick_day:number,
- *   pay:number, days:number, hours:number, months:number, source_months:number
- * }}  null when there is nothing to compute from.
+ *   pay:number, days:number, hours:number, months:number, source_months:number,
+ *   excluded_month:string|null
+ * }}  null when there is nothing to compute from — including when the only
+ *   month on file is the partial one; the caller then falls back.
  */
-function dayRatesFrom(rows) {
-  const a = aggregate(rows);
+function dayRatesFrom(rows, { startDate } = {}) {
+  const skip = partialStartMonth(startDate);
+  const all = rows || [];
+  const used = skip ? all.filter((r) => r?.month !== skip) : all;
+  const excludedMonth = used.length < all.length ? skip : null;
+  const a = aggregate(used);
   if (a.months === 0) return null;
 
   // A full-time day: the money spread over the days it was paid for.
@@ -139,6 +183,7 @@ function dayRatesFrom(rows) {
     hours: a.hours,
     months: a.months,
     source_months: a.sourceMonths,
+    excluded_month: excludedMonth,
   };
 }
 
@@ -180,5 +225,6 @@ module.exports = {
   lookbackMonths,
   aggregate,
   dayRatesFrom,
+  partialStartMonth,
   paidHours,
 };

@@ -850,7 +850,9 @@ async function getMonth(req, res, next) {
     // the months after it may be charged against her.
     // An hourly employee's day of חופשה or מחלה is an average over her own
     // recent history. Fetched once for everybody rather than per row.
-    const dayRatesByEmp = await hourlyDayRatesByEmp(empIdList, month);
+    const dayRatesByEmp = await hourlyDayRatesByEmp(
+      empIdList, month, new Map(employees.map((e) => [String(e._id), e.start_date])),
+    );
     // Average hours per day over 3 months: the fallback price of a day of
     // חג/חופשה/מחלה when there is no ₪ history above, and the hours behind a
     // paid day in pay_summary.paid_hours (see holidayAvgHoursByEmp).
@@ -6067,35 +6069,19 @@ async function recordMonthPaySummary(employeeId, month, summary) {
 }
 
 /**
- * An hourly employee's day rates, averaged over the twelve months before
- * `month` — or over however many of them this system holds.
- *
- * Returns null when there is no history at all. Null means "cannot say", and
- * every caller must fall back to the previous behaviour rather than paying
- * zero: an employee with no months on file is a new employee, not one whose
- * day is worth nothing.
- */
-async function hourlyDayRatesFor(employeeId, month) {
-  try {
-    const months = lookbackMonths(month);
-    if (months.length === 0) return null;
-    const rows = await PayrollMonth.find({
-      employee_id: employeeId, month: { $in: months }, 'pay_summary.recorded_at': { $ne: null },
-    }).select('month pay_summary').lean();
-    if (rows.length === 0) return null;
-    return dayRatesFrom(rows.map((r) => ({ month: r.month, ...(r.pay_summary || {}) })));
-  } catch (e) {
-    console.error('[hourly-day-rates] failed:', e.message);
-    return null;
-  }
-}
-
-/**
- * hourlyDayRatesFor, for many employees in one query — Map<employeeId, rates>.
+ * Hourly employees' day rates, averaged over the twelve months before `month`
+ * — or over however many of them this system holds — Map<employeeId, rates>.
  * The monthly table and the bulk "apply holidays" button both price a day
  * from this, so the two can never disagree about what a day is worth.
+ *
+ * `startDateById` leaves out the month each employee joined partway through
+ * (hourlyDayRates.partialStartMonth).
+ *
+ * An employee with no usable history is absent or null: "cannot say", and
+ * every caller falls back rather than paying zero — a new employee is not one
+ * whose day is worth nothing.
  */
-async function hourlyDayRatesByEmp(empIds, month) {
+async function hourlyDayRatesByEmp(empIds, month, startDateById = new Map()) {
   const out = new Map();
   const window = lookbackMonths(month);
   if (!window.length || !empIds?.length) return out;
@@ -6109,13 +6095,13 @@ async function hourlyDayRatesByEmp(empIds, month) {
     if (!byEmp.has(k)) byEmp.set(k, []);
     byEmp.get(k).push({ month: h.month, ...(h.pay_summary || {}) });
   }
-  for (const [k, rowsFor] of byEmp) out.set(k, dayRatesFrom(rowsFor));
+  for (const [k, rowsFor] of byEmp) out.set(k, dayRatesFrom(rowsFor, { startDate: startDateById.get(k) }));
   return out;
 }
 
 /**
  * Average WORKED HOURS PER DAY over the 3 months before `month`, for pricing
- * a day of דמי חגים. Unlike hourlyDayRatesFor (₪/day, 12-month window), this
+ * a day of דמי חגים. Unlike hourlyDayRatesByEmp (₪/day, 12-month window), this
  * is hours/day over a shorter window — a schedule change should move the
  * holiday rate faster than it should move the vacation/sick day value.
  *
