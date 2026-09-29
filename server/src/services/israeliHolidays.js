@@ -115,8 +115,22 @@ function getHolidaysInMonth(monthYM) {
  * @param {Number} args.avgDailyHours — typical working hours/day (for daily pay calc); default 8
  * @returns {{ eligible_days: Array, total_days: Number, total_pay: Number, ineligible_days: Array }}
  */
-function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate, avgDailyHours, ganClosedDates }) {
+function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate, avgDailyHours, ganClosedDates, dayRates }) {
   const ganClosed = ganClosedDates instanceof Set ? ganClosedDates : new Set(ganClosedDates || []);
+  // What a day of חג is worth: EXACTLY what a day of חופשה is worth — a full
+  // day from her own twelve-month history, times her מקדם (her scope against a
+  // full post, capped at 1). See services/hourlyDayRates.js.
+  //
+  // It used to be rate × her average worked hours per day, which prices a
+  // part-timer's day as though she held a full post on the days she works:
+  // אילנה שימחי (58 ₪/h, 8.15 h a day, a מקדם near 0.3) was paid ₪472.57 for
+  // יום כיפור on 09.2026, against ₪148.04 for a day of her own leave on the
+  // same payslip.
+  //
+  // rate × average hours stays only as the fallback for an employee with no
+  // history yet — a new employee is not one whose day is worth nothing.
+  const vacationDay = Number(dayRates?.vacation_day) || 0;
+  const fallbackDaily = Math.round(((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8)) * 100) / 100;
   const result = {
     eligible_days: [],
     ineligible_days: [],
@@ -126,7 +140,11 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     calc: {
       hourly_rate: Number(hourlyRate) || 0,
       avg_daily_hours: Math.round((Number(avgDailyHours) || 8) * 100) / 100,
-      daily_rate: Math.round(((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8)) * 100) / 100,
+      basis: vacationDay > 0 ? 'vacation_day' : 'hourly_x_hours',
+      full_day: vacationDay > 0 ? Number(dayRates.full_day) || 0 : null,
+      coefficient: vacationDay > 0 ? Number(dayRates.coefficient) || 0 : null,
+      months: vacationDay > 0 ? Number(dayRates.months) || 0 : null,
+      daily_rate: vacationDay > 0 ? vacationDay : fallbackDaily,
     },
   };
 
@@ -199,7 +217,7 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
     return false;                                    // no commitment → strict (must have worked)
   };
 
-  const dailyRate = (Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8);
+  const dailyRate = result.calc.daily_rate;
 
   for (const h of monthHolidays) {
     const wd = weekdayLocal(h.date);
@@ -246,10 +264,42 @@ function computeHolidayPay({ employee, monthYM, punches, commitment, hourlyRate,
   return result;
 }
 
+/**
+ * The holidays an HOURLY employee was not paid for this month, and why — one
+ * line the accountant can check against the payslip ("ראש השנה א' 12.09 — יום
+ * החג בשבת"). Both the שקלולית notes sheet and the accountant PDF print this
+ * same sentence, so the two cannot tell her different stories.
+ *
+ * Null when there is nothing to check: a תקן employee (holidays are inside her
+ * salary), a month with no holidays, or every holiday paid.
+ *
+ * @param {object} holidayPayAuto  the row's holiday_pay_auto block
+ * @param {string} salaryType      'hourly' | 'global'
+ * @param {number} [manualPay=0]   manual.holiday_pay — the office paid anyway
+ */
+function unpaidHolidaysText(holidayPayAuto, salaryType, manualPay = 0) {
+  if (salaryType !== 'hourly' || !holidayPayAuto) return null;
+  const fmt = (ymd) => { const p = String(ymd).split('-'); return p.length === 3 ? `${p[2]}.${p[1]}` : String(ymd); };
+  // The payroll row renames computeHolidayPay's ineligible_days to ineligible.
+  const raw = holidayPayAuto.ineligible || holidayPayAuto.ineligible_days;
+  const list = Array.isArray(raw) ? raw : [];
+  let text = null;
+  if (list.length) {
+    text = list.map((d) => `${d.name} ${fmt(d.date)} — ${(d.reasons || []).join('; ') || 'לא זכאי/ת'}`).join(' · ');
+  } else if (holidayPayAuto.blocking_reason && holidayPayAuto.blocking_reason !== 'אין חגים בחודש זה') {
+    // The holiday table running out is the one blocking reason with no days
+    // attached — and it is the one that underpays everybody at once.
+    text = holidayPayAuto.blocking_reason;
+  }
+  if (!text) return null;
+  return Number(manualPay) > 0 ? `${text} (הוזן סכום ידני לדמי חגים: ${Number(manualPay)} ₪)` : text;
+}
+
 module.exports = {
   HOLIDAYS,
   getHolidaysInMonth,
   computeHolidayPay,
+  unpaidHolidaysText,
   weekdayLocal,
   tableCoversMonth,
   COVERAGE_END_YM,

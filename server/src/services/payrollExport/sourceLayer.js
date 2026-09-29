@@ -1,4 +1,5 @@
 const { vacationUsageForMonth } = require('../vacationBalance');
+const { unpaidHolidaysText } = require('../israeliHolidays');
 'use strict';
 
 /**
@@ -143,6 +144,23 @@ function toCanonicalEmployee(row) {
   const giftCard = numberOrText(manual.gift_card);
   const cibus = numberOrText(manual.cibus);
   const miluim = numberOrText(manual.miluim);
+  // הבראה is the payroll table's own column (manual.recreation), filled once a
+  // year in August. This layer used to read components.recreation_monthly — a
+  // leg payrollCalc hard-zeroed on 02.09.2026 — so the August column never
+  // reached the export at all, not even as a note.
+  const recreation = numberOrText(manual.recreation);
+  // Whether a הבראה line is on this month's PAYSLIP — which is not the same as
+  // whether we file one. The accountant computes it and keys it by hand, and
+  // שקלולית then carries it into every following month until something zeroes
+  // it (אסתר הרוניאן's September: 14 × 338.80, August's הבראה, paid again).
+  // So the adapter has to remember it as though filed. An August entitlement
+  // counts even when the office left the cell empty: the accountant computes
+  // it for every eligible employee regardless, and zeroing a line that turns
+  // out not to exist next month costs nothing.
+  const ra = row.recreation_auto;
+  const recreationOnPayslip = recreation.amount > 0 || !!recreation.text
+    || !!(ra && ((ra.basis === 'annual' && Number(ra.amount) > 0)
+      || ra.basis === 'unknown_start' || ra.basis === 'suspicious_start'));
 
   // Advance deduction is an INSTRUCTION (preset label or free text), not a
   // number the engine resolved — the accountant reads it and sets the figure.
@@ -183,6 +201,11 @@ function toCanonicalEmployee(row) {
     // Raw counts — for a target that ingests quantities and prices them itself.
     quantities: {
       worked_hours: num(b.hours?.total),
+      // שעות משולמות — worked hours plus the hours behind every paid day of
+      // leave. Read from the row's own pay_summary (the figure the day-rate
+      // averages are built from), never recomputed here. Null when the row
+      // carries no pay_summary, so the adapter can tell "unknown" from zero.
+      paid_hours: row.pay_summary?.paid_hours != null ? num(row.pay_summary.paid_hours) : null,
       regular_hours: num(b.hours?.regular),
       ot_125_hours: num(b.hours?.ot_125),
       ot_150_hours: num(b.hours?.ot_150),
@@ -237,7 +260,7 @@ function toCanonicalEmployee(row) {
       teken_salary: isGlobal ? money(tb.teken_salary) : 0,
       teken_hourly_value: isGlobal ? num(tb.hourly_value) : 0,
       travel: money(c.travel),
-      recreation: money(c.recreation_monthly),
+      recreation: recreation.amount,
       meal_vouchers: money(c.meal_vouchers),
       holiday_pay: holidayPay,
       // תמורת חופשה — paid to an HOURLY employee only, and the engine already
@@ -276,6 +299,10 @@ function toCanonicalEmployee(row) {
       gift_card_note: giftCard.text,
       cibus_note: cibus.text,
       miluim_note: miluim.text,
+      recreation_note: recreation.text,
+      // A holiday she was NOT paid for, with the reason — so the accountant can
+      // check it rather than discover a missing day on a complaint.
+      holidays_not_paid: unpaidHolidaysText(row.holiday_pay_auto, row.salary_type, manual.holiday_pay) || '',
       notes: [row.permanent_note, manual.notes].filter(Boolean).join(' · '),
     },
 
@@ -289,6 +316,7 @@ function toCanonicalEmployee(row) {
     flags: {
       status: row.status || 'draft',                 // 'draft' | 'finalized'
       payslip_paid: !!row.payslip_paid,
+      recreation_on_payslip: recreationOnPayslip,
       calc_warnings: Array.isArray(b.warnings) ? b.warnings.slice() : [],
     },
   };

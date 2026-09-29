@@ -39,7 +39,7 @@
  */
 
 const OPEN_QUESTIONS = [
-  'סיבוס: שווי ארוחות מופיע פעמיים באקסולוגיית הזקופות (קוד 2 וקוד 21) — לוודא איזה מהם בשימוש. כל עוד הקוד לא ודאי, הרכיב נשאר בגיליון ההערות למרות שסוג הרשומה כבר ידוע (2).',
+  'תווי מזון: סיבוס אושר כזקופות 21 — לוודא אם תווי מזון נקלטים באותו קוד. עד אז נשארים בגיליון ההערות.',
   'החזר הלוואה: אין קוד ייעודי בניכויי הרשות — לוודא אם נקלט כמקדמה (קוד 1).',
   'חודש ניסיון: ספטמבר 2026 — הקבצים נשלחים לרו"ח במייל.',
 ];
@@ -161,6 +161,13 @@ const COMPONENTS = [
  * a different event, and not something this monthly file ever emits.)
  */
 const VACATION_CODE = 8;
+
+/**
+ * הבראה — code 4 of the salary table. Never filed as a row (the accountant
+ * computes it by job scope), but it is on the payslip, so it has to be
+ * switched off the month after — see `recreation_on_payslip`.
+ */
+const RECREATION_CODE = 4;
 
 /** Hours codes for hourly employees — שקלולית prices rate × quantity. */
 const HOURS = {
@@ -549,6 +556,16 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     if (workedHours > 0) {
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_HOURS, 0, workedHours);
     }
+    // שעות עבודה משולמות — the other half of the payslip's "משולמות / בפועל".
+    //
+    // Never filed until 29.09.2026, so שקלולית carried August's figure into
+    // September: אסתר הרוניאן's payslip read 78.8 paid hours beside 92.22
+    // worked, with six paid days of חופשה nowhere in it; אילנה שימחי's read
+    // 60.25. The worked hours were right — it was the paid ones nobody sent.
+    const paidHours = ce.quantities?.paid_hours == null ? 0 : round2(Number(ce.quantities.paid_hours) || 0);
+    if (paidHours > 0) {
+      push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.WORK_HOURS_PAID, 0, paidHours);
+    }
 
     for (const comp of UNMAPPED) {
       const raw = Number(comp.get(ce)) || 0;
@@ -567,6 +584,15 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       });
     }
 
+    // Lines the accountant keys by hand still sit on the payslip, and שקלולית
+    // carries them forward like any other. Remembered as filed — without a row
+    // — so next month's file switches them off. Only codes that are CONFIRMED
+    // belong here; an unconfirmed code zeroed is a stranger's line wiped.
+    if (ce.flags?.recreation_on_payslip
+      && !mine.some((c) => c.code === RECREATION_CODE && (c.table || RECORD_TYPE.SALARY) === RECORD_TYPE.SALARY)) {
+      mine.push({ code: RECREATION_CODE, table: RECORD_TYPE.SALARY });
+    }
+
     const d = ce.directives;
     if (d.advance_deduction) {
       notes.push({
@@ -579,6 +605,8 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       ['תו קנייה — הערה', d.gift_card_note],
       ['סיבוס — הערה', d.cibus_note],
       ['מילואים — הערה', d.miluim_note],
+      ['הבראה — הערה', d.recreation_note],
+      ['דמי חגים — לא שולמו (לבדיקה)', d.holidays_not_paid],
       ['הערות', d.notes],
     ]) {
       if (text) {

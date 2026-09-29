@@ -18,13 +18,20 @@ const mongoose = require('mongoose');
  * not in it now goes out again with a quantity and rate of ZERO, which is what
  * switches it off. A row nobody has to remember is a row nobody forgets.
  *
- * ── The limit, stated plainly ──
+ * ── Per month, not "the latest" ──
  *
- * This can only switch off what WE filed. Codes the accountant keys by hand —
- * הבראה among them, which has no confirmed קוד רכיב here — were never in our
- * file and are not in this collection, so they cannot be zeroed from here. They
- * are listed on the notes sheet each month instead, for a person to check.
- * Zeroing a code we do not manage could wipe a line she entered deliberately.
+ * `history` keeps each month's set separately; only the month directly before
+ * the one being filed is used (services/payrollExport/movementHistory.js).
+ * Keeping just the latest file meant that downloading September once made
+ * September its own "previous month", and August's leftovers were never zeroed.
+ * `components` / `month` still hold the newest entry for older readers.
+ *
+ * ── What it covers ──
+ *
+ * What we filed, plus the confirmed codes the accountant keys by hand from our
+ * notes (הבראה, code 4), which sit on the payslip just the same. Codes we do
+ * not manage are never here: zeroing one could wipe a line she entered on
+ * purpose.
  */
 const shkulitMovementSnapshotSchema = new mongoose.Schema({
   employee_number: { type: String, required: true, unique: true, index: true },
@@ -42,6 +49,21 @@ const shkulitMovementSnapshotSchema = new mongoose.Schema({
   },
   /** 'YYYY-MM' of that file, so a re-export of an older month cannot mislead. */
   month: { type: String, default: null },
+  history: {
+    type: [{
+      month: { type: String, required: true },
+      components: {
+        type: [{
+          code: { type: Number, required: true },
+          table: { type: Number, default: 1 },
+          _id: false,
+        }],
+        default: [],
+      },
+      _id: false,
+    }],
+    default: [],
+  },
   last_exported_at: { type: Date, default: null },
 }, { timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' } });
 

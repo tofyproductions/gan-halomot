@@ -65,6 +65,7 @@ function validHourlyRow(over = {}) {
       gift_card: { kind: 'number', amount: 150 },
       cibus: { kind: 'empty' },
       miluim: { kind: 'empty' },
+      recreation: { kind: 'number', amount: 209 },
       advance_deduction_text: '', notes: '',
       include_salary_completion: true,
     },
@@ -83,7 +84,12 @@ console.log('toCanonicalEmployee — copies authoritative fields');
   // Amounts copied verbatim — no rounding drift, no re-derivation.
   assert.strictEqual(ce.earnings.base_salary, 8560.25);
   assert.strictEqual(ce.earnings.travel, 352);
+  // הבראה is the table's own column. components.recreation_monthly is a leg
+  // payrollCalc hard-zeroes; reading it meant August's הבראה never exported.
   assert.strictEqual(ce.earnings.recreation, 209);
+  assert.strictEqual(
+    toCanonicalEmployee(validHourlyRow({ manual: { recreation: { kind: 'empty' } } })).earnings.recreation, 0,
+    'recreation_monthly is not a source — only the table column is');
   assert.strictEqual(ce.earnings.bonus, 300);        // from row.bonus.effective
   assert.strictEqual(ce.earnings.gift_card, 150);    // number-or-text → number
   assert.strictEqual(ce.deductions.loans, 500);

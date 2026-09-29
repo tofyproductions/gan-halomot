@@ -31,6 +31,7 @@ const {
 } = require('../services/augustBonus');
 const { buildExportSource } = require('../services/payrollExport/sourceLayer');
 const shkulit = require('../services/payrollExport/shkulitAdapter');
+const movementHistory = require('../services/payrollExport/movementHistory');
 const { classifyDayCount } = require('../services/punchFollowup/engine');
 const { computeRecreation, DEFAULT_DAY_RATE: RECREATION_DEFAULT_RATE } = require('../services/recreationPay');
 const { materializeScope } = require('../utils/branch-scope');
@@ -97,7 +98,7 @@ function suggestPunchLabels(sortedPunches) {
       : 'קריאה כפולה של השעון — מוצע הראשונה ככניסה והאחרונה כיציאה.');
 }
 const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = require('../services/commitmentAnalysis');
-const { computeHolidayPay, getHolidaysInMonth } = require('../services/israeliHolidays');
+const { computeHolidayPay, getHolidaysInMonth, unpaidHolidaysText } = require('../services/israeliHolidays');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
@@ -849,25 +850,10 @@ async function getMonth(req, res, next) {
     // the months after it may be charged against her.
     // An hourly employee's day of חופשה or מחלה is an average over her own
     // recent history. Fetched once for everybody rather than per row.
-    const dayRatesByEmp = new Map();
-    {
-      const window = lookbackMonths(month);
-      if (window.length) {
-        const hist = await PayrollMonth.find({
-          employee_id: { $in: empIdList }, month: { $in: window },
-          'pay_summary.recorded_at': { $ne: null },
-        }).select('employee_id month pay_summary').lean();
-        const byEmp = new Map();
-        for (const h of hist) {
-          const k = String(h.employee_id);
-          if (!byEmp.has(k)) byEmp.set(k, []);
-          byEmp.get(k).push({ month: h.month, ...(h.pay_summary || {}) });
-        }
-        for (const [k, rowsFor] of byEmp) dayRatesByEmp.set(k, dayRatesFrom(rowsFor));
-      }
-    }
-    // דמי חגים prices a day at her recent average — 3 months, not 12, and
-    // hours/day rather than ₪/day (see holidayAvgHoursByEmp above).
+    const dayRatesByEmp = await hourlyDayRatesByEmp(empIdList, month);
+    // Average hours per day over 3 months: the fallback price of a day of
+    // חג/חופשה/מחלה when there is no ₪ history above, and the hours behind a
+    // paid day in pay_summary.paid_hours (see holidayAvgHoursByEmp).
     const holidayHoursByEmp = await holidayAvgHoursByEmp(empIdList, month);
 
     const priorVacationByEmp = new Map();
@@ -1037,6 +1023,10 @@ async function getMonth(req, res, next) {
       const avgDailyHours = holidayHoursByEmp.get(String(emp._id)) ?? currentMonthAvgHours ?? 8;
       const avgDailyHoursSource = holidayHoursByEmp.get(String(emp._id)) != null
         ? '3-months' : (currentMonthAvgHours != null ? 'this-month' : 'default');
+      // An hourly employee's day of חופשה / מחלה / חג, averaged over her own
+      // year (services/hourlyDayRates.js). Null for a תקן employee — her salary
+      // does not move with the days — and for anyone with no history yet.
+      const dayRates = isTeken ? null : (dayRatesByEmp.get(String(emp._id)) || null);
       const holidayPayInfo = computeHolidayPay({
         employee: emp,
         monthYM: month,
@@ -1045,6 +1035,7 @@ async function getMonth(req, res, next) {
         hourlyRate,
         avgDailyHours,
         ganClosedDates: holidayDates, // gan-closure days don't fail the guard-day rule
+        dayRates,                     // a day of חג is priced as a day of חופשה
       });
       // Kindergarten closures → vacation days — EXCLUDING statutory-holiday days
       // (those are paid via דמי חגים, not vacation).
@@ -1218,7 +1209,6 @@ async function getMonth(req, res, next) {
       //
       // `rate × avgDailyHours` is kept as the fallback for an employee with no
       // history yet. A new employee is not one whose day is worth nothing.
-      const dayRates = isTeken ? null : (dayRatesByEmp.get(String(emp._id)) || null);
       const vacationDayValue = dayRates
         ? dayRates.vacation_day
         : Math.round((Number(hourlyRate) || 0) * (Number(avgDailyHours) || 8) * 100) / 100;
@@ -3241,95 +3231,31 @@ async function applyAutoHolidays(req, res, next) {
     const { month } = req.params;
     const { branch } = req.query;
 
-    const branchFilter = { is_active: true };
-    if (branch && branch !== 'all') branchFilter.branch_id = branch;
-
-    // Same scope enforcement as getMonth
-    const role = req.user?.role;
-    if (role && role !== 'system_admin' && role !== 'accountant') {
-      const managed = (req.user.managed_branch_ids || []).map(String);
-      const fallback = req.user.branch_id ? [String(req.user.branch_id)] : [];
-      const allowed = managed.length > 0 ? managed : fallback;
-      if (branchFilter.branch_id && !allowed.includes(String(branchFilter.branch_id))) {
-        return res.json({ updated: 0, skipped_already_set: 0, skipped_not_eligible: 0 });
-      }
-      if (!branchFilter.branch_id) branchFilter.branch_id = { $in: allowed };
-    }
-
-    const employees = await Employee.find(branchFilter).lean();
-    const empIds = employees.map(e => e._id);
-
-    const { from, to } = parseMonthRange(month);
-    const punches = await Punch.find({
-      employee_id: { $in: empIds },
-      timestamp: { $gte: from, $lt: to },
-      ignored: { $ne: true },
-    }).sort({ timestamp: 1 }).lean();
-    const punchesByEmp = new Map();
-    for (const p of punches) {
-      const k = String(p.employee_id);
-      if (!punchesByEmp.has(k)) punchesByEmp.set(k, []);
-      punchesByEmp.get(k).push(p);
-    }
-
-    const commitments = await EmployeeCommitment.find({ employee_id: { $in: empIds } }).lean();
-    const commitmentByEmp = new Map(commitments.map(c => [String(c.employee_id), c]));
-
-    const existing = await PayrollMonth.find({ employee_id: { $in: empIds }, month }).lean();
-    const existingByEmp = new Map(existing.map(r => [String(r.employee_id), r]));
-    const holidayHoursByEmp = await holidayAvgHoursByEmp(empIds, month);
+    // The figure written is the one the monthly table already shows, read
+    // through the same pipeline (and the same branch scope) as the screen.
+    // This endpoint used to hold its own copy of the holiday calculation, and
+    // the copy had drifted: it priced the day differently and never passed the
+    // gan's closure dates, so a guard day on a closure could fail here while
+    // the table called the same holiday eligible — and what it wrote into
+    // manual.holiday_pay then overrode the table's own number.
+    const data = await fetchMonthData({ month, branch: branch || 'all' }, req.user);
+    if (data?.error) return res.status(400).json({ error: data.error });
 
     let updated = 0;
     let skippedAlreadySet = 0;
     let skippedNotEligible = 0;
 
-    for (const emp of employees) {
-      if (emp.salary_type !== 'hourly') { skippedNotEligible++; continue; }
-
-      const empPunches = (punchesByEmp.get(String(emp._id)) || []).filter(p => {
-        const s = p.approval_status || 'auto';
-        return s === 'auto' || s === 'approved';
-      });
-      const hourlyRate = emp.amuta_distribution?.[0]?.hourly_rate || 0;
-      const daysWorked = new Set(empPunches.map(p => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date(p.timestamp)))).size;
-      const totalMinutes = (() => {
-        const byDay = new Map();
-        for (const p of empPunches) {
-          const k = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(new Date(p.timestamp));
-          if (!byDay.has(k)) byDay.set(k, []);
-          byDay.get(k).push(p);
-        }
-        let total = 0;
-        for (const ps of byDay.values()) {
-          const sorted = ps.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-          for (let i = 0; i + 1 < sorted.length; i += 2) {
-            total += Math.max(0, Math.round((new Date(sorted[i + 1].timestamp) - new Date(sorted[i].timestamp)) / 60000));
-          }
-        }
-        return total;
-      })();
-      const currentMonthAvgHours = daysWorked > 0 ? (totalMinutes / 60 / daysWorked) : null;
-      const avgDailyHours = holidayHoursByEmp.get(String(emp._id)) ?? currentMonthAvgHours ?? 8;
-
-      const info = computeHolidayPay({
-        employee: emp,
-        monthYM: month,
-        punches: empPunches,
-        commitment: commitmentByEmp.get(String(emp._id)),
-        hourlyRate,
-        avgDailyHours,
-      });
-
-      if (info.total_pay <= 0) { skippedNotEligible++; continue; }
-
-      const cur = Number(existingByEmp.get(String(emp._id))?.manual?.holiday_pay) || 0;
-      if (cur > 0) { skippedAlreadySet++; continue; }
+    for (const r of data?.rows || []) {
+      if (r.salary_type !== 'hourly') { skippedNotEligible++; continue; }
+      const auto = Number(r.holiday_pay_auto?.total_pay) || 0;
+      if (auto <= 0) { skippedNotEligible++; continue; }
+      if ((Number(r.manual?.holiday_pay) || 0) > 0) { skippedAlreadySet++; continue; }
 
       await PayrollMonth.findOneAndUpdate(
-        { employee_id: emp._id, month },
+        { employee_id: r.employee_id, month },
         {
-          $set: { 'manual.holiday_pay': info.total_pay },
-          $setOnInsert: { branch_id: emp.branch_id, employee_id: emp._id, month },
+          $set: { 'manual.holiday_pay': auto },
+          $setOnInsert: { branch_id: r.branch_id, employee_id: r.employee_id, month },
         },
         { upsert: true },
       );
@@ -4192,6 +4118,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     const sickPay = r.sick_info?.pay || 0;
     const sickDays = Number(r.manual?.sick_days) || 0;
     const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
+    const unpaidHolidays = unpaidHolidaysText(r.holiday_pay_auto, r.salary_type, r.manual?.holiday_pay);
     // What the office recorded, and what her balance actually allows to be
     // filed. Seven days away against a balance of two is two days paid: the
     // rest have not been earned. `vac` stays the FILED figure so every line
@@ -4414,6 +4341,9 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         : `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
             <span style="font-size:10.5px;color:#92400e;font-weight:800">חופשה: </span>
             <span style="font-size:12px;color:#111827;font-weight:700">לתשלום רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש — אין יתרה, אין תשלום.</span></td></tr>`) : ''}
+      ${unpaidHolidays ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
+          <span style="font-size:10.5px;color:#92400e;font-weight:800">דמי חגים — לא שולמו (לבדיקה): </span>
+          <span style="font-size:12px;color:#111827;font-weight:700">${unpaidHolidays}</span></td></tr>` : ''}
       ${notes ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:6px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">הערות: </span>
           <span style="font-size:13px;color:#111827;font-weight:800">${notes}</span></td></tr>` : ''}
@@ -6153,6 +6083,29 @@ async function hourlyDayRatesFor(employeeId, month) {
 }
 
 /**
+ * hourlyDayRatesFor, for many employees in one query — Map<employeeId, rates>.
+ * The monthly table and the bulk "apply holidays" button both price a day
+ * from this, so the two can never disagree about what a day is worth.
+ */
+async function hourlyDayRatesByEmp(empIds, month) {
+  const out = new Map();
+  const window = lookbackMonths(month);
+  if (!window.length || !empIds?.length) return out;
+  const hist = await PayrollMonth.find({
+    employee_id: { $in: empIds }, month: { $in: window },
+    'pay_summary.recorded_at': { $ne: null },
+  }).select('employee_id month pay_summary').lean();
+  const byEmp = new Map();
+  for (const h of hist) {
+    const k = String(h.employee_id);
+    if (!byEmp.has(k)) byEmp.set(k, []);
+    byEmp.get(k).push({ month: h.month, ...(h.pay_summary || {}) });
+  }
+  for (const [k, rowsFor] of byEmp) out.set(k, dayRatesFrom(rowsFor));
+  return out;
+}
+
+/**
  * Average WORKED HOURS PER DAY over the 3 months before `month`, for pricing
  * a day of דמי חגים. Unlike hourlyDayRatesFor (₪/day, 12-month window), this
  * is hours/day over a shorter window — a schedule change should move the
@@ -6294,46 +6247,31 @@ function shkulitMovementsWorkbook(source, month, previousByEmployee = new Map(),
 }
 
 /**
- * What each employee was last filed with, so the next file can switch off what
- * no longer applies. See models/ShkulitMovementSnapshot.js for why this has to
- * be remembered at all.
+ * What was on each employee's PREVIOUS payslip, so this month's file can switch
+ * off what no longer applies. The month directly before `month` only — see
+ * services/payrollExport/movementHistory.js for why, and for why the filed set
+ * and a rebuilt copy of that month are both taken.
  */
 async function previousMovementComponents(source, month, req) {
-  const numbers = source.ready.map((ce) => ce.employee.employee_number).filter(Boolean);
-  if (numbers.length === 0) return new Map();
+  const numbers = source.ready.map((ce) => ce.employee.employee_number).filter(Boolean).map(String);
+  if (numbers.length === 0 || !month) return new Map();
+  const prevMonth = lookbackMonths(month, 1)[0];
+  if (!prevMonth) return new Map();
 
-  const snaps = await ShkulitMovementSnapshot.find({ employee_number: { $in: numbers } }).lean();
-  const out = new Map(snaps.map((sn) => [String(sn.employee_number), sn.components || []]));
+  const snapshots = await ShkulitMovementSnapshot.find({ employee_number: { $in: numbers } }).lean();
 
-  // Employees with no snapshot — everyone, the first time this runs, because
-  // the remembering only began when the code did. Their previous month is
-  // DERIVED instead: last month's payroll data is built through the same
-  // adapter, and whatever it would have filed becomes the set to switch off.
-  //
-  // Without this the switch-off is useless in exactly the month it is needed
-  // most. אילנה שימחי's August bonus is the case in point: שקלולית carried it
-  // into September, we had never filed a bonus row for her, so nothing in the
-  // snapshot could reach it and it would have been paid a second time.
-  const missing = numbers.filter((n) => !out.has(String(n)));
-  if (missing.length === 0 || !month || !req) return out;
-
-  const prev = lookbackMonths(month, 1)[0];
-  if (!prev) return out;
-  try {
-    const prevData = await fetchMonthData({ month: prev, branch: 'all' }, req.user);
-    const prevSource = buildExportSource(prev, (prevData.rows || []).filter(
-      (r) => missing.includes(String(r.employee_number)),
-    ));
-    const { filed } = shkulit.buildMovements(prevSource);
-    for (const [empNo, components] of filed) {
-      if (!out.has(String(empNo))) out.set(String(empNo), components);
+  let prevRows = null;
+  if (req) {
+    try {
+      const prevData = await fetchMonthData({ month: prevMonth, branch: 'all' }, req.user);
+      prevRows = prevData?.rows || [];
+    } catch (e) {
+      // Without last month's rows only what we actually filed can be switched
+      // off — said out loud rather than silently.
+      console.error(`[shkulit] rebuilding ${prevMonth} for the switch-off failed:`, e.message);
     }
-  } catch (e) {
-    // A month we cannot rebuild leaves those employees without a switch-off —
-    // the same position as before, and said out loud rather than silently.
-    console.error(`[shkulit] deriving ${prev} for the switch-off failed:`, e.message);
   }
-  return out;
+  return movementHistory.previousMonthComponents({ numbers, snapshots, prevMonth, prevRows });
 }
 
 /**
@@ -6341,13 +6279,21 @@ async function previousMovementComponents(source, month, req) {
  * genuinely been handed over, exactly like the master snapshot. Recorded
  * earlier, a failed send would leave us believing we had switched components
  * off that the accountant never received.
+ *
+ * Kept per month: re-downloading September replaces September's entry and
+ * leaves August's alone.
  */
 async function recordShkulitMovementHandoff(filed, month) {
+  const numbers = [...filed.keys()].filter(Boolean).map(String);
+  const existing = await ShkulitMovementSnapshot.find({ employee_number: { $in: numbers } }).lean();
+  const byNumber = new Map(existing.map((s) => [String(s.employee_number), s]));
   for (const [employeeNumber, components] of filed) {
     if (!employeeNumber) continue;
+    const history = movementHistory.withMonth(byNumber.get(String(employeeNumber)), month, components);
+    const latest = history[history.length - 1];
     await ShkulitMovementSnapshot.updateOne(
       { employee_number: String(employeeNumber) },
-      { $set: { components, month, last_exported_at: new Date() } },
+      { $set: { history, components: latest.components, month: latest.month, last_exported_at: new Date() } },
       { upsert: true },
     );
   }

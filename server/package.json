@@ -161,7 +161,10 @@
     "test:vacation-balance": "node scripts/vacation-balance.test.js",
     "test:pm-scope": "node scripts/payroll-month-scope.test.js",
     "test:day-rates": "node scripts/hourly-day-rates.test.js",
-    "backfill:pay-summary": "node scripts/backfill-pay-summary.js"
+    "backfill:pay-summary": "node scripts/backfill-pay-summary.js",
+    "test:shkulit": "node scripts/shkulit-adapter.test.js",
+    "test:shkulit-history": "node scripts/shkulit-movement-history.test.js",
+    "test:holiday-day-value": "node scripts/holiday-day-value.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

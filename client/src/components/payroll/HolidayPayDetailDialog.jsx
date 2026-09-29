@@ -30,6 +30,13 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
 
   if (!row) return null;
   const isHourly = row.salary_type === 'hourly';
+  // The server pays the manual figure when one is entered, otherwise the auto
+  // one (payrollMonth.controller holidayPayEffective). Showing the bare manual
+  // field here read "₪0" for someone the table was in fact paying.
+  const savedManual = Number(row.manual?.holiday_pay) || 0;
+  const effective = savedManual > 0 ? savedManual : (Number(auto.total_pay) || 0);
+  const calc = auto.calc || {};
+  const byVacationDay = calc.basis === 'vacation_day';
 
   const save = () => {
     const n = Number(manual);
@@ -80,26 +87,44 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
               </Box>
               <Box sx={{ flex: 1, p: 1.5, bgcolor: 'primary.soft', borderRadius: 2, textAlign: 'center' }}>
                 <Typography variant="caption" color="text.secondary">סכום סופי בטבלה</Typography>
-                <Typography variant="h5" sx={{ fontWeight: 800 }}>{manual} ₪</Typography>
+                <Typography variant="h5" sx={{ fontWeight: 800 }}>{effective} ₪</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {savedManual > 0 ? 'סכום ידני' : 'לפי החישוב האוטומטי'}
+                </Typography>
               </Box>
             </Stack>
+          )}
+
+          {isHourly && savedManual > 0 && Number(auto.total_pay) > 0 && Math.abs(savedManual - Number(auto.total_pay)) >= 0.01 && (
+            <Alert severity="warning" sx={{ borderRadius: 2 }}>
+              בטבלה שמור סכום ידני ({savedManual} ₪) השונה מהחישוב האוטומטי ({auto.total_pay} ₪).
+              הסכום הידני הוא שנשלח לרו״ח. אם הוא נשמר לפני שחישוב דמי החגים עודכן — לחצו "החל אוטומטי".
+            </Alert>
           )}
 
           {isHourly && auto.calc && auto.total_days > 0 && (
             <Alert severity="success" icon={false} sx={{ borderRadius: 2 }}>
               <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>איך חושב הסכום?</Typography>
               <Box component="pre" sx={{ fontFamily: 'inherit', m: 0, fontSize: '0.85rem', whiteSpace: 'pre-wrap' }}>
-                {`תעריף שעתי: ${auto.calc.hourly_rate} ₪/שעה
+                {byVacationDay
+                  ? `יום חג = יום חופשה (אותו חישוב בדיוק)
+יום מלא (ממוצע ${calc.months} חודשים): ${calc.full_day} ₪
+מקדם היקף משרה: ${calc.coefficient}
+תעריף יומי = ${calc.full_day} × ${calc.coefficient} = ${calc.daily_rate} ₪
+סה״כ = ${calc.daily_rate} ₪ × ${auto.total_days} ימי חג זכאי = ${auto.total_pay} ₪`
+                  : `תעריף שעתי: ${calc.hourly_rate} ₪/שעה
 ממוצע שעות יומי (${
-  auto.calc.avg_daily_hours_source === '3-months' ? 'ממוצע 3 חודשים אחרונים'
-    : auto.calc.avg_daily_hours_source === 'this-month' ? 'מהחתמות החודש'
+  calc.avg_daily_hours_source === '3-months' ? 'ממוצע 3 חודשים אחרונים'
+    : calc.avg_daily_hours_source === 'this-month' ? 'מהחתמות החודש'
     : 'ברירת מחדל'
-}): ${auto.calc.avg_daily_hours}h
-תעריף יומי = ${auto.calc.hourly_rate} × ${auto.calc.avg_daily_hours} = ${auto.calc.daily_rate} ₪
-סה״כ = ${auto.calc.daily_rate} ₪ × ${auto.total_days} ימי חג זכאי = ${auto.total_pay} ₪`}
+}): ${calc.avg_daily_hours}h
+תעריף יומי = ${calc.hourly_rate} × ${calc.avg_daily_hours} = ${calc.daily_rate} ₪
+סה״כ = ${calc.daily_rate} ₪ × ${auto.total_days} ימי חג זכאי = ${auto.total_pay} ₪`}
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                מבוסס על 3 החודשים האחרונים שבהם נשמר שכר; בלי היסטוריה — החודש הנוכחי; בלי החתמות בכלל — 8 שעות יומיות כברירת מחדל.
+                {byVacationDay
+                  ? 'יום מלא = (שכר יסוד + חופשה + מחלה + מילואים + חגים) ÷ ימים לתלוש, על פני עד 12 החודשים הקודמים. מקדם = ממוצע שעות משולמות בחודש ÷ 182, עד 1.'
+                  : 'אין עדיין היסטוריית שכר לעובד/ת — לפי תעריף שעה × ממוצע שעות יומי (3 חודשים; בלי היסטוריה — החודש הנוכחי; בלי החתמות — 8 שעות).'}
               </Typography>
             </Alert>
           )}

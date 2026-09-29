@@ -723,4 +723,84 @@ console.log('כל שלושת רכיבי הבונוס (קבוע + חד פעמי +
   });
 }
 
+console.log('שעות עבודה משולמות — the other half of "משולמות / בפועל"');
+{
+  // אסתר הרוניאן, 09.2026: 92.22 hours worked, six days of חופשה. Her payslip
+  // read 78.8 paid hours — August's figure, carried forward because we never
+  // sent this one.
+  const esther = {
+    ...row, employee_number: '31', israeli_id: '023806615', full_name: 'אסתר הרוניאן',
+    salary_type: 'global', manual: {}, vacation_eff_days: 6,
+    breakdown: { ...row.breakdown, hours: { total: 92.22, regular: 87.12, ot_125: 5.1, ot_150: 0, days_worked: 14 } },
+    pay_summary: { paid_hours: 131.82, days_for_payslip: 20 },
+  };
+  ok('paid hours go out as סוג רשומה 4 קוד 8, beside the worked hours in קוד 5', () => {
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [esther]));
+    const paid = rr.find((x) => x[2] === 4 && x[3] === 8);
+    const worked = rr.find((x) => x[2] === 4 && x[3] === 5);
+    assert.ok(paid, 'the paid-hours row must exist');
+    assert.deepStrictEqual(paid.slice(4), [0, 131.82], 'the row pay_summary already computed, no rate');
+    assert.deepStrictEqual(worked.slice(4), [0, 92.22], 'and the worked hours stay where they were');
+  });
+  ok('code 8 of the attendance table is not תמורת חופשה', () => {
+    // Same number, two tables: a salary-table 8 PAYS leave. A תקן employee's
+    // leave is inside her salary, so the salary-table 8 must still be absent.
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [esther]));
+    assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 8), 'no salary-table code 8 for a תקן employee');
+  });
+  ok('a row with no pay_summary sends no paid hours rather than a guessed number', () => {
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [{ ...esther, pay_summary: undefined }]));
+    assert.ok(!rr.some((x) => x[2] === 4 && x[3] === 8));
+  });
+}
+
+console.log('הבראה is keyed by hand, and still switched off the month after');
+{
+  // אסתר הרוניאן: August's הבראה (14 × 338.80) was paid AGAIN on her September
+  // payslip. We never filed it, so nothing remembered it, so nothing zeroed it.
+  const august = (manualRecreation, auto) => ({
+    ...row, employee_number: '31', israeli_id: '023806615', full_name: 'אסתר הרוניאן',
+    manual: { recreation: manualRecreation }, recreation_auto: auto,
+  });
+  ok('the August table column reaches the export — it used to read a hard-zeroed field', () => {
+    const src = buildExportSource('2026-08', [august({ kind: 'number', amount: 4743 }, null)]);
+    assert.strictEqual(src.ready[0].earnings.recreation, 4743);
+    const { rows: rr, notes: nn } = shkulit.buildMovements(src);
+    assert.ok(nn.some((n) => n.subject === 'הבראה' && /4743/.test(n.text)), 'the accountant reads the figure');
+    assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 4), 'and it is still NOT filed as a row');
+  });
+  ok('a הבראה on the payslip is remembered as filed, so next month can zero it', () => {
+    const { filed } = shkulit.buildMovements(buildExportSource('2026-08', [august({ kind: 'number', amount: 4743 }, null)]));
+    assert.ok((filed.get('31') || []).some((c) => c.code === 4 && c.table === 1));
+  });
+  ok('an August entitlement counts even when the office left the cell empty', () => {
+    const { filed } = shkulit.buildMovements(buildExportSource('2026-08', [
+      august({ kind: 'empty' }, { basis: 'annual', amount: 4743, days: 14 }),
+    ]));
+    assert.ok((filed.get('31') || []).some((c) => c.code === 4 && c.table === 1));
+  });
+  ok('"חישוב אצל רו״ח" as text counts too, and travels as a note', () => {
+    const src = buildExportSource('2026-08', [august({ kind: 'text', text: 'זכאית להבראה — חישוב אצל רו״ח' }, null)]);
+    const { filed, notes: nn } = shkulit.buildMovements(src);
+    assert.ok((filed.get('31') || []).some((c) => c.code === 4 && c.table === 1));
+    assert.ok(nn.some((n) => n.subject === 'הבראה — הערה'));
+  });
+  ok('not yet eligible, nothing entered → nothing remembered', () => {
+    const { filed } = shkulit.buildMovements(buildExportSource('2026-08', [
+      august({ kind: 'empty' }, { basis: 'not_yet_eligible', amount: 0 }),
+    ]));
+    assert.ok(!(filed.get('31') || []).some((c) => c.code === 4 && c.table === 1));
+  });
+  ok('September then zeroes code 4 of the salary table', () => {
+    const aug = shkulit.buildMovements(buildExportSource('2026-08', [august({ kind: 'number', amount: 4743 }, null)]));
+    const sep = shkulit.buildMovements(
+      buildExportSource('2026-09', [{ ...august({ kind: 'empty' }, null), month: '2026-09' }]),
+      new Map([['31', aug.filed.get('31')]]),
+    );
+    const z = sep.rows.find((x) => x[2] === 1 && x[3] === 4);
+    assert.ok(z, 'the switch-off row must be there');
+    assert.deepStrictEqual(z.slice(4), [0, 0]);
+  });
+}
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);
