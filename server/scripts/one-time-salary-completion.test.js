@@ -116,6 +116,68 @@ async function main() {
     ok(`automatic completion (₪${Math.round(autoCompletion)}) and the manual one-off (₪300) coexist as separate fields, neither overwriting the other`);
   }
 
+  // אסתר גוטליב, 09.2026: hourly, ₪955 one-off. It reached estimated_total and
+  // it reached the שקלולית file — and the accountant's card never named it, so
+  // the printed fields did not add up to the printed total. The card's only
+  // completion line was `isGlobal && ...`, which an hourly employee can never
+  // satisfy, and the one-off was absent for EVERY salary type.
+  console.log('the accountant card names BOTH completions — the employer one and the one-off');
+  {
+    const { buildAccountantHtml } = require('../src/controllers/payrollMonth.controller');
+    const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
+
+    const hourly = (data.rows || []).find(r => r.full_name === 'עובדת בדיקה — השלמה לפי שעות');
+    assert.ok(hourly, 'the hourly employee with a one-off must be in the fetch');
+    const hourlyHtml = buildAccountantHtml(month, [hourly]);
+    assert.ok(hourlyHtml.includes('השלמת שכר חד פעמית'),
+      'an HOURLY employee\'s card must carry a השלמת שכר חד פעמית field — this is the field that was missing entirely');
+    assert.ok(hourlyHtml.includes('₪585'),
+      'the one-off AMOUNT must be printed on the card, not only folded into the total');
+    ok('an hourly employee\'s one-off completion is a named field on the accountant card');
+
+    const teken = (data.rows || []).find(r => r.full_name === 'עובדת תקן — השלמת שכר');
+    assert.ok(teken, 'the teken employee must be in the fetch');
+    const tekenHtml = buildAccountantHtml(month, [teken]);
+    assert.ok(tekenHtml.includes('השלמת שכר — ע״י המעסיק'),
+      'the teken card must name the EMPLOYER completion apart from the one-off');
+    assert.ok(tekenHtml.includes('השלמת שכר חד פעמית') && tekenHtml.includes('₪300'),
+      'the teken card must ALSO carry the one-off, with its amount');
+    ok('a teken employee\'s card names the two completions apart, both with amounts');
+
+    // When the employer completion is nonzero it is printed TWICE on a teken
+    // card — once inside the teken split (where it is part of סה״כ שכר תקן)
+    // and once on the completions row. A number printed twice is a number that
+    // can be paid twice, so the card has to say which one is already counted.
+    // This fixture's employee happens to compute a ₪0 automatic completion, so
+    // the assertion is tied to the value rather than assumed either way — a
+    // hard-coded expectation here would be testing the fixture, not the card.
+    const autoOnCard = Number(teken.breakdown?.components?.teken_breakdown?.completion) || 0;
+    const warned = tekenHtml.includes('אין לשלם פעמיים');
+    const splitRow = tekenHtml.includes('סה״כ שכר תקן');
+    assert.strictEqual(warned, autoOnCard > 0 && splitRow,
+      `the do-not-pay-twice note must appear exactly when the employer completion (₪${Math.round(autoOnCard)}) is both nonzero and repeated in the teken split`);
+    ok(`the do-not-pay-twice note tracks the employer completion (₪${Math.round(autoOnCard)} here → note ${warned ? 'shown' : 'absent'})`);
+
+    // A card with no completion at all must not grow an empty green row.
+    const plain = (data.rows || []).find(r => r.full_name === 'עובדת בדיקה — השלמת שכר חד פעמית');
+    assert.ok(plain, 'the cleared employee must be in the fetch');
+    assert.strictEqual(Number(plain.one_time_salary_completion?.amount) || 0, 0, 'sanity: her one-off was cleared earlier');
+    // Matched on the row's own background, not on the label text: this
+    // fixture's employee is NAMED "עובדת בדיקה — השלמת שכר חד פעמית", and her
+    // name is printed on every card, so the label alone always "appears".
+    assert.ok(!buildAccountantHtml(month, [plain]).includes('background:#f0fdf4'),
+      'an employee with no completion of either kind gets no completions row');
+    ok('no completions row is printed when there is nothing to complete');
+
+    // Each completion has to say what it is FOR — a bare figure labelled
+    // "השלמת שכר" is a number the accountant cannot check against anything.
+    assert.ok(hourlyHtml.includes('5 ש׳ רגילות') && hourlyHtml.includes('2 ש׳ שע״נ 125%'),
+      'the one-off must show the HOURS it was computed from, not only the amount');
+    assert.ok(hourlyHtml.includes('5 שעות רגילות + 2 שע"נ 125%'),
+      'and the reason the office typed alongside them');
+    ok('the one-off names the hours behind it and the reason it was entered');
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
 

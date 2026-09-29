@@ -232,6 +232,10 @@ function toCanonicalEmployee(row) {
       holiday_days: num(holidayDays),
       absence_deduct_days: num(row.absence?.deductible_days),
       partial_absence_hours: num(row.partial_absence?.effective_hours),
+      // Hours worked BEYOND the monthly commitment, once the manager approved
+      // paying them. The mirror image of partial_absence_hours, and it was
+      // missing here entirely — see earnings.extra_hours_pay below.
+      extra_hours: num(row.partial_absence?.extra_approved_hours),
     },
 
     // Money components — for a target that ingests resolved amounts. Each is
@@ -275,6 +279,13 @@ function toCanonicalEmployee(row) {
       // בונוס חד פעמי — an independent one-off for this month only.
       one_time_bonus: money(row.one_time_bonus?.amount),
       one_time_salary_completion: money(row.one_time_salary_completion?.amount),
+      // תוספת שעות מעל התקן — hours past the monthly commitment that the
+      // manager approved paying. It rides OUTSIDE the agreed salary (the תקן
+      // split above caps at the salary), which is exactly why it needs a row
+      // of its own: ליאור מחפוד, 09.2026 — 28.9 approved hours, ₪1,829, in her
+      // estimated total and on her card, and absent from the שקלולית file
+      // because this layer never carried it.
+      extra_hours_pay: money(row.partial_absence?.extra_pay),
       // closure_completion_bonus is an OBJECT ({amount, days, dates, ...}).
       // money() of an object is NaN → 0, so בונוס אוגוסט never once reached
       // the file: אילנה שימחי's ₪1,844 for 08.2026 was typed in by hand at the
@@ -317,6 +328,15 @@ function toCanonicalEmployee(row) {
       status: row.status || 'draft',                 // 'draft' | 'finalized'
       payslip_paid: !!row.payslip_paid,
       recreation_on_payslip: recreationOnPayslip,
+      // The month HAD holidays and she was paid for none of them. Not the same
+      // as "no holidays this month": here the engine was asked and answered no,
+      // which is a statement the export can act on — שקלולית carries a payslip
+      // forward, so sending nothing lets last month's דמי חגים be paid again.
+      // גלאם רות, 09.2026: four holidays, 26 days of seniority against the 90
+      // the rule wants, no row from us — and the accountant's import paid her
+      // דמי חגים anyway. See the switch-off block in shkulitAdapter.
+      holiday_pay_denied: holidayPay === 0
+        && (row.holiday_pay_auto?.ineligible || []).length > 0,
       calc_warnings: Array.isArray(b.warnings) ? b.warnings.slice() : [],
     },
   };

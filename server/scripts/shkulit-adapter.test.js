@@ -851,4 +851,96 @@ ok('an hourly employee whose day is worth ₪0 gets a note, not silence', () => 
   assert.ok(nn.some((n) => n.subject === 'ימי חופשה ללא תשלום (לבדיקה)'));
 });
 
+// ליאור מחפוד, 09.2026 — 28.85 hours past her commitment, approved for
+// payment, worth ₪1,829. A תקן employee's salary components are capped at the
+// agreed salary, so these hours cannot ride inside them; without a row of
+// their own the money simply never reached the file, while her card and her
+// estimated total both carried it.
+console.log('hours worked past the commitment are filed, under their own code');
+{
+  const lior = {
+    ...row, employee_number: '27', full_name: 'ליאור מחפוד', salary_type: 'global',
+    manual: {},
+    partial_absence: {
+      deduction: 152, effective_hours: 2.4,
+      extra_pay: 1829, extra_approved_hours: 28.85, committed_hours: 162.5,
+    },
+    breakdown: {
+      ...row.breakdown,
+      rates: { global_salary: 10300 },
+      components: {
+        base_salary: 10300,
+        teken_breakdown: {
+          teken_salary: 10300, regular_pay: 7685, ot125_pay: 554, ot150_pay: 0,
+          completion: 2062, hourly_value: 62.6, required_hours: 162.5,
+        },
+      },
+      deductions: {},
+    },
+  };
+  const src = buildExportSource('2026-09', [lior]);
+  ok('the source layer carries the approved extra hours and their pay', () => {
+    const ce = src.ready[0];
+    assert.strictEqual(ce.earnings.extra_hours_pay, 1829);
+    assert.strictEqual(ce.quantities.extra_hours, 28.85);
+  });
+  const { rows: rr, notes: nn } = shkulit.buildMovements(src);
+  ok('they go out as code 31, for the full amount', () => {
+    const c31 = rr.find((x) => x[2] === 1 && x[3] === 31);
+    assert.ok(c31, 'a code 31 row must exist — this is what was missing entirely');
+    assert.strictEqual(c31[4] * c31[5], 1829, 'the money filed must be the money owed');
+  });
+  ok('an inexact per-hour rate travels whole, with the count said in words', () => {
+    // 1829 ÷ 28.85 does not divide evenly, so the amount goes as כמות 1 rather
+    // than being rounded into a rate that would pay a different number.
+    const c31 = rr.find((x) => x[2] === 1 && x[3] === 31);
+    assert.deepStrictEqual(c31.slice(4), [1829, 1]);
+    assert.ok(nn.some((n) => n.subject === 'תוספת שעות מעל התקן' && /28\.85/.test(n.text)));
+  });
+  ok('an employee with no extra hours gets no code 31 row', () => {
+    const { rows: plain } = shkulit.buildMovements(buildExportSource('2026-09', [row]));
+    assert.ok(!plain.some((x) => x[3] === 31));
+  });
+}
+
+// גלאם רות, 09.2026 — four holidays in the month, entitled to none of them
+// (26 days of seniority against the 90 the rule wants). We filed no code 44,
+// which is correct arithmetic and the wrong instruction: שקלולית keeps a
+// component that is missing from this month's file at last month's value and
+// pays it again. The accountant reported after importing that she WAS being
+// paid דמי חגים.
+console.log('דמי חגים she is not entitled to are switched off, not left unsaid');
+{
+  const ineligible = [
+    { date: '2026-09-12', name: "ראש השנה א'", reasons: ['ותק לא מספיק (26 ימים, נדרשים 90)'] },
+    { date: '2026-09-21', name: 'יום כיפור', reasons: ['ותק לא מספיק (26 ימים, נדרשים 90)'] },
+  ];
+  const glam = {
+    ...row, employee_number: '140', full_name: 'גלאם רות', manual: {},
+    holiday_pay_auto: { total_pay: 0, total_days: 0, eligible: [], ineligible },
+  };
+  const src = buildExportSource('2026-09', [glam]);
+  ok('the source layer marks the denial — asked and answered, not merely absent', () => {
+    assert.strictEqual(src.ready[0].flags.holiday_pay_denied, true);
+  });
+  const { rows: rr, notes: nn } = shkulit.buildMovements(src);
+  ok('code 44 goes out at 0 × 0 so last month\'s figure cannot carry forward', () => {
+    assert.deepStrictEqual(rr.find((x) => x[2] === 1 && x[3] === 44)?.slice(4), [0, 0]);
+    assert.ok(nn.some((n) => n.subject === 'רכיבים שבוטלו' && /44/.test(n.text)));
+  });
+  ok('a month with no holidays at all is left alone — nothing was asked, nothing is said', () => {
+    const quiet = { ...glam, holiday_pay_auto: { total_pay: 0, total_days: 0, eligible: [], ineligible: [] } };
+    const s = buildExportSource('2026-09', [quiet]);
+    assert.strictEqual(s.ready[0].flags.holiday_pay_denied, false);
+    assert.ok(!shkulit.buildMovements(s).rows.some((x) => x[3] === 44));
+  });
+  ok('an office that pays her anyway is not overwritten by the zero', () => {
+    const paid = { ...glam, manual: { holiday_pay: 500 } };
+    const { rows: rr2 } = shkulit.buildMovements(buildExportSource('2026-09', [paid]));
+    const c44 = rr2.filter((x) => x[2] === 1 && x[3] === 44);
+    assert.strictEqual(c44.length, 1, 'exactly one code 44 row — the real one, not a real one and a zero');
+    assert.strictEqual(c44[0][4] * c44[0][5], 500);
+  });
+}
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

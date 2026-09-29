@@ -114,6 +114,13 @@ const ATTENDANCE = Object.freeze({
  * `sign` -1 marks a deduction, emitted as a negative amount so it cannot be
  * misread as pay.
  */
+/**
+ * ימי חג — code 44. Named rather than inlined because it is also the one code
+ * we file a deliberate ZERO for when an employee is not entitled; see the
+ * switch-off block at the end of buildMovements.
+ */
+const HOLIDAY_CODE = 44;
+
 const COMPONENTS = [
   // Two DIFFERENT completions, two DIFFERENT codes — confirmed with the user
   // 28.09.2026: code 47 is the AUTOMATIC תקן completion (calculateMonthlySalary's
@@ -123,8 +130,18 @@ const COMPONENTS = [
   // which conflated the two on the payslip.
   { key: 'salary_completion', code: 47, label: 'השלמת שכר', get: (ce) => ce.earnings.salary_completion },
   { key: 'one_time_salary_completion', code: 38, label: 'השלמת שכר חד פעמית', get: (ce) => ce.earnings.one_time_salary_completion },
+  // תוספת שעות מעל התקן — code 31, confirmed with the user 29.09.2026.
+  //
+  // A תקן employee's salary components are capped at the agreed salary, so
+  // hours worked PAST the commitment cannot ride inside them — they are money
+  // owed on top. ליאור מחפוד, 09.2026: 28.9 approved hours worth ₪1,829, shown
+  // on her card and counted in her estimated total, and absent from the file.
+  // Filed per-hour × quantity when the rate divides exactly, like any other
+  // counted component, so the payslip states the hours and not just the money.
+  { key: 'extra_hours', code: 31, label: 'תוספת שעות מעל התקן', unit: 'שעות',
+    get: (ce) => ce.earnings.extra_hours_pay, units: (ce) => ce.quantities.extra_hours },
   { key: 'travel', code: 3, label: 'נסיעות', get: (ce) => ce.earnings.travel },
-  { key: 'holiday_pay', code: 44, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
+  { key: 'holiday_pay', code: HOLIDAY_CODE, label: 'ימי חג', unit: 'ימים', get: (ce) => ce.earnings.holiday_pay, units: (ce) => ce.quantities.holiday_days },
   { key: 'sick_pay', code: 34, label: 'ימי מחלה', unit: 'ימים', get: (ce) => ce.earnings.sick_pay, units: (ce) => ce.quantities.sick_days },
   // בונוס — code 35, and בונוס אוגוסט rides the SAME code.
   //
@@ -679,16 +696,37 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     // Named codes that are neither filed by us nor already being switched off.
     const standing = alwaysZeroList.filter((z) => !nowCodes.has(key(z)) && !staleKeys.has(key(z)));
 
-    for (const p of [...stale, ...standing]) {
+    //   DENIED דמי חגים. The third source, and the one neither list above can
+    //   reach: a code we have never filed for her, because she has never been
+    //   entitled to it. Nothing we filed went stale, and nobody named 44 in
+    //   the settings screen — so the ordinary machinery has no reason to touch
+    //   it, and שקלולית quietly keeps paying whatever her payslip last carried.
+    //   גלאם רות, 09.2026: not entitled to any of the month's four holidays
+    //   (26 days of seniority against 90), no row from us, and the accountant
+    //   reported after the import that she was receiving דמי חגים.
+    //
+    //   A zero is honest here in a way a blanket zero would not be: the engine
+    //   was asked about her holidays this month and answered no. An office that
+    //   wants to pay her regardless types an amount into the table's דמי חגים
+    //   field, which files a real row — and the filed set is checked first, so
+    //   this cannot overwrite it.
+    const deniedHoliday = (ce.flags?.holiday_pay_denied
+      && !nowCodes.has(`${RECORD_TYPE.SALARY}:${HOLIDAY_CODE}`)
+      && !staleKeys.has(`${RECORD_TYPE.SALARY}:${HOLIDAY_CODE}`)
+      && !standing.some((z) => key(z) === `${RECORD_TYPE.SALARY}:${HOLIDAY_CODE}`))
+      ? [{ code: HOLIDAY_CODE, table: RECORD_TYPE.SALARY }] : [];
+
+    for (const p of [...stale, ...standing, ...deniedHoliday]) {
       rows.push([label, empNo, p.table || RECORD_TYPE.SALARY, p.code, 0, 0]);
     }
-    const all = [...stale, ...standing];
+    const all = [...stale, ...standing, ...deniedHoliday];
     if (all.length) {
       notes.push({
         employee_number: empNo, full_name: ce.employee.full_name,
         subject: 'רכיבים שבוטלו',
         text: `${all.length} רכיבים שאינם רלוונטיים החודש נשלחו עם 0 כדי לבטלם: קודים ${all.map((p) => p.code).join(', ')}.`
-          + (standing.length ? ` (${standing.map((z) => z.code).join(', ')} — מרשימת הקודים לביטול קבוע)` : ''),
+          + (standing.length ? ` (${standing.map((z) => z.code).join(', ')} — מרשימת הקודים לביטול קבוע)` : '')
+          + (deniedHoliday.length ? ` (${HOLIDAY_CODE} — אינה זכאית לדמי חגים החודש, נשלח 0 כדי ששקלולית לא תגרור את הסכום מהחודש הקודם)` : ''),
       });
     }
   }

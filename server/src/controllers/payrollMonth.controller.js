@@ -4154,6 +4154,14 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // real payslip shows one בונוס line, not two.
     const bonus = (r.bonus?.effective || 0) + (r.one_time_bonus?.amount || 0);
     const completion = isGlobal && (r.manual?.include_salary_completion !== false) ? (tb.completion || 0) : 0;
+    // השלמת שכר חד פעמית — the manual one-off (שקלולית code 38), a different
+    // thing from the automatic תקן completion above (code 47), and NOT
+    // teken-only: any salary type can carry one. אסתר גוטליב, 09.2026, hourly,
+    // ₪955 — it was in estimated_total and it was filed to שקלולית, but no
+    // field on this card ever named it, so the accountant was handed a total
+    // that none of the printed lines added up to.
+    const oneTimeCompletion = Number(r.one_time_salary_completion?.amount) || 0;
+    const oneTimeCompletionNote = r.one_time_salary_completion?.note || '';
     const paDed = r.partial_absence?.deduction || 0;
     const paExtra = r.partial_absence?.extra_pay || 0;
     // Extra-hours-beyond-commitment shown in HOURS (not ₪); the salary total
@@ -4221,13 +4229,14 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // Teken salary split — same columns as the salary table: שכר בסיס (regular) +
     // שכר שע״נ 125% + שכר שע״נ 150% + השלמת שכר, which sum to the agreed teken
     // salary. Only for teken; hourly staff keep a single שכר בסיס below.
-    const tekenSplitRow = (isGlobal && tb.teken_salary) ? `<tr style="background:#f6f9ff">
+    const hasTekenSplit = !!(isGlobal && tb.teken_salary);
+    const tekenSplitRow = hasTekenSplit ? `<tr style="background:#f6f9ff">
         ${cell('שכר בסיס', tb.regular_pay != null
           ? f(tb.regular_pay) + (tekenFactor != null ? emphLine(`מקדם תקן: ${tekenFactor}`) : '')
           : '', { bold: true })}
         ${cell('שכר שע״נ 125%', tb.ot125_pay ? f(tb.ot125_pay) : '')}
         ${cell('שכר שע״נ 150%', tb.ot150_pay ? f(tb.ot150_pay) : '')}
-        ${cell('השלמת שכר', completion ? f(completion) : '')}
+        ${cell('השלמת שכר (מעסיק)', completion ? f(completion) : '')}
         ${cell('בונוס אוגוסט', augBonus?.amount ? f(augBonus.amount) : '')}
         ${cell('סה״כ שכר תקן', f((tb.regular_pay || 0) + (tb.ot125_pay || 0) + (tb.ot150_pay || 0) + (completion || 0) + (Number(augBonus?.amount) || 0)), { bold: true })}
       </tr>` : '';
@@ -4236,6 +4245,62 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     const payRow = isGlobal
       ? `${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}${cell('', '')}${cell('', '')}`
       : `${cell('שכר בסיס', f(c.base_salary), { bold: true })}${cell('בונוס אוגוסט', augBonus?.amount ? f(augBonus.amount) : '')}${cell('נסיעות', c.travel ? f(c.travel) : '')}${cell('דמי חגים', holiday ? f(holiday) : '')}${cell('בונוס', bonus ? f(bonus) : '')}${cell('מחלה', sickVal)}`;
+
+    // The two completions, named apart, each SAYING WHAT IT IS FOR — the same
+    // two the salary table and the שקלולית file distinguish (codes 47 and 38).
+    // A bare figure labelled "השלמת שכר" tells the accountant nothing she can
+    // check; every completion here carries the arithmetic that produced it.
+    const wideCell = (label, value, span, opts = {}) => {
+      const has = value !== '' && value != null;
+      return `<td colspan="${span}" style="border:1px solid #e2e8f0;padding:4px 6px;vertical-align:top">
+        <div style="font-size:8.5px;color:#64748b;font-weight:700">${label}</div>
+        <div style="font-size:11px;font-weight:${opts.bold ? 800 : 600};color:${has ? (opts.color || '#0f172a') : '#cbd5e1'}">${has ? value : '—'}</div>
+      </td>`;
+    };
+    // Why the employer owes a completion at all: the agreed teken salary, less
+    // what the month's own work came to. The two numbers below it are the ones
+    // already printed in the teken split, so the accountant can add them up.
+    const employerWhy = (() => {
+      if (!completion) return '';
+      const worked = (tb.regular_pay || 0) + (tb.ot125_pay || 0) + (tb.ot150_pay || 0);
+      const parts = [];
+      if (tb.teken_salary) {
+        // Stated as two facts, not as a subtraction: both figures are rounded
+        // for print, so "10,300 פחות 8,239" can miss the completion beside it
+        // by a shekel and read like an error in the card.
+        parts.push(`להשלמת שכר התקן המוסכם ${f(tb.teken_salary)}`
+          + `; שכר העבודה החודש ${f(worked)}`
+          + (tekenFactor != null ? ` (מקדם ${tekenFactor})` : ''));
+      } else {
+        parts.push('השלמה לשכר התקן המוסכם');
+      }
+      if (Number(r.sick_info?.completion_offset) > 0) {
+        parts.push(`הופחתה ב-${f(r.sick_info.completion_offset)} בגין ימי מחלה ששולמו בנפרד`);
+      }
+      if (hasTekenSplit) parts.push('כבר כלולה בסה״כ שכר תקן שלמעלה — אין לשלם פעמיים');
+      return parts.join(' · ');
+    })();
+    // Why the one-off was entered: the hours the office keyed into the dialog,
+    // priced at her current hourly value, plus whatever they wrote as a reason.
+    const oneTimeWhy = (() => {
+      if (!oneTimeCompletion) return '';
+      const hrs = r.one_time_salary_completion?.hours || {};
+      const seg = [];
+      if (Number(hrs.regular) > 0) seg.push(`${n1(hrs.regular)} ש׳ רגילות`);
+      if (Number(hrs.ot125) > 0) seg.push(`${n1(hrs.ot125)} ש׳ שע״נ 125%`);
+      if (Number(hrs.ot150) > 0) seg.push(`${n1(hrs.ot150)} ש׳ שע״נ 150%`);
+      const parts = [];
+      if (seg.length) parts.push(seg.join(' + '));
+      if (oneTimeCompletionNote) parts.push(oneTimeCompletionNote);
+      if (!parts.length) parts.push('הוזנה ידנית — לא נרשמה סיבה');
+      return parts.join(' · ');
+    })();
+    const completionsRow = (completion > 0 || oneTimeCompletion > 0) ? `<tr style="background:#f0fdf4">
+        ${wideCell('השלמת שכר — ע״י המעסיק',
+          completion ? f(completion) + subLine(employerWhy) : '', 3, { color: '#15803d', bold: true })}
+        ${wideCell('השלמת שכר חד פעמית',
+          oneTimeCompletion ? f(oneTimeCompletion) + subLine(oneTimeWhy) : '', 3, { color: '#15803d', bold: true })}
+      </tr>` : '';
 
     // Per-branch payment detail — hourly staff who worked at >1 branch (or a
     // single branch at a non-standard rate), so the accountant sees exactly what
@@ -4303,6 +4368,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       <tr>
         ${payRow}
       </tr>
+      ${completionsRow}
       <tr>
         ${cell('חופשה', vac
           ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
