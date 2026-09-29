@@ -803,4 +803,52 @@ console.log('הבראה is keyed by hand, and still switched off the month after
   });
 }
 
+console.log('a תקן employee who worked no hours is paid ONCE — by the completion');
+{
+  // טטיאנה אייזנשטט, 09.2026: agreed ₪8,500, no hours worked (6 days of חופשה,
+  // 15 absent). The file carried 8,500 under code 1 AND 8,500 under code 47.
+  const tatiana = {
+    ...row, employee_number: '41', israeli_id: '300000041', full_name: 'טטיאנה אייזנשטט',
+    salary_type: 'global', manual: { include_salary_completion: true }, vacation_eff_days: 6,
+    breakdown: {
+      ...row.breakdown, rates: {},
+      hours: { total: 0, regular: 0, ot_125: 0, ot_150: 0, days_worked: 0 },
+      components: { base_salary: 8500, travel: 0,
+        teken_breakdown: { teken_salary: 8500, hourly_value: 52.31, regular_pay: 0, ot125_pay: 0, ot150_pay: 0, completion: 8500 } },
+      deductions: { absence: 5795.4 },
+    },
+    absence: { deductible_days: 15 },
+  };
+  ok('nothing under code 1; the salary travels once, under 47', () => {
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [tatiana]));
+    assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 1), 'code 1 must not carry the whole salary beside its own completion');
+    const c47 = rr.find((x) => x[2] === 1 && x[3] === 47);
+    assert.deepStrictEqual(c47.slice(4), [8500, 1]);
+    const salaryTotal = rr.filter((x) => x[2] === 1 && [1, 32, 33, 47].includes(x[3]))
+      .reduce((t, x) => t + x[4] * x[5], 0);
+    assert.strictEqual(salaryTotal, 8500, 'never ₪17,000');
+  });
+  ok('last month\'s code 1 is switched off instead', () => {
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [tatiana]),
+      new Map([['41', [{ code: 1, table: 1 }, { code: 47, table: 1 }]]]));
+    assert.deepStrictEqual(rr.find((x) => x[2] === 1 && x[3] === 1).slice(4), [0, 0]);
+  });
+  ok('a תקן employee with no commitment on file still goes out as the plain amount', () => {
+    const plain = { ...tatiana, breakdown: { ...tatiana.breakdown, components: { base_salary: 5000 } } };
+    const { rows: rr } = shkulit.buildMovements(buildExportSource('2026-09', [plain]));
+    assert.deepStrictEqual(rr.find((x) => x[2] === 1 && x[3] === 1).slice(4), [5000, 1]);
+    assert.ok(!rr.some((x) => x[3] === 47), 'and there is no completion to double it');
+  });
+}
+
+console.log('days of leave drawn with nothing paid for them are called out');
+ok('an hourly employee whose day is worth ₪0 gets a note, not silence', () => {
+  const noa = { ...row, employee_number: '40', full_name: 'נועה אביב', manual: {},
+    vacation_eff_days: 2.74, vacation_pay: 0, vacation_balance_available: 2.74 };
+  const { rows: rr, notes: nn } = shkulit.buildMovements(buildExportSource('2026-09', [noa]));
+  assert.deepStrictEqual(rr.find((x) => x[2] === 4 && x[3] === 1).slice(4), [0, 2.74]);
+  assert.ok(!rr.some((x) => x[2] === 1 && x[3] === 8));
+  assert.ok(nn.some((n) => n.subject === 'ימי חופשה ללא תשלום (לבדיקה)'));
+});
+
 console.log(`\nAll שקלולית adapter tests passed (${passed} checks).`);

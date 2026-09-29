@@ -312,7 +312,14 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       if (q.regular_hours) push(RECORD_TYPE.SALARY, HOURS.regular.code, hourlyRate, round2(q.regular_hours));
       if (q.ot_125_hours) push(RECORD_TYPE.SALARY, HOURS.ot125.code, round2(hourlyRate * HOURS.ot125.factor), round2(q.ot_125_hours));
       if (q.ot_150_hours) push(RECORD_TYPE.SALARY, HOURS.ot150.code, round2(hourlyRate * HOURS.ot150.factor), round2(q.ot_150_hours));
-    } else if (ce.earnings.teken_regular || ce.earnings.teken_ot125 || ce.earnings.teken_ot150) {
+    } else if (ce.earnings.teken_regular || ce.earnings.teken_ot125 || ce.earnings.teken_ot150
+      // A תקן split with NOTHING worked is still a תקן split. טטיאנה
+      // אייזנשטט, 09.2026 — six days of חופשה, fifteen absent, no hours: all
+      // three parts were zero, so this fell through to base_salary and filed
+      // 8,500 under code 1 — while base_salary already IS the completion, and
+      // the completion went out again under code 47. ₪17,000 for ₪8,500.
+      // Here, nothing goes under code 1 and the completion carries the salary.
+      || (ce.employee.salary_type === 'global' && Number(ce.earnings.teken_salary) > 0)) {
       // A תקן employee is filed the way her payslip reads: the full agreed
       // salary times its מקדם, and the hourly value times the overtime hours.
       //
@@ -492,6 +499,16 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
     if (vacDays > 0 && vacPay > 0 && !vacIsGlobal) {
       pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
         'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
+    } else if (vacDays > 0 && !vacIsGlobal) {
+      // The days leave her balance above, and nothing pays for them — an hourly
+      // employee whose day came out worth ₪0 (no rate on the card, no history).
+      // נועה אביב, 09.2026: 2.74 days drawn, ₪0 paid. Said out loud rather
+      // than filed silently.
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'ימי חופשה ללא תשלום (לבדיקה)',
+        text: `${vacDays} ימי חופשה נרשמו כניצול, אך שווי יום החופשה חושב כ-0 ולכן לא נשלח תשלום (קוד 8). כנראה חסר תעריף שעתי או היסטוריית שכר בכרטיס העובד/ת.`,
+      });
     }
 
     if (ce.quantities?.vacation_override_applied) {
