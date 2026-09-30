@@ -1245,10 +1245,13 @@ async function getMonth(req, res, next) {
       // pay ÷ days, where the two numbers had stopped describing the same
       // thing. An employee cannot be paid for leave the file says she did not
       // take.
-      const vacationPay = (!isTeken && vacUseRow.paid > 0)
+      let vacationPay = (!isTeken && vacUseRow.paid > 0)
         ? Math.round(vacUseRow.paid * vacationDayValue * 100) / 100
         : 0;
       if (vacationPay) breakdown.estimated_total = (breakdown.estimated_total || 0) + vacationPay;
+      // A תקן employee's leave is priced further down, AFTER the August carve —
+      // carved out of her completion rather than added to her total.
+      let tekenVacationUnfunded = 0;
 
       // --- Employer-declared closures paid to hourly staff -----------------
       // She punched nothing that day because the gan was shut by decision, so
@@ -1510,6 +1513,52 @@ async function getMonth(req, res, next) {
             reason: 'בונוס אוגוסט — ימי חופשת קיץ בתשלום',
           };
           breakdown.estimated_total = Math.round((breakdown.estimated_total + amount) * 100) / 100;
+        }
+      }
+
+      // --- A תקן employee's leave is תמורת חופשה, not השלמת שכר -------------
+      //
+      // Until 30.09.2026 a תקן employee's paid leave sat inside her השלמת שכר:
+      // her salary "already covers the days", so nothing was filed beside it and
+      // only the balance was drawn down. Owner's ruling that day: השלמת שכר
+      // (code 47) carries no social benefits and תמורת חופשה (code 8) does, so a
+      // day of leave filed as completion was costing her the pension on it.
+      //
+      // The same move as the August bonus above: the money CHANGES LINE, it is
+      // not added. Carved out of the completion, so estimated_total does not
+      // move by a shekel — and carved AFTER the August bonus, which has its own
+      // scaling rules and must see the completion it always saw.
+      //
+      //   value of a day = agreed salary ÷ committed days — the same dailyRate a
+      //     whole-day absence is deducted at, so a day away is worth one thing
+      //     whether it is leave or an absence (owner's choice, 30.09).
+      //   days = every day of leave credited this month, INCLUDING days past the
+      //     balance: a תקן employee is never capped (vacationUsageForMonth pays
+      //     her the full request) and the balance goes negative for גמר חשבון,
+      //     exactly as before — the owner ruled those days are תמורת חופשה too.
+      //   capped at the completion: if she worked enough elsewhere that the
+      //     completion is smaller than the leave's value, only what is there
+      //     moves. Paying more would raise her above the agreed salary — a new
+      //     payment, not a relabel. The part that did not fit is recorded, so
+      //     the accountant is told.
+      //
+      // No daily rate (no commitment on file) → nothing is carved and the
+      // leave stays inside the completion, as it always did.
+      if (isTeken && tb && vacUseRow.paid > 0 && dailyRate > 0) {
+        const want = Math.round(vacUseRow.paid * dailyRate * 100) / 100;
+        const available = Math.max(0, Number(tb.completion) || 0);
+        const carved = Math.round(Math.min(want, available) * 100) / 100;
+        tekenVacationUnfunded = Math.round((want - carved) * 100) / 100;
+        if (carved > 0) {
+          tb.completion = Math.round((available - carved) * 100) / 100;
+          tb.completion_reduced_by_vacation = carved;
+          breakdown.components.base_salary =
+            Math.round((Number(breakdown.components.base_salary || 0) - carved) * 100) / 100;
+          if (breakdown.components.pay_split) {
+            breakdown.components.pay_split.completion =
+              Math.round((Number(breakdown.components.pay_split.completion || 0) - carved) * 100) / 100;
+          }
+          vacationPay = carved; // a relabel — NOT added to estimated_total
         }
       }
 
@@ -1986,7 +2035,10 @@ async function getMonth(req, res, next) {
           // the gan was listed as shut.
           worked_on_holiday: vacationAutoInfo.worked_on_holiday,
         },
-        vacation_pay: vacationPay,        // paid for hourly (0 for תקן — covered by salary)
+        vacation_pay: vacationPay,        // hourly: on top of her pay · תקן: carved out of her completion
+        // תקן only: the part of her leave's value the completion could not
+        // cover (she worked enough elsewhere). Not paid — said to the accountant.
+        teken_vacation_unfunded: tekenVacationUnfunded,
         // How the day rates were arrived at, so the office can check them
         // against the payslip instead of taking them on trust.
         day_rates: dayRates && {
@@ -4252,6 +4304,19 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // A highlighted inline figure the accountant copies straight into the
     // payslip — bolder than subLine on purpose.
     const emphLine = (s) => `<div style="margin-top:2px;display:inline-block;font-size:10.5px;font-weight:800;color:#6d28d9;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:1px 6px">${s}</div>`;
+    // שווי ההתחייבות — the figure the מקדם is divided by, stated outright and
+    // emphasised (owner, 30.09.2026). The contract is a salary that INCLUDES the
+    // overtime built into the schedule, so hourly_value and the מקדם divide by
+    // the commitment with that overtime weighted in (a 10-hour day counts
+    // 10.5): 207 for a 198-hour month. The clock figure above it stays — it is
+    // what she was booked for — but it is not the number to divide by, and an
+    // accountant shown only that one would compute a different מקדם from ours.
+    // Declared below emphLine, not beside commitHrs: emphLine is a const, and
+    // reading it earlier throws for every תקן card.
+    const weightedHrs = Number(tb?.required_hours_weighted) || 0;
+    const commitWeightedLine = (isGlobal && weightedHrs > 0)
+      ? emphLine(`שווי התחייבות: ${n1(weightedHrs)} ש׳`)
+      : '';
     // Every card names the hourly value its pay is computed from — hourly
     // staff their contract rate, teken staff the value of a REGULAR hour:
     // salary ÷ OT-weighted committed hours (payrollCalc), the base that worked
@@ -4424,7 +4489,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ${inactiveNoteRow}
       <tr>
         ${cell('ימי עבודה', n1(h.days_worked))}
-        ${cell('סה״כ שעות', isGlobal && commitHrs ? `${n1(h.total)}${subLine('התחייבות: ' + n1(commitHrs) + ' ש׳')}${commitOpenLine}` : n1(h.total))}
+        ${cell('סה״כ שעות', isGlobal && commitHrs ? `${n1(h.total)}${subLine('התחייבות: ' + n1(commitHrs) + ' ש׳')}${commitOpenLine}${commitWeightedLine}` : n1(h.total))}
         ${cell('רגילות', n1(h.regular))}
         ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
         ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
@@ -4438,6 +4503,9 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       <tr>
         ${cell('חופשה', vac
           ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
+            // A תקן employee's leave is paid now (code 8, carved from 47), so
+            // the cell names the amount the file will carry.
+            + (isGlobal && Number(r.vacation_pay) > 0 ? emphLine(`תמורת חופשה: ${f(r.vacation_pay)}`) : '')
             + (vacBalanceKnown
               ? (vacUse.capped || vacUse.overdraft ? '' : subLine(`יתרה ${n1(vacUse.available)} — מכסה`))
               : subLine('היתרה לא רשומה במערכת — לבדוק בתלוש לפני תשלום'))
@@ -4478,7 +4546,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
           <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.unapproved_days || []).length || ''} ימי חופשת קיץ לא אושרו לתשלום — השכר הופחת ב-${f(augBonus.deduction)}.${(augBonus.unapproved_days || []).length ? subLine((augBonus.unapproved_days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
       ${(vac && isGlobal) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">חופשה (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.${vacBalanceKnown ? '' : ' <b style="color:#b91c1c">אין לעובדת יתרת פתיחה במערכת — משיכה מעבר ליתרה לא תירשם כחוב לגמר חשבון.</b>'}</span></td></tr>` : ''}
+          <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש. ${Number(r.vacation_pay) > 0 ? `שולמו כ<b>תמורת חופשה</b> (${f(r.vacation_pay)}, קוד 8) מתוך השלמת השכר — הסכום הכולל לא משתנה, רק השורה: תמורת חופשה מזכה בתנאים סוציאליים והשלמת שכר לא.` : 'לא נחתך מהשלמת השכר (אין לעובדת התחייבות או השלמה) — נשאר בתוך השכר הגלובלי.'}${Number(r.teken_vacation_unfunded) > 0 ? ` <b style="color:#b45309">${f(r.teken_vacation_unfunded)} משווי הימים לא נכנס — השלמת השכר קטנה ממנו, כי עבדה מעבר בימים אחרים.</b>` : ''}${vacBalanceKnown ? '' : ' <b style="color:#b91c1c">אין לעובדת יתרת פתיחה במערכת — משיכה מעבר ליתרה לא תירשם כחוב לגמר חשבון.</b>'}</span></td></tr>` : ''}
       ${(vac && !isGlobal) ? (r.manual?.vacation_pay_confirmed
         ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
             <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח: </span>

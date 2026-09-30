@@ -594,6 +594,13 @@ function calculateMonthlySalary(employee, punches, monthYM, opts = {}) {
     tekenBreakdown = {
       teken_salary: S,
       required_hours: H,
+      // The denominator of hourly_value and of the מקדם — the commitment with
+      // its built-in overtime weighted in (a 10-hour day counts 10.5). Carried
+      // so the accountant card can state it outright: the מקדם is regular hours
+      // ÷ THIS, and a card showing only the clock figure leaves him dividing by
+      // the wrong number. Not derived from hourly_value on the card, which is
+      // rounded to the agora.
+      required_hours_weighted: r2(rates.required_hours_weighted),
       hourly_value: r2(hv),
       regular_pay: r2(guaranteedRegular),   // שכר יסוד (regular hours within the salary)
       ot125_pay: r2(guaranteedOt125),       // שכר שע״נ 125% (within the salary)

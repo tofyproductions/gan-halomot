@@ -267,10 +267,11 @@ function toCanonicalEmployee(row) {
       recreation: recreation.amount,
       meal_vouchers: money(c.meal_vouchers),
       holiday_pay: holidayPay,
-      // תמורת חופשה — paid to an HOURLY employee only, and the engine already
-      // resolves it to 0 for a תקן employee: her salary does not move with the
-      // days, so the leave is drawn from the balance without adding money.
-      // The count still travels; only the money is absent.
+      // תמורת חופשה. HOURLY: paid on top of her hours. תקן (since 30.09.2026):
+      // carved out of her השלמת שכר by the engine, so salary_completion above
+      // is already the smaller figure and the two together are the same money —
+      // filed on code 8, which carries social benefits, instead of code 47,
+      // which does not.
       vacation_pay: money(row.vacation_pay),
       sick_pay: money(row.sick_info?.pay),
       // בונוס קבוע — the standing per-employee rule (fixed ₪, ₪/hour or

@@ -523,12 +523,16 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
       push(RECORD_TYPE.ATTENDANCE, ATTENDANCE.RESERVE_DAYS, 0, miluimDays);
     }
 
-    // ── the money, for an hourly employee only ──────────────────────────────
+    // ── the money ─────────────────────────────────────────────────────────────
     //
-    // A תקן salary does not move with the days; it already contains them, so
-    // there is nothing to pay beside it. An hourly employee is paid, and the
-    // row carries the daily rate.
-    if (vacDays > 0 && vacPay > 0 && !vacIsGlobal) {
+    // An hourly employee is paid for her leave on top of her hours. A תקן
+    // employee's salary does not move with the days — but since 30.09.2026 her
+    // leave is no longer left inside השלמת שכר: the engine carves it out of the
+    // completion (payrollMonth.controller) and it is filed here as תמורת חופשה,
+    // because code 47 carries no social benefits and code 8 does. Her code 47
+    // row is already the smaller completion, so the two together are the same
+    // money as before — on the line that is pensioned.
+    if (vacDays > 0 && vacPay > 0) {
       pushExact(RECORD_TYPE.SALARY, VACATION_CODE, vacPay / vacDays, vacDays, vacPay,
         'qty', 'תמורת חופשה', `${vacDays} ימי חופשה בתשלום`);
     } else if (vacDays > 0 && !vacIsGlobal) {
@@ -560,7 +564,7 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
         subject: 'ימי חופשה',
         text: ce.quantities?.vacation_capped
           ? `${vacDays} ימים לתשלום — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
-          : `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו במסגרת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`,
+          : `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו כתמורת חופשה (קוד 8) מתוך השלמת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`,
       });
     } else if (vacDays > 0) {
       // ── every other vacation row also gets a sentence ────────────────────
