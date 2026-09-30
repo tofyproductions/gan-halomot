@@ -160,7 +160,12 @@ async function notifyNewLead(lead, branch) {
   let recipients = [];
   if (lead.branch_id) {
     const managers = await User.find(branchManagerFilter(lead.branch_id)).select('email').lean();
-    recipients = managers.map(m => m.email).filter(Boolean);
+    // isRealEmail, not Boolean: a <ת"ז>@gan-halomot.local handle would pass
+    // Boolean, bounce, and — worse — make this list non-empty, which skips the
+    // office fallback four lines down. Filtering it out is what lets that
+    // fallback do its job.
+    const { isRealEmail } = require('../services/office-recipients.service');
+    recipients = managers.map(m => m.email).filter(isRealEmail);
   }
   // No branch (or no manager on it) → the office, by its "הורים וכספים" routing.
   if (recipients.length === 0) {

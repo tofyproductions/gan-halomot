@@ -5507,7 +5507,11 @@ async function remindBranchManager(req, res, next) {
 
     const managers = (await branchManagers([branchId])).get(String(branchId)) || [];
     const summary = buildReminderText(branch.name, month, branchMissing, branchDups, req);
-    const emails = managers.map(m => m.email).filter(Boolean);
+    // A manager whose login is the synthetic <ת"ז>@gan-halomot.local handle has
+    // no mailbox; this reminder used to bounce for her and reach nobody. It goes
+    // to the office instead, with a line saying whose it was.
+    const { to: emails, notice } = await require('../services/branch-recipients.service')
+      .mailableManagerEmails(managers, { what: 'תזכורת השלמת החתמות', branchName: branch.name });
     let emailed = 0;
     if (emails.length) {
       try {
@@ -5515,7 +5519,7 @@ async function remindBranchManager(req, res, next) {
           to: emails,
           subject: `השלמת החתמות — ${branch.name} — ${month}`,
           text: summary,
-          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${
+          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${notice}${
             summary.replace(/&/g, '&amp;').replace(/</g, '&lt;')
           }</div>`,
         });
@@ -5578,7 +5582,8 @@ async function assignPunchEntry(req, res, next) {
     }
 
     const summary = `${buildReminderText(branch.name, month, branchMissing, branchDups, req)}\n\nנפתחה עבורך משימה במערכת — היא תופיע בכניסה הבאה שלך לאפליקציה.`;
-    const emails = managers.map(m => m.email).filter(Boolean);
+    const { to: emails, notice } = await require('../services/branch-recipients.service')
+      .mailableManagerEmails(managers, { what: 'הקצאת משימת החתמות', branchName: branch.name });
     let emailed = 0;
     if (emails.length) {
       try {
@@ -5586,7 +5591,7 @@ async function assignPunchEntry(req, res, next) {
           to: emails,
           subject: `נדרשת השלמת החתמות — ${branch.name} — ${month}`,
           text: summary,
-          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${
+          html: `<div dir="rtl" style="font-family:Arial,sans-serif;white-space:pre-wrap">${notice}${
             summary.replace(/&/g, '&amp;').replace(/</g, '&lt;')
           }</div>`,
         });

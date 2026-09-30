@@ -203,7 +203,11 @@ async function notifyManagers(candidate, { created, reopened }) {
   const emails = new Set(await require('../services/office-recipients.service').officeEmails('hr'));
   for (const bid of branchIds) {
     const managers = await User.find(branchManagerFilter(bid)).select('email').lean().catch(() => []);
-    managers.forEach(m => m.email && emails.add(m.email));
+    // A synthetic <ת"ז>@gan-halomot.local login is not a mailbox; the office
+    // is already in this set, so a manager without a real address is skipped
+    // rather than bouncing the whole send.
+    const { isRealEmail } = require('../services/office-recipients.service');
+    managers.forEach(m => isRealEmail(m.email) && emails.add(m.email));
   }
   if (emails.size === 0) return;
 

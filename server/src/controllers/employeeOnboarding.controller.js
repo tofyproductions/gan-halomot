@@ -147,7 +147,10 @@ async function notifyOffice(doc, branch) {
   const emails = new Set(await require('../services/office-recipients.service').officeEmails('hr'));
   if (doc.branch_id) {
     const managers = await User.find(branchManagerFilter(doc.branch_id)).select('email').lean().catch(() => []);
-    managers.forEach(m => m.email && emails.add(m.email));
+    // See careers.controller: a login handle is not an address, and the office
+    // is already in this set.
+    const { isRealEmail } = require('../services/office-recipients.service');
+    managers.forEach(m => isRealEmail(m.email) && emails.add(m.email));
   }
   if (emails.size === 0) return;
   // Deliberately NOT the bank details. This mail lands in several inboxes and

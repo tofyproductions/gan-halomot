@@ -2773,7 +2773,11 @@ async function managerBranchEmails(group, stored) {
   if (!br) return [];
   if (stored[String(br._id)]) return [stored[String(br._id)]];
   const mgrs = await User.find(branchManagerFilter(br._id)).select('email').lean();
-  return [...new Set(mgrs.map(m => m.email).filter(Boolean))];
+  // A login handle is not a mailbox. The per-branch override above
+  // (branch_manager_emails) is where a branch with no reachable manager gets a
+  // real address.
+  const { isRealEmail } = require('../services/office-recipients.service');
+  return [...new Set(mgrs.map(m => m.email).filter(isRealEmail))];
 }
 
 // POST /payslip-audit/history/:id/send-managers — each branch manager gets the

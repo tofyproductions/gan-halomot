@@ -2063,14 +2063,19 @@ async function sendHoursReportsToManagers(req, res, next) {
       const bid = String(br._id);
       if (allowed && !allowed.includes(bid)) continue;
       const managers = await User.find(branchManagerFilter(br._id)).select('email full_name').lean();
-      const emails = [...new Set(managers.map(m => m.email).filter(Boolean))];
+      // 'no_manager' below used to mean two different things — a branch with no
+      // manager, and a manager with only a login handle for an address. The
+      // second is a missing field, not a missing person, so it goes to the
+      // office with a line naming her instead of being reported as absent.
+      const { to: emails, notice } = await require('../services/branch-recipients.service')
+        .mailableManagerEmails(managers, { what: 'דוח שעות חודשי', branchName: br.name });
       const employees = await Employee.find({ branch_id: br._id, is_active: true }).populate('branch_id', 'name').sort({ full_name: 1 }).lean();
       if (employees.length === 0) { results.push({ branch: br.name, status: 'no_employees' }); continue; }
       if (emails.length === 0) { results.push({ branch: br.name, status: 'no_manager' }); continue; }
 
       const reports = await buildHoursReportsForEmployees(employees, range, ymPrefix);
 
-      const html = buildHoursReportHtml(br.name, ymPrefix, reports);
+      const html = notice + buildHoursReportHtml(br.name, ymPrefix, reports);
       // Put the report both inline (works on every email provider) and as an
       // attachment (the Apps Script provider converts it to a PDF).
       const intro = `<div dir="rtl" style="font-family:Arial,sans-serif"><p>שלום,</p>

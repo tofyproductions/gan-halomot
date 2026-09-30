@@ -190,7 +190,12 @@ async function alertRecipients(branchId) {
     $or: branchManagerClauses(branchId),
   }).select('email').lean();
   const office = await require('../services/office-recipients.service').officeEmails('system_faults');
-  return [...new Set([...managers.map(m => m.email).filter(Boolean), ...office])];
+  // isRealEmail, not Boolean: most logins carry <ת"ז>@gan-halomot.local, which
+  // is a login handle and not a mailbox — mail to it bounces. The office is
+  // already on this list, so dropping an unreachable manager cannot silence
+  // the alert.
+  const { isRealEmail } = require('../services/office-recipients.service');
+  return [...new Set([...managers.map(m => m.email).filter(isRealEmail), ...office])];
 }
 
 async function maybeAlertClockDown(branch, now) {
