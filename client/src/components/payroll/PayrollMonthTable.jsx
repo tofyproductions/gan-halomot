@@ -3239,7 +3239,7 @@ export default function PayrollMonthTable() {
             <TableRow>
               <SubHeaderGroup color={{ sub: COLOR.background.sunken, accent: COLOR.info.dark, border: COLOR.info.soft }} />
               <TableCell align="center" sx={{ fontWeight: 700, bgcolor: COLOR.payrollColumn.base.head }}>
-                <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה (שכר תקן ÷ שעות התחייבות). שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
+                <Tooltip arrow title="תשלום בגין השעות הרגילות בלבד. תקן: שעות רגילות × ערך שעה רגילה — שכר תקן ÷ שעות התחייבות משוקללות, שבהן כל שעה נוספת שבנויה בתוך ההתחייבות נספרת ×1.25 או ×1.5. כך עבודה בדיוק לפי ההתחייבות נותנת בדיוק את שכר התקן. שעתי: שעות רגילות × תעריף. שע״נ מוצג בעמודות הנפרדות.">
                   <span style={{ borderBottom: '1px dotted', cursor: 'help' }}>שכר בסיס ⓘ</span>
                 </Tooltip>
               </TableCell>
@@ -3747,7 +3747,7 @@ function TekenBasePartCell({ row, onOpenHours, branchPay }) {
   let otNote = null;
   if (row.salary_type === 'global' && tb) {
     mainValue = split ? split.reg : (tb.regular_pay ?? tb.base_part);
-    perHourLabel = `ערך/שעה: ${tb.hourly_value}`;
+    perHourLabel = `ערך שעה רגילה: ${tb.hourly_value}`;
   } else if (row.salary_type === 'global') {
     // Flat global salary (no required_hours — e.g. a manager) — show the full
     // agreed salary so it isn't blank.
@@ -4341,7 +4341,9 @@ function PartialAbsenceDialog({ open, row, month, disabled, canAccounting, onClo
                     <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ fontSize: 13 }}>
                       <span>התחייבות חודשית: <b>{pa.committed_hours} ש׳</b></span>
                       <span>עבד/ה בפועל: <b>{pa.worked_hours} ש׳</b></span>
-                      <span>ערך שעה: <b>₪{hv.toLocaleString('he-IL')}</b></span>
+                      <Tooltip arrow title="שכר התקן ÷ שעות ההתחייבות בשעון. זה הערך הממוצע של שעה מתוך ההתחייבות — שעות רגילות ושעות 125% יחד — ולכן החסרה של חלק מההתחייבות עולה בדיוק אותו חלק מהשכר. שונה בכוונה מ״ערך שעה רגילה״ שליד השכר.">
+                        <span>ערך ממוצע לשעת התחייבות: <b>₪{hv.toLocaleString('he-IL')}</b></span>
+                      </Tooltip>
                       <span>שעות לקיזוז (לא מאושרות): <b>{deductHours}</b></span>
                       <span>ניכוי בפועל: <b style={{ color: COLOR.error.dark }}>−₪{deduction.toLocaleString('he-IL')}</b></span>
                     </Stack>

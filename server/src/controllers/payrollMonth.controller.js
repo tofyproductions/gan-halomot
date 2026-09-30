@@ -4193,20 +4193,40 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // made-up cap), with the unexcused short days + hours listed underneath.
     const paDedDays = (r.partial_absence?.candidates || []).filter(c => !c.excused);
     const paEffHours = r.partial_absence?.effective_hours || 0;
+    // The rate these hours are priced at, stated beside them. The card shows
+    // QUANTITIES and leaves the accountant to apply the rate — and the only
+    // other rate on this card is the "ערך שעה רגילה" next to the salary, which
+    // is NOT this one. For a תקן employee a missing hour is valued at the
+    // AVERAGE committed hour (salary ÷ clock hours: 9,000 ÷ 198 = 45.45), not at
+    // a regular hour (salary ÷ weighted hours: 9,000 ÷ 207 = 43.48), because a
+    // committed schedule with 10-hour days is part regular and part 125%, and
+    // missing 1/198 of it should cost 1/198 of the salary. Unlabelled, 6.6 hours
+    // × the 43.5 printed above is ₪287 against the ₪299 we deduct.
+    const paHv = Number(r.partial_absence?.hourly_value) || 0;
+    // Two decimals, not n1's one: this is the figure the accountant MULTIPLIES
+    // by, and the dialog on the salary screen prints 45.45 — a card saying 45.5
+    // beside it would be a fresh version of the very mismatch this line exists
+    // to explain.
+    const paRateLine = paHv ? subLine(`לפי ₪${paHv.toFixed(2)} לשעה (ממוצע שעת התחייבות)`) : '';
     const paDedVal = paEffHours > 0
-      ? `${n1(paEffHours)} ש׳` + (paDedDays.length ? subLine(paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')) : '')
+      ? `${n1(paEffHours)} ש׳` + paRateLine
+        + (paDedDays.length ? subLine(paDedDays.map(c => `${ddmm(c.date)}(${n1(c.shortfall_h)}ש)`).join(' · ')) : '')
       : '';
     const advance = r.manual?.advance_deduction_preset?.label || r.manual?.advance_deduction_text || '';
     // A highlighted inline figure the accountant copies straight into the
     // payslip — bolder than subLine on purpose.
     const emphLine = (s) => `<div style="margin-top:2px;display:inline-block;font-size:10.5px;font-weight:800;color:#6d28d9;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:1px 6px">${s}</div>`;
     // Every card names the hourly value its pay is computed from — hourly
-    // staff their contract rate, teken staff the derived salary/committed-hours
-    // value (the one that prices OT, absences and the August bonus alike).
+    // staff their contract rate, teken staff the value of a REGULAR hour:
+    // salary ÷ OT-weighted committed hours (payrollCalc), the base that worked
+    // hours and their 125%/150% premiums are priced from. Labelled "רגילה"
+    // because it is not the only hourly figure on a תקן card: missing and
+    // extra hours are valued at the average committed hour instead (see
+    // paRateLine), and the two used to share the bare label "ערך שעה".
     const rateCell = isGlobal
       ? cell('שכר תקן' + (r.salary_is_net ? ' (נטו)' : ''),
           b.rates?.global_salary
-            ? f(b.rates.global_salary) + (tb.hourly_value ? emphLine(`ערך שעה: ₪${n1(tb.hourly_value)}`) : '')
+            ? f(b.rates.global_salary) + (tb.hourly_value ? emphLine(`ערך שעה רגילה: ₪${n1(tb.hourly_value)}`) : '')
             : '')
       : cell('תעריף שעה', b.rates?.hourly_rate ? f(b.rates.hourly_rate) : '');
     // The payslip's standard-salary coefficient (מקדם): worked base pay as a
@@ -4391,7 +4411,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}
         ${cell('סיבוס', nt(r.manual?.cibus))}
-        ${cell('תוספת שעות (מעל התקן)', paExtraHrs ? `${n1(paExtraHrs)} ש׳${paExtra ? ` · ${f(paExtra)}` : ''}` : '', { color: '#15803d' })}
+        ${cell('תוספת שעות (מעל התקן)', paExtraHrs ? `${n1(paExtraHrs)} ש׳${paExtra ? ` · ${f(paExtra)}` : ''}` + paRateLine : '', { color: '#15803d' })}
       </tr>
       <tr>
         ${cell('קיזוז מקדמה', advance)}
