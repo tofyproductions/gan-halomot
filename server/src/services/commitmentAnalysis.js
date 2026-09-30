@@ -75,7 +75,7 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     return {
       committed_dates: [], off_dates: [], worked_dates: [], absent_dates: [],
       off_day_workdays: [], net_absent: 0, committed_hours: 0,
-      committed_weighted_hours: 0, has_commitment: false,
+      committed_weighted_hours: 0, has_commitment: false, hours_by_date: {},
     };
   }
 
@@ -116,6 +116,13 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
   const off = [];
   let committed_hours = 0;          // total contracted CLOCK hours this month (for display)
   let committed_weighted_hours = 0; // same hours but OT-weighted (for the teken hourly value)
+  // Clock hours per committed date, so a caller holding the month's CLOSURES
+  // can say how much of the commitment fell on days the gan was shut. The
+  // monthly total counts every committed weekday on the calendar — holidays
+  // included, on purpose (see payrollMonth's closure_hours) — and on its own
+  // reads as "the hours she was expected to work", which in a holiday month it
+  // is not. Alternating-day hours carry no date and are not in here.
+  const hoursByDate = {};
   for (const day of datesInMonth(monthYM)) {
     // Saturday (weekday=6) is never a work day in Israel — skip.
     if (day.weekday === 6) continue;
@@ -139,6 +146,7 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
       committed.push(day.ymd);
       committed_hours += dayHours;
       committed_weighted_hours += weightedDayHours(dayHours);
+      hoursByDate[day.ymd] = dayHours;
     }
   }
   // Fixed alternating count: add the whole month's contribution once.
@@ -166,6 +174,7 @@ function analyzeCommitment(commitment, punches, monthYM, excludeDates) {
     net_absent,
     committed_hours: Math.round(committed_hours * 100) / 100,
     committed_weighted_hours: Math.round(committed_weighted_hours * 100) / 100,
+    hours_by_date: hoursByDate,
     has_commitment: true,
   };
 }

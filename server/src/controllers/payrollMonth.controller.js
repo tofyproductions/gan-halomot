@@ -908,6 +908,31 @@ async function getMonth(req, res, next) {
       const commitmentInfo = analyzeCommitment(
         commitmentByEmp.get(String(emp._id)), countablePunches, month,
       );
+      /**
+       * How much of the commitment fell on days the gan was SHUT.
+       *
+       * committed_hours counts every committed weekday on the calendar,
+       * holidays included — deliberately, because a monthly salary pays for
+       * them and dividing it by open days only would nearly double the hourly
+       * value in any month with חגים (September 2026: 9,000 ÷ 124.5 = 72.29
+       * against 43.48 in a month without). So the total is right for pricing
+       * and wrong as a reading of "hours she was expected to be at work": in
+       * September 79 of אפרת משעלי's 198 committed hours were ראש השנה, כיפור
+       * and סוכות. Shown beside the total on the card, it stops 198 being read
+       * against the 123.6 she worked.
+       *
+       * Closures only (holidayDates: branch holidays + paid special days). Her
+       * OWN approved leave is not a closure — the gan was open and she was
+       * away — so it stays inside the open-day figure, where it belongs.
+       */
+      if (commitmentInfo.has_commitment) {
+        const byDate = commitmentInfo.hours_by_date || {};
+        const closureHours = commitmentInfo.committed_dates
+          .filter((d) => holidayDates.has(d))
+          .reduce((sum, d) => sum + (Number(byDate[d]) || 0), 0);
+        commitmentInfo.closure_hours = Math.round(closureHours * 100) / 100;
+        commitmentInfo.open_hours = Math.round((commitmentInfo.committed_hours - closureHours) * 100) / 100;
+      }
 
       // Absence only applies to תקן (global) employees — an hourly employee is
       // paid solely for the hours she punched, so "absence" is meaningless.
@@ -1826,6 +1851,8 @@ async function getMonth(req, res, next) {
         commitment: commitmentInfo.has_commitment ? {
           committed_days: commitmentInfo.committed_dates.length,
           committed_hours: commitmentInfo.committed_hours,  // contracted hours this month
+          closure_hours: commitmentInfo.closure_hours ?? 0,  // of those, on days the gan was shut
+          open_hours: commitmentInfo.open_hours ?? commitmentInfo.committed_hours, // on days it was open
           off_days: commitmentInfo.off_dates.length,
           absent_days: commitmentInfo.absent_dates,         // ymd[] for tooltip
           off_day_workdays: commitmentInfo.off_day_workdays, // ymd[] of compensation
@@ -4184,6 +4211,15 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     // applies the rate themselves). The specific dates are listed underneath.
     const ddmm = (ymd) => { const p = String(ymd).split('-'); return p.length === 3 ? `${p[2]}/${p[1]}` : ymd; };
     const subLine = (s) => `<div style="font-size:8px;color:#64748b;font-weight:600;margin-top:1px">${s}</div>`;
+    // The commitment total includes closure days (it has to — see closure_hours
+    // in getMonth), so in a holiday month it is not the figure to hold the
+    // worked hours against. Said only when some of it WAS a closure; a month
+    // with none needs no second number. Below subLine, not beside commitHrs:
+    // subLine is a const, and reading it earlier throws for every תקן card.
+    const closureHrs = Number(r.commitment?.closure_hours) || 0;
+    const commitOpenLine = (closureHrs > 0 && r.commitment?.open_hours != null)
+      ? subLine(`מתוכן ${n1(r.commitment.open_hours)} בימים פתוחים`)
+      : '';
     const absDates = r.absence?.deductible_dates || [];
     const absDays = r.absence?.deductible_days || 0;
     const absVal = absDays > 0
@@ -4388,7 +4424,7 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       ${inactiveNoteRow}
       <tr>
         ${cell('ימי עבודה', n1(h.days_worked))}
-        ${cell('סה״כ שעות', isGlobal && commitHrs ? `${n1(h.total)}${subLine('התחייבות: ' + n1(commitHrs) + ' ש׳')}` : n1(h.total))}
+        ${cell('סה״כ שעות', isGlobal && commitHrs ? `${n1(h.total)}${subLine('התחייבות: ' + n1(commitHrs) + ' ש׳')}${commitOpenLine}` : n1(h.total))}
         ${cell('רגילות', n1(h.regular))}
         ${cell('שע״נ 125%', h.ot_125 ? n1(h.ot_125) : '')}
         ${cell('שע״נ 150%', h.ot_150 ? n1(h.ot_150) : '')}
