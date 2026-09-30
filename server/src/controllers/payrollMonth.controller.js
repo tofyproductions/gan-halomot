@@ -5924,6 +5924,7 @@ async function sendToAccountant(req, res, next) {
     let masterForHandoff = null;
     let movementsFiled = null;
     let shkulitFailed = [];
+    let shkulitNoBank = [];
     let shkulitError = null;
     try {
       const source = await shkulitSourceFor(req, month);
@@ -5939,6 +5940,13 @@ async function sendToAccountant(req, res, next) {
           contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         });
         shkulitFailed = source.failed || [];
+        // Went INTO the file but has no bank account. Not a failure — her salary
+        // travels — so it does not belong in the red block; but it must not
+        // vanish either, or the transfer fails and nobody knew to key it.
+        shkulitNoBank = (source.ready || [])
+          .filter((ce) => ce.employee.bank && ce.employee.bank.account !== undefined
+            && !String(ce.employee.bank.account).trim())
+          .map((ce) => ce.employee.full_name || ce.employee.employee_number);
 
         // The master is issued ON CHANGE, not monthly — the accountant already
         // holds everyone she keyed. Attaching an unchanged master every month
@@ -5979,6 +5987,13 @@ async function sendToAccountant(req, res, next) {
                ${shkulitFailed.map(f => `<li><b>${f.full_name || f.employee_number || 'עובד/ת'}</b> — ${(f.errors || []).join(' · ')}</li>`).join('')}
              </ul>
              <p style="margin:6px 0 0">הכרטיסים המצורפים כן כוללים אותן, כך שאפשר להקליד אותן ידנית.</p>
+           </div>`
+        : '')
+      + (shkulitNoBank.length && !shkulitError
+        ? `<div dir="rtl" style="font-family:Arial,sans-serif;border:2px solid #d97706;background:#fffbeb;padding:12px;border-radius:8px;margin-bottom:12px">
+             <p style="font-weight:800;color:#92400e;margin:0 0 6px">חסר חשבון בנק — ${shkulitNoBank.length} ${shkulitNoBank.length === 1 ? 'עובדת' : 'עובדות'}</p>
+             <p style="margin:0 0 6px">נתוני השכר שלהן <b>נמצאים</b> בקובץ. אין להן מספר חשבון בנק במערכת, ולכן יש להזין אותו בשקלולית לפני העברת המשכורת:</p>
+             <p style="margin:0"><b>${shkulitNoBank.join(' · ')}</b></p>
            </div>`
         : '');
 

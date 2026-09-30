@@ -171,11 +171,15 @@ console.log('auditEmployee — blocks and warns');
   const good = toCanonicalEmployee(validHourlyRow());
   assert.deepStrictEqual(auditEmployee(good).errors, []);
 
+  // A missing bank account WARNS and no longer blocks (30.09.2026). The
+  // movements file carries no bank field, so holding her out protected nothing
+  // and made שקלולית carry her previous payslip forward instead — גאליה כהן's
+  // test import showed August's 9.6 hours for a September she worked 108.6.
   const noBank = toCanonicalEmployee(validHourlyRow({ bank_account: '' }));
   const rBank = auditEmployee(noBank);
-  assert.strictEqual(rBank.errors.length, 1);
-  assert.ok(rBank.errors[0].includes('חסר מספר חשבון בנק'));
-  ok('missing bank account → one blocking error, readable');
+  assert.strictEqual(rBank.errors.length, 0);
+  assert.ok(rBank.warnings.some(w => w.includes('חסר מספר חשבון בנק')));
+  ok('missing bank account → a warning, not a block — her salary still travels');
 
   const noNum = toCanonicalEmployee(validHourlyRow({ employee_number: '' }));
   assert.ok(auditEmployee(noNum).errors.some(e => e.includes('חסר מספר עובד')));
@@ -186,7 +190,10 @@ console.log('buildExportSource — sorts ready / failed / skipped');
 {
   const rows = [
     validHourlyRow(),                                                  // ready
-    validHourlyRow({ employee_id: 'e2', full_name: 'דנה כהן', bank_account: '' }), // failed
+    // Failed for a reason that still blocks: no employee number, so the row
+    // cannot be matched to anybody in שקלולית. (A missing bank account used to
+    // be this example; it is a warning now.)
+    validHourlyRow({ employee_id: 'e2', full_name: 'דנה כהן', employee_number: '' }), // failed
     validHourlyRow({ employee_id: 'e3', full_name: 'יעל בר', is_freelancer: true }), // skipped
     validHourlyRow({ employee_id: 'e4', full_name: 'מיה גל', is_active: false, inactive_reason: 'סיום העסקה' }), // skipped
   ];

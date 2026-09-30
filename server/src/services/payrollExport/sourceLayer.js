@@ -365,13 +365,24 @@ function auditEmployee(ce) {
     warnings.push(`${name}: תעודת זהות באורך ${id.length} ספרות (לא 9) — ודא שזה תקין (דרכון/מספר זמני).`);
   }
 
-  // Blocking: no bank account, no salary payment.
+  // Bank details. The field ABSENT (undefined) means the caller fetched without
+  // bank permission — a setup problem, not this employee's, and still blocking:
+  // auditMonth escalates it once, globally.
+  //
+  // A bank account that is merely EMPTY used to block her too, and that was
+  // wrong. The movements file carries no bank field at all — month, employee
+  // number, record type, code, rate, quantity — so holding her out of it
+  // protected nothing. What it did do (גאליה כהן, 30.09.2026): our file said
+  // nothing about her, שקלולית copied her August payslip forward, and the test
+  // import showed 9.6 hours for a month she worked 108.6 — which read as the
+  // system miscalculating. Her salary now travels; the missing account is a
+  // warning, and she is held out of the employee MASTER instead (buildMaster),
+  // because that file does carry bank columns and would send them blank.
   if (ce.employee.bank.account === undefined) {
-    // Field absent = fetched without bank permission. This is a setup problem,
-    // not this employee's problem. auditMonth escalates it once, globally.
     errors.push(`${name}: פרטי בנק אינם זמינים (הרשאת צפייה חסרה).`);
   } else if (!String(ce.employee.bank.account).trim()) {
-    errors.push(`${name}: חסר מספר חשבון בנק.`);
+    warnings.push(`${name}: חסר מספר חשבון בנק — נתוני השכר נשלחים, אבל שקלולית לא תדע לאן להעביר את המשכורת. `
+      + 'העובדת לא תיכלל בקובץ פרטי העובדים עד שיוזן חשבון.');
   } else {
     if (!String(ce.employee.bank.code || '').trim()) warnings.push(`${name}: חסר קוד בנק.`);
     if (!String(ce.employee.bank.branch || '').trim()) warnings.push(`${name}: חסר מספר סניף בנק.`);

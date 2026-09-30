@@ -271,6 +271,21 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
   for (const ce of source.ready) {
     const empNo = ce.employee.employee_number;
 
+    // Filed without a bank account — said IN the file. A missing account used
+    // to hold her out entirely (and her failure was listed by name in the
+    // accountant's email). It no longer does, because the salary is what
+    // matters and this file carries no bank field; but the accountant still
+    // has to key the account in שקלולית before the transfer, and a warning that
+    // lived only in the export dialog would reach nobody who imports this.
+    if (ce.employee.bank && ce.employee.bank.account !== undefined
+        && !String(ce.employee.bank.account).trim()) {
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: 'חסר חשבון בנק',
+        text: 'נתוני השכר נשלחו, אבל אין לעובדת מספר חשבון בנק במערכת. יש להזין אותו בשקלולית לפני העברת המשכורת.',
+      });
+    }
+
     // Every row this employee gets is recorded as it is pushed, so the caller
     // can remember the set and next month can switch off whatever leaves it.
     // A zero row is deliberately NOT recorded — it is the switch-off itself,
@@ -789,7 +804,18 @@ const dateCell = (d) => {
  */
 function buildMaster(source, extras = new Map()) {
   const rows = [];
+  // Held out of THIS file, not out of the export. A missing bank account no
+  // longer blocks an employee's salary movements (see auditEmployee), but the
+  // master carries bank code/branch/account columns and would send them empty
+  // — and an employee already in שקלולית, whose account the accountant keyed
+  // there by hand, could have it blanked by our import. So she waits here until
+  // the account is on her card; her salary does not wait with her.
+  const heldBack = [];
   for (const ce of source.ready) {
+    if (!String(ce.employee.bank?.account || '').trim()) {
+      heldBack.push({ employee_number: ce.employee.employee_number, full_name: ce.employee.full_name });
+      continue;
+    }
     const { first, last } = splitName(ce.employee.full_name);
     const ex = extras.get(ce.employee.employee_number) || {};
     rows.push([
@@ -808,7 +834,7 @@ function buildMaster(source, extras = new Map()) {
       '', '', '', '', // תת מחלקה / יישובי פיתוח / ב"ל / קופ"ח — לרו"ח
     ]);
   }
-  return { header: MASTER_HEADER, rows };
+  return { header: MASTER_HEADER, rows, held_back: heldBack };
 }
 
 /**

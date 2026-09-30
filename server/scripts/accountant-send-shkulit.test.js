@@ -35,6 +35,7 @@ require.cache[emailPath] = {
 const assert = require('assert');
 const XLSX = require('xlsx');
 const { buildExportSource } = require('../src/services/payrollExport/sourceLayer');
+const shkulit = require('../src/services/payrollExport/shkulitAdapter');
 
 let passed = 0;
 function ok(label) { console.log('  ✓ ' + label); passed++; }
@@ -152,9 +153,12 @@ function validRow(over = {}) {
 
   console.log('a failed employee never disappears quietly');
   {
+    // Failed for a reason that still blocks — no employee number, so there is
+    // nobody in שקלולית to attach her rows to. (This used to be a missing bank
+    // account; since 30.09.2026 that is a warning, pinned in the next block.)
     const source = buildExportSource('2026-09', [
       validRow(),
-      validRow({ employee_id: 'e2', full_name: 'דנה כהן', employee_number: '1048', bank_account: '' }),
+      validRow({ employee_id: 'e2', full_name: 'דנה כהן', employee_number: '' }),
     ]);
     assert.strictEqual(source.failed.length, 1);
     assert.strictEqual(source.failed[0].full_name, 'דנה כהן');
@@ -162,7 +166,33 @@ function validRow(over = {}) {
     // body. If it were empty, an accountant could import a short file believing
     // it whole — which is a person who does not get paid.
     assert.ok((source.failed[0].errors || []).length > 0, 'the failure carries a readable reason');
-    ok('an employee missing a bank account is reported by name, with a reason');
+    ok('an employee who cannot be filed is reported by name, with a reason');
+  }
+
+  console.log('a missing bank account never disappears quietly either');
+  {
+    // She is FILED now — the movements file carries no bank field, and holding
+    // her out made שקלולית carry her previous payslip forward (גאליה כהן:
+    // August's 9.6 hours shown for a September she worked 108.6). But the
+    // accountant must still key the account before the transfer, so it has to
+    // reach the file and the master has to leave her out rather than send the
+    // bank columns blank over whatever שקלולית already holds.
+    const source = buildExportSource('2026-09', [
+      validRow(),
+      validRow({ employee_id: 'e2', full_name: 'דנה כהן', employee_number: '1048', bank_account: '' }),
+    ]);
+    assert.strictEqual(source.failed.length, 0, 'not a failure');
+    assert.ok(source.ready.some((ce) => ce.employee.full_name === 'דנה כהן'), 'she is in the file');
+
+    const { rows, notes } = shkulit.buildMovements(source, new Map(), {});
+    assert.ok(rows.some((r) => String(r[1]) === '1048'), 'her salary rows are in the movements file');
+    const note = notes.find((n) => String(n.employee_number) === '1048' && n.subject === 'חסר חשבון בנק');
+    assert.ok(note, 'and the missing account is a note in the same file');
+
+    const master = shkulit.buildMaster(source);
+    assert.ok(!master.rows.some((r) => String(r[1]) === '1048'), 'the master leaves her out — no blank bank columns');
+    assert.ok(master.held_back.some((h) => String(h.employee_number) === '1048'), 'and says it held her back');
+    ok('filed, noted in the file, and held out of the master until the account exists');
   }
 
   console.log('the master workbook — issued on change, never blank');
