@@ -18,7 +18,18 @@ const runSchema = new mongoose.Schema({
   at: { type: Date, default: Date.now },
   month: { type: String, default: '' },          // 'YYYY-MM' the report was written into
   status: { type: String, enum: ['ok', 'empty', 'error'], default: 'ok' },
-  trigger: { type: String, enum: ['schedule', 'manual'], default: 'schedule' },
+  /**
+   * 'schedule' the nightly mailbox job, 'manual' a person in the payroll
+   * screen, 'bot' the import bot posting a file it took off the Cibus site
+   * (routes/importBot.routes.js).
+   *
+   * A bot import MUST land here and not only in its own log. This document is
+   * what `tick()` reads to decide the month is already done, and what
+   * `alertIfStale` reads to decide nothing has arrived — so a bot success that
+   * did not update it would re-import the same month off the email on the 2nd
+   * and, forty days on, mail the office that the import has been failing.
+   */
+  trigger: { type: String, enum: ['schedule', 'manual', 'bot'], default: 'schedule' },
   matched_count: { type: Number, default: 0 },
   unmatched_count: { type: Number, default: 0 },
   total_amount: { type: Number, default: 0 },

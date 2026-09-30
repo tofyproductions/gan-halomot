@@ -118,6 +118,20 @@ services:
       # feature switched off rather than a hole.
       - key: TASKS_SYNC_KEY
         sync: false
+      # The import bot's key (routes/importBot.routes.js). Neither Cibus nor
+      # ClickTac has an API, so a robot signs in to their sites, downloads the
+      # monthly reports and posts the files to /api/import-bot. Write-only, two
+      # routes, no reads — and the routes answer 503 while this is unset, so an
+      # absent key is a feature switched off rather than a hole.
+      #
+      # At least 32 characters, or the routes stay closed:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      #
+      # IMPORT_BOT_RATE_MAX (optional, default 40) caps uploads per hour. Forty
+      # covers a full ClickTac refresh — two exports per branch, with retries —
+      # and grows with the branch count; raise it there rather than in code.
+      - key: IMPORT_BOT_SECRET
+        sync: false
     healthCheckPath: /api/health
 
   # ---------------------------------------------------------------------------

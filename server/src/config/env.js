@@ -81,6 +81,25 @@ const env = {
   MAIL_SORTER_URL: process.env.MAIL_SORTER_URL,
   MAIL_SORTER_TOKEN: process.env.MAIL_SORTER_TOKEN,
 
+  /**
+   * The import bot's key — the one door a robot may post a report file through
+   * (routes/importBot.routes.js).
+   *
+   * Neither Cibus nor ClickTac publishes an API, so their reports can only be
+   * taken off their own websites. A bot signs in there, downloads, and posts
+   * the file here; Cibus alone is worth a day, since the site has the file on
+   * the 1st at 00:01 and the email arrives on the 2nd.
+   *
+   * UNSET MEANS CLOSED. Both routes answer 503 without it, the same as
+   * TASKS_SYNC_KEY closes /api/sync — a feature that is off is off, not open
+   * with a guessable key. Minimum 32 characters, checked at the route: this is
+   * the whole authentication, so a short one is not a weak password, it is an
+   * open door. Generate with:
+   *   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+   * Set on Render, never in the repo.
+   */
+  IMPORT_BOT_SECRET: process.env.IMPORT_BOT_SECRET,
+
   // Google Sheets (migration only)
   GOOGLE_SHEETS_ID: process.env.GOOGLE_SHEETS_ID,
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH,
