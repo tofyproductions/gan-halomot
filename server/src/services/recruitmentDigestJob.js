@@ -122,15 +122,46 @@ async function send({ dryRun = false } = {}) {
   const emailSetting = await Setting.findOne({ key: 'branch_manager_emails' }).lean();
   const managerEmails = emailSetting?.value || {};
 
+  /**
+   * A branch with no row in the override table used to be SKIPPED — `continue`,
+   * no mail, no note, nothing in the log. That made `branch_manager_emails` a
+   * required table pretending to be an override: empty it and the digest simply
+   * stops for that branch, which nobody would notice until a candidate went
+   * three weeks without a call.
+   *
+   * It exists because most manager logins carry the synthetic
+   * `<ת"ז>@gan-halomot.local` handle rather than an address, so somebody typed
+   * the real addresses in here by hand. Now that the managers themselves are
+   * resolved properly (branch-recipients), the table is what it always claimed
+   * to be: an override for when the branch's mail should go somewhere other
+   * than its managers. Absent means "ask who runs this branch", not "skip it".
+   */
+  const { User } = require('../models');
+  const { branchManagerFilter, mailableManagerEmails } = require('./branch-recipients.service');
+
+  async function addressesFor(branch) {
+    const override = String(managerEmails[String(branch._id)] || '').trim().toLowerCase();
+    if (override.includes('@')) return [override];
+    const managers = await User.find(branchManagerFilter(branch._id))
+      .select('email full_name').lean().catch(() => []);
+    // Falls back to the office when nobody on the branch is reachable, so the
+    // digest reaches a person either way.
+    const { to } = await mailableManagerEmails(managers, {
+      what: 'דוח הגיוס היומי', branchName: branch.name,
+    });
+    return to;
+  }
+
   // One mail per ADDRESS, not per branch. קפלן and משה דיין share a manager
   // and a mailbox; two mails landing a second apart, each holding half of her
   // morning, is how a list stops being read.
   const byAddress = new Map();
   for (const b of branches) {
-    const address = String(managerEmails[String(b._id)] || '').trim().toLowerCase();
-    if (!address.includes('@')) continue;
-    if (!byAddress.has(address)) byAddress.set(address, []);
-    byAddress.get(address).push(b._id);
+    for (const address of await addressesFor(b)) {
+      if (!address.includes('@')) continue;
+      if (!byAddress.has(address)) byAddress.set(address, []);
+      byAddress.get(address).push(b._id);
+    }
   }
 
   for (const [address, branchIds] of byAddress) {
