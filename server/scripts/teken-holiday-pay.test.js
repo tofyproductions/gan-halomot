@@ -78,7 +78,7 @@ async function main() {
   await mongoose.connect(process.env.MONGODB_URI);
 
   const { Branch, Amuta, Employee, PayrollMonth, Punch, EmployeeCommitment, Holiday } = require('../src/models');
-  const { fetchMonthData, buildAccountantHtml } = require('../src/controllers/payrollMonth.controller');
+  const { fetchMonthData, buildAccountantHtml, finalizeMonth } = require('../src/controllers/payrollMonth.controller');
   const { buildExportSource } = require('../src/services/payrollExport/sourceLayer');
   const shkulit = require('../src/services/payrollExport/shkulitAdapter');
 
@@ -128,6 +128,49 @@ async function main() {
     return e;
   };
 
+  // אפרת משעלי's real schedule: Sun–Wed 07:00–17:00 (10h), Thu off, Fri
+  // 07:30–12:00 (4.5h). Unequal days are where pricing BY THE DAY matters: at
+  // the average (₪409) her nine shut days came to ₪3,682, more than the whole
+  // completion they are carved from.
+  const efratDays = [
+    ...[0, 1, 2, 3].map((day) => ({ day, is_off: false, start_hhmm: '07:00', end_hhmm: '17:00' })),
+    { day: 4, is_off: true, start_hhmm: '', end_hhmm: '' },
+    { day: 5, is_off: false, start_hhmm: '07:30', end_hhmm: '12:00' },
+  ];
+  const makeEfrat = async (name, no, idn) => {
+    const e = await Employee.create({
+      full_name: name, israeli_id: idn, employee_number: no,
+      branch_id: branch._id, salary_type: 'global', global_salary: 9000, is_active: true,
+      start_date: new Date('2023-01-01'), work_days: [0, 1, 2, 3, 5],
+      amuta_distribution: [{ amuta_id: amuta._id, global_salary: 9000 }],
+      bank_number: '10', bank_branch: '1', bank_account: `66${no}`,
+      vacation_balance_opening: 20, vacation_monthly_accrual: 1,
+    });
+    await EmployeeCommitment.create({ employee_id: e._id, branch_id: branch._id, days: efratDays });
+    await PayrollMonth.create({ employee_id: e._id, branch_id: branch._id, month, manual: {} });
+    return e;
+  };
+  const punchAt = async (emp, day, h1, m1, h2, m2) => {
+    for (const [h, m] of [[h1, m1], [h2, m2]]) {
+      await Punch.create({
+        branch_id: branch._id, employee_id: emp._id, israeli_id: emp.israeli_id,
+        device_user_sn: sn++, timestamp: new Date(Date.UTC(2026, 8, day, h - 3, m, 0)), approval_status: 'auto',
+      });
+    }
+  };
+  const EF_LONG = [1, 2, 6, 7, 8, 9, 13, 14, 15, 16, 20, 21, 22, 23, 27, 28, 29, 30];
+  const EF_FRI = [4, 11, 18, 25];
+  const EF_SHUT = new Set([11, 13, 20, 21, 25, 27, 28, 29, 30]);
+  // Works every open day exactly as committed.
+  const efrat = await makeEfrat('תקן — ימים לא שווים', '803', '300000013');
+  for (const day of EF_LONG.filter((x) => !EF_SHUT.has(x))) await punchAt(efrat, day, 7, 0, 17, 0);
+  for (const day of EF_FRI.filter((x) => !EF_SHUT.has(x))) await punchAt(efrat, day, 7, 30, 12, 0);
+  // The same, but away without explanation on Fri 18.9 and Tue 22.9 — a short
+  // day and a long day, deducted at what EACH is worth.
+  const absent = await makeEfrat('תקן — היעדרות לפי יום', '804', '300000014');
+  for (const day of EF_LONG.filter((x) => !EF_SHUT.has(x) && x !== 22)) await punchAt(absent, day, 7, 0, 17, 0);
+  for (const day of EF_FRI.filter((x) => !EF_SHUT.has(x) && x !== 18)) await punchAt(absent, day, 7, 30, 12, 0);
+
   // Worked every open day exactly: the completion is precisely the 7 shut days.
   const full = await make('תקן — ההשלמה מכסה הכל', '801', '300000011');
   for (const day of OPEN) await workDay(full, day, 8, 16);
@@ -138,7 +181,7 @@ async function main() {
 
   const data = await fetchMonthData({ month, branch: String(branch._id) }, { role: 'system_admin' });
   const rows = data.rows || [];
-  assert.strictEqual(rows.length, 2, 'both employees reach the table');
+  assert.strictEqual(rows.length, 4, 'all four employees reach the table');
   const source = buildExportSource(month, rows);
   const { rows: fileRows } = shkulit.buildMovements(source, new Map(), {});
   const DAY = r2(10300 / 22);
@@ -188,6 +231,49 @@ async function main() {
     assert.strictEqual(r2(salary), 10300, `still exactly ₪10,300 — never above; got ₪${r2(salary)}`);
     assert.strictEqual(r2(code(file, 47)), 0, 'the completion is used up, not overdrawn');
     ok('holidays in full, leave from the remainder, the total unmoved');
+  }
+
+  console.log('2b. unequal days — each priced by its own hours, and it FITS');
+  {
+    const { row, ce, file } = pick('803');
+    const hv = 9000 / 207;
+    const long = r2(10.5 * hv); const fri = r2(4.5 * hv);
+    assert.strictEqual(long, 456.52, 'a 10-hour day = 10.5 weighted hours × 43.48');
+    assert.strictEqual(fri, 195.65, 'a Friday = 4.5 × 43.48');
+    assert.strictEqual(r2(ce.earnings.holiday_pay), r2(2 * long),
+      `13.9 and 21.9 are long days: 2 × ₪${long}; got ₪${ce.earnings.holiday_pay}`);
+    const leave = r2(5 * long + 2 * fri); // 20, 27–30 long · 11, 25 Friday
+    assert.strictEqual(r2(ce.earnings.vacation_pay), leave,
+      `the seven leave days by their own hours: 5 long + 2 Fridays = ₪${leave}; got ₪${ce.earnings.vacation_pay}`);
+    assert.strictEqual(row.breakdown.components.teken_breakdown.leave_priced_by, 'day', 'priced from the calendar dates');
+    assert.ok(!(Number(row.teken_vacation_unfunded) > 0.02),
+      `nothing left unfunded — at the average ₪95 was; got ₪${row.teken_vacation_unfunded}`);
+    assert.ok(r2(code(file, 47)) <= 0.02, 'the completion is used exactly');
+    const salary = code(file, 1) + code(file, 8) + code(file, 32) + code(file, 33) + code(file, 44) + code(file, 47);
+    assert.strictEqual(r2(salary), 9000, `exactly ₪9,000; got ₪${r2(salary)}`);
+    ok('holidays and leave priced by the day fill the completion exactly — the ₪95 gap is gone');
+  }
+
+  console.log('2c. an absent day is deducted at what THAT day is worth — and finalizing keeps it');
+  {
+    const { row } = pick('804');
+    const hv = 9000 / 207;
+    const want = r2(r2(4.5 * hv) + r2(10.5 * hv)); // Fri 18.9 + Tue 22.9
+    assert.strictEqual(r2(row.absence.deduction), want,
+      `a Friday and a long day: ₪195.65 + ₪456.52 = ₪${want} (the average would have said ₪818.18); got ₪${row.absence.deduction}`);
+
+    let finalized = null;
+    await finalizeMonth(
+      { params: { month }, query: { branch: String(branch._id) }, user: { id: new mongoose.Types.ObjectId(), role: 'system_admin' } },
+      { json: (b) => { finalized = b; }, status() { return this; } },
+      (e) => { throw e; },
+    );
+    const frozen = await PayrollMonth.findOne({ employee_id: absent._id, month }).lean();
+    assert.strictEqual(frozen.status, 'finalized', 'the month is closed');
+    const frozenDeduction = Number(frozen.auto_snapshot?.deductions?.absence ?? frozen.auto_snapshot?.absence_deduction ?? NaN);
+    assert.strictEqual(r2(frozenDeduction), want,
+      `the frozen snapshot holds the same ₪${want} the screen showed; got ₪${frozenDeduction}`);
+    ok('by the day, and the live screen and the closed month agree to the agora');
   }
 
   console.log('3. the card names the דמי חגים');

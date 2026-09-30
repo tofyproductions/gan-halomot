@@ -61,9 +61,33 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
       </DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
-          {!isHourly && (
-            <Alert severity="info">
-              עובד תקן — לא זכאי לדמי חגים בנפרד (החגים מכוסים כבר ע"י השכר הגלובלי).
+          {!isHourly && auto.teken_carved && (
+            <Alert severity="success" icon={false} sx={{ borderRadius: 2 }}>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                עובדת תקן — דמי חגים משולמים מתוך השלמת השכר (קוד 44)
+              </Typography>
+              <Typography variant="body2">
+                כל חג בחוק שנופל ביום התחייבות שלה ולא עבדה בו, לפי השעות של אותו יום × ערך שעה רגילה.
+                הסכום הכולל לא משתנה — הכסף עובר מהשלמת השכר, שלא מזכה בתנאים סוציאליים, לשורה שכן.
+                בלי תנאי ותק.
+              </Typography>
+              {auto.eligible.length > 0 && (
+                <Box component="ul" sx={{ m: 0, mt: 1, pr: 2.5 }}>
+                  {auto.eligible.map((d) => (
+                    <li key={d.date}><Typography variant="body2">{d.name} ({d.date.slice(8, 10)}.{d.date.slice(5, 7)}) — ₪{Number(d.amount).toLocaleString('he-IL')}</Typography></li>
+                  ))}
+                </Box>
+              )}
+              {Number(auto.teken_unfunded) > 0 && (
+                <Typography variant="body2" sx={{ mt: 1, color: 'warning.dark' }}>
+                  ₪{Number(auto.teken_unfunded).toLocaleString('he-IL')} משווי החגים לא נכנסו — השלמת השכר קטנה מהם.
+                </Typography>
+              )}
+            </Alert>
+          )}
+          {!isHourly && !auto.teken_carved && (
+            <Alert severity="info" sx={{ borderRadius: 2 }}>
+              אין לעובדת התחייבות שעות במערכת, ולכן אי אפשר לתמחר את ימי החג שלה — החגים נשארו בתוך השכר הגלובלי.
             </Alert>
           )}
           {isHourly && auto.blocking_reason && (
@@ -173,9 +197,13 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
             </>
           )}
 
+          {/* Hand entry is for hourly staff only. A תקן employee's holidays are
+              carved out of her completion; an amount typed here would be paid
+              ON TOP, a second time (and the server ignores it for her). */}
+          {isHourly && (<>
           <Divider />
           <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>סכום בטבלת השכר</Typography>
-          {(auto.blocking_reason || (!isHourly)) && (
+          {auto.blocking_reason && (
             <Alert severity="info" sx={{ borderRadius: 2 }}>
               העובד לא זכאי אוטומטית — אבל ניתן לתת לו דמי חגים ידנית בכל זאת.
               הזן סכום בשדה למטה ולחץ "שמור".
@@ -204,11 +232,12 @@ export default function HolidayPayDetailDialog({ open, row, month, onClose, onSa
               </Button>
             )}
           </Stack>
+          </>)}
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>ביטול</Button>
-        <Button variant="contained" onClick={save}>שמור</Button>
+        <Button onClick={onClose}>{isHourly ? 'ביטול' : 'סגור'}</Button>
+        {isHourly && <Button variant="contained" onClick={save}>שמור</Button>}
       </DialogActions>
     </Dialog>
   );

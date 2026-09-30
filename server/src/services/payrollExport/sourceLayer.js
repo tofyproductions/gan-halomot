@@ -94,7 +94,10 @@ function toCanonicalEmployee(row) {
   const isGlobal = row.salary_type === 'global';
 
   // Holiday pay: a manual figure wins over the auto one (mirrors the accountant PDF).
-  const holidayPay = num(manual.holiday_pay) > 0
+  // תקן: the engine's carve out of the completion IS her דמי חגים (owner,
+  // 30.09.2026) — a hand-typed amount does not apply, or it would be filed
+  // beside a completion that was already reduced by the same days.
+  const holidayPay = (row.salary_type !== 'global' && num(manual.holiday_pay) > 0)
     ? money(manual.holiday_pay)
     : money(row.holiday_pay_auto?.total_pay);
   const holidayDays = row.holiday_pay_auto?.total_days || 0;

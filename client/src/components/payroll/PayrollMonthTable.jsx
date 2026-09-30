@@ -4478,8 +4478,13 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
   // Default = deduct. A day is deducted when its category is deductible (unpaid)
   // and it isn't offset against extra hours — no approval gate.
   const offApprovedDate = (d) => !!(offsetState[d] && offsetState[d].approved);
+  // A תקן employee's day is priced by its own hours (the server sends each
+  // absent day's value) — a Friday is not a long day. Without them, the
+  // average day, as before.
+  const dayValues = row.absence?.day_values || null;
+  const valueOf = (date) => (dayValues && dayValues[date] != null ? Number(dayValues[date]) : dailyRate);
   const deduction = Object.values(entries).reduce((s, e) =>
-    s + ((absCat(e.category).deduct && !offApprovedDate(e.date)) ? dailyRate : 0), 0);
+    s + ((absCat(e.category).deduct && !offApprovedDate(e.date)) ? valueOf(e.date) : 0), 0);
   // A day is "handled" (טופל) once accounting entered a reason for it. Track the
   // count so the accountant can verify every absent day got a reason.
   const isHandled = (e) => !!((e?.note || '').trim());
@@ -4495,7 +4500,7 @@ function AbsenceDialog({ open, row, disabled, canManager, canAccounting, onClose
         ) : (
           <Stack spacing={1.5} sx={{ mt: 1 }}>
             <Alert severity="info" sx={{ py: 0.5 }}>
-              תעריף יום: ₪{Math.round(dailyRate).toLocaleString('he-IL')} · ניכוי מצטבר: <b>−₪{Math.round(deduction).toLocaleString('he-IL')}</b>
+              {dayValues ? 'לפי שעות כל יום' : `תעריף יום: ₪${Math.round(dailyRate).toLocaleString('he-IL')}`} · ניכוי מצטבר: <b>−₪{Math.round(deduction).toLocaleString('he-IL')}</b>
             </Alert>
             {unknownDays.length > 0 && (
               <Alert severity={allHandled ? 'success' : 'warning'} icon={false} sx={{ py: 0.5 }}>

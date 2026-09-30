@@ -99,7 +99,9 @@ function suggestPunchLabels(sortedPunches) {
 }
 const { analyzeCommitment, datesInMonth, workingWeekdays, weightedDayHours } = require('../services/commitmentAnalysis');
 const { computeHolidayPay, getHolidaysInMonth, unpaidHolidaysText } = require('../services/israeliHolidays');
-const { carveFromCompletion, tekenHolidayDays } = require('../services/tekenCompletionCarve');
+const {
+  carveFromCompletion, tekenHolidayDays, tekenDaysValue, tekenHourlyValue,
+} = require('../services/tekenCompletionCarve');
 const { applyCibusReport } = require('../services/cibusImport');
 const { computeSickPay, availableBalance, accruedBalance, groupSickSpells } = require('../services/sickPay');
 const { vacationBalance: vacationBalanceFor, vacationUsageForMonth } = require('../services/vacationBalance');
@@ -1006,7 +1008,17 @@ async function getMonth(req, res, next) {
       const deductibleDays = deductibleDates.length;
       const unknownCount = absenceDays.length;
       const justifiedCount = 0;
-      const absenceDeduction = Math.round(deductibleDays * dailyRate * 100) / 100;
+      // A תקן employee's absent day is deducted at what THAT day is worth — its
+      // weighted hours × the regular hourly value — not at the average day
+      // (owner, 30.09.2026: a day is worth its own hours, for leave, holidays
+      // and absence alike). finalizeMonth computes the frozen figure through the
+      // same helper, so finalizing never shifts it.
+      const tekenHv = isTeken ? tekenHourlyValue(tekenSalary, commitmentInfo.committed_weighted_hours) : 0;
+      const absenceDeduction = (isTeken && tekenHv > 0)
+        ? tekenDaysValue(deductibleDates, {
+          hoursByDate: commitmentInfo.hours_by_date, hourlyValue: tekenHv, fallback: dailyRate,
+        })
+        : Math.round(deductibleDays * dailyRate * 100) / 100;
 
       // RETIRED — the old beyond-commitment "תוספת שכר" supplement is disabled.
       // Extra hours above commitment are now paid via the partial-absence /
@@ -1149,7 +1161,11 @@ async function getMonth(req, res, next) {
       // Fold holiday pay (דמי חגים) into the total — manager override if set,
       // otherwise the auto-eligible amount (hourly employees only). Was computed
       // and displayed but never actually added to the salary.
-      const holidayPayEffective = (Number(manual.holiday_pay) > 0)
+      // תקן: never. Her holidays are carved out of the completion further down
+      // (owner, 30.09.2026) — a hand-typed amount added here would pay them a
+      // second time, on top of the salary that already contains them. No תקן
+      // row carried one when this was written (checked in production).
+      const holidayPayEffective = isTeken ? 0 : (Number(manual.holiday_pay) > 0)
         ? Number(manual.holiday_pay)
         : (holidayPayInfo.total_pay || 0);
       if (holidayPayEffective) breakdown.estimated_total = (breakdown.estimated_total || 0) + holidayPayEffective;
@@ -1547,10 +1563,30 @@ async function getMonth(req, res, next) {
           monthStatutory, commitmentInfo.committed_dates, commitmentInfo.worked_dates,
         );
         const vacDaysToPay = Number(vacUseRow.paid) || 0;
+        // Each day at its own value (owner, 30.09.2026) — tekenDayValue. A
+        // holiday always has its date. Leave has dates when it came from the
+        // gan's calendar (vacationAutoInfo.details, half-day closures at 0.5) —
+        // or when a hand-typed count equals that calendar, which means the same
+        // days. A hand-typed count that does not match has no dates to price by,
+        // and falls back to the average day, exactly as before.
+        const dayCtx = {
+          hoursByDate: commitmentInfo.hours_by_date,
+          hourlyValue: tekenHourlyValue(tekenSalary, commitmentInfo.committed_weighted_hours),
+          fallback: dailyRate,
+        };
+        const calendarLeave = vacationAutoInfo.details || [];
+        const calendarTotal = Number(vacationAutoInfo.total) || 0;
+        const leaveIsCalendar = vacDaysToPay > 0 && calendarLeave.length > 0
+          && Math.abs(vacDaysToPay - calendarTotal) < 0.01;
+        const holidayWant = tekenDaysValue(holDays.map((h) => h.date), dayCtx);
+        const leaveWant = leaveIsCalendar
+          ? tekenDaysValue(calendarLeave, dayCtx)
+          : vacDaysToPay * dailyRate;
         const { allocations: carve, carved, remaining } = carveFromCompletion(tb.completion, [
-          { key: 'holiday', days: holDays.length, want: holDays.length * dailyRate },
-          { key: 'vacation', days: vacDaysToPay, want: vacDaysToPay * dailyRate },
+          { key: 'holiday', days: holDays.length, want: holidayWant },
+          { key: 'vacation', days: vacDaysToPay, want: leaveWant },
         ]);
+        tb.leave_priced_by = leaveIsCalendar ? 'day' : 'average';
         if (carved > 0) {
           tb.completion = remaining;
           breakdown.components.base_salary =
@@ -1578,8 +1614,13 @@ async function getMonth(req, res, next) {
           reasons: [committedSet.has(h.date) ? 'עבדה ביום הזה' : 'לא יום עבודה שלה'],
         }));
         if (carve.holiday.got > 0) {
-          const per = Math.round((carve.holiday.got / holDays.length) * 100) / 100;
-          holidayPayInfo.eligible_days = holDays.map((h) => ({ date: h.date, name: h.name, amount: per }));
+          // Each holiday at its own value; scaled down together if the
+          // completion could not cover all of them.
+          const scale = holidayWant > 0 ? carve.holiday.got / holidayWant : 0;
+          holidayPayInfo.eligible_days = holDays.map((h) => ({
+            date: h.date, name: h.name,
+            amount: Math.round(tekenDaysValue([h.date], dayCtx) * scale * 100) / 100,
+          }));
           holidayPayInfo.ineligible_days = notPaid;
           holidayPayInfo.total_days = holDays.length;
           holidayPayInfo.total_pay = carve.holiday.got;
@@ -1899,7 +1940,15 @@ async function getMonth(req, res, next) {
           days: absenceDays,                         // [{date, source: holiday|leave|unknown}]
           candidates: absenceDays.map(a => a.date),  // back-compat
           entries: absenceEntries,                   // per-day decisions (unknown days)
-          daily_rate: dailyRate,                     // S / committed days
+          daily_rate: dailyRate,                     // S / committed days — the average, for display
+          // תקן: what EACH absent day is worth, by its own hours. The dialog
+          // recomputes the deduction live as categories change, and must price
+          // a day the way the server does — a Friday is not a long day.
+          day_values: (isTeken && tekenHv > 0)
+            ? Object.fromEntries(absenceDays.map((a) => [a.date, tekenDaysValue([a.date], {
+              hoursByDate: commitmentInfo.hours_by_date, hourlyValue: tekenHv, fallback: dailyRate,
+            })]))
+            : null,
           deduction: absenceDeduction,               // amount actually deducted
           deductible_days: deductibleDays,
           deductible_dates: deductibleDates,         // ymd[] of the days being deducted
@@ -1951,6 +2000,10 @@ async function getMonth(req, res, next) {
           ineligible: holidayPayInfo.ineligible_days,
           blocking_reason: holidayPayInfo.blocking_reason,
           is_eligible: holidayPayInfo.total_days > 0,
+          // תקן: paid out of her completion by the engine (not the hourly rule),
+          // and what of it the completion could not cover.
+          teken_carved: !!holidayPayInfo.teken_carved,
+          teken_unfunded: Number(holidayPayInfo.teken_unfunded) || 0,
           calc: { ...holidayPayInfo.calc, avg_daily_hours_source: avgDailyHoursSource },
         },
         loans_info: (() => {
@@ -2774,13 +2827,20 @@ async function finalizeMonth(req, res, next) {
       const offsetAbsenceDates = new Set(
         (Array.isArray(m.absence_offset_entries) ? m.absence_offset_entries : [])
           .filter(o => o.approved).map(o => o.absence_date));
-      const deductibleDays = !isTeken ? 0 : ci.absent_dates
+      const deductibleDates = !isTeken ? [] : ci.absent_dates
         .filter(d => !holidayDates.has(d) && !leaveDates.has(d) && !inAugustBonusWindow(d))
         .filter(d => {
           if (offsetAbsenceDates.has(d)) return false;
           const e = entryByDate.get(d);
           return DEDUCTIBLE_ABSENCE.has((e && e.category) || 'unpaid');
-        }).length;
+        });
+      const deductibleDays = deductibleDates.length;
+      // By the day, through the SAME helper getMonth uses — the frozen figure
+      // must be the one the screen showed (see the rounding note above).
+      const finTekenHv = isTeken ? tekenHourlyValue(tekenSalary, ci.committed_weighted_hours) : 0;
+      const finAbsenceDeduction = (isTeken && finTekenHv > 0)
+        ? tekenDaysValue(deductibleDates, { hoursByDate: ci.hours_by_date, hourlyValue: finTekenHv, fallback: dailyRate })
+        : Math.round(deductibleDays * dailyRate * 100) / 100;
 
       const snapshot = calculateMonthlySalary(emp, empPunches, month, {
         branchAmutaMap,
@@ -2790,7 +2850,7 @@ async function finalizeMonth(req, res, next) {
         resolutions: finResByEmp.get(String(emp._id)) || new Map(),
         include_salary_completion: m.include_salary_completion !== false,
         pay_excess_supplement: false, // RETIRED — see getMonth
-        absence_deduction: Math.round(deductibleDays * dailyRate * 100) / 100,
+        absence_deduction: finAbsenceDeduction,
         // Mirror the live view exactly so finalizing never shifts the teken
         // hourly value: committed clock hours for display/threshold, OT-weighted
         // committed hours for the base hourly value.
@@ -4243,7 +4303,10 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
     const m = acctMarker(r.branch_name);
     const sickPay = r.sick_info?.pay || 0;
     const sickDays = Number(r.manual?.sick_days) || 0;
-    const holiday = Number(r.manual?.holiday_pay) > 0 ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
+    // תקן: the carve is the figure (a manual amount does not apply to her).
+    // r.salary_type, not isGlobal: isGlobal is a const declared a few lines
+    // below, and reading it here would throw for every card.
+    const holiday = (r.salary_type !== 'global' && Number(r.manual?.holiday_pay) > 0) ? Number(r.manual.holiday_pay) : (r.holiday_pay_auto?.total_pay || 0);
     const unpaidHolidays = unpaidHolidaysText(r.holiday_pay_auto, r.salary_type, r.manual?.holiday_pay);
     // What the office recorded, and what her balance actually allows to be
     // filed. Seven days away against a balance of two is two days paid: the
@@ -4311,8 +4374,14 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       : '';
     const absDates = r.absence?.deductible_dates || [];
     const absDays = r.absence?.deductible_days || 0;
+    // A תקן employee's absent days are priced each by its own hours, so there is
+    // no single rate for the accountant to multiply the count by — the amount is
+    // stated beside it.
+    const absAmountLine = (isGlobal && absDays > 0 && Number(r.absence?.deduction) > 0)
+      ? subLine(`₪${n1(r.absence.deduction)} — לפי שעות כל יום`)
+      : '';
     const absVal = absDays > 0
-      ? `${absDays} ${absDays === 1 ? 'יום' : 'ימים'}` + (absDates.length ? subLine(absDates.map(ddmm).join(' · ')) : '')
+      ? `${absDays} ${absDays === 1 ? 'יום' : 'ימים'}` + absAmountLine + (absDates.length ? subLine(absDates.map(ddmm).join(' · ')) : '')
       : '';
     // Partial-absence (hourly): total HOURS to offset (effective, after excused +
     // made-up cap), with the unexcused short days + hours listed underneath.
