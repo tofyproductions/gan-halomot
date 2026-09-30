@@ -116,7 +116,11 @@ const env = {
   // no-op, the same as a missing FCM_SERVICE_ACCOUNT.
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
-  VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@ganhahalomot.co.il',
+  // The address push services (Chrome, Firefox) use to reach the sender if a
+  // subscription misbehaves. The default named ganhahalomot.co.il, which nobody
+  // ever registered — dreamgan.com is the domain this gan actually holds.
+  // Changing it does not invalidate any subscription; only a new key pair does.
+  VAPID_SUBJECT: process.env.VAPID_SUBJECT || 'mailto:support@dreamgan.com',
 };
 
 module.exports = env;
