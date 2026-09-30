@@ -84,6 +84,34 @@ async function alreadySeen(hash) {
  * one verdict and one row, with a count of how often it has come back — which
  * is the saving, in a number.
  */
+/**
+ * One Form101Inbox row from a scanned attachment. Both the review queue and the
+ * other-employer record are built here, so the two can never disagree about
+ * what a row holds — the review screen reads the same fields from either.
+ */
+function inboxRow({ data, att, hash, msg, scan }, { status, reason, candidates }) {
+  return {
+    status,
+    file_data: data,
+    file_name: att.filename || '',
+    file_mimetype: att.contentType || 'application/pdf',
+    hash,
+    mail: { from: msg.from, subject: msg.subject, date: msg.date, uid: msg.uid },
+    scan: {
+      is_form_101: true,
+      employee_name: scan.employee_name || '',
+      israeli_id: scan.israeli_id || '',
+      tax_year: scan.tax_year || null,
+      employer_name: scan.employer_name || '',
+      signed: !!scan.signed,
+      confidence: scan.confidence || '',
+      notes: scan.notes || '',
+    },
+    reason: reason || '',
+    candidates: candidates || [],
+  };
+}
+
 async function remember(hash, verdict, att, note = '') {
   await ScannedAttachment.updateOne(
     { hash },
@@ -210,6 +238,7 @@ async function runOnce(trigger) {
   let cached = 0;
   // Files rejected locally, before any AI call — the cheapest possible answer.
   let prefiltered = 0;
+  let otherEmployerCount = 0; // forms issued to another business — not ours to place
   // Files that only ever reached the cheap gate model.
   let gated = 0;
   // Every API call this run, priced. The whole point of the two-stage split is
@@ -296,7 +325,21 @@ async function runOnce(trigger) {
         continue;
       }
 
-      const match = await form101.matchEmployee(scan, msg.from, { allowNameMatch: cfg.allow_name_match });
+      const verdict = await form101.classifyScan(scan, msg.from, { allowNameMatch: cfg.allow_name_match });
+
+      // Another business's form (חברים של טופי). mail-sorter offers every 101 to
+      // both businesses and each keeps its own, so this one is not waiting for
+      // anybody here — it is NOT queued. It is still written down, as a row in
+      // the other_employer status: alreadySeen() checks this collection by hash,
+      // and a form with no row would be paid for again on every run.
+      if (verdict.kind === 'other_employer') {
+        await Form101Inbox.create(inboxRow({ data, att, hash, msg, scan }, {
+          status: 'other_employer', reason: verdict.reason, candidates: [],
+        }));
+        otherEmployerCount += 1;
+        continue;
+      }
+      const match = verdict;
 
       if (match.employee) {
         // Already filed for that year — by hand, or from a different message.
@@ -326,25 +369,9 @@ async function runOnce(trigger) {
         });
         attached += 1;
       } else {
-        await Form101Inbox.create({
-          file_data: data,
-          file_name: att.filename || '',
-          file_mimetype: att.contentType || 'application/pdf',
-          hash,
-          mail: { from: msg.from, subject: msg.subject, date: msg.date, uid: msg.uid },
-          scan: {
-            is_form_101: true,
-            employee_name: scan.employee_name || '',
-            israeli_id: scan.israeli_id || '',
-            tax_year: scan.tax_year || null,
-            employer_name: scan.employer_name || '',
-            signed: !!scan.signed,
-            confidence: scan.confidence || '',
-            notes: scan.notes || '',
-          },
-          reason: match.reason || '',
-          candidates: match.candidates || [],
-        });
+        await Form101Inbox.create(inboxRow({ data, att, hash, msg, scan }, {
+          status: 'pending', reason: match.reason || '', candidates: match.candidates || [],
+        }));
         unmatched += 1;
       }
     }
@@ -368,6 +395,7 @@ async function runOnce(trigger) {
   // The cost, in the sentence a person actually reads.
   if (ledger.total > 0) parts.push(`עלות: $${ledger.total.toFixed(4)}`);
   if (unmatched) parts.push(`${unmatched} ממתינים לשיוך`);
+  if (otherEmployerCount) parts.push(`${otherEmployerCount} של מעסיק אחר (לא נכנסו לתור)`);
   if (skipped) {
     const free = [];
     if (cached) free.push(`${cached} מהזיכרון`);

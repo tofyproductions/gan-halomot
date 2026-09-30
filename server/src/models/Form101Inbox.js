@@ -12,7 +12,17 @@ const mongoose = require('mongoose');
  * Matched forms do NOT land here — they become EmployeeDocuments directly.
  */
 const form101InboxSchema = new mongoose.Schema({
-  status: { type: String, enum: ['pending', 'assigned', 'discarded'], default: 'pending', index: true },
+  /**
+   * pending   — waiting for a person to place it
+   * assigned  — placed on an employee
+   * discarded — a person decided it is not wanted
+   * other_employer — issued to another business (חברים של טופי). mail-sorter
+   *   offers every 101 to both businesses and each keeps its own; this one is
+   *   the other's, so it is not waiting for anybody here. Kept rather than
+   *   deleted: alreadySeen() checks this collection by hash, so the row is what
+   *   stops the same file being paid for again on the next run.
+   */
+  status: { type: String, enum: ['pending', 'assigned', 'discarded', 'other_employer'], default: 'pending', index: true },
 
   file_data: { type: String, required: true },   // base64 (no data: prefix)
   file_name: { type: String, default: '' },

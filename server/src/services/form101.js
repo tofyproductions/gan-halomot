@@ -16,7 +16,7 @@
  *    kept alive alongside the real field.
  */
 const crypto = require('crypto');
-const { EmployeeDocument, Employee } = require('../models');
+const { EmployeeDocument, Employee, Form101Inbox } = require('../models');
 
 /** The tax year in progress, in Israel — a calendar year. */
 function currentTaxYear() {
@@ -218,8 +218,90 @@ async function backfillLegacy() {
   return { converted: res.modifiedCount || 0 };
 }
 
+/**
+ * ── Whose form is it? The employer written on it. ──────────────────────────
+ *
+ * mail-sorter offers every 101 to BOTH businesses on purpose — "a 101 is about
+ * a PERSON, not a business" (its pull.routes.ts) — and each is meant to keep the
+ * ones it recognises. חברים של טופי does: it matches by ID and ignores the rest.
+ * The גן took every one, paid to read it, and queued whatever matched no גן
+ * employee as "לא נמצא עובד תואם", as though a form for another company were a
+ * problem for somebody here to solve. On 30.09.2026 that queue held 16 forms,
+ * and 15 read "חברים של טופי בע״מ" on the employer line.
+ *
+ * In Israel an employee with two employers files a 101 to EACH. So a טופי form
+ * is not a גן form even when the same woman works in both places — which makes
+ * this a correctness rule as well as a tidy one. See classifyScan for the order.
+ *
+ * A POSITIVE match only. An employer the scan could not read, or read with a
+ * spelling nobody listed, is NOT "another company": dropping those would lose
+ * real גן forms without a trace, and the review queue is exactly where an
+ * unknown should land. Listed as substrings of the normalised name (quotes and
+ * geresh stripped — the real queue had 12 × בע"מ and 3 × בע״מ).
+ */
+const OTHER_EMPLOYERS = [
+  { match: 'טופי', label: 'חברים של טופי' },
+];
+
+/** The other business this form was issued to, or null when it may be ours. */
+function otherEmployer(scan) {
+  const name = normalizeName(scan && scan.employer_name);
+  if (!name) return null;
+  const hit = OTHER_EMPLOYERS.find((o) => name.includes(normalizeName(o.match)));
+  return hit ? hit.label : null;
+}
+
+/**
+ * The whole decision for one scanned form: another employer's, or ours to match.
+ *
+ * The EMPLOYER is asked first, before the ID. Asked second, a טופי form whose ID
+ * belongs to a woman who also works at the גן would match her — and be filed as
+ * her גן 101, which is the wrong employer's tax form in her file.
+ *
+ * @returns {{ kind: 'other_employer', label, reason }
+ *          | { kind: 'match', employee, basis } | { kind: 'match', employee: null, reason, candidates }}
+ */
+async function classifyScan(scan, mailFrom, opts = {}) {
+  const label = otherEmployer(scan);
+  if (label) {
+    return {
+      kind: 'other_employer',
+      label,
+      reason: `שייך ל${label} — מטופל במערכת של ${label}, לא בגן`,
+    };
+  }
+  return { kind: 'match', ...(await matchEmployee(scan, mailFrom, opts)) };
+}
+
+/**
+ * Move what is ALREADY waiting in the queue and belongs to another employer.
+ *
+ * Decided from the employer name stored on each row when it was first read —
+ * no re-scan and no cost. Idempotent: a second run finds nothing to move.
+ * Returns how many rows moved.
+ */
+async function reclassifyQueuedOtherEmployer() {
+  const pending = await Form101Inbox.find({ status: 'pending' })
+    .select('_id scan.employer_name').lean();
+  let moved = 0;
+  for (const row of pending) {
+    const label = otherEmployer(row.scan);
+    if (!label) continue;
+    await Form101Inbox.updateOne(
+      { _id: row._id, status: 'pending' },
+      { $set: { status: 'other_employer', reason: `שייך ל${label} — מטופל במערכת של ${label}, לא בגן` } },
+    );
+    moved += 1;
+  }
+  return moved;
+}
+
 module.exports = {
   currentTaxYear,
+  otherEmployer,
+  classifyScan,
+  reclassifyQueuedOtherEmployer,
+  OTHER_EMPLOYERS,
   hashFile,
   normalizeId,
   normalizeName,
