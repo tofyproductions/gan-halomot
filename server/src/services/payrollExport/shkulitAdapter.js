@@ -547,6 +547,29 @@ function buildMovements(source, previousByEmployee = new Map(), componentCodes =
           ? `${vacDays} ימים לתשלום — מוגבל ליתרה. בפועל נעדרה ${vacTaken} ימים, והיתרה בתחילת החודש הייתה ${round2(Number(ce.quantities.vacation_balance_available) || 0)}. ${round2(ce.quantities.vacation_days_unpaid)} ימים נותרו ללא תשלום עד להחלטת המשרד.`
           : `${vacDays} ימי חופשה, מתוכם ${round2(ce.quantities.vacation_overdraft_days)} מעבר ליתרה. עובדת תקן — שולמו במסגרת השכר, והיתרה נכנסת למינוס לקיזוז בגמר חשבון.`,
       });
+    } else if (vacDays > 0) {
+      // ── every other vacation row also gets a sentence ────────────────────
+      //
+      // Until now a note appeared ONLY when something went wrong: a cap, an
+      // overdraft, a lifted cap. Silence therefore carried two opposite
+      // meanings — "the balance covered it" and "there is no balance and
+      // nothing was checked" — and the file gave the accountant no way to
+      // tell them apart. In 09.2026 nine employees were filed ₪8,450 of
+      // תמורת חופשה with no note of any kind, and at least one of them
+      // (גלאם רות, ₪402) had no opening balance on file at all.
+      //
+      // An unknown balance still does not reduce anyone's pay — that rule is
+      // deliberate, see services/vacationBalance.js. It just stops being
+      // invisible.
+      const bal = ce.quantities?.vacation_balance_available;
+      const balKnown = bal != null && Number.isFinite(Number(bal));
+      notes.push({
+        employee_number: empNo, full_name: ce.employee.full_name,
+        subject: balKnown ? 'ימי חופשה' : 'ימי חופשה — יתרה לא רשומה',
+        text: balKnown
+          ? `${vacDays} ימי חופשה. היתרה בתחילת החודש הייתה ${round2(Number(bal))} ומכסה אותם.`
+          : `${vacDays} ימי חופשה נשלחו ${vacIsGlobal ? 'לניצול' : 'לתשלום'} ללא בדיקת יתרה — לעובד/ת אין יתרת פתיחה רשומה במערכת. לאמת מול היתרה בתלוש.`,
+      });
     }
 
     // ── ימי עבודה ושעות עבודה ───────────────────────────────────────────────

@@ -4149,6 +4149,16 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       vacTaken, r.vacation_balance_available == null ? null : Number(r.vacation_balance_available), { isGlobal },
     );
     const vac = vacUse.paid;
+    // An UNKNOWN balance is not a balance of zero, and the card has to say so.
+    // vacationUsageForMonth deliberately caps nothing when the opening balance
+    // is missing — reducing pay on the strength of a number we do not have
+    // would be worse than paying it. But the card used to render that case
+    // exactly like "her balance covered the days": a plain "2 ימים", no colour,
+    // no note. רות גלאם, 09.2026 — 2 days, ₪402 filed to שקלולית, and nothing
+    // anywhere said the balance behind them was never recorded. So the two
+    // cases are now told apart, and the covered one states the balance it
+    // leaned on rather than staying silent about it.
+    const vacBalanceKnown = vacUse.available != null && Number.isFinite(Number(vacUse.available));
     // "בונוס" here is the SAME combined figure the שקלולית export and the
     // payslip audit read — standing bonus + this month's one-off — because the
     // real payslip shows one בונוס line, not two.
@@ -4372,8 +4382,11 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
       <tr>
         ${cell('חופשה', vac
           ? `${n1(vac)} ימים${vacUse.capped ? ` (מתוך ${n1(vacTaken)} — מוגבל ליתרה)` : ''}${vacUse.overdraft ? ` · ${n1(vacUse.overdraft)} מעבר ליתרה` : ''}`
+            + (vacBalanceKnown
+              ? (vacUse.capped || vacUse.overdraft ? '' : subLine(`יתרה ${n1(vacUse.available)} — מכסה`))
+              : subLine('היתרה לא רשומה במערכת — לבדוק בתלוש לפני תשלום'))
           : (vacUse.capped ? `0 (מתוך ${n1(vacTaken)} — אין יתרה)` : ''),
-          (vacUse.capped || vacUse.overdraft) ? { color: '#b91c1c', bold: true } : {})}
+          (vacUse.capped || vacUse.overdraft || (vac && !vacBalanceKnown)) ? { color: '#b91c1c', bold: true } : {})}
         ${cell('מילואים', nt(r.manual?.miluim))}
         ${cell('GIFT CARD', nt(r.manual?.gift_card))}
         ${cell('הבראה', nt(r.manual?.recreation))}
@@ -4409,14 +4422,24 @@ function buildAccountantHtml(month, rows, branchNameById = new Map()) {
           <span style="font-size:12px;color:#111827;font-weight:700">${(augBonus.unapproved_days || []).length || ''} ימי חופשת קיץ לא אושרו לתשלום — השכר הופחת ב-${f(augBonus.deduction)}.${(augBonus.unapproved_days || []).length ? subLine((augBonus.unapproved_days || []).map(x => ddmm(x.date)).join(' · ')) : ''}</span></td></tr>` : ''}
       ${(vac && isGlobal) ? `<tr><td colspan="6" style="border:2px solid #2563eb;background:#eff6ff;padding:5px 9px">
           <span style="font-size:10.5px;color:#1d4ed8;font-weight:800">חופשה (תקן): </span>
-          <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.</span></td></tr>` : ''}
+          <span style="font-size:12px;color:#111827;font-weight:700">לנצל ${vacDaysText(vac)} מיתרת ימי החופשה של העובדת בתלוש — <u>ללא תשלום נוסף</u>. השכר הגלובלי כבר כולל את התשלום עבור ${vac === 1 ? 'היום הזה' : 'הימים האלה'}, ולכן יש להוריד ${vac === 1 ? 'אותו' : 'אותם'} מהצבירה בלבד.${vacBalanceKnown ? '' : ' <b style="color:#b91c1c">אין לעובדת יתרת פתיחה במערכת — משיכה מעבר ליתרה לא תירשם כחוב לגמר חשבון.</b>'}</span></td></tr>` : ''}
       ${(vac && !isGlobal) ? (r.manual?.vacation_pay_confirmed
         ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
             <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה — אישור הנה״ח: </span>
             <span style="font-size:12px;color:#111827;font-weight:700">הנהלת חשבונות אישרה לשלם את ימי החופשה גם ללא יתרת ימים לניצול.</span></td></tr>`
-        : `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
-            <span style="font-size:10.5px;color:#92400e;font-weight:800">חופשה: </span>
-            <span style="font-size:12px;color:#111827;font-weight:700">לתשלום רק אם נותרו לעובד/ת ימי חופשה לניצול בתלוש — אין יתרה, אין תשלום.</span></td></tr>`) : ''}
+        : (vacBalanceKnown
+          // The balance is on file and the days came out of it — say which
+          // number they came out of. This note used to read "לתשלום רק אם
+          // נותרו ימי חופשה לניצול בתלוש", printed identically for every
+          // hourly employee with leave, which made it a standing disclaimer
+          // rather than a statement about anyone. An accountant reading it
+          // could not tell a checked balance from an unchecked one.
+          ? `<tr><td colspan="6" style="border:2px solid #16a34a;background:#f0fdf4;padding:5px 9px">
+            <span style="font-size:10.5px;color:#15803d;font-weight:800">חופשה: </span>
+            <span style="font-size:12px;color:#111827;font-weight:700">היתרה בתחילת החודש הייתה ${n1(vacUse.available)} ימים ומכסה את ${n1(vac)} הימים ששולמו.</span></td></tr>`
+          : `<tr><td colspan="6" style="border:2px solid #b91c1c;background:#fef2f2;padding:5px 9px">
+            <span style="font-size:10.5px;color:#b91c1c;font-weight:800">חופשה — יתרה לא רשומה: </span>
+            <span style="font-size:12px;color:#111827;font-weight:700">אין לעובדת יתרת פתיחה במערכת, ולכן ${n1(vac)} ימי החופשה נשלחו לתשלום <u>ללא בדיקת יתרה</u>. לאמת מול היתרה בתלוש לפני תשלום.</span></td></tr>`)) : ''}
       ${unpaidHolidays ? `<tr><td colspan="6" style="border:2px solid #f59e0b;background:#fffbeb;padding:5px 9px">
           <span style="font-size:10.5px;color:#92400e;font-weight:800">דמי חגים — לא שולמו (לבדיקה): </span>
           <span style="font-size:12px;color:#111827;font-weight:700">${unpaidHolidays}</span></td></tr>` : ''}
@@ -6267,6 +6290,59 @@ async function getVacationOverdraft(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /payroll-month/vacation-missing-balance
+ *
+ * Who has no חופשה balance on file — the list that has to shrink to zero.
+ *
+ * An employee with no `vacation_balance_opening.as_of_month` is not an
+ * employee with no leave: she is one whose leave nobody here can count. The
+ * system deliberately does not cap her days against a balance it does not
+ * have (services/vacationBalance.js explains why), so her leave is filed and
+ * paid in full, unchecked, every month — quietly, until somebody reads a
+ * payslip. In 09.2026 that was ₪8,450 across nine people.
+ *
+ * `accrual_missing` is the second half of the same hole: a balance that opened
+ * once and accrues 0 a month is frozen at its opening figure, so it drifts
+ * further from the truth with every month that passes.
+ */
+async function getVacationMissingBalance(req, res, next) {
+  try {
+    const employees = await Employee.find({ is_active: true, is_test_account: { $ne: true } })
+      .select('full_name employee_number salary_type branch_id vacation_balance_opening vacation_monthly_accrual')
+      .lean();
+
+    const rows = employees
+      .map((e) => {
+        const asOf = e.vacation_balance_opening?.as_of_month || null;
+        const accrual = Number(e.vacation_monthly_accrual) || 0;
+        return {
+          employee_id: String(e._id),
+          full_name: e.full_name,
+          employee_number: e.employee_number || null,
+          salary_type: e.salary_type,
+          opening_missing: !asOf,
+          opening_as_of_month: asOf,
+          opening_days: asOf ? (Number(e.vacation_balance_opening?.days) || 0) : null,
+          accrual_missing: accrual <= 0,
+          monthly_accrual: accrual,
+        };
+      })
+      .filter((r) => r.opening_missing || r.accrual_missing)
+      // The ones with nothing at all first — they are the ones being paid
+      // unchecked right now; a missing accrual only drifts.
+      .sort((a, b) => (Number(b.opening_missing) - Number(a.opening_missing))
+        || String(a.full_name).localeCompare(String(b.full_name), 'he'));
+
+    res.json({
+      total: rows.length,
+      opening_missing: rows.filter((r) => r.opening_missing).length,
+      accrual_missing: rows.filter((r) => r.accrual_missing).length,
+      rows,
+    });
+  } catch (err) { next(err); }
+}
+
 async function shkulitSourceFor(req, month) {
   // Fetched as the CALLER — bank fields are present only for accounting/admin,
   // and the source layer's setup_error says so if anyone else sneaks in.
@@ -6556,6 +6632,7 @@ module.exports = {
   __fetchMonthData: fetchMonthData,
   __previousMovementComponents: previousMovementComponents,
   getVacationOverdraft,
+  getVacationMissingBalance,
   // The workbook builders are exported so the download path, the send path and
   // the tests all assemble the accountant's files from the same code.
   shkulitMovementsWorkbook, shkulitMasterWorkbook,

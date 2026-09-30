@@ -115,6 +115,8 @@ router.delete('/adjustments/:id',             requireRole('system_admin', 'accou
 // then the two template files (movements / employee master). Accounting and
 // admin only: the files carry bank details.
 router.get('/vacation-overdraft/:employeeId',  requireRole('system_admin', 'accountant', 'branch_manager'), c.getVacationOverdraft);
+// Who has no חופשה balance on file at all — their leave is filed unchecked.
+router.get('/vacation-missing-balance',         requireRole('system_admin', 'accountant'), c.getVacationMissingBalance);
 router.get('/shkulit-codes',                  requireRole('system_admin', 'accountant'), c.getShkulitCodes);
 router.put('/shkulit-codes',                  requireRole('system_admin', 'accountant'), c.setShkulitCodes);
 router.get('/:month/shkulit-export',          requireRole('system_admin', 'accountant'), c.getShkulitExport);

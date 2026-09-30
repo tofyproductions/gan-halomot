@@ -9,6 +9,7 @@ import AddIcon from '@mui/icons-material/Add';
 import { toast } from 'react-toastify';
 import api from '../../api/client';
 import { useConfirm } from '../shared/ConfirmProvider';
+import VacationMissingBalancePanel from './VacationMissingBalancePanel';
 
 /**
  * Payroll settings panel — currently houses two admin tools:
@@ -282,6 +283,7 @@ function PregnancyExamSettings() {
 export default function PayrollSettings() {
   return (
     <Box dir="rtl" sx={{ maxWidth: 1100, mx: 'auto' }}>
+      <VacationMissingBalancePanel />
       <PregnancyExamSettings />
       <PresetOptionsManager />
       <AmutaBranchMapping />
